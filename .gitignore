@@ -1,4 +1,5 @@
 /target
+/temp
 .history/src/voxel/*
 log.txt
 log.err
@@ -11,4 +12,5 @@ tools/*.html
 assets/*.html
 
 # World save file
-world_data.bin
+*.bin
+*.local.json
