@@ -28,20 +28,34 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     const MIN_SAMPLERS: u32 = 64;
 
     #[cfg(target_os = "windows")]
-    let backends = wgpu::Backends::DX12;
+    let (backends, backend_name) = (wgpu::Backends::DX12, "DX12");
     #[cfg(target_os = "macos")]
-    let backends = wgpu::Backends::METAL;
+    let (backends, backend_name) = (wgpu::Backends::METAL, "Metal");
     #[cfg(target_os = "linux")]
-    let backends = wgpu::Backends::VULKAN;
+    let (backends, backend_name) = (wgpu::Backends::VULKAN, "Vulkan");
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    let backends = wgpu::Backends::all();
+    let (backends, backend_name) = (wgpu::Backends::all(), "Auto");
+
+    eprintln!("[GPU] Initializing wgpu instance with backend: {}", backend_name);
+    eprintln!("[GPU] Target OS: {}", std::env::consts::OS);
+    eprintln!("[GPU] Target Arch: {}", std::env::consts::ARCH);
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
     });
 
+    // List all available adapters for debugging
+    eprintln!("[GPU] Enumerating available adapters...");
+    let adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all());
+    for (i, adapter) in adapters.iter().enumerate() {
+        let info = adapter.get_info();
+        eprintln!("[GPU]   [{}] {} ({:?}, {:?})", i, info.name, info.backend, info.device_type);
+    }
+    eprintln!("[GPU] Found {} adapter(s)", adapters.len());
+
     // Try to get the best adapter
+    eprintln!("[GPU] Requesting high-performance adapter...");
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
@@ -51,6 +65,7 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     if let Ok(adapter) = adapter {
         let info = adapter.get_info();
         let device_limits = adapter.limits();
+        let features = adapter.features();
 
         println!("╔══════════════════════════════════════════════════════════════╗");
         println!("║                    GPU PRE-FLIGHT DETECTION                  ║");
@@ -58,12 +73,34 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
         println!("║ GPU: {:<55} ║", truncate_str(&info.name, 55));
         println!("║ Backend: {:<51?} ║", info.backend);
         println!("║ Device Type: {:<47?} ║", info.device_type);
+        println!("║ Driver: {:<52} ║", truncate_str(&info.driver, 52));
+        println!("║ Driver Info: {:<47} ║", truncate_str(&info.driver_info, 47));
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║ Max Textures/Stage: {:<40} ║", device_limits.max_sampled_textures_per_shader_stage);
         println!("║ Max Samplers/Stage: {:<40} ║", device_limits.max_samplers_per_shader_stage);
         println!("║ Max Bind Groups: {:<43} ║", device_limits.max_bind_groups);
         println!("║ Max Storage Textures: {:<38} ║", device_limits.max_storage_textures_per_shader_stage);
+        println!("║ Max Texture Dimension 2D: {:<34} ║", device_limits.max_texture_dimension_2d);
+        println!("║ Max Buffer Size: {:<43} ║", format_bytes(device_limits.max_buffer_size));
+        println!("╠══════════════════════════════════════════════════════════════╣");
+        println!("║ Required Min Textures: {:<37} ║", MIN_TEXTURES);
+        println!("║ Required Min Samplers: {:<37} ║", MIN_SAMPLERS);
         println!("╚══════════════════════════════════════════════════════════════╝");
+
+        // Log additional debug info
+        eprintln!("[GPU] Selected adapter: {} ({:?})", info.name, info.backend);
+        eprintln!("[GPU] Vendor ID: 0x{:04X}, Device ID: 0x{:04X}", info.vendor, info.device);
+        eprintln!("[GPU] Features enabled: {:?}", features);
+
+        // Check if limits are sufficient
+        if device_limits.max_sampled_textures_per_shader_stage < MIN_TEXTURES {
+            eprintln!("[GPU] WARNING: Device max_sampled_textures ({}) < required ({})",
+                device_limits.max_sampled_textures_per_shader_stage, MIN_TEXTURES);
+        }
+        if device_limits.max_samplers_per_shader_stage < MIN_SAMPLERS {
+            eprintln!("[GPU] WARNING: Device max_samplers ({}) < required ({})",
+                device_limits.max_samplers_per_shader_stage, MIN_SAMPLERS);
+        }
 
         // Use actual device limits, but ensure minimums for our shaders
         let limits = WgpuLimits {
@@ -79,14 +116,28 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
             ..WgpuLimits::default()
         };
 
+        eprintln!("[GPU] Configured limits: textures={}, samplers={}, bind_groups={}",
+            limits.max_sampled_textures_per_shader_stage,
+            limits.max_samplers_per_shader_stage,
+            limits.max_bind_groups);
+
         #[cfg(target_os = "windows")]
-        return (limits, Some(Backends::DX12));
+        {
+            eprintln!("[GPU] Using DX12 backend for Bevy");
+            return (limits, Some(Backends::DX12));
+        }
         #[cfg(not(target_os = "windows"))]
-        return (limits, None);
+        {
+            eprintln!("[GPU] Using default backend for Bevy");
+            return (limits, None);
+        }
     }
 
     // Fallback if no adapter found - use safe defaults
-    eprintln!("Warning: Could not detect GPU, using fallback limits");
+    eprintln!("[GPU] ERROR: Could not detect GPU adapter!");
+    eprintln!("[GPU] Requested backend: {}", backend_name);
+    eprintln!("[GPU] Using fallback limits (may cause issues)");
+
     let limits = WgpuLimits {
         max_sampled_textures_per_shader_stage: MIN_TEXTURES,
         max_samplers_per_shader_stage: MIN_SAMPLERS,
@@ -99,6 +150,16 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     return (limits, Some(Backends::DX12));
     #[cfg(not(target_os = "windows"))]
     return (limits, None);
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} bytes", bytes)
+    }
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {
