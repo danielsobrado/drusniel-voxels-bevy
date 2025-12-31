@@ -1,9 +1,17 @@
+//! Voxel Builder - A voxel sandbox game engine.
+//!
+//! This is the main entry point that initializes the Bevy app with all plugins.
+
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings, WgpuLimits};
 use bevy::render::RenderPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
+use voxel_builder::constants::{
+    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES,
+    MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
+};
 use voxel_builder::entity::EntityPlugin;
 use voxel_builder::environment::AtmospherePlugin;
 use voxel_builder::atmosphere::FogPlugin;
@@ -21,11 +29,15 @@ use voxel_builder::debug_ui::DebugUiPlugin;
 use voxel_builder::particles::ParticlePlugin;
 
 /// Pre-flight GPU detection to query actual device limits before Bevy initializes.
-/// Returns limits tailored to the detected GPU capabilities.
+///
+/// This function creates a temporary wgpu instance to probe the GPU's actual capabilities,
+/// ensuring we request appropriate limits for our shaders without exceeding hardware support.
+///
+/// # Returns
+/// A tuple of `(WgpuLimits, Option<Backends>)` where:
+/// - `WgpuLimits` contains the texture/sampler limits to request
+/// - `Option<Backends>` specifies which graphics backend to use (DX12 on Windows, auto elsewhere)
 fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
-    // Minimum limits our shaders require
-    const MIN_TEXTURES: u32 = 64;  // BuildingMaterial(17) + Bevy internals + headroom
-    const MIN_SAMPLERS: u32 = 64;
 
     #[cfg(target_os = "windows")]
     let (backends, backend_name) = (wgpu::Backends::DX12, "DX12");
@@ -83,8 +95,8 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
         println!("║ Max Texture Dimension 2D: {:<34} ║", device_limits.max_texture_dimension_2d);
         println!("║ Max Buffer Size: {:<43} ║", format_bytes(device_limits.max_buffer_size));
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ Required Min Textures: {:<37} ║", MIN_TEXTURES);
-        println!("║ Required Min Samplers: {:<37} ║", MIN_SAMPLERS);
+        println!("║ Required Min Textures: {:<37} ║", MIN_TEXTURES_PER_STAGE);
+        println!("║ Required Min Samplers: {:<37} ║", MIN_SAMPLERS_PER_STAGE);
         println!("╚══════════════════════════════════════════════════════════════╝");
 
         // Log additional debug info
@@ -93,23 +105,23 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
         eprintln!("[GPU] Features enabled: {:?}", features);
 
         // Check if limits are sufficient
-        if device_limits.max_sampled_textures_per_shader_stage < MIN_TEXTURES {
+        if device_limits.max_sampled_textures_per_shader_stage < MIN_TEXTURES_PER_STAGE {
             eprintln!("[GPU] WARNING: Device max_sampled_textures ({}) < required ({})",
-                device_limits.max_sampled_textures_per_shader_stage, MIN_TEXTURES);
+                device_limits.max_sampled_textures_per_shader_stage, MIN_TEXTURES_PER_STAGE);
         }
-        if device_limits.max_samplers_per_shader_stage < MIN_SAMPLERS {
+        if device_limits.max_samplers_per_shader_stage < MIN_SAMPLERS_PER_STAGE {
             eprintln!("[GPU] WARNING: Device max_samplers ({}) < required ({})",
-                device_limits.max_samplers_per_shader_stage, MIN_SAMPLERS);
+                device_limits.max_samplers_per_shader_stage, MIN_SAMPLERS_PER_STAGE);
         }
 
         // Use actual device limits, but ensure minimums for our shaders
         let limits = WgpuLimits {
             max_sampled_textures_per_shader_stage: device_limits
                 .max_sampled_textures_per_shader_stage
-                .max(MIN_TEXTURES),
+                .max(MIN_TEXTURES_PER_STAGE),
             max_samplers_per_shader_stage: device_limits
                 .max_samplers_per_shader_stage
-                .max(MIN_SAMPLERS),
+                .max(MIN_SAMPLERS_PER_STAGE),
             max_storage_textures_per_shader_stage: device_limits
                 .max_storage_textures_per_shader_stage,
             max_bind_groups: device_limits.max_bind_groups,
@@ -139,10 +151,10 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     eprintln!("[GPU] Using fallback limits (may cause issues)");
 
     let limits = WgpuLimits {
-        max_sampled_textures_per_shader_stage: MIN_TEXTURES,
-        max_samplers_per_shader_stage: MIN_SAMPLERS,
-        max_storage_textures_per_shader_stage: 8,
-        max_bind_groups: 8,
+        max_sampled_textures_per_shader_stage: MIN_TEXTURES_PER_STAGE,
+        max_samplers_per_shader_stage: MIN_SAMPLERS_PER_STAGE,
+        max_storage_textures_per_shader_stage: FALLBACK_STORAGE_TEXTURES,
+        max_bind_groups: FALLBACK_BIND_GROUPS,
         ..WgpuLimits::default()
     };
 
@@ -162,11 +174,27 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Truncates a string to a maximum length, adding "..." if truncated.
+///
+/// This function is Unicode-safe and will not panic on non-ASCII strings.
+/// It counts characters rather than bytes to ensure proper truncation.
+///
+/// # Arguments
+/// * `s` - The string to truncate
+/// * `max_len` - Maximum length including the "..." suffix if truncated
+///
+/// # Returns
+/// The original string if it fits, or a truncated version with "..." suffix
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
+    } else if max_len <= 3 {
+        // If max_len is too small for "...", just return dots
+        ".".repeat(max_len)
     } else {
-        format!("{}...", &s[..max_len - 3])
+        let truncated: String = s.chars().take(max_len - 3).collect();
+        format!("{}...", truncated)
     }
 }
 

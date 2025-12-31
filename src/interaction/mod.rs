@@ -1,3 +1,13 @@
+//! Block and entity interaction systems.
+//!
+//! This module provides player interaction with the voxel world including:
+//! - Block targeting and raycasting
+//! - Block breaking and placing
+//! - Edit mode (drag & drop blocks)
+//! - Entity targeting and attacking
+//! - Debug overlays
+
+use crate::constants::{INTERACTION_RANGE, RAY_STEP, ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS, ATTACK_DAMAGE};
 use crate::entity::{Health, Wolf};
 use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::menu::PauseMenuState;
@@ -8,7 +18,12 @@ use crate::particles::{SpawnParticleEvent, ParticleType};
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+
 pub mod palette;
+// Note: targeting, editing, and debug modules are available for future refactoring
+// pub mod targeting;
+// pub mod editing;
+// pub mod debug;
 
 /// Component to mark the block highlight entity
 #[derive(Component)]
@@ -91,11 +106,6 @@ impl Default for HeldBlock {
     }
 }
 
-/// Maximum distance for block interaction
-const INTERACTION_RANGE: f32 = 6.0;
-
-/// Raycast step size for block detection
-const RAY_STEP: f32 = 0.1;
 
 /// Cast a ray and find the first solid block hit
 pub fn raycast_blocks(
@@ -184,18 +194,17 @@ pub fn update_targeted_entity(
                 continue;
             }
 
-            // Check if entity is in front of camera
+            // Check if entity is in front of camera (within targeting cone)
             let dot = to_entity.normalize().dot(direction);
-            if dot < 0.9 {
-                // ~25 degree cone
+            if dot < ENTITY_TARGET_CONE {
                 continue;
             }
 
-            // Simple sphere collision (1.5 unit radius for wolf)
+            // Simple sphere collision
             let closest_point = origin + direction * dot * distance;
             let dist_to_ray = (entity_transform.translation - closest_point).length();
 
-            if dist_to_ray < 1.5 && distance < targeted.distance {
+            if dist_to_ray < ENTITY_TARGET_RADIUS && distance < targeted.distance {
                 targeted.entity = Some(entity);
                 targeted.distance = distance;
             }
@@ -217,7 +226,7 @@ pub fn attack_entity_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Some(entity) = targeted_entity.entity {
             if let Ok(mut health) = entity_query.get_mut(entity) {
-                health.damage(10.0);
+                health.damage(ATTACK_DAMAGE);
                 info!("Attacked entity! Health: {}/{}", health.current, health.max);
             }
         }

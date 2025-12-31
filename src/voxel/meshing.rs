@@ -1,8 +1,20 @@
+//! Mesh generation for voxel chunks.
+//!
+//! This module provides two meshing modes:
+//! - **Blocky**: Traditional Minecraft-style meshing with cube faces
+//! - **Surface Nets**: Smooth terrain meshing using the Surface Nets algorithm
+//!
+//! Both modes support ambient occlusion and proper chunk boundary handling.
+
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::constants::{CHUNK_SIZE, VOXEL_SIZE};
+use crate::constants::{
+    CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE,
+    PADDED_CHUNK_SIZE_U32, UV_PADDING, CHUNK_BOUNDARY_SCALE,
+    ATLAS_COLUMNS, ATLAS_ROWS,
+};
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::baked_ao::compute_surface_nets_ao;
@@ -167,9 +179,9 @@ fn is_face_visible(
     let neighbor_z = local.z as i32 + dz;
 
     // If neighbor is within chunk
-    if neighbor_x >= 0 && neighbor_x < 16 &&
-       neighbor_y >= 0 && neighbor_y < 16 &&
-       neighbor_z >= 0 && neighbor_z < 16 {
+    if neighbor_x >= 0 && neighbor_x < CHUNK_SIZE_I32 &&
+       neighbor_y >= 0 && neighbor_y < CHUNK_SIZE_I32 &&
+       neighbor_z >= 0 && neighbor_z < CHUNK_SIZE_I32 {
         let neighbor_voxel = chunk.get(UVec3::new(neighbor_x as u32, neighbor_y as u32, neighbor_z as u32));
         return neighbor_voxel.is_transparent(); // Visible if neighbor is transparent (air or water)
     }
@@ -209,9 +221,9 @@ fn is_water_face_visible(
     let neighbor_z = local.z as i32 + dz;
 
     // If neighbor is within chunk
-    if neighbor_x >= 0 && neighbor_x < 16 &&
-       neighbor_y >= 0 && neighbor_y < 16 &&
-       neighbor_z >= 0 && neighbor_z < 16 {
+    if neighbor_x >= 0 && neighbor_x < CHUNK_SIZE_I32 &&
+       neighbor_y >= 0 && neighbor_y < CHUNK_SIZE_I32 &&
+       neighbor_z >= 0 && neighbor_z < CHUNK_SIZE_I32 {
         let neighbor_voxel = chunk.get(UVec3::new(neighbor_x as u32, neighbor_y as u32, neighbor_z as u32));
         return neighbor_voxel == VoxelType::Air; // Water only visible against air
     }
@@ -251,9 +263,9 @@ fn is_solid_at_offset(chunk: &Chunk, world: &VoxelWorld, local: UVec3, offset: I
     let local_pos = IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
     
     // Check within chunk first
-    if local_pos.x >= 0 && local_pos.x < 16 &&
-       local_pos.y >= 0 && local_pos.y < 16 &&
-       local_pos.z >= 0 && local_pos.z < 16 {
+    if local_pos.x >= 0 && local_pos.x < CHUNK_SIZE_I32 &&
+       local_pos.y >= 0 && local_pos.y < CHUNK_SIZE_I32 &&
+       local_pos.z >= 0 && local_pos.z < CHUNK_SIZE_I32 {
         let v = chunk.get(UVec3::new(local_pos.x as u32, local_pos.y as u32, local_pos.z as u32));
         return v.is_solid();
     }
@@ -448,18 +460,17 @@ fn add_face_with_ao(
             );
         }
     }
-    let cols = 4.0;
-    let rows = 4.0;
-    let col = (atlas_idx % 4) as f32;
-    let row = (atlas_idx / 4) as f32;
-    
-    // UV padding to prevent texture bleeding from adjacent tiles
-    let padding = 0.02;
-    
-    let u_min = col / cols + padding;
-    let u_max = (col + 1.0) / cols - padding;
-    let v_min = row / rows + padding;
-    let v_max = (row + 1.0) / rows - padding;
+
+    // Calculate UV coordinates from atlas position
+    let cols = ATLAS_COLUMNS as f32;
+    let rows = ATLAS_ROWS as f32;
+    let col = (atlas_idx % ATLAS_COLUMNS as u8) as f32;
+    let row = (atlas_idx / ATLAS_COLUMNS as u8) as f32;
+
+    let u_min = col / cols + UV_PADDING;
+    let u_max = (col + 1.0) / cols - UV_PADDING;
+    let v_min = row / rows + UV_PADDING;
+    let v_max = (row + 1.0) / rows - UV_PADDING;
     
     mesh_data.uvs.push([u_min, v_max]);
     mesh_data.uvs.push([u_max, v_max]);
@@ -559,19 +570,17 @@ fn add_face_no_ao(
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
     
+    // Calculate UV coordinates from atlas position
     let atlas_idx = voxel.atlas_index();
-    let cols = 4.0;
-    let rows = 4.0;
-    let col = (atlas_idx % 4) as f32;
-    let row = (atlas_idx / 4) as f32;
-    
-    // UV padding to prevent texture bleeding from adjacent tiles
-    let padding = 0.02;
-    
-    let u_min = col / cols + padding;
-    let u_max = (col + 1.0) / cols - padding;
-    let v_min = row / rows + padding;
-    let v_max = (row + 1.0) / rows - padding;
+    let cols = ATLAS_COLUMNS as f32;
+    let rows = ATLAS_ROWS as f32;
+    let col = (atlas_idx % ATLAS_COLUMNS as u8) as f32;
+    let row = (atlas_idx / ATLAS_COLUMNS as u8) as f32;
+
+    let u_min = col / cols + UV_PADDING;
+    let u_max = (col + 1.0) / cols - UV_PADDING;
+    let v_min = row / rows + UV_PADDING;
+    let v_max = (row + 1.0) / rows - UV_PADDING;
     
     mesh_data.uvs.push([u_min, v_max]);
     mesh_data.uvs.push([u_max, v_max]);
@@ -591,8 +600,10 @@ fn add_face_no_ao(
 // Surface Nets Smooth Meshing
 // =============================================================================
 
-/// Padded chunk shape for surface nets (18x18x18 for 16x16x16 chunk + 1 padding)
-type PaddedChunkShape = ConstShape3u32<18, 18, 18>;
+/// Padded chunk shape for surface nets.
+/// Surface Nets needs +1 padding on each side to sample neighboring voxels,
+/// resulting in an 18x18x18 sample grid for a 16x16x16 chunk.
+type PaddedChunkShape = ConstShape3u32<PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32>;
 
 /// Sample voxel from world or chunk, returns true if solid OR water
 /// Water is treated as solid for SDF purposes to prevent surface nets from generating
@@ -742,11 +753,8 @@ pub fn generate_chunk_mesh_surface_nets(
         }
     };
 
-    // Scale factor to slightly enlarge chunks so they overlap at boundaries
-    // This prevents gaps (sky showing through) at chunk seams caused by
-    // independent SDF smoothing per chunk producing slightly different vertex positions
-    const CHUNK_SCALE: f32 = 1.01; // 1.0% larger overlap
-    let chunk_center = Vec3::new(8.0, 8.0, 8.0) * VOXEL_SIZE; // Center of 16x16x16 chunk
+    // Chunk center for scaling calculations
+    let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate SDF from voxel data
     let sdf = generate_sdf(chunk, world);
@@ -928,7 +936,7 @@ pub fn generate_chunk_mesh_surface_nets(
             // Helper to scale vertex position outward from chunk center to close seams
             let scale_vertex = |local: Vec3| -> [f32; 3] {
                 let pos = Vec3::new(local.x * VOXEL_SIZE, local.y * VOXEL_SIZE, local.z * VOXEL_SIZE);
-                let scaled = chunk_center + (pos - chunk_center) * CHUNK_SCALE;
+                let scaled = chunk_center + (pos - chunk_center) * CHUNK_BOUNDARY_SCALE;
                 [scaled.x, scaled.y, scaled.z]
             };
 
@@ -1059,7 +1067,7 @@ pub fn generate_chunk_mesh_surface_nets(
             // Scale vertices
             let scale_vertex = |local: Vec3| -> [f32; 3] {
                 let pos = Vec3::new(local.x * VOXEL_SIZE, local.y * VOXEL_SIZE, local.z * VOXEL_SIZE);
-                let scaled = chunk_center + (pos - chunk_center) * CHUNK_SCALE;
+                let scaled = chunk_center + (pos - chunk_center) * CHUNK_BOUNDARY_SCALE;
                 [scaled.x, scaled.y, scaled.z]
             };
 

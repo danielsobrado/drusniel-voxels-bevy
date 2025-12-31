@@ -1,16 +1,244 @@
-// Chunk dimensions
+//! Global constants for the voxel engine.
+//!
+//! This module centralizes all magic numbers and configuration constants
+//! to ensure consistency across the codebase and make tuning easier.
+
+// =============================================================================
+// Chunk Dimensions
+// =============================================================================
+
+/// Number of voxels along each axis of a chunk (16x16x16).
 pub const CHUNK_SIZE: usize = 16;
-pub const CHUNK_SIZE_I32: i32 = 16;
+
+/// Chunk size as i32 for coordinate calculations.
+pub const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
+
+/// Chunk size as f32 for floating-point calculations.
+pub const CHUNK_SIZE_F32: f32 = CHUNK_SIZE as f32;
+
+/// Total number of voxels in a chunk (16^3 = 4096).
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
-// World defaults (overridden by config)
+/// Padded chunk size for Surface Nets meshing.
+/// Surface Nets needs +1 padding on each side to sample neighboring voxels,
+/// resulting in an 18x18x18 sample grid for a 16x16x16 chunk.
+pub const PADDED_CHUNK_SIZE: usize = CHUNK_SIZE + 2;
+
+/// Padded chunk size as u32 for ndshape.
+pub const PADDED_CHUNK_SIZE_U32: u32 = PADDED_CHUNK_SIZE as u32;
+
+// =============================================================================
+// World Defaults (can be overridden by config)
+// =============================================================================
+
+/// Default world size in chunks along X axis.
 pub const DEFAULT_WORLD_CHUNKS_X: i32 = 32;
+
+/// Default world size in chunks along Y axis (vertical).
 pub const DEFAULT_WORLD_CHUNKS_Y: i32 = 4;
+
+/// Default world size in chunks along Z axis.
 pub const DEFAULT_WORLD_CHUNKS_Z: i32 = 32;
 
-// Texture atlas
+// =============================================================================
+// Texture Atlas Configuration
+// =============================================================================
+
+/// Size of each tile in the texture atlas in pixels.
 pub const ATLAS_TILE_SIZE: u32 = 256;
+
+/// Number of columns in the texture atlas grid.
 pub const ATLAS_COLUMNS: u32 = 4;
 
-// Meshing
+/// Number of rows in the texture atlas grid.
+pub const ATLAS_ROWS: u32 = 4;
+
+/// UV padding to prevent texture bleeding from adjacent atlas tiles.
+/// This insets UVs slightly from tile boundaries.
+pub const UV_PADDING: f32 = 0.02;
+
+// =============================================================================
+// Meshing Constants
+// =============================================================================
+
+/// Size of a single voxel in world units.
 pub const VOXEL_SIZE: f32 = 1.0;
+
+/// Scale factor applied to chunk meshes to create slight overlap at boundaries.
+/// This prevents gaps (sky showing through) at chunk seams caused by
+/// independent SDF smoothing producing slightly different vertex positions.
+pub const CHUNK_BOUNDARY_SCALE: f32 = 1.01;
+
+// =============================================================================
+// Terrain Generation
+// =============================================================================
+
+/// Water level in world Y coordinates. Areas below this height are filled with water.
+pub const WATER_LEVEL: i32 = 18;
+
+/// Base terrain noise frequency for large-scale features.
+pub const TERRAIN_BASE_FREQUENCY: f32 = 0.008;
+
+/// Hill noise frequency for medium-scale terrain variation.
+pub const TERRAIN_HILL_FREQUENCY: f32 = 0.02;
+
+/// Mountain mask frequency for determining mountain placement.
+pub const TERRAIN_MOUNTAIN_FREQUENCY: f32 = 0.005;
+
+/// River noise frequency for carving river valleys.
+pub const TERRAIN_RIVER_FREQUENCY: f32 = 0.015;
+
+/// Biome noise frequency for biome distribution.
+pub const TERRAIN_BIOME_FREQUENCY: f32 = 0.01;
+
+/// Cave noise frequency for 3D cave generation.
+pub const TERRAIN_CAVE_FREQUENCY: f32 = 0.05;
+
+/// Minimum terrain height (clamped).
+pub const TERRAIN_MIN_HEIGHT: f32 = 1.0;
+
+/// Maximum terrain height (clamped).
+pub const TERRAIN_MAX_HEIGHT: f32 = 58.0;
+
+/// Base terrain height offset (minimum base height).
+pub const TERRAIN_BASE_HEIGHT: f32 = 16.0;
+
+/// Amplitude of base terrain noise.
+pub const TERRAIN_BASE_AMPLITUDE: f32 = 20.0;
+
+/// Amplitude of hill noise.
+pub const TERRAIN_HILL_AMPLITUDE: f32 = 10.0;
+
+/// Mountain threshold - noise values above this create mountains.
+pub const MOUNTAIN_THRESHOLD: f32 = 0.65;
+
+/// Mountain height multiplier for noise values above threshold.
+pub const MOUNTAIN_MULTIPLIER: f32 = 50.0;
+
+/// River width threshold - noise values below this create river valleys.
+pub const RIVER_WIDTH_THRESHOLD: f32 = 0.2;
+
+/// Maximum depth of river valley carving.
+pub const RIVER_CARVE_DEPTH: f32 = 10.0;
+
+// =============================================================================
+// Tree Generation
+// =============================================================================
+
+/// Probability threshold for tree spawning (higher = fewer trees).
+/// A value of 0.98 means ~2% of valid positions will spawn trees.
+pub const TREE_SPAWN_THRESHOLD: f32 = 0.98;
+
+/// Minimum tree trunk height.
+pub const TREE_MIN_HEIGHT: i32 = 3;
+
+/// Additional random height range for trees.
+pub const TREE_HEIGHT_VARIANCE: i32 = 3;
+
+/// Radius to check for nearby trees when generating leaves.
+pub const TREE_LEAF_CHECK_RADIUS: i32 = 3;
+
+/// Radius of spherical leaf canopy.
+pub const TREE_LEAF_RADIUS: f32 = 2.5;
+
+// =============================================================================
+// Dungeon Generation
+// =============================================================================
+
+/// Spacing between dungeon structures in world units.
+pub const DUNGEON_SPACING: i32 = 96;
+
+/// Size of dungeon floor area.
+pub const DUNGEON_SIZE: i32 = 20;
+
+/// Y-level of dungeon floors.
+pub const DUNGEON_FLOOR_Y: i32 = 3;
+
+/// Interior height of dungeon rooms.
+pub const DUNGEON_HEIGHT: i32 = 12;
+
+/// Size of dungeon entrance stairwell.
+pub const DUNGEON_ENTRANCE_SIZE: i32 = 3;
+
+/// Maximum Y-level for dungeon entrance shaft.
+pub const DUNGEON_ENTRANCE_MAX_Y: i32 = 50;
+
+/// Grid spacing for inner dungeon walls.
+pub const DUNGEON_WALL_SPACING: i32 = 8;
+
+// =============================================================================
+// Biome Thresholds
+// =============================================================================
+
+/// Noise threshold below which sandy biome is generated.
+pub const BIOME_SANDY_THRESHOLD: f32 = 0.25;
+
+/// Noise threshold above which rocky biome is possible.
+pub const BIOME_ROCKY_THRESHOLD: f32 = 0.75;
+
+/// Detail noise threshold for rocky outcrops.
+pub const BIOME_ROCKY_DETAIL_THRESHOLD: f32 = 0.5;
+
+/// Noise range for clay deposits (min).
+pub const BIOME_CLAY_MIN: f32 = 0.4;
+
+/// Noise range for clay deposits (max).
+pub const BIOME_CLAY_MAX: f32 = 0.5;
+
+/// Detail noise threshold for clay deposits.
+pub const BIOME_CLAY_DETAIL_THRESHOLD: f32 = 0.6;
+
+/// Height above water level considered "near water" for beach generation.
+pub const BEACH_HEIGHT_OFFSET: i32 = 2;
+
+// =============================================================================
+// LOD (Level of Detail) Settings
+// =============================================================================
+
+/// Default distance in world units for high detail meshing.
+pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 96.0;
+
+/// Default distance in world units at which chunks are culled entirely.
+pub const DEFAULT_CULL_DISTANCE: f32 = 192.0;
+
+/// High detail distance for integrated GPUs (more aggressive culling).
+pub const INTEGRATED_GPU_HIGH_DETAIL_DISTANCE: f32 = 48.0;
+
+/// Cull distance for integrated GPUs.
+pub const INTEGRATED_GPU_CULL_DISTANCE: f32 = 96.0;
+
+// =============================================================================
+// Interaction Constants
+// =============================================================================
+
+/// Maximum distance for block interaction (breaking/placing).
+pub const INTERACTION_RANGE: f32 = 6.0;
+
+/// Raycast step size for block detection.
+pub const RAY_STEP: f32 = 0.1;
+
+/// Cone angle threshold for entity targeting (dot product, ~25 degree cone).
+pub const ENTITY_TARGET_CONE: f32 = 0.9;
+
+/// Collision radius for entity targeting.
+pub const ENTITY_TARGET_RADIUS: f32 = 1.5;
+
+/// Damage dealt per attack.
+pub const ATTACK_DAMAGE: f32 = 10.0;
+
+// =============================================================================
+// GPU Requirements
+// =============================================================================
+
+/// Minimum required sampled textures per shader stage.
+/// BuildingMaterial(17) + Bevy internals + headroom.
+pub const MIN_TEXTURES_PER_STAGE: u32 = 64;
+
+/// Minimum required samplers per shader stage.
+pub const MIN_SAMPLERS_PER_STAGE: u32 = 64;
+
+/// Fallback storage textures for when GPU detection fails.
+pub const FALLBACK_STORAGE_TEXTURES: u32 = 8;
+
+/// Fallback bind groups for when GPU detection fails.
+pub const FALLBACK_BIND_GROUPS: u32 = 8;

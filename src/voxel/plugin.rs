@@ -1,11 +1,37 @@
+//! Voxel world plugin for chunk management and terrain generation.
+//!
+//! This module provides the core voxel functionality including:
+//! - Procedural terrain generation with biomes, caves, dungeons, and trees
+//! - Chunk-based world management with LOD (Level of Detail)
+//! - Mesh generation and update systems
+
 use crate::camera::controller::PlayerCamera;
-use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
+use crate::constants::{
+    CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32,
+    // Terrain generation
+    TERRAIN_BASE_FREQUENCY, TERRAIN_HILL_FREQUENCY, TERRAIN_MOUNTAIN_FREQUENCY,
+    TERRAIN_RIVER_FREQUENCY, TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
+    TERRAIN_BASE_HEIGHT, TERRAIN_BASE_AMPLITUDE, TERRAIN_HILL_AMPLITUDE,
+    TERRAIN_MIN_HEIGHT, TERRAIN_MAX_HEIGHT,
+    MOUNTAIN_THRESHOLD, MOUNTAIN_MULTIPLIER, RIVER_WIDTH_THRESHOLD, RIVER_CARVE_DEPTH,
+    WATER_LEVEL, BEACH_HEIGHT_OFFSET,
+    // Biomes
+    BIOME_SANDY_THRESHOLD, BIOME_ROCKY_THRESHOLD, BIOME_ROCKY_DETAIL_THRESHOLD,
+    BIOME_CLAY_MIN, BIOME_CLAY_MAX, BIOME_CLAY_DETAIL_THRESHOLD,
+    // Trees
+    TREE_SPAWN_THRESHOLD, TREE_MIN_HEIGHT, TREE_HEIGHT_VARIANCE, TREE_LEAF_CHECK_RADIUS, TREE_LEAF_RADIUS,
+    // Dungeons
+    DUNGEON_SPACING, DUNGEON_SIZE, DUNGEON_FLOOR_Y, DUNGEON_HEIGHT,
+    DUNGEON_ENTRANCE_SIZE, DUNGEON_ENTRANCE_MAX_Y, DUNGEON_WALL_SPACING,
+    // LOD
+    DEFAULT_HIGH_DETAIL_DISTANCE, DEFAULT_CULL_DISTANCE,
+    INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
+};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::VoxelMaterial;
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
-// use crate::voxel::gravity::GravityPlugin;
 use crate::voxel::meshing::{generate_chunk_mesh_with_mode, MeshMode, MeshSettings};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::persistence::{self, WorldPersistence};
@@ -36,8 +62,8 @@ pub struct LodSettings {
 impl Default for LodSettings {
     fn default() -> Self {
         Self {
-            high_detail_distance: 96.0,
-            cull_distance: 192.0,
+            high_detail_distance: DEFAULT_HIGH_DETAIL_DISTANCE,
+            cull_distance: DEFAULT_CULL_DISTANCE,
             low_detail_mode: MeshMode::Blocky,
         }
     }
@@ -126,164 +152,193 @@ fn fbm(x: f32, z: f32, octaves: u32) -> f32 {
     value / max_value
 }
 
+/// Calculates terrain height at a given world position using multi-octave noise.
+///
+/// The terrain is generated using several noise layers:
+/// - Base layer for overall terrain shape
+/// - Hills for medium-scale variation
+/// - Mountains for occasional tall peaks (above threshold)
+/// - River valleys that carve into the terrain
 fn get_terrain_height(world_x: i32, world_z: i32) -> i32 {
     let x = world_x as f32;
     let z = world_z as f32;
 
     // Base terrain with multiple noise layers
-    // Base ranges from 16-36, keeping most land above water level (18)
-    let base = fbm(x * 0.008, z * 0.008, 4) * 20.0 + 16.0;
+    let base = fbm(x * TERRAIN_BASE_FREQUENCY, z * TERRAIN_BASE_FREQUENCY, 4)
+        * TERRAIN_BASE_AMPLITUDE
+        + TERRAIN_BASE_HEIGHT;
 
     // Hills - larger features
-    let hills = fbm(x * 0.02, z * 0.02, 3) * 10.0;
+    let hills = fbm(x * TERRAIN_HILL_FREQUENCY, z * TERRAIN_HILL_FREQUENCY, 3) * TERRAIN_HILL_AMPLITUDE;
 
     // Mountains - occasional tall peaks
-    let mountain_mask = fbm(x * 0.005, z * 0.005, 2);
-    let mountains = if mountain_mask > 0.65 {
-        (mountain_mask - 0.65) * 50.0
+    let mountain_mask = fbm(x * TERRAIN_MOUNTAIN_FREQUENCY, z * TERRAIN_MOUNTAIN_FREQUENCY, 2);
+    let mountains = if mountain_mask > MOUNTAIN_THRESHOLD {
+        (mountain_mask - MOUNTAIN_THRESHOLD) * MOUNTAIN_MULTIPLIER
     } else {
         0.0
     };
 
-    // River valleys - carve into terrain (wider rivers)
-    let river_noise = (fbm(x * 0.015, z * 0.015, 2) * 6.28).sin();
-    let river_factor = if river_noise.abs() < 0.2 {
-        -10.0 * (1.0 - river_noise.abs() / 0.2)
+    // River valleys - carve into terrain
+    let river_noise = (fbm(x * TERRAIN_RIVER_FREQUENCY, z * TERRAIN_RIVER_FREQUENCY, 2) * std::f32::consts::TAU).sin();
+    let river_factor = if river_noise.abs() < RIVER_WIDTH_THRESHOLD {
+        -RIVER_CARVE_DEPTH * (1.0 - river_noise.abs() / RIVER_WIDTH_THRESHOLD)
     } else {
         0.0
     };
 
-    (base + hills + mountains + river_factor).max(1.0).min(58.0) as i32
+    (base + hills + mountains + river_factor)
+        .max(TERRAIN_MIN_HEIGHT)
+        .min(TERRAIN_MAX_HEIGHT) as i32
 }
 
+/// Determines the biome type at a given world position.
+///
+/// # Returns
+/// - 0: Normal terrain (grass/soil)
+/// - 1: Sandy/beach biome
+/// - 2: Rocky outcrops
+/// - 3: Clay deposits
 fn get_biome(world_x: i32, world_z: i32) -> u8 {
-    // 0 = normal, 1 = sandy/beach, 2 = rocky, 3 = clay deposits
     let x = world_x as f32;
     let z = world_z as f32;
 
-    let biome_noise = fbm(x * 0.01, z * 0.01, 2);
-    let detail_noise = fbm(x * 0.05, z * 0.05, 2);
+    let biome_noise = fbm(x * TERRAIN_BIOME_FREQUENCY, z * TERRAIN_BIOME_FREQUENCY, 2);
+    let detail_noise = fbm(x * TERRAIN_CAVE_FREQUENCY, z * TERRAIN_CAVE_FREQUENCY, 2);
 
-    if biome_noise < 0.25 {
+    if biome_noise < BIOME_SANDY_THRESHOLD {
         1 // Sandy areas
-    } else if biome_noise > 0.75 && detail_noise > 0.5 {
+    } else if biome_noise > BIOME_ROCKY_THRESHOLD && detail_noise > BIOME_ROCKY_DETAIL_THRESHOLD {
         2 // Rocky outcrops
-    } else if biome_noise > 0.4 && biome_noise < 0.5 && detail_noise > 0.6 {
+    } else if biome_noise > BIOME_CLAY_MIN && biome_noise < BIOME_CLAY_MAX && detail_noise > BIOME_CLAY_DETAIL_THRESHOLD {
         3 // Clay deposits
     } else {
         0 // Normal terrain
     }
 }
 
+/// Determines if a position should be a cave (empty space underground).
+///
+/// Uses 3D noise to create organic cave shapes, with caves being more
+/// common at lower depths.
 fn is_cave(world_x: i32, world_y: i32, world_z: i32) -> bool {
     let x = world_x as f32;
     let y = world_y as f32;
     let z = world_z as f32;
 
-    // 3D noise for caves
-    let cave_noise = fbm(x * 0.05 + y * 0.03, z * 0.05 + y * 0.02, 3);
-    let cave_threshold = 0.65 + (y / 64.0) * 0.1; // Caves more common at lower depths
+    // 3D noise for caves - combine horizontal and vertical frequencies
+    let cave_noise = fbm(
+        x * TERRAIN_CAVE_FREQUENCY + y * 0.03,
+        z * TERRAIN_CAVE_FREQUENCY + y * 0.02,
+        3,
+    );
+    // Caves more common at lower depths
+    let cave_threshold = MOUNTAIN_THRESHOLD + (y / 64.0) * 0.1;
 
     cave_noise > cave_threshold && world_y > 2 && world_y < 45
 }
 
+/// Determines if a position is part of a dungeon structure.
+///
+/// Dungeons are placed on a grid defined by `DUNGEON_SPACING` and consist of:
+/// - Entrance staircase from the surface
+/// - Floor and ceiling
+/// - Outer walls
+/// - Inner walls forming corridors with doorways
+/// - Pillars at wall intersections
+///
+/// # Returns
+/// - `Some(VoxelType)` if this position is part of a dungeon structure
+/// - `None` if this position should use normal terrain generation
 fn is_dungeon_wall(world_x: i32, world_y: i32, world_z: i32) -> Option<VoxelType> {
-    // Create dungeon structures at specific locations
-    let dungeon_spacing = 96; // Closer spacing for more dungeons
-    let dungeon_size = 20;
-    let dungeon_floor_y = 3; // Dungeon floor level
-    let dungeon_height = 12; // Dungeon interior height
-
-    let dx = ((world_x % dungeon_spacing) + dungeon_spacing) % dungeon_spacing;
-    let dz = ((world_z % dungeon_spacing) + dungeon_spacing) % dungeon_spacing;
+    let dx = ((world_x % DUNGEON_SPACING) + DUNGEON_SPACING) % DUNGEON_SPACING;
+    let dz = ((world_z % DUNGEON_SPACING) + DUNGEON_SPACING) % DUNGEON_SPACING;
 
     // Dungeon entrance staircase - visible from surface
     // Located at corner of each dungeon (position 2-4, 2-4 in dungeon local coords)
-    let entrance_x = 2;
-    let entrance_z = 2;
-    let entrance_size = 3;
+    const ENTRANCE_X: i32 = 2;
+    const ENTRANCE_Z: i32 = 2;
 
-    if dx >= entrance_x
-        && dx < entrance_x + entrance_size
-        && dz >= entrance_z
-        && dz < entrance_z + entrance_size
+    if dx >= ENTRANCE_X
+        && dx < ENTRANCE_X + DUNGEON_ENTRANCE_SIZE
+        && dz >= ENTRANCE_Z
+        && dz < ENTRANCE_Z + DUNGEON_ENTRANCE_SIZE
     {
         // Staircase from surface down to dungeon
-        // Stairs go from Y=dungeon_floor_y+1 up to Y=50 (well above terrain)
-        if world_y > dungeon_floor_y && world_y <= 50 {
-            let stair_local_x = dx - entrance_x;
-            let stair_local_z = dz - entrance_z;
+        if world_y > DUNGEON_FLOOR_Y && world_y <= DUNGEON_ENTRANCE_MAX_Y {
+            let stair_local_x = dx - ENTRANCE_X;
+            let stair_local_z = dz - ENTRANCE_Z;
 
-            // Create spiral/straight staircase walls
+            // Create staircase walls
             let is_stair_wall = stair_local_x == 0
-                || stair_local_x == entrance_size - 1
+                || stair_local_x == DUNGEON_ENTRANCE_SIZE - 1
                 || stair_local_z == 0
-                || stair_local_z == entrance_size - 1;
+                || stair_local_z == DUNGEON_ENTRANCE_SIZE - 1;
 
             // Interior is air (the stairwell)
             if is_stair_wall && stair_local_x != 1 && stair_local_z != 1 {
                 return Some(VoxelType::DungeonWall);
             } else {
-                // Stairwell interior - just air for the shaft
                 return Some(VoxelType::Air);
             }
         }
     }
 
     // Check if we're in a dungeon area
-    if dx < dungeon_size
-        && dz < dungeon_size
-        && world_y >= dungeon_floor_y
-        && world_y <= dungeon_floor_y + dungeon_height + 3
+    if dx < DUNGEON_SIZE
+        && dz < DUNGEON_SIZE
+        && world_y >= DUNGEON_FLOOR_Y
+        && world_y <= DUNGEON_FLOOR_Y + DUNGEON_HEIGHT + 3
     {
         let local_x = dx;
         let local_z = dz;
-        let local_y = world_y - dungeon_floor_y;
+        let local_y = world_y - DUNGEON_FLOOR_Y;
 
-        // Only generate dungeon structure within height bounds
-        if local_y > dungeon_height {
+        if local_y > DUNGEON_HEIGHT {
             return None; // Above dungeon ceiling
         }
 
-        // Create room walls
+        // Outer walls
         let is_outer_wall = local_x == 0
-            || local_x == dungeon_size - 1
+            || local_x == DUNGEON_SIZE - 1
             || local_z == 0
-            || local_z == dungeon_size - 1;
+            || local_z == DUNGEON_SIZE - 1;
 
-        // Create inner walls forming corridors
-        let wall_at_x =
-            (local_x % 8 == 0 || local_x % 8 == 1) && local_x > 0 && local_x < dungeon_size - 1;
-        let wall_at_z =
-            (local_z % 8 == 0 || local_z % 8 == 1) && local_z > 0 && local_z < dungeon_size - 1;
+        // Inner walls forming corridors (on grid spacing)
+        let wall_at_x = (local_x % DUNGEON_WALL_SPACING == 0 || local_x % DUNGEON_WALL_SPACING == 1)
+            && local_x > 0
+            && local_x < DUNGEON_SIZE - 1;
+        let wall_at_z = (local_z % DUNGEON_WALL_SPACING == 0 || local_z % DUNGEON_WALL_SPACING == 1)
+            && local_z > 0
+            && local_z < DUNGEON_SIZE - 1;
 
-        // Doorways in inner walls
-        let doorway_x = local_z >= 3 && local_z <= 5
-            || local_z >= 11 && local_z <= 13
-            || local_z >= 17 && local_z <= 19;
-        let doorway_z = local_x >= 3 && local_x <= 5
-            || local_x >= 11 && local_x <= 13
-            || local_x >= 17 && local_x <= 19;
+        // Doorways in inner walls (at positions 3-5, 11-13, 17-19)
+        let doorway_x = (local_z >= 3 && local_z <= 5)
+            || (local_z >= 11 && local_z <= 13)
+            || (local_z >= 17 && local_z <= 19);
+        let doorway_z = (local_x >= 3 && local_x <= 5)
+            || (local_x >= 11 && local_x <= 13)
+            || (local_x >= 17 && local_x <= 19);
 
         let is_inner_wall = (wall_at_x && !doorway_x) || (wall_at_z && !doorway_z);
 
         // Floor and ceiling
         let is_floor = local_y == 0;
-        let is_ceiling = local_y == dungeon_height;
+        let is_ceiling = local_y == DUNGEON_HEIGHT;
 
         // Pillars at intersections
-        let is_pillar = (local_x % 8 <= 1)
-            && (local_z % 8 <= 1)
+        let is_pillar = (local_x % DUNGEON_WALL_SPACING <= 1)
+            && (local_z % DUNGEON_WALL_SPACING <= 1)
             && local_x > 0
-            && local_x < dungeon_size - 1
+            && local_x < DUNGEON_SIZE - 1
             && local_z > 0
-            && local_z < dungeon_size - 1;
+            && local_z < DUNGEON_SIZE - 1;
 
         // Don't place ceiling over entrance
-        let over_entrance = dx >= entrance_x
-            && dx < entrance_x + entrance_size
-            && dz >= entrance_z
-            && dz < entrance_z + entrance_size;
+        let over_entrance = dx >= ENTRANCE_X
+            && dx < ENTRANCE_X + DUNGEON_ENTRANCE_SIZE
+            && dz >= ENTRANCE_Z
+            && dz < ENTRANCE_Z + DUNGEON_ENTRANCE_SIZE;
 
         if is_floor {
             return Some(VoxelType::DungeonFloor);
@@ -292,7 +347,6 @@ fn is_dungeon_wall(world_x: i32, world_y: i32, world_z: i32) -> Option<VoxelType
         } else if is_outer_wall || is_inner_wall || is_pillar {
             return Some(VoxelType::DungeonWall);
         } else {
-            // Interior dungeon space - return Air so terrain doesn't fill it
             return Some(VoxelType::Air);
         }
     }
@@ -300,27 +354,30 @@ fn is_dungeon_wall(world_x: i32, world_y: i32, world_z: i32) -> Option<VoxelType
     None
 }
 
-/// Check if a tree should spawn at this location
+/// Determines if a tree should spawn at a given location.
+///
+/// Trees spawn based on a pseudo-random hash with approximately 2% probability,
+/// but only on terrain sufficiently above water level.
 fn should_spawn_tree(world_x: i32, world_z: i32, terrain_height: i32) -> bool {
     // Trees only spawn above water level on grass
-    if terrain_height <= WATER_LEVEL + 2 {
+    if terrain_height <= WATER_LEVEL + BEACH_HEIGHT_OFFSET {
         return false;
     }
 
     // Use hash to determine tree placement - sparse distribution
     let tree_noise = hash(world_x.wrapping_mul(7), world_z.wrapping_mul(13));
-
-    // About 2% chance per block
-    tree_noise > 0.98
+    tree_noise > TREE_SPAWN_THRESHOLD
 }
 
-/// Get tree height at this location (for consistent tree generation)
+/// Gets the height of a tree at a given location.
+///
+/// Uses deterministic hashing so the same position always produces the same height.
 fn get_tree_height(world_x: i32, world_z: i32) -> i32 {
     let h = hash(world_x.wrapping_add(1000), world_z.wrapping_add(2000));
-    3 + (h * 3.0) as i32 // Height between 3 and 5
+    TREE_MIN_HEIGHT + (h * TREE_HEIGHT_VARIANCE as f32) as i32
 }
 
-/// Check if a position is part of a tree trunk
+/// Determines if a position is part of a tree trunk.
 fn is_tree_trunk(world_x: i32, world_y: i32, world_z: i32, terrain_height: i32) -> bool {
     if !should_spawn_tree(world_x, world_z, terrain_height) {
         return false;
@@ -333,13 +390,13 @@ fn is_tree_trunk(world_x: i32, world_y: i32, world_z: i32, terrain_height: i32) 
     world_y >= trunk_bottom && world_y < trunk_top
 }
 
-/// Check if a position is part of tree leaves
+/// Determines if a position is part of tree leaves.
+///
+/// Searches nearby positions for trees and checks if this position falls
+/// within their spherical leaf canopy.
 fn is_tree_leaves(world_x: i32, world_y: i32, world_z: i32) -> bool {
-    // Check nearby positions for tree trunks
-    let radius = 3;
-
-    for dx in -radius..=radius {
-        for dz in -radius..=radius {
+    for dx in -TREE_LEAF_CHECK_RADIUS..=TREE_LEAF_CHECK_RADIUS {
+        for dz in -TREE_LEAF_CHECK_RADIUS..=TREE_LEAF_CHECK_RADIUS {
             let check_x = world_x + dx;
             let check_z = world_z + dz;
 
@@ -350,15 +407,14 @@ fn is_tree_leaves(world_x: i32, world_y: i32, world_z: i32) -> bool {
                 let trunk_top = check_height + 1 + trunk_height;
                 let leaf_center_y = trunk_top - 1;
 
-                // Spherical leaf shape
+                // Spherical leaf shape (slightly flattened vertically)
                 let dx_f = dx as f32;
                 let dz_f = dz as f32;
                 let dy_f = (world_y - leaf_center_y) as f32;
 
                 let dist_sq = dx_f * dx_f + dy_f * dy_f * 1.5 + dz_f * dz_f;
-                let leaf_radius = 2.5;
 
-                if dist_sq < leaf_radius * leaf_radius {
+                if dist_sq < TREE_LEAF_RADIUS * TREE_LEAF_RADIUS {
                     // Don't place leaves where trunk is
                     if !(dx == 0 && dz == 0 && world_y < trunk_top) {
                         return true;
@@ -371,10 +427,7 @@ fn is_tree_leaves(world_x: i32, world_y: i32, world_z: i32) -> bool {
     false
 }
 
-// Water level constant - areas below this height will be filled with water
-pub const WATER_LEVEL: i32 = 18;
-
-// Debug flat world toggle (disabled by default)
+/// Debug flag to generate a flat world for testing. Disabled by default.
 const DEBUG_FLAT_WORLD: bool = false;
 
 fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<WorldPersistence>) {
@@ -489,8 +542,7 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
                         let depth = terrain_height - world_y;
 
                         // Near water, use sand instead of topsoil (beaches and shorelines)
-                        // Beach area: terrain within 2 blocks above water level only
-                        let near_water = terrain_height <= WATER_LEVEL + 2;
+                        let near_water = terrain_height <= WATER_LEVEL + BEACH_HEIGHT_OFFSET;
 
                         match biome {
                             1 => {
@@ -536,7 +588,7 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
                             _ => {
                                 // Normal terrain - use sand near water (beaches)
                                 if near_water {
-                                    if depth <= 2 {
+                                    if depth <= BEACH_HEIGHT_OFFSET as i32 {
                                         VoxelType::Sand
                                     } else if depth <= 5 {
                                         VoxelType::SubSoil
@@ -773,6 +825,10 @@ fn mesh_dirty_chunks_system(
     }
 }
 
+/// Adjusts LOD settings for integrated GPUs to maintain performance.
+///
+/// This system runs once at startup and reduces view distances when an
+/// integrated GPU is detected.
 fn adjust_lod_for_integrated_gpu(
     capabilities: Option<Res<GraphicsCapabilities>>,
     mut lod_settings: ResMut<LodSettings>,
@@ -792,8 +848,8 @@ fn adjust_lod_for_integrated_gpu(
     }
 
     if capabilities.integrated_gpu {
-        lod_settings.high_detail_distance = 48.0;
-        lod_settings.cull_distance = 96.0;
+        lod_settings.high_detail_distance = INTEGRATED_GPU_HIGH_DETAIL_DISTANCE;
+        lod_settings.cull_distance = INTEGRATED_GPU_CULL_DISTANCE;
         lod_settings.low_detail_mode = MeshMode::Blocky;
         mesh_settings.mode = MeshMode::Blocky;
         info!("Integrated GPU detected; using more aggressive chunk LOD distances.");
@@ -802,6 +858,12 @@ fn adjust_lod_for_integrated_gpu(
     *applied = true;
 }
 
+/// Updates the LOD level of each chunk based on distance from the camera.
+///
+/// Chunks are assigned to one of three LOD levels:
+/// - `High`: Close to camera, uses full detail meshing
+/// - `Low`: Medium distance, uses simplified meshing
+/// - `Culled`: Far away, not rendered at all
 fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
@@ -817,7 +879,7 @@ fn update_chunk_lod_system(
 
     for (chunk_pos, chunk) in world.chunk_entries_mut() {
         let world_pos = VoxelWorld::chunk_to_world(*chunk_pos);
-        let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE as f32 * 0.5);
+        let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = chunk_center.distance(camera_pos);
 
         let target_lod = if distance <= lod_settings.high_detail_distance {
