@@ -1,11 +1,11 @@
+use crate::atmosphere::{fog_camera_components, FogConfig};
 use crate::interaction::palette::PlacementPaletteState;
 use crate::map::MapState;
-use crate::menu::PauseMenuState;
-use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::ray_tracing::RayTracingSettings;
-use crate::atmosphere::fog_camera_components;
-use crate::atmosphere::FogConfig;
+use crate::menu::{PauseMenuState, SettingsState, ShadowFiltering};
 use crate::player::Player;
+use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::cinematic::CinematicCamera;
+use crate::rendering::ray_tracing::RayTracingSettings;
 use bevy::prelude::*;
 use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
@@ -62,13 +62,13 @@ pub fn spawn_camera(
         Msaa::Off,
         Transform::from_xyz(256.0, 50.0, 256.0).looking_at(Vec3::new(200.0, 30.0, 200.0), Vec3::Y),
         PlayerCamera::default(),
-        match crate::menu::SettingsState::default().shadow_filtering {
-            crate::menu::ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
-            crate::menu::ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
-            crate::menu::ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
+        match SettingsState::default().shadow_filtering {
+            ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
+            ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
+            ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
         },
         fog_camera_components(&fog_config),
-        crate::rendering::cinematic::CinematicCamera,
+        CinematicCamera,
     ));
 
     if capabilities.integrated_gpu {
@@ -108,7 +108,7 @@ pub fn spawn_camera(
 }
 
 pub fn update_camera_shadow_filtering(
-    settings_state: Res<crate::menu::SettingsState>,
+    settings_state: Res<SettingsState>,
     mut camera_query: Query<&mut ShadowFilteringMethod, With<PlayerCamera>>,
 ) {
     if !settings_state.is_changed() {
@@ -117,9 +117,9 @@ pub fn update_camera_shadow_filtering(
 
     for mut method in camera_query.iter_mut() {
         *method = match settings_state.shadow_filtering {
-            crate::menu::ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
-            crate::menu::ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
-            crate::menu::ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
+            ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
+            ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
+            ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
         };
     }
 }

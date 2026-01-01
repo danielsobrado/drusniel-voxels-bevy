@@ -83,24 +83,14 @@ pub struct EntitySpawnState {
     pub rabbits_frame_counter: u32,
 }
 
-impl EntitySpawnState {
-    pub fn wolves_not_spawned(&self) -> bool {
-        !self.wolves_spawned
-    }
-
-    pub fn rabbits_not_spawned(&self) -> bool {
-        !self.rabbits_spawned
-    }
-}
-
 /// Run condition: wolves not yet spawned
 fn should_spawn_wolves(state: Res<EntitySpawnState>) -> bool {
-    state.wolves_not_spawned()
+    !state.wolves_spawned
 }
 
 /// Run condition: rabbits not yet spawned
 fn should_spawn_rabbits(state: Res<EntitySpawnState>) -> bool {
-    state.rabbits_not_spawned()
+    !state.rabbits_spawned
 }
 
 // ============================================================================

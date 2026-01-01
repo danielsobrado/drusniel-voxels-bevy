@@ -5,6 +5,9 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureViewDescriptor, TextureViewDimension,
 };
 
+use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
+use crate::rendering::materials::VoxelMaterial;
+
 #[derive(Resource)]
 pub struct TextureArraySource {
     // Albedo handles
@@ -52,8 +55,8 @@ pub fn create_texture_array(
     mut source: ResMut<TextureArraySource>,
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<crate::rendering::blocky_material::BlockyMaterial>>,
-    _mat_handle_res: Option<ResMut<crate::rendering::blocky_material::BlockyMaterialHandle>>,
+    mut materials: ResMut<Assets<BlockyMaterial>>,
+    _mat_handle_res: Option<ResMut<BlockyMaterialHandle>>,
 ) {
     if source.loaded {
         return;
@@ -94,8 +97,8 @@ pub fn create_texture_array(
         
         let mut image = Image::new(
             Extent3d {
-                width: width,
-                height: height,
+                width,
+                height,
                 depth_or_array_layers: handles.len() as u32,
             },
             TextureDimension::D2,
@@ -133,19 +136,19 @@ pub fn create_texture_array(
     });
 
     // Create the material
-    let material = crate::rendering::blocky_material::BlockyMaterial {
+    let material = BlockyMaterial {
         uniforms: default(),
         diffuse_texture: Some(albedo_array),
         normal_texture: Some(normal_array),
     };
-    
+
     let handle = materials.add(material);
-    
+
     // Insert the handle so we can access it if needed
-    commands.insert_resource(crate::rendering::blocky_material::BlockyMaterialHandle { handle: handle.clone() });
-    
+    commands.insert_resource(BlockyMaterialHandle { handle: handle.clone() });
+
     // CRITICAL: Insert VoxelMaterial resource so the rest of the app (meshing) can find it
-    commands.insert_resource(crate::rendering::materials::VoxelMaterial { handle });
+    commands.insert_resource(VoxelMaterial { handle });
     
     source.loaded = true;
     info!("Blocky Texture Array created and material initialized.");

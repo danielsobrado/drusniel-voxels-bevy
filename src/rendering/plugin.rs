@@ -1,10 +1,17 @@
 use bevy::prelude::*;
 
+use crate::rendering::array_loader::{create_texture_array, start_loading_texture_arrays};
+use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::BuildingMaterial;
 use crate::rendering::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
 };
-use crate::rendering::materials::{setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material};
+use crate::rendering::cinematic::CinematicPlugin;
+use crate::rendering::materials::{
+    configure_triplanar_textures, setup_triplanar_material, setup_water_material,
+    setup_building_material, setup_props_material,
+};
+use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::ssao::SsaoPlugin;
@@ -21,15 +28,13 @@ impl Plugin for RenderingPlugin {
                 detect_graphics_capabilities.in_set(GraphicsDetectionSet),
             )
             .add_plugins(SsaoPlugin)
-            .add_plugins(crate::rendering::cinematic::CinematicPlugin)
-            .add_plugins(crate::rendering::photo_mode::PhotoModePlugin)
+            .add_plugins(CinematicPlugin)
+            .add_plugins(PhotoModePlugin)
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
             // Register TriplanarMaterial as a custom material type
             .add_plugins(MaterialPlugin::<TriplanarMaterial>::default())
             // Register BlockyMaterial
-            .add_plugins(MaterialPlugin::<
-                crate::rendering::blocky_material::BlockyMaterial,
-            >::default())
+            .add_plugins(MaterialPlugin::<BlockyMaterial>::default())
             // Register BuildingMaterial (Full PBR for RTX 40xx)
             .add_plugins(MaterialPlugin::<BuildingMaterial>::default())
             // Register PropsMaterial (Medium PBR)
@@ -37,7 +42,7 @@ impl Plugin for RenderingPlugin {
             .add_systems(
                 Startup,
                 (
-                    crate::rendering::array_loader::start_loading_texture_arrays,
+                    start_loading_texture_arrays,
                     setup_water_material,
                     setup_triplanar_material,
                     setup_building_material,
@@ -47,10 +52,7 @@ impl Plugin for RenderingPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    crate::rendering::materials::configure_triplanar_textures,
-                    crate::rendering::array_loader::create_texture_array,
-                ),
+                (configure_triplanar_textures, create_texture_array),
             );
     }
 }

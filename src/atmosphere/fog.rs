@@ -172,7 +172,7 @@ fn follow_camera_fog_volume(
     camera_query: Query<&Transform, With<FogCamera>>,
     mut volume_query: Query<&mut Transform, (With<GlobalFogVolume>, Without<FogCamera>)>,
 ) {
-    let Some(camera_tf) = camera_query.iter().next() else { return };
+    let Ok(camera_tf) = camera_query.single() else { return };
     
     for mut tf in volume_query.iter_mut() {
         // Center volume on camera XZ, keep Y centered on world

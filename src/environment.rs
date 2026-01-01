@@ -3,8 +3,7 @@ use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use bevy_water::*;
 
-/// Water level constant - matches terrain generation
-pub const SEA_LEVEL: f32 = 18.0;
+use crate::constants::WATER_LEVEL;
 
 /// Settings that drive the sky and sun animation
 #[derive(Resource)]
@@ -65,7 +64,7 @@ impl Plugin for AtmospherePlugin {
             .insert_resource(DirectionalLightShadowMap { size: 4096 })
             // bevy_water for dynamic ocean waves
             .insert_resource(WaterSettings {
-                height: SEA_LEVEL,
+                height: WATER_LEVEL as f32,
                 amplitude: 0.5,
                 clarity: 0.4,
                 deep_color: Color::srgba(0.05, 0.15, 0.35, 0.95).into(),
