@@ -1,4 +1,8 @@
+pub mod config;
+
 use bevy::prelude::*;
+
+pub use config::ViewmodelConfig;
 
 /// Component marking the pickaxe viewmodel
 #[derive(Component)]
@@ -31,52 +35,78 @@ pub fn spawn_pickaxe(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
 ) {
     if let Ok(camera_entity) = camera_query.single() {
-        // Create a larger, more visible pickaxe
-        
-        // Handle (long thin box) - much larger
-        let handle_mesh = meshes.add(Cuboid::new(0.08, 0.08, 0.8));
+        let handle_mesh = meshes.add(Cuboid::new(
+            config.handle.size.x,
+            config.handle.size.y,
+            config.handle.size.z,
+        ));
         let handle_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.6, 0.35, 0.15), // Brighter brown
-            emissive: LinearRgba::new(0.1, 0.05, 0.02, 1.0), // Slight glow
-            perceptual_roughness: 0.7,
+            base_color: config.handle.color,
+            emissive: LinearRgba::new(
+                config.handle.emissive[0],
+                config.handle.emissive[1],
+                config.handle.emissive[2],
+                config.handle.emissive[3],
+            ),
+            perceptual_roughness: config.handle.roughness,
             ..default()
         });
-        
-        // Pickaxe head (larger flat box)
-        let head_mesh = meshes.add(Cuboid::new(0.4, 0.12, 0.12));
+
+        let head_mesh = meshes.add(Cuboid::new(
+            config.head.size.x,
+            config.head.size.y,
+            config.head.size.z,
+        ));
         let head_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.7, 0.7, 0.75), // Brighter metal
-            emissive: LinearRgba::new(0.1, 0.1, 0.12, 1.0), // Slight glow
-            perceptual_roughness: 0.2,
-            metallic: 0.8,
+            base_color: config.head.color,
+            emissive: LinearRgba::new(
+                config.head.emissive[0],
+                config.head.emissive[1],
+                config.head.emissive[2],
+                config.head.emissive[3],
+            ),
+            perceptual_roughness: config.head.roughness,
+            metallic: config.head.metallic,
             ..default()
         });
-        
-        // Spawn pickaxe as child of camera - positioned more visible
+
         commands.entity(camera_entity).with_children(|parent| {
-            // Parent entity for the whole pickaxe (we animate this)
-            parent.spawn((
-                Transform::from_xyz(0.5, -0.4, -0.7)
-                    .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.4, -0.6, 0.3)),
-                Visibility::default(),
-                PickaxeViewModel::default(),
-            )).with_children(|pickaxe| {
-                // Handle
-                pickaxe.spawn((
-                    Mesh3d(handle_mesh),
-                    MeshMaterial3d(handle_material),
-                    Transform::from_xyz(0.0, 0.0, 0.0),
-                ));
-                
-                // Head - at the end of handle
-                pickaxe.spawn((
-                    Mesh3d(head_mesh),
-                    MeshMaterial3d(head_material),
-                    Transform::from_xyz(0.0, 0.0, -0.4),
-                ));
-            });
+            parent
+                .spawn((
+                    Transform::from_xyz(
+                        config.position.offset.x,
+                        config.position.offset.y,
+                        config.position.offset.z,
+                    )
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        config.position.rotation.x,
+                        config.position.rotation.y,
+                        config.position.rotation.z,
+                    )),
+                    Visibility::default(),
+                    PickaxeViewModel::default(),
+                ))
+                .with_children(|pickaxe| {
+                    pickaxe.spawn((
+                        Mesh3d(handle_mesh),
+                        MeshMaterial3d(handle_material),
+                        Transform::from_xyz(0.0, 0.0, 0.0),
+                    ));
+
+                    pickaxe.spawn((
+                        Mesh3d(head_mesh),
+                        MeshMaterial3d(head_material),
+                        Transform::from_xyz(
+                            config.head.offset.x,
+                            config.head.offset.y,
+                            config.head.offset.z,
+                        ),
+                    ));
+                });
         });
     }
 }
@@ -86,15 +116,15 @@ pub fn trigger_swing_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut pickaxe_query: Query<&mut PickaxeViewModel>,
     mut state: ResMut<PickaxeState>,
+    config: Res<ViewmodelConfig>,
 ) {
-    // Start swing on left click
     if mouse.just_pressed(MouseButton::Left) {
         for mut pickaxe in pickaxe_query.iter_mut() {
             if !pickaxe.is_swinging {
                 pickaxe.is_swinging = true;
                 pickaxe.swing_progress = 0.0;
                 state.swing_timer = 0.0;
-                state.swing_duration = 0.25; // Quarter second swing
+                state.swing_duration = config.swing.duration;
             }
         }
     }
@@ -105,46 +135,48 @@ pub fn animate_pickaxe_system(
     time: Res<Time>,
     mut state: ResMut<PickaxeState>,
     mut pickaxe_query: Query<(&mut PickaxeViewModel, &mut Transform)>,
+    config: Res<ViewmodelConfig>,
 ) {
     let dt = time.delta_secs();
-    
+
     for (mut pickaxe, mut transform) in pickaxe_query.iter_mut() {
         if pickaxe.is_swinging {
             state.swing_timer += dt;
             pickaxe.swing_progress = (state.swing_timer / state.swing_duration).min(1.0);
-            
-            // Swing animation curve - quick down, slower return
-            let swing_amount = if pickaxe.swing_progress < 0.4 {
-                // Swing down (0 -> 0.4 progress = 0 -> 1 swing)
-                pickaxe.swing_progress / 0.4
+
+            let down_phase = config.swing.down_phase;
+            let up_phase = 1.0 - down_phase;
+            let swing_amount = if pickaxe.swing_progress < down_phase {
+                pickaxe.swing_progress / down_phase
             } else {
-                // Return (0.4 -> 1.0 progress = 1 -> 0 swing)
-                1.0 - (pickaxe.swing_progress - 0.4) / 0.6
+                1.0 - (pickaxe.swing_progress - down_phase) / up_phase
             };
-            
-            // Apply swing rotation and position offset
-            let base_rotation = Quat::from_euler(EulerRot::XYZ, 0.4, -0.6, 0.3);
-            let swing_rotation = Quat::from_euler(EulerRot::XYZ, 
-                swing_amount * 1.0,  // Pitch down - more dramatic
-                swing_amount * 0.4,  // Slight yaw
-                swing_amount * -0.3, // Slight roll
+
+            let base_rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                config.position.rotation.x,
+                config.position.rotation.y,
+                config.position.rotation.z,
             );
-            
+            let swing_rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                swing_amount * config.swing.rotation_pitch,
+                swing_amount * config.swing.rotation_yaw,
+                swing_amount * config.swing.rotation_roll,
+            );
+
             transform.rotation = base_rotation * swing_rotation;
-            
-            // Move forward and down during swing
+
             transform.translation = Vec3::new(
-                0.5 - swing_amount * 0.15,
-                -0.4 - swing_amount * 0.2,
-                -0.7 + swing_amount * 0.3,
+                config.position.offset.x - swing_amount * config.swing.offset_x,
+                config.position.offset.y - swing_amount * config.swing.offset_y,
+                config.position.offset.z + swing_amount * config.swing.offset_z,
             );
-            
-            // End swing
+
             if pickaxe.swing_progress >= 1.0 {
                 pickaxe.is_swinging = false;
                 pickaxe.swing_progress = 0.0;
-                // Reset to idle position
-                transform.translation = Vec3::new(0.5, -0.4, -0.7);
+                transform.translation = config.position.offset;
                 transform.rotation = base_rotation;
             }
         }
@@ -155,17 +187,17 @@ pub fn animate_pickaxe_system(
 pub fn idle_bob_system(
     time: Res<Time>,
     mut pickaxe_query: Query<(&PickaxeViewModel, &mut Transform)>,
+    config: Res<ViewmodelConfig>,
 ) {
     let t = time.elapsed_secs();
-    
+
     for (pickaxe, mut transform) in pickaxe_query.iter_mut() {
         if !pickaxe.is_swinging {
-            // Gentle idle bobbing
-            let bob = (t * 2.0).sin() * 0.015;
-            let sway = (t * 1.5).cos() * 0.008;
-            
-            transform.translation.y = -0.4 + bob;
-            transform.translation.x = 0.5 + sway;
+            let bob = (t * config.idle.bob_frequency).sin() * config.idle.bob_amplitude;
+            let sway = (t * config.idle.sway_frequency).cos() * config.idle.sway_amplitude;
+
+            transform.translation.y = config.position.offset.y + bob;
+            transform.translation.x = config.position.offset.x + sway;
         }
     }
 }
@@ -175,14 +207,12 @@ pub struct PickaxePlugin;
 
 impl Plugin for PickaxePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<PickaxeState>()
-            // Use PostStartup to ensure camera is spawned first
+        app.init_resource::<PickaxeState>()
+            .init_resource::<ViewmodelConfig>()
             .add_systems(PostStartup, spawn_pickaxe)
-            .add_systems(Update, (
-                trigger_swing_system,
-                animate_pickaxe_system,
-                idle_bob_system,
-            ).chain());
+            .add_systems(
+                Update,
+                (trigger_swing_system, animate_pickaxe_system, idle_bob_system).chain(),
+            );
     }
 }

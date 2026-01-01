@@ -1,4 +1,5 @@
 use crate::atmosphere::{fog_camera_components, FogConfig};
+use crate::camera::config::CameraConfig;
 use crate::interaction::palette::PlacementPaletteState;
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, ShadowFiltering};
@@ -6,7 +7,6 @@ use crate::player::Player;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::cinematic::CinematicCamera;
 use crate::rendering::ray_tracing::RayTracingSettings;
-use bevy::prelude::*;
 use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
 use bevy::anti_alias::taa::TemporalAntiAliasing;
@@ -15,8 +15,8 @@ use bevy::input::mouse::MouseMotion;
 use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
+use bevy::prelude::*;
 use bevy::render::view::Hdr;
-
 use bevy::window::{CursorGrabMode, CursorOptions};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -37,16 +37,22 @@ pub struct PlayerCamera {
     pub fly_speed: f32,
 }
 
-impl Default for PlayerCamera {
-    fn default() -> Self {
+impl PlayerCamera {
+    pub fn from_config(config: &CameraConfig) -> Self {
         Self {
-            sensitivity: 0.002,
+            sensitivity: config.movement.sensitivity,
             pitch: 0.0,
             yaw: 0.0,
-            mode: CameraMode::Walk, // Start in walk mode
-
-            fly_speed: 40.0,
+            mode: CameraMode::Walk,
+            fly_speed: config.movement.fly_speed,
         }
+    }
+}
+
+impl Default for PlayerCamera {
+    fn default() -> Self {
+        let config = CameraConfig::default();
+        Self::from_config(&config)
     }
 }
 
@@ -55,13 +61,19 @@ pub fn spawn_camera(
     capabilities: Res<GraphicsCapabilities>,
     ray_tracing: Res<RayTracingSettings>,
     fog_config: Res<FogConfig>,
+    camera_config: Res<CameraConfig>,
 ) {
     let mut camera = commands.spawn((
         Camera3d::default(),
         Camera::default(),
         Msaa::Off,
-        Transform::from_xyz(256.0, 50.0, 256.0).looking_at(Vec3::new(200.0, 30.0, 200.0), Vec3::Y),
-        PlayerCamera::default(),
+        Transform::from_xyz(
+            camera_config.spawn.position.x,
+            camera_config.spawn.position.y,
+            camera_config.spawn.position.z,
+        )
+        .looking_at(camera_config.spawn.look_at, Vec3::Y),
+        PlayerCamera::from_config(&camera_config),
         match SettingsState::default().shadow_filtering {
             ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
             ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
@@ -77,11 +89,10 @@ pub fn spawn_camera(
         camera.insert((
             Hdr,
             Bloom {
-                intensity: 0.15, // Subtle glow on bright highlights
+                intensity: camera_config.rendering.bloom_intensity,
                 composite_mode: BloomCompositeMode::EnergyConserving,
                 ..default()
             },
-            // Tonemapping for better HDR look
             Tonemapping::TonyMcMapface,
             DebandDither::Enabled,
         ));
@@ -94,7 +105,7 @@ pub fn spawn_camera(
             TemporalAntiAliasing::default(),
             ContrastAdaptiveSharpening {
                 enabled: true,
-                sharpening_strength: 0.6,
+                sharpening_strength: camera_config.rendering.sharpening_strength,
                 denoise: false,
             },
         ));
@@ -160,6 +171,7 @@ pub fn player_camera_system(
     pause_menu: Res<PauseMenuState>,
     palette: Res<PlacementPaletteState>,
     map_state: Res<MapState>,
+    camera_config: Res<CameraConfig>,
 ) {
     let Ok((_window, mut cursor_options)) = windows.single_mut() else {
         return;
@@ -182,7 +194,6 @@ pub fn player_camera_system(
                 CameraMode::Fly => CameraMode::Walk,
                 CameraMode::Walk => CameraMode::Fly,
             };
-            // Log mode change
             match camera.mode {
                 CameraMode::Fly => info!("Switched to FLY mode"),
                 CameraMode::Walk => info!("Switched to WALK mode"),
@@ -191,10 +202,14 @@ pub fn player_camera_system(
 
         // Reset position with R
         if keys.just_pressed(KeyCode::KeyR) {
-            camera.yaw = -2.35;
-            camera.pitch = -0.4;
-            *transform = Transform::from_xyz(256.0, 50.0, 256.0)
-                .looking_at(Vec3::new(200.0, 30.0, 200.0), Vec3::Y);
+            camera.yaw = camera_config.movement.reset_yaw;
+            camera.pitch = camera_config.movement.reset_pitch;
+            *transform = Transform::from_xyz(
+                camera_config.spawn.position.x,
+                camera_config.spawn.position.y,
+                camera_config.spawn.position.z,
+            )
+            .looking_at(camera_config.spawn.look_at, Vec3::Y);
         }
 
         if cursor_options.visible {
@@ -205,7 +220,9 @@ pub fn player_camera_system(
         for ev in mouse_motion.read() {
             camera.yaw -= ev.delta.x * camera.sensitivity;
             camera.pitch -= ev.delta.y * camera.sensitivity;
-            camera.pitch = camera.pitch.clamp(-1.5, 1.5);
+            camera.pitch = camera
+                .pitch
+                .clamp(camera_config.movement.pitch_min, camera_config.movement.pitch_max);
         }
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, 0.0);
@@ -213,7 +230,7 @@ pub fn player_camera_system(
         // Movement based on mode
         match camera.mode {
             CameraMode::Fly => {
-                fly_movement(&mut transform, &camera, &keys, dt);
+                fly_movement(&mut transform, &camera, &keys, dt, &camera_config);
             }
             CameraMode::Walk => {
                 // Walk mode is handled by the player controller.
@@ -227,6 +244,7 @@ fn fly_movement(
     camera: &PlayerCamera,
     keys: &Res<ButtonInput<KeyCode>>,
     dt: f32,
+    config: &CameraConfig,
 ) {
     let mut velocity = Vec3::ZERO;
     let local_z = transform.local_z();
@@ -253,7 +271,7 @@ fn fly_movement(
     }
 
     let speed = if keys.pressed(KeyCode::ControlLeft) {
-        camera.fly_speed * 3.0 // Turbo fly
+        camera.fly_speed * config.movement.fly_turbo_multiplier
     } else {
         camera.fly_speed
     };
@@ -264,6 +282,7 @@ fn fly_movement(
 pub fn camera_follow_player(
     player_query: Query<&Transform, With<Player>>,
     mut camera_query: Query<(&mut Transform, &PlayerCamera), (With<PlayerCamera>, Without<Player>)>,
+    camera_config: Res<CameraConfig>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -273,6 +292,7 @@ pub fn camera_follow_player(
     };
 
     if camera.mode == CameraMode::Walk {
-        camera_transform.translation = player_transform.translation + Vec3::Y * 1.6;
+        camera_transform.translation =
+            player_transform.translation + Vec3::Y * camera_config.movement.eye_height;
     }
 }
