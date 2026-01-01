@@ -1,12 +1,21 @@
-pub mod wolf;
-pub mod rabbit;
+//! Game entities and AI.
+//!
+//! This module provides:
+//! - [`wolf`] - Wolf entity with wandering behavior
+//! - [`rabbit`] - Rabbit entity with hopping animation
+//! - [`inventory`] - Player inventory system
+//! - Entity health and death systems
+//! - Item drop and collection
+
 pub mod inventory;
+pub mod rabbit;
+pub mod wolf;
 
 use bevy::prelude::*;
 
-pub use wolf::Wolf;
+pub use inventory::{Inventory, ItemDrop, ItemType};
 pub use rabbit::Rabbit;
-pub use inventory::{Inventory, ItemType, ItemDrop};
+pub use wolf::Wolf;
 
 // ============================================================================
 // Shared Configuration

@@ -49,9 +49,9 @@ fn create_terrain_chunk() -> Chunk {
                     } else if y < height - 3 {
                         VoxelType::Rock
                     } else if y < height - 1 {
-                        VoxelType::Dirt
+                        VoxelType::SubSoil
                     } else {
-                        VoxelType::Grass
+                        VoxelType::TopSoil
                     }
                 } else {
                     VoxelType::Air
