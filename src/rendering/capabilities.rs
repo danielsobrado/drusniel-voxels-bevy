@@ -3,6 +3,7 @@ use bevy::render::batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreproc
 use bevy::render::render_resource::{TextureFormat, TextureFormatFeatureFlags};
 use bevy::render::renderer::{RenderAdapter, RenderAdapterInfo};
 use bevy::render::view::ViewTarget;
+use wgpu::DeviceType;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct GraphicsDetectionSet;
@@ -37,8 +38,7 @@ pub fn detect_graphics_capabilities(
         let features = adapter.features();
 
         capabilities.adapter_name = Some(adapter_info.name.clone());
-        capabilities.integrated_gpu =
-            format!("{:?}", adapter_info.device_type) == "IntegratedGpu";
+        capabilities.integrated_gpu = matches!(adapter_info.device_type, DeviceType::IntegratedGpu);
         capabilities.taa_supported = hdr_filterable && sdr_filterable;
         capabilities.ray_tracing_supported = features
             .contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_QUERY)

@@ -32,6 +32,7 @@ pub fn generate_chunk_colliders(
             ));
             commands.entity(entity).remove::<NeedsCollider>();
         } else {
+            trace!("Failed to generate trimesh collider for chunk {:?}", entity);
             commands.entity(entity).remove::<NeedsCollider>();
         }
     }

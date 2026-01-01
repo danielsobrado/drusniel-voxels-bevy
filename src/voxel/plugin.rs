@@ -460,7 +460,6 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
         let chunk_world_x = chunk_pos.x * CHUNK_SIZE_I32;
         let chunk_world_z = chunk_pos.z * CHUNK_SIZE_I32;
         let chunk_world_y = chunk_pos.y * CHUNK_SIZE_I32;
-        let mut _water_count = 0u32;
         let mut sand_count = 0u32;
         let mut dungeon_wall_count = 0u32;
         let mut dungeon_floor_count = 0u32;
@@ -496,9 +495,6 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
                         } else {
                             VoxelType::Air
                         };
-                        if voxel == VoxelType::Water {
-                            _water_count += 1;
-                        }
                         chunk.set(UVec3::new(x as u32, y as u32, z as u32), voxel);
                         continue;
                     }
@@ -606,10 +602,8 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
                         }
                     };
 
-                    match voxel {
-                        VoxelType::Water => _water_count += 1,
-                        VoxelType::Sand => sand_count += 1,
-                        _ => {}
+                    if voxel == VoxelType::Sand {
+                        sand_count += 1;
                     }
                     chunk.set(UVec3::new(x as u32, y as u32, z as u32), voxel);
                 }

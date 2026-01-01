@@ -56,6 +56,7 @@ fn spawn_category(
     prop_type: PropType,
 ) -> u32 {
     let Some(scene_handle) = assets.scenes.get(&def.id) else {
+        warn!("Prop asset '{}' not found in registry", def.id);
         return 0;
     };
 

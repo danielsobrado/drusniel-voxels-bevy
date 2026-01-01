@@ -43,12 +43,7 @@ impl VoxelWorld {
     pub fn get_voxel(&self, world_pos: IVec3) -> Option<VoxelType> {
         let chunk_pos = Self::world_to_chunk(world_pos);
         let local_pos = Self::world_to_local(world_pos);
-
-        if let Some(chunk) = self.get_chunk(chunk_pos) {
-            Some(chunk.get(local_pos))
-        } else {
-            None
-        }
+        self.get_chunk(chunk_pos).map(|chunk| chunk.get(local_pos))
     }
 
     pub fn set_voxel(&mut self, world_pos: IVec3, voxel: VoxelType) -> bool {

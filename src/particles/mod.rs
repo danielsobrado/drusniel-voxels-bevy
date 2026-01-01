@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
 
-#[derive(Component)]
 pub struct ParticlePlugin;
 
 #[derive(Resource)]
@@ -44,41 +43,24 @@ fn setup_particles(mut commands: Commands, mut effects: ResMut<Assets<EffectAsse
 }
 
 fn handle_particle_events(
-    mut _commands: Commands,
-    mut events: MessageReader<SpawnParticleEvent>, 
-    _registry: Res<ParticleRegistry>,
+    mut events: MessageReader<SpawnParticleEvent>,
 ) {
-    for ev in events.read() {
-        match ev.particle_type {
-            ParticleType::Dig => {
-                //  commands.spawn((
-                //     ParticleEffect {
-                //         handle: registry.dig_effect.clone(),
-                //         ..default()
-                //     },
-                //     EffectProperties::default(),
-                //     Transform::from_translation(ev.position),
-                //     GlobalTransform::default(),
-                //     Visibility::Visible,
-                //     InheritedVisibility::default(),
-                //     ViewVisibility::default(),
-                //     AutoDespawnEffect,
-                //  ));
-            }
-        }
-    }
+    // TODO: Implement particle spawning once bevy_hanabi API is finalized
+    // Drain events to prevent memory buildup
+    for _ev in events.read() {}
 }
 
 #[derive(Component)]
 struct AutoDespawnEffect;
 
 fn despawn_finished_effects(
-    mut _commands: Commands,
+    mut commands: Commands,
     query: Query<(Entity, &CompiledParticleEffect), With<AutoDespawnEffect>>,
 ) {
-    for (_entity, _effect) in query.iter() {
-        // if effect.is_finished() {
-        //     commands.entity(entity).despawn();
-        // }
+    // TODO: Check if effect is finished and despawn
+    // bevy_hanabi API for checking completion may differ by version
+    for (entity, _effect) in query.iter() {
+        // Placeholder: despawn immediately for now
+        commands.entity(entity).despawn();
     }
 }

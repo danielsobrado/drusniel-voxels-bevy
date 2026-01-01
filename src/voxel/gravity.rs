@@ -1,9 +1,7 @@
 use bevy::prelude::*;
 use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::VoxelType;
-// use crate::voxel::chunk::Chunk;
-use std::collections::VecDeque;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 pub struct GravityPlugin;
 
