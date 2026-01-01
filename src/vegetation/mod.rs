@@ -53,6 +53,15 @@ pub struct VegetationConfig {
     pub particle_height_variance: f32,
     pub particle_wrap_distance: f32,
     pub particle_bob_amplitude: f32,
+
+    // World bounds for spawning
+    pub world_chunks_x: i32,
+    pub world_chunks_z: i32,
+    pub world_chunks_y: i32,
+    pub world_blocks_x: i32,
+    pub world_blocks_z: i32,
+    pub surface_search_max_y: i32,
+    pub chunk_size: i32,
 }
 
 impl Default for VegetationConfig {
@@ -91,6 +100,15 @@ impl Default for VegetationConfig {
             particle_height_variance: 6.0,
             particle_wrap_distance: 15.0,
             particle_bob_amplitude: 0.2,
+
+            // World bounds
+            world_chunks_x: 32,
+            world_chunks_z: 32,
+            world_chunks_y: 4,
+            world_blocks_x: 512,
+            world_blocks_z: 512,
+            surface_search_max_y: 64,
+            chunk_size: 16,
         }
     }
 }
@@ -108,42 +126,24 @@ pub struct VegetationState {
     pub trees_spawned: bool,
 }
 
-impl VegetationState {
-    pub fn grass_not_spawned(&self) -> bool {
-        !self.grass_spawned
-    }
-
-    pub fn rocks_not_spawned(&self) -> bool {
-        !self.rocks_spawned
-    }
-
-    pub fn particles_not_spawned(&self) -> bool {
-        !self.particles_spawned
-    }
-
-    pub fn trees_not_spawned(&self) -> bool {
-        !self.trees_spawned
-    }
-}
-
 /// Run condition: grass not yet spawned
 fn should_spawn_grass(state: Res<VegetationState>) -> bool {
-    state.grass_not_spawned()
+    !state.grass_spawned
 }
 
 /// Run condition: rocks not yet spawned
 fn should_spawn_rocks(state: Res<VegetationState>) -> bool {
-    state.rocks_not_spawned()
+    !state.rocks_spawned
 }
 
 /// Run condition: particles not yet spawned
 fn should_spawn_particles(state: Res<VegetationState>) -> bool {
-    state.particles_not_spawned()
+    !state.particles_spawned
 }
 
 /// Run condition: trees not yet spawned
 fn should_spawn_trees(state: Res<VegetationState>) -> bool {
-    state.trees_not_spawned()
+    !state.trees_spawned
 }
 
 // ============================================================================
@@ -470,6 +470,7 @@ fn process_chunk_for_grass(
     config: &VegetationConfig,
 ) {
     let Some(chunk_source_mesh) = meshes.get(&chunk_mesh.0) else {
+        trace!("Chunk mesh not yet loaded for grass attachment");
         return;
     };
 
@@ -484,10 +485,12 @@ fn process_chunk_for_grass(
     }
 
     let Some(template_mesh) = meshes.get(&assets.blade_mesh) else {
+        trace!("Grass blade template mesh not yet loaded");
         return;
     };
 
     let Some(grass_mesh) = build_grass_patch_mesh(template_mesh, &instances) else {
+        trace!("Failed to build grass patch mesh from {} instances", instances.len());
         return;
     };
 
@@ -799,9 +802,9 @@ fn spawn_grass_on_terrain(
 ) -> usize {
     let mut grass_count = 0;
 
-    for chunk_x in 0..32 {
-        for chunk_z in 0..32 {
-            for chunk_y in 0..4 {
+    for chunk_x in 0..config.world_chunks_x {
+        for chunk_z in 0..config.world_chunks_z {
+            for chunk_y in 0..config.world_chunks_y {
                 let chunk_pos = IVec3::new(chunk_x, chunk_y, chunk_z);
                 if let Some(chunk) = world.get_chunk(chunk_pos) {
                     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
@@ -847,7 +850,7 @@ fn spawn_grass_in_chunk(
                     return spawned;
                 }
 
-                let local = bevy::math::UVec3::new(x, y, z);
+                let local = UVec3::new(x, y, z);
                 let voxel = chunk.get(local);
 
                 if voxel != VoxelType::TopSoil {
@@ -879,13 +882,14 @@ fn spawn_grass_in_chunk(
                     config.grass_blades_per_block_min + (hash * config.grass_blades_per_block_variance) as i32;
 
                 for i in 0..blade_count {
-                    spawned += spawn_single_grass_blade(
+                    spawn_single_grass_blade(
                         commands,
                         world_pos,
                         i,
                         grass_mesh,
                         grass_handles,
                     );
+                    spawned += 1;
                 }
             }
         }
@@ -900,7 +904,7 @@ fn spawn_single_grass_blade(
     blade_index: i32,
     grass_mesh: &Handle<Mesh>,
     grass_handles: &[Handle<GrassMaterial>],
-) -> usize {
+) {
     let offset_x = (simple_hash(world_pos.x + blade_index * 17, world_pos.z) - 0.5) * 0.9;
     let offset_z = (simple_hash(world_pos.x, world_pos.z + blade_index * 23) - 0.5) * 0.9;
     let rotation =
@@ -923,8 +927,6 @@ fn spawn_single_grass_blade(
         .with_scale(Vec3::splat(scale)),
         GrassBlade,
     ));
-
-    1
 }
 
 // ============================================================================
@@ -971,8 +973,8 @@ fn spawn_rocks_on_terrain(
 ) -> usize {
     let mut rock_count = 0;
 
-    for x in 0..512 {
-        for z in 0..512 {
+    for x in 0..config.world_blocks_x {
+        for z in 0..config.world_blocks_z {
             if rock_count >= config.rock_max_count {
                 return rock_count;
             }
@@ -985,7 +987,7 @@ fn spawn_rocks_on_terrain(
                 continue;
             }
 
-            if let Some(surface_y) = find_surface_height(world, world_x, world_z, 64) {
+            if let Some(surface_y) = find_surface_height(world, world_x, world_z, config.surface_search_max_y) {
                 let rock_mesh = &rock_meshes[(hash * 3.0) as usize % rock_meshes.len()];
                 let scale = config.rock_scale_min + hash * config.rock_scale_variance;
                 let rotation = hash * std::f32::consts::TAU;
@@ -1193,7 +1195,7 @@ pub fn spawn_trees(
         return;
     }
 
-    let Some(player_transform) = player_query.iter().next() else {
+    let Ok(player_transform) = player_query.single() else {
         return;
     };
 
@@ -1309,7 +1311,7 @@ fn find_tree_spawn_position(
     let chunk_world_origin = VoxelWorld::chunk_to_world(chunk_pos);
 
     for y in (0..16).rev() {
-        let world_y = chunk_world_origin.y + y as i32;
+        let world_y = chunk_world_origin.y + y;
         let world_pos = IVec3::new(world_x, world_y, world_z);
 
         let Some(voxel) = world.get_voxel(world_pos) else {
