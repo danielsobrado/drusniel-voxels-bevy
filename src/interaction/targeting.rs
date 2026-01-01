@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use crate::constants::{INTERACTION_RANGE, RAY_STEP, ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS};
 use crate::entity::Wolf;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
 /// Resource tracking the currently targeted block.

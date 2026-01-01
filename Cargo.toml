@@ -35,6 +35,14 @@ criterion = "0.5"
 rstest = "0.22"
 tempfile = "3.10"
 
+[[bench]]
+name = "meshing_benchmark"
+harness = false
+
+[[bench]]
+name = "world_benchmark"
+harness = false
+
 [profile.dev]
 opt-level = 1
 

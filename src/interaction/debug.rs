@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use crate::interaction::editing::{EditMode, DeleteMode, DragState};
 use crate::interaction::targeting::TargetedBlock;
 use crate::network::NetworkSession;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
 /// Component to mark the debug overlay text.

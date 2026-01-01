@@ -9,7 +9,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use crate::interaction::targeting::TargetedBlock;
 use crate::interaction::palette::PlacementPaletteState;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
 /// Resource that enables edit mode for dragging blocks.

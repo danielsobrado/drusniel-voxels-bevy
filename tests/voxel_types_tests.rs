@@ -86,7 +86,7 @@ fn atlas_indices_are_unique_for_visible_types() {
         VoxelType::DungeonFloor,
     ];
 
-    let mut indices: Vec<u8> = visible_types.iter().map(|v| v.atlas_index()).collect();
+    let mut indices: Vec<u8> = visible_types.iter().map(|v: &VoxelType| v.atlas_index()).collect();
     indices.sort();
 
     // Check for no consecutive duplicates after sorting
