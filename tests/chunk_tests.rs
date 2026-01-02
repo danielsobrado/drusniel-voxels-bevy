@@ -201,8 +201,8 @@ fn mesh_entity_management() {
     assert!(chunk.water_mesh_entity().is_none());
 
     // Create fake entities for testing
-    let entity = Entity::from_raw(42);
-    let water_entity = Entity::from_raw(43);
+    let entity = Entity::from_bits(42);
+    let water_entity = Entity::from_bits(43);
 
     chunk.set_mesh_entity(entity);
     chunk.set_water_mesh_entity(water_entity);

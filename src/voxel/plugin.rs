@@ -264,19 +264,20 @@ fn mesh_dirty_chunks_system(
     mut material_logged: Local<bool>,
 ) {
     // Wait for blocky material to be loaded before processing chunks.
-    let blocky_material = match blocky_material {
-        Some(mat) => {
-            if !*material_logged {
-                debug!("Blocky material loaded, mesh processing enabled");
-                *material_logged = true;
-            }
-            mat
+    let blocky_material = if let Some(mat) = blocky_material {
+        if !*material_logged {
+            debug!("Blocky material loaded, mesh processing enabled");
+            *material_logged = true;
         }
-        None => {
-            // Material not yet loaded - this is expected during startup
-            return;
-        }
+        Some(mat)
+    } else {
+        None
     };
+
+    if matches!(mesh_settings.mode, MeshMode::Blocky) && blocky_material.is_none() {
+        // Material not yet loaded - this is expected during startup
+        return;
+    }
 
     // Collect dirty chunks first to avoid borrowing issues
     let dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
@@ -363,21 +364,26 @@ fn mesh_dirty_chunks_system(
                 } else {
                     // Spawn with appropriate material based on mesh mode
                     let entity = match mesh_settings.mode {
-                        MeshMode::Blocky => commands
-                            .spawn((
-                                Mesh3d(mesh_handle),
-                                MeshMaterial3d(blocky_material.handle.clone()),
-                                Transform::from_xyz(
-                                    world_pos.x as f32,
-                                    world_pos.y as f32,
-                                    world_pos.z as f32,
-                                ),
-                                crate::voxel::meshing::ChunkMesh {
-                                    chunk_position: chunk_pos,
-                                },
-                                NeedsCollider,
-                            ))
-                            .id(),
+                        MeshMode::Blocky => {
+                            let Some(blocky_material) = blocky_material.as_ref() else {
+                                continue;
+                            };
+                            commands
+                                .spawn((
+                                    Mesh3d(mesh_handle),
+                                    MeshMaterial3d(blocky_material.handle.clone()),
+                                    Transform::from_xyz(
+                                        world_pos.x as f32,
+                                        world_pos.y as f32,
+                                        world_pos.z as f32,
+                                    ),
+                                    crate::voxel::meshing::ChunkMesh {
+                                        chunk_position: chunk_pos,
+                                    },
+                                    NeedsCollider,
+                                ))
+                                .id()
+                        }
                         MeshMode::SurfaceNets => commands
                             .spawn((
                                 Mesh3d(mesh_handle),

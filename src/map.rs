@@ -15,7 +15,7 @@ pub struct MapPlugin;
 pub struct MapState {
     pub open: bool,
     pub root_entity: Option<Entity>,
-    pub map_texture: Handle<Image>,
+    pub map_texture: Option<Handle<Image>>,
 }
 
 #[derive(Component)]
@@ -56,6 +56,10 @@ fn toggle_map_overlay(
         return;
     }
 
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        return;
+    }
+
     if state.open {
         if let Some(entity) = state.root_entity.take() {
             commands.entity(entity).despawn();
@@ -68,8 +72,26 @@ fn toggle_map_overlay(
         return;
     }
 
-    let texture = create_map_texture(&mut images, &world);
-    state.map_texture = texture.clone();
+    let existing_handle = state.map_texture.take();
+    let texture = match existing_handle {
+        Some(handle) => {
+            if update_map_texture(&mut images, &handle, &world) {
+                let texture = handle.clone();
+                state.map_texture = Some(handle);
+                texture
+            } else {
+                images.remove(&handle);
+                let new_handle = create_map_texture(&mut images, &world);
+                state.map_texture = Some(new_handle.clone());
+                new_handle
+            }
+        }
+        None => {
+            let new_handle = create_map_texture(&mut images, &world);
+            state.map_texture = Some(new_handle.clone());
+            new_handle
+        }
+    };
 
     let root_entity = commands
         .spawn((
@@ -217,31 +239,8 @@ fn update_coordinates_text(
 }
 
 fn create_map_texture(images: &mut Assets<Image>, world: &VoxelWorld) -> Handle<Image> {
-    let world_size = world.world_size_chunks();
-    let width = world_size.x.max(1) as u32;
-    let height = world_size.z.max(1) as u32;
-
-    let mut data = vec![0; (width * height * 4) as usize];
-    for z in 0..height {
-        for x in 0..width {
-            let mut has_chunk = false;
-            for y in 0..world_size.y {
-                if world.chunk_exists(IVec3::new(x as i32, y, z as i32)) {
-                    has_chunk = true;
-                    break;
-                }
-            }
-
-            let idx = ((z * width + x) * 4) as usize;
-            let color = if has_chunk {
-                [72, 141, 113, 255]
-            } else {
-                [18, 24, 34, 255]
-            };
-
-            data[idx..idx + 4].copy_from_slice(&color);
-        }
-    }
+    let (width, height) = map_dimensions(world);
+    let data = build_map_data(world, width, height);
 
     let mut image = Image::new_fill(
         Extent3d {
@@ -266,4 +265,56 @@ fn create_map_texture(images: &mut Assets<Image>, world: &VoxelWorld) -> Handle<
     });
 
     images.add(image)
+}
+
+fn update_map_texture(
+    images: &mut Assets<Image>,
+    handle: &Handle<Image>,
+    world: &VoxelWorld,
+) -> bool {
+    let (width, height) = map_dimensions(world);
+    let Some(image) = images.get_mut(handle) else {
+        return false;
+    };
+
+    let size = image.texture_descriptor.size;
+    if size.width != width || size.height != height || size.depth_or_array_layers != 1 {
+        return false;
+    }
+
+    image.data = Some(build_map_data(world, width, height));
+    true
+}
+
+fn map_dimensions(world: &VoxelWorld) -> (u32, u32) {
+    let world_size = world.world_size_chunks();
+    let width = world_size.x.max(1) as u32;
+    let height = world_size.z.max(1) as u32;
+    (width, height)
+}
+
+fn build_map_data(world: &VoxelWorld, width: u32, height: u32) -> Vec<u8> {
+    let world_size = world.world_size_chunks();
+    let mut data = vec![0; (width * height * 4) as usize];
+    for z in 0..height {
+        for x in 0..width {
+            let mut has_chunk = false;
+            for y in 0..world_size.y {
+                if world.chunk_exists(IVec3::new(x as i32, y, z as i32)) {
+                    has_chunk = true;
+                    break;
+                }
+            }
+
+            let idx = ((z * width + x) * 4) as usize;
+            let color = if has_chunk {
+                [72, 141, 113, 255]
+            } else {
+                [18, 24, 34, 255]
+            };
+
+            data[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    data
 }

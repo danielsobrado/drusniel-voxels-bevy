@@ -9,8 +9,6 @@ use std::collections::HashMap;
 pub struct VoxelWorld {
     chunks: HashMap<IVec3, Chunk>,
     world_size_chunks: IVec3,
-    #[allow(dead_code)]
-    chunk_size: i32,
 }
 
 impl VoxelWorld {
@@ -18,7 +16,6 @@ impl VoxelWorld {
         Self {
             chunks: HashMap::new(),
             world_size_chunks: size_chunks,
-            chunk_size: CHUNK_SIZE_I32,
         }
     }
 

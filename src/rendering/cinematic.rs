@@ -90,12 +90,13 @@ fn handle_cinematic_events(
                 state.transition_timer = Some(Timer::from_seconds(0.5, TimerMode::Once));
                 
                 // Calculate initial focus distance
-                if let Some(target) = focus_entity {
+                let camera_entity = cameras.iter().next();
+                if let (Some(target), Some(camera_entity)) = (focus_entity, camera_entity) {
                     if let (Ok(camera_tf), Ok(target_tf)) = (
-                        transforms.get(cameras.single().unwrap()),
+                        transforms.get(camera_entity),
                         transforms.get(*target),
                     ) {
-                        state.target_focal_distance = 
+                        state.target_focal_distance =
                             camera_tf.translation().distance(target_tf.translation());
                     }
                 } else {
@@ -135,9 +136,9 @@ fn handle_cinematic_events(
             
             CinematicEvent::FocusOn { entity } => {
                 if let Ok(target_tf) = transforms.get(*entity) {
-                    if let Ok(camera_entity) = cameras.single() {
+                    if let Some(camera_entity) = cameras.iter().next() {
                         if let Ok(camera_tf) = transforms.get(camera_entity) {
-                            state.target_focal_distance = 
+                            state.target_focal_distance =
                                 camera_tf.translation().distance(target_tf.translation());
                         }
                     }

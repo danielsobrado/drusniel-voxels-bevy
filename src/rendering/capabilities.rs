@@ -21,9 +21,13 @@ pub struct GraphicsCapabilities {
 pub fn detect_graphics_capabilities(
     adapter: Option<Res<RenderAdapter>>,
     adapter_info: Option<Res<RenderAdapterInfo>>,
+    mut capabilities: ResMut<GraphicsCapabilities>,
     mut commands: Commands,
+    mut warned: Local<bool>,
 ) {
-    let mut capabilities = GraphicsCapabilities::default();
+    if capabilities.adapter_name.is_some() {
+        return;
+    }
 
     if let (Some(adapter), Some(adapter_info)) = (adapter, adapter_info) {
         let hdr_features = adapter.get_texture_format_features(ViewTarget::TEXTURE_FORMAT_HDR);
@@ -63,10 +67,11 @@ pub fn detect_graphics_capabilities(
             info!("Integrated GPU detected; disabling GPU preprocessing.");
         }
     } else {
-        warn!(
-            "Render adapter not available yet; TAA will remain disabled until capabilities are known"
-        );
+        if !*warned {
+            warn!(
+                "Render adapter not available yet; TAA will remain disabled until capabilities are known"
+            );
+            *warned = true;
+        }
     }
-
-    commands.insert_resource(capabilities);
 }

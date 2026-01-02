@@ -38,7 +38,7 @@ fn toggle_debug_ui(
     mut state: ResMut<DebugUiState>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    if keys.just_pressed(KeyCode::F3) {
+    if keys.just_pressed(KeyCode::F4) {
         state.show_inspector = !state.show_inspector;
         state.show_settings = !state.show_settings;
     }
@@ -67,6 +67,6 @@ fn debug_settings_ui(
         }
         
         ui.separator();
-        ui.label("Press F3 to toggle this window and Inspector");
+        ui.label("Press F4 to toggle this window and Inspector");
     });
 }

@@ -78,23 +78,26 @@ pub fn create_texture_array(
     info!("Creating Texture Arrays for Blocky Material...");
 
     // Helper to create array from list of handles
-    let mut create_array = |handles: &[&Handle<Image>]| -> Handle<Image> {
-        let first = images.get(handles[0]).unwrap();
+    let mut create_array = |handles: &[&Handle<Image>]| -> Option<Handle<Image>> {
+        let first = images.get(handles[0])?;
         let width = first.width();
         let height = first.height();
         let format = first.texture_descriptor.format;
-        
+
         // Assume consistent size/format for now
         let mut data = Vec::new();
         for h in handles {
-            let img = images.get(*h).unwrap();
-            let bytes = img
-                .data
-                .as_ref()
-                .expect("Image data should be available once loaded");
+            let img = images.get(*h)?;
+            if img.width() != width
+                || img.height() != height
+                || img.texture_descriptor.format != format
+            {
+                return None;
+            }
+            let bytes = img.data.as_ref()?;
             data.extend_from_slice(bytes);
         }
-        
+
         let mut image = Image::new(
             Extent3d {
                 width,
@@ -124,11 +127,19 @@ pub fn create_texture_array(
             ..default()
         });
 
-        images.add(image)
+        Some(images.add(image))
     };
 
-    let albedo_array = create_array(&[&source.grass, &source.dirt, &source.rock, &source.sand]);
-    let normal_array = create_array(&[&source.grass_n, &source.dirt_n, &source.rock_n, &source.sand_n]);
+    let Some(albedo_array) =
+        create_array(&[&source.grass, &source.dirt, &source.rock, &source.sand])
+    else {
+        return;
+    };
+    let Some(normal_array) =
+        create_array(&[&source.grass_n, &source.dirt_n, &source.rock_n, &source.sand_n])
+    else {
+        return;
+    };
 
     commands.insert_resource(BlockyTextureArray {
         albedo: albedo_array.clone(),

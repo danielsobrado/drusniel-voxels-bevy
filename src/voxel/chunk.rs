@@ -80,6 +80,7 @@ impl Chunk {
 
     /// Gets the voxel at the given local coordinates, returning None if out of bounds.
     #[inline]
+    #[must_use]
     pub fn try_get(&self, local: UVec3) -> Option<VoxelType> {
         if is_valid_local(local) {
             Some(self.voxels[Self::index(local.x as usize, local.y as usize, local.z as usize)])
@@ -109,6 +110,7 @@ impl Chunk {
 
     /// Sets the voxel at the given local coordinates, returning false if out of bounds.
     #[inline]
+    #[must_use]
     pub fn try_set(&mut self, local: UVec3, voxel: VoxelType) -> bool {
         if !is_valid_local(local) {
             return false;
@@ -166,12 +168,12 @@ impl Chunk {
     }
 
     pub fn set_lod_level(&mut self, lod_level: LodLevel) -> bool {
-        if self.lod_level != lod_level {
+        let changed = self.lod_level != lod_level;
+        if changed {
             self.lod_level = lod_level;
             self.dirty = true;
-            return true;
         }
-        false
+        changed
     }
 
     /// Converts local 3D coordinates to a linear index.

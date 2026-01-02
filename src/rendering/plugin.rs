@@ -24,8 +24,12 @@ impl Plugin for RenderingPlugin {
         app.init_resource::<GraphicsCapabilities>()
             .init_resource::<RayTracingSettings>()
             .add_systems(
-                Startup,
-                detect_graphics_capabilities.in_set(GraphicsDetectionSet),
+                Update,
+                detect_graphics_capabilities
+                    .in_set(GraphicsDetectionSet)
+                    .run_if(|capabilities: Res<GraphicsCapabilities>| {
+                        capabilities.adapter_name.is_none()
+                    }),
             )
             .add_plugins(SsaoPlugin)
             .add_plugins(CinematicPlugin)
