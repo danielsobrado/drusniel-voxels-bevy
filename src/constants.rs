@@ -16,6 +16,9 @@ pub const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
 /// Chunk size as f32 for floating-point calculations.
 pub const CHUNK_SIZE_F32: f32 = CHUNK_SIZE as f32;
 
+/// Chunk size as u32 for unsigned coordinate calculations.
+pub const CHUNK_SIZE_U32: u32 = CHUNK_SIZE as u32;
+
 /// Total number of voxels in a chunk (16^3 = 4096).
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -242,3 +245,48 @@ pub const FALLBACK_STORAGE_TEXTURES: u32 = 8;
 
 /// Fallback bind groups for when GPU detection fails.
 pub const FALLBACK_BIND_GROUPS: u32 = 8;
+
+// =============================================================================
+// Player Configuration Defaults
+// =============================================================================
+
+/// Default player walking speed in units per second.
+pub const DEFAULT_WALK_SPEED: f32 = 6.0;
+
+/// Default player running speed in units per second.
+pub const DEFAULT_RUN_SPEED: f32 = 12.0;
+
+/// Default jump height in world units.
+pub const DEFAULT_JUMP_HEIGHT: f32 = 2.0;
+
+/// Default float height for physics ground detection.
+pub const DEFAULT_FLOAT_HEIGHT: f32 = 1.5;
+
+/// Default player capsule collider radius.
+pub const DEFAULT_CAPSULE_RADIUS: f32 = 0.35;
+
+/// Default player capsule collider height.
+pub const DEFAULT_CAPSULE_HEIGHT: f32 = 1.8;
+
+// =============================================================================
+// Cave Generation
+// =============================================================================
+
+/// Maximum Y level for cave generation.
+pub const CAVE_MAX_Y: i32 = 45;
+
+/// Minimum Y level for cave generation (above bedrock).
+pub const CAVE_MIN_Y: i32 = 2;
+
+/// Minimum depth below terrain surface for caves.
+pub const CAVE_SURFACE_OFFSET: i32 = 3;
+
+// =============================================================================
+// Bedrock Generation
+// =============================================================================
+
+/// Maximum Y level for bedrock layer.
+pub const BEDROCK_MAX_Y: i32 = 3;
+
+/// Probability threshold for bedrock vs rock in transition layer.
+pub const BEDROCK_ROCK_THRESHOLD: f32 = 0.3;

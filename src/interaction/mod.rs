@@ -29,6 +29,9 @@ use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 use palette::{PlacementPaletteState, PlacementSelection};
 
+/// Duration in seconds before gameplay errors are automatically cleared.
+const ERROR_DISPLAY_DURATION: f64 = 3.0;
+
 // ============================================================================
 // Components
 // ============================================================================
@@ -63,29 +66,53 @@ impl Default for HeldBlock {
 /// Handles attacking entities when the player left-clicks.
 ///
 /// Applies damage to targeted entities when not in edit mode.
+/// Reports combat errors via the `LastGameplayError` resource.
 pub fn attack_entity_system(
     mouse: Res<ButtonInput<MouseButton>>,
     edit_mode: Res<EditMode>,
     targeted_entity: Res<TargetedEntity>,
     mut entity_query: Query<&mut Health>,
+    mut last_error: ResMut<LastGameplayError>,
+    time: Res<Time>,
 ) {
     if edit_mode.enabled {
         return;
     }
 
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Some(entity) = targeted_entity.entity {
-            if let Ok(mut health) = entity_query.get_mut(entity) {
-                health.damage(ATTACK_DAMAGE);
-                info!("Attacked entity! Health: {}/{}", health.current, health.max);
-            }
-        }
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
     }
+
+    let result = try_attack_entity(&targeted_entity, &mut entity_query);
+    if let Err(err) = result {
+        last_error.set(err.to_string(), time.elapsed_secs_f64());
+    }
+}
+
+/// Attempts to attack the targeted entity.
+fn try_attack_entity(
+    targeted_entity: &TargetedEntity,
+    entity_query: &mut Query<&mut Health>,
+) -> Result<(), CombatError> {
+    let entity = targeted_entity.entity.ok_or(CombatError::EntityNotFound)?;
+
+    let mut health = entity_query
+        .get_mut(entity)
+        .map_err(|_| CombatError::NoHealthComponent)?;
+
+    if health.current <= 0.0 {
+        return Err(CombatError::AlreadyDead);
+    }
+
+    health.damage(ATTACK_DAMAGE);
+    info!("Attacked entity! Health: {}/{}", health.current, health.max);
+    Ok(())
 }
 
 /// Handles block breaking when the player left-clicks.
 ///
 /// Removes the targeted block (unless it's bedrock) and updates the held block type.
+/// Reports break errors via the `LastGameplayError` resource.
 pub fn break_block_system(
     mouse: Res<ButtonInput<MouseButton>>,
     edit_mode: Res<EditMode>,
@@ -94,6 +121,8 @@ pub fn break_block_system(
     mut world: ResMut<VoxelWorld>,
     mut held: ResMut<HeldBlock>,
     mut particle_events: MessageWriter<SpawnParticleEvent>,
+    mut last_error: ResMut<LastGameplayError>,
+    time: Res<Time>,
 ) {
     if edit_mode.enabled {
         return;
@@ -103,28 +132,51 @@ pub fn break_block_system(
         return;
     }
 
-    let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type) else {
-        return;
-    };
+    let result = try_break_block(&targeted_block, &mut world, &mut held);
+    match result {
+        Ok(pos) => {
+            // Spawn particles on successful break
+            let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
+            particle_events.write(SpawnParticleEvent {
+                position: center,
+                particle_type: ParticleType::Dig,
+            });
+        }
+        Err(err) => {
+            // Only show error for actual failure (not just no target)
+            if !matches!(err, BreakError::NoTarget) {
+                last_error.set(err.to_string(), time.elapsed_secs_f64());
+            }
+        }
+    }
+}
+
+/// Attempts to break the targeted block.
+///
+/// Returns the position of the broken block on success.
+fn try_break_block(
+    targeted_block: &TargetedBlock,
+    world: &mut VoxelWorld,
+    held: &mut HeldBlock,
+) -> Result<IVec3, BreakError> {
+    let pos = targeted_block.position.ok_or(BreakError::NoTarget)?;
+    let voxel_type = targeted_block.voxel_type.ok_or(BreakError::NoTarget)?;
 
     if voxel_type == VoxelType::Bedrock {
-        return;
+        return Err(BreakError::Unbreakable { position: pos });
     }
 
     held.block_type = voxel_type;
     world.set_voxel(pos, VoxelType::Air);
-    editing::mark_neighbors_dirty(&mut world, pos);
+    editing::mark_neighbors_dirty(world, pos);
 
-    let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
-    particle_events.write(SpawnParticleEvent {
-        position: center,
-        particle_type: ParticleType::Dig,
-    });
+    Ok(pos)
 }
 
 /// Handles block placing when the player right-clicks.
 ///
 /// Places the held block type at the targeted surface, if valid.
+/// Reports placement errors via the `LastGameplayError` resource.
 pub fn place_block_system(
     mouse: Res<ButtonInput<MouseButton>>,
     edit_mode: Res<EditMode>,
@@ -135,6 +187,8 @@ pub fn place_block_system(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     drag_state: Res<DragState>,
     palette: Res<PlacementPaletteState>,
+    mut last_error: ResMut<LastGameplayError>,
+    time: Res<Time>,
 ) {
     let placing_in_edit_mode = edit_mode.enabled
         && palette
@@ -154,22 +208,46 @@ pub fn place_block_system(
         return;
     }
 
-    let (Some(block_pos), Some(normal)) = (targeted.position, targeted.normal) else {
-        return;
-    };
+    let result = try_place_block(&targeted, &mut world, &held, &camera_query);
+    if let Err(err) = result {
+        // Only show error for actual failure (not just no target)
+        if !matches!(err, PlacementError::NoTarget) {
+            last_error.set(err.to_string(), time.elapsed_secs_f64());
+        }
+    }
+}
+
+/// Attempts to place a block at the targeted surface.
+fn try_place_block(
+    targeted: &TargetedBlock,
+    world: &mut VoxelWorld,
+    held: &HeldBlock,
+    camera_query: &Query<&Transform, With<PlayerCamera>>,
+) -> Result<IVec3, PlacementError> {
+    let block_pos = targeted.position.ok_or(PlacementError::NoTarget)?;
+    let normal = targeted.normal.ok_or(PlacementError::NoTarget)?;
 
     let place_pos = block_pos + normal;
 
-    if is_player_blocking_position(&camera_query, place_pos) {
-        return;
+    // Check if player is blocking the position
+    if is_player_blocking_position(camera_query, place_pos) {
+        return Err(PlacementError::PlayerBlocking { position: place_pos });
     }
 
-    if let Some(existing) = world.get_voxel(place_pos) {
-        if existing == VoxelType::Air || existing == VoxelType::Water {
-            world.set_voxel(place_pos, held.block_type);
-            editing::mark_neighbors_dirty(&mut world, place_pos);
-        }
+    // Check if position is valid for placement
+    let existing = world.get_voxel(place_pos).ok_or(PlacementError::OutOfBounds {
+        position: place_pos,
+    })?;
+
+    if existing != VoxelType::Air && existing != VoxelType::Water {
+        return Err(PlacementError::PositionOccupied { position: place_pos });
     }
+
+    // Place the block
+    world.set_voxel(place_pos, held.block_type);
+    editing::mark_neighbors_dirty(world, place_pos);
+
+    Ok(place_pos)
 }
 
 /// Checks if the player's body occupies the given position.
@@ -605,6 +683,19 @@ fn find_air_gaps(world: &VoxelWorld, center: IVec3) -> usize {
 // Plugin
 // ============================================================================
 
+// ============================================================================
+// Error Management
+// ============================================================================
+
+/// Clears expired gameplay errors.
+fn clear_expired_errors(mut last_error: ResMut<LastGameplayError>, time: Res<Time>) {
+    last_error.clear_if_expired(time.elapsed_secs_f64(), ERROR_DISPLAY_DURATION);
+}
+
+// ============================================================================
+// Plugin
+// ============================================================================
+
 /// Plugin for block and entity interaction systems.
 pub struct InteractionPlugin;
 
@@ -618,6 +709,7 @@ impl Plugin for InteractionPlugin {
             .init_resource::<DragState>()
             .init_resource::<DebugOverlayState>()
             .init_resource::<DebugDetailToggles>()
+            .init_resource::<LastGameplayError>()
             .init_resource::<palette::PaletteItems>()
             .init_resource::<PlacementPaletteState>()
             .init_resource::<palette::BookmarkStore>()
@@ -656,6 +748,7 @@ impl Plugin for InteractionPlugin {
                     debug::toggle_debug_overlay,
                     debug::toggle_debug_details,
                     debug::update_debug_overlay,
+                    clear_expired_errors,
                 )
                     .run_if(|state: Res<PauseMenuState>| !state.open),
             );

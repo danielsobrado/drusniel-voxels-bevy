@@ -5,6 +5,7 @@
 //! - [`types`] - Voxel type definitions and traits
 //! - [`world`] - World coordinate system and chunk management
 //! - [`meshing`] - Surface Nets mesh generation for smooth terrain
+//! - [`terrain`] - Procedural terrain generation with noise abstractions
 //! - [`plugin`] - Bevy plugin integration
 //! - [`persistence`] - World save/load functionality
 //! - [`gravity`] - Voxel gravity simulation
@@ -18,5 +19,6 @@ pub mod meshing;
 pub mod persistence;
 pub mod plugin;
 pub mod skirt;
+pub mod terrain;
 pub mod types;
 pub mod world;

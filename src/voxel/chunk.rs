@@ -1,13 +1,19 @@
-use crate::constants::{CHUNK_SIZE, CHUNK_VOLUME};
+use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_U32, CHUNK_VOLUME};
 use crate::voxel::types::VoxelType;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Serializable chunk data (voxels only)
+/// Serializable chunk data (voxels only).
 #[derive(Serialize, Deserialize)]
 pub struct ChunkData {
     pub voxels: Vec<VoxelType>,
     pub position: IVec3,
+}
+
+/// Checks if local coordinates are within valid chunk bounds.
+#[inline]
+pub fn is_valid_local(local: UVec3) -> bool {
+    local.x < CHUNK_SIZE_U32 && local.y < CHUNK_SIZE_U32 && local.z < CHUNK_SIZE_U32
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,17 +62,63 @@ impl Chunk {
         }
     }
 
+    /// Gets the voxel at the given local coordinates.
+    ///
+    /// # Panics
+    /// Panics if coordinates are outside chunk bounds (>= 16).
+    /// Use `try_get` for a non-panicking version.
+    #[inline]
     pub fn get(&self, local: UVec3) -> VoxelType {
+        debug_assert!(
+            is_valid_local(local),
+            "Chunk::get called with out-of-bounds coordinates: {:?}",
+            local
+        );
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         self.voxels[index]
     }
 
+    /// Gets the voxel at the given local coordinates, returning None if out of bounds.
+    #[inline]
+    pub fn try_get(&self, local: UVec3) -> Option<VoxelType> {
+        if is_valid_local(local) {
+            Some(self.voxels[Self::index(local.x as usize, local.y as usize, local.z as usize)])
+        } else {
+            None
+        }
+    }
+
+    /// Sets the voxel at the given local coordinates.
+    ///
+    /// # Panics
+    /// Panics if coordinates are outside chunk bounds (>= 16).
+    /// Use `try_set` for a non-panicking version.
+    #[inline]
     pub fn set(&mut self, local: UVec3, voxel: VoxelType) {
+        debug_assert!(
+            is_valid_local(local),
+            "Chunk::set called with out-of-bounds coordinates: {:?}",
+            local
+        );
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
             self.dirty = true;
         }
+    }
+
+    /// Sets the voxel at the given local coordinates, returning false if out of bounds.
+    #[inline]
+    pub fn try_set(&mut self, local: UVec3, voxel: VoxelType) -> bool {
+        if !is_valid_local(local) {
+            return false;
+        }
+        let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
+        if self.voxels[index] != voxel {
+            self.voxels[index] = voxel;
+            self.dirty = true;
+        }
+        true
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -122,17 +174,36 @@ impl Chunk {
         false
     }
 
-    // For meshing - index conversion
-    fn index(x: usize, y: usize, z: usize) -> usize {
+    /// Converts local 3D coordinates to a linear index.
+    ///
+    /// Index layout: x + y*16 + z*256 (X-major ordering).
+    #[inline]
+    pub fn index(x: usize, y: usize, z: usize) -> usize {
         x + (y * CHUNK_SIZE) + (z * CHUNK_SIZE * CHUNK_SIZE)
     }
 
-    #[allow(dead_code)]
-    fn coords(index: usize) -> (usize, usize, usize) {
+    /// Converts a linear index back to 3D local coordinates.
+    ///
+    /// Inverse of `index()`.
+    #[inline]
+    pub fn coords(index: usize) -> (usize, usize, usize) {
         let x = index % CHUNK_SIZE;
         let y = (index / CHUNK_SIZE) % CHUNK_SIZE;
         let z = index / (CHUNK_SIZE * CHUNK_SIZE);
         (x, y, z)
+    }
+
+    /// Returns an iterator over all voxels with their local coordinates.
+    pub fn iter(&self) -> impl Iterator<Item = (UVec3, VoxelType)> + '_ {
+        self.voxels.iter().enumerate().map(|(i, &voxel)| {
+            let (x, y, z) = Self::coords(i);
+            (UVec3::new(x as u32, y as u32, z as u32), voxel)
+        })
+    }
+
+    /// Returns an iterator over all non-air voxels with their local coordinates.
+    pub fn iter_solid(&self) -> impl Iterator<Item = (UVec3, VoxelType)> + '_ {
+        self.iter().filter(|(_, voxel)| *voxel != VoxelType::Air)
     }
 
     /// Convert chunk to serializable data

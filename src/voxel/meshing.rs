@@ -159,87 +159,109 @@ fn check_water_face(
     }
 }
 
+/// Returns the face offset vector for a given face direction.
+#[inline]
+fn face_offset(face: Face) -> IVec3 {
+    match face {
+        Face::Top => IVec3::Y,
+        Face::Bottom => IVec3::NEG_Y,
+        Face::North => IVec3::NEG_Z,
+        Face::South => IVec3::Z,
+        Face::East => IVec3::X,
+        Face::West => IVec3::NEG_X,
+    }
+}
+
+/// Checks if a neighbor position is within chunk bounds.
+#[inline]
+fn is_in_chunk_bounds(pos: IVec3) -> bool {
+    pos.x >= 0 && pos.x < CHUNK_SIZE_I32 &&
+    pos.y >= 0 && pos.y < CHUNK_SIZE_I32 &&
+    pos.z >= 0 && pos.z < CHUNK_SIZE_I32
+}
+
+/// Gets the neighboring voxel for a face, checking chunk first then world.
+fn get_neighbor_voxel(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    local: UVec3,
+    face: Face,
+) -> Option<VoxelType> {
+    let offset = face_offset(face);
+    let neighbor_local = IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
+
+    if is_in_chunk_bounds(neighbor_local) {
+        Some(chunk.get(UVec3::new(
+            neighbor_local.x as u32,
+            neighbor_local.y as u32,
+            neighbor_local.z as u32,
+        )))
+    } else {
+        // Neighbor is outside chunk - check world
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+        let world_pos = chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
+        world.get_voxel(world_pos)
+    }
+}
+
+/// Generic face visibility check with a custom predicate.
+///
+/// # Arguments
+/// * `chunk` - The chunk containing the voxel
+/// * `world` - The voxel world for cross-chunk lookups
+/// * `local` - Local coordinates within the chunk
+/// * `face` - The face direction to check
+/// * `is_visible` - Predicate to determine visibility based on neighbor voxel
+/// * `default_if_outside` - Value to return if neighbor is outside world bounds
+fn is_face_visible_with<F>(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    local: UVec3,
+    face: Face,
+    is_visible: F,
+    default_if_outside: bool,
+) -> bool
+where
+    F: Fn(VoxelType) -> bool,
+{
+    match get_neighbor_voxel(chunk, world, local, face) {
+        Some(neighbor) => is_visible(neighbor),
+        None => default_if_outside,
+    }
+}
+
+/// Solid face is visible when neighbor is transparent (air or water).
 fn is_face_visible(
     chunk: &Chunk,
     world: &VoxelWorld,
     local: UVec3,
     face: Face,
 ) -> bool {
-    let (dx, dy, dz) = match face {
-        Face::Top => (0, 1, 0),
-        Face::Bottom => (0, -1, 0),
-        Face::North => (0, 0, -1),
-        Face::South => (0, 0, 1),
-        Face::East => (1, 0, 0),
-        Face::West => (-1, 0, 0),
-    };
-
-    let neighbor_x = local.x as i32 + dx;
-    let neighbor_y = local.y as i32 + dy;
-    let neighbor_z = local.z as i32 + dz;
-
-    // If neighbor is within chunk
-    if neighbor_x >= 0 && neighbor_x < CHUNK_SIZE_I32 &&
-       neighbor_y >= 0 && neighbor_y < CHUNK_SIZE_I32 &&
-       neighbor_z >= 0 && neighbor_z < CHUNK_SIZE_I32 {
-        let neighbor_voxel = chunk.get(UVec3::new(neighbor_x as u32, neighbor_y as u32, neighbor_z as u32));
-        return neighbor_voxel.is_transparent(); // Visible if neighbor is transparent (air or water)
-    }
-
-    // If neighbor is outside chunk, check world
-    let chunk_pos = chunk.position();
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let current_world_pos = chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32);
-    let neighbor_world_pos = current_world_pos + IVec3::new(dx, dy, dz);
-    
-    if let Some(neighbor_voxel) = world.get_voxel(neighbor_world_pos) {
-        neighbor_voxel.is_transparent()
-    } else {
-        // Outside world bounds - never render faces into the void
-        false
-    }
+    is_face_visible_with(
+        chunk,
+        world,
+        local,
+        face,
+        |neighbor| neighbor.is_transparent(),
+        false, // Don't render faces into the void
+    )
 }
 
-/// Water faces are only visible when adjacent to air (not other water)
+/// Water face is visible only when neighbor is air.
 fn is_water_face_visible(
     chunk: &Chunk,
     world: &VoxelWorld,
     local: UVec3,
     face: Face,
 ) -> bool {
-    let (dx, dy, dz) = match face {
-        Face::Top => (0, 1, 0),
-        Face::Bottom => (0, -1, 0),
-        Face::North => (0, 0, -1),
-        Face::South => (0, 0, 1),
-        Face::East => (1, 0, 0),
-        Face::West => (-1, 0, 0),
-    };
-
-    let neighbor_x = local.x as i32 + dx;
-    let neighbor_y = local.y as i32 + dy;
-    let neighbor_z = local.z as i32 + dz;
-
-    // If neighbor is within chunk
-    if neighbor_x >= 0 && neighbor_x < CHUNK_SIZE_I32 &&
-       neighbor_y >= 0 && neighbor_y < CHUNK_SIZE_I32 &&
-       neighbor_z >= 0 && neighbor_z < CHUNK_SIZE_I32 {
-        let neighbor_voxel = chunk.get(UVec3::new(neighbor_x as u32, neighbor_y as u32, neighbor_z as u32));
-        return neighbor_voxel == VoxelType::Air; // Water only visible against air
-    }
-
-    // If neighbor is outside chunk, check world
-    let chunk_pos = chunk.position();
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let current_world_pos = chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32);
-    let neighbor_world_pos = current_world_pos + IVec3::new(dx, dy, dz);
-    
-    if let Some(neighbor_voxel) = world.get_voxel(neighbor_world_pos) {
-        neighbor_voxel == VoxelType::Air
-    } else {
-        // If outside world bounds, assume visible (edge of world)
-        true
-    }
+    is_face_visible_with(
+        chunk,
+        world,
+        local,
+        face,
+        |neighbor| neighbor == VoxelType::Air,
+        true, // Show water at world edges
+    )
 }
 
 /// Calculate vertex ambient occlusion (0-3 scale, 0 = fully occluded, 3 = not occluded).
