@@ -165,7 +165,8 @@ fn benchmark_serialization(c: &mut Criterion) {
 
     group.bench_function("chunk_from_data", |b| {
         b.iter(|| {
-            black_box(Chunk::from_data(data.clone()))
+            // ChunkData doesn't implement Clone, so create a fresh one each iteration.
+            black_box(Chunk::from_data(chunk.to_data()))
         })
     });
 

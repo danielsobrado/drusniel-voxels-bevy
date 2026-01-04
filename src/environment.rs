@@ -1,5 +1,4 @@
 use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, VolumetricLight};
-use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use bevy_water::*;
 
@@ -113,7 +112,6 @@ fn seed_atmosphere(
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut ambient: ResMut<AmbientLight>,
     mut clear_color: ResMut<ClearColor>,
-    mut fog_query: Query<&mut DistanceFog>,
 ) {
     if let Some(sample) = compute_atmosphere(&settings) {
         apply_atmosphere_sample(
@@ -121,7 +119,6 @@ fn seed_atmosphere(
             &mut sun_query,
             &mut ambient,
             &mut clear_color,
-            &mut fog_query,
         );
     }
 }
@@ -132,7 +129,6 @@ fn animate_atmosphere(
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut ambient: ResMut<AmbientLight>,
     mut clear_color: ResMut<ClearColor>,
-    mut fog_query: Query<&mut DistanceFog>,
 ) {
     // Advance time if enabled
     if settings.cycle_enabled {
@@ -144,7 +140,6 @@ fn animate_atmosphere(
             &mut sun_query,
             &mut ambient,
             &mut clear_color,
-            &mut fog_query,
         );
     }
 }
@@ -156,9 +151,6 @@ struct AtmosphereSample {
     ambient_color: Color,
     ambient_brightness: f32,
     sky_color: Color,
-    fog_color: Color,
-    fog_density: f32,
-    fog_light_color: Color,
 }
 
 fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample> {
@@ -210,24 +202,13 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);
 
-    // Fog color and density
-    let fog_color = night_sky
-        .lerp(zenith_day * 1.1, daylight)
-        .lerp(horizon_twilight, horizon_warmth)
-        * settings.exposure;
-    let fog_density = lerp(settings.fog_density.y, settings.fog_density.x, daylight)
-        * (1.0 + horizon_warmth * 0.75);
-
     Some(AtmosphereSample {
         sun_dir,
-        sun_color: Color::srgba(sun_tint.x, sun_tint.y, sun_tint.z, 1.0),
+        sun_color: Color::linear_rgb(sun_tint.x, sun_tint.y, sun_tint.z),
         sun_illuminance: sun_strength + moon_strength,
-        ambient_color: Color::srgba(ambient_tint.x, ambient_tint.y, ambient_tint.z, 1.0),
+        ambient_color: Color::linear_rgb(ambient_tint.x, ambient_tint.y, ambient_tint.z),
         ambient_brightness: ambient_strength,
-        sky_color: Color::srgba(sky_color.x, sky_color.y, sky_color.z, 1.0),
-        fog_color: Color::srgba(fog_color.x, fog_color.y, fog_color.z, 1.0),
-        fog_density: fog_density.clamp(0.0003, 0.015),
-        fog_light_color: Color::srgba(sun_tint.x, sun_tint.y, sun_tint.z, 1.0),
+        sky_color: Color::linear_rgb(sky_color.x, sky_color.y, sky_color.z),
     })
 }
 
@@ -236,7 +217,6 @@ fn apply_atmosphere_sample(
     sun_query: &mut Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     ambient: &mut ResMut<AmbientLight>,
     clear_color: &mut ResMut<ClearColor>,
-    fog_query: &mut Query<&mut DistanceFog>,
 ) {
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
         transform.look_to(sample.sun_dir, Vec3::Y);
@@ -247,14 +227,6 @@ fn apply_atmosphere_sample(
     ambient.brightness = sample.ambient_brightness;
     ambient.color = sample.ambient_color;
     clear_color.0 = sample.sky_color;
-
-    for mut fog in fog_query.iter_mut() {
-        fog.color = sample.fog_color;
-        fog.directional_light_color = sample.fog_light_color;
-        fog.falloff = FogFalloff::ExponentialSquared {
-            density: sample.fog_density,
-        };
-    }
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

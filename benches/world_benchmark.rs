@@ -108,7 +108,9 @@ fn benchmark_chunk_access(c: &mut Criterion) {
 
     group.bench_function("get_chunk_mut", |b| {
         b.iter(|| {
-            black_box(world.get_chunk_mut(IVec3::new(2, 2, 2)))
+            // Use the pointer address to avoid returning a reference from the closure
+            let ptr = world.get_chunk_mut(IVec3::new(2, 2, 2)).map(|chunk| chunk as *mut _);
+            black_box(ptr)
         })
     });
 

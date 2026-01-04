@@ -6,6 +6,8 @@ use crate::environment::AtmosphereSettings;
 
 pub struct FogPlugin;
 
+const BASE_FOG_DENSITY: f32 = 0.0009; // Matches the balanced fog preset.
+
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
         // Load fog config from file or use default
@@ -126,6 +128,12 @@ fn update_fog_from_atmosphere(
     let daylight = smoothstep(-0.1, 0.25, altitude);
     let twilight = twilight_factor(altitude, 0.15);
     let night = (1.0 - daylight).max(0.05);
+
+    let fog_density = lerp(atmo_settings.fog_density.y, atmo_settings.fog_density.x, daylight)
+        .max(0.0001);
+    let visibility_scale = BASE_FOG_DENSITY / fog_density;
+    let fog_start = config.distance.start * visibility_scale;
+    let fog_end = config.distance.end * visibility_scale;
     
     // Blend between presets
     let day = &config.colors.day;
@@ -158,6 +166,10 @@ fn update_fog_from_atmosphere(
             0.5 * daylight + 0.2 * night, // Less directional glow at night
         );
         fog.directional_light_exponent = 30.0 + twilight * 20.0; // Tighter during sunset
+        fog.falloff = FogFalloff::Linear {
+            start: fog_start,
+            end: fog_end,
+        };
     }
     
     // Update volumetric fog volume
@@ -188,6 +200,10 @@ fn follow_camera_fog_volume(
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn twilight_factor(altitude: f32, band: f32) -> f32 {
