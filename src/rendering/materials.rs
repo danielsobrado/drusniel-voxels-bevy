@@ -181,7 +181,6 @@ pub fn setup_building_material(
                 normal_intensity: 0.0,
                 parallax_scale: 0.0,
                 parallax_steps: 0,
-                _padding: [0.0; 3],
             },
             ..default()
         }
@@ -195,7 +194,6 @@ pub fn setup_building_material(
                 normal_intensity: 1.0,
                 parallax_scale: 0.04,    // Subtle parallax depth
                 parallax_steps: 6,       // Balanced quality/performance
-                _padding: [0.0; 3],
             },
             // Wood plank textures
             wood_albedo: Some(asset_server.load("pbr/building/wood/albedo.png")),

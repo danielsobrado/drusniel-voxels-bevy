@@ -20,8 +20,6 @@ pub struct BuildingUniforms {
     pub parallax_scale: f32,
     /// Number of parallax iterations (4-8 for quality)
     pub parallax_steps: u32,
-    /// Padding for GPU alignment
-    pub _padding: [f32; 3],
 }
 
 impl Default for BuildingUniforms {
@@ -33,7 +31,6 @@ impl Default for BuildingUniforms {
             normal_intensity: 1.0,
             parallax_scale: 0.04, // Subtle depth for wood/stone
             parallax_steps: 6,    // Balanced quality/performance
-            _padding: [0.0; 3],
         }
     }
 }

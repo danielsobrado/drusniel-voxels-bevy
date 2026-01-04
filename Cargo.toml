@@ -48,3 +48,6 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[patch.crates-io]
+wgpu-core = { path = "patches/wgpu-core-26.0.1" }

@@ -12,7 +12,6 @@ struct BuildingUniforms {
     normal_intensity: f32,
     parallax_scale: f32,
     parallax_steps: u32,
-    _padding: vec3<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: BuildingUniforms;

@@ -1,5 +1,6 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
+use bevy::ecs::world::EntityWorldMut;
 
 use crate::physics::PhysicsLayer;
 use crate::voxel::meshing::ChunkMesh;
@@ -24,16 +25,24 @@ pub fn generate_chunk_colliders(
         };
 
         if let Some(collider) = Collider::trimesh_from_mesh(mesh) {
-            commands.entity(entity).insert((
-                RigidBody::Static,
-                collider,
-                CollisionLayers::new(PhysicsLayer::Terrain, PhysicsLayer::terrain_mask()),
-                ChunkCollider,
-            ));
-            commands.entity(entity).remove::<NeedsCollider>();
+            commands
+                .entity(entity)
+                .queue_silenced(|mut entity_world: EntityWorldMut| {
+                    entity_world.insert((
+                        RigidBody::Static,
+                        collider,
+                        CollisionLayers::new(PhysicsLayer::Terrain, PhysicsLayer::terrain_mask()),
+                        ChunkCollider,
+                    ));
+                    entity_world.remove::<NeedsCollider>();
+                });
         } else {
             trace!("Failed to generate trimesh collider for chunk {:?}", entity);
-            commands.entity(entity).remove::<NeedsCollider>();
+            commands
+                .entity(entity)
+                .queue_silenced(|mut entity_world: EntityWorldMut| {
+                    entity_world.remove::<NeedsCollider>();
+                });
         }
     }
 }
@@ -46,8 +55,10 @@ pub fn handle_chunk_modification(
     for entity in modified_chunks.iter() {
         commands
             .entity(entity)
-            .remove::<Collider>()
-            .remove::<ChunkCollider>()
-            .insert(NeedsCollider);
+            .queue_silenced(|mut entity_world: EntityWorldMut| {
+                entity_world.remove::<Collider>();
+                entity_world.remove::<ChunkCollider>();
+                entity_world.insert(NeedsCollider);
+            });
     }
 }
