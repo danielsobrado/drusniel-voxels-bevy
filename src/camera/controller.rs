@@ -10,6 +10,8 @@ use crate::rendering::ray_tracing::RayTracingSettings;
 use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
 use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::camera::Exposure;
+use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::MouseMotion;
 use bevy::light::ShadowFilteringMethod;
@@ -18,6 +20,7 @@ use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
 use bevy::prelude::*;
 use bevy::render::view::Hdr;
 use bevy::window::{CursorGrabMode, CursorOptions};
+use bevy_water::ImageReformat;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CameraMode {
@@ -58,15 +61,24 @@ impl Default for PlayerCamera {
 
 pub fn spawn_camera(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     capabilities: Res<GraphicsCapabilities>,
     ray_tracing: Res<RayTracingSettings>,
     fog_config: Res<FogConfig>,
     camera_config: Res<CameraConfig>,
 ) {
+    // Daytime skybox (same asset used in v0.3).
+    let skybox_image = ImageReformat::cubemap(
+        &mut commands,
+        &asset_server,
+        "textures/table_mountain_2_puresky_4k_cubemap.jpg",
+    );
+
     let mut camera = commands.spawn((
         Camera3d::default(),
         Camera::default(),
         Msaa::Off,
+        Exposure::default(),
         Transform::from_xyz(
             camera_config.spawn.position.x,
             camera_config.spawn.position.y,
@@ -80,22 +92,23 @@ pub fn spawn_camera(
             ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
         },
         fog_camera_components(&fog_config),
+        Skybox {
+            image: skybox_image,
+            brightness: 1500.0,
+            rotation: Quat::IDENTITY,
+        },
         CinematicCamera,
     ));
 
-    if capabilities.integrated_gpu {
-        camera.insert(Tonemapping::None);
-    } else {
-        camera.insert((
-            Hdr,
-            Bloom {
-                intensity: camera_config.rendering.bloom_intensity,
-                composite_mode: BloomCompositeMode::EnergyConserving,
-                ..default()
-            },
-            Tonemapping::TonyMcMapface,
-            DebandDither::Enabled,
-        ));
+    // Keep HDR + tonemapping enabled on all GPUs; otherwise custom materials that output HDR-linear
+    // end up looking dark due to missing exposure/tonemapping.
+    camera.insert((Hdr, Tonemapping::AcesFitted, DebandDither::Enabled));
+    if !capabilities.integrated_gpu {
+        camera.insert(Bloom {
+            intensity: camera_config.rendering.bloom_intensity,
+            composite_mode: BloomCompositeMode::EnergyConserving,
+            ..default()
+        });
     }
 
     if capabilities.integrated_gpu {
@@ -115,6 +128,24 @@ pub fn spawn_camera(
 
     if ray_tracing.enabled && capabilities.ray_tracing_supported {
         camera.insert(ScreenSpaceReflections::default());
+    }
+}
+
+pub fn update_camera_exposure_from_atmosphere(
+    atmosphere: Res<crate::environment::AtmosphereSettings>,
+    mut cameras: Query<&mut Exposure, With<PlayerCamera>>,
+) {
+    if !atmosphere.is_changed() {
+        return;
+    }
+
+    let multiplier = atmosphere.exposure.max(0.001);
+    // Treat the in-game "exposure" slider as a direct multiplier on top of Bevy's baseline (BLENDER) exposure.
+    // Higher multiplier -> brighter image -> lower EV.
+    let ev100 = (Exposure::EV100_BLENDER - multiplier.log2()).clamp(0.0, 20.0);
+
+    for mut exposure in cameras.iter_mut() {
+        exposure.ev100 = ev100;
     }
 }
 
@@ -165,6 +196,7 @@ pub fn update_ray_tracing_on_camera(
 pub fn player_camera_system(
     mut query: Query<(&mut Transform, &mut PlayerCamera)>,
     keys: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut mouse_motion: MessageReader<MouseMotion>,
     time: Res<Time>,
     mut windows: Query<(&mut Window, &mut CursorOptions)>,
@@ -172,16 +204,46 @@ pub fn player_camera_system(
     palette: Res<PlacementPaletteState>,
     map_state: Res<MapState>,
     camera_config: Res<CameraConfig>,
+    mut cursor_captured: Local<bool>,
 ) {
-    let Ok((_window, mut cursor_options)) = windows.single_mut() else {
+    let Ok((window, mut cursor_options)) = windows.single_mut() else {
         return;
     };
     let dt = time.delta_secs();
 
-    if pause_menu.open || palette.open || map_state.open {
+    let ui_open = pause_menu.open || palette.open || map_state.open;
+
+    // Never keep the cursor grabbed when the window isn't focused.
+    // Otherwise alt-tab / clicking other windows can feel like the mouse is "stuck".
+    if !window.focused {
+        *cursor_captured = false;
+    }
+
+    // Escape always releases the cursor (pause/menu systems can still handle it too).
+    if keys.just_pressed(KeyCode::Escape) {
+        *cursor_captured = false;
+    }
+
+    // Any UI that needs a cursor releases it.
+    if ui_open {
+        *cursor_captured = false;
+    }
+
+    if !*cursor_captured {
         cursor_options.visible = true;
         cursor_options.grab_mode = CursorGrabMode::None;
-        return;
+
+        // Drain motion events so we don't apply a large accumulated delta when capture starts.
+        for _ in mouse_motion.read() {}
+
+        // Click-to-capture when focused and not in UI.
+        if window.focused && !ui_open && mouse_buttons.just_pressed(MouseButton::Left) {
+            *cursor_captured = true;
+            cursor_options.visible = false;
+            cursor_options.grab_mode = CursorGrabMode::Locked;
+        } else {
+            return;
+        }
     }
 
     cursor_options.visible = false;

@@ -224,5 +224,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ambient = 0.35 * ao_factor;
     let lit = albedo.rgb * (ambient + ndotl * 0.65) + vec3(pow(ndoth, spec_power) * spec_intensity);
-    return vec4(lit, albedo.a);
+    return vec4(lit * 500.0, albedo.a);
 }

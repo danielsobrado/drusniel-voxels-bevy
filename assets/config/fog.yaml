@@ -11,7 +11,7 @@ fog:
     
   # Volumetric fog (god rays, local volumes)
   volumetric:
-    enabled: true
+    enabled: false
     # Raymarching quality (32=fast, 64=quality, 128=ultra)
     step_count: 64
     # Jitter for TAA integration

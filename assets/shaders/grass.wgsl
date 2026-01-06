@@ -111,5 +111,5 @@ struct FragmentInput {
 
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
-    return input.color;
+    return vec4(input.color.rgb * 500.0, input.color.a);
 }

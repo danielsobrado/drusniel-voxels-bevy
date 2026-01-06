@@ -82,5 +82,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     
     let lighting = ambient + vec3<f32>(1.0, 0.95, 0.8) * NdotL;
     
-    return diffuse * vec4<f32>(lighting, 1.0);
+    return diffuse * vec4<f32>(lighting, 1.0) * 500.0;
 }

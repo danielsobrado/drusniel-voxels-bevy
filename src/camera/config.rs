@@ -46,7 +46,7 @@ impl Default for CameraConfig {
                 eye_height: 1.6,
             },
             rendering: CameraRenderingConfig {
-                bloom_intensity: 0.15,
+                bloom_intensity: 0.06,
                 sharpening_strength: 0.6,
             },
             spawn: CameraSpawnConfig {

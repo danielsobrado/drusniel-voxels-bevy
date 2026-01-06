@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
+use bevy::light::{FogVolume, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use crate::atmosphere::config::FogConfig;
 use crate::environment::AtmosphereSettings;
@@ -44,23 +44,25 @@ pub struct AtmosphereSample {
 }
 
 fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
-    // Spawn global fog volume centered at origin
-    // Will be repositioned to follow camera
-    commands.spawn((
-        GlobalFogVolume,
-        FogVolume {
-            fog_color: Color::WHITE,
-            density_factor: config.volume.density,
-            density_texture: None,
-            density_texture_offset: Vec3::ZERO,
-            absorption: config.volume.absorption,
-            scattering: config.volume.scattering,
-            scattering_asymmetry: config.volume.scattering_asymmetry,
-            light_tint: Color::WHITE,
-            light_intensity: 1.0,
-        },
-        Transform::from_scale(Vec3::splat(config.volume.size)),
-    ));
+    if config.volumetric.enabled {
+        // Spawn global fog volume centered at origin
+        // Will be repositioned to follow camera
+        commands.spawn((
+            GlobalFogVolume,
+            FogVolume {
+                fog_color: Color::WHITE,
+                density_factor: config.volume.density,
+                density_texture: None,
+                density_texture_offset: Vec3::ZERO,
+                absorption: config.volume.absorption,
+                scattering: config.volume.scattering,
+                scattering_asymmetry: config.volume.scattering_asymmetry,
+                light_tint: Color::WHITE,
+                light_intensity: 1.0,
+            },
+            Transform::from_scale(Vec3::splat(config.volume.size)),
+        ));
+    }
     
     // Initialize atmosphere sample resource
     commands.insert_resource(AtmosphereSample::default());
@@ -82,18 +84,10 @@ pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
                 0.5,
             ),
             directional_light_exponent: 30.0,
-            falloff: FogFalloff::Linear {
-                start: config.distance.start,
-                end: config.distance.end,
+            // Matches the older v0.3 look better than linear, and avoids "wall of fog" banding.
+            falloff: FogFalloff::ExponentialSquared {
+                density: BASE_FOG_DENSITY,
             },
-        },
-        // Volumetric fog processor
-        VolumetricFog {
-            ambient_color: Color::srgba(0.1, 0.1, 0.15, 1.0),
-            ambient_intensity: config.volumetric.ambient_intensity,
-            step_count: config.volumetric.step_count,
-            jitter: config.volumetric.jitter,
-            ..default()
         },
     )
 }
@@ -131,9 +125,6 @@ fn update_fog_from_atmosphere(
 
     let fog_density = lerp(atmo_settings.fog_density.y, atmo_settings.fog_density.x, daylight)
         .max(0.0001);
-    let visibility_scale = BASE_FOG_DENSITY / fog_density;
-    let fog_start = config.distance.start * visibility_scale;
-    let fog_end = config.distance.end * visibility_scale;
     
     // Blend between presets
     let day = &config.colors.day;
@@ -166,10 +157,7 @@ fn update_fog_from_atmosphere(
             0.5 * daylight + 0.2 * night, // Less directional glow at night
         );
         fog.directional_light_exponent = 30.0 + twilight * 20.0; // Tighter during sunset
-        fog.falloff = FogFalloff::Linear {
-            start: fog_start,
-            end: fog_end,
-        };
+        fog.falloff = FogFalloff::ExponentialSquared { density: fog_density };
     }
     
     // Update volumetric fog volume

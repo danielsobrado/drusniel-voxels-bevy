@@ -85,6 +85,7 @@ fn setup_atmosphere(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.95, 0.85),
+            // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
             illuminance: 32_000.0,
             shadows_enabled: true,
             shadow_depth_bias: 0.02,
@@ -197,7 +198,9 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let sun_strength = lerp(1200.0, 45_000.0, daylight) * (1.0 + horizon_warmth * 0.2);
     let moon_strength = lerp(600.0, 50.0, daylight) * settings.night_floor;
     let ambient_strength =
-        lerp(1200.0, 7000.0, daylight) * (1.0 + horizon_warmth * 0.15) * settings.exposure;
+        lerp(1200.0, 7000.0, daylight)
+            * (1.0 + horizon_warmth * 0.15)
+            * settings.exposure;
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);

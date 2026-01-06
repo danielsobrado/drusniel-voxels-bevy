@@ -230,8 +230,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lo = (k_d * albedo / 3.14159265 + specular) * light_color * n_dot_l;
     let color = ambient * albedo + lo;
 
-    // Simple tone mapping
-    let mapped = color / (color + vec3(1.0));
-
-    return vec4(mapped, final_pbr.albedo.a);
+    // Output HDR-linear; camera tonemapping/exposure handles mapping to SDR.
+    return vec4(color * 500.0, final_pbr.albedo.a);
 }

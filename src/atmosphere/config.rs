@@ -57,7 +57,7 @@ impl Default for FogConfig {
                 end: 220.0,
             },
             volumetric: VolumetricConfig {
-                enabled: true,
+                enabled: false,
                 step_count: 64,
                 jitter: 0.5,
                 ambient_intensity: 0.0,
