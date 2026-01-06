@@ -41,7 +41,7 @@ impl Default for AtmosphereSettings {
             rayleigh: Vec3::new(5.5, 13.0, 22.4) * 0.0012,
             mie: Vec3::splat(0.005),
             mie_direction: 0.7,
-            exposure: 1.2,
+            exposure: 1.0,
             twilight_band: 0.6,
             night_floor: 0.08,
             fog_density: Vec2::new(0.0009, 0.0022),
@@ -194,13 +194,11 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let moon_heat = Vec3::new(0.8, 0.9, 1.0);
     let sun_tint = sun_heat.lerp(moon_heat, night_factor * 0.85);
 
-    // Lighting strength based on altitude
-    let sun_strength = lerp(1200.0, 45_000.0, daylight) * (1.0 + horizon_warmth * 0.2);
+    // Lighting strength based on altitude (tuned to match the older v0.3 look).
+    let sun_strength = lerp(4000.0, 10_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
     let moon_strength = lerp(600.0, 50.0, daylight) * settings.night_floor;
     let ambient_strength =
-        lerp(1200.0, 7000.0, daylight)
-            * (1.0 + horizon_warmth * 0.15)
-            * settings.exposure;
+        lerp(2800.0, 6000.0, daylight) * (1.0 + horizon_warmth * 0.15);
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);

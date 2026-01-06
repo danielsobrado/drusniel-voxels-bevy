@@ -15,7 +15,9 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(TnuaControllerPlugin::new(PhysicsSchedule));
 
         #[cfg(debug_assertions)]
-        app.add_plugins(PhysicsDebugPlugin::default());
+        if std::env::var("VOXEL_PHYSICS_DEBUG").is_ok() {
+            app.add_plugins(PhysicsDebugPlugin::default());
+        }
 
         app.insert_resource(Gravity(Vec3::new(0.0, -20.0, 0.0)));
         app.insert_resource(PhysicsLengthUnit(1.0));

@@ -4,6 +4,7 @@
 // Target: ~2000 props, 1ms frame budget
 
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
 
 struct PropsUniforms {
     base_color: vec4<f32>,
@@ -40,6 +41,9 @@ struct PropsPbrSample {
     roughness: f32,
     ao: f32,
 };
+
+// Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
+const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 fn compute_uv(world_coord: vec2<f32>) -> vec2<f32> {
     return fract(world_coord / uniforms.tex_scale);
@@ -153,7 +157,7 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_pos = in.world_position.xyz;
     let world_normal = normalize(in.world_normal);
-    let view_dir = normalize(-world_pos);
+    let view_dir = normalize(view.world_position - world_pos);
 
     // Material weights from vertex colors (r=rock, g=furniture, b=crate)
     let mat_weights = in.color;
@@ -230,6 +234,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lo = (k_d * albedo / 3.14159265 + specular) * light_color * n_dot_l;
     let color = ambient * albedo + lo;
 
-    // Output HDR-linear; camera tonemapping/exposure handles mapping to SDR.
-    return vec4(color * 500.0, final_pbr.albedo.a);
+    // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
+    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
+    return vec4(color * exposure_ratio, final_pbr.albedo.a);
 }

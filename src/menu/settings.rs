@@ -632,9 +632,9 @@ pub fn handle_atmosphere_settings(
         if *interaction == Interaction::Pressed {
             settings_state.exposure = *option;
             atmosphere.exposure = match option {
-                ExposureOption::Low => 0.9,
-                ExposureOption::Neutral => 1.2,
-                ExposureOption::High => 1.6,
+                ExposureOption::Low => 0.8,
+                ExposureOption::Neutral => 1.0,
+                ExposureOption::High => 1.3,
             };
         }
     }

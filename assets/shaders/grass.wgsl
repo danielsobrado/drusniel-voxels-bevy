@@ -12,6 +12,10 @@
 // 4. Texture detail (skipped) - stylized aesthetic doesn't need it
 
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
+#import bevy_pbr::mesh_view_bindings::view
+
+// Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
+const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 struct GrassMaterial {
     base_color: vec4<f32>,
@@ -111,5 +115,7 @@ struct FragmentInput {
 
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
-    return vec4(input.color.rgb * 500.0, input.color.a);
+    // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
+    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
+    return vec4(input.color.rgb * exposure_ratio, input.color.a);
 }

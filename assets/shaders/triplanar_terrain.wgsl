@@ -5,6 +5,7 @@
 // Target: ~64 chunks, 1.5ms frame budget, 6 samples/fragment
 
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
 
 struct TriplanarUniforms {
     base_color: vec4<f32>,
@@ -19,6 +20,9 @@ const GRASS_ROUGHNESS: f32 = 0.85;
 const ROCK_ROUGHNESS: f32 = 0.90;
 const SAND_ROUGHNESS: f32 = 0.98;
 const DIRT_ROUGHNESS: f32 = 0.92;
+
+// Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
+const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
 
@@ -152,7 +156,7 @@ fn get_base_material(atlas_idx: i32) -> i32 {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_pos = in.world_position.xyz;
     let world_normal = normalize(in.world_normal);
-    let view_dir = normalize(-world_pos);
+    let view_dir = normalize(view.world_position - world_pos);
     
     // Use vertex colors as material weights
     let mat_weights = in.color; 
@@ -224,5 +228,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ambient = 0.35 * ao_factor;
     let lit = albedo.rgb * (ambient + ndotl * 0.65) + vec3(pow(ndoth, spec_power) * spec_intensity);
-    return vec4(lit * 500.0, albedo.a);
+    // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
+    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
+    return vec4(lit * exposure_ratio, albedo.a);
 }
