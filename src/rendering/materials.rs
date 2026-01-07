@@ -1,5 +1,6 @@
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
+use std::path::Path;
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingUniforms};
 use crate::rendering::capabilities::GraphicsCapabilities;
@@ -16,6 +17,15 @@ pub struct WaterMaterial {
     pub handle: Handle<StandardMaterial>,
 }
 
+fn load_image_if_exists(asset_server: &AssetServer, asset_path: &str) -> Option<Handle<Image>> {
+    let disk_path = Path::new("assets").join(asset_path);
+    if disk_path.exists() {
+        Some(asset_server.load(asset_path.to_string()))
+    } else {
+        None
+    }
+}
+
 // setup_voxel_material is now largely superseded by array_loader which creates the BlockyMaterial
 // However, we might keep this signature if we want to initialize other things or just empty.
 // For now, let's essentially empty it out or remove it from plugin if not needed.
@@ -27,7 +37,7 @@ pub fn setup_water_material(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Water material - semi-transparent blue with proper depth handling
-    // Use positive depth_bias to push water behind terrain, preventing visible seams
+    // Use a negative depth_bias so water renders behind terrain (positive biases render *closer*).
     let water_handle = materials.add(StandardMaterial {
         base_color: Color::srgba(0.1, 0.4, 0.7, 0.6),
         alpha_mode: AlphaMode::Blend,
@@ -36,7 +46,7 @@ pub fn setup_water_material(
         reflectance: 0.9,            // High reflection
         double_sided: true,
         cull_mode: None,
-        depth_bias: 0.5,             // Reduce z-fighting
+        depth_bias: -0.5,            // Reduce z-fighting (render behind terrain)
         ..default()
     });
 
@@ -196,26 +206,26 @@ pub fn setup_building_material(
                 parallax_steps: 6,       // Balanced quality/performance
             },
             // Wood plank textures
-            wood_albedo: Some(asset_server.load("pbr/building/wood/albedo.png")),
-            wood_normal: Some(asset_server.load("pbr/building/wood/normal.png")),
-            wood_roughness: Some(asset_server.load("pbr/building/wood/roughness.png")),
-            wood_ao: Some(asset_server.load("pbr/building/wood/ao.png")),
+            wood_albedo: load_image_if_exists(&asset_server, "pbr/building/wood/albedo.png"),
+            wood_normal: load_image_if_exists(&asset_server, "pbr/building/wood/normal.png"),
+            wood_roughness: load_image_if_exists(&asset_server, "pbr/building/wood/roughness.png"),
+            wood_ao: load_image_if_exists(&asset_server, "pbr/building/wood/ao.png"),
             // Stone brick textures
-            stone_albedo: Some(asset_server.load("pbr/building/stone/albedo.png")),
-            stone_normal: Some(asset_server.load("pbr/building/stone/normal.png")),
-            stone_roughness: Some(asset_server.load("pbr/building/stone/roughness.png")),
-            stone_ao: Some(asset_server.load("pbr/building/stone/ao.png")),
+            stone_albedo: load_image_if_exists(&asset_server, "pbr/building/stone/albedo.png"),
+            stone_normal: load_image_if_exists(&asset_server, "pbr/building/stone/normal.png"),
+            stone_roughness: load_image_if_exists(&asset_server, "pbr/building/stone/roughness.png"),
+            stone_ao: load_image_if_exists(&asset_server, "pbr/building/stone/ao.png"),
             // Metal plate textures (includes metallic)
-            metal_albedo: Some(asset_server.load("pbr/building/metal/albedo.png")),
-            metal_normal: Some(asset_server.load("pbr/building/metal/normal.png")),
-            metal_roughness: Some(asset_server.load("pbr/building/metal/roughness.png")),
-            metal_ao: Some(asset_server.load("pbr/building/metal/ao.png")),
-            metal_metallic: Some(asset_server.load("pbr/building/metal/metallic.png")),
+            metal_albedo: load_image_if_exists(&asset_server, "pbr/building/metal/albedo.png"),
+            metal_normal: load_image_if_exists(&asset_server, "pbr/building/metal/normal.png"),
+            metal_roughness: load_image_if_exists(&asset_server, "pbr/building/metal/roughness.png"),
+            metal_ao: load_image_if_exists(&asset_server, "pbr/building/metal/ao.png"),
+            metal_metallic: load_image_if_exists(&asset_server, "pbr/building/metal/metallic.png"),
             // Thatch textures
-            thatch_albedo: Some(asset_server.load("pbr/building/thatch/albedo.png")),
-            thatch_normal: Some(asset_server.load("pbr/building/thatch/normal.png")),
-            thatch_roughness: Some(asset_server.load("pbr/building/thatch/roughness.png")),
-            thatch_ao: Some(asset_server.load("pbr/building/thatch/ao.png")),
+            thatch_albedo: load_image_if_exists(&asset_server, "pbr/building/thatch/albedo.png"),
+            thatch_normal: load_image_if_exists(&asset_server, "pbr/building/thatch/normal.png"),
+            thatch_roughness: load_image_if_exists(&asset_server, "pbr/building/thatch/roughness.png"),
+            thatch_ao: load_image_if_exists(&asset_server, "pbr/building/thatch/ao.png"),
         }
     });
 
@@ -260,17 +270,17 @@ pub fn setup_props_material(
                 default_roughness: 0.8,
             },
             // Rock textures (full props PBR)
-            rock_albedo: Some(asset_server.load("pbr/props/rock/albedo.png")),
-            rock_normal: Some(asset_server.load("pbr/props/rock/normal.png")),
-            rock_roughness: Some(asset_server.load("pbr/props/rock/roughness.png")),
-            rock_ao: Some(asset_server.load("pbr/props/rock/ao.png")),
+            rock_albedo: load_image_if_exists(&asset_server, "pbr/props/rock/albedo.png"),
+            rock_normal: load_image_if_exists(&asset_server, "pbr/props/rock/normal.png"),
+            rock_roughness: load_image_if_exists(&asset_server, "pbr/props/rock/roughness.png"),
+            rock_ao: load_image_if_exists(&asset_server, "pbr/props/rock/ao.png"),
             // Furniture textures (vertex AO baked)
-            furniture_albedo: Some(asset_server.load("pbr/props/furniture/albedo.png")),
-            furniture_normal: Some(asset_server.load("pbr/props/furniture/normal.png")),
-            furniture_roughness: Some(asset_server.load("pbr/props/furniture/roughness.png")),
+            furniture_albedo: load_image_if_exists(&asset_server, "pbr/props/furniture/albedo.png"),
+            furniture_normal: load_image_if_exists(&asset_server, "pbr/props/furniture/normal.png"),
+            furniture_roughness: load_image_if_exists(&asset_server, "pbr/props/furniture/roughness.png"),
             // Barrel/crate textures (minimal - uniform roughness)
-            crate_albedo: Some(asset_server.load("pbr/props/crate/albedo.png")),
-            crate_normal: Some(asset_server.load("pbr/props/crate/normal.png")),
+            crate_albedo: load_image_if_exists(&asset_server, "pbr/props/crate/albedo.png"),
+            crate_normal: load_image_if_exists(&asset_server, "pbr/props/crate/normal.png"),
         }
     });
 
