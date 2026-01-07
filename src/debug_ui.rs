@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use crate::rendering::materials::WaterMaterial;
+use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
 use crate::voxel::plugin::LodSettings;
 use crate::vegetation::VegetationConfig;
 
@@ -27,6 +29,9 @@ impl Plugin for DebugUiPlugin {
 
         app.init_resource::<DebugUiState>()
            .add_systems(Update, (toggle_debug_ui, debug_settings_ui));
+
+        #[cfg(debug_assertions)]
+        app.add_systems(Update, toggle_scene_visibility);
     }
 }
 
@@ -69,4 +74,87 @@ fn debug_settings_ui(
         ui.separator();
         ui.label("Press F4 to toggle this window and Inspector");
     });
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug)]
+struct DebugVisibilityToggles {
+    show_water: bool,
+    show_grass: bool,
+}
+
+#[cfg(debug_assertions)]
+impl Default for DebugVisibilityToggles {
+    fn default() -> Self {
+        Self {
+            show_water: true,
+            show_grass: true,
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn toggle_scene_visibility(
+    keys: Res<ButtonInput<KeyCode>>,
+    water_material: Option<Res<WaterMaterial>>,
+    mut visibility_queries: ParamSet<(
+        Query<&mut Visibility, With<bevy_water::WaterTiles>>,
+        Query<(&MeshMaterial3d<StandardMaterial>, &mut Visibility)>,
+        Query<&mut Visibility, With<GrassBlade>>,
+        Query<&mut Visibility, With<ProceduralGrassPatch>>,
+    )>,
+    mut toggles: Local<DebugVisibilityToggles>,
+) {
+    let mut water_changed = false;
+    let mut grass_changed = false;
+
+    if keys.just_pressed(KeyCode::F6) {
+        toggles.show_water = !toggles.show_water;
+        water_changed = true;
+    }
+
+    if keys.just_pressed(KeyCode::F7) {
+        toggles.show_grass = !toggles.show_grass;
+        grass_changed = true;
+    }
+
+    if water_changed {
+        let water_visibility = if toggles.show_water {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+
+        for mut visibility in visibility_queries.p0().iter_mut() {
+            *visibility = water_visibility;
+        }
+
+        if let Some(water_material) = water_material {
+            for (material, mut visibility) in visibility_queries.p1().iter_mut() {
+                if material.0 == water_material.handle {
+                    *visibility = water_visibility;
+                }
+            }
+        }
+
+        info!("Water visibility: {}", toggles.show_water);
+    }
+
+    if grass_changed {
+        let grass_visibility = if toggles.show_grass {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+
+        for mut visibility in visibility_queries.p2().iter_mut() {
+            *visibility = grass_visibility;
+        }
+
+        for mut visibility in visibility_queries.p3().iter_mut() {
+            *visibility = grass_visibility;
+        }
+
+        info!("Grass visibility: {}", toggles.show_grass);
+    }
 }

@@ -1,7 +1,7 @@
 use crate::camera::config::CameraConfig;
 use crate::camera::controller::{
     camera_follow_player, player_camera_system, spawn_camera, update_camera_shadow_filtering,
-    update_camera_exposure_from_atmosphere, update_ray_tracing_on_camera,
+    update_camera_anti_aliasing, update_camera_exposure_from_atmosphere, update_ray_tracing_on_camera,
 };
 use crate::rendering::capabilities::GraphicsDetectionSet;
 use bevy::prelude::*;
@@ -22,6 +22,7 @@ impl Plugin for CameraPlugin {
                     camera_follow_player,
                     update_ray_tracing_on_camera,
                     update_camera_shadow_filtering,
+                    update_camera_anti_aliasing,
                     update_camera_exposure_from_atmosphere,
                 ),
             );

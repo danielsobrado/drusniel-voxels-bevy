@@ -64,7 +64,8 @@ pub fn apply_player_movement(
     controller.basis(TnuaBuiltinWalk {
         desired_velocity: direction * speed,
         float_height: config.float_height,
-        max_slope: std::f32::consts::FRAC_PI_4,
+        cling_distance: 1.0,
+        max_slope: std::f32::consts::FRAC_PI_3,
         ..default()
     });
 

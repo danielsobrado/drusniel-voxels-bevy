@@ -394,11 +394,11 @@ fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
 /// Map voxel/face to blocky texture array layer (grass, dirt, rock, sand).
 fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
     match voxel {
-        VoxelType::TopSoil => match face {
+        VoxelType::TopSoil | VoxelType::Leaves => match face {
             Face::Bottom => 1, // Dirt
             _ => 0,            // Grass
         },
-        VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood | VoxelType::Leaves => 1, // Dirt
+        VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood => 1, // Dirt
         VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => 2, // Rock
         VoxelType::Sand => 3, // Sand
         _ => 0, // Default to grass for unsupported/air/water
@@ -483,16 +483,13 @@ fn add_face_with_ao(
         }
     }
 
-    // Calculate UV coordinates from atlas position
-    let cols = ATLAS_COLUMNS as f32;
-    let rows = ATLAS_ROWS as f32;
-    let col = (atlas_idx % ATLAS_COLUMNS as u8) as f32;
-    let row = (atlas_idx / ATLAS_COLUMNS as u8) as f32;
-
-    let u_min = col / cols + UV_PADDING;
-    let u_max = (col + 1.0) / cols - UV_PADDING;
-    let v_min = row / rows + UV_PADDING;
-    let v_max = (row + 1.0) / rows - UV_PADDING;
+    // For Texture Arrays, we use full 0..1 UVs as each layer is a complete texture
+    // Atlas logic removed as it causes incorrect sampling (zoomed in patches)
+    
+    let u_min = 0.0;
+    let u_max = 1.0;
+    let v_min = 0.0;
+    let v_max = 1.0;
     
     mesh_data.uvs.push([u_min, v_max]);
     mesh_data.uvs.push([u_max, v_max]);
@@ -797,7 +794,7 @@ fn compute_vertex_material_weights(
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
                     let mat_idx = match voxel {
-                        VoxelType::TopSoil => 0,
+                        VoxelType::TopSoil | VoxelType::Leaves => 0,
                         VoxelType::Rock | VoxelType::Bedrock |
                         VoxelType::DungeonWall | VoxelType::DungeonFloor => 1,
                         VoxelType::Sand => 2,

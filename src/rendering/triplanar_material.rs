@@ -1,7 +1,9 @@
 use bevy::{
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
+    pbr::{MaterialPipeline, MaterialPipelineKey},
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
 };
+use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
 
 /// All triplanar material uniforms in a single struct for proper GPU alignment
@@ -86,6 +88,17 @@ impl Material for TriplanarMaterial {
 
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Opaque
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // Disable backface culling to match v0.3 behavior
+        descriptor.primitive.cull_mode = None;
+        Ok(())
     }
 }
 

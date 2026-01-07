@@ -1,8 +1,9 @@
 use bevy::{
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
-    pbr::Material,
+    pbr::{Material, MaterialPipeline, MaterialPipelineKey},
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
 };
+use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
 
 /// Uniform data for grass material - must match WGSL struct layout
@@ -67,6 +68,17 @@ impl Material for GrassMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         // Render fully opaque to avoid looking like ground-projected shadows
         AlphaMode::Opaque
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // Disable backface culling - grass blades should be visible from both sides
+        descriptor.primitive.cull_mode = None;
+        Ok(())
     }
 }
 

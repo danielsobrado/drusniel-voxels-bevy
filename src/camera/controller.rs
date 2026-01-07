@@ -2,14 +2,12 @@ use crate::atmosphere::{fog_camera_components, FogConfig};
 use crate::camera::config::CameraConfig;
 use crate::interaction::palette::PlacementPaletteState;
 use crate::map::MapState;
-use crate::menu::{PauseMenuState, SettingsState, ShadowFiltering};
+use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering};
 use crate::player::Player;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::cinematic::CinematicCamera;
 use crate::rendering::ray_tracing::RayTracingSettings;
-use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
-use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
-use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -66,6 +64,7 @@ pub fn spawn_camera(
     ray_tracing: Res<RayTracingSettings>,
     fog_config: Res<FogConfig>,
     camera_config: Res<CameraConfig>,
+    settings_state: Res<SettingsState>,
 ) {
     // Daytime skybox (same asset used in v0.3).
     let skybox_image = ImageReformat::cubemap(
@@ -77,7 +76,10 @@ pub fn spawn_camera(
     let mut camera = commands.spawn((
         Camera3d::default(),
         Camera::default(),
-        Msaa::Off,
+        match settings_state.anti_aliasing {
+            AntiAliasing::Msaa4x => Msaa::Sample4,
+            _ => Msaa::Off,
+        },
         Exposure::default(),
         Transform::from_xyz(
             camera_config.spawn.position.x,
@@ -111,23 +113,40 @@ pub fn spawn_camera(
         });
     }
 
-    if capabilities.integrated_gpu {
-        camera.insert(Smaa { preset: SmaaPreset::Low });
-    } else if capabilities.taa_supported {
-        camera.insert((
-            TemporalAntiAliasing::default(),
-            ContrastAdaptiveSharpening {
-                enabled: true,
-                sharpening_strength: camera_config.rendering.sharpening_strength,
-                denoise: false,
-            },
-        ));
-    } else {
-        camera.insert(Smaa { preset: SmaaPreset::High });
+    if settings_state.anti_aliasing == AntiAliasing::Fxaa {
+        camera.insert(Fxaa::default());
     }
 
     if ray_tracing.enabled && capabilities.ray_tracing_supported {
         camera.insert(ScreenSpaceReflections::default());
+    }
+}
+
+pub fn update_camera_anti_aliasing(
+    settings_state: Res<SettingsState>,
+    mut commands: Commands,
+    mut camera_query: Query<(Entity, &mut Msaa), With<PlayerCamera>>,
+) {
+    if !settings_state.is_changed() {
+        return;
+    }
+
+    for (entity, mut msaa) in camera_query.iter_mut() {
+        let mut camera = commands.entity(entity);
+        camera.remove::<Fxaa>();
+
+        match settings_state.anti_aliasing {
+            AntiAliasing::None => {
+                *msaa = Msaa::Off;
+            }
+            AntiAliasing::Fxaa => {
+                *msaa = Msaa::Off;
+                camera.insert(Fxaa::default());
+            }
+            AntiAliasing::Msaa4x => {
+                *msaa = Msaa::Sample4;
+            }
+        }
     }
 }
 

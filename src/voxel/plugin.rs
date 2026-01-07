@@ -325,6 +325,10 @@ fn mesh_dirty_chunks_system(
                 .map(|c| c.lod_level()),
         };
 
+        if matches!(target_mode, MeshMode::Blocky) && blocky_material.is_none() {
+            continue;
+        }
+
         // Step 1: Generate mesh data using immutable borrow
         let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_with_mode(
@@ -358,12 +362,23 @@ fn mesh_dirty_chunks_system(
                 let mesh_handle = meshes.add(mesh);
 
                 if let Some(entity) = chunk.mesh_entity() {
-                    commands
-                        .entity(entity)
-                        .insert((Mesh3d(mesh_handle), NeedsCollider));
+                    let mut entity_commands = commands.entity(entity);
+                    entity_commands.insert((Mesh3d(mesh_handle), NeedsCollider));
+                    match target_mode {
+                        MeshMode::Blocky => {
+                            if let Some(blocky_material) = blocky_material.as_ref() {
+                                entity_commands
+                                    .insert(MeshMaterial3d(blocky_material.handle.clone()));
+                            }
+                        }
+                        MeshMode::SurfaceNets => {
+                            entity_commands
+                                .insert(MeshMaterial3d(triplanar_material.handle.clone()));
+                        }
+                    }
                 } else {
                     // Spawn with appropriate material based on mesh mode
-                    let entity = match mesh_settings.mode {
+                    let entity = match target_mode {
                         MeshMode::Blocky => {
                             let Some(blocky_material) = blocky_material.as_ref() else {
                                 continue;
