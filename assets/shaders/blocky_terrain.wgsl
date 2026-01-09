@@ -4,6 +4,8 @@
 
 // Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
 const EXPOSURE_BLENDER: f32 = 0.0010019079;
+const DEBUG_FORCE_ALBEDO: bool = false;
+const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(1.0, 0.0, 1.0, 1.0);
 
 struct TriplanarUniforms {
     base_color: vec4<f32>,
@@ -61,6 +63,11 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
+    if (DEBUG_FORCE_ALBEDO) {
+        return DEBUG_ALBEDO_COLOR * exposure_ratio;
+    }
+
     // Sample texture array
     let layer = clamp(in.material_index, 0, 3);
     
@@ -86,6 +93,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lighting = ambient + vec3<f32>(1.0, 0.95, 0.8) * NdotL;
     
     // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
-    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
     return diffuse * vec4<f32>(lighting, 1.0) * exposure_ratio;
 }

@@ -30,6 +30,10 @@ use crate::constants::{
     BEDROCK_MAX_Y, BEDROCK_ROCK_THRESHOLD,
 };
 use crate::voxel::types::VoxelType;
+use bevy::log::debug;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static TREE_SPAWN_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 // =============================================================================
 // Noise Abstraction
@@ -344,7 +348,14 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         }
 
         let tree_noise = hash_position(world_x.wrapping_mul(7), world_z.wrapping_mul(13));
-        tree_noise > TREE_SPAWN_THRESHOLD
+        let spawn = tree_noise > TREE_SPAWN_THRESHOLD;
+        if spawn && TREE_SPAWN_LOGS.fetch_add(1, Ordering::Relaxed) < 8 {
+            debug!(
+                "Tree spawn candidate at ({}, {}) height {} noise {:.3}",
+                world_x, world_z, terrain_height, tree_noise
+            );
+        }
+        spawn
     }
 
     /// Gets the height of a tree at a given location.

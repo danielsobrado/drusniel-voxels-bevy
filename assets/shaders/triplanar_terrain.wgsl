@@ -23,6 +23,8 @@ const DIRT_ROUGHNESS: f32 = 0.92;
 
 // Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
 const EXPOSURE_BLENDER: f32 = 0.0010019079;
+const DEBUG_FORCE_ALBEDO: bool = false;
+const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(0.0, 1.0, 0.0, 1.0);
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
 
@@ -157,6 +159,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_pos = in.world_position.xyz;
     let world_normal = normalize(in.world_normal);
     let view_dir = normalize(view.world_position - world_pos);
+    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
+
+    if (DEBUG_FORCE_ALBEDO) {
+        return DEBUG_ALBEDO_COLOR * exposure_ratio;
+    }
     
     // Use vertex colors as material weights
     let mat_weights = in.color; 
@@ -229,6 +236,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = 0.35 * ao_factor;
     let lit = albedo.rgb * (ambient + ndotl * 0.65) + vec3(pow(ndoth, spec_power) * spec_intensity);
     // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
-    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
     return vec4(lit * exposure_ratio, albedo.a);
 }

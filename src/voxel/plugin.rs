@@ -153,6 +153,8 @@ fn generate_chunk(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chunk, Chu
                     VoxelType::Sand => stats.sand += 1,
                     VoxelType::DungeonWall => stats.dungeon_wall += 1,
                     VoxelType::DungeonFloor => stats.dungeon_floor += 1,
+                    VoxelType::Wood => stats.wood += 1,
+                    VoxelType::Leaves => stats.leaves += 1,
                     _ => {}
                 }
 
@@ -161,6 +163,7 @@ fn generate_chunk(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chunk, Chu
         }
     }
 
+    if stats.wood > 0 || stats.leaves > 0 { debug!("Chunk {:?}: wood={}, leaves={}", chunk_pos, stats.wood, stats.leaves); }
     chunk.mark_dirty();
     (chunk, stats)
 }
@@ -171,6 +174,8 @@ struct ChunkStats {
     sand: u32,
     dungeon_wall: u32,
     dungeon_floor: u32,
+    wood: u32,
+    leaves: u32,
 }
 
 /// Aggregate statistics for world generation.
@@ -179,6 +184,8 @@ struct WorldStats {
     total_sand: u32,
     total_dungeon_wall: u32,
     total_dungeon_floor: u32,
+    total_wood: u32,
+    total_leaves: u32,
 }
 
 impl WorldStats {
@@ -186,6 +193,8 @@ impl WorldStats {
         self.total_sand += chunk_stats.sand;
         self.total_dungeon_wall += chunk_stats.dungeon_wall;
         self.total_dungeon_floor += chunk_stats.dungeon_floor;
+        self.total_wood += chunk_stats.wood;
+        self.total_leaves += chunk_stats.leaves;
     }
 
     fn log_summary(&self, generation_time: std::time::Duration) {
@@ -194,6 +203,8 @@ impl WorldStats {
         info!("Total sand blocks: {}", self.total_sand);
         info!("Total dungeon wall blocks: {}", self.total_dungeon_wall);
         info!("Total dungeon floor blocks: {}", self.total_dungeon_floor);
+        info!("Total wood blocks: {}", self.total_wood);
+        info!("Total leaves blocks: {}", self.total_leaves);
         info!("Dungeons at positions like (0-19, 3-18, 0-19), (96-115, 3-18, 96-115), etc.");
         info!("Sand appears near water (terrain height <= 24) and in sandy biomes");
     }
@@ -325,10 +336,6 @@ fn mesh_dirty_chunks_system(
                 .map(|c| c.lod_level()),
         };
 
-        if matches!(target_mode, MeshMode::Blocky) && blocky_material.is_none() {
-            continue;
-        }
-
         // Step 1: Generate mesh data using immutable borrow
         let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_with_mode(
@@ -362,23 +369,12 @@ fn mesh_dirty_chunks_system(
                 let mesh_handle = meshes.add(mesh);
 
                 if let Some(entity) = chunk.mesh_entity() {
-                    let mut entity_commands = commands.entity(entity);
-                    entity_commands.insert((Mesh3d(mesh_handle), NeedsCollider));
-                    match target_mode {
-                        MeshMode::Blocky => {
-                            if let Some(blocky_material) = blocky_material.as_ref() {
-                                entity_commands
-                                    .insert(MeshMaterial3d(blocky_material.handle.clone()));
-                            }
-                        }
-                        MeshMode::SurfaceNets => {
-                            entity_commands
-                                .insert(MeshMaterial3d(triplanar_material.handle.clone()));
-                        }
-                    }
+                    commands
+                        .entity(entity)
+                        .insert((Mesh3d(mesh_handle), NeedsCollider));
                 } else {
                     // Spawn with appropriate material based on mesh mode
-                    let entity = match target_mode {
+                    let entity = match mesh_settings.mode {
                         MeshMode::Blocky => {
                             let Some(blocky_material) = blocky_material.as_ref() else {
                                 continue;

@@ -130,7 +130,7 @@ pub const RIVER_CARVE_DEPTH: f32 = 10.0;
 
 /// Probability threshold for tree spawning (higher = fewer trees).
 /// A value of 0.98 means ~2% of valid positions will spawn trees.
-pub const TREE_SPAWN_THRESHOLD: f32 = 0.98;
+pub const TREE_SPAWN_THRESHOLD: f32 = 0.8;
 
 /// Minimum tree trunk height.
 pub const TREE_MIN_HEIGHT: i32 = 3;
