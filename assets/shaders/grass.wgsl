@@ -2,7 +2,11 @@
 // Uses Bevy 0.17 Material system with mesh_functions import
 // Pattern based on assets/shaders/custom_vertex_attribute.wgsl from Bevy examples
 
+#import bevy_pbr::mesh_view_bindings::view
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
+
+// Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
+const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 struct GrassMaterial {
     base_color: vec4<f32>,
@@ -89,8 +93,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = mesh_position_local_to_clip(model, local_pos);
     out.uv = vertex.uv;
     
-    // Gradient color from base to tip
-    out.color = mix(material.tip_color, material.base_color, vertex.uv.y);
+    // Gradient color from base to tip (bias toward tip to reduce base banding)
+    let base_weight = pow(clamp(vertex.uv.y, 0.0, 1.0), 1.6);
+    out.color = mix(material.tip_color, material.base_color, base_weight);
 
     return out;
 }

@@ -83,16 +83,6 @@ pub fn setup_grass_patch_assets(
             LinearRgba::new(0.60, 0.85, 0.35, 1.0), // Bright green tip
             0.35, 1.8, 0.08,
         ),
-        GrassMaterial::new(
-            LinearRgba::new(0.18, 0.32, 0.07, 1.0),
-            LinearRgba::new(0.70, 0.90, 0.38, 1.0),
-            0.30, 1.5, 0.10,
-        ),
-        GrassMaterial::new(
-            LinearRgba::new(0.12, 0.26, 0.06, 1.0),
-            LinearRgba::new(0.55, 0.78, 0.32, 1.0),
-            0.40, 2.0, 0.07,
-        ),
     ];
 
     let material_handles_vec: Vec<Handle<GrassMaterial>> = grass_material_configs
@@ -164,7 +154,8 @@ fn process_chunk_for_grass(
     };
 
     // Density: blades per square unit; max_count: limit per chunk
-    let instances = collect_grass_instances(chunk_source_mesh, transform, 20, 2000);
+    // RESTORED
+    let instances = collect_grass_instances(chunk_source_mesh, transform, 20, 1000);
     if instances.is_empty() {
         return;
     }
@@ -185,7 +176,7 @@ fn process_chunk_for_grass(
         % assets.materials.len();
     let material_handle = assets.materials[material_idx].clone();
 
-    commands.entity(entity).insert(ChunkGrassAttached);
+    commands.entity(entity).try_insert(ChunkGrassAttached);
 
     commands.spawn((
         ProceduralGrassPatch,
@@ -244,6 +235,8 @@ fn collect_grass_instances(
         mix_bits32(cx as u32 ^ (cz as u32).wrapping_mul(0x9e37_79b9) ^ 0x85eb_ca6b) as i32
     };
 
+    let water_cutoff = (crate::constants::WATER_LEVEL + 1) as f32;
+
     for (tri_idx, tri) in indices.chunks(3).enumerate() {
         if tri.len() < 3 {
             continue;
@@ -252,6 +245,10 @@ fn collect_grass_instances(
         let v0 = transform.transform_point(Vec3::from(positions[tri[0] as usize]));
         let v1 = transform.transform_point(Vec3::from(positions[tri[1] as usize]));
         let v2 = transform.transform_point(Vec3::from(positions[tri[2] as usize]));
+
+        if v0.is_nan() || v1.is_nan() || v2.is_nan() {
+            continue;
+        }
 
         // Use the stored normal from the first vertex of the triangle (all 3 should be the same for flat faces)
         let normal_local = Vec3::from(normals[tri[0] as usize]);
@@ -265,8 +262,9 @@ fn collect_grass_instances(
             continue;
         }
 
-        // Skip underwater / shoreline grass. The water surface (and waves) sits at WATER_LEVEL
-        if v0.y <= (crate::constants::WATER_LEVEL + 1) as f32 {
+        // Skip fully submerged triangles; water surface (and waves) sits at WATER_LEVEL.
+        let max_y = v0.y.max(v1.y.max(v2.y));
+        if max_y <= water_cutoff {
             continue;
         }
 
@@ -308,6 +306,9 @@ fn collect_grass_instances(
 
             let bary = Vec3::new(1.0 - r1, r1 * (1.0 - r2), r1 * r2);
             let position = v0 * bary.x + v1 * bary.y + v2 * bary.z;
+            if position.y <= water_cutoff {
+                continue;
+            }
 
             instances.push(GrassInstance { position, normal: normal_dir });
             if instances.len() >= max_count {
@@ -413,7 +414,7 @@ pub struct FloatingParticle {
 }
 
 /// Spawn grass blades on grass block surfaces with wind shader
-pub fn spawn_grass_blades(
+pub fn spawn_grass_blades_UNUSED(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut grass_materials: ResMut<Assets<GrassMaterial>>,

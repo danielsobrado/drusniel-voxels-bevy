@@ -108,7 +108,11 @@ pub struct GrassMaterialPlugin;
 
 impl Plugin for GrassMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
+        app.add_plugins(MaterialPlugin::<GrassMaterial> {
+            prepass_enabled: false,
+            shadows_enabled: false, // Explicitly disable shadows too just in case
+            ..default()
+        })
             .init_resource::<GrassMaterialHandles>()
             .add_systems(Update, update_grass_time);
     }
