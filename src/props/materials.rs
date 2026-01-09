@@ -69,9 +69,10 @@ fn tweak_material(mat: &mut StandardMaterial, style: &super::StyleConfig, prop_t
     match prop_type {
         PropType::Tree => {
             // Leaves: slight translucency, double-sided
-            mat.diffuse_transmission = 0.15;
+            mat.diffuse_transmission = 0.2;
             mat.double_sided = true;
             mat.cull_mode = None;
+            mat.alpha_mode = AlphaMode::Mask(0.35);
         }
         PropType::Rock => {
             // Rocks: very rough, no transmission

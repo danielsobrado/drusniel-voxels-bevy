@@ -88,8 +88,8 @@ fn setup_atmosphere(mut commands: Commands) {
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
             illuminance: 32_000.0,
             shadows_enabled: true,
-            shadow_depth_bias: 0.02,
-            shadow_normal_bias: 1.8,
+            shadow_depth_bias: 0.005,
+            shadow_normal_bias: 0.4,
             ..default()
         },
         Transform::from_translation(Vec3::ZERO)
@@ -195,10 +195,10 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let sun_tint = sun_heat.lerp(moon_heat, night_factor * 0.85);
 
     // Lighting strength based on altitude (tuned to match the older v0.3 look).
-    let sun_strength = lerp(4000.0, 10_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
-    let moon_strength = lerp(600.0, 50.0, daylight) * settings.night_floor;
+    let sun_strength = lerp(6000.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
+    let moon_strength = lerp(300.0, 40.0, daylight) * settings.night_floor;
     let ambient_strength =
-        lerp(2800.0, 6000.0, daylight) * (1.0 + horizon_warmth * 0.15);
+        lerp(350.0, 1400.0, daylight) * (1.0 + horizon_warmth * 0.2);
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);
@@ -220,7 +220,8 @@ fn apply_atmosphere_sample(
     clear_color: &mut ResMut<ClearColor>,
 ) {
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
-        transform.look_to(sample.sun_dir, Vec3::Y);
+        // Use light direction (from sun toward the world), which is the inverse of the sun vector.
+        transform.look_to(-sample.sun_dir, Vec3::Y);
         light.illuminance = sample.sun_illuminance;
         light.color = sample.sun_color;
     }

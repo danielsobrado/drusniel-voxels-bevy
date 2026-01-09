@@ -164,6 +164,13 @@ fn update_fog_from_atmosphere(
     for mut volume in volume_query.iter_mut() {
         volume.density_factor = config.volume.density * density_mult;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
+        volume.light_tint = Color::srgba(
+            directional_color[0],
+            directional_color[1],
+            directional_color[2],
+            1.0,
+        );
+        volume.light_intensity = lerp(0.6, 1.6, daylight) * (1.0 + twilight * 0.4);
     }
 }
 

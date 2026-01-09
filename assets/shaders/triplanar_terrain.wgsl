@@ -5,7 +5,7 @@
 // Target: ~64 chunks, 1.5ms frame budget, 6 samples/fragment
 
 #import bevy_pbr::forward_io::VertexOutput
-#import bevy_pbr::mesh_view_bindings::view
+#import bevy_pbr::{pbr_fragment, pbr_functions, pbr_types}
 
 struct TriplanarUniforms {
     base_color: vec4<f32>,
@@ -21,8 +21,6 @@ const ROCK_ROUGHNESS: f32 = 0.90;
 const SAND_ROUGHNESS: f32 = 0.98;
 const DIRT_ROUGHNESS: f32 = 0.92;
 
-// Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
-const EXPOSURE_BLENDER: f32 = 0.0010019079;
 const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(0.0, 1.0, 0.0, 1.0);
 
@@ -155,15 +153,11 @@ fn get_base_material(atlas_idx: i32) -> i32 {
 }
 
 @fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let world_pos = in.world_position.xyz;
-    let world_normal = normalize(in.world_normal);
-    let view_dir = normalize(view.world_position - world_pos);
-    let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
-
-    if (DEBUG_FORCE_ALBEDO) {
-        return DEBUG_ALBEDO_COLOR * exposure_ratio;
-    }
+fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
+    var pbr_input = pbr_fragment::pbr_input_from_vertex_output(in, is_front, true);
+    let world_pos = pbr_input.world_position.xyz;
+    let world_normal = normalize(pbr_input.world_normal);
+    let view_dir = pbr_input.V;
     
     // Use vertex colors as material weights
     let mat_weights = in.color; 
@@ -223,18 +217,27 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
                     w.z * SAND_ROUGHNESS +
                     w.w * DIRT_ROUGHNESS;
 
-    // Lighting with uniform roughness
-    let light_dir = normalize(vec3(0.4, 0.8, 0.3));
-    let half_dir = normalize(light_dir + view_dir);
-    let ndotl = max(dot(blended_n, light_dir), 0.0);
-    let ndoth = max(dot(blended_n, half_dir), 0.0);
+    pbr_input.material.base_color = albedo;
+    pbr_input.material.perceptual_roughness = clamp(roughness, 0.04, 1.0);
+    pbr_input.material.metallic = 0.0;
+    pbr_input.N = blended_n;
+    pbr_input.diffuse_occlusion = vec3<f32>(ao_factor);
+    pbr_input.specular_occlusion = ao_factor;
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT;
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
 
-    // Roughness affects specular power: higher roughness = broader highlight
-    let spec_power = mix(128.0, 8.0, roughness);
-    let spec_intensity = mix(0.3, 0.05, roughness);
+    if (DEBUG_FORCE_ALBEDO) {
+        pbr_input.material.base_color = DEBUG_ALBEDO_COLOR;
+        pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT;
+    }
 
-    let ambient = 0.35 * ao_factor;
-    let lit = albedo.rgb * (ambient + ndotl * 0.65) + vec3(pow(ndoth, spec_power) * spec_intensity);
-    // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
-    return vec4(lit * exposure_ratio, albedo.a);
+    var color: vec4<f32>;
+    if ((pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
+        color = pbr_functions::apply_pbr_lighting(pbr_input);
+    } else {
+        color = pbr_input.material.base_color;
+    }
+
+    color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
+    return color;
 }
