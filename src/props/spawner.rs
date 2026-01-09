@@ -6,6 +6,7 @@ use bevy::prelude::*;
 const DEFAULT_MAX_PER_TYPE: u32 = 500;
 const WORLD_SCAN_SIZE: i32 = 512;
 const MAX_SCAN_HEIGHT: i32 = 64;
+const TREE_CELL_SIZE: i32 = 10;
 
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
@@ -63,6 +64,9 @@ fn spawn_category(
     let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
     let mut count = 0u32;
 
+    let is_tree = prop_type == PropType::Tree;
+    let cell_size = if is_tree { TREE_CELL_SIZE } else { 1 };
+
     for x in 0..WORLD_SCAN_SIZE {
         for z in 0..WORLD_SCAN_SIZE {
             if count >= max_count {
@@ -72,10 +76,29 @@ fn spawn_category(
             let world_x = x;
             let world_z = z;
 
-            // Density check with deterministic hash
-            let hash = deterministic_hash(world_x, world_z, &def.id);
-            if hash > def.density {
-                continue;
+            if is_tree {
+                // One candidate per grid cell with jitter, to keep trees separated.
+                let cell_x = world_x / cell_size;
+                let cell_z = world_z / cell_size;
+                let cell_hash = deterministic_hash(cell_x, cell_z, &def.id);
+                if cell_hash > def.density {
+                    continue;
+                }
+                let jitter_x = deterministic_hash(cell_x * 31, cell_z * 17, &def.id);
+                let jitter_z = deterministic_hash(cell_x * 47, cell_z * 23, &def.id);
+                let offset_x = (jitter_x * (cell_size as f32 * 0.9)) as i32;
+                let offset_z = (jitter_z * (cell_size as f32 * 0.9)) as i32;
+                let target_x = (cell_x * cell_size + offset_x).min(WORLD_SCAN_SIZE - 1);
+                let target_z = (cell_z * cell_size + offset_z).min(WORLD_SCAN_SIZE - 1);
+                if world_x != target_x || world_z != target_z {
+                    continue;
+                }
+            } else {
+                // Density check with deterministic hash
+                let hash = deterministic_hash(world_x, world_z, &def.id);
+                if hash > def.density {
+                    continue;
+                }
             }
 
             // Find surface and validate spawn conditions
@@ -92,6 +115,7 @@ fn spawn_category(
             }
 
             // Calculate transform with variation
+            let hash = deterministic_hash(world_x, world_z, &def.id);
             let scale = lerp(def.scale_range[0], def.scale_range[1], fract(hash * 7.0));
             let rotation = fract(hash * 13.0) * std::f32::consts::TAU;
             let offset_x = fract(hash * 17.0) - 0.5;
