@@ -2,6 +2,8 @@ pub mod config;
 
 use bevy::prelude::*;
 
+use crate::entity::{EquippedItem, ItemType};
+
 pub use config::ViewmodelConfig;
 
 /// Component marking the pickaxe viewmodel
@@ -202,6 +204,26 @@ pub fn idle_bob_system(
     }
 }
 
+pub fn update_pickaxe_visibility(
+    equipped: Res<EquippedItem>,
+    mut pickaxe_query: Query<&mut Visibility, With<PickaxeViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visible = !matches!(equipped.item, Some(ItemType::Torch));
+    let visibility = if visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut pickaxe_visibility in pickaxe_query.iter_mut() {
+        *pickaxe_visibility = visibility;
+    }
+}
+
 /// Plugin for the pickaxe viewmodel
 pub struct PickaxePlugin;
 
@@ -213,6 +235,7 @@ impl Plugin for PickaxePlugin {
             .add_systems(
                 Update,
                 (trigger_swing_system, animate_pickaxe_system, idle_bob_system).chain(),
-            );
+            )
+            .add_systems(Update, update_pickaxe_visibility);
     }
 }

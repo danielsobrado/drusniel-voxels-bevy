@@ -13,7 +13,7 @@ pub mod wolf;
 
 use bevy::prelude::*;
 
-pub use inventory::{Inventory, ItemDrop, ItemType};
+pub use inventory::{EquippedItem, Inventory, ItemDrop, ItemType};
 pub use rabbit::Rabbit;
 pub use wolf::Wolf;
 
@@ -190,6 +190,7 @@ pub struct EntityPlugin;
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
+            .init_resource::<EquippedItem>()
             .init_resource::<EntitySpawnState>()
             .init_resource::<EntitySpawnConfig>()
             // NPCs (wolves, rabbits) removed

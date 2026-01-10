@@ -1,6 +1,7 @@
 use crate::atmosphere::{fog_camera_components, FogConfig};
 use crate::camera::config::CameraConfig;
 use crate::interaction::palette::PlacementPaletteState;
+use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering};
 use crate::player::Player;
@@ -256,6 +257,7 @@ pub fn player_camera_system(
     pause_menu: Res<PauseMenuState>,
     palette: Res<PlacementPaletteState>,
     map_state: Res<MapState>,
+    inventory_ui: Res<InventoryUiState>,
     camera_config: Res<CameraConfig>,
     mut cursor_captured: Local<bool>,
 ) {
@@ -264,7 +266,7 @@ pub fn player_camera_system(
     };
     let dt = time.delta_secs();
 
-    let ui_open = pause_menu.open || palette.open || map_state.open;
+    let ui_open = pause_menu.open || palette.open || map_state.open || inventory_ui.open;
 
     // Never keep the cursor grabbed when the window isn't focused.
     // Otherwise alt-tab / clicking other windows can feel like the mouse is "stuck".

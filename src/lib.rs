@@ -6,6 +6,7 @@ pub mod constants;
 pub mod entity;
 pub mod environment;
 pub mod interaction;
+pub mod inventory_ui;
 pub mod map;
 pub mod menu;
 pub mod network;

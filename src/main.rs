@@ -16,6 +16,7 @@ use voxel_builder::entity::EntityPlugin;
 use voxel_builder::environment::AtmospherePlugin;
 use voxel_builder::atmosphere::FogPlugin;
 use voxel_builder::interaction::InteractionPlugin;
+use voxel_builder::inventory_ui::InventoryUiPlugin;
 use voxel_builder::map::MapPlugin;
 use voxel_builder::menu::PauseMenuPlugin;
 use voxel_builder::props::PropsPlugin;
@@ -231,6 +232,7 @@ fn main() {
         .add_plugins(InteractionPlugin)
         .add_plugins(PickaxePlugin)
         .add_plugins(MapPlugin)
+        .add_plugins(InventoryUiPlugin)
         .add_plugins(VegetationPlugin)
         .add_plugins(ChatPlugin)
         .add_plugins(PauseMenuPlugin)
