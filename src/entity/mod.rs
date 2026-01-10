@@ -92,15 +92,6 @@ pub struct EntitySpawnState {
     pub rabbits_frame_counter: u32,
 }
 
-/// Run condition: wolves not yet spawned
-fn should_spawn_wolves(state: Res<EntitySpawnState>) -> bool {
-    !state.wolves_spawned
-}
-
-/// Run condition: rabbits not yet spawned
-fn should_spawn_rabbits(state: Res<EntitySpawnState>) -> bool {
-    !state.rabbits_spawned
-}
 
 // ============================================================================
 // Shared Utilities
@@ -201,15 +192,10 @@ impl Plugin for EntityPlugin {
         app.init_resource::<Inventory>()
             .init_resource::<EntitySpawnState>()
             .init_resource::<EntitySpawnConfig>()
-            .add_systems(Startup, rabbit::setup_rabbit_assets)
+            // NPCs (wolves, rabbits) removed
             .add_systems(
                 Update,
                 (
-                    wolf::spawn_wolves.run_if(should_spawn_wolves),
-                    wolf::animate_wolves,
-                    rabbit::spawn_rabbits.run_if(should_spawn_rabbits),
-                    rabbit::animate_rabbits,
-                    rabbit::fix_rabbit_textures,
                     handle_death,
                     process_item_drops,
                     despawn_dead.after(process_item_drops),

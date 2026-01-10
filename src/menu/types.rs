@@ -158,7 +158,7 @@ impl Default for SettingsState {
             twilight_band: TwilightBandOption::Medium,
             night_brightness: NightBrightnessOption::Balanced,
             fog_preset: FogPresetOption::Balanced,
-            cycle_enabled: true,
+            cycle_enabled: false,
             shadow_filtering: ShadowFiltering::Gaussian,
             walk_speed: WalkSpeedPreset::Standard,
             run_speed: RunSpeedPreset::Standard,

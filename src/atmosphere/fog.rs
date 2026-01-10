@@ -1,12 +1,17 @@
 use bevy::prelude::*;
-use bevy::light::{FogVolume, VolumetricLight};
+use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use crate::atmosphere::config::FogConfig;
 use crate::environment::AtmosphereSettings;
 
 pub struct FogPlugin;
 
-const BASE_FOG_DENSITY: f32 = 0.0009; // Matches the balanced fog preset.
+const BASE_FOG_DENSITY: f32 = 0.006; // Fallback density when visibility-based calc fails.
+const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
+const VISIBILITY_DENSITY_SCALE: f32 = 0.25; // Reduced for clearer daylight
+const VOLUME_DENSITY_SCALE: f32 = 0.5; // Reduced for lighter fog volume
+const MIN_VOLUME_DENSITY: f32 = 0.01; // Lower minimum for clearer day
+const MAX_VOLUME_DENSITY: f32 = 0.12; // Lower max to prevent overly dark scenes
 
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
@@ -71,6 +76,7 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
 /// Call this when spawning the main camera to add fog components
 pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
     let colors = &config.colors.day;
+    let base_density = visibility_density(config.distance.visibility);
     
     (
         FogCamera,
@@ -84,9 +90,9 @@ pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
                 0.5,
             ),
             directional_light_exponent: 30.0,
-            // Matches the older v0.3 look better than linear, and avoids "wall of fog" banding.
+            // Exponential squared gives a softer, more natural haze.
             falloff: FogFalloff::ExponentialSquared {
-                density: BASE_FOG_DENSITY,
+                density: base_density,
             },
         },
     )
@@ -102,10 +108,16 @@ fn update_fog_from_atmosphere(
     atmosphere_settings: Option<Res<AtmosphereSettings>>,
     config: Res<FogConfig>,
     mut atmosphere_sample: ResMut<AtmosphereSample>,
+    ambient: Res<AmbientLight>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
+    mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
     let Some(atmo_settings) = atmosphere_settings else { return };
+
+    // Get Mie settings from atmosphere (connected to menu settings)
+    let mie_direction = atmo_settings.mie_direction;
+    let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
     
     // Calculate sun position from atmosphere settings
     let phase = atmo_settings.time / atmo_settings.day_length;
@@ -119,13 +131,18 @@ fn update_fog_from_atmosphere(
     atmosphere_sample.sun_altitude = altitude;
     
     // Compute blend factors from sun altitude
-    let daylight = smoothstep(-0.1, 0.25, altitude);
-    let twilight = twilight_factor(altitude, 0.15);
-    let night = (1.0 - daylight).max(0.05);
+    let (daylight, twilight, night) = if atmo_settings.cycle_enabled {
+        let daylight = smoothstep(-0.1, 0.25, altitude);
+        let twilight = twilight_factor(altitude, 0.15);
+        let night = (1.0 - daylight).max(0.05);
+        (daylight, twilight, night)
+    } else {
+        (1.0, 0.0, 0.0)
+    };
 
-    let fog_density = lerp(atmo_settings.fog_density.y, atmo_settings.fog_density.x, daylight)
+    let preset_density = lerp(atmo_settings.fog_density.y, atmo_settings.fog_density.x, daylight)
         .max(0.0001);
-    
+
     // Blend between presets
     let day = &config.colors.day;
     let twi = &config.colors.twilight;
@@ -146,7 +163,13 @@ fn update_fog_from_atmosphere(
     
     // Density increases at night/twilight
     let density_mult = 1.0 + twilight * 0.5 + night * 0.3;
+    let preset_scale = (preset_density / BASE_PRESET_DENSITY).clamp(0.5, 2.5);
+    let base_density = visibility_density(config.distance.visibility);
+    let fog_density = base_density * preset_scale * density_mult;
     
+    let ambient_intensity = (ambient.brightness / 6000.0).clamp(0.02, 0.22)
+        .max(config.volumetric.ambient_intensity);
+
     // Update distance fog
     for mut fog in fog_query.iter_mut() {
         fog.color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
@@ -159,10 +182,17 @@ fn update_fog_from_atmosphere(
         fog.directional_light_exponent = 30.0 + twilight * 20.0; // Tighter during sunset
         fog.falloff = FogFalloff::ExponentialSquared { density: fog_density };
     }
+
+    // Update volumetric fog camera settings so night/dim changes take effect.
+    for mut volumetric in volumetric_query.iter_mut() {
+        volumetric.ambient_color = ambient.color;
+        volumetric.ambient_intensity = ambient_intensity;
+    }
     
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
-        volume.density_factor = config.volume.density * density_mult;
+        volume.density_factor = (config.volume.density * density_mult * VOLUME_DENSITY_SCALE * preset_scale)
+            .clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
         volume.light_tint = Color::srgba(
             directional_color[0],
@@ -170,7 +200,12 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        volume.light_intensity = lerp(0.6, 1.6, daylight) * (1.0 + twilight * 0.4);
+        volume.light_intensity = lerp(0.9, 2.2, daylight) * (1.0 + twilight * 0.5);
+        // Connect Mie settings to fog scattering
+        // mie_strength controls how much light scatters in the fog
+        volume.scattering = (config.volume.scattering * (1.0 + mie_strength * 20.0)).clamp(0.3, 1.0);
+        // mie_direction controls forward scattering asymmetry (0 = isotropic, 1 = fully forward)
+        volume.scattering_asymmetry = mie_direction.clamp(0.0, 0.95);
     }
 }
 
@@ -182,11 +217,10 @@ fn follow_camera_fog_volume(
     let Ok(camera_tf) = camera_query.single() else { return };
     
     for mut tf in volume_query.iter_mut() {
-        // Center volume on camera XZ, keep Y centered on world
+        // Center volume on the camera so we're always inside the fog.
         tf.translation.x = camera_tf.translation.x;
+        tf.translation.y = camera_tf.translation.y;
         tf.translation.z = camera_tf.translation.z;
-        // Keep Y at half the volume height so it covers above and below
-        tf.translation.y = tf.scale.y * 0.5;
     }
 }
 
@@ -221,6 +255,15 @@ fn lerp_color4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
         a[2] + (b[2] - a[2]) * t,
         a[3] + (b[3] - a[3]) * t,
     ]
+}
+
+fn visibility_density(visibility: f32) -> f32 {
+    let visibility = visibility.max(1.0);
+    let density = match FogFalloff::from_visibility_squared(visibility) {
+        FogFalloff::ExponentialSquared { density } => density,
+        _ => BASE_FOG_DENSITY,
+    };
+    density * VISIBILITY_DENSITY_SCALE
 }
 
 /// Load fog configuration from YAML file

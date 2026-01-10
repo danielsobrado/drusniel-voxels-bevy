@@ -640,7 +640,11 @@ fn sample_voxel_solid(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px
     voxel.is_solid() || voxel.is_liquid()
 }
 
-/// Smooths an SDF array at boundary cells by averaging with neighbors.
+/// Smooths an SDF array at interior cells by averaging with neighbors.
+///
+/// IMPORTANT: Only smooths cells that are fully interior to the chunk (positions 2-15).
+/// Boundary cells (positions 1 and 16) are left unchanged to ensure consistent
+/// vertex positions between adjacent chunks - this prevents seams/cracks.
 ///
 /// # Arguments
 /// * `sdf` - The raw SDF array to smooth
@@ -654,8 +658,10 @@ fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] 
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
 
-        // Only smooth interior cells (not at array edges)
-        if px > 0 && px < 17 && py > 0 && py < 17 && pz > 0 && pz < 17 {
+        // Only smooth truly interior cells (2-15), NOT boundary cells (1 and 16).
+        // This ensures adjacent chunks calculate identical SDF values at their shared boundary,
+        // which produces identical vertex positions and eliminates seams.
+        if px >= 2 && px <= 15 && py >= 2 && py <= 15 && pz >= 2 && pz <= 15 {
             let current = sdf[i];
 
             let neighbors = [
@@ -694,8 +700,9 @@ fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] { // 18^3 = 58
         sdf[i] = if is_solid { -1.0 } else { 1.0 };
     }
 
-    // Second pass: smooth SDF values at boundaries (0.5 = equal blend)
-    smooth_sdf_boundaries(&sdf, 0.5)
+    // Skip smoothing - it causes boundary vertices to differ between chunks, creating seams.
+    // The raw binary SDF produces consistent boundary vertices across chunks.
+    sdf
 }
 
 /// Sample voxel from world or chunk, returns true if water
@@ -725,8 +732,8 @@ fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
         sdf[i] = if is_water { -1.0 } else { 1.0 };
     }
 
-    // Second pass: smooth SDF values (0.4 weight = more neighbor influence for water)
-    smooth_sdf_boundaries(&sdf, 0.4)
+    // Skip smoothing for consistent boundary vertices
+    sdf
 }
 
 /// Sanitizes a position array, replacing NaN/infinite values with 0.0.

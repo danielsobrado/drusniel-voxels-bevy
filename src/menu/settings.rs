@@ -567,6 +567,9 @@ pub fn handle_atmosphere_settings(
         if *interaction == Interaction::Pressed {
             settings_state.cycle_enabled = option.0;
             atmosphere.cycle_enabled = option.0;
+            if !option.0 {
+                atmosphere.time = atmosphere.day_length * 0.25;
+            }
         }
     }
 

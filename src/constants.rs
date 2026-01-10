@@ -68,9 +68,9 @@ pub const UV_PADDING: f32 = 0.02;
 pub const VOXEL_SIZE: f32 = 1.0;
 
 /// Scale factor applied to chunk meshes to create slight overlap at boundaries.
-/// This prevents gaps (sky showing through) at chunk seams caused by
-/// independent SDF smoothing producing slightly different vertex positions.
-pub const CHUNK_BOUNDARY_SCALE: f32 = 1.01;
+/// Set to 1.0 (no scaling) because scaling from chunk center causes boundary
+/// vertices to be positioned differently in adjacent chunks, creating seams.
+pub const CHUNK_BOUNDARY_SCALE: f32 = 1.0;
 
 // =============================================================================
 // Terrain Generation
@@ -101,7 +101,7 @@ pub const TERRAIN_CAVE_FREQUENCY: f32 = 0.05;
 pub const TERRAIN_MIN_HEIGHT: f32 = 1.0;
 
 /// Maximum terrain height (clamped).
-pub const TERRAIN_MAX_HEIGHT: f32 = 58.0;
+pub const TERRAIN_MAX_HEIGHT: f32 = 120.0;
 
 /// Base terrain height offset (minimum base height).
 pub const TERRAIN_BASE_HEIGHT: f32 = 16.0;
@@ -113,10 +113,10 @@ pub const TERRAIN_BASE_AMPLITUDE: f32 = 20.0;
 pub const TERRAIN_HILL_AMPLITUDE: f32 = 10.0;
 
 /// Mountain threshold - noise values above this create mountains.
-pub const MOUNTAIN_THRESHOLD: f32 = 0.65;
+pub const MOUNTAIN_THRESHOLD: f32 = 0.35;
 
 /// Mountain height multiplier for noise values above threshold.
-pub const MOUNTAIN_MULTIPLIER: f32 = 50.0;
+pub const MOUNTAIN_MULTIPLIER: f32 = 150.0;
 
 /// River width threshold - noise values below this create river valleys.
 pub const RIVER_WIDTH_THRESHOLD: f32 = 0.2;

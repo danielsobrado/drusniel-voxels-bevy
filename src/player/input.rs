@@ -51,7 +51,7 @@ pub fn apply_player_movement(
 
     let forward = camera_transform.forward().as_vec3();
     let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    let right = Vec3::new(forward.z, 0.0, -forward.x);
+    let right = Vec3::new(-forward.z, 0.0, forward.x);
 
     let direction = forward * input.movement.y + right * input.movement.x;
 

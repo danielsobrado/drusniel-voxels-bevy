@@ -21,9 +21,6 @@ use crate::constants::{
     BIOME_CLAY_MIN, BIOME_CLAY_MAX, BIOME_CLAY_DETAIL_THRESHOLD,
     // Trees
     TREE_SPAWN_THRESHOLD, TREE_MIN_HEIGHT, TREE_HEIGHT_VARIANCE, TREE_LEAF_CHECK_RADIUS, TREE_LEAF_RADIUS,
-    // Dungeons
-    DUNGEON_SPACING, DUNGEON_SIZE, DUNGEON_FLOOR_Y, DUNGEON_HEIGHT,
-    DUNGEON_ENTRANCE_SIZE, DUNGEON_ENTRANCE_MAX_Y, DUNGEON_WALL_SPACING,
     // Caves
     CAVE_MIN_Y, CAVE_MAX_Y, CAVE_SURFACE_OFFSET,
     // Bedrock
@@ -422,10 +419,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let terrain_height = self.get_height(world_x, world_z);
         let biome = self.get_biome(world_x, world_z);
 
-        // Check dungeon structures first
-        if let Some(dungeon_voxel) = get_dungeon_voxel(world_x, world_y, world_z) {
-            return dungeon_voxel;
-        }
+        // Dungeons disabled
 
         // Check caves
         if self.is_cave(world_x, world_y, world_z, terrain_height) {
@@ -536,121 +530,6 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     }
 }
 
-// =============================================================================
-// Dungeon Generation
-// =============================================================================
-
-/// Local coordinates for dungeon entrance.
-const DUNGEON_ENTRANCE_X: i32 = 2;
-const DUNGEON_ENTRANCE_Z: i32 = 2;
-
-/// Determines if a position is part of a dungeon and returns the voxel type.
-pub fn get_dungeon_voxel(world_x: i32, world_y: i32, world_z: i32) -> Option<VoxelType> {
-    let dx = ((world_x % DUNGEON_SPACING) + DUNGEON_SPACING) % DUNGEON_SPACING;
-    let dz = ((world_z % DUNGEON_SPACING) + DUNGEON_SPACING) % DUNGEON_SPACING;
-
-    // Check entrance staircase
-    if let Some(voxel) = check_dungeon_entrance(dx, dz, world_y) {
-        return Some(voxel);
-    }
-
-    // Check main dungeon area
-    check_dungeon_interior(dx, dz, world_y)
-}
-
-/// Checks if position is part of dungeon entrance staircase.
-fn check_dungeon_entrance(dx: i32, dz: i32, world_y: i32) -> Option<VoxelType> {
-    if dx >= DUNGEON_ENTRANCE_X
-        && dx < DUNGEON_ENTRANCE_X + DUNGEON_ENTRANCE_SIZE
-        && dz >= DUNGEON_ENTRANCE_Z
-        && dz < DUNGEON_ENTRANCE_Z + DUNGEON_ENTRANCE_SIZE
-        && world_y > DUNGEON_FLOOR_Y
-        && world_y <= DUNGEON_ENTRANCE_MAX_Y
-    {
-        let stair_local_x = dx - DUNGEON_ENTRANCE_X;
-        let stair_local_z = dz - DUNGEON_ENTRANCE_Z;
-
-        let is_stair_wall = stair_local_x == 0
-            || stair_local_x == DUNGEON_ENTRANCE_SIZE - 1
-            || stair_local_z == 0
-            || stair_local_z == DUNGEON_ENTRANCE_SIZE - 1;
-
-        if is_stair_wall && stair_local_x != 1 && stair_local_z != 1 {
-            return Some(VoxelType::DungeonWall);
-        } else {
-            return Some(VoxelType::Air);
-        }
-    }
-
-    None
-}
-
-/// Checks if position is part of dungeon interior.
-fn check_dungeon_interior(dx: i32, dz: i32, world_y: i32) -> Option<VoxelType> {
-    if dx >= DUNGEON_SIZE || dz >= DUNGEON_SIZE {
-        return None;
-    }
-
-    if world_y < DUNGEON_FLOOR_Y || world_y > DUNGEON_FLOOR_Y + DUNGEON_HEIGHT + 3 {
-        return None;
-    }
-
-    let local_x = dx;
-    let local_z = dz;
-    let local_y = world_y - DUNGEON_FLOOR_Y;
-
-    if local_y > DUNGEON_HEIGHT {
-        return None;
-    }
-
-    // Structural elements
-    let is_outer_wall = local_x == 0
-        || local_x == DUNGEON_SIZE - 1
-        || local_z == 0
-        || local_z == DUNGEON_SIZE - 1;
-
-    let wall_at_x = (local_x % DUNGEON_WALL_SPACING == 0 || local_x % DUNGEON_WALL_SPACING == 1)
-        && local_x > 0
-        && local_x < DUNGEON_SIZE - 1;
-    let wall_at_z = (local_z % DUNGEON_WALL_SPACING == 0 || local_z % DUNGEON_WALL_SPACING == 1)
-        && local_z > 0
-        && local_z < DUNGEON_SIZE - 1;
-
-    // Doorways
-    let doorway_x = (local_z >= 3 && local_z <= 5)
-        || (local_z >= 11 && local_z <= 13)
-        || (local_z >= 17 && local_z <= 19);
-    let doorway_z = (local_x >= 3 && local_x <= 5)
-        || (local_x >= 11 && local_x <= 13)
-        || (local_x >= 17 && local_x <= 19);
-
-    let is_inner_wall = (wall_at_x && !doorway_x) || (wall_at_z && !doorway_z);
-
-    let is_floor = local_y == 0;
-    let is_ceiling = local_y == DUNGEON_HEIGHT;
-
-    let is_pillar = (local_x % DUNGEON_WALL_SPACING <= 1)
-        && (local_z % DUNGEON_WALL_SPACING <= 1)
-        && local_x > 0
-        && local_x < DUNGEON_SIZE - 1
-        && local_z > 0
-        && local_z < DUNGEON_SIZE - 1;
-
-    let over_entrance = dx >= DUNGEON_ENTRANCE_X
-        && dx < DUNGEON_ENTRANCE_X + DUNGEON_ENTRANCE_SIZE
-        && dz >= DUNGEON_ENTRANCE_Z
-        && dz < DUNGEON_ENTRANCE_Z + DUNGEON_ENTRANCE_SIZE;
-
-    if is_floor {
-        Some(VoxelType::DungeonFloor)
-    } else if is_ceiling && !over_entrance {
-        Some(VoxelType::DungeonFloor)
-    } else if is_outer_wall || is_inner_wall || is_pillar {
-        Some(VoxelType::DungeonWall)
-    } else {
-        Some(VoxelType::Air)
-    }
-}
 
 // =============================================================================
 // Utility Functions
@@ -716,14 +595,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_dungeon_placement() {
-        // Dungeon should exist at origin
-        let floor_voxel = get_dungeon_voxel(5, DUNGEON_FLOOR_Y, 5);
-        assert!(floor_voxel.is_some(), "Expected dungeon floor at (5, {}, 5)", DUNGEON_FLOOR_Y);
-
-        // No dungeon far from grid
-        let no_dungeon = get_dungeon_voxel(50, 10, 50);
-        assert!(no_dungeon.is_none(), "Expected no dungeon at (50, 10, 50)");
-    }
 }

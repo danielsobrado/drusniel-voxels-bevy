@@ -45,7 +45,7 @@ impl Default for AtmosphereSettings {
             twilight_band: 0.6,
             night_floor: 0.08,
             fog_density: Vec2::new(0.0009, 0.0022),
-            cycle_enabled: true,
+            cycle_enabled: false,
         }
     }
 }
@@ -155,12 +155,15 @@ struct AtmosphereSample {
 }
 
 fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample> {
-    let phase = settings.time / settings.day_length; // 0..1
+    let (altitude, azimuth) = if settings.cycle_enabled {
+        let phase = settings.time / settings.day_length; // 0..1
+        let theta = phase * std::f32::consts::TAU;
+        (theta.sin(), theta.cos())
+    } else {
+        (1.0, 0.0)
+    };
 
     // Sun position: overhead at noon, below horizon at night for smooth twilight
-    let theta = phase * std::f32::consts::TAU;
-    let altitude = theta.sin(); // 1 at noon, -1 at midnight
-    let azimuth = theta.cos(); // horizontal movement
     let sun_dir = Vec3::new(azimuth * 0.45, altitude, 0.35).normalize_or_zero();
 
     if sun_dir == Vec3::ZERO {
@@ -185,20 +188,22 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let horizon_twilight = Vec3::new(1.05, 0.42, 0.18);
     let night_sky = Vec3::new(0.01, 0.025, 0.05);
 
+    let night_sky_boost = (settings.night_floor * 4.0).clamp(0.12, 0.6);
+    let sky_brightness = lerp(night_sky_boost, 1.0, daylight);
     let sky_color = night_sky
         .lerp(zenith_day, daylight)
         .lerp(horizon_twilight, horizon_warmth)
-        * settings.exposure;
+        * (settings.exposure * sky_brightness);
 
     let sun_heat = Vec3::new(1.0, 0.78, 0.62).lerp(Vec3::new(1.0, 0.92, 0.84), daylight);
     let moon_heat = Vec3::new(0.8, 0.9, 1.0);
     let sun_tint = sun_heat.lerp(moon_heat, night_factor * 0.85);
 
     // Lighting strength based on altitude (tuned to match the older v0.3 look).
-    let sun_strength = lerp(6000.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
-    let moon_strength = lerp(300.0, 40.0, daylight) * settings.night_floor;
+    let sun_strength = lerp(0.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
+    let moon_strength = lerp(400.0, 60.0, daylight) * night_factor;
     let ambient_strength =
-        lerp(350.0, 1400.0, daylight) * (1.0 + horizon_warmth * 0.2);
+        lerp(250.0, 1400.0, daylight) * (1.0 + horizon_warmth * 0.2);
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);

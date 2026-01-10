@@ -12,6 +12,7 @@ use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::MouseMotion;
+use bevy::light::VolumetricFog;
 use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
@@ -96,7 +97,7 @@ pub fn spawn_camera(
         fog_camera_components(&fog_config),
         Skybox {
             image: skybox_image,
-            brightness: 1500.0,
+            brightness: 8000.0,
             rotation: Quat::IDENTITY,
         },
         CinematicCamera,
@@ -115,6 +116,15 @@ pub fn spawn_camera(
 
     if settings_state.anti_aliasing == AntiAliasing::Fxaa {
         camera.insert(Fxaa::default());
+    }
+
+    if fog_config.volumetric.enabled {
+        camera.insert(VolumetricFog {
+            step_count: fog_config.volumetric.step_count,
+            jitter: fog_config.volumetric.jitter,
+            ambient_intensity: fog_config.volumetric.ambient_intensity,
+            ambient_color: Color::WHITE,
+        });
     }
 
     if ray_tracing.enabled && capabilities.ray_tracing_supported {
@@ -165,6 +175,30 @@ pub fn update_camera_exposure_from_atmosphere(
 
     for mut exposure in cameras.iter_mut() {
         exposure.ev100 = ev100;
+    }
+}
+
+pub fn update_camera_skybox_from_atmosphere(
+    atmosphere: Res<crate::environment::AtmosphereSettings>,
+    mut skyboxes: Query<&mut Skybox, With<PlayerCamera>>,
+) {
+    if !atmosphere.is_changed() {
+        return;
+    }
+
+    let altitude = if atmosphere.cycle_enabled {
+        let phase = atmosphere.time / atmosphere.day_length;
+        let theta = phase * std::f32::consts::TAU;
+        theta.sin()
+    } else {
+        1.0
+    };
+
+    let daylight = smoothstep(-0.1, 0.25, altitude);
+    let brightness = lerp(2500.0, 14000.0, daylight);
+
+    for mut skybox in skyboxes.iter_mut() {
+        skybox.brightness = brightness;
     }
 }
 
@@ -376,4 +410,13 @@ pub fn camera_follow_player(
         camera_transform.translation =
             player_transform.translation + Vec3::Y * camera_config.movement.eye_height;
     }
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
