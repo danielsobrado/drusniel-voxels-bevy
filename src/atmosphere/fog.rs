@@ -8,10 +8,10 @@ pub struct FogPlugin;
 
 const BASE_FOG_DENSITY: f32 = 0.006; // Fallback density when visibility-based calc fails.
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
-const VISIBILITY_DENSITY_SCALE: f32 = 0.25; // Reduced for clearer daylight
-const VOLUME_DENSITY_SCALE: f32 = 0.5; // Reduced for lighter fog volume
-const MIN_VOLUME_DENSITY: f32 = 0.01; // Lower minimum for clearer day
-const MAX_VOLUME_DENSITY: f32 = 0.12; // Lower max to prevent overly dark scenes
+const VISIBILITY_DENSITY_SCALE: f32 = 0.3; // Moderate visibility fog
+const VOLUME_DENSITY_SCALE: f32 = 0.8; // Volumetric density scale
+const MIN_VOLUME_DENSITY: f32 = 0.02; // Ensure minimum visibility
+const MAX_VOLUME_DENSITY: f32 = 0.15; // Cap to prevent over-dark scenes
 
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
@@ -53,6 +53,7 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
         // Spawn global fog volume centered at origin
         // Will be repositioned to follow camera
         commands.spawn((
+            Name::new("GlobalFogVolume"),
             GlobalFogVolume,
             FogVolume {
                 fog_color: Color::WHITE,
@@ -66,6 +67,7 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
                 light_intensity: 1.0,
             },
             Transform::from_scale(Vec3::splat(config.volume.size)),
+            Visibility::Visible,
         ));
     }
     
@@ -200,12 +202,14 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        volume.light_intensity = lerp(0.9, 2.2, daylight) * (1.0 + twilight * 0.5);
+        volume.light_intensity = lerp(1.2, 2.5, daylight) * (1.0 + twilight * 0.5);
         // Connect Mie settings to fog scattering
         // mie_strength controls how much light scatters in the fog
-        volume.scattering = (config.volume.scattering * (1.0 + mie_strength * 20.0)).clamp(0.3, 1.0);
-        // mie_direction controls forward scattering asymmetry (0 = isotropic, 1 = fully forward)
-        volume.scattering_asymmetry = mie_direction.clamp(0.0, 0.95);
+        volume.scattering = (config.volume.scattering * (1.0 + mie_strength * 10.0)).clamp(0.4, 1.0);
+        // mie_direction controls forward scattering asymmetry
+        // Scale down for more isotropic scattering (visible from all directions)
+        // 0 = isotropic, higher = more forward scatter toward sun
+        volume.scattering_asymmetry = (mie_direction * 0.6).clamp(0.0, 0.7);
     }
 }
 
