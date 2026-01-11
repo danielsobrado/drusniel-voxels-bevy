@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemType {
     Fur,
+    Pickaxe,
     Torch,
 }
 
@@ -14,7 +15,7 @@ pub struct Inventory {
     pub items: HashMap<ItemType, u32>,
 }
 
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Debug)]
 pub struct EquippedItem {
     pub item: Option<ItemType>,
 }
@@ -23,14 +24,24 @@ impl ItemType {
     pub fn display_name(&self) -> &'static str {
         match self {
             ItemType::Fur => "Fur",
+            ItemType::Pickaxe => "Pickaxe",
             ItemType::Torch => "Torch",
         }
     }
 
     pub(crate) fn sort_key(&self) -> u8 {
         match self {
-            ItemType::Torch => 0,
-            ItemType::Fur => 1,
+            ItemType::Pickaxe => 0,
+            ItemType::Torch => 1,
+            ItemType::Fur => 2,
+        }
+    }
+}
+
+impl Default for EquippedItem {
+    fn default() -> Self {
+        Self {
+            item: Some(ItemType::Pickaxe),
         }
     }
 }
@@ -38,6 +49,7 @@ impl ItemType {
 impl Default for Inventory {
     fn default() -> Self {
         let mut items = HashMap::new();
+        items.insert(ItemType::Pickaxe, 1);
         items.insert(ItemType::Torch, 1);
         Self { items }
     }

@@ -212,7 +212,7 @@ pub fn update_pickaxe_visibility(
         return;
     }
 
-    let visible = !matches!(equipped.item, Some(ItemType::Torch));
+    let visible = matches!(equipped.item, Some(ItemType::Pickaxe));
     let visibility = if visible {
         Visibility::Visible
     } else {
