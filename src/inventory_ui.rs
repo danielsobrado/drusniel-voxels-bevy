@@ -292,19 +292,39 @@ fn update_torch_attachment(
             return;
         };
 
-        let handle_mesh = meshes.add(Cuboid::new(0.05, 0.05, 0.35));
-        let flame_mesh = meshes.add(Cuboid::new(0.06, 0.06, 0.08));
+        // Torch handle - wooden stick
+        let handle_mesh = meshes.add(Cylinder::new(0.025, 0.45));
+        // Torch head wrap - cloth/pitch soaked wrap
+        let head_mesh = meshes.add(Cylinder::new(0.04, 0.12));
+        // Flame - elongated sphere for fire shape
+        let flame_mesh = meshes.add(Sphere::new(0.06).mesh().uv(12, 8));
+        let flame_inner_mesh = meshes.add(Sphere::new(0.035).mesh().uv(8, 6));
 
         let handle_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.35, 0.2, 0.1),
-            perceptual_roughness: 0.8,
+            base_color: Color::srgb(0.3, 0.18, 0.08),
+            perceptual_roughness: 0.9,
+            ..default()
+        });
+
+        let head_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.15, 0.1, 0.05),
+            perceptual_roughness: 1.0,
             ..default()
         });
 
         let flame_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.6, 0.2),
-            emissive: LinearRgba::new(6.0, 3.0, 1.2, 1.0),
-            perceptual_roughness: 0.4,
+            base_color: Color::srgb(1.0, 0.5, 0.1),
+            emissive: LinearRgba::new(15.0, 6.0, 1.5, 1.0),
+            perceptual_roughness: 0.3,
+            unlit: true,
+            ..default()
+        });
+
+        let flame_inner_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.9, 0.5),
+            emissive: LinearRgba::new(20.0, 15.0, 5.0, 1.0),
+            perceptual_roughness: 0.2,
+            unlit: true,
             ..default()
         });
 
@@ -313,32 +333,53 @@ fn update_torch_attachment(
                 .spawn((
                     TorchAttachment,
                     Transform::from_xyz(0.45, -0.35, -0.7).with_rotation(
-                        Quat::from_euler(EulerRot::XYZ, 0.2, -0.5, 0.1),
+                        Quat::from_euler(EulerRot::XYZ, 0.3, -0.5, 0.15),
                     ),
                     Visibility::default(),
                 ))
                 .with_children(|torch| {
+                    // Wooden handle
                     torch.spawn((
                         Mesh3d(handle_mesh),
                         MeshMaterial3d(handle_material),
-                        Transform::from_xyz(0.0, 0.0, 0.0),
+                        Transform::from_xyz(0.0, 0.0, 0.0)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     ));
 
+                    // Wrapped head (pitch-soaked cloth)
+                    torch.spawn((
+                        Mesh3d(head_mesh),
+                        MeshMaterial3d(head_material),
+                        Transform::from_xyz(0.0, 0.0, -0.22)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    ));
+
+                    // Outer flame glow
                     torch.spawn((
                         Mesh3d(flame_mesh),
                         MeshMaterial3d(flame_material),
-                        Transform::from_xyz(0.0, 0.06, -0.18),
+                        Transform::from_xyz(0.0, 0.02, -0.30)
+                            .with_scale(Vec3::new(1.0, 1.4, 1.0)),
                     ));
 
+                    // Inner bright core
+                    torch.spawn((
+                        Mesh3d(flame_inner_mesh),
+                        MeshMaterial3d(flame_inner_material),
+                        Transform::from_xyz(0.0, 0.01, -0.28)
+                            .with_scale(Vec3::new(1.0, 1.6, 1.0)),
+                    ));
+
+                    // Bright point light
                     torch.spawn((
                         PointLight {
-                            color: Color::srgb(1.0, 0.8, 0.6),
-                            intensity: 6000.0,
-                            range: 24.0,
-                            shadows_enabled: false,
+                            color: Color::srgb(1.0, 0.7, 0.4),
+                            intensity: 80000.0,
+                            range: 40.0,
+                            shadows_enabled: true,
                             ..default()
                         },
-                        Transform::from_xyz(0.0, 0.06, -0.2),
+                        Transform::from_xyz(0.0, 0.0, -0.28),
                     ));
                 });
         });
