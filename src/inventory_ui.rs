@@ -333,8 +333,8 @@ fn update_torch_attachment(
                     torch.spawn((
                         PointLight {
                             color: Color::srgb(1.0, 0.8, 0.6),
-                            intensity: 2200.0,
-                            range: 16.0,
+                            intensity: 6000.0,
+                            range: 24.0,
                             shadows_enabled: false,
                             ..default()
                         },
