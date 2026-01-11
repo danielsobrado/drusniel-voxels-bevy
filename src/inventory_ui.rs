@@ -112,16 +112,22 @@ fn toggle_inventory_ui(
     pause_menu: Res<PauseMenuState>,
     chat_state: Option<Res<ChatState>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyI) {
-        return;
-    }
+    let open_pressed = keys.just_pressed(KeyCode::KeyI);
+    let close_pressed = keys.just_pressed(KeyCode::Escape);
 
     if state.open {
+        if !(open_pressed || close_pressed) {
+            return;
+        }
         if let Some(root) = state.root_entity.take() {
             commands.entity(root).despawn();
         }
         state.open = false;
         dragged.item = None;
+        return;
+    }
+
+    if !open_pressed {
         return;
     }
 
@@ -381,7 +387,7 @@ fn spawn_inventory_ui(
                 ))
                 .with_children(|panel| {
                     panel.spawn((
-                        Text::new("Inventory (Press I to close)"),
+                        Text::new("Inventory (Press I or Esc to close)"),
                         TextFont {
                             font: font.clone(),
                             font_size: 20.0,

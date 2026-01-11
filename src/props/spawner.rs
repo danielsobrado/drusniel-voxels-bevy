@@ -123,7 +123,7 @@ fn spawn_category(
 
             let position = Vec3::new(
                 world_x as f32 + 0.5 + offset_x * 0.8,
-                surface_y as f32 + 1.0,
+                surface_y as f32 + 1.0 + def.y_offset,
                 world_z as f32 + 0.5 + offset_z * 0.8,
             );
 

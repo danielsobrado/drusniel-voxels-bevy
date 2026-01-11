@@ -25,7 +25,7 @@ $Downloads = @{
     }
     "kenney_nature" = @{
         Url = "https://kenney.nl/assets/nature-kit"
-        DirectUrl = "https://kenney.nl/media/pages/assets/nature-kit/8b0c8c9c09-1732550108/kenney_nature-kit.zip"
+        DirectUrl = "https://kenney.nl/media/pages/assets/nature-kit/8334871c74-1677698939/kenney_nature-kit.zip"
     }
     "kenney_holiday" = @{
         Url = "https://kenney.nl/assets/holiday-kit"  
@@ -68,25 +68,25 @@ $FileMappings = @{
 
 function Write-Header($text) {
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host " $text" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host ("=" * 60) -ForegroundColor Cyan
+    Write-Host (" " + $text) -ForegroundColor Cyan
+    Write-Host ("=" * 60) -ForegroundColor Cyan
 }
 
 function Write-Step($text) {
-    Write-Host "  → $text" -ForegroundColor Yellow
+    Write-Host "  -> $text" -ForegroundColor Yellow
 }
 
 function Write-Success($text) {
-    Write-Host "  ✓ $text" -ForegroundColor Green
+    Write-Host "  OK $text" -ForegroundColor Green
 }
 
 function Write-Warning($text) {
-    Write-Host "  ⚠ $text" -ForegroundColor DarkYellow
+    Write-Host "  WARN $text" -ForegroundColor DarkYellow
 }
 
 function Write-Error($text) {
-    Write-Host "  ✗ $text" -ForegroundColor Red
+    Write-Host "  ERR $text" -ForegroundColor Red
 }
 
 # Create directories
@@ -211,7 +211,7 @@ function Copy-MappedAssets {
 function Get-KenneyAssets {
     Write-Header "Downloading Kenney Assets"
     
-    $kenneyUrl = "https://kenney.nl/media/pages/assets/nature-kit/e55c3cf5c4-1732550108/kenney_nature-kit.zip"
+    $kenneyUrl = "https://kenney.nl/media/pages/assets/nature-kit/8334871c74-1677698939/kenney_nature-kit.zip"
     $zipPath = "temp/downloads/kenney_nature.zip"
     $extractPath = "temp/kenney_nature"
     
@@ -324,13 +324,12 @@ function Remove-TempFiles {
 # Main execution
 function Main {
     Write-Host ""
-    Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
-    Write-Host "║       VOXEL BUILDER - Asset Downloader                    ║" -ForegroundColor Magenta
-    Write-Host "║       Downloads CC0 foliage for Valheim/Skyrim look       ║" -ForegroundColor Magenta
-    Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
-    
+    Write-Host ("-" * 60) -ForegroundColor Magenta
+    Write-Host "  VOXEL BUILDER - Asset Downloader" -ForegroundColor Magenta
+    Write-Host "  Downloads CC0 foliage for Valheim/Skyrim look" -ForegroundColor Magenta
+    Write-Host ("-" * 60) -ForegroundColor Magenta
+
     Initialize-Directories
-    
     $totalAssets = 0
     
     # Try Kenney first (most reliable)

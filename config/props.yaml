@@ -16,6 +16,207 @@ props:
       max_slope: 0.35
       max_count: 250
 
+    # Ultimate Stylized Nature (May 2022)
+    - id: usn_birch_1
+      path: "models/vegetation/trees/ultimate_stylized_nature/BirchTree_1.gltf"
+      scale_range: [0.8, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 60
+
+    - id: usn_birch_2
+      path: "models/vegetation/trees/ultimate_stylized_nature/BirchTree_2.gltf"
+      scale_range: [0.8, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 60
+
+    - id: usn_birch_3
+      path: "models/vegetation/trees/ultimate_stylized_nature/BirchTree_3.gltf"
+      scale_range: [0.8, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 60
+
+    - id: usn_birch_4
+      path: "models/vegetation/trees/ultimate_stylized_nature/BirchTree_4.gltf"
+      scale_range: [0.8, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 60
+
+    - id: usn_birch_5
+      path: "models/vegetation/trees/ultimate_stylized_nature/BirchTree_5.gltf"
+      scale_range: [0.8, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 60
+
+    - id: usn_maple_1
+      path: "models/vegetation/trees/ultimate_stylized_nature/MapleTree_1.gltf"
+      scale_range: [0.9, 1.3]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.0025
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 50
+
+    - id: usn_maple_2
+      path: "models/vegetation/trees/ultimate_stylized_nature/MapleTree_2.gltf"
+      scale_range: [0.9, 1.3]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.0025
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 50
+
+    - id: usn_maple_3
+      path: "models/vegetation/trees/ultimate_stylized_nature/MapleTree_3.gltf"
+      scale_range: [0.9, 1.3]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.0025
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 50
+
+    - id: usn_maple_4
+      path: "models/vegetation/trees/ultimate_stylized_nature/MapleTree_4.gltf"
+      scale_range: [0.9, 1.3]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.0025
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 50
+
+    - id: usn_maple_5
+      path: "models/vegetation/trees/ultimate_stylized_nature/MapleTree_5.gltf"
+      scale_range: [0.9, 1.3]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.0025
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 50
+
+    - id: usn_dead_1
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_1.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_2
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_2.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_3
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_3.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_4
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_4.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_5
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_5.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_6
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_6.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_7
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_7.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_8
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_8.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_9
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_9.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
+    - id: usn_dead_10
+      path: "models/vegetation/trees/ultimate_stylized_nature/DeadTree_10.gltf"
+      scale_range: [0.8, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.002
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 40
+
   rocks:
     - id: boulder_large
       path: "models/rocks/boulder_large.glb"
@@ -54,6 +255,97 @@ props:
       max_slope: 0.35
       max_count: 400
 
+    # Ultimate Stylized Nature (May 2022)
+    - id: usn_bush
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush.gltf"
+      scale_range: [0.7, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.015
+      min_slope: 0.0
+      max_slope: 0.4
+      max_count: 150
+
+    - id: usn_bush_flowers
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Flowers.gltf"
+      scale_range: [0.7, 1.2]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.012
+      min_slope: 0.0
+      max_slope: 0.4
+      max_count: 140
+
+    - id: usn_bush_large
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Large.gltf"
+      scale_range: [0.9, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.01
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 120
+
+    - id: usn_bush_large_flowers
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Large_Flowers.gltf"
+      scale_range: [0.9, 1.4]
+      y_offset: -1.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 0.01
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 120
+
+    - id: usn_bush_small
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Small.gltf"
+      scale_range: [0.6, 1.0]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.4
+      max_count: 160
+
+    - id: usn_bush_small_flowers
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Small_Flowers.gltf"
+      scale_range: [0.6, 1.0]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.4
+      max_count: 160
+
+    - id: usn_grass_large
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large.gltf"
+      scale_range: [0.7, 1.1]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.03
+      min_slope: 0.0
+      max_slope: 0.5
+      max_count: 220
+
+    - id: usn_grass_large_extruded
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large_Extruded.gltf"
+      scale_range: [0.7, 1.1]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.03
+      min_slope: 0.0
+      max_slope: 0.5
+      max_count: 220
+
+    - id: usn_grass_small
+      path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Small.gltf"
+      scale_range: [0.6, 1.0]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.035
+      min_slope: 0.0
+      max_slope: 0.5
+      max_count: 240
+
     - id: fern
       path: "models/plants/fern.glb"
       scale_range: [0.6, 1.0]
@@ -81,6 +373,77 @@ props:
       min_slope: 0.0
       max_slope: 0.3
       max_count: 200
+
+    # Ultimate Stylized Nature (May 2022)
+    - id: usn_flower_1
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_1.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_1_clump
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_1_Clump.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_2
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_2.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_2_clump
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_2_Clump.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_3_clump
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_3_Clump.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_4_clump
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_4_Clump.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
+
+    - id: usn_flower_5_clump
+      path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_5_Clump.gltf"
+      scale_range: [0.5, 0.9]
+      y_offset: -1.0
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 160
 
     - id: flower_yellow
       path: "models/plants/flower_yellow.glb"

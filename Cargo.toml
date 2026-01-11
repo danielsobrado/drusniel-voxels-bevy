@@ -2,6 +2,7 @@
 name = "voxel_builder"
 version = "0.1.0"
 edition = "2024"
+default-run = "voxel_builder"
 
 [dependencies]
 bevy = { version = "0.17", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures"] }

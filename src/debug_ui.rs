@@ -68,7 +68,12 @@ fn debug_settings_ui(
         if let Some(mut veg) = veg_config {
             ui.heading("Vegetation");
             ui.add(egui::Slider::new(&mut veg.grass_density, 1..=100).text("Grass Density"));
-            ui.label("Note: density changes affect new chunks only");
+            ui.add(egui::Slider::new(&mut veg.max_blades_per_chunk, 100..=5000).text("Max Blades/Chunk"));
+            ui.label("Note: density/max changes affect new chunks only");
+            ui.separator();
+            ui.heading("Wind");
+            ui.add(egui::Slider::new(&mut veg.wind_strength, 0.0..=1.0).text("Wind Strength"));
+            ui.add(egui::Slider::new(&mut veg.wind_speed, 0.5..=5.0).text("Wind Speed"));
         }
         
         ui.separator();

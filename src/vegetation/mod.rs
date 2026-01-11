@@ -4,7 +4,6 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::light::NotShadowCaster;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use crate::constants::CHUNK_SIZE;
 use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::{VoxelType, Voxel};
 use crate::voxel::meshing::ChunkMesh;
@@ -47,15 +46,23 @@ pub struct ChunkGrassAttached;
 #[derive(Component)]
 pub struct ProceduralGrassPatch;
 
-/// Configuration resource for vegetation (stub for compatibility)
+/// Configuration resource for vegetation
 #[derive(Resource)]
 pub struct VegetationConfig {
     pub grass_density: u32,
+    pub max_blades_per_chunk: usize,
+    pub wind_strength: f32,
+    pub wind_speed: f32,
 }
 
 impl Default for VegetationConfig {
     fn default() -> Self {
-        Self { grass_density: 20 }
+        Self {
+            grass_density: 20,
+            max_blades_per_chunk: 1000,
+            wind_strength: 0.35,
+            wind_speed: 1.8,
+        }
     }
 }
 
@@ -105,6 +112,7 @@ pub fn attach_procedural_grass_to_chunks(
     mut commands: Commands,
     assets: Res<GrassPatchAssets>,
     water_material: Res<WaterMaterial>,
+    veg_config: Res<VegetationConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     // Query chunks with StandardMaterial (blocky mode)
     blocky_chunk_query: Query<(
@@ -123,6 +131,9 @@ pub fn attach_procedural_grass_to_chunks(
         &Transform,
     ), Without<ChunkGrassAttached>>,
 ) {
+    let density = veg_config.grass_density;
+    let max_count = veg_config.max_blades_per_chunk;
+
     // Process blocky chunks
     for (entity, chunk, chunk_mesh, material, transform) in blocky_chunk_query.iter() {
         // Skip water surfaces
@@ -130,12 +141,12 @@ pub fn attach_procedural_grass_to_chunks(
             continue;
         }
 
-        process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform);
+        process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform, density, max_count);
     }
 
     // Process triplanar chunks (surface nets mode)
     for (entity, chunk, chunk_mesh, _material, transform) in triplanar_chunk_query.iter() {
-        process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform);
+        process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform, density, max_count);
     }
 }
 
@@ -148,14 +159,14 @@ fn process_chunk_for_grass(
     chunk: &ChunkMesh,
     chunk_mesh: &Mesh3d,
     transform: &Transform,
+    density: u32,
+    max_count: usize,
 ) {
     let Some(chunk_source_mesh) = meshes.get(&chunk_mesh.0) else {
         return;
     };
 
-    // Density: blades per square unit; max_count: limit per chunk
-    // RESTORED
-    let instances = collect_grass_instances(chunk_source_mesh, transform, 20, 1000);
+    let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count);
     if instances.is_empty() {
         return;
     }
@@ -165,7 +176,9 @@ fn process_chunk_for_grass(
         None => return,
     };
 
-    let Some(grass_mesh) = build_grass_patch_mesh(template_mesh, &instances) else {
+    // Pass chunk origin so grass positions are relative to chunk (since we parent to chunk)
+    let chunk_origin = transform.translation;
+    let Some(grass_mesh) = build_grass_patch_mesh(template_mesh, &instances, chunk_origin) else {
         return;
     };
 
@@ -178,6 +191,7 @@ fn process_chunk_for_grass(
 
     commands.entity(entity).try_insert(ChunkGrassAttached);
 
+    // Parent grass to chunk entity so it despawns when chunk is culled
     commands.spawn((
         ProceduralGrassPatch,
         Mesh3d(mesh_handle),
@@ -188,6 +202,7 @@ fn process_chunk_for_grass(
         InheritedVisibility::VISIBLE,
         ViewVisibility::default(),
         NotShadowCaster,
+        ChildOf(entity),
     ));
 }
 
@@ -321,7 +336,8 @@ fn collect_grass_instances(
 }
 
 /// Build a combined grass mesh for all instances using the blade template
-fn build_grass_patch_mesh(template: &Mesh, instances: &[GrassInstance]) -> Option<Mesh> {
+/// chunk_origin: positions are made relative to this so parenting works correctly
+fn build_grass_patch_mesh(template: &Mesh, instances: &[GrassInstance], chunk_origin: Vec3) -> Option<Mesh> {
     if instances.is_empty() {
         return None;
     }
@@ -356,13 +372,24 @@ fn build_grass_patch_mesh(template: &Mesh, instances: &[GrassInstance]) -> Optio
             (instance.position.z as i32).wrapping_sub(i as i32 * 7),
         );
         let yaw = hash * std::f32::consts::TAU;
-        let scale = 0.8 + simple_hash(i as i32 * 17, i as i32 * 29) * 0.6;
+
+        // Independent height and width scaling for variety
+        let height_scale = 0.7 + simple_hash(i as i32 * 17, i as i32 * 29) * 0.8;
+        let width_scale = 0.75 + simple_hash(i as i32 * 19, i as i32 * 31) * 0.5;
+        let scale = Vec3::new(width_scale, height_scale, width_scale);
+
+        // Random lean angle (up to ~12 degrees) for natural variation
+        let lean_amount = (simple_hash(i as i32 * 23, i as i32 * 37) - 0.5) * 0.21;
+        let lean_direction = simple_hash(i as i32 * 41, i as i32 * 43) * std::f32::consts::TAU;
+        let lean_axis = Vec3::new(lean_direction.cos(), 0.0, lean_direction.sin());
+        let lean_rotation = Quat::from_axis_angle(lean_axis, lean_amount);
 
         let align = Quat::from_rotation_arc(Vec3::Y, instance.normal);
-        let rotation = align * Quat::from_rotation_y(yaw);
+        let rotation = align * lean_rotation * Quat::from_rotation_y(yaw);
         // Lift slightly along the normal to avoid z-fighting with the ground
-        let base_pos = instance.position + instance.normal * 0.05;
-        let transform = Mat4::from_scale_rotation_translation(Vec3::splat(scale), rotation, base_pos);
+        // Make position relative to chunk origin since grass is parented to chunk
+        let base_pos = instance.position + instance.normal * 0.05 - chunk_origin;
+        let transform = Mat4::from_scale_rotation_translation(scale, rotation, base_pos);
         let normal_matrix = Mat3::from_quat(rotation);
 
         let index_offset = (i as u32) * base_len;
@@ -836,6 +863,23 @@ pub fn animate_particles(
 }
 
 
+/// Sync wind parameters from VegetationConfig to grass materials
+pub fn sync_grass_wind_config(
+    veg_config: Res<VegetationConfig>,
+    mut materials: ResMut<Assets<GrassMaterial>>,
+    handles: Res<GrassMaterialHandles>,
+) {
+    if !veg_config.is_changed() {
+        return;
+    }
+    for handle in &handles.handles {
+        if let Some(material) = materials.get_mut(handle) {
+            material.uniform_data.wind_strength = veg_config.wind_strength;
+            material.uniform_data.wind_speed = veg_config.wind_speed;
+        }
+    }
+}
+
 /// Plugin for vegetation and props
 pub struct VegetationPlugin;
 
@@ -847,12 +891,14 @@ impl Plugin for VegetationPlugin {
             .init_resource::<GrassSpawned>()
             .init_resource::<RocksSpawned>()
             .init_resource::<ParticlesSpawned>()
+            .init_resource::<VegetationConfig>()
             .add_systems(Startup, setup_grass_patch_assets)
             // Run in Update to ensure world is populated
             .add_systems(
                 Update,
                 (
                     attach_procedural_grass_to_chunks,
+                    sync_grass_wind_config,
                     spawn_rock_props,
                     spawn_floating_particles,
                     animate_particles,

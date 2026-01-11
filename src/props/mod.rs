@@ -76,6 +76,8 @@ pub struct PropDefinition {
     #[serde(default = "default_scale_range")]
     pub scale_range: [f32; 2],
     #[serde(default)]
+    pub y_offset: f32,
+    #[serde(default)]
     pub spawn_on: Vec<String>,
     #[serde(default = "default_density")]
     pub density: f32,

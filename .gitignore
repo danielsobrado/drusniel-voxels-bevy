@@ -14,3 +14,18 @@ assets/*.html
 # World save file
 *.bin
 *.local.json
+*.png
+*.fbx
+*.gltf
+assets/models/_downloads/*.zip
+assets/models/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/obj/*
+assets/models/Models/DAE format/*
+assets/models/Models/GLTF format/*
+assets/models/Models/OBJ format/*
+assets/models/Models/STL format/*
+assets/models/OBJ/*
+assets/models/props/resources/kaykit/*
+assets/models/*.jpg
+assets/models/License.txt
+assets/models/Kenney.url
+assets/models/KayKit_Forest_Nature_Pack_1.0_FREE/*

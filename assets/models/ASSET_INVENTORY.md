@@ -1,5 +1,5 @@
 # Nature Assets Inventory
-Generated: 2025-12-25 15:39:26
+Generated: 2026-01-11 10:41:16
 
 ## Directory Structure
 
@@ -40,62 +40,26 @@ assets/models/
 - kenney: 0
 - polypizza: 0
 - quaternius: 0
-### Trees: 0 models
+### Trees: 20 models
 - kaykit: 0
 - kenney: 0
 - quaternius: 0
-### Plants & Flowers: 0 models
+- ultimate_stylized_nature: 20
+### Plants & Flowers: 7 models
 - quaternius: 0
-### Grass & Bushes: 0 models
+- ultimate_stylized_nature: 7
+### Grass & Bushes: 9 models
 - kaykit: 0
 - quaternius: 0
-### Crops: 0 models
-- quaternius: 0
-### Props: 0 models
+- ultimate_stylized_nature: 9
+### Crops: 1 models
+- quaternius: 1
+### Props: 304 models
 - camping: 0
-- resources: 0
+- resources: 304
 ## Sources & Licenses
 
-### Quaternius
-- Website: https://quaternius.com/
-- License: CC0 (Public Domain)
-- Formats: FBX, OBJ, glTF
-- Style: Stylized/Ghibli-inspired
-
-### Kay Lousberg (KayKit)
-- Website: https://kaylousberg.com/game-assets
-- License: CC0 (Public Domain)
-- Formats: FBX, OBJ, glTF
-- Style: Stylized with gradient atlas textures
-
-### Kenney
-- Website: https://kenney.nl/
-- License: CC0 (Public Domain)
-- Formats: OBJ
-- Style: Clean, minimalist
-
-### Poly.pizza
-- Website: https://poly.pizza/
-- License: Varies (check individual models, most are CC0)
-- Formats: FBX, OBJ, glTF
-- Style: Various
-
-## Usage Notes
-
-All assets from the main sources (Quaternius, KayKit, Kenney) are CC0 licensed:
-- Commercial use allowed
-- No attribution required
-- Modify and redistribute freely
-
-## Integration with Bevy
-
-1. Recommended format: glTF/GLB
-2. Fallback: FBX (convert with Blender)
-3. Textures: Most use simple atlas textures
-
-## Next Steps
-
-1. Convert FBX/OBJ to glTF if needed
-2. Create YAML configs for each asset
-3. Set up deterministic placement
-4. Apply triplanar shader where needed
+- Quaternius: https://quaternius.com/ (CC0)
+- Kay Lousberg (KayKit): https://kaylousberg.com/game-assets (CC0)
+- Kenney: https://kenney.nl/ (CC0)
+- Poly.pizza: https://poly.pizza/ (varies)

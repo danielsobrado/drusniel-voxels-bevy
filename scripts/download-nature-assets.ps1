@@ -256,15 +256,26 @@ Write-Host "  4. Auto-extract and organize when it appears"
 Write-Host ""
 
 $downloadedAssets = @()
+$satisfiedAssets = @()
 
 foreach ($assetEntry in $sortedAssets) {
     $asset = $assetEntry.Value
+    $assetKey = $assetEntry.Key
 
     Write-Host ""
     Write-ColorOutput "----------------------------------------" "Blue"
     Write-ColorOutput "$($asset.Description)" "Cyan"
     Write-ColorOutput "----------------------------------------" "Blue"
     Write-Host ""
+
+    if ($assetKey -eq "Quaternius_Crops") {
+        $cropsGlb = Join-Path $TargetDir "vegetation/crops/quaternius/Crops.glb"
+        if (Test-Path $cropsGlb) {
+            Write-ColorOutput "Crops.glb already present - skipping ZIP download" "Green"
+            $satisfiedAssets += $assetKey
+            continue
+        }
+    }
 
     $targetPath = "$TargetDir/_downloads/$($asset.TargetFileName)"
     if ((Test-Path $targetPath) -and $SkipExisting) {
@@ -511,13 +522,13 @@ Write-ColorOutput "Inventory saved to: $inventoryPath" "Green"
 Write-Section "Process Complete"
 
 Write-Host ""
-$extractedCount = $downloadedAssets.Count
-Write-ColorOutput "Assets processed: $extractedCount" "Green"
+$processedCount = $downloadedAssets.Count + $satisfiedAssets.Count
+Write-ColorOutput "Assets processed: $processedCount" "Green"
 Write-ColorOutput "Directory structure created" "Green"
 Write-ColorOutput "Asset inventory generated: $inventoryPath" "Green"
 
-if ($extractedCount -lt $assetManifest.Count) {
-    $remaining = $assetManifest.Count - $extractedCount
+if ($processedCount -lt $assetManifest.Count) {
+    $remaining = $assetManifest.Count - $processedCount
     Write-Host ""
     Write-ColorOutput "$remaining assets not yet downloaded" "Yellow"
     Write-Host "Run this script again after downloading remaining assets."
