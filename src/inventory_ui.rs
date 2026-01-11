@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::light::VolumetricLight;
 use bevy::ui::{AlignItems, FlexDirection, FlexWrap, JustifyContent, PositionType, Val};
 
 use crate::camera::controller::PlayerCamera;
@@ -667,16 +668,17 @@ fn update_torch_attachment(
                             .with_scale(Vec3::new(1.0, 1.6, 1.0)),
                     ));
 
-                    // Bright point light
+                    // Bright point light with volumetric for god rays
                     torch.spawn((
                         TorchAttachment,
                         PointLight {
                             color: Color::srgb(1.0, 0.7, 0.4),
-                            intensity: 80000.0,
-                            range: 40.0,
+                            intensity: 120_000.0,
+                            range: 50.0,
                             shadows_enabled: true,
                             ..default()
                         },
+                        VolumetricLight,
                         Transform::from_xyz(0.0, 0.0, -0.28),
                     ));
                 });

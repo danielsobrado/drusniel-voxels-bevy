@@ -84,22 +84,22 @@ fn setup_atmosphere(mut commands: Commands) {
     // Sun directional light with warmer color and tuned settings
     commands.spawn((
         DirectionalLight {
-            color: Color::srgb(1.0, 0.95, 0.85),
+            color: Color::srgb(1.0, 0.98, 0.94),
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
-            illuminance: 32_000.0,
+            illuminance: 34_000.0,
             shadows_enabled: true,
-            shadow_depth_bias: 0.005,
-            shadow_normal_bias: 0.4,
+            shadow_depth_bias: 0.02,
+            shadow_normal_bias: 1.2,
             ..default()
         },
         Transform::from_translation(Vec3::ZERO)
             .looking_to(Vec3::new(-0.3, -1.0, -0.2).normalize(), Vec3::Y),
         CascadeShadowConfigBuilder {
             num_cascades: 4,
-            minimum_distance: 1.0,
+            minimum_distance: 0.5,
             maximum_distance: 256.0,
-            first_cascade_far_bound: 15.0,
-            overlap_proportion: 0.2,
+            first_cascade_far_bound: 12.0,
+            overlap_proportion: 0.35,
             ..default()
         }
         .build(),
@@ -203,7 +203,7 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let sun_strength = lerp(0.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
     let moon_strength = lerp(400.0, 60.0, daylight) * night_factor;
     let ambient_strength =
-        lerp(250.0, 1400.0, daylight) * (1.0 + horizon_warmth * 0.2);
+        lerp(200.0, 800.0, daylight) * (1.0 + horizon_warmth * 0.2);
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);

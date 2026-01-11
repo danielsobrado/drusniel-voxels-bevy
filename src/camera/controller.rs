@@ -196,7 +196,7 @@ pub fn update_camera_skybox_from_atmosphere(
     };
 
     let daylight = smoothstep(-0.1, 0.25, altitude);
-    let brightness = lerp(2500.0, 14000.0, daylight);
+    let brightness = lerp(1500.0, 6000.0, daylight);
 
     for mut skybox in skyboxes.iter_mut() {
         skybox.brightness = brightness;

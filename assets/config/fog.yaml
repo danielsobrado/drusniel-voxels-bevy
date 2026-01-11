@@ -23,22 +23,22 @@ fog:
   volume:
     # Size in world units (should cover render distance)
     size: 512.0
-    # Base density (0.02-0.1 for light haze, 0.1-0.3 for heavy)
-    density: 0.04
-    # Light absorption (0=no absorption, 1=full)
-    absorption: 0.08
-    # Light scattering (0=no scatter, 1=full)
-    scattering: 0.25
-    # Scattering asymmetry (-1 to 1, positive=forward scatter like mist)
-    scattering_asymmetry: 0.7
+    # Base density - keep LOW for god rays without darkening (0.01-0.03)
+    density: 0.015
+    # Light absorption - keep near zero to avoid darkening
+    absorption: 0.005
+    # Light scattering (higher = brighter rays)
+    scattering: 0.8
+    # Scattering asymmetry (0.2-0.4 for visible rays from most angles)
+    scattering_asymmetry: 0.25
     
   # Day/night color presets
   colors:
     day:
-      fog: [0.55, 0.65, 0.80, 1.0]      # Blue-grey haze
-      extinction: [0.35, 0.50, 0.66]    # What light gets absorbed
-      inscattering: [0.80, 0.84, 1.00]  # Light scattered into view
-      directional: [1.0, 0.95, 0.85]    # Sun glow color
+      fog: [0.70, 0.78, 0.88, 1.0]      # Light blue-white haze
+      extinction: [0.40, 0.55, 0.70]    # What light gets absorbed
+      inscattering: [0.95, 0.95, 1.00]  # Light scattered into view
+      directional: [1.0, 0.98, 0.95]    # Neutral white sun glow
     twilight:
       fog: [0.65, 0.45, 0.40, 1.0]      # Warm orange haze
       extinction: [0.50, 0.35, 0.30]

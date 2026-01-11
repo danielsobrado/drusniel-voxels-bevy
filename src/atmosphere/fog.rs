@@ -9,9 +9,9 @@ pub struct FogPlugin;
 const BASE_FOG_DENSITY: f32 = 0.006; // Fallback density when visibility-based calc fails.
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
 const VISIBILITY_DENSITY_SCALE: f32 = 0.3; // Moderate visibility fog
-const VOLUME_DENSITY_SCALE: f32 = 0.8; // Volumetric density scale
-const MIN_VOLUME_DENSITY: f32 = 0.02; // Ensure minimum visibility
-const MAX_VOLUME_DENSITY: f32 = 0.15; // Cap to prevent over-dark scenes
+const VOLUME_DENSITY_SCALE: f32 = 0.5; // Volumetric density scale (lower = brighter scene)
+const MIN_VOLUME_DENSITY: f32 = 0.005; // Very low minimum for subtle god rays
+const MAX_VOLUME_DENSITY: f32 = 0.08; // Cap to prevent over-dark scenes
 
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
@@ -202,14 +202,14 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        volume.light_intensity = lerp(1.2, 2.5, daylight) * (1.0 + twilight * 0.5);
+        volume.light_intensity = lerp(2.0, 5.0, daylight) * (1.0 + twilight * 0.5);
         // Connect Mie settings to fog scattering
-        // mie_strength controls how much light scatters in the fog
-        volume.scattering = (config.volume.scattering * (1.0 + mie_strength * 10.0)).clamp(0.4, 1.0);
+        // mie_strength (0.0035-0.0075) scaled up to have visible impact
+        let mie_factor = (mie_strength / 0.005).clamp(0.5, 2.0); // Normalize around 1.0
+        volume.scattering = (config.volume.scattering * mie_factor).clamp(0.3, 1.0);
         // mie_direction controls forward scattering asymmetry
-        // Scale down for more isotropic scattering (visible from all directions)
-        // 0 = isotropic, higher = more forward scatter toward sun
-        volume.scattering_asymmetry = (mie_direction * 0.6).clamp(0.0, 0.7);
+        // Lower = more visible from all angles, higher = only toward sun
+        volume.scattering_asymmetry = config.volume.scattering_asymmetry * mie_direction;
     }
 }
 

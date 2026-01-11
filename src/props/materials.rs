@@ -53,19 +53,8 @@ fn apply_to_hierarchy(
     }
 }
 
-fn tweak_material(mat: &mut StandardMaterial, style: &super::StyleConfig, prop_type: PropType) {
-    // Boost saturation for Valheim's vibrant look
-    let hsla: Hsla = mat.base_color.into();
-    let boosted_saturation = (hsla.saturation + style.saturation_boost).clamp(0.0, 1.0);
-    let boosted = Hsla::new(hsla.hue, boosted_saturation, hsla.lightness, hsla.alpha);
-    mat.base_color = boosted.into();
-
-    // Reduce specularity for matte, hand-painted look
-    mat.perceptual_roughness = mat.perceptual_roughness.max(style.roughness_min);
-    mat.metallic = mat.metallic.min(style.metallic_max);
-    mat.reflectance = 0.1;
-
-    // Type-specific adjustments
+fn tweak_material(mat: &mut StandardMaterial, _style: &super::StyleConfig, prop_type: PropType) {
+    // Type-specific adjustments (GLTF material values preserved)
     match prop_type {
         PropType::Tree => {
             // Leaves: slight translucency, double-sided
@@ -75,8 +64,7 @@ fn tweak_material(mat: &mut StandardMaterial, style: &super::StyleConfig, prop_t
             mat.alpha_mode = AlphaMode::Mask(0.35);
         }
         PropType::Rock => {
-            // Rocks: very rough, no transmission
-            mat.perceptual_roughness = 0.95;
+            // Rocks: use GLTF values, just ensure no transmission
             mat.diffuse_transmission = 0.0;
         }
         PropType::Bush | PropType::Flower => {
