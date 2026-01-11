@@ -341,38 +341,53 @@ These could be used instead of procedural crossed quads for a more stylized look
 
 ---
 
-## Prepass Implementation (Resolved)
+## Alpha Transparency Implementation (Current)
 
-A custom prepass shader was implemented to enable alpha masking and shadows:
-
-**Files:**
-- `assets/shaders/grass_prepass.wgsl` - Custom prepass shader with wind animation and alpha discard
+The grass uses `AlphaMode::Blend` for transparency with a procedural alpha mask in the fragment shader.
 
 **Current settings in `GrassMaterialPlugin`:**
 ```rust
 MaterialPlugin::<GrassMaterial> {
-    prepass_enabled: true,   // Uses custom grass_prepass.wgsl
-    shadows_enabled: true,   // Grass receives shadows
+    prepass_enabled: false,  // Blend mode doesn't need prepass
+    shadows_enabled: false,  // Blend mode doesn't cast shadows properly
     ..default()
 }
 ```
 
-**Material impl includes:**
+**Material impl:**
 ```rust
-fn prepass_vertex_shader() -> ShaderRef {
-    "shaders/grass_prepass.wgsl".into()
-}
-
-fn prepass_fragment_shader() -> ShaderRef {
-    "shaders/grass_prepass.wgsl".into()
-}
-
 fn alpha_mode(&self) -> AlphaMode {
-    AlphaMode::Mask(0.5)
+    AlphaMode::Blend
 }
 ```
 
-The prepass shader applies the same wind animation as the main shader to ensure depth consistency.
+**Fragment shader** ([grass.wgsl:126-148](../assets/shaders/grass.wgsl#L126-L148)):
+```wgsl
+fn blade_alpha(uv: vec2<f32>) -> f32 {
+    let height = 1.0 - uv.y;
+    let blade_width = mix(0.5, 0.15, height * height);
+    let center_dist = abs(uv.x - 0.5);
+    let edge = smoothstep(blade_width, blade_width * 0.6, center_dist);
+    let tip_taper = smoothstep(0.0, 0.1, 1.0 - height);
+    return edge * tip_taper;
+}
+
+@fragment
+fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
+    let alpha = blade_alpha(input.uv);
+    return vec4<f32>(input.color.rgb, alpha);
+}
+```
+
+### Why Not AlphaMode::Mask?
+
+Attempts to use `AlphaMode::Mask(0.5)` with a custom prepass shader failed due to Bevy 0.17's prepass pipeline expecting specific vertex output structures. The custom prepass shader at `assets/shaders/grass_prepass.wgsl` couldn't match the expected `VertexOutput` interface, resulting in pipeline validation errors:
+
+```
+Location[2] Float32x2 is not provided by the previous stage outputs
+```
+
+**Future work:** Investigate Bevy's prepass_io module and proper custom prepass shader integration for better shadow support.
 
 See `docs/debugging_blue_vegetation.md` for investigation history of the blue artifact issue.
 
@@ -381,7 +396,13 @@ See `docs/debugging_blue_vegetation.md` for investigation history of the blue ar
 ## Implementation Priority
 
 1. **Phase 5 (Lifecycle Fix)** - Bug fix, prevents entity leaks ✅
-2. **Phase 1 (Alpha-Masked Texturing)** - Custom prepass shader ✅
+2. **Phase 1 (Alpha Transparency)** - Using AlphaMode::Blend with procedural alpha ✅
 3. **Phase 2 (Per-Blade Variation)** - Significant visual improvement ✅
 4. **Phase 4 (Config Integration)** - Enables iteration ✅
 5. **Phase 3 (Wind Improvements)** - Polish ✅
+
+### Known Limitations
+
+- **No shadow casting**: `AlphaMode::Blend` doesn't support proper shadow casting
+- **Potential sorting artifacts**: Overlapping blades may have z-fighting in some cases
+- **Future improvement**: Investigate Bevy's prepass system for `AlphaMode::Mask` support

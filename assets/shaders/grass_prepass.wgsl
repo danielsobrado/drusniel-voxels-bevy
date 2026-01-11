@@ -2,6 +2,7 @@
 // Must apply same wind animation as main grass.wgsl shader
 
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
+#import bevy_pbr::prepass_io::VertexOutput
 
 struct GrassMaterial {
     base_color: vec4<f32>,
@@ -55,11 +56,6 @@ struct Vertex {
     @location(2) uv: vec2<f32>,
 };
 
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -93,15 +89,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     local_pos.y -= abs(wind_x + wind_z) * 0.1 * height_factor_smooth;
 
     // Transform to clip space
-    out.clip_position = mesh_position_local_to_clip(model, local_pos);
+    out.position = mesh_position_local_to_clip(model, local_pos);
+
+    // Output world position and normal for prepass
+    out.world_position = model * local_pos;
+    out.world_normal = normalize((model * vec4<f32>(vertex.normal, 0.0)).xyz);
     out.uv = vertex.uv;
 
     return out;
 }
-
-struct FragmentInput {
-    @location(0) uv: vec2<f32>,
-};
 
 // Alpha mask function - must match main shader exactly
 fn blade_alpha(uv: vec2<f32>) -> f32 {
@@ -114,11 +110,11 @@ fn blade_alpha(uv: vec2<f32>) -> f32 {
 }
 
 @fragment
-fn fragment(input: FragmentInput) {
+fn fragment(input: VertexOutput) {
     let alpha = blade_alpha(input.uv);
     // Discard fragments below alpha threshold (matches AlphaMode::Mask(0.5))
     if alpha < 0.5 {
         discard;
     }
-    // Prepass doesn't need to output color, just depth (implicit via clip_position)
+    // Prepass doesn't need to output color, just depth (implicit via position)
 }

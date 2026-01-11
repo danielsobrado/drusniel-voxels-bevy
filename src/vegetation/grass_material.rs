@@ -65,19 +65,10 @@ impl Material for GrassMaterial {
         "shaders/grass.wgsl".into()
     }
 
-    fn prepass_vertex_shader() -> ShaderRef {
-        // Custom prepass shader that applies same wind animation
-        "shaders/grass_prepass.wgsl".into()
-    }
-
-    fn prepass_fragment_shader() -> ShaderRef {
-        // Custom prepass shader that handles alpha mask discard
-        "shaders/grass_prepass.wgsl".into()
-    }
-
     fn alpha_mode(&self) -> AlphaMode {
-        // Alpha mask for grass blade silhouette - requires custom prepass shader
-        AlphaMode::Mask(0.5)
+        // Use Blend for transparency - avoids prepass complexity
+        // Grass has procedural alpha masking in fragment shader
+        AlphaMode::Blend
     }
 
     fn specialize(
@@ -119,8 +110,8 @@ pub struct GrassMaterialPlugin;
 impl Plugin for GrassMaterialPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GrassMaterial> {
-            prepass_enabled: true, // Custom prepass shader in grass_prepass.wgsl
-            shadows_enabled: true, // Grass can now cast/receive shadows
+            prepass_enabled: false, // Disabled - AlphaMode::Blend doesn't need prepass
+            shadows_enabled: false, // Blend mode doesn't cast shadows properly
             ..default()
         })
             .init_resource::<GrassMaterialHandles>()
