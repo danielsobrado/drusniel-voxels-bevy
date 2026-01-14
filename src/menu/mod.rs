@@ -58,6 +58,8 @@ impl Plugin for PauseMenuPlugin {
                     settings::handle_graphics_settings,
                     settings::handle_gameplay_settings,
                     settings::handle_atmosphere_settings,
+                    settings::handle_fog_settings,
+                    settings::handle_fog_sliders,
                     settings::handle_close_settings,
                     settings::handle_visual_sliders,
                 ),
@@ -106,9 +108,11 @@ impl Plugin for PauseMenuPlugin {
                     settings::update_twilight_backgrounds,
                     settings::update_night_backgrounds,
                     settings::update_fog_backgrounds,
+                    settings::update_fog_toggle_backgrounds,
                     settings::update_cycle_backgrounds,
                     multiplayer::handle_favorite_buttons,
                     settings::update_visual_slider_display,
+                    settings::update_fog_slider_display,
                 ),
             );
     }

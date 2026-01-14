@@ -118,7 +118,7 @@ pub fn setup_triplanar_material(
     });
 }
 
-/// Ensure all triplanar textures use Repeat address mode for seamless tiling
+/// Ensure all triplanar textures use Repeat address mode for seamless tiling with proper mipmaps
 pub fn configure_triplanar_textures(
     mat_handle: Option<Res<TriplanarMaterialHandle>>,
     materials: Res<Assets<TriplanarMaterial>>,
@@ -142,7 +142,7 @@ pub fn configure_triplanar_textures(
             for tex_opt in textures {
                 if let Some(tex_handle) = tex_opt {
                     if let Some(image) = images.get_mut(tex_handle) {
-                        // Set sampler to Repeat for tiling
+                        // Set sampler to Repeat for tiling with trilinear filtering and anisotropy
                         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
                             address_mode_u: ImageAddressMode::Repeat,
                             address_mode_v: ImageAddressMode::Repeat,
@@ -150,6 +150,8 @@ pub fn configure_triplanar_textures(
                             mag_filter: ImageFilterMode::Linear,
                             min_filter: ImageFilterMode::Linear,
                             mipmap_filter: ImageFilterMode::Linear,
+                            // Enable anisotropic filtering for terrain viewed at oblique angles
+                            anisotropy_clamp: 16,
                             ..default()
                         });
                     } else {
@@ -163,6 +165,7 @@ pub fn configure_triplanar_textures(
             // If some are not loaded, we wait for next frame
             if all_loaded {
                 *configured = true;
+                info!("Triplanar textures configured with anisotropic filtering");
             }
         }
     }

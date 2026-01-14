@@ -10,7 +10,9 @@ use crate::rendering::cinematic::CinematicCamera;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
+use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::fxaa::Fxaa;
+use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -156,8 +158,21 @@ pub fn spawn_camera(
         });
     }
 
-    if settings_state.anti_aliasing == AntiAliasing::Fxaa {
-        camera.insert(Fxaa::default());
+    match settings_state.anti_aliasing {
+        AntiAliasing::Fxaa => {
+            camera.insert(Fxaa::default());
+        }
+        AntiAliasing::Taa => {
+            camera.insert((
+                TemporalAntiAliasing::default(),
+                ContrastAdaptiveSharpening {
+                    enabled: true,
+                    sharpening_strength: 0.6,
+                    denoise: false,
+                },
+            ));
+        }
+        _ => {}
     }
 
     if fog_config.volumetric.enabled {
@@ -185,7 +200,10 @@ pub fn update_camera_anti_aliasing(
 
     for (entity, mut msaa) in camera_query.iter_mut() {
         let mut camera = commands.entity(entity);
+        // Remove all AA-related components before applying new ones
         camera.remove::<Fxaa>();
+        camera.remove::<TemporalAntiAliasing>();
+        camera.remove::<ContrastAdaptiveSharpening>();
 
         match settings_state.anti_aliasing {
             AntiAliasing::None => {
@@ -197,6 +215,17 @@ pub fn update_camera_anti_aliasing(
             }
             AntiAliasing::Msaa4x => {
                 *msaa = Msaa::Sample4;
+            }
+            AntiAliasing::Taa => {
+                *msaa = Msaa::Off;
+                camera.insert((
+                    TemporalAntiAliasing::default(),
+                    ContrastAdaptiveSharpening {
+                        enabled: true,
+                        sharpening_strength: 0.6,
+                        denoise: false,
+                    },
+                ));
             }
         }
     }

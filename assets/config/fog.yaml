@@ -2,6 +2,7 @@
 fog:
   # Distance fog (screen-space, hides chunk boundaries)
   distance:
+    enabled: true
     # Should be ~80% of cull_distance to hide loading
     visibility: 200.0
     # Start fading at this distance
@@ -24,11 +25,11 @@ fog:
     # Size in world units (should cover render distance)
     size: 512.0
     # Base density - keep LOW for god rays without darkening (0.01-0.03)
-    density: 0.015
+    density: 0.025
     # Light absorption - keep near zero to avoid darkening
     absorption: 0.005
     # Light scattering (higher = brighter rays)
-    scattering: 0.8
+    scattering: 0.9
     # Scattering asymmetry (0.2-0.4 for visible rays from most angles)
     scattering_asymmetry: 0.25
     

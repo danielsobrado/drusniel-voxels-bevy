@@ -23,6 +23,7 @@ pub mod cinematic;
 pub mod cinematic_config;
 pub mod cutscene;
 pub mod materials;
+pub mod mipmaps;
 pub mod photo_mode;
 pub mod plugin;
 pub mod props_material;

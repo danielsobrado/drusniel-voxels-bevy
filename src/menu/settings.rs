@@ -82,6 +82,7 @@ fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             spawn_settings_tab_button(tabs, font, "Graphics", SettingsTabButton::Graphics);
             spawn_settings_tab_button(tabs, font, "Gameplay", SettingsTabButton::Gameplay);
             spawn_settings_tab_button(tabs, font, "Atmosphere", SettingsTabButton::Atmosphere);
+            spawn_settings_tab_button(tabs, font, "Fog", SettingsTabButton::Fog);
             spawn_settings_tab_button(tabs, font, "Visual", SettingsTabButton::Visual);
         });
 }
@@ -126,6 +127,7 @@ fn spawn_settings_content(
     spawn_graphics_tab(dialog, font, ray_tracing_supported);
     spawn_gameplay_tab(dialog, font);
     spawn_atmosphere_tab(dialog, font);
+    spawn_fog_tab(dialog, font);
     spawn_visual_tab(dialog, font);
 }
 
@@ -188,6 +190,7 @@ fn spawn_graphics_tab(
                 spawn_graphics_option(options, font, "None", AntiAliasingOption(AntiAliasing::None));
                 spawn_graphics_option(options, font, "FXAA", AntiAliasingOption(AntiAliasing::Fxaa));
                 spawn_graphics_option(options, font, "MSAA 4x", AntiAliasingOption(AntiAliasing::Msaa4x));
+                spawn_graphics_option(options, font, "TAA", AntiAliasingOption(AntiAliasing::Taa));
             });
 
             if ray_tracing_supported {
@@ -323,12 +326,50 @@ fn spawn_atmosphere_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) 
                 spawn_graphics_option(options, font, "Balanced", NightBrightnessOption::Balanced);
                 spawn_graphics_option(options, font, "Bright", NightBrightnessOption::Bright);
             });
+        });
+}
 
-            spawn_option_row(content, font, "Fog", |options, font| {
+fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+    dialog
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                display: Display::None,
+                overflow: Overflow::scroll_y(),
+                max_height: Val::Px(400.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            FogTabContent,
+        ))
+        .with_children(|content| {
+            spawn_option_row(content, font, "Distance Fog", |options, font| {
+                spawn_graphics_option(options, font, "Off", DistanceFogOption(false));
+                spawn_graphics_option(options, font, "On", DistanceFogOption(true));
+            });
+
+            spawn_option_row(content, font, "Volumetric Fog", |options, font| {
+                spawn_graphics_option(options, font, "Off", VolumetricFogOption(false));
+                spawn_graphics_option(options, font, "On", VolumetricFogOption(true));
+            });
+
+            spawn_option_row(content, font, "Fog Preset", |options, font| {
                 spawn_graphics_option(options, font, "Clear", FogPresetOption::Clear);
                 spawn_graphics_option(options, font, "Balanced", FogPresetOption::Balanced);
                 spawn_graphics_option(options, font, "Misty", FogPresetOption::Misty);
             });
+
+            spawn_fog_slider_row(content, font, "Visibility", FogSlider::Visibility);
+            spawn_fog_slider_row(content, font, "Volume Density", FogSlider::VolumeDensity);
+            spawn_fog_slider_row(content, font, "Scattering", FogSlider::VolumeScattering);
+            spawn_fog_slider_row(content, font, "Absorption", FogSlider::VolumeAbsorption);
+            spawn_fog_slider_row(content, font, "Asymmetry", FogSlider::ScatteringAsymmetry);
+            spawn_fog_slider_row(content, font, "Volume Size", FogSlider::VolumeSize);
+            spawn_fog_slider_row(content, font, "Step Count", FogSlider::StepCount);
+            spawn_fog_slider_row(content, font, "Jitter", FogSlider::Jitter);
+            spawn_fog_slider_row(content, font, "Ambient", FogSlider::AmbientIntensity);
         });
 }
 
@@ -431,6 +472,75 @@ fn spawn_slider_row(
                     ..default()
                 },
                 SliderValueText(slider),
+            ));
+        });
+}
+
+fn spawn_fog_slider_row(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    slider: FogSlider,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            height: Val::Px(32.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Node {
+                    width: Val::Px(120.0),
+                    ..default()
+                },
+            ));
+
+            row.spawn((
+                Button,
+                Node {
+                    width: Val::Px(200.0),
+                    height: Val::Px(20.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 1.0)),
+                FogSliderTrack(slider),
+                RelativeCursorPosition::default(),
+            ))
+            .with_children(|track| {
+                track.spawn((
+                    Node {
+                        width: Val::Percent(50.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.3, 0.6, 0.9, 1.0)),
+                    FogSliderFill(slider),
+                ));
+            });
+
+            row.spawn((
+                Text::new("0.00"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.8, 0.8, 0.8, 1.0)),
+                Node {
+                    width: Val::Px(70.0),
+                    ..default()
+                },
+                FogSliderValueText(slider),
             ));
         });
 }
@@ -540,6 +650,7 @@ pub fn handle_settings_tabs(
             SettingsTabButton::Graphics => SettingsTab::Graphics,
             SettingsTabButton::Gameplay => SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => SettingsTab::Atmosphere,
+            SettingsTabButton::Fog => SettingsTab::Fog,
             SettingsTabButton::Visual => SettingsTab::Visual,
         };
     }
@@ -662,9 +773,7 @@ pub fn handle_atmosphere_settings(
     exposure_query: Query<(&Interaction, &ExposureOption), (Changed<Interaction>, With<Button>)>,
     twilight_query: Query<(&Interaction, &TwilightBandOption), (Changed<Interaction>, With<Button>)>,
     night_query: Query<(&Interaction, &NightBrightnessOption), (Changed<Interaction>, With<Button>)>,
-    fog_query: Query<(&Interaction, &FogPresetOption), (Changed<Interaction>, With<Button>)>,
     mut atmosphere: ResMut<AtmosphereSettings>,
-    mut fog_config: ResMut<FogConfig>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -770,6 +879,33 @@ pub fn handle_atmosphere_settings(
             };
         }
     }
+}
+
+/// Handles fog settings changes.
+pub fn handle_fog_settings(
+    state: Res<PauseMenuState>,
+    mut settings_state: ResMut<SettingsState>,
+    distance_query: Query<(&Interaction, &DistanceFogOption), (Changed<Interaction>, With<Button>)>,
+    volumetric_query: Query<(&Interaction, &VolumetricFogOption), (Changed<Interaction>, With<Button>)>,
+    fog_query: Query<(&Interaction, &FogPresetOption), (Changed<Interaction>, With<Button>)>,
+    mut atmosphere: ResMut<AtmosphereSettings>,
+    mut fog_config: ResMut<FogConfig>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, option) in distance_query.iter() {
+        if *interaction == Interaction::Pressed {
+            fog_config.distance.enabled = option.0;
+        }
+    }
+
+    for (interaction, option) in volumetric_query.iter() {
+        if *interaction == Interaction::Pressed {
+            fog_config.volumetric.enabled = option.0;
+        }
+    }
 
     for (interaction, option) in fog_query.iter() {
         if *interaction == Interaction::Pressed {
@@ -838,6 +974,7 @@ pub fn update_settings_tab_backgrounds(
             SettingsTabButton::Graphics => settings_state.active_tab == SettingsTab::Graphics,
             SettingsTabButton::Gameplay => settings_state.active_tab == SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => settings_state.active_tab == SettingsTab::Atmosphere,
+            SettingsTabButton::Fog => settings_state.active_tab == SettingsTab::Fog,
             SettingsTabButton::Visual => settings_state.active_tab == SettingsTab::Visual,
         };
         *background = if active { ACTIVE_BG } else { INACTIVE_BG }.into();
@@ -847,10 +984,11 @@ pub fn update_settings_tab_backgrounds(
 /// Updates settings content visibility based on active tab.
 pub fn update_settings_content_visibility(
     settings_state: Res<SettingsState>,
-    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
-    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
-    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<VisualTabContent>)>,
-    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>)>,
+    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut fog_query: Query<&mut Node, (With<FogTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
+    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>)>,
 ) {
     if settings_state.dialog_root.is_none() {
         return;
@@ -874,6 +1012,14 @@ pub fn update_settings_content_visibility(
 
     for mut node in atmosphere_query.iter_mut() {
         node.display = if settings_state.active_tab == SettingsTab::Atmosphere {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    for mut node in fog_query.iter_mut() {
+        node.display = if settings_state.active_tab == SettingsTab::Fog {
             Display::Flex
         } else {
             Display::None
@@ -1154,6 +1300,77 @@ pub fn update_fog_backgrounds(
     }
 }
 
+/// Updates fog toggle option backgrounds.
+pub fn update_fog_toggle_backgrounds(
+    settings_state: Res<SettingsState>,
+    fog_config: Res<FogConfig>,
+    mut queries: ParamSet<(
+        Query<(&DistanceFogOption, &mut BackgroundColor), Without<VolumetricFogOption>>,
+        Query<(&VolumetricFogOption, &mut BackgroundColor), Without<DistanceFogOption>>,
+    )>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (option, mut background) in queries.p0().iter_mut() {
+        *background = if fog_config.distance.enabled == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+
+    for (option, mut background) in queries.p1().iter_mut() {
+        *background = if fog_config.volumetric.enabled == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+}
+
+// ============================================================================
+// Fog Settings Slider Systems
+// ============================================================================
+
+/// Handles slider interactions for fog settings.
+pub fn handle_fog_sliders(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut fog_config: ResMut<FogConfig>,
+    slider_query: Query<(&Interaction, &FogSliderTrack, &RelativeCursorPosition), With<Button>>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, slider_track, relative_cursor) in slider_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let Some(relative_pos) = relative_cursor.normalized else { continue };
+        let normalized = relative_pos.x.clamp(0.0, 1.0);
+        apply_fog_slider(&mut fog_config, slider_track.0, normalized);
+    }
+}
+
+/// Updates fog slider fill widths and value text based on current fog settings.
+pub fn update_fog_slider_display(
+    fog_config: Res<FogConfig>,
+    settings_state: Res<SettingsState>,
+    mut fill_query: Query<(&FogSliderFill, &mut Node)>,
+    mut text_query: Query<(&FogSliderValueText, &mut Text)>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (fill, mut node) in fill_query.iter_mut() {
+        let (min, max) = fog_slider_bounds(fill.0);
+        let value = fog_slider_value(&fog_config, fill.0);
+        let normalized = inv_lerp(min, max, value);
+        node.width = Val::Percent(normalized * 100.0);
+    }
+
+    for (text_marker, mut text) in text_query.iter_mut() {
+        **text = format_fog_slider_value(&fog_config, text_marker.0);
+    }
+}
+
 // ============================================================================
 // Visual Settings Slider Systems
 // ============================================================================
@@ -1245,6 +1462,85 @@ pub fn update_visual_slider_display(
             VisualSlider::SkyboxBrightness => format!("{:.0}", visual_settings.skybox_brightness),
         };
         **text = value_str;
+    }
+}
+
+fn fog_slider_bounds(slider: FogSlider) -> (f32, f32) {
+    match slider {
+        FogSlider::Visibility => (80.0, 400.0),
+        FogSlider::VolumeDensity => (0.0, 0.12),
+        FogSlider::VolumeScattering => (0.1, 1.0),
+        FogSlider::VolumeAbsorption => (0.0, 0.08),
+        FogSlider::ScatteringAsymmetry => (0.0, 0.9),
+        FogSlider::VolumeSize => (128.0, 1024.0),
+        FogSlider::StepCount => (16.0, 128.0),
+        FogSlider::Jitter => (0.0, 1.0),
+        FogSlider::AmbientIntensity => (0.0, 0.25),
+    }
+}
+
+fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
+    match slider {
+        FogSlider::Visibility => config.distance.visibility,
+        FogSlider::VolumeDensity => config.volume.density,
+        FogSlider::VolumeScattering => config.volume.scattering,
+        FogSlider::VolumeAbsorption => config.volume.absorption,
+        FogSlider::ScatteringAsymmetry => config.volume.scattering_asymmetry,
+        FogSlider::VolumeSize => config.volume.size,
+        FogSlider::StepCount => config.volumetric.step_count as f32,
+        FogSlider::Jitter => config.volumetric.jitter,
+        FogSlider::AmbientIntensity => config.volumetric.ambient_intensity,
+    }
+}
+
+fn apply_fog_slider(config: &mut FogConfig, slider: FogSlider, normalized: f32) {
+    let (min, max) = fog_slider_bounds(slider);
+    let value = lerp(min, max, normalized).clamp(min, max);
+
+    match slider {
+        FogSlider::Visibility => {
+            config.distance.visibility = value;
+        }
+        FogSlider::VolumeDensity => {
+            config.volume.density = value;
+        }
+        FogSlider::VolumeScattering => {
+            config.volume.scattering = value;
+        }
+        FogSlider::VolumeAbsorption => {
+            config.volume.absorption = value;
+        }
+        FogSlider::ScatteringAsymmetry => {
+            config.volume.scattering_asymmetry = value;
+        }
+        FogSlider::VolumeSize => {
+            let snapped = (value / 16.0).round() * 16.0;
+            config.volume.size = snapped.clamp(min, max);
+        }
+        FogSlider::StepCount => {
+            let snapped = (value / 16.0).round() * 16.0;
+            config.volumetric.step_count = snapped.clamp(min, max) as u32;
+        }
+        FogSlider::Jitter => {
+            config.volumetric.jitter = value;
+        }
+        FogSlider::AmbientIntensity => {
+            config.volumetric.ambient_intensity = value;
+        }
+    }
+}
+
+fn format_fog_slider_value(config: &FogConfig, slider: FogSlider) -> String {
+    match slider {
+        FogSlider::Visibility => format!("{:.0}", config.distance.visibility),
+        FogSlider::VolumeDensity => format!("{:.3}", config.volume.density),
+        FogSlider::VolumeScattering => format!("{:.2}", config.volume.scattering),
+        FogSlider::VolumeAbsorption => format!("{:.3}", config.volume.absorption),
+        FogSlider::ScatteringAsymmetry => format!("{:.2}", config.volume.scattering_asymmetry),
+        FogSlider::VolumeSize => format!("{:.0}", config.volume.size),
+        FogSlider::StepCount => format!("{}", config.volumetric.step_count),
+        FogSlider::Jitter => format!("{:.2}", config.volumetric.jitter),
+        FogSlider::AmbientIntensity => format!("{:.2}", config.volumetric.ambient_intensity),
     }
 }
 

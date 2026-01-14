@@ -11,6 +11,8 @@ pub struct FogConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct DistanceFogConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub visibility: f32,
     pub start: f32,
     pub end: f32,
@@ -52,6 +54,7 @@ impl Default for FogConfig {
     fn default() -> Self {
         Self {
             distance: DistanceFogConfig {
+                enabled: true,
                 visibility: 200.0,
                 start: 80.0,
                 end: 220.0,
@@ -91,4 +94,8 @@ impl Default for FogConfig {
             },
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }

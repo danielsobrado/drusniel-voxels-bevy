@@ -198,6 +198,7 @@ pub(crate) enum SettingsTabButton {
     Graphics,
     Gameplay,
     Atmosphere,
+    Fog,
     Visual,
 }
 
@@ -231,6 +232,7 @@ pub enum SettingsTab {
     Graphics,
     Gameplay,
     Atmosphere,
+    Fog,
     Visual,
 }
 
@@ -242,6 +244,9 @@ pub(crate) struct GameplayTabContent;
 
 #[derive(Component)]
 pub(crate) struct AtmosphereTabContent;
+
+#[derive(Component)]
+pub(crate) struct FogTabContent;
 
 #[derive(Component)]
 pub(crate) struct VisualTabContent;
@@ -258,6 +263,8 @@ pub enum AntiAliasing {
     None,
     Fxaa,
     Msaa4x,
+    /// Temporal Anti-Aliasing with Contrast Adaptive Sharpening to counter blur
+    Taa,
 }
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
@@ -329,6 +336,12 @@ pub enum FogPresetOption {
     Balanced,
     Misty,
 }
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct DistanceFogOption(pub bool);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct VolumetricFogOption(pub bool);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub enum WalkSpeedPreset {
@@ -462,3 +475,33 @@ pub struct SliderTrack(pub VisualSlider);
 /// Component for the slider fill (the colored portion)
 #[derive(Component)]
 pub struct SliderFill(pub VisualSlider);
+
+// ============================================================================
+// Fog Settings Types
+// ============================================================================
+
+/// Component marker for fog setting sliders
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum FogSlider {
+    Visibility,
+    VolumeDensity,
+    VolumeScattering,
+    VolumeAbsorption,
+    ScatteringAsymmetry,
+    VolumeSize,
+    StepCount,
+    Jitter,
+    AmbientIntensity,
+}
+
+/// Component for fog slider value text display
+#[derive(Component)]
+pub struct FogSliderValueText(pub FogSlider);
+
+/// Component for the fog slider track (the clickable background)
+#[derive(Component)]
+pub struct FogSliderTrack(pub FogSlider);
+
+/// Component for the fog slider fill (the colored portion)
+#[derive(Component)]
+pub struct FogSliderFill(pub FogSlider);

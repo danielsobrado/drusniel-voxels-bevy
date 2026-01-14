@@ -26,6 +26,7 @@ impl Plugin for FogPlugin {
             .add_systems(
                 Update,
                 (
+                    sync_fog_toggles,
                     update_fog_from_atmosphere,
                     follow_camera_fog_volume,
                 ).chain(),
@@ -48,27 +49,31 @@ pub struct AtmosphereSample {
     pub sun_altitude: f32,
 }
 
+fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
+    commands.spawn((
+        Name::new("GlobalFogVolume"),
+        GlobalFogVolume,
+        FogVolume {
+            fog_color: Color::WHITE,
+            density_factor: config.volume.density,
+            density_texture: None,
+            density_texture_offset: Vec3::ZERO,
+            absorption: config.volume.absorption,
+            scattering: config.volume.scattering,
+            scattering_asymmetry: config.volume.scattering_asymmetry,
+            light_tint: Color::WHITE,
+            light_intensity: 1.0,
+        },
+        Transform::from_scale(Vec3::splat(config.volume.size)),
+        Visibility::Visible,
+    ));
+}
+
 fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
     if config.volumetric.enabled {
         // Spawn global fog volume centered at origin
         // Will be repositioned to follow camera
-        commands.spawn((
-            Name::new("GlobalFogVolume"),
-            GlobalFogVolume,
-            FogVolume {
-                fog_color: Color::WHITE,
-                density_factor: config.volume.density,
-                density_texture: None,
-                density_texture_offset: Vec3::ZERO,
-                absorption: config.volume.absorption,
-                scattering: config.volume.scattering,
-                scattering_asymmetry: config.volume.scattering_asymmetry,
-                light_tint: Color::WHITE,
-                light_intensity: 1.0,
-            },
-            Transform::from_scale(Vec3::splat(config.volume.size)),
-            Visibility::Visible,
-        ));
+        spawn_global_fog_volume(&mut commands, &config);
     }
     
     // Initialize atmosphere sample resource
@@ -77,32 +82,83 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
 
 /// Call this when spawning the main camera to add fog components
 pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
+    (FogCamera, distance_fog_component(config))
+}
+
+fn distance_fog_component(config: &FogConfig) -> DistanceFog {
     let colors = &config.colors.day;
     let base_density = visibility_density(config.distance.visibility);
-    
-    (
-        FogCamera,
-        // Screen-space distance fog
-        DistanceFog {
-            color: Color::srgba(colors.fog[0], colors.fog[1], colors.fog[2], colors.fog[3]),
-            directional_light_color: Color::srgba(
-                colors.directional[0],
-                colors.directional[1],
-                colors.directional[2],
-                0.5,
-            ),
-            directional_light_exponent: 30.0,
-            // Exponential squared gives a softer, more natural haze.
-            falloff: FogFalloff::ExponentialSquared {
-                density: base_density,
-            },
+
+    // Screen-space distance fog
+    DistanceFog {
+        color: Color::srgba(colors.fog[0], colors.fog[1], colors.fog[2], colors.fog[3]),
+        directional_light_color: Color::srgba(
+            colors.directional[0],
+            colors.directional[1],
+            colors.directional[2],
+            0.5,
+        ),
+        directional_light_exponent: 30.0,
+        // Exponential squared gives a softer, more natural haze.
+        falloff: FogFalloff::ExponentialSquared {
+            density: base_density,
         },
-    )
+    }
 }
 
 /// Call this when spawning the sun to enable volumetric light
 pub fn sun_volumetric_components() -> VolumetricLight {
     VolumetricLight
+}
+
+fn volumetric_fog_component(config: &FogConfig) -> VolumetricFog {
+    VolumetricFog {
+        step_count: config.volumetric.step_count,
+        jitter: config.volumetric.jitter,
+        ambient_intensity: config.volumetric.ambient_intensity,
+        ambient_color: Color::WHITE,
+    }
+}
+
+fn sync_fog_toggles(
+    mut commands: Commands,
+    config: Res<FogConfig>,
+    camera_query: Query<(Entity, Option<&DistanceFog>, Option<&VolumetricFog>), With<FogCamera>>,
+    volume_query: Query<Entity, With<GlobalFogVolume>>,
+) {
+    if !config.is_changed() {
+        return;
+    }
+
+    for (entity, distance_fog, volumetric_fog) in camera_query.iter() {
+        let mut camera = commands.entity(entity);
+
+        if config.distance.enabled {
+            if distance_fog.is_none() {
+                camera.insert(distance_fog_component(&config));
+            }
+        } else if distance_fog.is_some() {
+            camera.remove::<DistanceFog>();
+        }
+
+        if config.volumetric.enabled {
+            if volumetric_fog.is_none() {
+                camera.insert(volumetric_fog_component(&config));
+            }
+        } else if volumetric_fog.is_some() {
+            camera.remove::<VolumetricFog>();
+        }
+    }
+
+    if config.volumetric.enabled {
+        if volume_query.iter().next().is_none() {
+            spawn_global_fog_volume(&mut commands, &config);
+        }
+    } else {
+        for entity in volume_query.iter() {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 /// Update fog colors based on time-of-day from AtmosphereSettings
@@ -189,6 +245,8 @@ fn update_fog_from_atmosphere(
     for mut volumetric in volumetric_query.iter_mut() {
         volumetric.ambient_color = ambient.color;
         volumetric.ambient_intensity = ambient_intensity;
+        volumetric.step_count = config.volumetric.step_count;
+        volumetric.jitter = config.volumetric.jitter;
     }
     
     // Update volumetric fog volume
@@ -215,6 +273,7 @@ fn update_fog_from_atmosphere(
 
 /// Keep fog volume centered on camera
 fn follow_camera_fog_volume(
+    config: Res<FogConfig>,
     camera_query: Query<&Transform, With<FogCamera>>,
     mut volume_query: Query<&mut Transform, (With<GlobalFogVolume>, Without<FogCamera>)>,
 ) {
@@ -225,6 +284,10 @@ fn follow_camera_fog_volume(
         tf.translation.x = camera_tf.translation.x;
         tf.translation.y = camera_tf.translation.y;
         tf.translation.z = camera_tf.translation.z;
+
+        if config.is_changed() {
+            tf.scale = Vec3::splat(config.volume.size);
+        }
     }
 }
 
@@ -281,4 +344,3 @@ fn load_fog_config() -> Result<FogConfig, Box<dyn std::error::Error>> {
     let config_file: FogConfigFile = serde_yaml::from_str(&config_str)?;
     Ok(config_file.fog)
 }
-
