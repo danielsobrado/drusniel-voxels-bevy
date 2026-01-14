@@ -1,0 +1,43 @@
+terrain:
+  # Vertical range (world is 4 chunks = 64 voxels tall, Y: 0-63)
+  height:
+    min: 1            # Minimum terrain height
+    max: 55           # Maximum terrain height (leave room for sky)
+    sea_level: 18
+
+  # Base continental shape
+  continent:
+    scale: 0.001      # Very large features
+    amplitude: 12.0   # Scaled for 64-voxel world
+
+  # Mountain ranges
+  mountains:
+    scale: 0.008
+    amplitude: 30.0   # Scaled for 64-voxel world
+    octaves: 6
+    persistence: 0.48
+    lacunarity: 2.3
+    ridge_power: 1.8  # Sharper peaks (1.0 = smooth, 2.0+ = sharp ridges)
+
+  # Hills and local variation
+  hills:
+    scale: 0.025
+    amplitude: 8.0    # Scaled for 64-voxel world
+    octaves: 4
+    persistence: 0.5
+    lacunarity: 2.0
+
+  # Fine detail
+  detail:
+    scale: 0.1
+    amplitude: 2.0
+    octaves: 3
+    persistence: 0.5
+    lacunarity: 2.0
+
+  # Biome influence on height
+  biome_modifiers:
+    plains: 0.3       # Flatten
+    forest: 0.6
+    mountains: 1.5    # Amplify
+    desert: 0.4

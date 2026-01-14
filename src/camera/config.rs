@@ -43,7 +43,7 @@ impl Default for CameraConfig {
                 pitch_max: 1.5,
                 reset_yaw: -2.35,
                 reset_pitch: -0.4,
-                eye_height: 1.6,
+                eye_height: 1.7,
             },
             rendering: CameraRenderingConfig {
                 bloom_intensity: 0.06,

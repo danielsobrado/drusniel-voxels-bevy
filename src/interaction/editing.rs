@@ -118,6 +118,10 @@ pub fn start_dragging_block(
     }
 
     if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type) {
+        if !super::can_modify_at(pos) {
+            return;
+        }
+
         if voxel_type == VoxelType::Bedrock {
             return;
         }
@@ -156,6 +160,12 @@ pub fn finish_dragging_block(
             mark_neighbors_dirty(&mut world, dragged.original_position);
             return;
         };
+
+        if !super::can_modify_at(grounded_pos) {
+            world.set_voxel(dragged.original_position, dragged.block_type);
+            mark_neighbors_dirty(&mut world, dragged.original_position);
+            return;
+        }
 
         if let Ok(camera_transform) = camera_query.single() {
             let player_block = IVec3::new(
@@ -246,6 +256,10 @@ pub fn delete_block_in_edit_mode(
     if mouse.just_pressed(MouseButton::Left) {
         if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type)
         {
+            if !super::can_modify_at(pos) {
+                return;
+            }
+
             if voxel_type != VoxelType::Bedrock {
                 world.set_voxel(pos, VoxelType::Air);
                 mark_neighbors_dirty(&mut world, pos);

@@ -28,6 +28,7 @@ use voxel_builder::viewmodel::PickaxePlugin;
 use voxel_builder::voxel::plugin::VoxelPlugin;
 use voxel_builder::debug_ui::DebugUiPlugin;
 use voxel_builder::particles::ParticlePlugin;
+use voxel_builder::terrain::TerrainToolsPlugin;
 
 /// Pre-flight GPU detection to query actual device limits before Bevy initializes.
 ///
@@ -242,5 +243,6 @@ fn main() {
         .add_plugins(EntityPlugin)
         .add_plugins(DebugUiPlugin)
         .add_plugins(ParticlePlugin)
+        .add_plugins(TerrainToolsPlugin)
         .run();
 }

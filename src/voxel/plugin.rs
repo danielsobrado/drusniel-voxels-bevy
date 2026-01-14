@@ -7,7 +7,7 @@
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
-    CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32,
+    BEDROCK_DEPTH, CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32,
     // LOD
     DEFAULT_HIGH_DETAIL_DISTANCE, DEFAULT_CULL_DISTANCE,
     INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
@@ -121,6 +121,49 @@ fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistenc
     }
 }
 
+fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
+    let mut changed = false;
+
+    for (chunk_pos, chunk) in world.chunk_entries_mut() {
+        let chunk_min_y = chunk_pos.y * CHUNK_SIZE_I32;
+        let chunk_max_y = chunk_min_y + CHUNK_SIZE_I32 - 1;
+
+        if BEDROCK_DEPTH < chunk_min_y {
+            continue;
+        }
+
+        let max_local_y = if BEDROCK_DEPTH >= chunk_max_y {
+            CHUNK_SIZE_I32 - 1
+        } else {
+            BEDROCK_DEPTH - chunk_min_y
+        };
+
+        if max_local_y < 0 {
+            continue;
+        }
+
+        let mut chunk_changed = false;
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for y in 0..=max_local_y as u32 {
+                    let local = UVec3::new(x as u32, y, z as u32);
+                    if chunk.get(local) != VoxelType::Bedrock {
+                        chunk.set(local, VoxelType::Bedrock);
+                        chunk_changed = true;
+                    }
+                }
+            }
+        }
+
+        if chunk_changed {
+            chunk.mark_dirty();
+            changed = true;
+        }
+    }
+
+    changed
+}
+
 /// Generates a single chunk using the terrain generator.
 fn generate_chunk(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chunk, ChunkStats) {
     let mut chunk = Chunk::new(chunk_pos);
@@ -227,6 +270,10 @@ fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
 fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<WorldPersistence>) {
     // Try to load existing world
     if try_load_world(&mut world, &persistence_settings) {
+        if enforce_bedrock_floor(&mut world) {
+            info!("Enforced bedrock floor at y={}", BEDROCK_DEPTH);
+            try_save_world(&world, &persistence_settings);
+        }
         return;
     }
 

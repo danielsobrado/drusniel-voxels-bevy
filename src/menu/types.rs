@@ -198,6 +198,7 @@ pub(crate) enum SettingsTabButton {
     Graphics,
     Gameplay,
     Atmosphere,
+    Visual,
 }
 
 #[derive(Component)]
@@ -230,6 +231,7 @@ pub enum SettingsTab {
     Graphics,
     Gameplay,
     Atmosphere,
+    Visual,
 }
 
 #[derive(Component)]
@@ -240,6 +242,9 @@ pub(crate) struct GameplayTabContent;
 
 #[derive(Component)]
 pub(crate) struct AtmosphereTabContent;
+
+#[derive(Component)]
+pub(crate) struct VisualTabContent;
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub enum GraphicsQuality {
@@ -392,3 +397,68 @@ impl FloatHeightPreset {
         }
     }
 }
+
+// ============================================================================
+// Visual Settings Types
+// ============================================================================
+
+/// Resource for visual/color grading settings that can be adjusted at runtime
+#[derive(Resource, Clone)]
+pub struct VisualSettings {
+    /// Color temperature (-0.5 to 0.5, 0 = neutral)
+    pub temperature: f32,
+    /// Color saturation (0.5 to 2.0, 1.0 = normal)
+    pub saturation: f32,
+    /// Exposure adjustment (-1.0 to 1.0, 0 = neutral)
+    pub exposure: f32,
+    /// Midtones gamma (0.5 to 1.5, 1.0 = normal)
+    pub gamma: f32,
+    /// Highlights gain (0.5 to 1.5, 1.0 = normal)
+    pub highlights_gain: f32,
+    /// Sun warmth (0.0 to 1.0, affects sun color)
+    pub sun_warmth: f32,
+    /// Sun illuminance (5000 to 50000 lux)
+    pub illuminance: f32,
+    /// Skybox brightness (1000 to 10000)
+    pub skybox_brightness: f32,
+}
+
+impl Default for VisualSettings {
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            saturation: 1.15,
+            exposure: -0.2,
+            gamma: 0.95,
+            highlights_gain: 0.9,
+            sun_warmth: 0.05,
+            illuminance: 20_000.0,
+            skybox_brightness: 4000.0,
+        }
+    }
+}
+
+/// Component marker for visual setting sliders
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum VisualSlider {
+    Temperature,
+    Saturation,
+    Exposure,
+    Gamma,
+    HighlightsGain,
+    SunWarmth,
+    Illuminance,
+    SkyboxBrightness,
+}
+
+/// Component for slider value text display
+#[derive(Component)]
+pub struct SliderValueText(pub VisualSlider);
+
+/// Component for the slider track (the clickable background)
+#[derive(Component)]
+pub struct SliderTrack(pub VisualSlider);
+
+/// Component for the slider fill (the colored portion)
+#[derive(Component)]
+pub struct SliderFill(pub VisualSlider);

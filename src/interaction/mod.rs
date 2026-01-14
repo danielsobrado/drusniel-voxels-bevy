@@ -20,7 +20,7 @@ pub use error::{BreakError, CombatError, DragError, LastGameplayError, Placement
 pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity};
 
 use crate::camera::controller::PlayerCamera;
-use crate::constants::ATTACK_DAMAGE;
+use crate::constants::{ATTACK_DAMAGE, BEDROCK_DEPTH};
 use crate::entity::Health;
 use crate::menu::PauseMenuState;
 use crate::particles::{ParticleType, SpawnParticleEvent};
@@ -162,6 +162,10 @@ fn try_break_block(
     let pos = targeted_block.position.ok_or(BreakError::NoTarget)?;
     let voxel_type = targeted_block.voxel_type.ok_or(BreakError::NoTarget)?;
 
+    if !can_modify_at(pos) {
+        return Err(BreakError::Unbreakable { position: pos });
+    }
+
     if voxel_type == VoxelType::Bedrock {
         return Err(BreakError::Unbreakable { position: pos });
     }
@@ -229,6 +233,13 @@ fn try_place_block(
 
     let place_pos = block_pos + normal;
 
+    if !can_modify_at(place_pos) {
+        return Err(PlacementError::InvalidPosition {
+            position: place_pos,
+            reason: "Below bedrock depth".to_string(),
+        });
+    }
+
     // Check if player is blocking the position
     if is_player_blocking_position(camera_query, place_pos) {
         return Err(PlacementError::PlayerBlocking { position: place_pos });
@@ -268,6 +279,10 @@ fn is_player_blocking_position(
     );
 
     place_pos == player_block || place_pos == player_feet
+}
+
+fn can_modify_at(world_pos: IVec3) -> bool {
+    world_pos.y > BEDROCK_DEPTH
 }
 
 // ============================================================================

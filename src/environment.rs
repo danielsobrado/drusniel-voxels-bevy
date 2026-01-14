@@ -76,20 +76,21 @@ impl Plugin for AtmospherePlugin {
                 Startup,
                 (setup_atmosphere, seed_atmosphere.after(setup_atmosphere)),
             )
-            .add_systems(Update, animate_atmosphere);
+            .add_systems(Update, (animate_atmosphere, apply_visual_settings_to_sun));
     }
 }
 
 fn setup_atmosphere(mut commands: Commands) {
-    // Sun directional light with warmer color and tuned settings
+    // Sun directional light with tuned settings
     commands.spawn((
         DirectionalLight {
-            color: Color::srgb(1.0, 0.98, 0.94),
+            color: Color::srgb(1.0, 0.98, 0.95),  // Slightly warm white sun
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
-            illuminance: 34_000.0,
+            // Tuned for balanced color rendering
+            illuminance: 20_000.0,
             shadows_enabled: true,
-            shadow_depth_bias: 0.02,
-            shadow_normal_bias: 1.2,
+            shadow_depth_bias: 0.04,
+            shadow_normal_bias: 1.8,
             ..default()
         },
         Transform::from_translation(Vec3::ZERO)
@@ -202,8 +203,9 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     // Lighting strength based on altitude (tuned to match the older v0.3 look).
     let sun_strength = lerp(0.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
     let moon_strength = lerp(400.0, 60.0, daylight) * night_factor;
+    // Higher ambient light to soften shadows
     let ambient_strength =
-        lerp(200.0, 800.0, daylight) * (1.0 + horizon_warmth * 0.2);
+        lerp(600.0, 2500.0, daylight) * (1.0 + horizon_warmth * 0.2);
     let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
         .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);
@@ -258,4 +260,25 @@ fn twilight_factor(altitude: f32, band_width: f32) -> f32 {
 fn henyey_greenstein(g: f32, cos_theta: f32) -> f32 {
     let denom = 1.0 + g * g - 2.0 * g * cos_theta;
     (1.0 - g * g) / (denom.powf(1.5) + f32::EPSILON)
+}
+
+use crate::menu::VisualSettings;
+
+/// System to apply visual settings to sun lighting
+pub fn apply_visual_settings_to_sun(
+    visual_settings: Res<VisualSettings>,
+    mut sun_query: Query<&mut DirectionalLight, With<Sun>>,
+) {
+    if !visual_settings.is_changed() {
+        return;
+    }
+
+    for mut light in sun_query.iter_mut() {
+        // Apply sun warmth - interpolate from neutral white to warm
+        let warmth = visual_settings.sun_warmth;
+        light.color = Color::srgb(1.0, 1.0 - warmth * 0.15, 1.0 - warmth * 0.5);
+        
+        // Apply illuminance
+        light.illuminance = visual_settings.illuminance;
+    }
 }

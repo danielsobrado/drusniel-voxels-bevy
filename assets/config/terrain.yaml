@@ -1,0 +1,4 @@
+terrain:
+  bedrock_depth: 0
+  bedrock_blend: 2.0
+  bedrock_material: stone

@@ -13,6 +13,7 @@ pub mod network;
 pub mod physics;
 pub mod props;
 pub mod rendering;
+pub mod terrain;
 pub mod vegetation;
 pub mod viewmodel;
 pub mod voxel;

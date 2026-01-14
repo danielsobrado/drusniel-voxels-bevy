@@ -3,11 +3,13 @@ use crate::camera::config::CameraConfig;
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
-use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering};
+use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering, VisualSettings};
 use crate::player::Player;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::cinematic::CinematicCamera;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::voxel::types::Voxel;
+use crate::voxel::world::VoxelWorld;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
@@ -18,7 +20,7 @@ use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection, Hdr};
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_water::ImageReformat;
 
@@ -78,6 +80,10 @@ pub fn spawn_camera(
     let mut camera = commands.spawn((
         Camera3d::default(),
         Camera::default(),
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.02,
+            ..default()
+        }),
         match settings_state.anti_aliasing {
             AntiAliasing::Msaa4x => Msaa::Sample4,
             _ => Msaa::Off,
@@ -98,7 +104,7 @@ pub fn spawn_camera(
         fog_camera_components(&fog_config),
         Skybox {
             image: skybox_image,
-            brightness: 8000.0,
+            brightness: 4000.0,  // Balanced skybox brightness
             rotation: Quat::IDENTITY,
         },
         CinematicCamera,
@@ -106,7 +112,42 @@ pub fn spawn_camera(
 
     // Keep HDR + tonemapping enabled on all GPUs; otherwise custom materials that output HDR-linear
     // end up looking dark due to missing exposure/tonemapping.
-    camera.insert((Hdr, Tonemapping::AcesFitted, DebandDither::Enabled));
+    camera.insert((
+        Hdr,
+        Tonemapping::TonyMcMapface,  // Best for stylized fantasy games like Valheim
+        DebandDither::Enabled,
+        ColorGrading {
+            global: ColorGradingGlobal {
+                exposure: -0.2,          // Slightly darker overall
+                temperature: 0.0,        // Neutral temperature
+                tint: 0.0,               // Neutral tint
+                hue: 0.0,
+                post_saturation: 1.15,   // Slightly vibrant colors
+                ..default()
+            },
+            shadows: ColorGradingSection {
+                saturation: 1.05,
+                contrast: 1.05,
+                gamma: 1.0,
+                gain: 1.0,
+                lift: -0.02,  // Slightly darker shadows
+            },
+            midtones: ColorGradingSection {
+                saturation: 1.1,
+                contrast: 1.05,
+                gamma: 0.95,  // Slightly darker midtones
+                gain: 1.0,
+                lift: 0.0,
+            },
+            highlights: ColorGradingSection {
+                saturation: 0.95,
+                contrast: 1.0,
+                gamma: 1.0,
+                gain: 0.9,    // Reduce blown-out highlights
+                lift: 0.0,
+            },
+        },
+    ));
     if !capabilities.integrated_gpu {
         camera.insert(Bloom {
             intensity: camera_config.rendering.bloom_intensity,
@@ -170,9 +211,12 @@ pub fn update_camera_exposure_from_atmosphere(
     }
 
     let multiplier = atmosphere.exposure.max(0.001);
-    // Treat the in-game "exposure" slider as a direct multiplier on top of Bevy's baseline (BLENDER) exposure.
+    // Treat the in-game "exposure" slider as a direct multiplier on top of Bevy's baseline exposure.
     // Higher multiplier -> brighter image -> lower EV.
-    let ev100 = (Exposure::EV100_BLENDER - multiplier.log2()).clamp(0.0, 20.0);
+    // Use EV100 around 9.0-10.0 for natural outdoor lighting (sunny day ~ EV 15, overcast ~ EV 12)
+    // Base EV of 9.5 provides a good balance for stylized games
+    let base_ev = 9.5;
+    let ev100 = (base_ev - multiplier.log2()).clamp(0.0, 20.0);
 
     for mut exposure in cameras.iter_mut() {
         exposure.ev100 = ev100;
@@ -259,6 +303,7 @@ pub fn player_camera_system(
     map_state: Res<MapState>,
     inventory_ui: Res<InventoryUiState>,
     camera_config: Res<CameraConfig>,
+    world: Res<VoxelWorld>,
     mut cursor_captured: Local<bool>,
 ) {
     let Ok((window, mut cursor_options)) = windows.single_mut() else {
@@ -347,7 +392,7 @@ pub fn player_camera_system(
         // Movement based on mode
         match camera.mode {
             CameraMode::Fly => {
-                fly_movement(&mut transform, &camera, &keys, dt, &camera_config);
+                fly_movement(&mut transform, &camera, &keys, dt, &camera_config, &world);
             }
             CameraMode::Walk => {
                 // Walk mode is handled by the player controller.
@@ -362,6 +407,7 @@ fn fly_movement(
     keys: &Res<ButtonInput<KeyCode>>,
     dt: f32,
     config: &CameraConfig,
+    world: &VoxelWorld,
 ) {
     let mut velocity = Vec3::ZERO;
     let local_z = transform.local_z();
@@ -393,7 +439,40 @@ fn fly_movement(
         camera.fly_speed
     };
 
-    transform.translation += velocity.normalize_or_zero() * speed * dt;
+    let desired = transform.translation + velocity.normalize_or_zero() * speed * dt;
+    if !camera_intersects_solid(world, desired) {
+        transform.translation = desired;
+    }
+}
+
+const CAMERA_COLLISION_RADIUS: f32 = 0.2;
+
+fn camera_intersects_solid(world: &VoxelWorld, position: Vec3) -> bool {
+    let offsets = [
+        Vec3::ZERO,
+        Vec3::X * CAMERA_COLLISION_RADIUS,
+        Vec3::NEG_X * CAMERA_COLLISION_RADIUS,
+        Vec3::Y * CAMERA_COLLISION_RADIUS,
+        Vec3::NEG_Y * CAMERA_COLLISION_RADIUS,
+        Vec3::Z * CAMERA_COLLISION_RADIUS,
+        Vec3::NEG_Z * CAMERA_COLLISION_RADIUS,
+    ];
+
+    for offset in offsets {
+        let check = position + offset;
+        let voxel_pos = IVec3::new(
+            check.x.floor() as i32,
+            check.y.floor() as i32,
+            check.z.floor() as i32,
+        );
+        if let Some(voxel) = world.get_voxel(voxel_pos) {
+            if voxel.is_solid() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub fn camera_follow_player(
@@ -421,4 +500,27 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// System to apply visual settings to camera color grading and skybox
+pub fn apply_visual_settings(
+    visual_settings: Res<VisualSettings>,
+    mut camera_query: Query<(&mut ColorGrading, &mut Skybox), With<PlayerCamera>>,
+) {
+    if !visual_settings.is_changed() {
+        return;
+    }
+
+    for (mut color_grading, mut skybox) in camera_query.iter_mut() {
+        // Apply color grading settings
+        color_grading.global.exposure = visual_settings.exposure;
+        color_grading.global.temperature = visual_settings.temperature;
+        color_grading.global.post_saturation = visual_settings.saturation;
+        
+        color_grading.midtones.gamma = visual_settings.gamma;
+        color_grading.highlights.gain = visual_settings.highlights_gain;
+        
+        // Apply skybox brightness
+        skybox.brightness = visual_settings.skybox_brightness;
+    }
 }

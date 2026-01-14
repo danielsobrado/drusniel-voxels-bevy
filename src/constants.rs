@@ -263,7 +263,7 @@ pub const DEFAULT_JUMP_HEIGHT: f32 = 2.0;
 pub const DEFAULT_FLOAT_HEIGHT: f32 = 1.5;
 
 /// Default player capsule collider radius.
-pub const DEFAULT_CAPSULE_RADIUS: f32 = 0.35;
+pub const DEFAULT_CAPSULE_RADIUS: f32 = 0.45;
 
 /// Default player capsule collider height.
 pub const DEFAULT_CAPSULE_HEIGHT: f32 = 1.8;
@@ -285,8 +285,8 @@ pub const CAVE_SURFACE_OFFSET: i32 = 3;
 // Bedrock Generation
 // =============================================================================
 
-/// Maximum Y level for bedrock layer.
-pub const BEDROCK_MAX_Y: i32 = 3;
+/// World Y coordinate for the bedrock floor.
+pub const BEDROCK_DEPTH: i32 = 0;
 
-/// Probability threshold for bedrock vs rock in transition layer.
-pub const BEDROCK_ROCK_THRESHOLD: f32 = 0.3;
+/// Smooth transition thickness for bedrock blending in SDF.
+pub const BEDROCK_BLEND: f32 = 2.0;

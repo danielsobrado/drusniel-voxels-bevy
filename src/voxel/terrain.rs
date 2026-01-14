@@ -9,12 +9,13 @@
 //! - Dungeon structure generation
 
 use crate::constants::{
-    // Terrain generation
-    TERRAIN_BASE_FREQUENCY, TERRAIN_HILL_FREQUENCY, TERRAIN_MOUNTAIN_FREQUENCY,
-    TERRAIN_RIVER_FREQUENCY, TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
-    TERRAIN_BASE_HEIGHT, TERRAIN_BASE_AMPLITUDE, TERRAIN_HILL_AMPLITUDE,
+    // Terrain generation (fallbacks for biomes/caves/trees)
+    TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
+    TERRAIN_BASE_FREQUENCY, TERRAIN_BASE_AMPLITUDE, TERRAIN_BASE_HEIGHT,
+    TERRAIN_HILL_FREQUENCY, TERRAIN_HILL_AMPLITUDE,
+    TERRAIN_MOUNTAIN_FREQUENCY, MOUNTAIN_MULTIPLIER,
+    TERRAIN_RIVER_FREQUENCY, RIVER_WIDTH_THRESHOLD, RIVER_CARVE_DEPTH,
     TERRAIN_MIN_HEIGHT, TERRAIN_MAX_HEIGHT,
-    MOUNTAIN_THRESHOLD, MOUNTAIN_MULTIPLIER, RIVER_WIDTH_THRESHOLD, RIVER_CARVE_DEPTH,
     WATER_LEVEL, BEACH_HEIGHT_OFFSET,
     // Biomes
     BIOME_SANDY_THRESHOLD, BIOME_ROCKY_THRESHOLD, BIOME_ROCKY_DETAIL_THRESHOLD,
@@ -22,10 +23,11 @@ use crate::constants::{
     // Trees
     TREE_SPAWN_THRESHOLD, TREE_MIN_HEIGHT, TREE_HEIGHT_VARIANCE, TREE_LEAF_CHECK_RADIUS, TREE_LEAF_RADIUS,
     // Caves
-    CAVE_MIN_Y, CAVE_MAX_Y, CAVE_SURFACE_OFFSET,
+    CAVE_MIN_Y, CAVE_MAX_Y, CAVE_SURFACE_OFFSET, MOUNTAIN_THRESHOLD,
     // Bedrock
-    BEDROCK_MAX_Y, BEDROCK_ROCK_THRESHOLD,
+    BEDROCK_DEPTH,
 };
+use crate::terrain::generation::config::TerrainConfig;
 use crate::voxel::types::VoxelType;
 use bevy::log::debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -231,67 +233,127 @@ impl Biome {
 /// Terrain generator that produces voxel types for world positions.
 pub struct TerrainGenerator<N: NoiseGenerator = ValueNoise> {
     noise: N,
+    config: TerrainConfig,
 }
 
 impl Default for TerrainGenerator<ValueNoise> {
     fn default() -> Self {
-        Self::new(ValueNoise::default())
+        Self::with_config(ValueNoise::default(), TerrainConfig::load_or_default())
     }
 }
 
 impl<N: NoiseGenerator> TerrainGenerator<N> {
     /// Creates a new terrain generator with the given noise implementation.
     pub fn new(noise: N) -> Self {
-        Self { noise }
+        Self::with_config(noise, TerrainConfig::default())
+    }
+
+    /// Creates a new terrain generator with custom config.
+    pub fn with_config(noise: N, config: TerrainConfig) -> Self {
+        Self { noise, config }
+    }
+
+    /// Configurable fBm noise using NoiseLayer parameters.
+    fn fbm_configurable(&self, x: f32, z: f32, scale: f32, octaves: u32, persistence: f32, lacunarity: f32) -> f32 {
+        let mut value = 0.0;
+        let mut amplitude = 1.0;
+        let mut frequency = scale;
+        let mut max_value = 0.0;
+
+        for _ in 0..octaves {
+            value += amplitude * self.noise.sample_2d(x * frequency, z * frequency);
+            max_value += amplitude;
+            amplitude *= persistence;
+            frequency *= lacunarity;
+        }
+
+        value / max_value
+    }
+
+    /// Ridged noise for sharp mountain peaks.
+    fn ridged_noise(&self, x: f32, z: f32) -> f32 {
+        let cfg = &self.config.mountains;
+        let mut value = 0.0;
+        let mut amplitude = 1.0;
+        let mut frequency = cfg.scale;
+        let mut max_value = 0.0;
+
+        for i in 0..cfg.octaves {
+            // Offset each octave slightly for variation
+            let sample = self.noise.sample_2d(x * frequency + i as f32 * 100.0, z * frequency + i as f32 * 100.0);
+
+            // Ridge transformation: 1.0 - |noise * 2 - 1|, then power for sharpness
+            let centered = sample * 2.0 - 1.0; // Convert [0,1] to [-1,1]
+            let ridge = 1.0 - centered.abs();
+            let ridge = ridge.powf(cfg.ridge_power);
+
+            value += ridge * amplitude;
+            max_value += amplitude;
+
+            amplitude *= cfg.persistence;
+            frequency *= cfg.lacunarity;
+        }
+
+        (value / max_value) * cfg.amplitude
     }
 
     /// Calculates terrain height at a given world position.
     ///
     /// Uses multiple noise layers for varied terrain:
-    /// - Base layer for overall shape
+    /// - Continent layer for large-scale shape
+    /// - Mountains with ridged noise for dramatic peaks
     /// - Hills for medium-scale variation
-    /// - Mountains for tall peaks
-    /// - River valleys that carve into terrain
+    /// - Detail for fine surface variation
     pub fn get_height(&self, world_x: i32, world_z: i32) -> i32 {
         let x = world_x as f32;
         let z = world_z as f32;
+        let cfg = &self.config;
 
-        // Base terrain
-        let base = self.noise.fbm_2d(x * TERRAIN_BASE_FREQUENCY, z * TERRAIN_BASE_FREQUENCY, 4)
-            * TERRAIN_BASE_AMPLITUDE
-            + TERRAIN_BASE_HEIGHT;
+        // Large-scale continent shape
+        let continent = self.fbm_configurable(
+            x, z,
+            cfg.continent.scale,
+            cfg.continent.octaves,
+            cfg.continent.persistence,
+            cfg.continent.lacunarity,
+        ) * cfg.continent.amplitude;
 
-        // Hills
-        let hills = self.noise.fbm_2d(x * TERRAIN_HILL_FREQUENCY, z * TERRAIN_HILL_FREQUENCY, 3)
-            * TERRAIN_HILL_AMPLITUDE;
-
-        // Mountains
-        let mountain_mask = self.noise.fbm_2d(
-            x * TERRAIN_MOUNTAIN_FREQUENCY,
-            z * TERRAIN_MOUNTAIN_FREQUENCY,
+        // Mountain mask - determines where mountains appear (using lower frequency)
+        let mountain_mask = self.fbm_configurable(
+            x, z,
+            cfg.mountains.scale * 0.25, // Lower frequency for mountain regions
             2,
+            0.5,
+            2.0,
         );
-        let mountains = if mountain_mask > MOUNTAIN_THRESHOLD {
-            (mountain_mask - MOUNTAIN_THRESHOLD) * MOUNTAIN_MULTIPLIER
-        } else {
-            0.0
-        };
+        let mountain_mask = (mountain_mask + 0.3).clamp(0.0, 1.0);
 
-        // River valleys
-        let river_noise = (self.noise.fbm_2d(
-            x * TERRAIN_RIVER_FREQUENCY,
-            z * TERRAIN_RIVER_FREQUENCY,
-            2,
-        ) * std::f32::consts::TAU)
-            .sin();
-        let river_factor = if river_noise.abs() < RIVER_WIDTH_THRESHOLD {
-            -RIVER_CARVE_DEPTH * (1.0 - river_noise.abs() / RIVER_WIDTH_THRESHOLD)
-        } else {
-            0.0
-        };
+        // Ridged mountains, masked by mountain regions
+        let mountains = self.ridged_noise(x, z) * mountain_mask;
 
-        (base + hills + mountains + river_factor)
-            .clamp(TERRAIN_MIN_HEIGHT, TERRAIN_MAX_HEIGHT) as i32
+        // Hills everywhere
+        let hills = self.fbm_configurable(
+            x, z,
+            cfg.hills.scale,
+            cfg.hills.octaves,
+            cfg.hills.persistence,
+            cfg.hills.lacunarity,
+        ) * cfg.hills.amplitude;
+
+        // Fine detail
+        let detail = self.fbm_configurable(
+            x, z,
+            cfg.detail.scale,
+            cfg.detail.octaves,
+            cfg.detail.persistence,
+            cfg.detail.lacunarity,
+        ) * cfg.detail.amplitude;
+
+        // Combine all layers
+        let height = continent + mountains + hills + detail;
+
+        // Clamp to world bounds from config
+        height.clamp(cfg.height.min, cfg.height.max) as i32
     }
 
     /// Determines the biome at a given world position.
@@ -417,6 +479,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     /// - Biome-specific terrain
     pub fn get_voxel(&self, world_x: i32, world_y: i32, world_z: i32) -> VoxelType {
         let terrain_height = self.get_height(world_x, world_z);
+
+        // Bedrock floor (always solid below this depth)
+        if world_y <= BEDROCK_DEPTH {
+            return VoxelType::Bedrock;
+        }
+
         let biome = self.get_biome(world_x, world_z);
 
         // Dungeons disabled
@@ -446,19 +514,6 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
                 VoxelType::Water
             } else {
                 VoxelType::Air
-            };
-        }
-
-        // Bedrock layer
-        if world_y == 0 {
-            return VoxelType::Bedrock;
-        }
-
-        if world_y <= BEDROCK_MAX_Y {
-            return if hash_position(world_x, world_z + world_y * 1000) > BEDROCK_ROCK_THRESHOLD {
-                VoxelType::Bedrock
-            } else {
-                VoxelType::Rock
             };
         }
 
@@ -548,6 +603,7 @@ pub fn hash_position(x: i32, z: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::generation::config::TerrainConfig;
 
     #[test]
     fn test_value_noise_range() {
@@ -562,12 +618,13 @@ mod tests {
 
     #[test]
     fn test_terrain_height_range() {
-        let generator = TerrainGenerator::default();
+        let config = TerrainConfig::default();
+        let generator = TerrainGenerator::with_config(ValueNoise::default(), config.clone());
         for x in -100..100 {
             for z in -100..100 {
                 let height = generator.get_height(x, z);
                 assert!(
-                    height >= TERRAIN_MIN_HEIGHT as i32 && height <= TERRAIN_MAX_HEIGHT as i32,
+                    height >= config.height.min as i32 && height <= config.height.max as i32,
                     "Height {} out of range at ({}, {})",
                     height,
                     x,

@@ -29,3 +29,6 @@ assets/models/*.jpg
 assets/models/License.txt
 assets/models/Kenney.url
 assets/models/KayKit_Forest_Nature_Pack_1.0_FREE/*
+
+*.log
+v0.3_grass_material.rs

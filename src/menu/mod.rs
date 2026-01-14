@@ -17,7 +17,7 @@ pub use types::{
     MieDirectionOption, MieOption, MultiplayerField, MultiplayerFormState,
     NightBrightnessOption, PauseMenuState, RayleighOption, SettingsState,
     SettingsTab, ShadowFiltering, TimeScaleOption, TwilightBandOption, WalkSpeedPreset,
-    RunSpeedPreset,
+    RunSpeedPreset, VisualSettings, VisualSlider, SliderValueText, SliderTrack, SliderFill,
 };
 
 use types::{
@@ -45,6 +45,7 @@ impl Plugin for PauseMenuPlugin {
             .init_resource::<ConnectTaskState>()
             .init_resource::<ChatState>()
             .init_resource::<NetworkSession>()
+            .init_resource::<types::VisualSettings>()
             // Core menu systems
             .add_systems(Update, toggle_pause_menu)
             .add_systems(Update, handle_menu_buttons)
@@ -58,6 +59,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::handle_gameplay_settings,
                     settings::handle_atmosphere_settings,
                     settings::handle_close_settings,
+                    settings::handle_visual_sliders,
                 ),
             )
             // Input systems
@@ -106,6 +108,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::update_fog_backgrounds,
                     settings::update_cycle_backgrounds,
                     multiplayer::handle_favorite_buttons,
+                    settings::update_visual_slider_display,
                 ),
             );
     }

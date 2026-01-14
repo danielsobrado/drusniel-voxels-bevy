@@ -6,6 +6,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::chat::ChatState;
 use crate::entity::{EquippedItem, Inventory, ItemType};
 use crate::menu::PauseMenuState;
+use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
 pub struct InventoryUiPlugin;
 
@@ -36,6 +37,11 @@ impl Default for HotbarState {
         let mut slots = [None; INVENTORY_COLUMNS * 2];
         slots[0] = Some(ItemType::Pickaxe);
         slots[1] = Some(ItemType::Torch);
+        // Terrain tools in slots 5-8 (keys 5-8)
+        slots[4] = Some(ItemType::TerrainRaise);
+        slots[5] = Some(ItemType::TerrainLower);
+        slots[6] = Some(ItemType::TerrainLevel);
+        slots[7] = Some(ItemType::TerrainSmooth);
         Self { slots, selected: 0 }
     }
 }
@@ -284,14 +290,32 @@ fn handle_hotbar_slot_buttons(
 fn sync_equipped_from_hotbar(
     hotbar: Res<HotbarState>,
     mut equipped: ResMut<EquippedItem>,
+    mut terrain_state: ResMut<TerrainToolState>,
 ) {
     if !hotbar.is_changed() {
         return;
     }
 
     let selected_item = hotbar.slots.get(hotbar.selected).copied().flatten();
-    if equipped.item != selected_item {
-        equipped.item = selected_item;
+    
+    // Sync terrain tool state
+    terrain_state.active_tool = match selected_item {
+        Some(ItemType::TerrainRaise) => TerrainTool::Raise,
+        Some(ItemType::TerrainLower) => TerrainTool::Lower,
+        Some(ItemType::TerrainLevel) => TerrainTool::Level,
+        Some(ItemType::TerrainSmooth) => TerrainTool::Smooth,
+        _ => TerrainTool::None,
+    };
+    
+    // Sync equipped item (only for non-terrain tools)
+    let equip_item = if selected_item.map(|i| i.is_terrain_tool()).unwrap_or(false) {
+        None
+    } else {
+        selected_item
+    };
+    
+    if equipped.item != equip_item {
+        equipped.item = equip_item;
     }
 }
 

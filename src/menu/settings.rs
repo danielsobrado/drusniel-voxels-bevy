@@ -6,6 +6,7 @@
 //! - Atmosphere settings (day/night cycle, fog, lighting)
 
 use bevy::prelude::*;
+use bevy::ui::RelativeCursorPosition;
 use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, WindowMode, WindowResolution};
 
 use crate::atmosphere::FogConfig;
@@ -81,6 +82,7 @@ fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             spawn_settings_tab_button(tabs, font, "Graphics", SettingsTabButton::Graphics);
             spawn_settings_tab_button(tabs, font, "Gameplay", SettingsTabButton::Gameplay);
             spawn_settings_tab_button(tabs, font, "Atmosphere", SettingsTabButton::Atmosphere);
+            spawn_settings_tab_button(tabs, font, "Visual", SettingsTabButton::Visual);
         });
 }
 
@@ -124,6 +126,7 @@ fn spawn_settings_content(
     spawn_graphics_tab(dialog, font, ray_tracing_supported);
     spawn_gameplay_tab(dialog, font);
     spawn_atmosphere_tab(dialog, font);
+    spawn_visual_tab(dialog, font);
 }
 
 fn spawn_settings_close_button(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
@@ -329,6 +332,109 @@ fn spawn_atmosphere_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) 
         });
 }
 
+fn spawn_visual_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+    dialog
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                display: Display::None,
+                overflow: Overflow::scroll_y(),
+                max_height: Val::Px(400.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            VisualTabContent,
+        ))
+        .with_children(|content| {
+            spawn_slider_row(content, font, "Temperature", VisualSlider::Temperature, -0.3, 0.3);
+            spawn_slider_row(content, font, "Saturation", VisualSlider::Saturation, 0.5, 2.0);
+            spawn_slider_row(content, font, "Exposure", VisualSlider::Exposure, -1.0, 1.0);
+            spawn_slider_row(content, font, "Gamma", VisualSlider::Gamma, 0.5, 1.5);
+            spawn_slider_row(content, font, "Highlights", VisualSlider::HighlightsGain, 0.5, 1.5);
+            spawn_slider_row(content, font, "Sun Warmth", VisualSlider::SunWarmth, 0.0, 0.3);
+            spawn_slider_row(content, font, "Illuminance", VisualSlider::Illuminance, 5000.0, 50000.0);
+            spawn_slider_row(content, font, "Sky Light", VisualSlider::SkyboxBrightness, 1000.0, 10000.0);
+        });
+}
+
+/// Spawns a slider row with label, track, and value display
+fn spawn_slider_row(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    slider: VisualSlider,
+    _min: f32,
+    _max: f32,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            height: Val::Px(32.0),
+            ..default()
+        })
+        .with_children(|row| {
+            // Label
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Node {
+                    width: Val::Px(100.0),
+                    ..default()
+                },
+            ));
+
+            // Slider track (clickable background)
+            row.spawn((
+                Button,
+                Node {
+                    width: Val::Px(200.0),
+                    height: Val::Px(20.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 1.0)),
+                SliderTrack(slider),
+                RelativeCursorPosition::default(),
+            ))
+            .with_children(|track| {
+                // Slider fill (colored portion)
+                track.spawn((
+                    Node {
+                        width: Val::Percent(50.0), // Will be updated by system
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.3, 0.6, 0.9, 1.0)),
+                    SliderFill(slider),
+                ));
+            });
+
+            // Value text
+            row.spawn((
+                Text::new("0.00"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.8, 0.8, 0.8, 1.0)),
+                Node {
+                    width: Val::Px(70.0),
+                    ..default()
+                },
+                SliderValueText(slider),
+            ));
+        });
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -434,6 +540,7 @@ pub fn handle_settings_tabs(
             SettingsTabButton::Graphics => SettingsTab::Graphics,
             SettingsTabButton::Gameplay => SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => SettingsTab::Atmosphere,
+            SettingsTabButton::Visual => SettingsTab::Visual,
         };
     }
 }
@@ -731,6 +838,7 @@ pub fn update_settings_tab_backgrounds(
             SettingsTabButton::Graphics => settings_state.active_tab == SettingsTab::Graphics,
             SettingsTabButton::Gameplay => settings_state.active_tab == SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => settings_state.active_tab == SettingsTab::Atmosphere,
+            SettingsTabButton::Visual => settings_state.active_tab == SettingsTab::Visual,
         };
         *background = if active { ACTIVE_BG } else { INACTIVE_BG }.into();
     }
@@ -739,9 +847,10 @@ pub fn update_settings_tab_backgrounds(
 /// Updates settings content visibility based on active tab.
 pub fn update_settings_content_visibility(
     settings_state: Res<SettingsState>,
-    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>)>,
-    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<AtmosphereTabContent>)>,
-    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>)>,
+    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
+    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
+    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<VisualTabContent>)>,
+    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>)>,
 ) {
     if settings_state.dialog_root.is_none() {
         return;
@@ -765,6 +874,14 @@ pub fn update_settings_content_visibility(
 
     for mut node in atmosphere_query.iter_mut() {
         node.display = if settings_state.active_tab == SettingsTab::Atmosphere {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    for mut node in visual_query.iter_mut() {
+        node.display = if settings_state.active_tab == SettingsTab::Visual {
             Display::Flex
         } else {
             Display::None
@@ -1035,4 +1152,108 @@ pub fn update_fog_backgrounds(
     for (option, mut background) in query.iter_mut() {
         *background = if settings_state.fog_preset == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
     }
+}
+
+// ============================================================================
+// Visual Settings Slider Systems
+// ============================================================================
+
+/// Handles slider interactions for visual settings
+pub fn handle_visual_sliders(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut visual_settings: ResMut<VisualSettings>,
+    slider_query: Query<(&Interaction, &SliderTrack, &RelativeCursorPosition), With<Button>>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, slider_track, relative_cursor) in slider_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // Get normalized position from RelativeCursorPosition (0.0 to 1.0)
+        let Some(relative_pos) = relative_cursor.normalized else { continue };
+        let normalized = relative_pos.x.clamp(0.0, 1.0);
+
+        // Update the corresponding setting based on slider type
+        match slider_track.0 {
+            VisualSlider::Temperature => {
+                visual_settings.temperature = lerp(-0.3, 0.3, normalized);
+            }
+            VisualSlider::Saturation => {
+                visual_settings.saturation = lerp(0.5, 2.0, normalized);
+            }
+            VisualSlider::Exposure => {
+                visual_settings.exposure = lerp(-1.0, 1.0, normalized);
+            }
+            VisualSlider::Gamma => {
+                visual_settings.gamma = lerp(0.5, 1.5, normalized);
+            }
+            VisualSlider::HighlightsGain => {
+                visual_settings.highlights_gain = lerp(0.5, 1.5, normalized);
+            }
+            VisualSlider::SunWarmth => {
+                visual_settings.sun_warmth = lerp(0.0, 0.3, normalized);
+            }
+            VisualSlider::Illuminance => {
+                visual_settings.illuminance = lerp(5000.0, 50000.0, normalized);
+            }
+            VisualSlider::SkyboxBrightness => {
+                visual_settings.skybox_brightness = lerp(1000.0, 10000.0, normalized);
+            }
+        }
+    }
+}
+
+/// Updates slider fill widths and value text based on current visual settings
+pub fn update_visual_slider_display(
+    visual_settings: Res<VisualSettings>,
+    settings_state: Res<SettingsState>,
+    mut fill_query: Query<(&SliderFill, &mut Node)>,
+    mut text_query: Query<(&SliderValueText, &mut Text)>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (fill, mut node) in fill_query.iter_mut() {
+        let normalized = match fill.0 {
+            VisualSlider::Temperature => inv_lerp(-0.3, 0.3, visual_settings.temperature),
+            VisualSlider::Saturation => inv_lerp(0.5, 2.0, visual_settings.saturation),
+            VisualSlider::Exposure => inv_lerp(-1.0, 1.0, visual_settings.exposure),
+            VisualSlider::Gamma => inv_lerp(0.5, 1.5, visual_settings.gamma),
+            VisualSlider::HighlightsGain => inv_lerp(0.5, 1.5, visual_settings.highlights_gain),
+            VisualSlider::SunWarmth => inv_lerp(0.0, 0.3, visual_settings.sun_warmth),
+            VisualSlider::Illuminance => inv_lerp(5000.0, 50000.0, visual_settings.illuminance),
+            VisualSlider::SkyboxBrightness => inv_lerp(1000.0, 10000.0, visual_settings.skybox_brightness),
+        };
+        node.width = Val::Percent(normalized * 100.0);
+    }
+
+    for (text_marker, mut text) in text_query.iter_mut() {
+        let value_str = match text_marker.0 {
+            VisualSlider::Temperature => format!("{:.2}", visual_settings.temperature),
+            VisualSlider::Saturation => format!("{:.2}", visual_settings.saturation),
+            VisualSlider::Exposure => format!("{:.2}", visual_settings.exposure),
+            VisualSlider::Gamma => format!("{:.2}", visual_settings.gamma),
+            VisualSlider::HighlightsGain => format!("{:.2}", visual_settings.highlights_gain),
+            VisualSlider::SunWarmth => format!("{:.2}", visual_settings.sun_warmth),
+            VisualSlider::Illuminance => format!("{:.0}", visual_settings.illuminance),
+            VisualSlider::SkyboxBrightness => format!("{:.0}", visual_settings.skybox_brightness),
+        };
+        **text = value_str;
+    }
+}
+
+/// Helper function to linearly interpolate between two values
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Helper function to get the normalized position between two values
+fn inv_lerp(a: f32, b: f32, value: f32) -> f32 {
+    ((value - a) / (b - a)).clamp(0.0, 1.0)
 }

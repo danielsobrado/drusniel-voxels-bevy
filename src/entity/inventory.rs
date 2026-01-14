@@ -1,12 +1,18 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// Types of items that can be collected
+/// Types of items that can be collected or tools that can be used
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemType {
+    // Inventory items
     Fur,
     Pickaxe,
     Torch,
+    // Terrain tools (not collectible, always available)
+    TerrainRaise,
+    TerrainLower,
+    TerrainLevel,
+    TerrainSmooth,
 }
 
 /// Player inventory resource
@@ -26,6 +32,10 @@ impl ItemType {
             ItemType::Fur => "Fur",
             ItemType::Pickaxe => "Pickaxe",
             ItemType::Torch => "Torch",
+            ItemType::TerrainRaise => "Raise",
+            ItemType::TerrainLower => "Lower",
+            ItemType::TerrainLevel => "Level",
+            ItemType::TerrainSmooth => "Smooth",
         }
     }
 
@@ -34,7 +44,22 @@ impl ItemType {
             ItemType::Pickaxe => 0,
             ItemType::Torch => 1,
             ItemType::Fur => 2,
+            ItemType::TerrainRaise => 10,
+            ItemType::TerrainLower => 11,
+            ItemType::TerrainLevel => 12,
+            ItemType::TerrainSmooth => 13,
         }
+    }
+
+    /// Returns true if this is a terrain tool
+    pub fn is_terrain_tool(&self) -> bool {
+        matches!(
+            self,
+            ItemType::TerrainRaise
+                | ItemType::TerrainLower
+                | ItemType::TerrainLevel
+                | ItemType::TerrainSmooth
+        )
     }
 }
 
