@@ -171,6 +171,98 @@ pub fn configure_triplanar_textures(
     }
 }
 
+/// Ensure building textures use Repeat address mode with trilinear + anisotropy.
+pub fn configure_building_textures(
+    mat_handle: Option<Res<BuildingMaterialHandle>>,
+    materials: Res<Assets<BuildingMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut configured: Local<bool>,
+) {
+    if *configured {
+        return;
+    }
+
+    if let Some(handle) = mat_handle {
+        if let Some(material) = materials.get(&handle.handle) {
+            let textures = [
+                &material.wood_albedo, &material.wood_normal, &material.wood_roughness,
+                &material.wood_ao,
+            ];
+
+            let mut all_loaded = true;
+            for tex_opt in textures {
+                if let Some(tex_handle) = tex_opt {
+                    if let Some(image) = images.get_mut(tex_handle) {
+                        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                            address_mode_u: ImageAddressMode::Repeat,
+                            address_mode_v: ImageAddressMode::Repeat,
+                            address_mode_w: ImageAddressMode::Repeat,
+                            mag_filter: ImageFilterMode::Linear,
+                            min_filter: ImageFilterMode::Linear,
+                            mipmap_filter: ImageFilterMode::Linear,
+                            anisotropy_clamp: 16,
+                            ..default()
+                        });
+                    } else {
+                        all_loaded = false;
+                    }
+                }
+            }
+
+            if all_loaded {
+                *configured = true;
+                info!("Building textures configured with anisotropic filtering");
+            }
+        }
+    }
+}
+
+/// Ensure props textures use Repeat address mode with trilinear + anisotropy.
+pub fn configure_props_textures(
+    mat_handle: Option<Res<PropsMaterialHandle>>,
+    materials: Res<Assets<PropsMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut configured: Local<bool>,
+) {
+    if *configured {
+        return;
+    }
+
+    if let Some(handle) = mat_handle {
+        if let Some(material) = materials.get(&handle.handle) {
+            let textures = [
+                &material.rock_albedo, &material.rock_normal, &material.rock_roughness,
+                &material.rock_ao,
+            ];
+
+            let mut all_loaded = true;
+            for tex_opt in textures {
+                if let Some(tex_handle) = tex_opt {
+                    if let Some(image) = images.get_mut(tex_handle) {
+                        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                            address_mode_u: ImageAddressMode::Repeat,
+                            address_mode_v: ImageAddressMode::Repeat,
+                            address_mode_w: ImageAddressMode::Repeat,
+                            mag_filter: ImageFilterMode::Linear,
+                            min_filter: ImageFilterMode::Linear,
+                            mipmap_filter: ImageFilterMode::Linear,
+                            anisotropy_clamp: 16,
+                            ..default()
+                        });
+                    } else {
+                        all_loaded = false;
+                    }
+                }
+            }
+
+            if all_loaded {
+                *configured = true;
+                info!("Props textures configured with anisotropic filtering");
+            }
+        }
+    }
+}
+
 /// Setup building material with full PBR textures for RTX 40xx
 /// Buildings get the highest detail: albedo + normal + roughness + AO + metallic + parallax
 pub fn setup_building_material(
@@ -213,22 +305,6 @@ pub fn setup_building_material(
             wood_normal: load_image_if_exists(&asset_server, "pbr/building/wood/normal.png"),
             wood_roughness: load_image_if_exists(&asset_server, "pbr/building/wood/roughness.png"),
             wood_ao: load_image_if_exists(&asset_server, "pbr/building/wood/ao.png"),
-            // Stone brick textures
-            stone_albedo: load_image_if_exists(&asset_server, "pbr/building/stone/albedo.png"),
-            stone_normal: load_image_if_exists(&asset_server, "pbr/building/stone/normal.png"),
-            stone_roughness: load_image_if_exists(&asset_server, "pbr/building/stone/roughness.png"),
-            stone_ao: load_image_if_exists(&asset_server, "pbr/building/stone/ao.png"),
-            // Metal plate textures (includes metallic)
-            metal_albedo: load_image_if_exists(&asset_server, "pbr/building/metal/albedo.png"),
-            metal_normal: load_image_if_exists(&asset_server, "pbr/building/metal/normal.png"),
-            metal_roughness: load_image_if_exists(&asset_server, "pbr/building/metal/roughness.png"),
-            metal_ao: load_image_if_exists(&asset_server, "pbr/building/metal/ao.png"),
-            metal_metallic: load_image_if_exists(&asset_server, "pbr/building/metal/metallic.png"),
-            // Thatch textures
-            thatch_albedo: load_image_if_exists(&asset_server, "pbr/building/thatch/albedo.png"),
-            thatch_normal: load_image_if_exists(&asset_server, "pbr/building/thatch/normal.png"),
-            thatch_roughness: load_image_if_exists(&asset_server, "pbr/building/thatch/roughness.png"),
-            thatch_ao: load_image_if_exists(&asset_server, "pbr/building/thatch/ao.png"),
         }
     });
 
@@ -277,13 +353,6 @@ pub fn setup_props_material(
             rock_normal: load_image_if_exists(&asset_server, "pbr/props/rock/normal.png"),
             rock_roughness: load_image_if_exists(&asset_server, "pbr/props/rock/roughness.png"),
             rock_ao: load_image_if_exists(&asset_server, "pbr/props/rock/ao.png"),
-            // Furniture textures (vertex AO baked)
-            furniture_albedo: load_image_if_exists(&asset_server, "pbr/props/furniture/albedo.png"),
-            furniture_normal: load_image_if_exists(&asset_server, "pbr/props/furniture/normal.png"),
-            furniture_roughness: load_image_if_exists(&asset_server, "pbr/props/furniture/roughness.png"),
-            // Barrel/crate textures (minimal - uniform roughness)
-            crate_albedo: load_image_if_exists(&asset_server, "pbr/props/crate/albedo.png"),
-            crate_normal: load_image_if_exists(&asset_server, "pbr/props/crate/normal.png"),
         }
     });
 

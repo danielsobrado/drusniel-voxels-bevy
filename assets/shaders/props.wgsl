@@ -24,13 +24,13 @@ struct PropsUniforms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var rock_ao: texture_2d<f32>;
 
 // Furniture textures (material 1) - standard PBR (vertex AO baked)
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var furniture_albedo: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var furniture_normal: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var furniture_roughness: texture_2d<f32>;
+// @group(#{MATERIAL_BIND_GROUP}) @binding(6) var furniture_albedo: texture_2d<f32>;
+// @group(#{MATERIAL_BIND_GROUP}) @binding(7) var furniture_normal: texture_2d<f32>;
+// @group(#{MATERIAL_BIND_GROUP}) @binding(8) var furniture_roughness: texture_2d<f32>;
 
 // Barrel/crate textures (material 2) - minimal (uniform roughness)
-@group(#{MATERIAL_BIND_GROUP}) @binding(9) var crate_albedo: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(10) var crate_normal: texture_2d<f32>;
+// @group(#{MATERIAL_BIND_GROUP}) @binding(9) var crate_albedo: texture_2d<f32>;
+// @group(#{MATERIAL_BIND_GROUP}) @binding(10) var crate_normal: texture_2d<f32>;
 
 // Uniform roughness values for materials without roughness maps
 const CRATE_ROUGHNESS: f32 = 0.8;

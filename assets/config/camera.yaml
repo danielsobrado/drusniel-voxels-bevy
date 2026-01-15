@@ -1,0 +1,5 @@
+# Camera rendering configuration.
+camera:
+  exposure:
+    # Fixed EV100 for HDR tonemapping (lower = brighter, higher = darker).
+    ev100: 10.0

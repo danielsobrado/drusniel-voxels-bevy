@@ -66,9 +66,9 @@ impl Material for GrassMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        // Use Blend for transparency - avoids prepass complexity
+        // Use Mask with cutoff for hard edges - avoids see-through grass
         // Grass has procedural alpha masking in fragment shader
-        AlphaMode::Blend
+        AlphaMode::Mask(0.5)
     }
 
     fn specialize(
@@ -110,8 +110,8 @@ pub struct GrassMaterialPlugin;
 impl Plugin for GrassMaterialPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GrassMaterial> {
-            prepass_enabled: false, // Disabled - AlphaMode::Blend doesn't need prepass
-            shadows_enabled: false, // Blend mode doesn't cast shadows properly
+            prepass_enabled: false, // Keep prepass disabled to avoid texture limit issues
+            shadows_enabled: false, // Grass shadows are too expensive
             ..default()
         })
             .init_resource::<GrassMaterialHandles>()

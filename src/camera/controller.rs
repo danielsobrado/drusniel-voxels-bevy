@@ -1,5 +1,5 @@
 use crate::atmosphere::{fog_camera_components, FogConfig};
-use crate::camera::config::CameraConfig;
+use crate::camera::config::{CameraConfig, CameraExposureConfig};
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
@@ -70,6 +70,7 @@ pub fn spawn_camera(
     ray_tracing: Res<RayTracingSettings>,
     fog_config: Res<FogConfig>,
     camera_config: Res<CameraConfig>,
+    exposure_config: Res<CameraExposureConfig>,
     settings_state: Res<SettingsState>,
 ) {
     // Daytime skybox (same asset used in v0.3).
@@ -90,7 +91,9 @@ pub fn spawn_camera(
             AntiAliasing::Msaa4x => Msaa::Sample4,
             _ => Msaa::Off,
         },
-        Exposure::default(),
+        Exposure {
+            ev100: exposure_config.ev100_clamped(),
+        },
         Transform::from_xyz(
             camera_config.spawn.position.x,
             camera_config.spawn.position.y,
@@ -106,7 +109,7 @@ pub fn spawn_camera(
         fog_camera_components(&fog_config),
         Skybox {
             image: skybox_image,
-            brightness: 4000.0,  // Balanced skybox brightness
+            brightness: 800.0,  // Lower skybox brightness
             rotation: Quat::IDENTITY,
         },
         CinematicCamera,
@@ -116,36 +119,36 @@ pub fn spawn_camera(
     // end up looking dark due to missing exposure/tonemapping.
     camera.insert((
         Hdr,
-        Tonemapping::TonyMcMapface,  // Best for stylized fantasy games like Valheim
+        Tonemapping::AcesFitted,  // v0.3 tonemapping for natural colors
         DebandDither::Enabled,
         ColorGrading {
             global: ColorGradingGlobal {
-                exposure: -0.2,          // Slightly darker overall
+                exposure: 0.0,           // Neutral exposure (v0.3 style)
                 temperature: 0.0,        // Neutral temperature
                 tint: 0.0,               // Neutral tint
                 hue: 0.0,
-                post_saturation: 1.15,   // Slightly vibrant colors
+                post_saturation: 1.0,    // Neutral saturation
                 ..default()
             },
             shadows: ColorGradingSection {
-                saturation: 1.05,
-                contrast: 1.05,
+                saturation: 1.0,
+                contrast: 1.0,
                 gamma: 1.0,
                 gain: 1.0,
-                lift: -0.02,  // Slightly darker shadows
+                lift: 0.0,
             },
             midtones: ColorGradingSection {
-                saturation: 1.1,
-                contrast: 1.05,
-                gamma: 0.95,  // Slightly darker midtones
+                saturation: 1.0,
+                contrast: 1.0,
+                gamma: 1.0,
                 gain: 1.0,
                 lift: 0.0,
             },
             highlights: ColorGradingSection {
-                saturation: 0.95,
+                saturation: 1.0,
                 contrast: 1.0,
                 gamma: 1.0,
-                gain: 0.9,    // Reduce blown-out highlights
+                gain: 1.0,
                 lift: 0.0,
             },
         },
@@ -184,9 +187,9 @@ pub fn spawn_camera(
         });
     }
 
-    if ray_tracing.enabled && capabilities.ray_tracing_supported {
-        camera.insert(ScreenSpaceReflections::default());
-    }
+    // SSR currently disabled: enabling deferred + SSR can exceed per-stage texture binding limits
+    // on some environments, causing a render-prepass panic.
+    let _ = (&ray_tracing, &capabilities);
 }
 
 pub fn update_camera_anti_aliasing(
@@ -231,22 +234,11 @@ pub fn update_camera_anti_aliasing(
     }
 }
 
-pub fn update_camera_exposure_from_atmosphere(
-    atmosphere: Res<crate::environment::AtmosphereSettings>,
+pub fn update_camera_exposure(
+    exposure_config: Res<CameraExposureConfig>,
     mut cameras: Query<&mut Exposure, With<PlayerCamera>>,
 ) {
-    if !atmosphere.is_changed() {
-        return;
-    }
-
-    let multiplier = atmosphere.exposure.max(0.001);
-    // Treat the in-game "exposure" slider as a direct multiplier on top of Bevy's baseline exposure.
-    // Higher multiplier -> brighter image -> lower EV.
-    // Use EV100 around 9.0-10.0 for natural outdoor lighting (sunny day ~ EV 15, overcast ~ EV 12)
-    // Base EV of 9.5 provides a good balance for stylized games
-    let base_ev = 9.5;
-    let ev100 = (base_ev - multiplier.log2()).clamp(0.0, 20.0);
-
+    let ev100 = exposure_config.ev100_clamped();
     for mut exposure in cameras.iter_mut() {
         exposure.ev100 = ev100;
     }
@@ -303,17 +295,17 @@ pub fn update_ray_tracing_on_camera(
         return;
     }
 
-    let should_enable = settings.enabled && capabilities.ray_tracing_supported;
+    // SSR currently disabled: avoid triggering deferred/prepass pipeline issues.
+    let should_enable = false;
+    let _ = (&settings, &capabilities);
 
     for (entity, current) in cameras.iter_mut() {
         match (should_enable, current.is_some()) {
-            (true, false) => {
+            (true, false) => {}
+            (false, true) => {
                 commands
                     .entity(entity)
-                    .insert(ScreenSpaceReflections::default());
-            }
-            (false, true) => {
-                commands.entity(entity).remove::<ScreenSpaceReflections>();
+                    .remove::<ScreenSpaceReflections>();
             }
             _ => {}
         }

@@ -87,7 +87,7 @@ fn setup_atmosphere(mut commands: Commands) {
             color: Color::srgb(1.0, 0.98, 0.95),  // Slightly warm white sun
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
             // Tuned for balanced color rendering
-            illuminance: 20_000.0,
+            illuminance: 5_000.0,
             shadows_enabled: true,
             shadow_depth_bias: 0.04,
             shadow_normal_bias: 1.8,
@@ -201,13 +201,14 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let sun_tint = sun_heat.lerp(moon_heat, night_factor * 0.85);
 
     // Lighting strength based on altitude (tuned to match the older v0.3 look).
-    let sun_strength = lerp(0.0, 14_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
-    let moon_strength = lerp(400.0, 60.0, daylight) * night_factor;
-    // Higher ambient light to soften shadows
+    let sun_strength = lerp(2000.0, 5_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
+    let moon_strength = lerp(100.0, 20.0, daylight) * night_factor;
+    // Ambient light - moderate for balanced shadows
     let ambient_strength =
-        lerp(600.0, 2500.0, daylight) * (1.0 + horizon_warmth * 0.2);
-    let ambient_tint = Vec3::new(0.06, 0.10, 0.16)
-        .lerp(Vec3::new(0.25, 0.36, 0.50), daylight)
+        lerp(800.0, 2000.0, daylight) * (1.0 + horizon_warmth * 0.2);
+    // Blue-ish ambient tint for cooler fill light (Valheim style)
+    let ambient_tint = Vec3::new(0.10, 0.16, 0.26)
+        .lerp(Vec3::new(0.24, 0.36, 0.52), daylight)
         .lerp(Vec3::new(0.22, 0.24, 0.30), horizon_warmth * 0.5);
 
     Some(AtmosphereSample {

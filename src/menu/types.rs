@@ -145,7 +145,7 @@ impl Default for SettingsState {
             dialog_root: None,
             active_tab: SettingsTab::Graphics,
             graphics_quality: GraphicsQuality::Medium,
-            anti_aliasing: AntiAliasing::Fxaa,
+            anti_aliasing: AntiAliasing::Taa,
             ray_tracing: false,
             display_mode: DisplayMode::Bordered,
             resolution: UVec2::new(1920, 1080),
@@ -483,7 +483,8 @@ pub struct SliderFill(pub VisualSlider);
 /// Component marker for fog setting sliders
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub enum FogSlider {
-    Visibility,
+    DistanceStart,
+    DistanceEnd,
     VolumeDensity,
     VolumeScattering,
     VolumeAbsorption,

@@ -361,7 +361,8 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 spawn_graphics_option(options, font, "Misty", FogPresetOption::Misty);
             });
 
-            spawn_fog_slider_row(content, font, "Visibility", FogSlider::Visibility);
+            spawn_fog_slider_row(content, font, "Fog Start", FogSlider::DistanceStart);
+            spawn_fog_slider_row(content, font, "Fog End", FogSlider::DistanceEnd);
             spawn_fog_slider_row(content, font, "Volume Density", FogSlider::VolumeDensity);
             spawn_fog_slider_row(content, font, "Scattering", FogSlider::VolumeScattering);
             spawn_fog_slider_row(content, font, "Absorption", FogSlider::VolumeAbsorption);
@@ -1467,7 +1468,8 @@ pub fn update_visual_slider_display(
 
 fn fog_slider_bounds(slider: FogSlider) -> (f32, f32) {
     match slider {
-        FogSlider::Visibility => (80.0, 400.0),
+        FogSlider::DistanceStart => (20.0, 300.0),
+        FogSlider::DistanceEnd => (60.0, 600.0),
         FogSlider::VolumeDensity => (0.0, 0.12),
         FogSlider::VolumeScattering => (0.1, 1.0),
         FogSlider::VolumeAbsorption => (0.0, 0.08),
@@ -1481,7 +1483,8 @@ fn fog_slider_bounds(slider: FogSlider) -> (f32, f32) {
 
 fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
     match slider {
-        FogSlider::Visibility => config.distance.visibility,
+        FogSlider::DistanceStart => config.distance.start,
+        FogSlider::DistanceEnd => config.distance.end,
         FogSlider::VolumeDensity => config.volume.density,
         FogSlider::VolumeScattering => config.volume.scattering,
         FogSlider::VolumeAbsorption => config.volume.absorption,
@@ -1498,8 +1501,13 @@ fn apply_fog_slider(config: &mut FogConfig, slider: FogSlider, normalized: f32) 
     let value = lerp(min, max, normalized).clamp(min, max);
 
     match slider {
-        FogSlider::Visibility => {
-            config.distance.visibility = value;
+        FogSlider::DistanceStart => {
+            let max_start = (config.distance.end - 1.0).max(min);
+            config.distance.start = value.min(max_start);
+        }
+        FogSlider::DistanceEnd => {
+            let min_end = (config.distance.start + 1.0).min(max);
+            config.distance.end = value.max(min_end);
         }
         FogSlider::VolumeDensity => {
             config.volume.density = value;
@@ -1532,7 +1540,8 @@ fn apply_fog_slider(config: &mut FogConfig, slider: FogSlider, normalized: f32) 
 
 fn format_fog_slider_value(config: &FogConfig, slider: FogSlider) -> String {
     match slider {
-        FogSlider::Visibility => format!("{:.0}", config.distance.visibility),
+        FogSlider::DistanceStart => format!("{:.0}", config.distance.start),
+        FogSlider::DistanceEnd => format!("{:.0}", config.distance.end),
         FogSlider::VolumeDensity => format!("{:.3}", config.volume.density),
         FogSlider::VolumeScattering => format!("{:.2}", config.volume.scattering),
         FogSlider::VolumeAbsorption => format!("{:.3}", config.volume.absorption),

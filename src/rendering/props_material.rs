@@ -1,5 +1,6 @@
 use bevy::{
     prelude::*,
+    pbr::OpaqueRendererMethod,
     render::render_resource::{AsBindGroup, ShaderType},
 };
 use bevy_shader::ShaderRef;
@@ -79,18 +80,18 @@ pub struct PropsMaterial {
     pub rock_ao: Option<Handle<Image>>,
 
     // Furniture textures - standard PBR (vertex AO baked)
-    #[texture(6)]
-    pub furniture_albedo: Option<Handle<Image>>,
-    #[texture(7)]
-    pub furniture_normal: Option<Handle<Image>>,
-    #[texture(8)]
-    pub furniture_roughness: Option<Handle<Image>>,
+    // #[texture(6)]
+    // pub furniture_albedo: Option<Handle<Image>>,
+    // #[texture(7)]
+    // pub furniture_normal: Option<Handle<Image>>,
+    // #[texture(8)]
+    // pub furniture_roughness: Option<Handle<Image>>,
 
     // Barrel/crate textures - minimal (uniform roughness)
-    #[texture(9)]
-    pub crate_albedo: Option<Handle<Image>>,
-    #[texture(10)]
-    pub crate_normal: Option<Handle<Image>>,
+    // #[texture(9)]
+    // pub crate_albedo: Option<Handle<Image>>,
+    // #[texture(10)]
+    // pub crate_normal: Option<Handle<Image>>,
 }
 
 impl Default for PropsMaterial {
@@ -101,11 +102,11 @@ impl Default for PropsMaterial {
             rock_normal: None,
             rock_roughness: None,
             rock_ao: None,
-            furniture_albedo: None,
-            furniture_normal: None,
-            furniture_roughness: None,
-            crate_albedo: None,
-            crate_normal: None,
+            // furniture_albedo: None,
+            // furniture_normal: None,
+            // furniture_roughness: None,
+            // crate_albedo: None,
+            // crate_normal: None,
         }
     }
 }
@@ -115,8 +116,16 @@ impl Material for PropsMaterial {
         "shaders/props.wgsl".into()
     }
 
+    fn prepass_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Opaque
+    }
+
+    fn opaque_render_method(&self) -> OpaqueRendererMethod {
+        OpaqueRendererMethod::Forward
     }
 }
 

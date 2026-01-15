@@ -3,7 +3,7 @@ ambient_occlusion:
   ssao:
     enabled: true
     # Low, Medium, High, Ultra (Ultra very expensive)
-    quality: High
+    quality: Ultra
     # Thickness of objects for occlusion (increase for voxel terrain)
     constant_object_thickness: 0.5
     # Fallback to baked-only on Intel/low-end

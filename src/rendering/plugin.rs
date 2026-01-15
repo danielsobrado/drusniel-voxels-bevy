@@ -8,8 +8,8 @@ use crate::rendering::capabilities::{
 };
 use crate::rendering::cinematic::CinematicPlugin;
 use crate::rendering::materials::{
-    configure_triplanar_textures, setup_triplanar_material, setup_water_material,
-    setup_building_material, setup_props_material,
+    configure_building_textures, configure_props_textures, configure_triplanar_textures,
+    setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material,
 };
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
@@ -56,7 +56,12 @@ impl Plugin for RenderingPlugin {
             )
             .add_systems(
                 Update,
-                (configure_triplanar_textures, create_texture_array),
+                (
+                    configure_triplanar_textures,
+                    configure_building_textures,
+                    configure_props_textures,
+                    create_texture_array,
+                ),
             );
     }
 }

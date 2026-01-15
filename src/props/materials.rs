@@ -57,22 +57,22 @@ fn tweak_material(mat: &mut StandardMaterial, _style: &super::StyleConfig, prop_
     // Type-specific adjustments (GLTF material values preserved)
     match prop_type {
         PropType::Tree => {
-            // Leaves: slight translucency, double-sided
-            mat.diffuse_transmission = 0.2;
+            // Leaves: double-sided, higher alpha threshold for solid look
+            mat.diffuse_transmission = 0.0;
             mat.double_sided = true;
             mat.cull_mode = None;
-            mat.alpha_mode = AlphaMode::Mask(0.35);
+            mat.alpha_mode = AlphaMode::Mask(0.5);
         }
         PropType::Rock => {
             // Rocks: use GLTF values, just ensure no transmission
             mat.diffuse_transmission = 0.0;
         }
         PropType::Bush | PropType::Flower => {
-            // Foliage: alpha mask, double-sided
+            // Foliage: alpha mask, double-sided, solid look
             mat.double_sided = true;
             mat.cull_mode = None;
             mat.alpha_mode = AlphaMode::Mask(0.5);
-            mat.diffuse_transmission = 0.1;
+            mat.diffuse_transmission = 0.0;
         }
     }
 }

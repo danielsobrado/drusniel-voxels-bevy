@@ -13,9 +13,23 @@ pub struct FogConfig {
 pub struct DistanceFogConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    pub visibility: f32,
     pub start: f32,
     pub end: f32,
+    #[serde(default)]
+    pub falloff: FogFalloffMode,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum FogFalloffMode {
+    Linear,
+    Atmospheric,
+}
+
+impl Default for FogFalloffMode {
+    fn default() -> Self {
+        Self::Linear
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -55,9 +69,9 @@ impl Default for FogConfig {
         Self {
             distance: DistanceFogConfig {
                 enabled: true,
-                visibility: 200.0,
                 start: 80.0,
                 end: 220.0,
+                falloff: FogFalloffMode::Linear,
             },
             volumetric: VolumetricConfig {
                 enabled: false,

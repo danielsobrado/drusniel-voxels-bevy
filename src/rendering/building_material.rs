@@ -1,5 +1,6 @@
 use bevy::{
     prelude::*,
+    pbr::OpaqueRendererMethod,
     render::render_resource::{AsBindGroup, ShaderType},
 };
 use bevy_shader::ShaderRef;
@@ -81,36 +82,36 @@ pub struct BuildingMaterial {
     pub wood_ao: Option<Handle<Image>>,
 
     // Stone brick textures (material 1) - Full PBR
-    #[texture(6)]
-    pub stone_albedo: Option<Handle<Image>>,
-    #[texture(7)]
-    pub stone_normal: Option<Handle<Image>>,
-    #[texture(8)]
-    pub stone_roughness: Option<Handle<Image>>,
-    #[texture(9)]
-    pub stone_ao: Option<Handle<Image>>,
+    // #[texture(6)]
+    // pub stone_albedo: Option<Handle<Image>>,
+    // #[texture(7)]
+    // pub stone_normal: Option<Handle<Image>>,
+    // #[texture(8)]
+    // pub stone_roughness: Option<Handle<Image>>,
+    // #[texture(9)]
+    // pub stone_ao: Option<Handle<Image>>,
 
     // Metal plate textures (material 2) - Full PBR + Metallic
-    #[texture(10)]
-    pub metal_albedo: Option<Handle<Image>>,
-    #[texture(11)]
-    pub metal_normal: Option<Handle<Image>>,
-    #[texture(12)]
-    pub metal_roughness: Option<Handle<Image>>,
-    #[texture(13)]
-    pub metal_ao: Option<Handle<Image>>,
-    #[texture(14)]
-    pub metal_metallic: Option<Handle<Image>>,
+    // #[texture(10)]
+    // pub metal_albedo: Option<Handle<Image>>,
+    // #[texture(11)]
+    // pub metal_normal: Option<Handle<Image>>,
+    // #[texture(12)]
+    // pub metal_roughness: Option<Handle<Image>>,
+    // #[texture(13)]
+    // pub metal_ao: Option<Handle<Image>>,
+    // #[texture(14)]
+    // pub metal_metallic: Option<Handle<Image>>,
 
     // Thatch textures (material 3) - Full PBR
-    #[texture(15)]
-    pub thatch_albedo: Option<Handle<Image>>,
-    #[texture(16)]
-    pub thatch_normal: Option<Handle<Image>>,
-    #[texture(17)]
-    pub thatch_roughness: Option<Handle<Image>>,
-    #[texture(18)]
-    pub thatch_ao: Option<Handle<Image>>,
+    // #[texture(15)]
+    // pub thatch_albedo: Option<Handle<Image>>,
+    // #[texture(16)]
+    // pub thatch_normal: Option<Handle<Image>>,
+    // #[texture(17)]
+    // pub thatch_roughness: Option<Handle<Image>>,
+    // #[texture(18)]
+    // pub thatch_ao: Option<Handle<Image>>,
 }
 
 impl Default for BuildingMaterial {
@@ -121,19 +122,19 @@ impl Default for BuildingMaterial {
             wood_normal: None,
             wood_roughness: None,
             wood_ao: None,
-            stone_albedo: None,
-            stone_normal: None,
-            stone_roughness: None,
-            stone_ao: None,
-            metal_albedo: None,
-            metal_normal: None,
-            metal_roughness: None,
-            metal_ao: None,
-            metal_metallic: None,
-            thatch_albedo: None,
-            thatch_normal: None,
-            thatch_roughness: None,
-            thatch_ao: None,
+            // stone_albedo: None,
+            // stone_normal: None,
+            // stone_roughness: None,
+            // stone_ao: None,
+            // metal_albedo: None,
+            // metal_normal: None,
+            // metal_roughness: None,
+            // metal_ao: None,
+            // metal_metallic: None,
+            // thatch_albedo: None,
+            // thatch_normal: None,
+            // thatch_roughness: None,
+            // thatch_ao: None,
         }
     }
 }
@@ -143,8 +144,16 @@ impl Material for BuildingMaterial {
         "shaders/building.wgsl".into()
     }
 
+    fn prepass_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Opaque
+    }
+
+    fn opaque_render_method(&self) -> OpaqueRendererMethod {
+        OpaqueRendererMethod::Forward
     }
 }
 

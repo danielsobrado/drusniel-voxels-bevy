@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::Deserialize;
 
 /// Configuration for camera behavior and rendering settings.
 #[derive(Resource, Clone)]
@@ -55,4 +56,38 @@ impl Default for CameraConfig {
             },
         }
     }
+}
+
+/// Fixed camera exposure configuration (EV100).
+#[derive(Resource, Deserialize, Clone)]
+pub struct CameraExposureConfig {
+    pub ev100: f32,
+}
+
+impl Default for CameraExposureConfig {
+    fn default() -> Self {
+        Self { ev100: 10.0 }
+    }
+}
+
+impl CameraExposureConfig {
+    pub fn ev100_clamped(&self) -> f32 {
+        self.ev100.clamp(0.0, 20.0)
+    }
+}
+
+pub fn load_camera_exposure_config() -> Result<CameraExposureConfig, Box<dyn std::error::Error>> {
+    #[derive(Deserialize)]
+    struct CameraConfigFile {
+        camera: CameraExposureSection,
+    }
+
+    #[derive(Deserialize)]
+    struct CameraExposureSection {
+        exposure: CameraExposureConfig,
+    }
+
+    let config_str = std::fs::read_to_string("assets/config/camera.yaml")?;
+    let config_file: CameraConfigFile = serde_yaml::from_str(&config_str)?;
+    Ok(config_file.camera.exposure)
 }

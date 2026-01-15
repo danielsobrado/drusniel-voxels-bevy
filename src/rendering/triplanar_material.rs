@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    pbr::{MaterialPipeline, MaterialPipelineKey},
+    pbr::{MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod},
     render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
 };
 use bevy_mesh::MeshVertexBufferLayoutRef;
@@ -86,8 +86,16 @@ impl Material for TriplanarMaterial {
         "shaders/triplanar_terrain.wgsl".into()
     }
 
+    fn prepass_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Opaque
+    }
+
+    fn opaque_render_method(&self) -> OpaqueRendererMethod {
+        OpaqueRendererMethod::Forward
     }
 
     fn specialize(

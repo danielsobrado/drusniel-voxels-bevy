@@ -1,17 +1,20 @@
 use bevy::prelude::*;
-use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
+use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
-use crate::atmosphere::config::FogConfig;
-use crate::environment::AtmosphereSettings;
+use crate::atmosphere::config::{FogConfig, FogFalloffMode};
+use crate::environment::{AtmosphereSettings, Sun};
+use crate::voxel::plugin::LodSettings;
 
 pub struct FogPlugin;
 
-const BASE_FOG_DENSITY: f32 = 0.006; // Fallback density when visibility-based calc fails.
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
-const VISIBILITY_DENSITY_SCALE: f32 = 0.3; // Moderate visibility fog
-const VOLUME_DENSITY_SCALE: f32 = 0.5; // Volumetric density scale (lower = brighter scene)
-const MIN_VOLUME_DENSITY: f32 = 0.005; // Very low minimum for subtle god rays
-const MAX_VOLUME_DENSITY: f32 = 0.08; // Cap to prevent over-dark scenes
+const VOLUME_DENSITY_SCALE: f32 = 0.2; // Volumetric density scale (lower = brighter scene)
+const MIN_VOLUME_DENSITY: f32 = 0.001; // Very low minimum for subtle god rays
+const MAX_VOLUME_DENSITY: f32 = 0.02; // Cap to prevent over-dark scenes
+const MIN_DISTANCE_SCALE: f32 = 0.25; // Prevents overly aggressive linear fog compression
+const MAX_DISTANCE_SCALE: f32 = 2.5; // Prevents excessively thin fog
+const MIN_DISTANCE_SPAN: f32 = 1.0; // Keep end > start
+const SHADOW_FOG_FRACTION: f32 = 0.65; // End shadows before fog gets thick
 
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
@@ -28,6 +31,7 @@ impl Plugin for FogPlugin {
                 (
                     sync_fog_toggles,
                     update_fog_from_atmosphere,
+                    update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
                 ).chain(),
             );
@@ -47,6 +51,13 @@ pub struct FogCamera;
 pub struct AtmosphereSample {
     pub sun_dir: Vec3,
     pub sun_altitude: f32,
+}
+
+/// Effective fog distance range after time-of-day and LOD alignment.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct FogDistanceState {
+    pub start: f32,
+    pub end: f32,
 }
 
 fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
@@ -76,8 +87,12 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
         spawn_global_fog_volume(&mut commands, &config);
     }
     
-    // Initialize atmosphere sample resource
+    // Initialize atmosphere sample and fog range resources
     commands.insert_resource(AtmosphereSample::default());
+    commands.insert_resource(FogDistanceState {
+        start: config.distance.start,
+        end: config.distance.end,
+    });
 }
 
 /// Call this when spawning the main camera to add fog components
@@ -87,7 +102,19 @@ pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
 
 fn distance_fog_component(config: &FogConfig) -> DistanceFog {
     let colors = &config.colors.day;
-    let base_density = visibility_density(config.distance.visibility);
+    let (start, end) = linear_fog_range(config, 1.0, None);
+    let falloff = match config.distance.falloff {
+        FogFalloffMode::Linear => FogFalloff::Linear { start, end },
+        FogFalloffMode::Atmospheric => FogFalloff::from_visibility_colors(
+            end.max(1.0),
+            Color::srgb(colors.extinction[0], colors.extinction[1], colors.extinction[2]),
+            Color::srgb(
+                colors.inscattering[0],
+                colors.inscattering[1],
+                colors.inscattering[2],
+            ),
+        ),
+    };
 
     // Screen-space distance fog
     DistanceFog {
@@ -99,10 +126,7 @@ fn distance_fog_component(config: &FogConfig) -> DistanceFog {
             0.5,
         ),
         directional_light_exponent: 30.0,
-        // Exponential squared gives a softer, more natural haze.
-        falloff: FogFalloff::ExponentialSquared {
-            density: base_density,
-        },
+        falloff,
     }
 }
 
@@ -165,7 +189,9 @@ fn sync_fog_toggles(
 fn update_fog_from_atmosphere(
     atmosphere_settings: Option<Res<AtmosphereSettings>>,
     config: Res<FogConfig>,
+    lod_settings: Option<Res<LodSettings>>,
     mut atmosphere_sample: ResMut<AtmosphereSample>,
+    mut fog_range: ResMut<FogDistanceState>,
     ambient: Res<AmbientLight>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
@@ -218,15 +244,51 @@ fn update_fog_from_atmosphere(
         twi.directional,
         twilight,
     );
+
+    let extinction_color = lerp_color3(
+        lerp_color3(ngt.extinction, day.extinction, daylight),
+        twi.extinction,
+        twilight,
+    );
+
+    let inscattering_color = lerp_color3(
+        lerp_color3(ngt.inscattering, day.inscattering, daylight),
+        twi.inscattering,
+        twilight,
+    );
     
     // Density increases at night/twilight
     let density_mult = 1.0 + twilight * 0.5 + night * 0.3;
     let preset_scale = (preset_density / BASE_PRESET_DENSITY).clamp(0.5, 2.5);
-    let base_density = visibility_density(config.distance.visibility);
-    let fog_density = base_density * preset_scale * density_mult;
-    
+    let distance_scale = (1.0 / (preset_scale * density_mult))
+        .clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
+    let min_end = lod_settings.as_ref().map(|lod| lod.cull_distance);
+    let (start, end) = linear_fog_range(&config, distance_scale, min_end);
+
+    if (fog_range.start - start).abs() > 0.01 || (fog_range.end - end).abs() > 0.01 {
+        fog_range.start = start;
+        fog_range.end = end;
+    }
+
     let ambient_intensity = (ambient.brightness / 6000.0).clamp(0.02, 0.22)
         .max(config.volumetric.ambient_intensity);
+
+    let fog_falloff = match config.distance.falloff {
+        FogFalloffMode::Linear => FogFalloff::Linear { start, end },
+        FogFalloffMode::Atmospheric => FogFalloff::from_visibility_colors(
+            end.max(1.0),
+            Color::srgb(
+                extinction_color[0],
+                extinction_color[1],
+                extinction_color[2],
+            ),
+            Color::srgb(
+                inscattering_color[0],
+                inscattering_color[1],
+                inscattering_color[2],
+            ),
+        ),
+    };
 
     // Update distance fog
     for mut fog in fog_query.iter_mut() {
@@ -238,7 +300,7 @@ fn update_fog_from_atmosphere(
             0.5 * daylight + 0.2 * night, // Less directional glow at night
         );
         fog.directional_light_exponent = 30.0 + twilight * 20.0; // Tighter during sunset
-        fog.falloff = FogFalloff::ExponentialSquared { density: fog_density };
+        fog.falloff = fog_falloff.clone();
     }
 
     // Update volumetric fog camera settings so night/dim changes take effect.
@@ -268,6 +330,44 @@ fn update_fog_from_atmosphere(
         // mie_direction controls forward scattering asymmetry
         // Lower = more visible from all angles, higher = only toward sun
         volume.scattering_asymmetry = config.volume.scattering_asymmetry * mie_direction;
+    }
+}
+
+fn update_shadow_cascades_from_fog(
+    config: Res<FogConfig>,
+    fog_range: Res<FogDistanceState>,
+    mut cascades: Query<&mut CascadeShadowConfig, With<Sun>>,
+) {
+    if !config.distance.enabled {
+        return;
+    }
+
+    if !(fog_range.is_changed() || config.is_changed()) {
+        return;
+    }
+
+    let start = fog_range.start.max(0.0);
+    let end = fog_range.end.max(start + MIN_DISTANCE_SPAN);
+    let target_max = (end * SHADOW_FOG_FRACTION).max(start + MIN_DISTANCE_SPAN);
+
+    for mut cascade in cascades.iter_mut() {
+        let Some(current_max) = cascade.bounds.last().copied() else {
+            continue;
+        };
+        if current_max <= 0.0 {
+            continue;
+        }
+
+        let min_dist = cascade.minimum_distance;
+        let target = target_max.max(min_dist + MIN_DISTANCE_SPAN);
+        if (current_max - target).abs() < 0.5 {
+            continue;
+        }
+
+        let scale = target / current_max;
+        for bound in cascade.bounds.iter_mut() {
+            *bound = (*bound * scale).max(min_dist + 0.01);
+        }
     }
 }
 
@@ -324,13 +424,19 @@ fn lerp_color4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
-fn visibility_density(visibility: f32) -> f32 {
-    let visibility = visibility.max(1.0);
-    let density = match FogFalloff::from_visibility_squared(visibility) {
-        FogFalloff::ExponentialSquared { density } => density,
-        _ => BASE_FOG_DENSITY,
-    };
-    density * VISIBILITY_DENSITY_SCALE
+fn linear_fog_range(config: &FogConfig, scale: f32, min_end: Option<f32>) -> (f32, f32) {
+    let scale = scale.clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
+    let mut start = (config.distance.start * scale).max(0.0);
+    let mut end = (config.distance.end * scale).max(0.0);
+    if let Some(min_end) = min_end {
+        if end < min_end {
+            end = min_end;
+        }
+    }
+    if end <= start + MIN_DISTANCE_SPAN {
+        end = start + MIN_DISTANCE_SPAN;
+    }
+    (start, end)
 }
 
 /// Load fog configuration from YAML file
