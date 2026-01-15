@@ -17,7 +17,8 @@ struct GrassMaterial {
     time: f32,
     fog_start: f32,
     fog_end: f32,
-    _padding: vec2<f32>,
+    aerial_strength: f32,
+    _padding: f32,
     fog_color: vec4<f32>,
 };
 
@@ -157,7 +158,7 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     // Aerial perspective - blend toward fog color based on distance
     let distance = length(view.world_position - input.world_position);
     let fog_range = max(material.fog_end - material.fog_start, 1.0);
-    let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0);
+    let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0) * material.aerial_strength;
     let color = mix(input.color.rgb, material.fog_color.rgb, fog_factor);
 
     return vec4<f32>(color, alpha);

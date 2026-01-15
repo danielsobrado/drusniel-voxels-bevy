@@ -7,6 +7,30 @@ pub struct FogConfig {
     pub volumetric: VolumetricConfig,
     pub volume: FogVolumeConfig,
     pub colors: FogColorPresets,
+    /// Runtime color modifiers (not serialized, adjusted via settings UI)
+    #[serde(skip)]
+    pub color_modifiers: FogColorModifiers,
+}
+
+/// Runtime fog color modifiers for UI tweaking
+#[derive(Clone, Copy)]
+pub struct FogColorModifiers {
+    /// Blue tint intensity (0.0 = neutral, 1.0 = full blue shift)
+    pub blue_tint: f32,
+    /// Overall fog brightness multiplier
+    pub brightness: f32,
+    /// Aerial perspective strength (how much distant objects blend to fog)
+    pub aerial_strength: f32,
+}
+
+impl Default for FogColorModifiers {
+    fn default() -> Self {
+        Self {
+            blue_tint: 0.5,      // Neutral starting point
+            brightness: 1.0,    // No brightness change
+            aerial_strength: 1.0, // Normal aerial perspective
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -106,6 +130,7 @@ impl Default for FogConfig {
                     directional: [0.6, 0.7, 0.9],
                 },
             },
+            color_modifiers: FogColorModifiers::default(),
         }
     }
 }

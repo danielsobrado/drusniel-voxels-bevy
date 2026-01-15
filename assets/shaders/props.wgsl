@@ -14,7 +14,8 @@ struct PropsUniforms {
     default_roughness: f32,
     fog_start: f32,
     fog_end: f32,
-    _padding: vec2<f32>,
+    aerial_strength: f32,
+    _padding: f32,
     fog_color: vec4<f32>,
 };
 
@@ -241,7 +242,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Aerial perspective - blend toward fog color based on distance
     let distance = length(view.world_position - world_pos);
     let fog_range = max(uniforms.fog_end - uniforms.fog_start, 1.0);
-    let fog_factor = clamp((distance - uniforms.fog_start) / fog_range, 0.0, 1.0);
+    let fog_factor = clamp((distance - uniforms.fog_start) / fog_range, 0.0, 1.0) * uniforms.aerial_strength;
     color = mix(color, uniforms.fog_color.rgb, fog_factor);
 
     // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.

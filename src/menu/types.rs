@@ -493,6 +493,10 @@ pub enum FogSlider {
     StepCount,
     Jitter,
     AmbientIntensity,
+    // Fog color controls for aerial perspective
+    FogBlueTint,
+    FogBrightness,
+    AerialStrength,
 }
 
 /// Component for fog slider value text display

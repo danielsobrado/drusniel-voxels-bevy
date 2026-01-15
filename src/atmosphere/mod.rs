@@ -7,5 +7,5 @@
 mod config;
 mod fog;
 
-pub use config::FogConfig;
+pub use config::{FogColorModifiers, FogConfig};
 pub use fog::{fog_camera_components, sun_volumetric_components, FogCamera, FogPlugin, FogUniforms};

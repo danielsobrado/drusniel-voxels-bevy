@@ -19,9 +19,10 @@ pub struct GrassMaterialUniform {
     pub fog_start: f32,
     /// Fog end distance for aerial perspective
     pub fog_end: f32,
+    /// Aerial perspective strength multiplier
+    pub aerial_strength: f32,
     /// Padding for alignment
-    pub _padding0: f32,
-    pub _padding1: f32,
+    pub _padding: f32,
     /// Fog color for aerial perspective (from atmosphere system)
     pub fog_color: LinearRgba,
 }
@@ -45,8 +46,8 @@ impl GrassMaterial {
                 time: 0.0,
                 fog_start: 80.0,
                 fog_end: 220.0,
-                _padding0: 0.0,
-                _padding1: 0.0,
+                aerial_strength: 1.0,
+                _padding: 0.0,
                 fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
             },
         }
@@ -67,8 +68,8 @@ impl Default for GrassMaterial {
                 time: 0.0,
                 fog_start: 80.0,
                 fog_end: 220.0,
-                _padding0: 0.0,
-                _padding1: 0.0,
+                aerial_strength: 1.0,
+                _padding: 0.0,
                 fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
             },
         }

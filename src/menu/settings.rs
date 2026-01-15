@@ -363,6 +363,9 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
 
             spawn_fog_slider_row(content, font, "Fog Start", FogSlider::DistanceStart);
             spawn_fog_slider_row(content, font, "Fog End", FogSlider::DistanceEnd);
+            spawn_fog_slider_row(content, font, "Blue Tint", FogSlider::FogBlueTint);
+            spawn_fog_slider_row(content, font, "Brightness", FogSlider::FogBrightness);
+            spawn_fog_slider_row(content, font, "Aerial Strength", FogSlider::AerialStrength);
             spawn_fog_slider_row(content, font, "Volume Density", FogSlider::VolumeDensity);
             spawn_fog_slider_row(content, font, "Scattering", FogSlider::VolumeScattering);
             spawn_fog_slider_row(content, font, "Absorption", FogSlider::VolumeAbsorption);
@@ -1470,6 +1473,9 @@ fn fog_slider_bounds(slider: FogSlider) -> (f32, f32) {
     match slider {
         FogSlider::DistanceStart => (20.0, 300.0),
         FogSlider::DistanceEnd => (60.0, 600.0),
+        FogSlider::FogBlueTint => (0.0, 1.0),
+        FogSlider::FogBrightness => (0.3, 1.5),
+        FogSlider::AerialStrength => (0.0, 2.0),
         FogSlider::VolumeDensity => (0.0, 0.12),
         FogSlider::VolumeScattering => (0.1, 1.0),
         FogSlider::VolumeAbsorption => (0.0, 0.08),
@@ -1485,6 +1491,9 @@ fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
     match slider {
         FogSlider::DistanceStart => config.distance.start,
         FogSlider::DistanceEnd => config.distance.end,
+        FogSlider::FogBlueTint => config.color_modifiers.blue_tint,
+        FogSlider::FogBrightness => config.color_modifiers.brightness,
+        FogSlider::AerialStrength => config.color_modifiers.aerial_strength,
         FogSlider::VolumeDensity => config.volume.density,
         FogSlider::VolumeScattering => config.volume.scattering,
         FogSlider::VolumeAbsorption => config.volume.absorption,
@@ -1508,6 +1517,15 @@ fn apply_fog_slider(config: &mut FogConfig, slider: FogSlider, normalized: f32) 
         FogSlider::DistanceEnd => {
             let min_end = (config.distance.start + 1.0).min(max);
             config.distance.end = value.max(min_end);
+        }
+        FogSlider::FogBlueTint => {
+            config.color_modifiers.blue_tint = value;
+        }
+        FogSlider::FogBrightness => {
+            config.color_modifiers.brightness = value;
+        }
+        FogSlider::AerialStrength => {
+            config.color_modifiers.aerial_strength = value;
         }
         FogSlider::VolumeDensity => {
             config.volume.density = value;
@@ -1542,6 +1560,9 @@ fn format_fog_slider_value(config: &FogConfig, slider: FogSlider) -> String {
     match slider {
         FogSlider::DistanceStart => format!("{:.0}", config.distance.start),
         FogSlider::DistanceEnd => format!("{:.0}", config.distance.end),
+        FogSlider::FogBlueTint => format!("{:.2}", config.color_modifiers.blue_tint),
+        FogSlider::FogBrightness => format!("{:.2}", config.color_modifiers.brightness),
+        FogSlider::AerialStrength => format!("{:.2}", config.color_modifiers.aerial_strength),
         FogSlider::VolumeDensity => format!("{:.3}", config.volume.density),
         FogSlider::VolumeScattering => format!("{:.2}", config.volume.scattering),
         FogSlider::VolumeAbsorption => format!("{:.3}", config.volume.absorption),

@@ -70,6 +70,8 @@ pub struct FogUniforms {
     pub fog_end: f32,
     pub sun_dir: Vec3,
     pub directional_exponent: f32,
+    /// Aerial perspective strength multiplier (0 = no fog blend, 1 = normal, 2 = exaggerated)
+    pub aerial_strength: f32,
 }
 
 impl Default for FogUniforms {
@@ -80,6 +82,7 @@ impl Default for FogUniforms {
             fog_end: 220.0,
             sun_dir: Vec3::new(0.4, 0.8, 0.3).normalize(),
             directional_exponent: 30.0,
+            aerial_strength: 1.0,
         }
     }
 }
@@ -363,11 +366,22 @@ fn update_fog_from_atmosphere(
     }
 
     // Update fog uniforms for custom shaders (building, props, grass)
-    fog_uniforms.fog_color = LinearRgba::new(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
+    // Apply color modifiers from settings UI
+    let mods = &config.color_modifiers;
+    // Blue tint: 0 = original color, 1 = shift toward blue
+    let blue_shift = mods.blue_tint;
+    let modified_fog = [
+        fog_color[0] * (1.0 - blue_shift * 0.3) * mods.brightness,
+        fog_color[1] * (1.0 - blue_shift * 0.1) * mods.brightness,
+        fog_color[2] * (1.0 + blue_shift * 0.2) * mods.brightness,
+        fog_color[3],
+    ];
+    fog_uniforms.fog_color = LinearRgba::new(modified_fog[0], modified_fog[1], modified_fog[2], modified_fog[3]);
     fog_uniforms.fog_start = start;
     fog_uniforms.fog_end = end;
     fog_uniforms.sun_dir = sun_dir;
     fog_uniforms.directional_exponent = 30.0 + twilight * 20.0;
+    fog_uniforms.aerial_strength = mods.aerial_strength;
 }
 
 fn update_shadow_cascades_from_fog(

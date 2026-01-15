@@ -390,6 +390,7 @@ pub fn sync_fog_to_materials(
             mat.uniforms.fog_color = fog.fog_color;
             mat.uniforms.fog_start = fog.fog_start;
             mat.uniforms.fog_end = fog.fog_end;
+            mat.uniforms.aerial_strength = fog.aerial_strength;
         }
     }
 
@@ -399,6 +400,7 @@ pub fn sync_fog_to_materials(
             mat.uniforms.fog_color = fog.fog_color;
             mat.uniforms.fog_start = fog.fog_start;
             mat.uniforms.fog_end = fog.fog_end;
+            mat.uniforms.aerial_strength = fog.aerial_strength;
         }
     }
 
@@ -409,6 +411,7 @@ pub fn sync_fog_to_materials(
                 mat.uniform_data.fog_color = fog.fog_color;
                 mat.uniform_data.fog_start = fog.fog_start;
                 mat.uniform_data.fog_end = fog.fog_end;
+                mat.uniform_data.aerial_strength = fog.aerial_strength;
             }
         }
     }
