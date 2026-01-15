@@ -2,6 +2,16 @@
 
 ## Version History
 
+### Current (v0.4-dev)
+*   **Bevy 0.17 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
+*   **Ambient + Atmospheric Effects**: SSAO (VBAO), distance + volumetric fog with atmospheric falloff, and time-of-day color blending.
+*   **Shadow + LOD Alignment**: Cascade shadows tuned to fog visibility and chunk LOD cull distances to avoid dark banding.
+*   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
+*   **Chunk LOD System**: High/low/culled LODs with skirts for seam hiding and integrated GPU fallbacks.
+*   **Config-Driven Tuning**: YAML configs for fog, AO, terrain generation, props, and camera exposure.
+*   **World + Tools**: Save/load persistence, terrain editing tools, and debug overlays.
+*   **UI + Modes**: Settings menu (graphics/atmosphere/fog/visual sliders), map overlay, inventory/hotbar, chat overlay, and photo mode (DoF/motion blur).
+
 ### V0.3
 *   **PBR Materials & Parallax Mapping**: Implemented PBR material blending and parallax occlusion mapping, specifically enhancing rock textures.
 *   **Texture Splatting**: Added smooth triplanar material blending (texture splatting) using vertex weights for seamless terrain transitions.
