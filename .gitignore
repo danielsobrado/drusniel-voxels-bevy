@@ -32,3 +32,5 @@ assets/models/KayKit_Forest_Nature_Pack_1.0_FREE/*
 
 *.log
 v0.3_grass_material.rs
+*.txt
+assets/models/plants/custom/*.glb

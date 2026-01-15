@@ -20,6 +20,15 @@ pub struct PropsUniforms {
     pub normal_intensity: f32,
     /// Uniform roughness fallback (used if no roughness map)
     pub default_roughness: f32,
+    /// Fog start distance for aerial perspective
+    pub fog_start: f32,
+    /// Fog end distance for aerial perspective
+    pub fog_end: f32,
+    /// Padding for alignment
+    pub _padding0: f32,
+    pub _padding1: f32,
+    /// Fog color for aerial perspective (from atmosphere system)
+    pub fog_color: LinearRgba,
 }
 
 impl Default for PropsUniforms {
@@ -30,6 +39,11 @@ impl Default for PropsUniforms {
             blend_sharpness: 4.0,
             normal_intensity: 1.0,
             default_roughness: 0.8, // Default matte for wood props
+            fog_start: 80.0,
+            fog_end: 220.0,
+            _padding0: 0.0,
+            _padding1: 0.0,
+            fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0), // Default day fog
         }
     }
 }

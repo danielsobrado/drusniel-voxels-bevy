@@ -15,6 +15,10 @@ struct GrassMaterial {
     wind_speed: f32,
     wind_scale: f32,
     time: f32,
+    fog_start: f32,
+    fog_end: f32,
+    _padding: vec2<f32>,
+    fog_color: vec4<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: GrassMaterial;
@@ -64,6 +68,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) world_position: vec3<f32>,
 };
 
 @vertex
@@ -107,6 +112,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Transform to clip space
     out.clip_position = mesh_position_local_to_clip(model, local_pos);
     out.uv = vertex.uv;
+    // Pass final world position for fog calculations
+    out.world_position = (model * local_pos).xyz;
 
     // Gradient color from base to tip (bias toward tip to reduce base banding)
     let base_weight = pow(clamp(vertex.uv.y, 0.0, 1.0), 1.6);
@@ -118,6 +125,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 struct FragmentInput {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) world_position: vec3<f32>,
 };
 
 // Compute procedural grass blade alpha mask
@@ -145,5 +153,12 @@ fn blade_alpha(uv: vec2<f32>) -> f32 {
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = blade_alpha(input.uv);
-    return vec4<f32>(input.color.rgb, alpha);
+
+    // Aerial perspective - blend toward fog color based on distance
+    let distance = length(view.world_position - input.world_position);
+    let fog_range = max(material.fog_end - material.fog_start, 1.0);
+    let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0);
+    let color = mix(input.color.rgb, material.fog_color.rgb, fog_factor);
+
+    return vec4<f32>(color, alpha);
 }

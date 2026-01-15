@@ -108,9 +108,18 @@ pub fn spawn_camera(
         },
         fog_camera_components(&fog_config),
         Skybox {
-            image: skybox_image,
+            image: skybox_image.clone(),
             brightness: 800.0,  // Lower skybox brightness
             rotation: Quat::IDENTITY,
+        },
+        // Use skybox as environment map for IBL (indirect lighting)
+        // Using same cubemap for diffuse/specular is a simplification but improves lighting
+        EnvironmentMapLight {
+            diffuse_map: skybox_image.clone(),
+            specular_map: skybox_image,
+            intensity: 400.0, // Lower than skybox to avoid over-lighting
+            rotation: Quat::IDENTITY,
+            affects_lightmapped_mesh_diffuse: false,
         },
         CinematicCamera,
     ));
@@ -246,7 +255,7 @@ pub fn update_camera_exposure(
 
 pub fn update_camera_skybox_from_atmosphere(
     atmosphere: Res<crate::environment::AtmosphereSettings>,
-    mut skyboxes: Query<&mut Skybox, With<PlayerCamera>>,
+    mut cameras: Query<(&mut Skybox, &mut EnvironmentMapLight), With<PlayerCamera>>,
 ) {
     if !atmosphere.is_changed() {
         return;
@@ -261,10 +270,13 @@ pub fn update_camera_skybox_from_atmosphere(
     };
 
     let daylight = smoothstep(-0.1, 0.25, altitude);
-    let brightness = lerp(1500.0, 6000.0, daylight);
+    let skybox_brightness = lerp(1500.0, 6000.0, daylight);
+    // Environment map intensity tracks skybox but stays lower to avoid over-lighting
+    let env_intensity = lerp(100.0, 400.0, daylight);
 
-    for mut skybox in skyboxes.iter_mut() {
-        skybox.brightness = brightness;
+    for (mut skybox, mut env_map) in cameras.iter_mut() {
+        skybox.brightness = skybox_brightness;
+        env_map.intensity = env_intensity;
     }
 }
 

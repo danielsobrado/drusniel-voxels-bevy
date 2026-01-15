@@ -15,6 +15,15 @@ pub struct GrassMaterialUniform {
     pub wind_speed: f32,
     pub wind_scale: f32,
     pub time: f32,
+    /// Fog start distance for aerial perspective
+    pub fog_start: f32,
+    /// Fog end distance for aerial perspective
+    pub fog_end: f32,
+    /// Padding for alignment
+    pub _padding0: f32,
+    pub _padding1: f32,
+    /// Fog color for aerial perspective (from atmosphere system)
+    pub fog_color: LinearRgba,
 }
 
 /// Custom grass material with wind animation
@@ -34,6 +43,11 @@ impl GrassMaterial {
                 wind_speed,
                 wind_scale,
                 time: 0.0,
+                fog_start: 80.0,
+                fog_end: 220.0,
+                _padding0: 0.0,
+                _padding1: 0.0,
+                fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
             },
         }
     }
@@ -51,6 +65,11 @@ impl Default for GrassMaterial {
                 wind_speed: 1.5,
                 wind_scale: 0.1,
                 time: 0.0,
+                fog_start: 80.0,
+                fog_end: 220.0,
+                _padding0: 0.0,
+                _padding1: 0.0,
+                fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
             },
         }
     }

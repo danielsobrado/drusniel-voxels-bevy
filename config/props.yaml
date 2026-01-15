@@ -346,6 +346,15 @@ props:
       max_slope: 0.5
       max_count: 240
 
+    - id: custom_grass_medium
+      path: "models/plants/custom/grass_medium_01_1k.glb"
+      scale_range: [0.6, 1.0]
+      spawn_on: [TopSoil]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.5
+      max_count: 200
+
     - id: fern
       path: "models/plants/fern.glb"
       scale_range: [0.6, 1.0]
@@ -444,6 +453,24 @@ props:
       min_slope: 0.0
       max_slope: 0.35
       max_count: 160
+
+    - id: custom_celandine
+      path: "models/plants/custom/celandine_01_1k.glb"
+      scale_range: [0.45, 0.85]
+      spawn_on: [TopSoil]
+      density: 0.015
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 180
+
+    - id: custom_dandelion
+      path: "models/plants/custom/dandelion_01_1k.glb"
+      scale_range: [0.4, 0.8]
+      spawn_on: [TopSoil]
+      density: 0.018
+      min_slope: 0.0
+      max_slope: 0.35
+      max_count: 180
 
     - id: flower_yellow
       path: "models/plants/flower_yellow.glb"

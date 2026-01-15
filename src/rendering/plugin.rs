@@ -10,6 +10,7 @@ use crate::rendering::cinematic::CinematicPlugin;
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
     setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material,
+    sync_fog_to_materials,
 };
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
@@ -61,6 +62,7 @@ impl Plugin for RenderingPlugin {
                     configure_building_textures,
                     configure_props_textures,
                     create_texture_array,
+                    sync_fog_to_materials,
                 ),
             );
     }

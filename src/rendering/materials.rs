@@ -1,11 +1,13 @@
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use std::path::Path;
+use crate::atmosphere::FogUniforms;
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingUniforms};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms};
+use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
 
 #[derive(Resource)]
 pub struct VoxelMaterial {
@@ -286,6 +288,7 @@ pub fn setup_building_material(
                 normal_intensity: 0.0,
                 parallax_scale: 0.0,
                 parallax_steps: 0,
+                ..default()
             },
             ..default()
         }
@@ -299,6 +302,7 @@ pub fn setup_building_material(
                 normal_intensity: 1.0,
                 parallax_scale: 0.04,    // Subtle parallax depth
                 parallax_steps: 6,       // Balanced quality/performance
+                ..default()
             },
             // Wood plank textures
             wood_albedo: load_image_if_exists(&asset_server, "pbr/building/wood/albedo.png"),
@@ -335,6 +339,7 @@ pub fn setup_props_material(
                 blend_sharpness: 4.0,
                 normal_intensity: 0.0,
                 default_roughness: 0.8,
+                ..default()
             },
             ..default()
         }
@@ -347,6 +352,7 @@ pub fn setup_props_material(
                 blend_sharpness: 4.0,
                 normal_intensity: 1.0,
                 default_roughness: 0.8,
+                ..default()
             },
             // Rock textures (full props PBR)
             rock_albedo: load_image_if_exists(&asset_server, "pbr/props/rock/albedo.png"),
@@ -359,4 +365,51 @@ pub fn setup_props_material(
     commands.insert_resource(PropsMaterialHandle {
         handle: material_handle,
     });
+}
+
+/// Sync fog uniforms to all custom materials that use aerial perspective.
+/// This updates building, props, and grass materials when the atmosphere fog changes.
+pub fn sync_fog_to_materials(
+    fog_uniforms: Option<Res<FogUniforms>>,
+    building_handle: Option<Res<BuildingMaterialHandle>>,
+    props_handle: Option<Res<PropsMaterialHandle>>,
+    grass_handles: Option<Res<GrassMaterialHandles>>,
+    mut building_materials: ResMut<Assets<BuildingMaterial>>,
+    mut props_materials: ResMut<Assets<PropsMaterial>>,
+    mut grass_materials: ResMut<Assets<GrassMaterial>>,
+) {
+    let Some(fog) = fog_uniforms else { return };
+
+    if !fog.is_changed() {
+        return;
+    }
+
+    // Update building material
+    if let Some(handle) = building_handle {
+        if let Some(mat) = building_materials.get_mut(&handle.handle) {
+            mat.uniforms.fog_color = fog.fog_color;
+            mat.uniforms.fog_start = fog.fog_start;
+            mat.uniforms.fog_end = fog.fog_end;
+        }
+    }
+
+    // Update props material
+    if let Some(handle) = props_handle {
+        if let Some(mat) = props_materials.get_mut(&handle.handle) {
+            mat.uniforms.fog_color = fog.fog_color;
+            mat.uniforms.fog_start = fog.fog_start;
+            mat.uniforms.fog_end = fog.fog_end;
+        }
+    }
+
+    // Update all grass materials
+    if let Some(handles) = grass_handles {
+        for handle in &handles.handles {
+            if let Some(mat) = grass_materials.get_mut(handle) {
+                mat.uniform_data.fog_color = fog.fog_color;
+                mat.uniform_data.fog_start = fog.fog_start;
+                mat.uniform_data.fog_end = fog.fog_end;
+            }
+        }
+    }
 }

@@ -21,6 +21,14 @@ pub struct BuildingUniforms {
     pub parallax_scale: f32,
     /// Number of parallax iterations (4-8 for quality)
     pub parallax_steps: u32,
+    /// Fog start distance for aerial perspective
+    pub fog_start: f32,
+    /// Fog end distance for aerial perspective
+    pub fog_end: f32,
+    /// Padding for alignment
+    pub _padding: f32,
+    /// Fog color for aerial perspective (from atmosphere system)
+    pub fog_color: LinearRgba,
 }
 
 impl Default for BuildingUniforms {
@@ -32,6 +40,10 @@ impl Default for BuildingUniforms {
             normal_intensity: 1.0,
             parallax_scale: 0.04, // Subtle depth for wood/stone
             parallax_steps: 6,    // Balanced quality/performance
+            fog_start: 80.0,
+            fog_end: 220.0,
+            _padding: 0.0,
+            fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0), // Default day fog
         }
     }
 }

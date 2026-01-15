@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::render::render_resource::ShaderType;
 use crate::atmosphere::config::{FogConfig, FogFalloffMode};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
@@ -60,6 +61,29 @@ pub struct FogDistanceState {
     pub end: f32,
 }
 
+/// GPU-compatible fog parameters for custom shaders that don't use Bevy's built-in fog.
+/// This is synced to material uniforms for aerial perspective in building/props/grass shaders.
+#[derive(Resource, Clone, Copy, ShaderType, Debug)]
+pub struct FogUniforms {
+    pub fog_color: LinearRgba,
+    pub fog_start: f32,
+    pub fog_end: f32,
+    pub sun_dir: Vec3,
+    pub directional_exponent: f32,
+}
+
+impl Default for FogUniforms {
+    fn default() -> Self {
+        Self {
+            fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0), // Day fog color
+            fog_start: 80.0,
+            fog_end: 220.0,
+            sun_dir: Vec3::new(0.4, 0.8, 0.3).normalize(),
+            directional_exponent: 30.0,
+        }
+    }
+}
+
 fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
     commands.spawn((
         Name::new("GlobalFogVolume"),
@@ -92,6 +116,11 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
     commands.insert_resource(FogDistanceState {
         start: config.distance.start,
         end: config.distance.end,
+    });
+    commands.insert_resource(FogUniforms {
+        fog_start: config.distance.start,
+        fog_end: config.distance.end,
+        ..default()
     });
 }
 
@@ -192,6 +221,7 @@ fn update_fog_from_atmosphere(
     lod_settings: Option<Res<LodSettings>>,
     mut atmosphere_sample: ResMut<AtmosphereSample>,
     mut fog_range: ResMut<FogDistanceState>,
+    mut fog_uniforms: ResMut<FogUniforms>,
     ambient: Res<AmbientLight>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
@@ -331,6 +361,13 @@ fn update_fog_from_atmosphere(
         // Lower = more visible from all angles, higher = only toward sun
         volume.scattering_asymmetry = config.volume.scattering_asymmetry * mie_direction;
     }
+
+    // Update fog uniforms for custom shaders (building, props, grass)
+    fog_uniforms.fog_color = LinearRgba::new(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
+    fog_uniforms.fog_start = start;
+    fog_uniforms.fog_end = end;
+    fog_uniforms.sun_dir = sun_dir;
+    fog_uniforms.directional_exponent = 30.0 + twilight * 20.0;
 }
 
 fn update_shadow_cascades_from_fog(
