@@ -349,11 +349,12 @@ props:
     - id: custom_grass_medium
       path: "models/plants/custom/grass_medium_01_1k.glb"
       scale_range: [0.6, 1.0]
-      spawn_on: [TopSoil]
-      density: 0.02
+      y_offset: 0.6
+      spawn_on: [TopSoil, SubSoil, Sand, Clay, Rock]
+      density: 0.004
       min_slope: 0.0
-      max_slope: 0.5
-      max_count: 200
+      max_slope: 0.8
+      max_count: 1500
 
     - id: fern
       path: "models/plants/fern.glb"
@@ -457,20 +458,22 @@ props:
     - id: custom_celandine
       path: "models/plants/custom/celandine_01_1k.glb"
       scale_range: [0.45, 0.85]
-      spawn_on: [TopSoil]
-      density: 0.015
+      y_offset: 0.4
+      spawn_on: [TopSoil, SubSoil, Sand, Clay, Rock]
+      density: 0.0025
       min_slope: 0.0
-      max_slope: 0.35
-      max_count: 180
+      max_slope: 0.7
+      max_count: 1200
 
     - id: custom_dandelion
       path: "models/plants/custom/dandelion_01_1k.glb"
       scale_range: [0.4, 0.8]
-      spawn_on: [TopSoil]
-      density: 0.018
+      y_offset: 0.4
+      spawn_on: [TopSoil, SubSoil, Sand, Clay, Rock]
+      density: 0.0025
       min_slope: 0.0
-      max_slope: 0.35
-      max_count: 180
+      max_slope: 0.7
+      max_count: 1200
 
     - id: flower_yellow
       path: "models/plants/flower_yellow.glb"
@@ -498,3 +501,15 @@ style:
   roughness_min: 0.75
   # Maximum metallic to keep matte look
   metallic_max: 0.05
+  custom:
+    # Extra boost for photoreal foliage cards
+    saturation_boost: 0.15
+    # Brighten custom foliage slightly
+    brightness_boost: 0.05
+    # Push custom foliage towards matte
+    roughness_min: 0.85
+    # Force non-metallic for plants
+    metallic_max: 0.0
+    # Reduce photoreal shading detail
+    disable_normal_maps: true
+    disable_occlusion_maps: true

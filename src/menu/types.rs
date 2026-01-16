@@ -130,6 +130,10 @@ pub struct SettingsState {
     pub exposure: ExposureOption,
     pub twilight_band: TwilightBandOption,
     pub night_brightness: NightBrightnessOption,
+    pub sky_quality: SkyQualityOption,
+    pub ozone: OzoneOption,
+    pub ground_albedo: GroundAlbedoOption,
+    pub sun_size: SunSizeOption,
     pub fog_preset: FogPresetOption,
     pub cycle_enabled: bool,
     pub shadow_filtering: ShadowFiltering,
@@ -157,6 +161,10 @@ impl Default for SettingsState {
             exposure: ExposureOption::Neutral,
             twilight_band: TwilightBandOption::Medium,
             night_brightness: NightBrightnessOption::Balanced,
+            sky_quality: SkyQualityOption::Medium,
+            ozone: OzoneOption::Earth,
+            ground_albedo: GroundAlbedoOption::Earth,
+            sun_size: SunSizeOption::Earth,
             fog_preset: FogPresetOption::Balanced,
             cycle_enabled: false,
             shadow_filtering: ShadowFiltering::Gaussian,
@@ -328,6 +336,38 @@ pub enum NightBrightnessOption {
     Dim,
     Balanced,
     Bright,
+}
+
+// Bevy native atmosphere options
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum SkyQualityOption {
+    Low,
+    Medium,
+    High,
+    Ultra,
+}
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum OzoneOption {
+    None,
+    Subtle,
+    Earth,
+    Heavy,
+}
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum GroundAlbedoOption {
+    Dark,
+    Earth,
+    Bright,
+    Snow,
+}
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum SunSizeOption {
+    Small,
+    Earth,
+    Large,
 }
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]

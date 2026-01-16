@@ -1,4 +1,5 @@
 pub mod grass_material;
+pub mod wind;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -11,6 +12,7 @@ use crate::rendering::materials::WaterMaterial;
 use crate::camera::controller::PlayerCamera;
 
 pub use grass_material::{GrassMaterial, GrassMaterialPlugin, GrassMaterialHandles};
+pub use wind::{WindPlugin, WindConfig, WindState, WindAffected, WindAnimationType};
 
 /// Minimal info for a single grass blade instance
 struct GrassInstance {

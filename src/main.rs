@@ -14,7 +14,7 @@ use voxel_builder::constants::{
 };
 use voxel_builder::entity::EntityPlugin;
 use voxel_builder::environment::AtmospherePlugin;
-use voxel_builder::atmosphere::FogPlugin;
+use voxel_builder::atmosphere::{FogPlugin, AtmosphereIntegrationPlugin};
 use voxel_builder::interaction::InteractionPlugin;
 use voxel_builder::inventory_ui::InventoryUiPlugin;
 use voxel_builder::map::MapPlugin;
@@ -239,6 +239,7 @@ fn main() {
         .add_plugins(PauseMenuPlugin)
         .add_plugins(PropsPlugin)
         .add_plugins(AtmospherePlugin)
+        .add_plugins(AtmosphereIntegrationPlugin)  // Physical sky rendering
         .add_plugins(FogPlugin)
         .add_plugins(EntityPlugin)
         .add_plugins(DebugUiPlugin)

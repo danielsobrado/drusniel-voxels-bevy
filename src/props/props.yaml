@@ -135,3 +135,15 @@ style:
   roughness_min: 0.75
   # Maximum metallic to keep matte look
   metallic_max: 0.05
+  custom:
+    # Extra boost for photoreal foliage cards
+    saturation_boost: 0.15
+    # Brighten custom foliage slightly
+    brightness_boost: 0.05
+    # Push custom foliage towards matte
+    roughness_min: 0.85
+    # Force non-metallic for plants
+    metallic_max: 0.0
+    # Reduce photoreal shading detail
+    disable_normal_maps: true
+    disable_occlusion_maps: true

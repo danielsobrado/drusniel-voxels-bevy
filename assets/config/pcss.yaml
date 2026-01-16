@@ -1,0 +1,50 @@
+pcss:
+  # Percentage-Closer Soft Shadows
+  enabled: true
+  
+  # World-space light source size (meters)
+  # Larger = softer shadows with wider penumbra
+  # For sun: 10-50m, For point lights: 0.5-5m
+  light_size: 15.0
+  
+  # Blocker search samples (8-16 recommended)
+  # More samples = better accuracy, slower
+  blocker_search_samples: 12
+  
+  # PCF filter samples (16-32 recommended)
+  # More samples = smoother shadows, slower
+  pcf_samples: 24
+  
+  # Minimum penumbra size (shadow blur)
+  # Prevents overly sharp shadows at contact points
+  min_penumbra_size: 0.001
+  
+  # Maximum penumbra size
+  # Prevents overly blurred shadows far from occluders
+  max_penumbra_size: 0.08
+  
+  # Quality presets (override above settings)
+  # Options: Low, Medium, High, Ultra
+  quality: High
+
+# Quality preset definitions
+quality_presets:
+  Low:
+    blocker_search_samples: 8
+    pcf_samples: 16
+    max_penumbra_size: 0.05
+  
+  Medium:
+    blocker_search_samples: 12
+    pcf_samples: 24
+    max_penumbra_size: 0.08
+  
+  High:
+    blocker_search_samples: 16
+    pcf_samples: 32
+    max_penumbra_size: 0.1
+  
+  Ultra:
+    blocker_search_samples: 24
+    pcf_samples: 48
+    max_penumbra_size: 0.15

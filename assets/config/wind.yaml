@@ -1,0 +1,73 @@
+# Wind System Configuration
+# Controls vegetation movement and weather integration
+
+wind:
+  enabled: true
+  
+  # Wind direction (x, z) - will be normalized
+  direction: [0.7, 0.3]
+  
+  # Base wind speed (m/s)
+  # 0-5 = calm, 5-10 = breezy, 10-20 = windy, 20+ = strong wind
+  speed: 5.0
+  
+  # Overall wind effect strength (0-2)
+  strength: 1.0
+  
+  # Wind turbulence/variation (0-1)
+  # Higher = more chaotic movement
+  turbulence: 0.3
+  
+  # Wind gust intensity multiplier
+  gust_strength: 2.0
+  
+  # How often gusts occur (0-1)
+  gust_frequency: 0.1
+
+# Presets for different weather conditions
+presets:
+  calm:
+    speed: 2.0
+    strength: 0.5
+    turbulence: 0.1
+    gust_strength: 1.0
+    gust_frequency: 0.05
+  
+  breezy:
+    speed: 6.0
+    strength: 1.0
+    turbulence: 0.3
+    gust_strength: 1.5
+    gust_frequency: 0.1
+  
+  windy:
+    speed: 12.0
+    strength: 1.5
+    turbulence: 0.5
+    gust_strength: 2.5
+    gust_frequency: 0.2
+  
+  stormy:
+    speed: 20.0
+    strength: 2.0
+    turbulence: 0.8
+    gust_strength: 4.0
+    gust_frequency: 0.4
+
+# Per-vegetation-type settings
+vegetation:
+  grass:
+    wind_response: 1.0
+    animation_scale: 1.0
+  
+  bush:
+    wind_response: 0.8
+    animation_scale: 0.7
+  
+  tree_leaves:
+    wind_response: 0.6
+    animation_scale: 0.5
+  
+  tree_trunk:
+    wind_response: 0.3
+    animation_scale: 0.2

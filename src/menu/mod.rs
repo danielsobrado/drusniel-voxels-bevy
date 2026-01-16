@@ -50,7 +50,7 @@ impl Plugin for PauseMenuPlugin {
             .add_systems(Update, toggle_pause_menu)
             .add_systems(Update, handle_menu_buttons)
             .add_systems(Update, multiplayer::poll_connect_task_results)
-            // Settings systems
+            // Settings systems - split into groups due to parameter limits
             .add_systems(
                 Update,
                 (
@@ -58,6 +58,12 @@ impl Plugin for PauseMenuPlugin {
                     settings::handle_graphics_settings,
                     settings::handle_gameplay_settings,
                     settings::handle_atmosphere_settings,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    settings::handle_bevy_atmosphere_settings,
                     settings::handle_fog_settings,
                     settings::handle_fog_sliders,
                     settings::handle_close_settings,

@@ -1,0 +1,64 @@
+gtao:
+  # Ground Truth Ambient Occlusion (XeGTAO)
+  enabled: true
+  
+  # Quality presets: Low, Medium, High, Ultra
+  quality: High
+  
+  # Number of angular slices (directions) - 2-4 recommended
+  # More slices = better quality but slower
+  slice_count: 3
+  
+  # Samples per slice direction - 2-4 recommended
+  steps_per_slice: 3
+  
+  # World-space occlusion radius in meters
+  # Adjust based on scene scale (voxel size)
+  radius: 2.5
+  
+  # Distance falloff range (smooth transition)
+  falloff_range: 1.0
+  
+  # Final AO power curve (1.5-2.5)
+  # Higher = darker AO
+  final_value_power: 2.0
+  
+  # Sample distribution power (2.0 default)
+  # Controls sample spacing along rays
+  sample_distribution_power: 2.0
+  
+  # Thin occluder compensation (0.0-1.0)
+  # Reduces over-darkening from thin geometry
+  thin_occluder_compensation: 0.0
+  
+  # Depth mip sampling offset for distant samples
+  depth_mip_sampling_offset: 1.0
+  
+  # Temporal denoising
+  denoise:
+    enabled: true
+    # Spatial filter radius (0-4)
+    spatial_radius: 2
+    # Spatial filter sigma (Gaussian blur)
+    spatial_sigma: 1.5
+    # Temporal blend factor (0.0-1.0)
+    # Higher = more temporal smoothing, can cause ghosting
+    temporal_blend: 0.95
+    # Edge detection thresholds
+    depth_threshold: 0.1
+    normal_threshold: 0.3
+  
+  # Bent normals output for directional occlusion
+  # Used for specular occlusion and GI
+  bent_normals: true
+  
+  # Fallback settings
+  disable_on_integrated_gpu: true
+
+# Baked per-vertex AO (computed at mesh generation)
+# Complementary to GTAO for enhanced detail
+baked:
+  enabled: true
+  strength: 0.8
+  corner_darkness: 0.6
+  fix_anisotropy: true

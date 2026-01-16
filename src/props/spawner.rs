@@ -1,4 +1,5 @@
 use super::{Prop, PropAssets, PropConfig, PropDefinition, PropType};
+use crate::player::Player;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
@@ -10,6 +11,9 @@ const TREE_CELL_SIZE: i32 = 10;
 
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
+
+#[derive(Resource, Default)]
+pub struct PropsDebugSpawned(pub bool);
 
 /// Spawn props on terrain based on configuration
 pub fn spawn_props_on_terrain(
@@ -47,6 +51,84 @@ pub fn spawn_props_on_terrain(
     }
 
     info!("Spawned {} total props", total);
+}
+
+/// Spawn a small ring of custom props near the player for quick verification.
+pub fn spawn_debug_custom_props_near_player(
+    mut commands: Commands,
+    prop_assets: Res<PropAssets>,
+    config: Res<PropConfig>,
+    world: Res<VoxelWorld>,
+    player_query: Query<&Transform, With<Player>>,
+    mut debug_spawned: ResMut<PropsDebugSpawned>,
+) {
+    if debug_spawned.0 || !prop_assets.loaded {
+        return;
+    }
+
+    if world.get_chunk(IVec3::ZERO).is_none() {
+        return;
+    }
+
+    let Ok(player_tf) = player_query.single() else {
+        return;
+    };
+
+    debug_spawned.0 = true;
+
+    let center = player_tf.translation;
+    let placements = [
+        ("custom_grass_medium", PropType::Bush, Vec2::new(6.0, 0.0)),
+        ("custom_grass_medium", PropType::Bush, Vec2::new(-6.0, 0.0)),
+        ("custom_grass_medium", PropType::Bush, Vec2::new(0.0, 6.0)),
+        ("custom_grass_medium", PropType::Bush, Vec2::new(0.0, -6.0)),
+        ("custom_celandine", PropType::Flower, Vec2::new(4.0, 4.0)),
+        ("custom_celandine", PropType::Flower, Vec2::new(-4.0, 4.0)),
+        ("custom_dandelion", PropType::Flower, Vec2::new(4.0, -4.0)),
+        ("custom_dandelion", PropType::Flower, Vec2::new(-4.0, -4.0)),
+    ];
+
+    for (id, prop_type, offset) in placements {
+        let Some(scene_handle) = prop_assets.scenes.get(id) else {
+            warn!("Prop asset '{}' not found in registry (debug spawn)", id);
+            continue;
+        };
+
+        let world_x = (center.x + offset.x).round() as i32;
+        let world_z = (center.z + offset.y).round() as i32;
+        let Some((surface_y, _voxel_type, _slope)) = find_surface(&world, world_x, world_z) else {
+            continue;
+        };
+
+        let (scale_min, scale_max, y_offset) = if let Some(def) = find_def(config.as_ref(), id) {
+            (def.scale_range[0], def.scale_range[1], def.y_offset)
+        } else {
+            (0.8, 1.2, 0.0)
+        };
+
+        let hash = deterministic_hash(world_x, world_z, id);
+        let scale = lerp(scale_min, scale_max, fract(hash * 7.0));
+        let rotation = fract(hash * 13.0) * std::f32::consts::TAU;
+
+        let position = Vec3::new(
+            world_x as f32 + 0.5,
+            surface_y as f32 + 1.0 + y_offset,
+            world_z as f32 + 0.5,
+        );
+
+        commands.spawn((
+            SceneRoot(scene_handle.clone()),
+            Transform::from_translation(position)
+                .with_rotation(Quat::from_rotation_y(rotation))
+                .with_scale(Vec3::splat(scale)),
+            Prop {
+                id: id.to_string(),
+                prop_type,
+            },
+        ));
+    }
+
+    info!("Spawned debug custom props around player");
 }
 
 fn spawn_category(
@@ -146,6 +228,17 @@ fn spawn_category(
         info!("Spawned {} x {}", count, def.id);
     }
     count
+}
+
+fn find_def<'a>(config: &'a PropConfig, id: &str) -> Option<&'a PropDefinition> {
+    config
+        .props
+        .trees
+        .iter()
+        .chain(config.props.rocks.iter())
+        .chain(config.props.bushes.iter())
+        .chain(config.props.flowers.iter())
+        .find(|def| def.id == id)
 }
 
 /// Find surface voxel and calculate slope

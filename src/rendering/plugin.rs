@@ -7,6 +7,9 @@ use crate::rendering::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
 };
 use crate::rendering::cinematic::CinematicPlugin;
+use crate::rendering::gtao::GtaoPlugin;
+use crate::rendering::gtao_noise::GtaoNoisePlugin;
+use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
     setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material,
@@ -32,6 +35,12 @@ impl Plugin for RenderingPlugin {
                         capabilities.adapter_name.is_none()
                     }),
             )
+            // GTAO replaces SSAO for better quality
+            .add_plugins(GtaoPlugin)
+            .add_plugins(GtaoNoisePlugin)
+            // PCSS for contact-hardening soft shadows
+            .add_plugins(PcssPlugin)
+            // Legacy SSAO kept for compatibility (disabled by default in gtao.yaml)
             .add_plugins(SsaoPlugin)
             .add_plugins(CinematicPlugin)
             .add_plugins(PhotoModePlugin)

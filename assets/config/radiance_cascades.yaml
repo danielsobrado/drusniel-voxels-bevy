@@ -1,0 +1,112 @@
+# Radiance Cascades Global Illumination Configuration
+# Screen-space GI using voxel SDF for efficient ray marching
+
+# Master toggle
+enabled: true
+
+# Cascade configuration
+cascades:
+  count: 4                    # Number of cascade levels (3-5)
+  rays_per_probe: 16          # Rays traced per probe at finest level
+  probe_spacing: 8.0          # Pixel spacing at finest cascade
+  scale_factor: 4.0           # Each cascade covers 4x more area
+  
+# Ray tracing
+ray_tracing:
+  max_distance: 64.0          # Maximum ray distance (world units)
+  step_multiplier: 1.0        # SDF step multiplier (lower = more accurate)
+  max_steps: 64               # Maximum sphere tracing steps
+  epsilon: 0.001              # Surface hit threshold
+
+# SDF Volume
+sdf_volume:
+  resolution: [128, 64, 128]  # 3D texture resolution (x, y, z)
+  
+  # World bounds (auto-calculated from world size if not specified)
+  world_min: [-256.0, 0.0, -256.0]
+  world_max: [256.0, 64.0, 256.0]
+  
+  # Update strategy
+  incremental_updates: true   # Update only modified chunks
+  update_radius: 3            # Chunks around modification to update
+  jfa_enabled: true           # Use Jump Flooding Algorithm for SDF
+
+# Lighting
+lighting:
+  gi_intensity: 1.0           # Global illumination strength
+  bounce_intensity: 0.5       # Secondary bounce contribution
+  ao_strength: 0.5            # Ambient occlusion from SDF
+  normal_bias: 0.1            # Bias to prevent self-shadowing
+  
+  # Sky contribution
+  sky_color: [0.5, 0.7, 1.0]
+  sky_intensity: 0.3
+
+# Temporal stability
+temporal:
+  enabled: true
+  blend_factor: 0.9           # History blend (higher = more stable, more ghosting)
+  jitter_enabled: true        # Blue noise jitter for anti-aliasing
+
+# Quality presets
+presets:
+  low:
+    cascade_count: 3
+    rays_per_probe: 8
+    probe_spacing: 16.0
+    sdf_resolution: [64, 32, 64]
+    temporal_blend: 0.95
+    
+  medium:
+    cascade_count: 4
+    rays_per_probe: 12
+    probe_spacing: 12.0
+    sdf_resolution: [96, 48, 96]
+    temporal_blend: 0.92
+    
+  high:
+    cascade_count: 4
+    rays_per_probe: 16
+    probe_spacing: 8.0
+    sdf_resolution: [128, 64, 128]
+    temporal_blend: 0.9
+    
+  ultra:
+    cascade_count: 5
+    rays_per_probe: 24
+    probe_spacing: 6.0
+    sdf_resolution: [192, 96, 192]
+    temporal_blend: 0.85
+
+# Performance
+performance:
+  # Cascade update frequency (not all cascades update every frame)
+  cascade_0_interval: 1       # Every frame
+  cascade_1_interval: 2       # Every 2 frames
+  cascade_2_interval: 4       # Every 4 frames
+  cascade_3_interval: 8       # Every 8 frames
+  
+  # Resolution scaling
+  render_scale: 0.5           # Render at half resolution, upsample
+  
+  # Early termination
+  min_ray_contribution: 0.001 # Skip rays below this threshold
+
+# Integration with other systems
+integration:
+  # Combine with GTAO
+  combine_with_gtao: true
+  gtao_blend: 0.3             # How much GTAO affects GI
+  
+  # Affect vegetation
+  vegetation_gi_multiplier: 1.2
+  
+  # Affect water reflections
+  water_gi_contribution: 0.5
+
+# Debug visualization
+debug:
+  show_cascades: false        # Visualize individual cascade levels
+  show_probes: false          # Show probe positions
+  show_sdf: false             # Render SDF as color
+  show_rays: false            # Visualize traced rays

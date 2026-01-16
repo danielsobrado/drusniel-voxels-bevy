@@ -2,6 +2,7 @@ use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, Volumet
 use bevy::prelude::*;
 use bevy_water::*;
 
+use crate::atmosphere::AtmosphereConfig;
 use crate::constants::WATER_LEVEL;
 
 /// Settings that drive the sky and sun animation
@@ -57,9 +58,21 @@ pub struct AtmospherePlugin;
 
 impl Plugin for AtmospherePlugin {
     fn build(&self, app: &mut App) {
+        // Check if native atmosphere will be used (loaded separately, but we can check the config)
+        let native_atmosphere_enabled = crate::atmosphere::atmosphere_integration::load_atmosphere_config()
+            .map(|c| c.enabled)
+            .unwrap_or(false);
+
+        // Use transparent clear color when native atmosphere is active (it renders the sky),
+        // otherwise use a soft sky tint as fallback
+        let clear_color = if native_atmosphere_enabled {
+            ClearColor(Color::NONE)
+        } else {
+            ClearColor(Color::srgba(0.50, 0.64, 0.84, 1.0))
+        };
+
         app.insert_resource(AtmosphereSettings::default())
-            // Soft initial sky tint
-            .insert_resource(ClearColor(Color::srgba(0.50, 0.64, 0.84, 1.0)))
+            .insert_resource(clear_color)
             .insert_resource(DirectionalLightShadowMap { size: 4096 })
             // bevy_water for dynamic ocean waves
             .insert_resource(WaterSettings {
@@ -111,16 +124,21 @@ fn setup_atmosphere(mut commands: Commands) {
 
 fn seed_atmosphere(
     settings: Res<AtmosphereSettings>,
+    atmo_config: Option<Res<AtmosphereConfig>>,
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut ambient: ResMut<AmbientLight>,
     mut clear_color: ResMut<ClearColor>,
 ) {
+    // Check if Bevy's native atmosphere is handling sky rendering
+    let native_atmosphere_active = atmo_config.map(|c| c.enabled).unwrap_or(false);
+
     if let Some(sample) = compute_atmosphere(&settings) {
         apply_atmosphere_sample(
             sample,
             &mut sun_query,
             &mut ambient,
             &mut clear_color,
+            native_atmosphere_active,
         );
     }
 }
@@ -128,10 +146,14 @@ fn seed_atmosphere(
 fn animate_atmosphere(
     time: Res<Time>,
     mut settings: ResMut<AtmosphereSettings>,
+    atmo_config: Option<Res<AtmosphereConfig>>,
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut ambient: ResMut<AmbientLight>,
     mut clear_color: ResMut<ClearColor>,
 ) {
+    // Check if Bevy's native atmosphere is handling sky rendering
+    let native_atmosphere_active = atmo_config.map(|c| c.enabled).unwrap_or(false);
+
     // Advance time if enabled
     if settings.cycle_enabled {
         settings.time = (settings.time + time.delta_secs() * settings.time_scale) % settings.day_length;
@@ -142,6 +164,7 @@ fn animate_atmosphere(
             &mut sun_query,
             &mut ambient,
             &mut clear_color,
+            native_atmosphere_active,
         );
     }
 }
@@ -226,6 +249,7 @@ fn apply_atmosphere_sample(
     sun_query: &mut Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     ambient: &mut ResMut<AmbientLight>,
     clear_color: &mut ResMut<ClearColor>,
+    native_atmosphere_active: bool,
 ) {
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
         // Use light direction (from sun toward the world), which is the inverse of the sun vector.
@@ -236,7 +260,12 @@ fn apply_atmosphere_sample(
 
     ambient.brightness = sample.ambient_brightness;
     ambient.color = sample.ambient_color;
-    clear_color.0 = sample.sky_color;
+
+    // Only set ClearColor if native atmosphere is NOT active
+    // When Bevy's procedural atmosphere is enabled, it renders the sky itself
+    if !native_atmosphere_active {
+        clear_color.0 = sample.sky_color;
+    }
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

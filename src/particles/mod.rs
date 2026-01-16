@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
 
+pub mod weather;
+
+pub use weather::{WeatherConfig, WeatherState, WeatherType, WeatherParticlePlugin, set_weather, set_wind};
+
 pub struct ParticlePlugin;
 
 #[derive(Resource)]
@@ -26,6 +30,7 @@ impl Plugin for ParticlePlugin {
         }
 
         app.add_message::<SpawnParticleEvent>()
+           .add_plugins(WeatherParticlePlugin)
            .add_systems(Startup, setup_particles)
            .add_systems(Update, (handle_particle_events, despawn_finished_effects));
     }

@@ -1,0 +1,91 @@
+# Enhanced Water Rendering Configuration
+# Gerstner waves, foam, and caustics
+
+gerstner:
+  enabled: true
+  # Base wave height (meters)
+  amplitude: 0.5
+  # Scale of wave patterns (larger = longer wavelengths)
+  wave_scale: 1.0
+  # Wave animation speed multiplier
+  wave_speed: 1.0
+  # Number of wave layers (1-4, more = better quality but slower)
+  wave_count: 4
+
+foam:
+  enabled: true
+  # Foam color (RGB, 0-1)
+  color: [1.0, 1.0, 1.0]
+  # Foam brightness multiplier
+  intensity: 1.0
+  # Foam texture scale
+  scale: 1.0
+  # How long foam persists (0-1)
+  persistence: 0.9
+  # Generate foam at shorelines
+  shore_foam: true
+  # Generate foam at wave crests
+  wave_crest_foam: true
+
+caustics:
+  enabled: true
+  # Caustic light intensity
+  intensity: 0.5
+  # Caustic pattern scale
+  scale: 1.0
+  # Animation speed
+  speed: 1.0
+  # Maximum depth for caustic visibility (meters)
+  max_depth: 10.0
+
+visual:
+  # Deep water color (RGBA)
+  deep_color: [0.02, 0.08, 0.15, 0.95]
+  # Shallow water color (RGBA)
+  shallow_color: [0.05, 0.25, 0.35, 0.7]
+  # Water clarity (0 = murky, 1 = crystal clear)
+  clarity: 0.4
+  # Surface reflectivity (0-1)
+  reflectivity: 0.8
+  # Fresnel effect power (higher = more edge reflection)
+  fresnel_power: 5.0
+
+# Quality presets
+quality_presets:
+  low:
+    gerstner:
+      wave_count: 2
+    foam:
+      enabled: false
+    caustics:
+      enabled: false
+  
+  medium:
+    gerstner:
+      wave_count: 3
+    foam:
+      enabled: true
+      shore_foam: true
+      wave_crest_foam: false
+    caustics:
+      enabled: true
+      intensity: 0.3
+  
+  high:
+    gerstner:
+      wave_count: 4
+    foam:
+      enabled: true
+    caustics:
+      enabled: true
+  
+  ultra:
+    gerstner:
+      wave_count: 4
+      amplitude: 0.6
+    foam:
+      enabled: true
+      intensity: 1.2
+    caustics:
+      enabled: true
+      intensity: 0.7

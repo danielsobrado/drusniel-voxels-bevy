@@ -13,12 +13,14 @@ impl Plugin for PropsPlugin {
         app.init_resource::<PropAssets>()
             .init_resource::<PropConfig>()
             .init_resource::<spawner::PropsSpawned>()
+            .init_resource::<spawner::PropsDebugSpawned>()
             .add_systems(Startup, loader::load_prop_config)
             .add_systems(
                 Update,
                 (
                     loader::track_asset_loading,
                     spawner::spawn_props_on_terrain,
+                    spawner::spawn_debug_custom_props_near_player,
                     materials::apply_style_overrides,
                 )
                     .chain(),
@@ -107,8 +109,10 @@ pub struct StyleConfig {
     pub saturation_boost: f32,
     #[serde(default = "default_roughness_min")]
     pub roughness_min: f32,
-    #[serde(default)]
+    #[serde(default = "default_metallic_max")]
     pub metallic_max: f32,
+    #[serde(default)]
+    pub custom: CustomStyleConfig,
 }
 
 impl Default for StyleConfig {
@@ -117,6 +121,7 @@ impl Default for StyleConfig {
             saturation_boost: 0.1,
             roughness_min: 0.7,
             metallic_max: 0.1,
+            custom: CustomStyleConfig::default(),
         }
     }
 }
@@ -127,4 +132,61 @@ fn default_saturation_boost() -> f32 {
 
 fn default_roughness_min() -> f32 {
     0.7
+}
+
+fn default_metallic_max() -> f32 {
+    0.1
+}
+
+#[derive(Deserialize, Clone)]
+pub struct CustomStyleConfig {
+    #[serde(default = "default_custom_saturation_boost")]
+    pub saturation_boost: f32,
+    #[serde(default = "default_custom_brightness_boost")]
+    pub brightness_boost: f32,
+    #[serde(default = "default_custom_roughness_min")]
+    pub roughness_min: f32,
+    #[serde(default = "default_custom_metallic_max")]
+    pub metallic_max: f32,
+    #[serde(default = "default_custom_disable_normal_maps")]
+    pub disable_normal_maps: bool,
+    #[serde(default = "default_custom_disable_occlusion_maps")]
+    pub disable_occlusion_maps: bool,
+}
+
+impl Default for CustomStyleConfig {
+    fn default() -> Self {
+        Self {
+            saturation_boost: 0.15,
+            brightness_boost: 0.05,
+            roughness_min: 0.85,
+            metallic_max: 0.0,
+            disable_normal_maps: true,
+            disable_occlusion_maps: true,
+        }
+    }
+}
+
+fn default_custom_saturation_boost() -> f32 {
+    0.15
+}
+
+fn default_custom_brightness_boost() -> f32 {
+    0.05
+}
+
+fn default_custom_roughness_min() -> f32 {
+    0.85
+}
+
+fn default_custom_metallic_max() -> f32 {
+    0.0
+}
+
+fn default_custom_disable_normal_maps() -> bool {
+    true
+}
+
+fn default_custom_disable_occlusion_maps() -> bool {
+    true
 }

@@ -93,6 +93,7 @@ If assets are FBX format:
 
 **Wrong colors:**
 - Adjust `style.saturation_boost` in props.yaml
+- For custom foliage, tweak `style.custom.*` to match the stylized palette
 - Check source textures are embedded in GLB
 
 **Performance issues:**

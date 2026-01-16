@@ -1,0 +1,143 @@
+# Volumetric Clouds Configuration
+# Raymarched clouds with temporal reprojection for performance
+
+# Cloud layer boundaries
+layer:
+  base_height: 1500.0    # Meters above sea level
+  top_height: 4000.0     # Maximum cloud altitude
+  earth_radius: 6371000.0  # For proper atmosphere curvature
+
+# Density and appearance
+appearance:
+  density_multiplier: 1.0
+  coverage: 0.5          # 0-1, how much sky is covered
+  cloud_type: 0.5        # 0=stratus, 0.5=stratocumulus, 1=cumulus
+  
+# Cloud type profiles (for cloud_type interpolation)
+cloud_types:
+  stratus:
+    height_range: [0.0, 0.3]  # Flat, low clouds
+    density_falloff: sharp
+    
+  stratocumulus:
+    height_range: [0.0, 0.6]  # Medium, rounded clouds
+    density_falloff: smooth
+    
+  cumulus:
+    height_range: [0.0, 0.95] # Tall, puffy clouds
+    density_falloff: gradual
+
+# Lighting
+lighting:
+  sun_intensity: 1.0
+  ambient_color: [0.6, 0.7, 0.9]
+  
+  # Phase function (light scattering)
+  forward_scattering: 0.8    # Silver lining effect
+  back_scattering: -0.5      # Soft ambient
+  scattering_blend: 0.7      # Bias toward forward
+  
+  # Powder effect for dark edges
+  powder_strength: 0.5
+
+# Animation
+animation:
+  wind_direction: [1.0, 0.0]  # XZ direction
+  wind_speed: 10.0            # m/s
+  detail_upward_speed: 3.0    # Vertical detail motion
+
+# Quality settings
+quality:
+  # Raymarching
+  primary_steps: 64       # Main ray steps
+  light_steps: 6          # Steps toward sun
+  max_ray_distance: 50000.0
+  
+  # Resolution
+  render_scale: 0.5       # Render at half res, upsample
+  
+  # Temporal reprojection
+  temporal:
+    enabled: true
+    blend_factor: 0.95    # How much history to keep
+    jitter_strength: 1.0  # Blue noise jitter amount
+
+# Noise texture settings
+noise:
+  base_shape:
+    resolution: 128       # 3D texture size
+    scale: 0.00003        # World-space scale
+    octaves: 4
+    
+  detail:
+    resolution: 32
+    scale: 0.0003
+    octaves: 4
+    
+  weather_map:
+    resolution: 512       # 2D texture
+    scale: 0.00002
+    regeneration_interval: 300.0  # Seconds
+
+# Presets
+presets:
+  clear:
+    coverage: 0.1
+    density_multiplier: 0.5
+    cloud_type: 0.3
+    
+  fair_weather:
+    coverage: 0.3
+    density_multiplier: 0.8
+    cloud_type: 0.5
+    
+  partly_cloudy:
+    coverage: 0.5
+    density_multiplier: 1.0
+    cloud_type: 0.6
+    
+  overcast:
+    coverage: 0.8
+    density_multiplier: 1.2
+    cloud_type: 0.2
+    ambient_color: [0.5, 0.55, 0.6]
+    
+  stormy:
+    coverage: 0.9
+    density_multiplier: 1.5
+    cloud_type: 0.8
+    ambient_color: [0.3, 0.35, 0.4]
+    wind_speed: 25.0
+
+# Performance profiles
+performance:
+  ultra:
+    primary_steps: 128
+    light_steps: 12
+    render_scale: 1.0
+    temporal_blend: 0.9
+    
+  high:
+    primary_steps: 64
+    light_steps: 6
+    render_scale: 0.5
+    temporal_blend: 0.95
+    
+  medium:
+    primary_steps: 32
+    light_steps: 4
+    render_scale: 0.5
+    temporal_blend: 0.97
+    
+  low:
+    primary_steps: 16
+    light_steps: 2
+    render_scale: 0.25
+    temporal_blend: 0.98
+
+# Integration with atmosphere system
+atmosphere_integration:
+  blend_with_sky: true
+  aerial_perspective: true  # Fade clouds with distance
+  horizon_fade_start: 30000.0
+  horizon_fade_end: 50000.0

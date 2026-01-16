@@ -1,0 +1,58 @@
+atmosphere:
+  # Bevy 0.17+ built-in atmosphere (Nishita-based physical sky)
+  enabled: true
+
+  # Rendering mode: "raymarched" (better quality) or "lookup" (faster)
+  rendering_mode: lookup
+
+  # Quality settings
+  sky_max_samples: 32  # Ray samples for sky rendering (16-64)
+
+  # Use Bevy's default Atmosphere::EARTH values
+  # Uncomment to customize (values must match Bevy's expected units):
+  # rayleigh_scattering: [5.8e-3, 13.5e-3, 33.1e-3]  # km^-1
+  # rayleigh_scale_height: 8000.0  # meters
+  # mie_scattering: 3.99e-3  # km^-1
+  # mie_scale_height: 1200.0  # meters
+  # mie_asymmetry: 0.8
+  # ozone_absorption: [0.65e-3, 1.881e-3, 0.085e-3]  # km^-1
+  # ozone_center_altitude: 25000.0  # meters
+  # ozone_width: 15000.0  # meters
+
+  # Sun parameters
+  sun_intensity: 22.0
+
+  # Planet parameters - use Bevy defaults
+  # bottom_radius: 6371.0  # km
+  # top_radius: 6471.0  # km
+  # ground_albedo: [0.3, 0.3, 0.3]
+
+  # Time of day presets (sun_angle in degrees, 0 = horizon)
+  time_presets:
+    sunrise:
+      sun_angle: 5.0
+      sun_intensity: 18.0
+    noon:
+      sun_angle: 60.0
+      sun_intensity: 25.0
+    sunset:
+      sun_angle: -2.0
+      sun_intensity: 15.0
+    night:
+      sun_angle: -30.0
+      sun_intensity: 0.1
+
+  # Quality presets
+  quality_presets:
+    low:
+      rendering_mode: lookup
+      sky_max_samples: 16
+    medium:
+      rendering_mode: lookup
+      sky_max_samples: 32
+    high:
+      rendering_mode: raymarched
+      sky_max_samples: 48
+    ultra:
+      rendering_mode: raymarched
+      sky_max_samples: 64

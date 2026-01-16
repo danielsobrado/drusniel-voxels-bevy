@@ -30,6 +30,7 @@ bevy-tnua = "0.26"
 bevy-tnua-avian3d = "0.8"
 pollster = "0.4.0"
 wgpu = { version = "26.0.1", default-features = false, features = ["dx12", "vulkan"] }
+rand = "0.8"
 
 [dev-dependencies]
 criterion = "0.5"

@@ -1,9 +1,10 @@
-// Grass wind shader - Valheim-style swaying animation
+// Grass wind shader - Valheim-style swaying animation with SSS
 // Uses Bevy 0.17 Material system with mesh_functions import
 // Pattern based on assets/shaders/custom_vertex_attribute.wgsl from Bevy examples
 
 #import bevy_pbr::mesh_view_bindings::view
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
+#import sss_vegetation::{simple_wrap_lighting}
 
 // Baseline exposure used by Bevy when no explicit camera exposure is set (EV100_BLENDER = 9.7).
 const EXPOSURE_BLENDER: f32 = 0.0010019079;
@@ -18,6 +19,8 @@ struct GrassMaterial {
     fog_start: f32,
     fog_end: f32,
     aerial_strength: f32,
+    sss_wrap: f32,               // SSS wrap amount (0.5 default)
+    sss_strength: f32,           // SSS strength multiplier
     _padding: f32,
     fog_color: vec4<f32>,
 };
@@ -70,6 +73,7 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) world_position: vec3<f32>,
+    @location(3) world_normal: vec3<f32>,
 };
 
 @vertex
@@ -115,6 +119,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.uv = vertex.uv;
     // Pass final world position for fog calculations
     out.world_position = (model * local_pos).xyz;
+    // Transform normal to world space for SSS lighting
+    out.world_normal = normalize((model * vec4<f32>(vertex.normal, 0.0)).xyz);
 
     // Gradient color from base to tip (bias toward tip to reduce base banding)
     let base_weight = pow(clamp(vertex.uv.y, 0.0, 1.0), 1.6);
@@ -125,6 +131,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 struct FragmentInput {
     @location(0) uv: vec2<f32>,
+    @location(3) world_normal: vec3<f32>,
     @location(1) color: vec4<f32>,
     @location(2) world_position: vec3<f32>,
 };
@@ -154,11 +161,23 @@ fn blade_alpha(uv: vec2<f32>) -> f32 {
 @fragment
 fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = blade_alpha(input.uv);
+Simple directional light for SSS (sun direction)
+    // In production, this would come from actual light sources
+    let sun_dir = normalize(vec3<f32>(0.3, 0.8, 0.4));
+    
+    // Apply SSS wrap lighting
+    let sss_lighting = simple_wrap_lighting(input.world_normal, sun_dir, material.sss_wrap);
+    let sss_boost = mix(1.0, 1.0 + material.sss_strength, sss_lighting);
+    
+    // SSS color tint (yellow-green for vegetation)
+    let sss_color = vec3<f32>(1.1, 1.0, 0.7);
+    let lit_color = input.color.rgb * sss_boost * sss_color;
 
     // Aerial perspective - blend toward fog color based on distance
     let distance = length(view.world_position - input.world_position);
     let fog_range = max(material.fog_end - material.fog_start, 1.0);
     let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0) * material.aerial_strength;
+    let color = mix(lit_colore - material.fog_start) / fog_range, 0.0, 1.0) * material.aerial_strength;
     let color = mix(input.color.rgb, material.fog_color.rgb, fog_factor);
 
     return vec4<f32>(color, alpha);

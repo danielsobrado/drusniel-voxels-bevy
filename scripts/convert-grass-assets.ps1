@@ -78,11 +78,48 @@ foreach ($blend in $blendFiles) {
         continue
     }
 
-    $escapedOut = $outPath -replace "'", "''"
-    $py = "import bpy; bpy.ops.export_scene.gltf(filepath=r'$escapedOut', export_format='GLB', export_apply=True, export_image_format='AUTO')"
+    $pyOut = ($outPath -replace "\\\\", "/")
+    $py = @'
+import bpy
+
+keep = []
+for obj in bpy.data.objects:
+    if obj.type != 'MESH':
+        continue
+    name = obj.name
+    if name.endswith('_LOD0') and 'geometry_nodes' not in name:
+        keep.append(obj)
+
+geonodes = [o for o in keep if 'geonodes' in o.name]
+if geonodes:
+    keep = geonodes
+
+if not keep:
+    keep = [o for o in bpy.data.objects if o.type == 'MESH']
+
+for obj in bpy.data.objects:
+    obj.select_set(False)
+
+for obj in list(bpy.data.objects):
+    if obj not in keep:
+        obj.select_set(True)
+
+if bpy.context.selected_objects:
+    bpy.ops.object.delete()
+
+out_path = r"__OUT__"
+bpy.ops.export_scene.gltf(filepath=out_path, export_format='GLB', export_apply=True, export_image_format='AUTO')
+'@
+    $py = $py.Replace('__OUT__', $pyOut)
 
     Write-Step "Exporting: $($blend.FullName) -> $outPath"
-    & $blender -b $blend.FullName --python-expr $py
+    $tmpFile = New-TemporaryFile
+    Set-Content -Path $tmpFile.FullName -Value $py -Encoding ASCII
+    try {
+        & $blender -b $blend.FullName --python $tmpFile.FullName
+    } finally {
+        Remove-Item -Path $tmpFile.FullName -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Success "Conversion complete"

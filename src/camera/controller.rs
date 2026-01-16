@@ -1,4 +1,4 @@
-use crate::atmosphere::{fog_camera_components, FogConfig};
+use crate::atmosphere::{fog_camera_components, AtmosphereConfig, FogConfig};
 use crate::camera::config::{CameraConfig, CameraExposureConfig};
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
@@ -72,7 +72,12 @@ pub fn spawn_camera(
     camera_config: Res<CameraConfig>,
     exposure_config: Res<CameraExposureConfig>,
     settings_state: Res<SettingsState>,
+    atmo_config: Option<Res<AtmosphereConfig>>,
 ) {
+    // Check if Bevy's native atmosphere is handling sky rendering
+    // If enabled, we skip the Skybox to let the procedural atmosphere render
+    let native_atmosphere_enabled = atmo_config.map(|c| c.enabled).unwrap_or(false);
+
     // Daytime skybox (same asset used in v0.3).
     let skybox_image = ImageReformat::cubemap(
         &mut commands,
@@ -107,22 +112,28 @@ pub fn spawn_camera(
             ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,
         },
         fog_camera_components(&fog_config),
-        Skybox {
-            image: skybox_image.clone(),
-            brightness: 800.0,  // Lower skybox brightness
-            rotation: Quat::IDENTITY,
-        },
-        // Use skybox as environment map for IBL (indirect lighting)
-        // Using same cubemap for diffuse/specular is a simplification but improves lighting
+        // Keep EnvironmentMapLight for IBL even with native atmosphere
         EnvironmentMapLight {
             diffuse_map: skybox_image.clone(),
-            specular_map: skybox_image,
+            specular_map: skybox_image.clone(),
             intensity: 400.0, // Lower than skybox to avoid over-lighting
             rotation: Quat::IDENTITY,
             affects_lightmapped_mesh_diffuse: false,
         },
         CinematicCamera,
     ));
+
+    // Only add Skybox if native atmosphere is NOT enabled
+    // The Skybox would override the procedural atmosphere rendering
+    if !native_atmosphere_enabled {
+        camera.insert(Skybox {
+            image: skybox_image,
+            brightness: 800.0,  // Lower skybox brightness
+            rotation: Quat::IDENTITY,
+        });
+    } else {
+        info!("Native atmosphere enabled - skipping cubemap Skybox");
+    }
 
     // Keep HDR + tonemapping enabled on all GPUs; otherwise custom materials that output HDR-linear
     // end up looking dark due to missing exposure/tonemapping.

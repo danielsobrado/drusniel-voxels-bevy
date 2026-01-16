@@ -268,6 +268,8 @@ fn spawn_atmosphere_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) 
                 row_gap: Val::Px(10.0),
                 padding: UiRect::all(Val::Px(10.0)),
                 display: Display::None,
+                overflow: Overflow::scroll_y(),
+                max_height: Val::Px(400.0),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
@@ -325,6 +327,33 @@ fn spawn_atmosphere_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) 
                 spawn_graphics_option(options, font, "Dim", NightBrightnessOption::Dim);
                 spawn_graphics_option(options, font, "Balanced", NightBrightnessOption::Balanced);
                 spawn_graphics_option(options, font, "Bright", NightBrightnessOption::Bright);
+            });
+
+            spawn_option_row(content, font, "Sky Quality", |options, font| {
+                spawn_graphics_option(options, font, "Low", SkyQualityOption::Low);
+                spawn_graphics_option(options, font, "Medium", SkyQualityOption::Medium);
+                spawn_graphics_option(options, font, "High", SkyQualityOption::High);
+                spawn_graphics_option(options, font, "Ultra", SkyQualityOption::Ultra);
+            });
+
+            spawn_option_row(content, font, "Ozone", |options, font| {
+                spawn_graphics_option(options, font, "None", OzoneOption::None);
+                spawn_graphics_option(options, font, "Subtle", OzoneOption::Subtle);
+                spawn_graphics_option(options, font, "Earth", OzoneOption::Earth);
+                spawn_graphics_option(options, font, "Heavy", OzoneOption::Heavy);
+            });
+
+            spawn_option_row(content, font, "Ground Albedo", |options, font| {
+                spawn_graphics_option(options, font, "Dark", GroundAlbedoOption::Dark);
+                spawn_graphics_option(options, font, "Earth", GroundAlbedoOption::Earth);
+                spawn_graphics_option(options, font, "Bright", GroundAlbedoOption::Bright);
+                spawn_graphics_option(options, font, "Snow", GroundAlbedoOption::Snow);
+            });
+
+            spawn_option_row(content, font, "Sun Size", |options, font| {
+                spawn_graphics_option(options, font, "Small", SunSizeOption::Small);
+                spawn_graphics_option(options, font, "Earth", SunSizeOption::Earth);
+                spawn_graphics_option(options, font, "Large", SunSizeOption::Large);
             });
         });
 }
@@ -778,6 +807,7 @@ pub fn handle_atmosphere_settings(
     twilight_query: Query<(&Interaction, &TwilightBandOption), (Changed<Interaction>, With<Button>)>,
     night_query: Query<(&Interaction, &NightBrightnessOption), (Changed<Interaction>, With<Button>)>,
     mut atmosphere: ResMut<AtmosphereSettings>,
+    mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -826,6 +856,14 @@ pub fn handle_atmosphere_settings(
                 RayleighOption::Balanced => base_rayleigh,
                 RayleighOption::Vivid => base_rayleigh * 1.4,
             };
+            // Also update Bevy's native atmosphere
+            for mut atmo in bevy_atmosphere_query.iter_mut() {
+                atmo.rayleigh_scattering = match option {
+                    RayleighOption::Gentle => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 0.7,
+                    RayleighOption::Balanced => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6),
+                    RayleighOption::Vivid => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 1.4,
+                };
+            }
         }
     }
 
@@ -837,6 +875,14 @@ pub fn handle_atmosphere_settings(
                 MieOption::Standard => base_mie,
                 MieOption::Dense => Vec3::splat(0.0075),
             };
+            // Also update Bevy's native atmosphere
+            for mut atmo in bevy_atmosphere_query.iter_mut() {
+                atmo.mie_scattering = match option {
+                    MieOption::Soft => 1.0e-5,
+                    MieOption::Standard => 2.0e-5,
+                    MieOption::Dense => 4.0e-5,
+                };
+            }
         }
     }
 
@@ -848,6 +894,14 @@ pub fn handle_atmosphere_settings(
                 MieDirectionOption::Standard => 0.7,
                 MieDirectionOption::Forward => 0.85,
             };
+            // Also update Bevy's native atmosphere
+            for mut atmo in bevy_atmosphere_query.iter_mut() {
+                atmo.mie_asymmetry = match option {
+                    MieDirectionOption::Broad => 0.5,
+                    MieDirectionOption::Standard => 0.758,
+                    MieDirectionOption::Forward => 0.9,
+                };
+            }
         }
     }
 
@@ -881,6 +935,74 @@ pub fn handle_atmosphere_settings(
                 NightBrightnessOption::Balanced => 0.08,
                 NightBrightnessOption::Bright => 0.12,
             };
+        }
+    }
+}
+
+/// Handles Bevy native atmosphere settings (sky quality, ozone, ground albedo, sun size).
+pub fn handle_bevy_atmosphere_settings(
+    state: Res<PauseMenuState>,
+    mut settings_state: ResMut<SettingsState>,
+    sky_quality_query: Query<(&Interaction, &SkyQualityOption), (Changed<Interaction>, With<Button>)>,
+    ozone_query: Query<(&Interaction, &OzoneOption), (Changed<Interaction>, With<Button>)>,
+    ground_albedo_query: Query<(&Interaction, &GroundAlbedoOption), (Changed<Interaction>, With<Button>)>,
+    sun_size_query: Query<(&Interaction, &SunSizeOption), (Changed<Interaction>, With<Button>)>,
+    mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
+    mut atmo_settings_query: Query<&mut bevy::pbr::AtmosphereSettings>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    // Bevy native atmosphere settings
+    for (interaction, option) in sky_quality_query.iter() {
+        if *interaction == Interaction::Pressed {
+            settings_state.sky_quality = *option;
+            for mut settings in atmo_settings_query.iter_mut() {
+                settings.sky_max_samples = match option {
+                    SkyQualityOption::Low => 16,
+                    SkyQualityOption::Medium => 32,
+                    SkyQualityOption::High => 48,
+                    SkyQualityOption::Ultra => 64,
+                };
+            }
+        }
+    }
+
+    for (interaction, option) in ozone_query.iter() {
+        if *interaction == Interaction::Pressed {
+            settings_state.ozone = *option;
+            for mut atmo in bevy_atmosphere_query.iter_mut() {
+                atmo.ozone_absorption = match option {
+                    OzoneOption::None => Vec3::ZERO,
+                    OzoneOption::Subtle => Vec3::new(0.32e-6, 0.94e-6, 0.04e-6),
+                    OzoneOption::Earth => Vec3::new(0.65e-6, 1.881e-6, 0.085e-6),
+                    OzoneOption::Heavy => Vec3::new(1.3e-6, 3.76e-6, 0.17e-6),
+                };
+            }
+        }
+    }
+
+    for (interaction, option) in ground_albedo_query.iter() {
+        if *interaction == Interaction::Pressed {
+            settings_state.ground_albedo = *option;
+            for mut atmo in bevy_atmosphere_query.iter_mut() {
+                atmo.ground_albedo = match option {
+                    GroundAlbedoOption::Dark => Vec3::splat(0.1),
+                    GroundAlbedoOption::Earth => Vec3::new(0.3, 0.3, 0.3),
+                    GroundAlbedoOption::Bright => Vec3::splat(0.5),
+                    GroundAlbedoOption::Snow => Vec3::splat(0.8),
+                };
+            }
+        }
+    }
+
+    for (interaction, option) in sun_size_query.iter() {
+        if *interaction == Interaction::Pressed {
+            settings_state.sun_size = *option;
+            // Sun angular radius in radians (Earth sun is ~0.00465 rad = 0.27°)
+            // Note: This would need DirectionalLight modification in a full impl
+            // For now this is a placeholder for future sun disk rendering
         }
     }
 }
