@@ -196,8 +196,7 @@ pub fn toggle_palette(
         return;
     }
 
-    let ctrl_pressed = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    if !(ctrl_pressed && keys.just_pressed(KeyCode::KeyM)) {
+    if !keys.just_pressed(KeyCode::KeyB) {
         return;
     }
 
