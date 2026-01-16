@@ -7,8 +7,8 @@
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::interaction::targeting::TargetedBlock;
-use crate::interaction::palette::PlacementPaletteState;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
@@ -102,14 +102,8 @@ pub fn start_dragging_block(
     targeted_block: Res<TargetedBlock>,
     mut drag_state: ResMut<DragState>,
     mut world: ResMut<VoxelWorld>,
-    palette: Res<PlacementPaletteState>,
 ) {
     if !edit_mode.enabled || delete_mode.enabled || !mouse.just_pressed(MouseButton::Left) {
-        return;
-    }
-
-    // Don't start dragging if palette is selecting a voxel
-    if palette.active_selection.is_some() {
         return;
     }
 
@@ -208,12 +202,18 @@ pub fn update_drag_rotation(
     mut drag_state: ResMut<DragState>,
     mut mouse_wheel: MessageReader<MouseWheel>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    palette: Res<PlacementPaletteState>,
 ) {
     if !edit_mode.enabled || delete_mode.enabled {
         return;
     }
 
-    if drag_state.dragged_block.is_none() {
+    let has_prop_selection = matches!(
+        palette.active_selection,
+        Some(PlacementSelection::Prop { .. })
+    );
+
+    if drag_state.dragged_block.is_none() && !has_prop_selection {
         drag_state.rotation_degrees = 0.0;
         return;
     }

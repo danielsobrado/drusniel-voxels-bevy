@@ -27,7 +27,7 @@ use crate::particles::{ParticleType, SpawnParticleEvent};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
-use palette::{PlacementPaletteState, PlacementSelection};
+use palette::PlacementPaletteState;
 
 /// Duration in seconds before gameplay errors are automatically cleared.
 const ERROR_DISPLAY_DURATION: f64 = 3.0;
@@ -190,17 +190,10 @@ pub fn place_block_system(
     held: Res<HeldBlock>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     drag_state: Res<DragState>,
-    palette: Res<PlacementPaletteState>,
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
 ) {
-    let placing_in_edit_mode = edit_mode.enabled
-        && palette
-            .active_selection
-            .as_ref()
-            .is_some_and(|selection| matches!(selection, PlacementSelection::Voxel(_)));
-
-    if edit_mode.enabled && !placing_in_edit_mode {
+    if edit_mode.enabled {
         return;
     }
 
@@ -728,8 +721,10 @@ impl Plugin for InteractionPlugin {
             .init_resource::<palette::PaletteItems>()
             .init_resource::<PlacementPaletteState>()
             .init_resource::<palette::BookmarkStore>()
+            .init_resource::<palette::GhostPreviewState>()
             .add_systems(Startup, debug::setup_debug_overlay)
             .add_systems(Startup, palette::load_bookmarks)
+            .add_systems(Startup, palette::setup_ghost_materials)
             .add_systems(
                 Update,
                 (
@@ -745,6 +740,8 @@ impl Plugin for InteractionPlugin {
                     palette::handle_palette_item_click,
                     editing::delete_block_in_edit_mode,
                     editing::update_drag_rotation,
+                    palette::update_ghost_preview,
+                    palette::sync_ghost_materials,
                 )
                     .run_if(|state: Res<PauseMenuState>| !state.open),
             )

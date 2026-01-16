@@ -12,6 +12,10 @@ use bevy::ui::{
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use crate::interaction::{DragState, EditMode, TargetedBlock};
+use crate::voxel::types::Voxel;
+use bevy::ecs::hierarchy::ChildOf;
+use crate::voxel::world::VoxelWorld;
 
 #[derive(Clone, PartialEq)]
 pub enum PlacementSelection {
@@ -36,7 +40,25 @@ pub struct PlacementPaletteState {
     pub items_initialized: bool,
     pub needs_redraw: bool,
     pub active_selection: Option<PlacementSelection>,
+    pub selected_index: Option<usize>,
     pub root: Option<Entity>,
+}
+
+#[derive(Resource, Default)]
+pub struct GhostPreviewState {
+    pub entity: Option<Entity>,
+    pub prop_id: Option<String>,
+}
+
+#[derive(Resource)]
+pub struct GhostPreviewMaterials {
+    pub valid: Handle<StandardMaterial>,
+    pub invalid: Handle<StandardMaterial>,
+}
+
+#[derive(Component)]
+pub struct GhostPreview {
+    pub valid: bool,
 }
 
 #[derive(Resource)]
@@ -174,13 +196,17 @@ pub fn toggle_palette(
         return;
     }
 
-    if !keys.just_pressed(KeyCode::Tab) {
+    let ctrl_pressed = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !(ctrl_pressed && keys.just_pressed(KeyCode::KeyM)) {
         return;
     }
 
     palette.open = !palette.open;
 
     if palette.open {
+        if palette.selected_index.is_none() {
+            palette.selected_index = Some(0);
+        }
         spawn_palette_ui(&mut commands, &asset_server, &mut palette);
         palette.needs_redraw = true;
     } else {
@@ -195,6 +221,8 @@ pub fn handle_palette_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut char_evr: MessageReader<KeyboardInput>,
     mut commands: Commands,
+    items: Res<PaletteItems>,
+    mut held: ResMut<crate::interaction::HeldBlock>,
 ) {
     if !palette.open || pause_state.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) {
         return;
@@ -224,6 +252,41 @@ pub fn handle_palette_input(
         }
     }
 
+    if keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowDown) {
+        let filtered = filtered_item_indices(&items, &palette.search);
+        if !filtered.is_empty() {
+            let current = palette
+                .selected_index
+                .and_then(|idx| filtered.iter().position(|v| *v == idx))
+                .unwrap_or(0);
+
+            let next = if keys.just_pressed(KeyCode::ArrowUp) {
+                if current == 0 {
+                    filtered.len() - 1
+                } else {
+                    current - 1
+                }
+            } else {
+                (current + 1) % filtered.len()
+            };
+
+            palette.selected_index = Some(filtered[next]);
+            changed = true;
+        }
+    }
+
+    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
+        if let Some(index) = palette.selected_index {
+            if let Some(item) = items.0.get(index).cloned() {
+                palette.active_selection = Some(item.selection.clone());
+                if let PlacementSelection::Voxel(voxel) = item.selection {
+                    held.block_type = voxel;
+                }
+                changed = true;
+            }
+        }
+    }
+
     if changed {
         palette.needs_redraw = true;
     }
@@ -243,6 +306,7 @@ pub fn handle_palette_item_click(
         if *interaction == Interaction::Pressed {
             if let Some(item) = items.0.get(button.0).cloned() {
                 palette.active_selection = Some(item.selection.clone());
+                palette.selected_index = Some(button.0);
                 palette.needs_redraw = true;
 
                 if let PlacementSelection::Voxel(voxel) = item.selection {
@@ -354,35 +418,25 @@ pub fn refresh_palette_ui(
     if let Ok(list_entity) = list_query.single() {
         commands.entity(list_entity).despawn_children();
 
-        let search_lower = palette.search.to_lowercase();
-
-        let mut matches: Vec<(usize, &PaletteItem)> = items
-            .0
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                if search_lower.is_empty() {
-                    return true;
-                }
-                let label_match = item.label.to_lowercase().contains(&search_lower);
-                let tag_match = item
-                    .tags
-                    .iter()
-                    .any(|t| t.to_lowercase().contains(&search_lower));
-                label_match || tag_match
-            })
-            .collect();
-
-        matches.sort_by(|a, b| a.1.label.cmp(&b.1.label));
+        let visible_indices = filtered_item_indices(&items, &palette.search);
+        if palette.selected_index.is_none()
+            || !visible_indices.contains(&palette.selected_index.unwrap())
+        {
+            palette.selected_index = visible_indices.first().copied();
+        }
 
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
 
-        for (index, item) in matches.iter().take(40) {
+        for index in visible_indices.iter().take(40) {
+            let Some(item) = items.0.get(*index) else {
+                continue;
+            };
             let is_selected = palette
                 .active_selection
                 .as_ref()
                 .map(|sel| sel == &item.selection)
                 .unwrap_or(false);
+            let is_focused = palette.selected_index == Some(*index);
 
             commands.entity(list_entity).with_children(|list| {
                 list.spawn((
@@ -397,6 +451,8 @@ pub fn refresh_palette_ui(
                     },
                     BackgroundColor(if is_selected {
                         Color::srgba(0.25, 0.4, 0.7, 0.8)
+                    } else if is_focused {
+                        Color::srgba(0.18, 0.2, 0.26, 0.9)
                     } else {
                         Color::srgba(0.15, 0.15, 0.18, 0.85)
                     }),
@@ -554,14 +610,183 @@ pub fn place_prop_from_palette(
         return;
     };
 
+    let rotation = Quat::from_rotation_y(drag_state.rotation_degrees.to_radians());
     commands.spawn((
         SceneRoot(scene.clone()),
-        Transform::from_translation(translation),
+        Transform::from_translation(translation).with_rotation(rotation),
         Prop {
             id: id.clone(),
             prop_type: *prop_type,
         },
     ));
+}
+
+pub fn setup_ghost_materials(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let valid = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.2, 1.0, 0.2, 0.45),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    let invalid = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 0.2, 0.2, 0.45),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    commands.insert_resource(GhostPreviewMaterials { valid, invalid });
+}
+
+pub fn update_ghost_preview(
+    mut commands: Commands,
+    edit_mode: Res<EditMode>,
+    palette: Res<PlacementPaletteState>,
+    drag_state: Res<DragState>,
+    targeted: Res<TargetedBlock>,
+    world: Res<VoxelWorld>,
+    prop_assets: Res<PropAssets>,
+    mut state: ResMut<GhostPreviewState>,
+) {
+    if !edit_mode.enabled {
+        if let Some(entity) = state.entity.take() {
+            commands.entity(entity).despawn();
+        }
+        state.prop_id = None;
+        return;
+    }
+
+    let Some(PlacementSelection::Prop { id, .. }) = &palette.active_selection else {
+        if let Some(entity) = state.entity.take() {
+            commands.entity(entity).despawn();
+        }
+        state.prop_id = None;
+        return;
+    };
+
+    let Some(scene) = prop_assets.scenes.get(id) else {
+        return;
+    };
+
+    let (Some(block_pos), Some(normal)) = (targeted.position, targeted.normal) else {
+        if let Some(entity) = state.entity {
+            commands.entity(entity).insert(Visibility::Hidden);
+        }
+        return;
+    };
+
+    let place_pos = block_pos + normal;
+    let target_voxel = world.get_voxel(block_pos);
+    let place_voxel = world.get_voxel(place_pos);
+    let valid = target_voxel.map(|v| v.is_solid()).unwrap_or(false)
+        && place_voxel
+            .map(|v| v == VoxelType::Air || v == VoxelType::Water)
+            .unwrap_or(false);
+
+    let translation = Vec3::new(
+        place_pos.x as f32 + 0.5,
+        place_pos.y as f32 + 0.5,
+        place_pos.z as f32 + 0.5,
+    );
+    let rotation = Quat::from_rotation_y(drag_state.rotation_degrees.to_radians());
+
+    let needs_respawn = state
+        .prop_id
+        .as_ref()
+        .map(|current| current != id)
+        .unwrap_or(true);
+
+    if needs_respawn {
+        if let Some(entity) = state.entity.take() {
+            commands.entity(entity).despawn();
+        }
+
+        let entity = commands
+            .spawn((
+                GhostPreview { valid },
+                Transform::from_translation(translation).with_rotation(rotation),
+                Visibility::Visible,
+            ))
+            .with_children(|parent| {
+                parent.spawn(SceneRoot(scene.clone()));
+            })
+            .id();
+
+        state.entity = Some(entity);
+        state.prop_id = Some(id.clone());
+    } else if let Some(entity) = state.entity {
+        commands.entity(entity).insert((
+            GhostPreview { valid },
+            Transform::from_translation(translation).with_rotation(rotation),
+            Visibility::Visible,
+        ));
+    }
+}
+
+pub fn sync_ghost_materials(
+    ghost_roots: Query<(Entity, &GhostPreview)>,
+    parents: Query<&ChildOf>,
+    mut materials_query: Query<(Entity, &mut MeshMaterial3d<StandardMaterial>)>,
+    ghost_materials: Res<GhostPreviewMaterials>,
+) {
+    let mut ghost_iter = ghost_roots.iter();
+    let Some((ghost_root, ghost)) = ghost_iter.next() else {
+        return;
+    };
+    if ghost_iter.next().is_some() {
+        return;
+    }
+    let target = if ghost.valid {
+        &ghost_materials.valid
+    } else {
+        &ghost_materials.invalid
+    };
+
+    for (entity, mut material) in materials_query.iter_mut() {
+        if is_descendant_of(entity, ghost_root, &parents) && material.0 != *target {
+            material.0 = target.clone();
+        }
+    }
+}
+
+fn filtered_item_indices(items: &PaletteItems, search: &str) -> Vec<usize> {
+    let search_lower = search.to_lowercase();
+
+    let mut matches: Vec<(usize, &PaletteItem)> = items
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            if search_lower.is_empty() {
+                return true;
+            }
+            let label_match = item.label.to_lowercase().contains(&search_lower);
+            let tag_match = item
+                .tags
+                .iter()
+                .any(|t| t.to_lowercase().contains(&search_lower));
+            label_match || tag_match
+        })
+        .collect();
+
+    matches.sort_by(|a, b| a.1.label.cmp(&b.1.label));
+    matches.into_iter().map(|(index, _)| index).collect()
+}
+
+fn is_descendant_of(mut entity: Entity, root: Entity, parents: &Query<&ChildOf>) -> bool {
+    loop {
+        if entity == root {
+            return true;
+        }
+        let Ok(parent) = parents.get(entity) else {
+            return false;
+        };
+        entity = parent.parent();
+    }
 }
 
 fn spawn_palette_ui(
@@ -589,7 +814,7 @@ fn spawn_palette_ui(
         ))
         .with_children(|root| {
             root.spawn((
-                Text::new("Placement Palette (Tab to close)"),
+                Text::new("Placement Palette (Esc to close)"),
                 TextFont {
                     font: font.clone(),
                     font_size: 18.0,

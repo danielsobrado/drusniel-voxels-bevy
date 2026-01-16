@@ -1,6 +1,8 @@
 pub mod config;
 
+use bevy::light::VolumetricLight;
 use bevy::prelude::*;
+use bevy_hanabi::prelude::*;
 
 use crate::entity::{EquippedItem, ItemType};
 
@@ -24,6 +26,27 @@ impl Default for PickaxeViewModel {
     }
 }
 
+/// Component marking the axe viewmodel
+#[derive(Component)]
+pub struct AxeViewModel;
+
+/// Component marking the sword viewmodel
+#[derive(Component)]
+pub struct SwordViewModel;
+
+/// Component marking the torch viewmodel
+#[derive(Component)]
+pub struct TorchViewModel;
+
+/// Component for torch light flickering
+#[derive(Component)]
+pub struct TorchFlicker {
+    pub base_intensity: f32,
+    pub speed: f32,
+    pub amplitude: f32,
+}
+
+
 /// Resource to track swing state
 #[derive(Resource, Default)]
 pub struct PickaxeState {
@@ -34,83 +57,42 @@ pub struct PickaxeState {
 /// Spawn the pickaxe viewmodel as a child of the camera
 pub fn spawn_pickaxe(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
     config: Res<ViewmodelConfig>,
 ) {
-    if let Ok(camera_entity) = camera_query.single() {
-        let handle_mesh = meshes.add(Cuboid::new(
-            config.handle.size.x,
-            config.handle.size.y,
-            config.handle.size.z,
-        ));
-        let handle_material = materials.add(StandardMaterial {
-            base_color: config.handle.color,
-            emissive: LinearRgba::new(
-                config.handle.emissive[0],
-                config.handle.emissive[1],
-                config.handle.emissive[2],
-                config.handle.emissive[3],
-            ),
-            perceptual_roughness: config.handle.roughness,
-            ..default()
-        });
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
 
-        let head_mesh = meshes.add(Cuboid::new(
-            config.head.size.x,
-            config.head.size.y,
-            config.head.size.z,
-        ));
-        let head_material = materials.add(StandardMaterial {
-            base_color: config.head.color,
-            emissive: LinearRgba::new(
-                config.head.emissive[0],
-                config.head.emissive[1],
-                config.head.emissive[2],
-                config.head.emissive[3],
-            ),
-            perceptual_roughness: config.head.roughness,
-            metallic: config.head.metallic,
-            ..default()
-        });
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/Pickaxe.glb#Scene0");
 
-        commands.entity(camera_entity).with_children(|parent| {
-            parent
-                .spawn((
-                    Transform::from_xyz(
-                        config.position.offset.x,
-                        config.position.offset.y,
-                        config.position.offset.z,
-                    )
-                    .with_rotation(Quat::from_euler(
-                        EulerRot::XYZ,
-                        config.position.rotation.x,
-                        config.position.rotation.y,
-                        config.position.rotation.z,
-                    )),
-                    Visibility::default(),
-                    PickaxeViewModel::default(),
-                ))
-                .with_children(|pickaxe| {
-                    pickaxe.spawn((
-                        Mesh3d(handle_mesh),
-                        MeshMaterial3d(handle_material),
-                        Transform::from_xyz(0.0, 0.0, 0.0),
-                    ));
-
-                    pickaxe.spawn((
-                        Mesh3d(head_mesh),
-                        MeshMaterial3d(head_material),
-                        Transform::from_xyz(
-                            config.head.offset.x,
-                            config.head.offset.y,
-                            config.head.offset.z,
-                        ),
-                    ));
-                });
-        });
-    }
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x,
+                    config.position.offset.y,
+                    config.position.offset.z,
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x,
+                    config.position.rotation.y,
+                    config.position.rotation.z,
+                )),
+                Visibility::default(),
+                PickaxeViewModel::default(),
+            ))
+            .with_children(|pickaxe| {
+                pickaxe.spawn((
+                    SceneRoot(scene_handle),
+                    Transform::from_scale(Vec3::splat(0.9))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.6, 0.0)),
+                ));
+            });
+    });
 }
 
 /// System to trigger pickaxe swing when breaking blocks
@@ -148,10 +130,17 @@ pub fn animate_pickaxe_system(
 
             let down_phase = config.swing.down_phase;
             let up_phase = 1.0 - down_phase;
+
+            // Calculate swing amount with easing for more natural motion
             let swing_amount = if pickaxe.swing_progress < down_phase {
-                pickaxe.swing_progress / down_phase
+                // Down phase: ease-in for acceleration (like gravity)
+                let t = pickaxe.swing_progress / down_phase;
+                t * t // quadratic ease-in
             } else {
-                1.0 - (pickaxe.swing_progress - down_phase) / up_phase
+                // Up phase: ease-out for deceleration (recovery)
+                let t = (pickaxe.swing_progress - down_phase) / up_phase;
+                let ease_out = 1.0 - (1.0 - t) * (1.0 - t); // quadratic ease-out
+                1.0 - ease_out
             };
 
             let base_rotation = Quat::from_euler(
@@ -172,7 +161,7 @@ pub fn animate_pickaxe_system(
             transform.translation = Vec3::new(
                 config.position.offset.x - swing_amount * config.swing.offset_x,
                 config.position.offset.y - swing_amount * config.swing.offset_y,
-                config.position.offset.z + swing_amount * config.swing.offset_z,
+                config.position.offset.z - swing_amount * config.swing.offset_z,
             );
 
             if pickaxe.swing_progress >= 1.0 {
@@ -204,6 +193,159 @@ pub fn idle_bob_system(
     }
 }
 
+/// Spawn the axe viewmodel as a child of the camera
+pub fn spawn_axe(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
+) {
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+
+    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/Axe.glb#Scene0");
+
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x + 0.2, // Shift right
+                    config.position.offset.y - 0.2, // Shift down bits
+                    config.position.offset.z - 0.2, // Shift forward
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x,
+                    config.position.rotation.y,
+                    config.position.rotation.z,
+                )),
+                Visibility::Hidden,
+                AxeViewModel,
+            ))
+            .with_children(|axe| {
+                axe.spawn((
+                    SceneRoot(scene_handle),
+                    // Scale up and rotate to be visible as a held item
+                    Transform::from_scale(Vec3::splat(1.2))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.3, 1.2, -0.2)),
+                ));
+            });
+    });
+}
+
+/// Spawn the sword viewmodel as a child of the camera
+pub fn spawn_sword(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
+) {
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+
+    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/Sword.glb#Scene0");
+
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x + 0.25,
+                    config.position.offset.y - 0.1,
+                    config.position.offset.z - 0.2,
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x,
+                    config.position.rotation.y,
+                    config.position.rotation.z,
+                )),
+                Visibility::Hidden,
+                SwordViewModel,
+            ))
+            .with_children(|sword| {
+                sword.spawn((
+                    SceneRoot(scene_handle),
+                    Transform::from_scale(Vec3::splat(1.0))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 1.8, 0.0)),
+                ));
+            });
+    });
+}
+
+/// Spawn the torch viewmodel as a child of the camera
+pub fn spawn_torch(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
+    mut effects: ResMut<Assets<EffectAsset>>,
+) {
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/Torch 1.glb#Scene0");
+
+    // Create fire particle effect
+    let fire_handle = create_torch_fire_effect(&mut effects);
+
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x + 0.05,
+                    config.position.offset.y + 0.1,
+                    config.position.offset.z,
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x - 0.2,
+                    config.position.rotation.y + 0.3,
+                    config.position.rotation.z,
+                )),
+                Visibility::Hidden,
+                TorchViewModel,
+            ))
+            .with_children(|torch| {
+                // The actual torch model
+                torch.spawn((
+                    SceneRoot(scene_handle),
+                    Transform::from_scale(Vec3::splat(0.85))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0)),
+                ));
+
+                // Add a point light for the torch flame effect
+                torch.spawn((
+                    PointLight {
+                        color: Color::srgb(1.0, 0.5, 0.2), // Warmer orange-red
+                        intensity: 120_000.0,
+                        range: 60.0,
+                        shadows_enabled: true,
+                        ..default()
+                    },
+                    VolumetricLight,
+                    TorchFlicker {
+                        base_intensity: 120_000.0,
+                        speed: 10.0,
+                        amplitude: 20_000.0,
+                    },
+                    Transform::from_xyz(0.0, 0.45, 0.1), // Slightly adjusted position for tip
+                ));
+
+                // Add the fire particle effect
+                torch.spawn((
+                    ParticleEffect::new(fire_handle),
+                    // Position at the tip of the torch
+                    Transform::from_xyz(0.0, 0.45, 0.1), 
+                ));
+            });
+    });
+}
+
+
 pub fn update_pickaxe_visibility(
     equipped: Res<EquippedItem>,
     mut pickaxe_query: Query<&mut Visibility, With<PickaxeViewModel>>,
@@ -224,18 +366,161 @@ pub fn update_pickaxe_visibility(
     }
 }
 
-/// Plugin for the pickaxe viewmodel
+pub fn update_axe_visibility(
+    equipped: Res<EquippedItem>,
+    mut axe_query: Query<&mut Visibility, With<AxeViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visibility = if matches!(equipped.item, Some(ItemType::Axe)) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut axe_visibility in axe_query.iter_mut() {
+        *axe_visibility = visibility;
+    }
+}
+
+pub fn update_sword_visibility(
+    equipped: Res<EquippedItem>,
+    mut sword_query: Query<&mut Visibility, With<SwordViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visibility = if matches!(equipped.item, Some(ItemType::Sword)) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut sword_visibility in sword_query.iter_mut() {
+        *sword_visibility = visibility;
+    }
+}
+
+pub fn update_torch_visibility(
+    equipped: Res<EquippedItem>,
+    mut torch_query: Query<&mut Visibility, With<TorchViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visibility = if matches!(equipped.item, Some(ItemType::Torch)) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut torch_visibility in torch_query.iter_mut() {
+        *torch_visibility = visibility;
+    }
+}
+
+/// Plugin for all viewmodels
 pub struct PickaxePlugin;
 
 impl Plugin for PickaxePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PickaxeState>()
             .init_resource::<ViewmodelConfig>()
-            .add_systems(PostStartup, spawn_pickaxe)
+            .add_systems(
+                PostStartup,
+                (spawn_pickaxe, spawn_axe, spawn_sword, spawn_torch),
+            )
             .add_systems(
                 Update,
-                (trigger_swing_system, animate_pickaxe_system, idle_bob_system).chain(),
+                (trigger_swing_system, animate_pickaxe_system, idle_bob_system, animate_torch_light).chain(),
             )
-            .add_systems(Update, update_pickaxe_visibility);
+            .add_systems(
+                Update,
+                (
+                    update_pickaxe_visibility,
+                    update_axe_visibility,
+                    update_sword_visibility,
+                    update_torch_visibility,
+                ),
+            );
     }
+}
+
+fn animate_torch_light(
+    time: Res<Time>,
+    mut query: Query<(&mut PointLight, &TorchFlicker)>,
+) {
+    let t = time.elapsed_secs();
+    for (mut light, flicker) in query.iter_mut() {
+        // Multi-layered sine waves for organic flickering
+        let noise = (t * flicker.speed).sin() 
+            + (t * flicker.speed * 2.3).sin() * 0.5 
+            + (t * flicker.speed * 5.7).sin() * 0.25;
+        
+        light.intensity = flicker.base_intensity + noise * flicker.amplitude;
+    }
+}
+
+fn create_torch_fire_effect(effects: &mut Assets<EffectAsset>) -> Handle<EffectAsset> {
+    let mut color_gradient = bevy_hanabi::Gradient::new();
+    // Bright yellow/white core (HDR)
+    color_gradient.add_key(0.0, Vec4::new(4.0, 3.0, 1.0, 1.0)); 
+    // Orange body
+    color_gradient.add_key(0.3, Vec4::new(4.0, 1.0, 0.1, 1.0));
+    // Red/Dark Orange tip
+    color_gradient.add_key(0.6, Vec4::new(2.0, 0.2, 0.0, 0.8));
+    // Smoke/Dark Gray
+    color_gradient.add_key(0.8, Vec4::new(0.2, 0.2, 0.2, 0.3));
+    // Transparent at end
+    color_gradient.add_key(1.0, Vec4::new(0.0, 0.0, 0.0, 0.0));
+
+    let mut size_gradient = bevy_hanabi::Gradient::new();
+    size_gradient.add_key(0.0, Vec3::splat(0.02));
+    size_gradient.add_key(0.4, Vec3::splat(0.05)); // Expand slightly
+    size_gradient.add_key(1.0, Vec3::splat(0.01)); // Shrink to nothing
+
+    let writer = ExprWriter::new();
+
+    // Lifetime
+    let init_lifetime = SetAttributeModifier::new(
+        Attribute::LIFETIME,
+        writer.lit(0.7).expr(), 
+    );
+
+    // Initial Position (Small tight sphere at emitter)
+    let init_pos = SetPositionSphereModifier {
+        center: writer.lit(Vec3::ZERO).expr(),
+        radius: writer.lit(0.02).expr(), 
+        dimension: ShapeDimension::Volume,
+    };
+
+    // Initial Velocity (Upwards + random noise)
+    let init_vel = SetVelocitySphereModifier {
+        center: writer.lit(Vec3::Y * 0.5).expr(), // Bias up
+        speed: writer.lit(0.2).expr(), // Random spread
+    };
+    
+    // Expressions for modifiers
+    let accel_expr = writer.lit(Vec3::new(0.0, 2.0, 0.0)).expr();
+    let drag_expr = writer.lit(0.5f32).expr();
+
+    let spawner = SpawnerSettings::rate(60.0.into()); 
+
+    let effect = EffectAsset::new(512, spawner, writer.finish())
+        .with_name("torch_fire")
+        .with_simulation_space(SimulationSpace::Global) // Trails when moving
+        .init(init_lifetime)
+        .init(init_pos)
+        .init(init_vel)
+        .update(AccelModifier::new(accel_expr)) // Heat rises
+        .update(LinearDragModifier::new(drag_expr)) // Drag
+        .render(ColorOverLifetimeModifier::new(color_gradient))
+        .render(SizeOverLifetimeModifier { gradient: size_gradient, screen_space_size: false })
+        .render(OrientModifier::new(OrientMode::FaceCameraPosition));
+
+    effects.add(effect)
 }

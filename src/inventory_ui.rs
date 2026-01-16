@@ -1,8 +1,10 @@
 use bevy::prelude::*;
-use bevy::light::VolumetricLight;
+use bevy::camera::{ClearColorConfig, RenderTarget};
+use bevy::asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::ui::{AlignItems, FlexDirection, FlexWrap, JustifyContent, PositionType, Val};
+use std::collections::HashMap;
 
-use crate::camera::controller::PlayerCamera;
 use crate::chat::ChatState;
 use crate::entity::{EquippedItem, Inventory, ItemType};
 use crate::menu::PauseMenuState;
@@ -19,6 +21,10 @@ const PANEL_PADDING: f32 = 18.0;
 const GRID_WIDTH: f32 =
     SLOT_SIZE * INVENTORY_COLUMNS as f32 + SLOT_GAP * (INVENTORY_COLUMNS as f32 - 1.0);
 const PANEL_WIDTH: f32 = GRID_WIDTH + PANEL_PADDING * 2.0;
+const HOTBAR_ICON_SIZE: u32 = 96;
+const HOTBAR_ICON_UI_SIZE: f32 = 40.0;
+const HOTBAR_ICON_SCENE_ORIGIN: Vec3 = Vec3::new(10000.0, 10000.0, 10000.0);
+const HOTBAR_ICON_SPACING: f32 = 6.0;
 
 #[derive(Resource, Default)]
 pub struct InventoryUiState {
@@ -37,6 +43,7 @@ impl Default for HotbarState {
         let mut slots = [None; INVENTORY_COLUMNS * 2];
         slots[0] = Some(ItemType::Pickaxe);
         slots[1] = Some(ItemType::Torch);
+        slots[2] = Some(ItemType::Axe);
         // Terrain tools in slots 5-8 (keys 5-8)
         slots[4] = Some(ItemType::TerrainRaise);
         slots[5] = Some(ItemType::TerrainLower);
@@ -49,6 +56,11 @@ impl Default for HotbarState {
 #[derive(Resource, Default)]
 pub struct HotbarUiState {
     pub root_entity: Option<Entity>,
+}
+
+#[derive(Resource, Default)]
+pub struct HotbarIconAssets {
+    pub images: HashMap<ItemType, Handle<Image>>,
 }
 
 #[derive(Resource, Default)]
@@ -69,9 +81,6 @@ struct InventoryHeldText;
 struct InventoryItemButton(ItemType);
 
 #[derive(Component)]
-struct TorchAttachment;
-
-#[derive(Component)]
 struct HotbarRoot;
 
 #[derive(Component)]
@@ -88,8 +97,9 @@ impl Plugin for InventoryUiPlugin {
         app.init_resource::<InventoryUiState>()
             .init_resource::<HotbarState>()
             .init_resource::<HotbarUiState>()
+            .init_resource::<HotbarIconAssets>()
             .init_resource::<DraggedItem>()
-            .add_systems(Startup, spawn_hotbar_ui)
+            .add_systems(Startup, (setup_hotbar_icons, spawn_hotbar_ui).chain())
             .add_systems(
                 Update,
                 (
@@ -100,7 +110,6 @@ impl Plugin for InventoryUiPlugin {
                     refresh_hotbar_ui,
                     toggle_inventory_ui,
                     refresh_inventory_ui,
-                    update_torch_attachment,
                 )
                     .chain(),
             );
@@ -151,6 +160,7 @@ fn spawn_hotbar_ui(
     asset_server: Res<AssetServer>,
     hotbar: Res<HotbarState>,
     dragged: Res<DraggedItem>,
+    icons: Res<HotbarIconAssets>,
     mut ui_state: ResMut<HotbarUiState>,
 ) {
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
@@ -212,7 +222,7 @@ fn spawn_hotbar_ui(
                             HotbarSlotList,
                         ))
                         .with_children(|list| {
-                            spawn_hotbar_slots(list, &hotbar, &font);
+                            spawn_hotbar_slots(list, &hotbar, &font, &icons);
                         });
                 });
         })
@@ -355,6 +365,7 @@ fn refresh_hotbar_ui(
     mut drag_query: Query<&mut Text, With<HotbarDragText>>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    icons: Res<HotbarIconAssets>,
 ) {
     if !hotbar.is_changed() && !dragged.is_changed() {
         return;
@@ -372,7 +383,7 @@ fn refresh_hotbar_ui(
 
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
     commands.entity(list_entity).with_children(|list| {
-        spawn_hotbar_slots(list, &hotbar, &font);
+        spawn_hotbar_slots(list, &hotbar, &font, &icons);
     });
 }
 
@@ -539,10 +550,12 @@ fn spawn_hotbar_slots(
     list: &mut ChildSpawnerCommands,
     hotbar: &HotbarState,
     font: &Handle<Font>,
+    icons: &HotbarIconAssets,
 ) {
     for (index, slot) in hotbar.slots.iter().enumerate() {
         let is_selected = hotbar.selected == index;
         let label = slot.map(|item| item.display_name()).unwrap_or("Empty");
+        let icon_handle = slot.and_then(|item| icons.images.get(&item).cloned());
 
         list.spawn((
             Button,
@@ -572,150 +585,164 @@ fn spawn_hotbar_slots(
                 },
                 TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
             ));
-            button.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
+            if let Some(icon) = icon_handle {
+                button.spawn((
+                    Node {
+                        width: Val::Px(HOTBAR_ICON_UI_SIZE),
+                        height: Val::Px(HOTBAR_ICON_UI_SIZE),
+                        ..default()
+                    },
+                    ImageNode::new(icon),
+                ));
+            } else {
+                button.spawn((
+                    Text::new(label),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            }
         });
     }
+}
+
+#[derive(Clone)]
+struct HotbarIconSpec {
+    item: ItemType,
+    scene_path: &'static str,
+    transform: Transform,
+}
+
+fn setup_hotbar_icons(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut icons: ResMut<HotbarIconAssets>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    if !icons.images.is_empty() {
+        return;
+    }
+
+    let specs = hotbar_icon_specs();
+    for (index, spec) in specs.iter().enumerate() {
+        let image_handle = create_hotbar_icon_image(&mut images);
+        icons.images.insert(spec.item, image_handle.clone());
+
+        let scene_handle: Handle<Scene> = asset_server.load(spec.scene_path);
+        let icon_origin =
+            HOTBAR_ICON_SCENE_ORIGIN + Vec3::new(index as f32 * HOTBAR_ICON_SPACING, 0.0, 0.0);
+
+        commands.spawn((
+            Camera3d::default(),
+            Camera {
+                target: RenderTarget::Image(image_handle.clone().into()),
+                order: -10,
+                clear_color: ClearColorConfig::Custom(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                ..default()
+            },
+            Projection::Perspective(PerspectiveProjection {
+                fov: std::f32::consts::FRAC_PI_4,
+                near: 0.1,
+                far: 10.0,
+                ..default()
+            }),
+            Transform::from_translation(icon_origin + Vec3::new(0.0, 0.4, 2.2))
+                .looking_at(icon_origin, Vec3::Y),
+        ));
+
+        commands.spawn((
+            SceneRoot(scene_handle),
+            Transform::from_translation(icon_origin) * spec.transform,
+        ));
+
+        commands.spawn((
+            PointLight {
+                intensity: 2000.0,
+                range: 10.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            Transform::from_translation(icon_origin + Vec3::new(2.2, 2.4, 2.2)),
+        ));
+    }
+}
+
+fn create_hotbar_icon_image(images: &mut Assets<Image>) -> Handle<Image> {
+    let size = Extent3d {
+        width: HOTBAR_ICON_SIZE,
+        height: HOTBAR_ICON_SIZE,
+        depth_or_array_layers: 1,
+    };
+
+    let mut image = Image::new_fill(
+        size,
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
+
+    images.add(image)
+}
+
+fn hotbar_icon_specs() -> Vec<HotbarIconSpec> {
+    let base_rotation = Quat::from_euler(EulerRot::XYZ, -0.35, 0.7, 0.0);
+    let base_scale = Vec3::splat(0.9);
+
+    vec![
+        HotbarIconSpec {
+            item: ItemType::Pickaxe,
+            scene_path: "models/Models/GLB format/Pickaxe.glb#Scene0",
+            transform: Transform::from_scale(base_scale).with_rotation(base_rotation),
+        },
+        HotbarIconSpec {
+            item: ItemType::Axe,
+            scene_path: "models/Models/GLB format/Axe.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(0.9))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.1, 0.8, 0.0)),
+        },
+        HotbarIconSpec {
+            item: ItemType::Torch,
+            scene_path: "models/Models/GLB format/Torch 1.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(0.85))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.8, 0.0)),
+        },
+        HotbarIconSpec {
+            item: ItemType::TerrainRaise,
+            scene_path: "models/Models/GLB format/Arrow.glb#Scene0",
+            transform: Transform::from_scale(base_scale)
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, -0.2, 0.9, 0.0)),
+        },
+        HotbarIconSpec {
+            item: ItemType::TerrainLower,
+            scene_path: "models/Models/GLB format/Arrow.glb#Scene0",
+            transform: Transform::from_scale(base_scale)
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, std::f32::consts::PI + 0.2, 0.9, 0.0)),
+        },
+        HotbarIconSpec {
+            item: ItemType::TerrainLevel,
+            scene_path: "models/Models/GLB format/Sword.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(0.8))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.4, 0.6, 0.0)),
+        },
+        HotbarIconSpec {
+            item: ItemType::TerrainSmooth,
+            scene_path: "models/Models/GLB format/Bow.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(0.9))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 1.1, 0.0)),
+        },
+    ]
 }
 
 fn drag_label(dragged: &DraggedItem) -> String {
     match dragged.item {
         Some(item) => format!("Dragging: {}", item.display_name()),
         None => "Drag an item from the inventory".to_string(),
-    }
-}
-
-fn update_torch_attachment(
-    equipped: Res<EquippedItem>,
-    mut commands: Commands,
-    camera_query: Query<Entity, With<PlayerCamera>>,
-    torch_query: Query<Entity, With<TorchAttachment>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    if !equipped.is_changed() {
-        return;
-    }
-
-    let torch_entities: Vec<Entity> = torch_query.iter().collect();
-    let wants_torch = matches!(equipped.item, Some(ItemType::Torch));
-
-    if wants_torch {
-        if !torch_entities.is_empty() {
-            return;
-        }
-
-        let Ok(camera_entity) = camera_query.single() else {
-            return;
-        };
-
-        // Torch handle - wooden stick
-        let handle_mesh = meshes.add(Cylinder::new(0.025, 0.45));
-        // Torch head wrap - cloth/pitch soaked wrap
-        let head_mesh = meshes.add(Cylinder::new(0.04, 0.12));
-        // Flame - elongated sphere for fire shape
-        let flame_mesh = meshes.add(Sphere::new(0.06).mesh().uv(12, 8));
-        let flame_inner_mesh = meshes.add(Sphere::new(0.035).mesh().uv(8, 6));
-
-        let handle_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.18, 0.08),
-            perceptual_roughness: 0.9,
-            ..default()
-        });
-
-        let head_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.15, 0.1, 0.05),
-            perceptual_roughness: 1.0,
-            ..default()
-        });
-
-        let flame_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.5, 0.1),
-            emissive: LinearRgba::new(15.0, 6.0, 1.5, 1.0),
-            perceptual_roughness: 0.3,
-            unlit: true,
-            ..default()
-        });
-
-        let flame_inner_material = materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.9, 0.5),
-            emissive: LinearRgba::new(20.0, 15.0, 5.0, 1.0),
-            perceptual_roughness: 0.2,
-            unlit: true,
-            ..default()
-        });
-
-        commands.entity(camera_entity).with_children(|parent| {
-            parent
-                .spawn((
-                    TorchAttachment,
-                    Transform::from_xyz(0.45, -0.35, -0.7).with_rotation(
-                        Quat::from_euler(EulerRot::XYZ, 0.3, -0.5, 0.15),
-                    ),
-                    Visibility::default(),
-                ))
-                .with_children(|torch| {
-                    // Wooden handle
-                    torch.spawn((
-                        TorchAttachment,
-                        Mesh3d(handle_mesh),
-                        MeshMaterial3d(handle_material),
-                        Transform::from_xyz(0.0, 0.0, 0.0)
-                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                    ));
-
-                    // Wrapped head (pitch-soaked cloth)
-                    torch.spawn((
-                        TorchAttachment,
-                        Mesh3d(head_mesh),
-                        MeshMaterial3d(head_material),
-                        Transform::from_xyz(0.0, 0.0, -0.22)
-                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                    ));
-
-                    // Outer flame glow
-                    torch.spawn((
-                        TorchAttachment,
-                        Mesh3d(flame_mesh),
-                        MeshMaterial3d(flame_material),
-                        Transform::from_xyz(0.0, 0.02, -0.30)
-                            .with_scale(Vec3::new(1.0, 1.4, 1.0)),
-                    ));
-
-                    // Inner bright core
-                    torch.spawn((
-                        TorchAttachment,
-                        Mesh3d(flame_inner_mesh),
-                        MeshMaterial3d(flame_inner_material),
-                        Transform::from_xyz(0.0, 0.01, -0.28)
-                            .with_scale(Vec3::new(1.0, 1.6, 1.0)),
-                    ));
-
-                    // Bright point light with volumetric for god rays
-                    torch.spawn((
-                        TorchAttachment,
-                        PointLight {
-                            color: Color::srgb(1.0, 0.7, 0.4),
-                            intensity: 120_000.0,
-                            range: 50.0,
-                            shadows_enabled: true,
-                            ..default()
-                        },
-                        VolumetricLight,
-                        Transform::from_xyz(0.0, 0.0, -0.28),
-                    ));
-                });
-        });
-    } else {
-        for entity in torch_entities {
-            commands.entity(entity).despawn();
-        }
     }
 }

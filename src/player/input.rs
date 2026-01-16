@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
 use super::{Player, PlayerConfig};
+use crate::camera::controller::PlayerCamera;
 
 /// Player input state.
 #[derive(Resource, Default)]
@@ -38,7 +39,7 @@ pub fn read_player_input(
 /// Apply input to Tnua controller.
 pub fn apply_player_movement(
     input: Res<PlayerInput>,
-    camera_query: Query<&Transform, (With<Camera3d>, Without<Player>)>,
+    camera_query: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
     mut player_query: Query<(&mut TnuaController, &PlayerConfig), With<Player>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {

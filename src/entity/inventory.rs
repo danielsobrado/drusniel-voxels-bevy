@@ -7,6 +7,8 @@ pub enum ItemType {
     // Inventory items
     Fur,
     Pickaxe,
+    Axe,
+    Sword,
     Torch,
     // Terrain tools (not collectible, always available)
     TerrainRaise,
@@ -31,6 +33,8 @@ impl ItemType {
         match self {
             ItemType::Fur => "Fur",
             ItemType::Pickaxe => "Pickaxe",
+            ItemType::Axe => "Axe",
+            ItemType::Sword => "Sword",
             ItemType::Torch => "Torch",
             ItemType::TerrainRaise => "Raise",
             ItemType::TerrainLower => "Lower",
@@ -42,8 +46,10 @@ impl ItemType {
     pub(crate) fn sort_key(&self) -> u8 {
         match self {
             ItemType::Pickaxe => 0,
-            ItemType::Torch => 1,
-            ItemType::Fur => 2,
+            ItemType::Axe => 1,
+            ItemType::Sword => 2,
+            ItemType::Torch => 3,
+            ItemType::Fur => 4,
             ItemType::TerrainRaise => 10,
             ItemType::TerrainLower => 11,
             ItemType::TerrainLevel => 12,
@@ -75,6 +81,8 @@ impl Default for Inventory {
     fn default() -> Self {
         let mut items = HashMap::new();
         items.insert(ItemType::Pickaxe, 1);
+        items.insert(ItemType::Axe, 1);
+        items.insert(ItemType::Sword, 1);
         items.insert(ItemType::Torch, 1);
         Self { items }
     }
