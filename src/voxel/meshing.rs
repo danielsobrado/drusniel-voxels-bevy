@@ -651,6 +651,7 @@ fn sample_voxel_solid(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px
 /// * `current_weight` - Weight for the current cell value (0.0-1.0)
 ///
 /// The neighbor weight is `1.0 - current_weight`.
+#[allow(dead_code)]
 fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] {
     let neighbor_weight = 1.0 - current_weight;
     let mut smoothed = *sdf;

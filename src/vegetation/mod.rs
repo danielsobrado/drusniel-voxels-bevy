@@ -241,9 +241,9 @@ fn collect_grass_instances(
     };
 
     let mut instances = Vec::new();
-    let mut rejected_area = 0;
-    let mut rejected_normal = 0;
-    let mut accepted = 0;
+    let mut _rejected_area = 0;
+    let mut _rejected_normal = 0;
+    let mut _accepted = 0;
 
     // Per-chunk salt so adjacent chunks don't align
     let chunk_seed = {
@@ -275,7 +275,7 @@ fn collect_grass_instances(
         let area = normal.length() * 0.5;
 
         if area <= 0.0001 {
-            rejected_area += 1;
+            _rejected_area += 1;
             continue;
         }
 
@@ -288,11 +288,11 @@ fn collect_grass_instances(
         let normal_dir = normal_world.normalize();
         
         if normal_dir.y <= 0.25 {
-            rejected_normal += 1;
+            _rejected_normal += 1;
             continue;
         }
         
-        accepted += 1;
+        _accepted += 1;
 
         let blade_count = (density as f32 * area).ceil() as u32;
 
@@ -310,7 +310,7 @@ fn collect_grass_instances(
             ^ (tri_idx as u32).wrapping_mul(0x9e37_79b9)
             ^ chunk_seed as u32;
         seed_base_bits = mix_bits32(seed_base_bits);
-        let seed_base = seed_base_bits as i32;
+        let _seed_base = seed_base_bits as i32;
 
         for i in 0..blade_count {
             // Two independent hashes for barycentric sampling (u1/u2)
@@ -443,7 +443,7 @@ pub struct FloatingParticle {
 }
 
 /// Spawn grass blades on grass block surfaces with wind shader
-pub fn spawn_grass_blades_UNUSED(
+pub fn spawn_grass_blades_unused(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut grass_materials: ResMut<Assets<GrassMaterial>>,

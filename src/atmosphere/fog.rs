@@ -477,7 +477,7 @@ fn lerp_color4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 
 fn linear_fog_range(config: &FogConfig, scale: f32, min_end: Option<f32>) -> (f32, f32) {
     let scale = scale.clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
-    let mut start = (config.distance.start * scale).max(0.0);
+    let start = (config.distance.start * scale).max(0.0);
     let mut end = (config.distance.end * scale).max(0.0);
     if let Some(min_end) = min_end {
         if end < min_end {

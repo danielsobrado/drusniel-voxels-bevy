@@ -4,17 +4,7 @@
 //! Based on techniques from Horizon Zero Dawn and other AAA implementations.
 
 use bevy::prelude::*;
-use bevy::render::{
-    render_resource::*,
-    renderer::RenderDevice,
-    view::ViewTarget,
-    extract_component::{ExtractComponent, ExtractComponentPlugin},
-    render_graph::{Node, RenderLabel},
-    Render, RenderApp, RenderSet,
-};
-use bevy::asset::embedded_asset;
-use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
-use std::num::NonZeroU32;
+use bevy::render::render_resource::*;
 
 /// Plugin for volumetric cloud rendering
 pub struct VolumetricCloudsPlugin;
@@ -215,8 +205,7 @@ impl CloudPreset {
 
 /// Setup cloud noise textures
 fn setup_cloud_textures(
-    mut commands: Commands,
-    // render_device: Res<RenderDevice>,
+    _commands: Commands,
 ) {
     // In a full implementation, this would:
     // 1. Create 3D noise textures for cloud shapes
@@ -231,10 +220,10 @@ fn setup_cloud_textures(
 /// Update cloud parameters each frame
 fn update_cloud_params(
     time: Res<Time>,
-    config: Res<CloudConfig>,
+    _config: Res<CloudConfig>,
     mut state: ResMut<CloudState>,
-    camera_query: Query<&GlobalTransform, With<Camera3d>>,
-    sun_query: Query<&GlobalTransform, With<DirectionalLight>>,
+    _camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    _sun_query: Query<&GlobalTransform, With<DirectionalLight>>,
 ) {
     state.time += time.delta_secs();
     
@@ -248,7 +237,7 @@ fn update_cloud_params(
 /// Regenerate weather map periodically for variation
 fn regenerate_weather_map(
     mut state: ResMut<CloudState>,
-    config: Res<CloudConfig>,
+    _config: Res<CloudConfig>,
 ) {
     // Regenerate weather every 5 minutes for slow variation
     if state.weather_regen_timer > 300.0 {
@@ -375,7 +364,6 @@ pub mod noise {
 }
 
 /// Debug visualization for clouds
-#[cfg(feature = "debug")]
 pub mod debug {
     use super::*;
     

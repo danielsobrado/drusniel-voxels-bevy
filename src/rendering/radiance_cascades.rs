@@ -5,17 +5,9 @@
 
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
-use bevy::render::{
-    extract_component::{ExtractComponent, ExtractComponentPlugin},
-    render_resource::*,
-    renderer::{RenderDevice, RenderQueue},
-    texture::GpuImage,
-    view::ViewTarget,
-    Render, RenderApp, RenderSet,
-};
+use bevy::render::render_resource::*;
 
 use crate::voxel::world::VoxelWorld;
-use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 
 /// Plugin for Radiance Cascades global illumination
 pub struct RadianceCascadesPlugin;
@@ -258,7 +250,7 @@ fn setup_radiance_cascades(
 
     // Create SDF volume texture
     let sdf_texture = create_sdf_volume_texture(&config);
-    let sdf_handle = images.add(sdf_texture);
+    let _sdf_handle = images.add(sdf_texture);
 
     // Create cascade textures (screen-sized, half-res per cascade)
     // In a full implementation, these would be created based on screen resolution
@@ -532,7 +524,6 @@ pub mod sdf_generation {
 }
 
 /// Debug visualization
-#[cfg(feature = "debug")]
 pub mod debug {
     use super::*;
 
