@@ -208,6 +208,11 @@ fn spawn_category(
                 continue;
             };
 
+            // Prevent underwater vegetation
+            if surface_y <= WATER_LEVEL {
+                continue;
+            }
+
             if !can_spawn_on(voxel_type, &def.spawn_on) {
                 continue;
             }
