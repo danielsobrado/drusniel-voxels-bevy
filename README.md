@@ -51,8 +51,20 @@
 *   **Escape**: Toggle Pause Menu / Close Chat
 *   **M**: Toggle Map Overlay
 *   **Shift + M**: Toggle Edit Mode
-*   **G**: Print Debug Voxel Info (Console Log)
-*   **F3**: Enter Debug Mode
+
+### Debug & Development
+*   **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
+*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks)
+*   **F6**: Toggle Water Visibility (debug builds only)
+*   **F7**: Toggle Grass Visibility (debug builds only)
+*   **F12**: Toggle Photo Mode (DoF, motion blur)
+*   **G**: Print Detailed Block Debug Info to Console
+
+#### F3 Overlay Sub-toggles (all use Alt+)
+*   **Alt+V**: Toggle Vertex Corners Display
+*   **Alt+T**: Toggle Texture Debug Details
+*   **Alt+N**: Toggle Multiplayer Debug Info
+*   **Alt+C**: Toggle Chunk Statistics (uniformity, LOD, mesh counts)
 
 
 ### Movement

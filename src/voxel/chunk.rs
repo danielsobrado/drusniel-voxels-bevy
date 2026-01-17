@@ -10,6 +10,23 @@ pub struct ChunkData {
     pub position: IVec3,
 }
 
+/// Represents the uniformity state of a chunk's voxels.
+///
+/// This is used to skip expensive mesh generation for chunks that are
+/// entirely empty (all air) or entirely solid (no internal surfaces).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ChunkUniformity {
+    /// Chunk state hasn't been computed yet.
+    #[default]
+    Unknown,
+    /// All voxels are air - no mesh needed.
+    Empty,
+    /// All voxels are the same solid (non-air) type - may need boundary faces only.
+    Solid,
+    /// Mixed voxels - has internal surfaces, needs full mesh generation.
+    Mixed,
+}
+
 /// Checks if local coordinates are within valid chunk bounds.
 #[inline]
 pub fn is_valid_local(local: UVec3) -> bool {
@@ -48,6 +65,8 @@ pub struct Chunk {
     water_mesh_entity: Option<Entity>,
     position: IVec3, // Chunk coords (not world)
     lod_level: LodLevel,
+    /// Cached uniformity state for skipping mesh generation on uniform chunks.
+    uniformity: ChunkUniformity,
 }
 
 impl Chunk {
@@ -59,6 +78,8 @@ impl Chunk {
             water_mesh_entity: None,
             position,
             lod_level: LodLevel::High,
+            // New chunk is all air, so it's empty
+            uniformity: ChunkUniformity::Empty,
         }
     }
 
@@ -105,6 +126,8 @@ impl Chunk {
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
             self.dirty = true;
+            // Invalidate cached uniformity since voxel changed
+            self.uniformity = ChunkUniformity::Unknown;
         }
     }
 
@@ -119,6 +142,8 @@ impl Chunk {
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
             self.dirty = true;
+            // Invalidate cached uniformity since voxel changed
+            self.uniformity = ChunkUniformity::Unknown;
         }
         true
     }
@@ -231,6 +256,81 @@ impl Chunk {
             water_mesh_entity: None,
             position: data.position,
             lod_level: LodLevel::High,
+            uniformity: ChunkUniformity::Unknown, // Will be computed on first mesh attempt
         }
+    }
+
+    // =========================================================================
+    // Uniformity Methods
+    // =========================================================================
+
+    /// Returns the cached uniformity state of this chunk.
+    #[inline]
+    pub fn uniformity(&self) -> ChunkUniformity {
+        self.uniformity
+    }
+
+    /// Returns true if all voxels in this chunk are air.
+    ///
+    /// This is a cached check - call `compute_uniformity()` first if the
+    /// uniformity state is `Unknown`.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.uniformity == ChunkUniformity::Empty
+    }
+
+    /// Returns true if all voxels in this chunk are the same solid type.
+    ///
+    /// This is a cached check - call `compute_uniformity()` first if the
+    /// uniformity state is `Unknown`.
+    #[inline]
+    pub fn is_fully_solid(&self) -> bool {
+        self.uniformity == ChunkUniformity::Solid
+    }
+
+    /// Returns true if this chunk has mixed voxel types (internal surfaces).
+    ///
+    /// This is a cached check - call `compute_uniformity()` first if the
+    /// uniformity state is `Unknown`.
+    #[inline]
+    pub fn has_surface(&self) -> bool {
+        self.uniformity == ChunkUniformity::Mixed
+    }
+
+    /// Computes and caches the uniformity state by scanning all voxels.
+    ///
+    /// Returns the computed uniformity state.
+    pub fn compute_uniformity(&mut self) -> ChunkUniformity {
+        if self.uniformity != ChunkUniformity::Unknown {
+            return self.uniformity;
+        }
+
+        let first_voxel = self.voxels[0];
+        let mut all_same = true;
+
+        for &voxel in &self.voxels[1..] {
+            if voxel != first_voxel {
+                all_same = false;
+                break;
+            }
+        }
+
+        self.uniformity = if all_same {
+            if first_voxel == VoxelType::Air {
+                ChunkUniformity::Empty
+            } else {
+                ChunkUniformity::Solid
+            }
+        } else {
+            ChunkUniformity::Mixed
+        };
+
+        self.uniformity
+    }
+
+    /// Invalidates the cached uniformity state, forcing recomputation on next check.
+    #[inline]
+    pub fn invalidate_uniformity(&mut self) {
+        self.uniformity = ChunkUniformity::Unknown;
     }
 }

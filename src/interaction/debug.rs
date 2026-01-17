@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use crate::interaction::editing::{EditMode, DeleteMode, DragState};
 use crate::interaction::targeting::TargetedBlock;
 use crate::network::NetworkSession;
+use crate::voxel::plugin::RuntimeChunkStats;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
@@ -35,6 +36,7 @@ pub struct DebugDetailToggles {
     pub show_vertex_corners: bool,
     pub show_texture_details: bool,
     pub show_multiplayer: bool,
+    pub show_chunk_stats: bool,
 }
 
 /// Setup debug overlay UI.
@@ -75,21 +77,27 @@ pub fn toggle_debug_overlay(
     }
 }
 
-/// Toggle optional debug detail sections.
+/// Toggle optional debug detail sections (all use Alt+ prefix).
 pub fn toggle_debug_details(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut toggles: ResMut<DebugDetailToggles>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyV) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+
+    if alt_held && keyboard.just_pressed(KeyCode::KeyV) {
         toggles.show_vertex_corners = !toggles.show_vertex_corners;
     }
 
-    if keyboard.just_pressed(KeyCode::KeyT) {
+    if alt_held && keyboard.just_pressed(KeyCode::KeyT) {
         toggles.show_texture_details = !toggles.show_texture_details;
     }
 
-    if keyboard.just_pressed(KeyCode::KeyN) {
+    if alt_held && keyboard.just_pressed(KeyCode::KeyN) {
         toggles.show_multiplayer = !toggles.show_multiplayer;
+    }
+
+    if alt_held && keyboard.just_pressed(KeyCode::KeyC) {
+        toggles.show_chunk_stats = !toggles.show_chunk_stats;
     }
 }
 
@@ -102,7 +110,9 @@ pub fn update_debug_overlay(
     delete_mode: Res<DeleteMode>,
     drag_state: Res<DragState>,
     network: Res<NetworkSession>,
+    chunk_stats: Res<RuntimeChunkStats>,
     camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
+    all_entities: Query<Entity>,
     diagnostics: Res<DiagnosticsStore>,
     toggles: Res<DebugDetailToggles>,
     mut query: Query<&mut Text, With<DebugOverlay>>,
@@ -137,6 +147,16 @@ pub fn update_debug_overlay(
         .map(|value| format!("{value:.1}"))
         .unwrap_or_else(|| "N/A".to_string());
     text_content.push_str(&format!("FPS: {}\n", fps));
+
+    // Entity count
+    let entity_count = all_entities.iter().count();
+    text_content.push_str(&format!("Entities: {}\n", entity_count));
+
+    // Chunk stats summary (always show basic info)
+    text_content.push_str(&format!(
+        "Chunks: {} (meshes: {})\n",
+        chunk_stats.total_chunks, chunk_stats.mesh_entities
+    ));
 
     text_content.push('\n');
 
@@ -197,6 +217,10 @@ pub fn update_debug_overlay(
         append_multiplayer_debug(&mut text_content, &network);
     }
 
+    if toggles.show_chunk_stats {
+        append_chunk_stats_debug(&mut text_content, &chunk_stats);
+    }
+
     append_control_hints(&mut text_content, &edit_mode, &delete_mode, &drag_state, &toggles);
 
     for mut text in query.iter_mut() {
@@ -239,6 +263,61 @@ fn count_nearby_water(world: &VoxelWorld, center: IVec3) -> (u32, u32) {
     }
 
     (water_count, water_with_air)
+}
+
+/// Append chunk statistics debug info to text content.
+fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats) {
+    text_content.push_str("\n[Chunk Statistics]\n");
+
+    // Uniformity breakdown
+    let empty_pct = if stats.total_chunks > 0 {
+        (stats.empty_chunks as f32 / stats.total_chunks as f32) * 100.0
+    } else {
+        0.0
+    };
+    let solid_pct = if stats.total_chunks > 0 {
+        (stats.solid_chunks as f32 / stats.total_chunks as f32) * 100.0
+    } else {
+        0.0
+    };
+    let mixed_pct = if stats.total_chunks > 0 {
+        (stats.mixed_chunks as f32 / stats.total_chunks as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    text_content.push_str(&format!(
+        "Empty (air): {} ({:.1}%)\n",
+        stats.empty_chunks, empty_pct
+    ));
+    text_content.push_str(&format!(
+        "Solid: {} ({:.1}%)\n",
+        stats.solid_chunks, solid_pct
+    ));
+    text_content.push_str(&format!(
+        "Mixed (surfaces): {} ({:.1}%)\n",
+        stats.mixed_chunks, mixed_pct
+    ));
+
+    // LOD breakdown
+    text_content.push_str(&format!(
+        "LOD: High={} Low={} Culled={}\n",
+        stats.high_lod_chunks, stats.low_lod_chunks, stats.culled_chunks
+    ));
+
+    // Mesh counts
+    text_content.push_str(&format!(
+        "Meshes: {} solid, {} water\n",
+        stats.mesh_entities, stats.water_mesh_entities
+    ));
+
+    // Per-frame stats
+    if stats.chunks_meshed_this_frame > 0 || stats.chunks_skipped_this_frame > 0 {
+        text_content.push_str(&format!(
+            "This frame: {} meshed, {} skipped\n",
+            stats.chunks_meshed_this_frame, stats.chunks_skipped_this_frame
+        ));
+    }
 }
 
 /// Append multiplayer debug info to text content.
@@ -312,7 +391,7 @@ fn append_control_hints(
         }
     }
     text_content.push_str(&format!(
-        "\n[V] Vertex corners: {}",
+        "\n[Alt+V] Vertex corners: {}",
         if toggles.show_vertex_corners {
             "ON"
         } else {
@@ -320,7 +399,7 @@ fn append_control_hints(
         }
     ));
     text_content.push_str(&format!(
-        "\n[T] Texture debug: {}",
+        "\n[Alt+T] Texture debug: {}",
         if toggles.show_texture_details {
             "ON"
         } else {
@@ -328,8 +407,16 @@ fn append_control_hints(
         }
     ));
     text_content.push_str(&format!(
-        "\n[N] Multiplayer debug: {}",
+        "\n[Alt+N] Multiplayer debug: {}",
         if toggles.show_multiplayer {
+            "ON"
+        } else {
+            "OFF"
+        }
+    ));
+    text_content.push_str(&format!(
+        "\n[Alt+C] Chunk stats: {}",
+        if toggles.show_chunk_stats {
             "ON"
         } else {
             "OFF"

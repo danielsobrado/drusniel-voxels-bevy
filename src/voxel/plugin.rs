@@ -17,7 +17,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::VoxelMaterial;
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::AmbientOcclusionConfig;
-use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
 use crate::voxel::meshing::{generate_chunk_mesh_with_mode, MeshMode, MeshSettings};
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
@@ -55,6 +55,77 @@ impl Default for LodSettings {
     }
 }
 
+/// Runtime chunk statistics for debug overlay and performance monitoring.
+///
+/// This resource tracks chunk counts by uniformity type, mesh entities,
+/// and per-frame statistics for the debug overlay (F3).
+#[derive(Resource, Default, Debug)]
+pub struct RuntimeChunkStats {
+    // Total chunk counts by uniformity
+    pub total_chunks: u32,
+    pub empty_chunks: u32,
+    pub solid_chunks: u32,
+    pub mixed_chunks: u32,
+
+    // Mesh statistics
+    pub mesh_entities: u32,
+    pub water_mesh_entities: u32,
+
+    // Per-frame statistics (reset each frame in the meshing system)
+    pub chunks_meshed_this_frame: u32,
+    pub chunks_skipped_this_frame: u32,
+
+    // LOD statistics
+    pub high_lod_chunks: u32,
+    pub low_lod_chunks: u32,
+    pub culled_chunks: u32,
+}
+
+impl RuntimeChunkStats {
+    /// Recompute all statistics from the world state.
+    pub fn recompute_from_world(&mut self, world: &VoxelWorld) {
+        self.total_chunks = 0;
+        self.empty_chunks = 0;
+        self.solid_chunks = 0;
+        self.mixed_chunks = 0;
+        self.mesh_entities = 0;
+        self.water_mesh_entities = 0;
+        self.high_lod_chunks = 0;
+        self.low_lod_chunks = 0;
+        self.culled_chunks = 0;
+
+        for (_, chunk) in world.chunk_entries() {
+            self.total_chunks += 1;
+
+            match chunk.uniformity() {
+                ChunkUniformity::Empty => self.empty_chunks += 1,
+                ChunkUniformity::Solid => self.solid_chunks += 1,
+                ChunkUniformity::Mixed => self.mixed_chunks += 1,
+                ChunkUniformity::Unknown => {} // Count as mixed for display purposes
+            }
+
+            if chunk.mesh_entity().is_some() {
+                self.mesh_entities += 1;
+            }
+            if chunk.water_mesh_entity().is_some() {
+                self.water_mesh_entities += 1;
+            }
+
+            match chunk.lod_level() {
+                LodLevel::High => self.high_lod_chunks += 1,
+                LodLevel::Low => self.low_lod_chunks += 1,
+                LodLevel::Culled => self.culled_chunks += 1,
+            }
+        }
+    }
+
+    /// Reset per-frame counters.
+    pub fn reset_frame_counters(&mut self) {
+        self.chunks_meshed_this_frame = 0;
+        self.chunks_skipped_this_frame = 0;
+    }
+}
+
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(WorldConfig {
@@ -69,6 +140,8 @@ impl Plugin for VoxelPlugin {
         })
         .insert_resource(LodSettings::default())
         .insert_resource(SkirtConfig::default())
+        // Runtime chunk statistics for debug overlay
+        .insert_resource(RuntimeChunkStats::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -208,6 +281,8 @@ fn generate_chunk(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chunk, Chu
 
     if stats.wood > 0 || stats.leaves > 0 { debug!("Chunk {:?}: wood={}, leaves={}", chunk_pos, stats.wood, stats.leaves); }
     chunk.mark_dirty();
+    // Compute uniformity eagerly to enable skipping empty/solid chunks during meshing
+    chunk.compute_uniformity();
     (chunk, stats)
 }
 
@@ -229,27 +304,65 @@ struct WorldStats {
     total_dungeon_floor: u32,
     total_wood: u32,
     total_leaves: u32,
+    // Uniformity statistics
+    empty_chunks: u32,
+    solid_chunks: u32,
+    mixed_chunks: u32,
 }
 
 impl WorldStats {
-    fn add(&mut self, chunk_stats: &ChunkStats) {
+    fn add(&mut self, chunk_stats: &ChunkStats, uniformity: ChunkUniformity) {
         self.total_sand += chunk_stats.sand;
         self.total_dungeon_wall += chunk_stats.dungeon_wall;
         self.total_dungeon_floor += chunk_stats.dungeon_floor;
         self.total_wood += chunk_stats.wood;
         self.total_leaves += chunk_stats.leaves;
+
+        match uniformity {
+            ChunkUniformity::Empty => self.empty_chunks += 1,
+            ChunkUniformity::Solid => self.solid_chunks += 1,
+            ChunkUniformity::Mixed => self.mixed_chunks += 1,
+            ChunkUniformity::Unknown => {} // Shouldn't happen after compute_uniformity
+        }
     }
 
     fn log_summary(&self, generation_time: std::time::Duration) {
+        let total_chunks = self.empty_chunks + self.solid_chunks + self.mixed_chunks;
+        let skippable = self.empty_chunks + self.solid_chunks;
+        let skip_percent = if total_chunks > 0 {
+            (skippable as f32 / total_chunks as f32) * 100.0
+        } else {
+            0.0
+        };
+
         info!("=== WORLD GENERATION SUMMARY ===");
         info!("Generation time: {:.2}s", generation_time.as_secs_f32());
-        info!("Total sand blocks: {}", self.total_sand);
-        info!("Total dungeon wall blocks: {}", self.total_dungeon_wall);
-        info!("Total dungeon floor blocks: {}", self.total_dungeon_floor);
-        info!("Total wood blocks: {}", self.total_wood);
-        info!("Total leaves blocks: {}", self.total_leaves);
-        info!("Dungeons at positions like (0-19, 3-18, 0-19), (96-115, 3-18, 96-115), etc.");
-        info!("Sand appears near water (terrain height <= 24) and in sandy biomes");
+        info!("--- Chunk Uniformity (mesh optimization) ---");
+        info!(
+            "  Empty chunks (all air): {} ({:.1}% of total)",
+            self.empty_chunks,
+            (self.empty_chunks as f32 / total_chunks as f32) * 100.0
+        );
+        info!(
+            "  Solid chunks (no internal surfaces): {} ({:.1}% of total)",
+            self.solid_chunks,
+            (self.solid_chunks as f32 / total_chunks as f32) * 100.0
+        );
+        info!(
+            "  Mixed chunks (need full meshing): {} ({:.1}% of total)",
+            self.mixed_chunks,
+            (self.mixed_chunks as f32 / total_chunks as f32) * 100.0
+        );
+        info!(
+            "  Skippable chunks: {}/{} ({:.1}%)",
+            skippable, total_chunks, skip_percent
+        );
+        info!("--- Block Statistics ---");
+        info!("  Sand blocks: {}", self.total_sand);
+        info!("  Dungeon wall blocks: {}", self.total_dungeon_wall);
+        info!("  Dungeon floor blocks: {}", self.total_dungeon_floor);
+        info!("  Wood blocks: {}", self.total_wood);
+        info!("  Leaves blocks: {}", self.total_leaves);
     }
 }
 
@@ -300,7 +413,7 @@ fn setup_voxel_world(mut world: ResMut<VoxelWorld>, persistence_settings: Res<Wo
             );
         }
 
-        stats.add(&chunk_stats);
+        stats.add(&chunk_stats, chunk.uniformity());
         world.insert_chunk(chunk);
     }
 
@@ -319,8 +432,12 @@ fn mesh_dirty_chunks_system(
     lod_settings: Res<LodSettings>,
     skirt_config: Res<SkirtConfig>,
     ao_config: Res<AmbientOcclusionConfig>,
+    mut chunk_stats: ResMut<RuntimeChunkStats>,
     mut material_logged: Local<bool>,
 ) {
+    // Reset per-frame counters
+    chunk_stats.reset_frame_counters();
+
     // Wait for blocky material to be loaded before processing chunks.
     let blocky_material = if let Some(mat) = blocky_material {
         if !*material_logged {
@@ -339,20 +456,31 @@ fn mesh_dirty_chunks_system(
 
     // Collect dirty chunks first to avoid borrowing issues
     let dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
+    let had_dirty_chunks = !dirty_chunks.is_empty();
+    let mut chunks_meshed = 0u32;
+    let mut chunks_skipped = 0u32;
 
     for chunk_pos in dirty_chunks {
-        let (target_mode, lod_level) = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        // Compute uniformity if unknown (lazy evaluation)
+        if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+            if chunk.uniformity() == ChunkUniformity::Unknown {
+                chunk.compute_uniformity();
+            }
+        }
+
+        let (target_mode, lod_level, uniformity) = if let Some(chunk) = world.get_chunk(chunk_pos) {
             let target_mode = match chunk.lod_level() {
                 LodLevel::High => mesh_settings.mode,
                 LodLevel::Low => lod_settings.low_detail_mode,
                 LodLevel::Culled => lod_settings.low_detail_mode,
             };
 
-            (target_mode, chunk.lod_level())
+            (target_mode, chunk.lod_level(), chunk.uniformity())
         } else {
             continue;
         };
 
+        // Skip meshing for culled chunks
         if lod_level == LodLevel::Culled {
             if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
                 if let Some(entity) = chunk.mesh_entity() {
@@ -365,6 +493,25 @@ fn mesh_dirty_chunks_system(
                 }
                 chunk.clear_dirty();
             }
+            chunks_skipped += 1;
+            continue;
+        }
+
+        // Skip meshing for empty chunks (all air) - no geometry to render
+        if uniformity == ChunkUniformity::Empty {
+            if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+                // Clean up any existing mesh entities
+                if let Some(entity) = chunk.mesh_entity() {
+                    commands.entity(entity).despawn();
+                    chunk.clear_mesh_entity();
+                }
+                if let Some(entity) = chunk.water_mesh_entity() {
+                    commands.entity(entity).despawn();
+                    chunk.clear_water_mesh_entity();
+                }
+                chunk.clear_dirty();
+            }
+            chunks_skipped += 1;
             continue;
         }
 
@@ -492,7 +639,18 @@ fn mesh_dirty_chunks_system(
                     chunk.set_water_mesh_entity(entity);
                 }
             }
+
+            chunks_meshed += 1;
         }
+    }
+
+    // Update runtime statistics
+    chunk_stats.chunks_meshed_this_frame = chunks_meshed;
+    chunk_stats.chunks_skipped_this_frame = chunks_skipped;
+
+    // Recompute full stats from world (only if there were dirty chunks to process)
+    if had_dirty_chunks {
+        chunk_stats.recompute_from_world(&world);
     }
 }
 

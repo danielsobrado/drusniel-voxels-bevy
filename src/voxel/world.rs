@@ -88,6 +88,11 @@ impl VoxelWorld {
         self.chunks.iter_mut()
     }
 
+    /// Returns an iterator over all chunk positions and their chunks (immutable).
+    pub fn chunk_entries(&self) -> impl Iterator<Item = (&IVec3, &Chunk)> {
+        self.chunks.iter()
+    }
+
     pub fn all_chunk_positions(&self) -> impl Iterator<Item = IVec3> + '_ {
         // Generate all positions within world bounds
         // This is a naive implementation, might want to just iterate loaded chunks
