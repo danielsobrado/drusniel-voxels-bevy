@@ -430,9 +430,243 @@ Generate base mesh, use GPU tessellation for detail.
 
 ---
 
+## Bevy-Specific Optimizations
+
+### Parallel Mesh Generation
+
+Mesh generation is CPU-heavy and independent per chunk - ideal for parallelization:
+
+```rust
+// In mesh_dirty_chunks_system - spawn async tasks
+
+use bevy::tasks::{AsyncComputeTaskPool, Task};
+
+#[derive(Component)]
+struct MeshGenerationTask {
+    task: Task<ChunkMeshResult>,
+    chunk_pos: IVec3,
+    lod_level: LodLevel,
+}
+
+fn spawn_mesh_tasks(
+    mut commands: Commands,
+    world: Res<VoxelWorld>,
+    dirty_chunks: Query<(Entity, &ChunkPosition), With<DirtyChunk>>,
+    camera: Query<&Transform, With<PlayerCamera>>,
+) {
+    let task_pool = AsyncComputeTaskPool::get();
+    let camera_pos = camera.single().translation;
+
+    // Sort by distance - prioritize near chunks
+    let mut chunks: Vec<_> = dirty_chunks.iter().collect();
+    chunks.sort_by(|a, b| {
+        let dist_a = camera_pos.distance(a.1.world_center());
+        let dist_b = camera_pos.distance(b.1.world_center());
+        dist_a.partial_cmp(&dist_b).unwrap()
+    });
+
+    // Throttle: only spawn N tasks per frame to avoid overwhelming CPU
+    const MAX_TASKS_PER_FRAME: usize = 8;
+
+    for (entity, chunk_pos) in chunks.into_iter().take(MAX_TASKS_PER_FRAME) {
+        let chunk_data = world.get_chunk(chunk_pos.0).clone();
+        let lod_config = determine_lod_config(chunk_pos, camera_pos);
+
+        let task = task_pool.spawn(async move {
+            generate_surface_nets_lod(&chunk_data, lod_config)
+        });
+
+        commands.entity(entity).insert(MeshGenerationTask {
+            task,
+            chunk_pos: chunk_pos.0,
+            lod_level: lod_config.level,
+        });
+    }
+}
+
+fn poll_mesh_tasks(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut tasks: Query<(Entity, &mut MeshGenerationTask)>,
+) {
+    for (entity, mut task) in tasks.iter_mut() {
+        if let Some(result) = block_on(poll_once(&mut task.task)) {
+            // Apply mesh on main thread (fast)
+            let mesh_handle = meshes.add(result.solid.into_mesh());
+            commands.entity(entity)
+                .insert(Mesh3d(mesh_handle))
+                .remove::<MeshGenerationTask>();
+        }
+    }
+}
+```
+
+### LOD Transition Hysteresis
+
+Prevent rapid LOD switching when camera is near threshold:
+
+```rust
+/// Hysteresis buffer to prevent LOD flip-flopping
+const LOD_HYSTERESIS: f32 = 10.0;
+
+fn calculate_target_lod(
+    distance: f32,
+    current_lod: LodLevel,
+    settings: &LodSettings,
+) -> LodLevel {
+    match current_lod {
+        LodLevel::High => {
+            // Need to go PAST threshold + hysteresis to switch to Low
+            if distance > settings.high_detail_distance + LOD_HYSTERESIS {
+                LodLevel::Low
+            } else {
+                LodLevel::High
+            }
+        }
+        LodLevel::Low => {
+            // Need to come INSIDE threshold - hysteresis to switch to High
+            if distance < settings.high_detail_distance - LOD_HYSTERESIS {
+                LodLevel::High
+            } else if distance > settings.cull_distance + LOD_HYSTERESIS {
+                LodLevel::Culled
+            } else {
+                LodLevel::Low
+            }
+        }
+        LodLevel::Culled => {
+            if distance < settings.cull_distance - LOD_HYSTERESIS {
+                LodLevel::Low
+            } else {
+                LodLevel::Culled
+            }
+        }
+    }
+}
+```
+
+### Entity Management for Culled Chunks
+
+Despawn culled chunk entities to reduce ECS overhead:
+
+```rust
+fn manage_culled_chunks(
+    mut commands: Commands,
+    mut world: ResMut<VoxelWorld>,
+    chunks: Query<(Entity, &ChunkMesh)>,
+) {
+    for (entity, chunk_mesh) in chunks.iter() {
+        if let Some(chunk) = world.get_chunk(chunk_mesh.chunk_position) {
+            if chunk.lod_level() == LodLevel::Culled {
+                // Despawn the mesh entity entirely
+                commands.entity(entity).despawn();
+
+                // Clear references in chunk data
+                if let Some(chunk_mut) = world.get_chunk_mut(chunk_mesh.chunk_position) {
+                    chunk_mut.clear_mesh_entity();
+                    chunk_mut.clear_water_mesh_entity();
+                }
+            }
+        }
+    }
+}
+```
+
+### Super-Chunking (Future Enhancement)
+
+For further draw call reduction, merge distant chunks:
+
+```rust
+/// Groups 4x4 Low LOD chunks into a single mesh
+/// Reduces draw calls from 16 to 1 for that region
+struct SuperChunk {
+    /// Which 4x4 region this represents (in chunk coordinates / 4)
+    region: IVec2,
+    /// Combined mesh of all 16 chunks
+    mesh_entity: Option<Entity>,
+    /// LOD level (only created when all 16 chunks are Low LOD)
+    active: bool,
+}
+
+fn update_super_chunks(
+    world: &VoxelWorld,
+    super_chunks: &mut HashMap<IVec2, SuperChunk>,
+) {
+    // For each 4x4 region, check if all chunks are Low LOD
+    // If so, combine meshes and disable individual chunk meshes
+    // If any chunk becomes High LOD, dissolve super-chunk
+}
+```
+
+---
+
+## Alternative LOD Techniques Comparison
+
+### Why Not These Approaches?
+
+| Technique | Pros | Cons | Verdict |
+|-----------|------|------|---------|
+| **Octree Dual Contouring** | Preserves sharp features, adaptive detail | Complex implementation, major rewrite needed | Too invasive for our existing pipeline |
+| **Transvoxel** | Seamless transitions by design | Designed for Marching Cubes, not Surface Nets | Not directly applicable |
+| **Geometry Clipmaps** | Great for heightfield terrain | Poor for true 3D volumes (caves, overhangs) | Wrong fit for volumetric world |
+| **Mesh Decimation** | Optimal triangle reduction | Too slow for real-time, breaks seams | Rejected for dynamic terrain |
+| **Greedy Meshing (Low LOD)** | Very fast, huge polygon reduction | Visual discontinuity (blocky vs smooth) | Already tried, looks bad |
+| **Impostors** | Extreme distance optimization | Fails for 3D parallax | Maybe for >1000 unit distance |
+
+### Chosen Approach Rationale
+
+Downsampled voxel grids for Surface Nets is the **simplest effective method** because:
+1. Leverages existing voxel representation (8 voxels → 1 at distance)
+2. Same algorithm produces consistent visual style
+3. No complex transition geometry needed (skirts suffice)
+4. Easy to implement incrementally
+5. Tunable via distance thresholds
+
+---
+
+## GPU Meshing (Future Enhancement)
+
+For extreme performance, consider compute shader mesh generation:
+
+```wgsl
+// Conceptual WGSL compute shader for Surface Nets
+@group(0) @binding(0) var<storage, read> voxel_data: array<u32>;
+@group(0) @binding(1) var<storage, read_write> vertices: array<Vertex>;
+@group(0) @binding(2) var<storage, read_write> indices: array<u32>;
+
+@compute @workgroup_size(8, 8, 8)
+fn surface_nets_compute(
+    @builtin(global_invocation_id) id: vec3<u32>
+) {
+    // Each thread processes one voxel cell
+    let sdf = sample_sdf_neighborhood(id);
+    if has_sign_change(sdf) {
+        let vertex = compute_vertex_position(sdf);
+        let idx = atomicAdd(&vertex_count, 1u);
+        vertices[idx] = vertex;
+    }
+}
+```
+
+**Benefits:**
+- Massive parallelism (thousands of threads)
+- Frees CPU for game logic
+- Direct GPU buffer output (no upload needed)
+
+**Challenges:**
+- Complex shader code
+- Debugging difficulty
+- WGPU compute shader limitations
+- Read-back needed if CPU requires mesh data
+
+**Recommendation:** Implement CPU LOD first, profile, then consider GPU if CPU becomes bottleneck.
+
+---
+
 ## Success Metrics
 
 1. **Performance**: 30%+ reduction in total mesh vertex count
 2. **Visual Quality**: No visible seams at LOD boundaries
 3. **Stability**: No crashes or artifacts during LOD transitions
 4. **Meshing Time**: Low LOD meshing should be 3-4x faster than High LOD
+5. **Scalability**: System handles rapid camera movement without hitching
+6. **Draw Calls**: Maintain reasonable draw call count with many visible chunks
