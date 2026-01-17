@@ -389,25 +389,22 @@ fn can_spawn_on(voxel: VoxelType, allowed: &[String]) -> bool {
 }
 
 fn prop_ground_sink(id: &str, prop_type: PropType, scale: f32) -> f32 {
-    if prop_type != PropType::Rock {
-        return 0.0;
-    }
-
     let id_lower = id.to_lowercase();
-    let factor = if id_lower.contains("pebble") {
-        0.18
-    } else if id_lower.contains("large") || id_lower.contains("boulder") {
-        0.55
-    } else if id_lower.contains("medium") {
-        0.45
-    } else if id_lower.contains("small") {
-        0.35
-    } else if id_lower.contains("flat") {
-        0.25
-    } else if id_lower.contains("cluster") {
-        0.3
+    
+    // Determine base sink factor based on type and id
+    let factor = if prop_type == PropType::Rock {
+        if id_lower.contains("pebble") { 0.18 }
+        else if id_lower.contains("large") || id_lower.contains("boulder") { 0.55 }
+        else if id_lower.contains("medium") { 0.45 }
+        else if id_lower.contains("small") { 0.35 }
+        else if id_lower.contains("flat") { 0.25 }
+        else if id_lower.contains("cluster") { 0.3 }
+        else { 0.4 }
+    } else if prop_type == PropType::Tree {
+        0.2 // Trees usually have roots/trunk base to hide
     } else {
-        0.4
+        // Bushes, Flowers, Grass
+        0.15 // Sink 15% of height to ensure no floating
     };
 
     scale * factor

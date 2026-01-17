@@ -500,7 +500,8 @@ props:
   flowers:
     - id: flower_red
       path: "models/plants/flower_red.glb"
-      scale_range: [3.0, 5.0]
+      scale_range: [6.0, 9.0]
+      y_offset: -0.5
       spawn_on: [TopSoil]
       density: 0.015
       min_slope: 0.0
@@ -580,8 +581,8 @@ props:
 
     - id: custom_celandine
       path: "models/plants/custom/celandine_01_1k.glb"
-      scale_range: [3.0, 5.0]
-      y_offset: -0.2
+      scale_range: [6.0, 9.0]
+      y_offset: -0.5
       spawn_on: [TopSoil]
       density: 0.0025
       min_slope: 0.0
@@ -590,8 +591,8 @@ props:
 
     - id: custom_dandelion
       path: "models/plants/custom/dandelion_01_1k.glb"
-      scale_range: [3.0, 5.0]
-      y_offset: -0.2
+      scale_range: [6.0, 9.0]
+      y_offset: -0.5
       spawn_on: [TopSoil]
       density: 0.0025
       min_slope: 0.0

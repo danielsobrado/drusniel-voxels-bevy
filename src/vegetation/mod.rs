@@ -579,43 +579,65 @@ fn create_grass_blade_mesh() -> Mesh {
     let height = 1.4; // Taller grass like Valheim
     let width = 0.18;
 
-    // Two crossed quads for X shape when viewed from above
-    // UV.y goes from 1 (bottom) to 0 (top) for shader compatibility
-    let positions = vec![
-        // Quad 1 (aligned with X axis)
-        [-width, 0.0, 0.0],
-        [width, 0.0, 0.0],
-        [width * 0.2, height, 0.0], // Narrower at top
-        [-width * 0.2, height, 0.0],
-        // Quad 2 (aligned with Z axis)
-        [0.0, 0.0, -width],
-        [0.0, 0.0, width],
-        [0.0, height, width * 0.2],
-        [0.0, height, -width * 0.2],
-    ];
-
-    let normals = vec![
-        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
-        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
-    ];
-
-    // UVs: y=1 at bottom (no movement), y=0 at top (max movement)
-    let uvs = vec![
-        [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0],
-        [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0],
-    ];
-
-    // Vertex colors for additional variation (shader will blend base_color to tip_color)
-    let colors: Vec<[f32; 4]> = vec![
-        [0.35, 0.30, 0.15, 1.0], [0.35, 0.30, 0.15, 1.0], [0.95, 0.85, 0.45, 1.0], [0.95, 0.85, 0.45, 1.0],
-        [0.35, 0.30, 0.15, 1.0], [0.35, 0.30, 0.15, 1.0], [0.95, 0.85, 0.45, 1.0], [0.95, 0.85, 0.45, 1.0],
-    ];
-
-    // Only front faces - crossed quads ensure visibility from any angle
-    let indices = vec![
-        0, 1, 2, 0, 2, 3, // Quad 1 front
-        4, 5, 6, 4, 6, 7, // Quad 2 front
-    ];
+    // Three crossed quads (star shape) for a fuller "tuft" look
+    // Angles: 0, 60, 120 degrees
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut colors = Vec::new();
+    let mut indices = Vec::new();
+    
+    let angles = [0.0, 60.0f32.to_radians(), 120.0f32.to_radians()];
+    
+    for (i, &angle) in angles.iter().enumerate() {
+        let (sin, cos) = angle.sin_cos();
+        let dx = cos * width;
+        let dz = sin * width;
+        let dx_top = cos * (width * 0.2);
+        let dz_top = sin * (width * 0.2);
+        
+        // Push 4 vertices for this quad
+        // Bottom-Left, Bottom-Right, Top-Right, Top-Left
+        positions.push([-dx, 0.0, -dz]);
+        positions.push([dx, 0.0, dz]);
+        positions.push([dx_top, height, dz_top]);
+        positions.push([-dx_top, height, -dz_top]);
+        
+        // Normal points roughly perpendicular to blade surface
+        // (Approximation: keeping it simple with Up or angled)
+        // For grass shader, "Normal" often encodes data or just needs to be non-zero.
+        // Let's use Up (0,1,0) generic or the face normal?
+        // Original code used [0,0,1] and [1,0,0] which are face normals.
+        let nx = -sin;
+        let nz = cos;
+        for _ in 0..4 {
+            normals.push([nx, 0.0, nz]);
+        }
+        
+        uvs.push([0.0, 1.0]);
+        uvs.push([1.0, 1.0]);
+        uvs.push([1.0, 0.0]);
+        uvs.push([0.0, 0.0]);
+        
+        // Vertex colors (base to tip gradient)
+        colors.push([0.35, 0.30, 0.15, 1.0]); // Bottom
+        colors.push([0.35, 0.30, 0.15, 1.0]); // Bottom
+        colors.push([0.95, 0.85, 0.45, 1.0]); // Top
+        colors.push([0.95, 0.85, 0.45, 1.0]); // Top
+        
+        // Indices for this quad
+        let base = (i * 4) as u32;
+        indices.push(base);
+        indices.push(base + 1);
+        indices.push(base + 2);
+        indices.push(base);
+        indices.push(base + 2);
+        indices.push(base + 3);
+        
+        // Double-sided? Original code only had front faces. 
+        // "crossed quads ensure visibility from any angle"
+        // Let's stick to single sided per quad, but 3 quads cover more angles.
+    }
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
