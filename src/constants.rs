@@ -199,16 +199,19 @@ pub const BEACH_HEIGHT_OFFSET: i32 = 2;
 // =============================================================================
 
 /// Default distance in world units for high detail meshing.
-pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 96.0;
+/// Increased from 96 to 160 for smoother LOD transitions.
+pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 160.0;
 
 /// Default distance in world units at which chunks are culled entirely.
-pub const DEFAULT_CULL_DISTANCE: f32 = 192.0;
+/// Increased from 192 to 400 to cover more of the 512x512 world and
+/// prevent props from appearing without terrain.
+pub const DEFAULT_CULL_DISTANCE: f32 = 400.0;
 
 /// High detail distance for integrated GPUs (more aggressive culling).
-pub const INTEGRATED_GPU_HIGH_DETAIL_DISTANCE: f32 = 48.0;
+pub const INTEGRATED_GPU_HIGH_DETAIL_DISTANCE: f32 = 64.0;
 
 /// Cull distance for integrated GPUs.
-pub const INTEGRATED_GPU_CULL_DISTANCE: f32 = 96.0;
+pub const INTEGRATED_GPU_CULL_DISTANCE: f32 = 160.0;
 
 // =============================================================================
 // Interaction Constants

@@ -55,7 +55,9 @@ impl Default for LodSettings {
         Self {
             high_detail_distance: DEFAULT_HIGH_DETAIL_DISTANCE,
             cull_distance: DEFAULT_CULL_DISTANCE,
-            low_detail_mode: MeshMode::Blocky,
+            // Use Surface Nets for low LOD too - eliminates harsh visual transition
+            // between smooth terrain and blocky chunks at LOD boundaries
+            low_detail_mode: MeshMode::SurfaceNets,
         }
     }
 }
