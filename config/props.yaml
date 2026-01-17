@@ -441,43 +441,43 @@ props:
 
     - id: usn_grass_large
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large.gltf"
-      scale_range: [0.7, 1.1]
-      y_offset: -1.0
+      scale_range: [12.0, 16.0]
+      y_offset: -0.2
       spawn_on: [TopSoil]
-      density: 0.03
+      density: 0.15
       min_slope: 0.0
       max_slope: 0.5
-      max_count: 220
+      max_count: 10000
 
     - id: usn_grass_large_extruded
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large_Extruded.gltf"
-      scale_range: [0.7, 1.1]
-      y_offset: -1.0
+      scale_range: [12.0, 16.0]
+      y_offset: -0.2
       spawn_on: [TopSoil]
-      density: 0.03
+      density: 0.15
       min_slope: 0.0
       max_slope: 0.5
-      max_count: 220
+      max_count: 10000
 
     - id: usn_grass_small
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Small.gltf"
-      scale_range: [0.6, 1.0]
-      y_offset: -1.0
+      scale_range: [10.0, 14.0]
+      y_offset: -0.2
       spawn_on: [TopSoil]
-      density: 0.035
+      density: 0.2
       min_slope: 0.0
       max_slope: 0.5
-      max_count: 240
+      max_count: 15000
 
     - id: custom_grass_medium
       path: "models/plants/custom/grass_medium_01_1k.glb"
       scale_range: [0.6, 1.0]
       y_offset: 0.6
-      spawn_on: [TopSoil, SubSoil, Sand, Clay, Rock]
-      density: 0.004
+      spawn_on: []
+      density: 0.0
       min_slope: 0.0
       max_slope: 0.8
-      max_count: 1500
+      max_count: 0
 
     - id: fern
       path: "models/plants/fern.glb"

@@ -82,10 +82,10 @@ pub fn spawn_debug_custom_props_near_player(
 
     let center = player_tf.translation;
     let placements = [
-        ("custom_grass_medium", PropType::Bush, Vec2::new(6.0, 0.0)),
-        ("custom_grass_medium", PropType::Bush, Vec2::new(-6.0, 0.0)),
-        ("custom_grass_medium", PropType::Bush, Vec2::new(0.0, 6.0)),
-        ("custom_grass_medium", PropType::Bush, Vec2::new(0.0, -6.0)),
+        ("usn_grass_small", PropType::Bush, Vec2::new(6.0, 0.0)),
+        ("usn_grass_large", PropType::Bush, Vec2::new(-6.0, 0.0)),
+        ("usn_grass_small", PropType::Bush, Vec2::new(0.0, 6.0)),
+        ("usn_grass_large", PropType::Bush, Vec2::new(0.0, -6.0)),
         ("custom_celandine", PropType::Flower, Vec2::new(4.0, 4.0)),
         ("custom_celandine", PropType::Flower, Vec2::new(-4.0, 4.0)),
         ("custom_dandelion", PropType::Flower, Vec2::new(4.0, -4.0)),

@@ -60,8 +60,8 @@ pub struct VegetationConfig {
 impl Default for VegetationConfig {
     fn default() -> Self {
         Self {
-            grass_density: 20,
-            max_blades_per_chunk: 1000,
+            grass_density: 2,
+            max_blades_per_chunk: 200,
             wind_strength: 0.35,
             wind_speed: 1.8,
         }
@@ -899,9 +899,9 @@ impl Plugin for VegetationPlugin {
             .add_systems(
                 Update,
                 (
-                    attach_procedural_grass_to_chunks,
+                    attach_procedural_grass_to_chunks, // Mixed with assets
                     sync_grass_wind_config,
-                    spawn_rock_props,
+                    // spawn_rock_props, // Disabled in favor of asset props
                     spawn_floating_particles,
                     animate_particles,
                 ),

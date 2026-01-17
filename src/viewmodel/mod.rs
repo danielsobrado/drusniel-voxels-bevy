@@ -295,7 +295,7 @@ pub fn spawn_torch(
         parent
             .spawn((
                 // Position torch closer and lower, like holding it at your side
-                Transform::from_xyz(0.4, -0.5, -0.8)
+                Transform::from_xyz(0.5, -0.7, -1.2)
                     .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, -0.3, 0.1)),
                 Visibility::Hidden,
                 TorchViewModel,
@@ -304,7 +304,7 @@ pub fn spawn_torch(
                 // The actual torch model
                 torch.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(0.75))
+                    Transform::from_scale(Vec3::splat(0.5))
                         .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0)),
                 ));
 
