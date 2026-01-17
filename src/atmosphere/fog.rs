@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::render::render_resource::ShaderType;
-use crate::atmosphere::config::{FogConfig, FogFalloffMode};
+use crate::atmosphere::config::{FogColorModifiers, FogConfig, FogFalloffMode};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
 
@@ -135,30 +135,37 @@ pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
 fn distance_fog_component(config: &FogConfig) -> DistanceFog {
     let colors = &config.colors.day;
     let (start, end) = linear_fog_range(config, 1.0, None);
+    let mods = &config.color_modifiers;
+    let fog_color = apply_color_modifiers4(colors.fog, mods);
+    let directional_color = apply_color_modifiers3(colors.directional, mods);
+    let extinction_color = apply_color_modifiers3(colors.extinction, mods);
+    let inscattering_color = apply_color_modifiers3(colors.inscattering, mods);
+    let use_linear = matches!(config.distance.falloff, FogFalloffMode::Linear)
+        || config.distance.near_fade > 0.0;
     let falloff = match config.distance.falloff {
         FogFalloffMode::Linear => FogFalloff::Linear { start, end },
         FogFalloffMode::Atmospheric => FogFalloff::from_visibility_colors(
             end.max(1.0),
-            Color::srgb(colors.extinction[0], colors.extinction[1], colors.extinction[2]),
+            Color::srgb(extinction_color[0], extinction_color[1], extinction_color[2]),
             Color::srgb(
-                colors.inscattering[0],
-                colors.inscattering[1],
-                colors.inscattering[2],
+                inscattering_color[0],
+                inscattering_color[1],
+                inscattering_color[2],
             ),
         ),
     };
 
     // Screen-space distance fog
     DistanceFog {
-        color: Color::srgba(colors.fog[0], colors.fog[1], colors.fog[2], colors.fog[3]),
+        color: Color::srgba(fog_color[0], fog_color[1], fog_color[2], fog_color[3]),
         directional_light_color: Color::srgba(
-            colors.directional[0],
-            colors.directional[1],
-            colors.directional[2],
+            directional_color[0],
+            directional_color[1],
+            directional_color[2],
             0.5,
         ),
         directional_light_exponent: 30.0,
-        falloff,
+        falloff: if use_linear { FogFalloff::Linear { start, end } } else { falloff },
     }
 }
 
@@ -306,6 +313,13 @@ fn update_fog_from_atmosphere(
     let ambient_intensity = (ambient.brightness / 6000.0).clamp(0.02, 0.22)
         .max(config.volumetric.ambient_intensity);
 
+    let mods = &config.color_modifiers;
+    let fog_color = apply_color_modifiers4(fog_color, mods);
+    let directional_color = apply_color_modifiers3(directional_color, mods);
+    let extinction_color = apply_color_modifiers3(extinction_color, mods);
+    let inscattering_color = apply_color_modifiers3(inscattering_color, mods);
+    let use_linear = matches!(config.distance.falloff, FogFalloffMode::Linear)
+        || config.distance.near_fade > 0.0;
     let fog_falloff = match config.distance.falloff {
         FogFalloffMode::Linear => FogFalloff::Linear { start, end },
         FogFalloffMode::Atmospheric => FogFalloff::from_visibility_colors(
@@ -333,7 +347,11 @@ fn update_fog_from_atmosphere(
             0.5 * daylight + 0.2 * night, // Less directional glow at night
         );
         fog.directional_light_exponent = 30.0 + twilight * 20.0; // Tighter during sunset
-        fog.falloff = fog_falloff.clone();
+        fog.falloff = if use_linear {
+            FogFalloff::Linear { start, end }
+        } else {
+            fog_falloff.clone()
+        };
     }
 
     // Update volumetric fog camera settings so night/dim changes take effect.
@@ -366,17 +384,7 @@ fn update_fog_from_atmosphere(
     }
 
     // Update fog uniforms for custom shaders (building, props, grass)
-    // Apply color modifiers from settings UI
-    let mods = &config.color_modifiers;
-    // Blue tint: 0 = original color, 1 = shift toward blue
-    let blue_shift = mods.blue_tint;
-    let modified_fog = [
-        fog_color[0] * (1.0 - blue_shift * 0.3) * mods.brightness,
-        fog_color[1] * (1.0 - blue_shift * 0.1) * mods.brightness,
-        fog_color[2] * (1.0 + blue_shift * 0.2) * mods.brightness,
-        fog_color[3],
-    ];
-    fog_uniforms.fog_color = LinearRgba::new(modified_fog[0], modified_fog[1], modified_fog[2], modified_fog[3]);
+    fog_uniforms.fog_color = LinearRgba::new(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
     fog_uniforms.fog_start = start;
     fog_uniforms.fog_end = end;
     fog_uniforms.sun_dir = sun_dir;
@@ -477,7 +485,7 @@ fn lerp_color4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 
 fn linear_fog_range(config: &FogConfig, scale: f32, min_end: Option<f32>) -> (f32, f32) {
     let scale = scale.clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
-    let start = (config.distance.start * scale).max(0.0);
+    let mut start = (config.distance.start * scale).max(0.0);
     let mut end = (config.distance.end * scale).max(0.0);
     if let Some(min_end) = min_end {
         if end < min_end {
@@ -487,7 +495,26 @@ fn linear_fog_range(config: &FogConfig, scale: f32, min_end: Option<f32>) -> (f3
     if end <= start + MIN_DISTANCE_SPAN {
         end = start + MIN_DISTANCE_SPAN;
     }
+    let near_fade = config.distance.near_fade.clamp(0.0, 0.95);
+    if near_fade > 0.0 {
+        let max_start = (end - MIN_DISTANCE_SPAN).max(0.0);
+        start = lerp(start, max_start, near_fade);
+    }
     (start, end)
+}
+
+fn apply_color_modifiers3(color: [f32; 3], mods: &FogColorModifiers) -> [f32; 3] {
+    let blue_shift = mods.blue_tint;
+    [
+        color[0] * (1.0 - blue_shift * 0.3) * mods.brightness,
+        color[1] * (1.0 - blue_shift * 0.1) * mods.brightness,
+        color[2] * (1.0 + blue_shift * 0.2) * mods.brightness,
+    ]
+}
+
+fn apply_color_modifiers4(color: [f32; 4], mods: &FogColorModifiers) -> [f32; 4] {
+    let rgb = apply_color_modifiers3([color[0], color[1], color[2]], mods);
+    [rgb[0], rgb[1], rgb[2], color[3]]
 }
 
 /// Load fog configuration from YAML file

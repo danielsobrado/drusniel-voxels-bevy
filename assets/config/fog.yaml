@@ -9,6 +9,8 @@ fog:
     start: 80.0
     # Fog visibility distance (set >= cull distance to hide loading)
     end: 220.0
+    # Keep a fraction of the range clear before fog starts (0 = immediate).
+    near_fade: 0.35
     
   # Volumetric fog (god rays, local volumes)
   volumetric:

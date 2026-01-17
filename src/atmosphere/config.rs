@@ -40,6 +40,9 @@ pub struct DistanceFogConfig {
     pub start: f32,
     pub end: f32,
     #[serde(default)]
+    /// Fraction of the fog range kept clear before fog starts (0 = immediate, 0.5 = start halfway).
+    pub near_fade: f32,
+    #[serde(default)]
     pub falloff: FogFalloffMode,
 }
 
@@ -95,6 +98,7 @@ impl Default for FogConfig {
                 enabled: true,
                 start: 80.0,
                 end: 220.0,
+                near_fade: 0.0,
                 falloff: FogFalloffMode::Linear,
             },
             volumetric: VolumetricConfig {
