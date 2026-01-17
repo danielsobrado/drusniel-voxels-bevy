@@ -6,6 +6,7 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings, WgpuLimits};
 use bevy::render::RenderPlugin;
+use bevy::window::{Window, WindowPlugin, WindowResolution};
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
 use voxel_builder::constants::{
@@ -23,6 +24,7 @@ use voxel_builder::props::PropsPlugin;
 use voxel_builder::physics::PhysicsPlugin;
 use voxel_builder::player::PlayerPlugin;
 use voxel_builder::rendering::plugin::RenderingPlugin;
+use voxel_builder::rendering::AdaptiveGIPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
 use voxel_builder::voxel::plugin::VoxelPlugin;
@@ -216,6 +218,13 @@ fn main() {
 
         DefaultPlugins
             .set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    resolution: WindowResolution::new(1920, 1080),
+                    ..default()
+                }),
+                ..default()
+            })
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(wgpu_settings),
                 ..default()
@@ -229,6 +238,7 @@ fn main() {
         .add_plugins(PlayerPlugin)
         .add_plugins(VoxelPlugin)
         .add_plugins(RenderingPlugin)
+        .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(InteractionPlugin)
         .add_plugins(PickaxePlugin)

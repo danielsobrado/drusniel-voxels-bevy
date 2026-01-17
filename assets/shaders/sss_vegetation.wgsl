@@ -1,3 +1,5 @@
+#define_import_path sss_vegetation
+
 // Subsurface Scattering utilities for vegetation
 // Wrap lighting approximation for fast, convincing SSS on foliage
 

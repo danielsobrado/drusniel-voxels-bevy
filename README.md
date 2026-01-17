@@ -5,13 +5,14 @@
 ### Current (v0.4-dev)
 *   **Bevy 0.17 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
 *   **Radiance Cascades GI**: Screen-space global illumination using voxel SDF data for efficient ray marching, providing realistic indirect lighting with multi-cascade probe system and temporal reprojection.
+*   **Adaptive GI Enhancements**: Stochastic one-from-eight probe selection (~8x GI performance gain at Low quality), SDF-based terrain shadows leveraging voxel data, and screen-space contact shadows for vegetation micro-detail. Quality presets (Low/Medium/High/Ultra) with ~15% performance range. Toggle with Alt+1/2/3/4, debug with Alt+P.
 *   **Aerial Perspective**: Custom shaders (buildings, props, grass) now blend toward fog color at distance, matching terrain fog behavior for consistent atmospheric depth.
 *   **Environment Map Lighting**: Skybox-based IBL (Image-Based Lighting) for improved PBR reflections and ambient lighting that tracks time-of-day.
 *   **Ambient + Atmospheric Effects**: GTAO (Ground Truth Ambient Occlusion via XeGTAO port), PCSS soft shadows, distance + volumetric fog with atmospheric falloff, and time-of-day color blending.
 *   **Volumetric Clouds**: Raymarched volumetric clouds with temporal reprojection, Henyey-Greenstein scattering, and configurable cloud types (stratus/stratocumulus/cumulus).
 *   **Enhanced Water**: Gerstner wave simulation with foam generation and caustic effects.
 *   **Weather Particles**: GPU-accelerated weather system (rain/snow/dust) via bevy_hanabi with camera-following emitters.
-*   **Vegetation Wind**: Multi-layer wind animation for vegetation (trunk sway, branch movement, leaf flutter) with configurable presets.
+*   **Vegetation Wind**: Multi-layer wind animation for vegetation (trunk sway, branch movement, leaf flutter) with configurable presets. Enhanced grass shader with SSS (subsurface scattering) and contact shadows for realistic foliage rendering.
 *   **Shadow + LOD Alignment**: Cascade shadows tuned to fog visibility and chunk LOD cull distances to avoid dark banding.
 *   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
 *   **Chunk LOD System**: High/low/culled LODs with skirts for seam hiding and integrated GPU fallbacks.
@@ -19,6 +20,7 @@
 *   **World + Tools**: Save/load persistence, minimap, and debug overlays.
 *   **Enhanced Terrain Tools**: Gradual sculpting (Raise/Lower/Level/Smooth) with brush size/strength controls and visual preview cursor. Toggled via T key with dedicated hotbar UI.
 *   **UI + Modes**: Settings menu (graphics/atmosphere/fog/visual sliders), map overlay, inventory/hotbar, chat overlay, and photo mode (DoF/motion blur).
+
 
 ### V0.3
 *   **PBR Materials & Parallax Mapping**: Implemented PBR material blending and parallax occlusion mapping, specifically enhancing rock textures.
@@ -65,6 +67,14 @@
 *   **Alt+T**: Toggle Texture Debug Details
 *   **Alt+N**: Toggle Multiplayer Debug Info
 *   **Alt+C**: Toggle Chunk Statistics (uniformity, LOD, mesh counts)
+
+#### Adaptive GI Controls (Alt+)
+*   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)
+*   **Alt+2**: Medium Quality
+*   **Alt+3**: High Quality (Default, Contact Shadows ON)
+*   **Alt+4**: Ultra Quality
+*   **Alt+P**: Toggle Probe Selection Debug Log
+*   **Alt+C**: Toggle Contact Shadows Debug Log (in console)
 
 
 ### Movement

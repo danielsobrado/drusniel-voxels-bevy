@@ -8,7 +8,7 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::ui::{FlexWrap, RelativeCursorPosition};
-use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, WindowMode, WindowResolution};
+use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution};
 
 use crate::atmosphere::FogConfig;
 use crate::environment::AtmosphereSettings;
@@ -29,15 +29,20 @@ pub fn spawn_settings_dialog(
     font: &Handle<Font>,
     settings_state: SettingsState,
     ray_tracing_supported: bool,
+    dialog_position: Vec2,
 ) -> Entity {
     let mut dialog_entity = commands.spawn((
         Node {
-            width: Val::Percent(80.0),
-            height: Val::Percent(75.0),
-            padding: UiRect::all(Val::Px(20.0)),
+            width: Val::Auto,
+            height: Val::Auto,
+            max_width: Val::Percent(72.0),
+            max_height: Val::Percent(82.0),
+            padding: UiRect::all(Val::Px(16.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
-            align_self: AlignSelf::Center,
+            position_type: PositionType::Absolute,
+            left: Val::Px(dialog_position.x),
+            top: Val::Px(dialog_position.y),
             justify_content: JustifyContent::FlexStart,
             ..default()
         },
@@ -62,14 +67,48 @@ pub fn spawn_settings_dialog(
 
 fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     dialog.spawn((
-        Text::new("Settings"),
-        TextFont {
-            font: font.clone(),
-            font_size: 28.0,
+        Button,
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            align_self: AlignSelf::Stretch,
             ..default()
         },
-        TextColor(Color::WHITE),
-    ));
+        BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.95)),
+        SettingsDragHandle,
+    ))
+    .with_children(|header| {
+        header.spawn((
+            Node {
+                width: Val::Px(4.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
+            SettingsDragHighlight,
+        ));
+        header.spawn((
+            Text::new("⋮⋮"),
+            TextFont {
+                font: font.clone(),
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
+        ));
+        header.spawn((
+            Text::new("Settings"),
+            TextFont {
+                font: font.clone(),
+                font_size: 28.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
 }
 
 fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
@@ -388,6 +427,7 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                     column_gap: Val::Px(18.0),
                     row_gap: Val::Px(12.0),
                     align_items: AlignItems::FlexStart,
+                    max_width: Val::Px(720.0),
                     ..default()
                 })
                 .with_children(|columns| {
@@ -742,10 +782,15 @@ fn spawn_option_row<F>(
 }
 
 /// Closes the settings dialog if open.
-pub fn close_settings_dialog(commands: &mut Commands, settings_state: &mut SettingsState) {
+pub fn close_settings_dialog(
+    commands: &mut Commands,
+    settings_state: &mut SettingsState,
+    drag_state: &mut SettingsDialogDrag,
+) {
     if let Some(dialog) = settings_state.dialog_root.take() {
         commands.entity(dialog).despawn();
     }
+    drag_state.active = false;
 }
 
 // ============================================================================
@@ -1145,11 +1190,12 @@ pub fn handle_fog_settings(
 pub fn handle_close_settings(
     mut commands: Commands,
     mut settings_state: ResMut<SettingsState>,
+    mut drag_state: ResMut<SettingsDialogDrag>,
     query: Query<&Interaction, (Changed<Interaction>, With<CloseSettingsButton>)>,
 ) {
     for interaction in query.iter() {
         if *interaction == Interaction::Pressed {
-            close_settings_dialog(&mut commands, &mut settings_state);
+            close_settings_dialog(&mut commands, &mut settings_state, &mut drag_state);
         }
     }
 }
@@ -1563,6 +1609,77 @@ pub fn handle_settings_input_interaction(
 
         input_state.active = Some(input.0);
         input_state.buffer = format_settings_input_value(&visual_settings, &fog_config, input.0);
+    }
+}
+
+pub fn handle_settings_drag(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut drag_state: ResMut<SettingsDialogDrag>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut dialog_query: Query<&mut Node, With<SettingsDialogRoot>>,
+    handle_query: Query<&Interaction, (Changed<Interaction>, With<SettingsDragHandle>)>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        drag_state.active = false;
+        return;
+    }
+
+    let Ok(window) = window_query.single() else { return };
+
+    for interaction in handle_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        if let Some(cursor) = window.cursor_position() {
+            drag_state.active = true;
+            drag_state.grab_offset = cursor - drag_state.position;
+        }
+    }
+
+    if drag_state.active && mouse.just_released(MouseButton::Left) {
+        drag_state.active = false;
+    }
+
+    if drag_state.active {
+        if let Some(cursor) = window.cursor_position() {
+            let mut new_pos = cursor - drag_state.grab_offset;
+            let margin = 12.0;
+            let max_x = (window.width() - margin).max(margin);
+            let max_y = (window.height() - margin).max(margin);
+            new_pos.x = new_pos.x.clamp(margin, max_x);
+            new_pos.y = new_pos.y.clamp(margin, max_y);
+            drag_state.position = new_pos;
+        }
+    }
+
+    if drag_state.is_changed() {
+        if let Ok(mut node) = dialog_query.single_mut() {
+            node.left = Val::Px(drag_state.position.x);
+            node.top = Val::Px(drag_state.position.y);
+        }
+    }
+}
+
+pub fn update_settings_drag_hover(
+    settings_state: Res<SettingsState>,
+    handle_query: Query<&Interaction, (With<SettingsDragHandle>, Changed<Interaction>)>,
+    mut highlight_query: Query<&mut BackgroundColor, With<SettingsDragHighlight>>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    let Ok(mut highlight) = highlight_query.single_mut() else { return };
+
+    for interaction in handle_query.iter() {
+        *highlight = match *interaction {
+            Interaction::Pressed => BackgroundColor(Color::srgba(0.55, 0.75, 0.6, 1.0)),
+            Interaction::Hovered => BackgroundColor(Color::srgba(0.5, 0.7, 0.56, 0.95)),
+            Interaction::None => BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
+        };
     }
 }
 

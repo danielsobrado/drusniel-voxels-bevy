@@ -213,6 +213,29 @@ pub(crate) enum SettingsTabButton {
 #[derive(Component)]
 pub(crate) struct SettingsDialogRoot;
 
+#[derive(Resource, Clone, Copy)]
+pub struct SettingsDialogDrag {
+    pub active: bool,
+    pub grab_offset: Vec2,
+    pub position: Vec2,
+}
+
+impl Default for SettingsDialogDrag {
+    fn default() -> Self {
+        Self {
+            active: false,
+            grab_offset: Vec2::ZERO,
+            position: Vec2::new(280.0, 80.0),
+        }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct SettingsDragHandle;
+
+#[derive(Component)]
+pub(crate) struct SettingsDragHighlight;
+
 #[derive(Component, Copy, Clone)]
 pub(crate) struct GraphicsQualityOption(pub GraphicsQuality);
 

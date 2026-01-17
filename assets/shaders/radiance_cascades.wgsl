@@ -1,3 +1,5 @@
+#define_import_path radiance_cascades
+
 //! Radiance Cascades Global Illumination Shader
 //!
 //! Implements screen-space radiance cascades using voxel SDF data

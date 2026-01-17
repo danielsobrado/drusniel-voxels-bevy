@@ -769,6 +769,12 @@ impl Plugin for InteractionPlugin {
                     place_block_system,
                     palette::refresh_palette_ui,
                     render_block_highlight,
+                )
+                    .run_if(|state: Res<PauseMenuState>| !state.open),
+            )
+            .add_systems(
+                Update,
+                (
                     debug_voxel_info_system,
                     debug::toggle_debug_overlay,
                     debug::toggle_debug_details,

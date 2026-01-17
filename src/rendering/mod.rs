@@ -25,6 +25,7 @@ pub mod capabilities;
 pub mod cinematic;
 pub mod cinematic_config;
 pub mod cutscene;
+pub mod adaptive_gi;
 pub mod gtao;
 pub mod gtao_noise;
 pub mod materials;
@@ -40,11 +41,14 @@ pub mod triplanar_material;
 pub mod volumetric_clouds;
 pub mod water;
 
+
 pub use ao_config::AmbientOcclusionConfig;
 pub use building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingMaterialType, BuildingMesh};
 pub use cinematic::{CinematicCamera, CinematicEvent, CinematicPlugin};
 pub use cinematic_config::CinematicConfig;
+pub use adaptive_gi::{AdaptiveGIPlugin, AdaptiveGISettings, AdaptiveGIQuality};
 pub use photo_mode::PhotoModePlugin;
 pub use props_material::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
 pub use radiance_cascades::{RadianceCascadesPlugin, RadianceCascadesConfig, RadianceCascadesCamera};
 pub use ssao::{ssao_camera_components, SsaoPlugin, SsaoSupported};
+

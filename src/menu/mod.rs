@@ -15,7 +15,7 @@ pub use types::{
     AntiAliasing, DayLengthOption, DisplayMode, ExposureOption, FavoriteServer,
     FloatHeightPreset, FogPresetOption, GraphicsQuality, JumpHeightPreset, MenuScreen,
     MieDirectionOption, MieOption, MultiplayerField, MultiplayerFormState,
-    NightBrightnessOption, PauseMenuState, RayleighOption, SettingsState,
+    NightBrightnessOption, PauseMenuState, RayleighOption, SettingsDialogDrag, SettingsState,
     SettingsTab, ShadowFiltering, TimeScaleOption, TwilightBandOption, WalkSpeedPreset,
     RunSpeedPreset, VisualSettings, VisualSlider, SliderValueText, SliderTrack, SliderFill,
 };
@@ -47,6 +47,7 @@ impl Plugin for PauseMenuPlugin {
             .init_resource::<NetworkSession>()
             .init_resource::<types::VisualSettings>()
             .init_resource::<SettingsInputState>()
+            .init_resource::<types::SettingsDialogDrag>()
             // Core menu systems
             .add_systems(Update, toggle_pause_menu)
             .add_systems(Update, handle_menu_buttons)
@@ -76,6 +77,8 @@ impl Plugin for PauseMenuPlugin {
             .add_systems(Update, multiplayer::process_input_characters)
             .add_systems(Update, (multiplayer::update_input_texts, multiplayer::update_input_backgrounds))
             .add_systems(Update, settings::handle_settings_input_interaction)
+            .add_systems(Update, settings::handle_settings_drag)
+            .add_systems(Update, settings::update_settings_drag_hover)
             .add_systems(Update, settings::process_settings_input_characters)
             .add_systems(Update, settings::update_settings_input_backgrounds)
             .add_systems(Update, settings::clear_settings_input_on_close)
@@ -141,13 +144,14 @@ fn toggle_pause_menu(
     mut state: ResMut<PauseMenuState>,
     mut form_state: ResMut<MultiplayerFormState>,
     mut settings_state: ResMut<SettingsState>,
+    mut drag_state: ResMut<SettingsDialogDrag>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
 
     if state.open {
-        close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state);
+        close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state, &mut drag_state);
     } else {
         open_menu(&mut commands, &asset_server, &mut state, &form_state);
     }
@@ -188,11 +192,12 @@ fn close_menu(
     state: &mut PauseMenuState,
     form_state: &mut MultiplayerFormState,
     settings_state: &mut SettingsState,
+    drag_state: &mut SettingsDialogDrag,
 ) {
     if let Some(root) = state.root_entity.take() {
         commands.entity(root).despawn();
     }
-    settings::close_settings_dialog(commands, settings_state);
+    settings::close_settings_dialog(commands, settings_state, drag_state);
     form_state.active_field = None;
     state.open = false;
     state.current_screen = MenuScreen::Main;
@@ -212,6 +217,7 @@ fn handle_menu_buttons(
     chunk_meshes: Query<Entity, With<ChunkMesh>>,
     mut state: ResMut<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
+    mut drag_state: ResMut<SettingsDialogDrag>,
     mut form_state: ResMut<MultiplayerFormState>,
     mut connect_tasks: ResMut<ConnectTaskState>,
     mut network: ResMut<NetworkSession>,
@@ -251,6 +257,7 @@ fn handle_menu_buttons(
                     &state,
                     &mut settings_state,
                     &capabilities,
+                    &drag_state,
                 );
             }
             PauseMenuButton::Multiplayer => {
@@ -268,7 +275,7 @@ fn handle_menu_buttons(
                 );
             }
             PauseMenuButton::Resume => {
-                close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state);
+                close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state, &mut drag_state);
             }
         }
 
@@ -308,6 +315,7 @@ fn handle_settings_button(
     state: &PauseMenuState,
     settings_state: &mut SettingsState,
     capabilities: &GraphicsCapabilities,
+    drag_state: &SettingsDialogDrag,
 ) {
     if settings_state.dialog_root.is_none() {
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
@@ -318,6 +326,7 @@ fn handle_settings_button(
             &font,
             settings_state.clone(),
             capabilities.ray_tracing_supported,
+            drag_state.position,
         ));
     }
 }

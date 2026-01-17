@@ -6,13 +6,49 @@
 //! - Various toggle keys for specific debug information
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crate::interaction::editing::{EditMode, DeleteMode, DragState};
 use crate::interaction::targeting::TargetedBlock;
 use crate::network::NetworkSession;
-use crate::voxel::plugin::RuntimeChunkStats;
+use crate::props::Prop;
+use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
+use crate::voxel::meshing::ChunkMesh;
+use crate::voxel::plugin::{ChunkGenerationState, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+
+/// System parameter bundling entity breakdown queries for debug overlay.
+#[derive(SystemParam)]
+pub struct EntityBreakdownQuery<'w, 's> {
+    chunk_meshes: Query<'w, 's, Entity, With<ChunkMesh>>,
+    grass_patches: Query<'w, 's, Entity, With<ProceduralGrassPatch>>,
+    props: Query<'w, 's, Entity, With<Prop>>,
+    particles: Query<'w, 's, Entity, With<FloatingParticle>>,
+    ui_nodes: Query<'w, 's, Entity, With<Node>>,
+}
+
+impl EntityBreakdownQuery<'_, '_> {
+    /// Get counts for each entity category.
+    pub fn counts(&self) -> EntityCounts {
+        EntityCounts {
+            chunk_meshes: self.chunk_meshes.iter().count(),
+            grass_patches: self.grass_patches.iter().count(),
+            props: self.props.iter().count(),
+            particles: self.particles.iter().count(),
+            ui_nodes: self.ui_nodes.iter().count(),
+        }
+    }
+}
+
+/// Entity counts by category.
+pub struct EntityCounts {
+    pub chunk_meshes: usize,
+    pub grass_patches: usize,
+    pub props: usize,
+    pub particles: usize,
+    pub ui_nodes: usize,
+}
 
 /// Component to mark the debug overlay text.
 #[derive(Component)]
@@ -102,6 +138,7 @@ pub fn toggle_debug_details(
 }
 
 /// Update debug overlay text with real-time info.
+#[allow(clippy::too_many_arguments)]
 pub fn update_debug_overlay(
     state: Res<DebugOverlayState>,
     targeted: Res<TargetedBlock>,
@@ -111,11 +148,14 @@ pub fn update_debug_overlay(
     drag_state: Res<DragState>,
     network: Res<NetworkSession>,
     chunk_stats: Res<RuntimeChunkStats>,
+    gen_state: Res<ChunkGenerationState>,
     camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
     all_entities: Query<Entity>,
     diagnostics: Res<DiagnosticsStore>,
     toggles: Res<DebugDetailToggles>,
     mut query: Query<&mut Text, With<DebugOverlay>>,
+    // Entity breakdown - use combined query to avoid param limit
+    entity_breakdown: EntityBreakdownQuery,
 ) {
     if !state.visible {
         return;
@@ -148,15 +188,29 @@ pub fn update_debug_overlay(
         .unwrap_or_else(|| "N/A".to_string());
     text_content.push_str(&format!("FPS: {}\n", fps));
 
-    // Entity count
+    // Entity count with breakdown
     let entity_count = all_entities.iter().count();
-    text_content.push_str(&format!("Entities: {}\n", entity_count));
+    let counts = entity_breakdown.counts();
+    let tracked = counts.chunk_meshes + counts.grass_patches + counts.props + counts.particles + counts.ui_nodes;
+    let other_count = entity_count.saturating_sub(tracked);
+
+    text_content.push_str(&format!("Entities: {} (mesh:{} grass:{} prop:{} ui:{} other:{})\n",
+        entity_count, counts.chunk_meshes, counts.grass_patches, counts.props, counts.ui_nodes, other_count));
 
     // Chunk stats summary (always show basic info)
     text_content.push_str(&format!(
         "Chunks: {} (meshes: {})\n",
         chunk_stats.total_chunks, chunk_stats.mesh_entities
     ));
+
+    // Show generation progress if generating
+    if gen_state.is_generating() {
+        let progress = (gen_state.progress() * 100.0) as u32;
+        text_content.push_str(&format!(
+            "Generating: {}% ({}/{})\n",
+            progress, gen_state.chunks_completed, gen_state.total_chunks
+        ));
+    }
 
     text_content.push('\n');
 
