@@ -9,3 +9,12 @@ props:
       min_slope: 0.0
       max_slope: 1.0
       max_count: 0
+    - id: wooden_wall
+      path: "models/Models/GLB format/Wooden Wall.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0

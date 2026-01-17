@@ -198,7 +198,7 @@ pub fn spawn_axe(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
-    config: Res<ViewmodelConfig>,
+    _config: Res<ViewmodelConfig>,
 ) {
     let Ok(camera_entity) = camera_query.single() else {
         return;
@@ -209,26 +209,17 @@ pub fn spawn_axe(
     commands.entity(camera_entity).with_children(|parent| {
         parent
             .spawn((
-                Transform::from_xyz(
-                    config.position.offset.x + 0.2, // Shift right
-                    config.position.offset.y - 0.2, // Shift down bits
-                    config.position.offset.z - 0.2, // Shift forward
-                )
-                .with_rotation(Quat::from_euler(
-                    EulerRot::XYZ,
-                    config.position.rotation.x,
-                    config.position.rotation.y,
-                    config.position.rotation.z,
-                )),
+                // Position similar to pickaxe
+                Transform::from_xyz(0.45, -0.35, -0.9)
+                    .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.3, -0.5, 0.2)),
                 Visibility::Hidden,
                 AxeViewModel,
             ))
             .with_children(|axe| {
                 axe.spawn((
                     SceneRoot(scene_handle),
-                    // Scale up and rotate to be visible as a held item
-                    Transform::from_scale(Vec3::splat(1.2))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.3, 1.2, -0.2)),
+                    Transform::from_scale(Vec3::splat(0.35))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, std::f32::consts::PI, 0.0)),
                 ));
             });
     });
@@ -295,17 +286,9 @@ pub fn spawn_torch(
     commands.entity(camera_entity).with_children(|parent| {
         parent
             .spawn((
-                Transform::from_xyz(
-                    config.position.offset.x + 0.05,
-                    config.position.offset.y + 0.1,
-                    config.position.offset.z,
-                )
-                .with_rotation(Quat::from_euler(
-                    EulerRot::XYZ,
-                    config.position.rotation.x - 0.2,
-                    config.position.rotation.y + 0.3,
-                    config.position.rotation.z,
-                )),
+                // Position torch closer and lower, like holding it at your side
+                Transform::from_xyz(0.4, -0.5, -0.8)
+                    .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, -0.3, 0.1)),
                 Visibility::Hidden,
                 TorchViewModel,
             ))
@@ -313,7 +296,7 @@ pub fn spawn_torch(
                 // The actual torch model
                 torch.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(0.85))
+                    Transform::from_scale(Vec3::splat(0.75))
                         .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0)),
                 ));
 

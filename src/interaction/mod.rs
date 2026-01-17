@@ -15,7 +15,7 @@ mod targeting;
 
 // Re-export public types and functions from sub-modules
 pub use debug::{DebugDetailToggles, DebugOverlay, DebugOverlayState};
-pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode};
+pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode, mark_neighbors_dirty};
 pub use error::{BreakError, CombatError, DragError, LastGameplayError, PlacementError};
 pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity};
 
@@ -28,6 +28,7 @@ use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 use palette::PlacementPaletteState;
+use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
 /// Duration in seconds before gameplay errors are automatically cleared.
 const ERROR_DISPLAY_DURATION: f64 = 3.0;
@@ -123,8 +124,14 @@ pub fn break_block_system(
     mut particle_events: MessageWriter<SpawnParticleEvent>,
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
+    terrain_tool_state: Res<TerrainToolState>,
 ) {
     if edit_mode.enabled {
+        return;
+    }
+
+    // Do not break blocks if a terrain tool is active
+    if terrain_tool_state.active_tool != TerrainTool::None {
         return;
     }
 
@@ -192,8 +199,14 @@ pub fn place_block_system(
     drag_state: Res<DragState>,
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
+    terrain_tool_state: Res<TerrainToolState>,
 ) {
     if edit_mode.enabled {
+        return;
+    }
+
+    // Do not place blocks if a terrain tool is active
+    if terrain_tool_state.active_tool != TerrainTool::None {
         return;
     }
 

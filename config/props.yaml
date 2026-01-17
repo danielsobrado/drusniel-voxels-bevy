@@ -218,6 +218,46 @@ props:
       max_count: 40
 
   rocks:
+    - id: fence
+      path: "models/Models/GLB format/fence.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: wooden_wall
+      path: "models/Models/GLB format/Wooden Wall.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: path_straight
+      path: "models/Models/GLB format/Path Straight.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: wall
+      path: "models/Models/GLB format/Wall.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
     - id: boulder_large
       path: "models/rocks/boulder_large.glb"
       scale_range: [0.8, 2.0]

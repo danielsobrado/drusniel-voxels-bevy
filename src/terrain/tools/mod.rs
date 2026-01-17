@@ -2,6 +2,7 @@ mod types;
 mod operations;
 mod input;
 mod preview;
+mod apply;
 
 pub use types::*;
 pub use operations::*;
@@ -21,6 +22,7 @@ impl Plugin for TerrainToolsPlugin {
                 input::handle_tool_input,
                 preview::update_terrain_raycast,
                 preview::update_preview,
+                apply::apply_terrain_tool,
             ).chain());
     }
 }

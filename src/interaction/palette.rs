@@ -12,7 +12,7 @@ use bevy::ui::{
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use crate::interaction::{DragState, EditMode, TargetedBlock};
+use crate::interaction::{DeleteMode, DragState, EditMode, TargetedBlock};
 use crate::voxel::types::Voxel;
 use bevy::ecs::hierarchy::ChildOf;
 use crate::voxel::world::VoxelWorld;
@@ -30,6 +30,8 @@ pub struct PaletteItem {
     pub selection: PlacementSelection,
 }
 
+const CONSTRUCTION_PROP_IDS: [&str; 4] = ["fence", "wooden_wall", "path_straight", "wall"];
+
 #[derive(Resource, Default)]
 pub struct PaletteItems(pub Vec<PaletteItem>);
 
@@ -42,6 +44,7 @@ pub struct PlacementPaletteState {
     pub active_selection: Option<PlacementSelection>,
     pub selected_index: Option<usize>,
     pub root: Option<Entity>,
+    pub prev_edit_mode: Option<bool>,
 }
 
 #[derive(Resource, Default)]
@@ -113,6 +116,35 @@ pub struct BookmarkTeleportButton(usize);
 #[derive(Component)]
 pub struct BookmarkDeleteButton(usize);
 
+fn set_edit_mode_state(
+    edit_mode: &mut EditMode,
+    delete_mode: &mut DeleteMode,
+    drag_state: &mut DragState,
+    world: &mut VoxelWorld,
+    enabled: bool,
+) {
+    if edit_mode.enabled == enabled {
+        if enabled {
+            delete_mode.enabled = false;
+        }
+        return;
+    }
+
+    edit_mode.enabled = enabled;
+    delete_mode.enabled = false;
+
+    if !enabled {
+        if let Some(dragged) = drag_state.dragged_block.take() {
+            world.set_voxel(dragged.original_position, dragged.block_type);
+            crate::interaction::editing::mark_neighbors_dirty(
+                world,
+                dragged.original_position,
+            );
+        }
+        drag_state.rotation_degrees = 0.0;
+    }
+}
+
 pub fn initialize_palette_items(
     mut items: ResMut<PaletteItems>,
     mut palette: ResMut<PlacementPaletteState>,
@@ -124,25 +156,6 @@ pub fn initialize_palette_items(
 
     let mut all_items = Vec::new();
 
-    for voxel in [
-        VoxelType::TopSoil,
-        VoxelType::SubSoil,
-        VoxelType::Rock,
-        VoxelType::Sand,
-        VoxelType::Clay,
-        VoxelType::Water,
-        VoxelType::Wood,
-        VoxelType::Leaves,
-        VoxelType::DungeonWall,
-        VoxelType::DungeonFloor,
-    ] {
-        all_items.push(PaletteItem {
-            label: format!("{:?}", voxel),
-            tags: voxel_tags(voxel),
-            selection: PlacementSelection::Voxel(voxel),
-        });
-    }
-
     for (category, list) in [
         (PropType::Tree, config.props.trees.as_slice()),
         (PropType::Rock, config.props.rocks.as_slice()),
@@ -150,6 +163,9 @@ pub fn initialize_palette_items(
         (PropType::Flower, config.props.flowers.as_slice()),
     ] {
         for def in list {
+            if !CONSTRUCTION_PROP_IDS.contains(&def.id.as_str()) {
+                continue;
+            }
             let mut tags = vec![format!("{:?}", category).to_lowercase(), "prop".to_string()];
             for spawn in &def.spawn_on {
                 tags.push(spawn.to_lowercase());
@@ -191,6 +207,10 @@ pub fn toggle_palette(
     mut palette: ResMut<PlacementPaletteState>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut edit_mode: ResMut<EditMode>,
+    mut delete_mode: ResMut<DeleteMode>,
+    mut drag_state: ResMut<DragState>,
+    mut world: ResMut<VoxelWorld>,
 ) {
     if pause_state.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) {
         return;
@@ -203,6 +223,14 @@ pub fn toggle_palette(
     palette.open = !palette.open;
 
     if palette.open {
+        palette.prev_edit_mode = Some(edit_mode.enabled);
+        set_edit_mode_state(
+            &mut edit_mode,
+            &mut delete_mode,
+            &mut drag_state,
+            &mut world,
+            true,
+        );
         if palette.selected_index.is_none() {
             palette.selected_index = Some(0);
         }
@@ -210,6 +238,15 @@ pub fn toggle_palette(
         palette.needs_redraw = true;
     } else {
         despawn_palette_ui(&mut commands, &mut palette);
+        if let Some(prev) = palette.prev_edit_mode.take() {
+            set_edit_mode_state(
+                &mut edit_mode,
+                &mut delete_mode,
+                &mut drag_state,
+                &mut world,
+                prev,
+            );
+        }
     }
 }
 
@@ -222,6 +259,10 @@ pub fn handle_palette_input(
     mut commands: Commands,
     items: Res<PaletteItems>,
     mut held: ResMut<crate::interaction::HeldBlock>,
+    mut edit_mode: ResMut<EditMode>,
+    mut delete_mode: ResMut<DeleteMode>,
+    mut drag_state: ResMut<DragState>,
+    mut world: ResMut<VoxelWorld>,
 ) {
     if !palette.open || pause_state.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) {
         return;
@@ -233,6 +274,15 @@ pub fn handle_palette_input(
         palette.open = false;
         palette.needs_redraw = true;
         despawn_palette_ui(&mut commands, &mut palette);
+        if let Some(prev) = palette.prev_edit_mode.take() {
+            set_edit_mode_state(
+                &mut edit_mode,
+                &mut delete_mode,
+                &mut drag_state,
+                &mut world,
+                prev,
+            );
+        }
         return;
     }
 
@@ -941,18 +991,3 @@ pub fn persist_bookmarks(mut store: ResMut<BookmarkStore>) {
     }
 }
 
-fn voxel_tags(voxel: VoxelType) -> Vec<String> {
-    match voxel {
-        VoxelType::TopSoil => vec!["material".into(), "soil".into(), "ground".into()],
-        VoxelType::SubSoil => vec!["material".into(), "soil".into()],
-        VoxelType::Rock => vec!["material".into(), "stone".into()],
-        VoxelType::Sand => vec!["material".into(), "sand".into()],
-        VoxelType::Clay => vec!["material".into(), "clay".into()],
-        VoxelType::Water => vec!["liquid".into(), "water".into()],
-        VoxelType::Wood => vec!["material".into(), "wood".into(), "tree".into()],
-        VoxelType::Leaves => vec!["material".into(), "foliage".into()],
-        VoxelType::DungeonWall => vec!["material".into(), "dungeon".into()],
-        VoxelType::DungeonFloor => vec!["material".into(), "dungeon".into()],
-        VoxelType::Air | VoxelType::Bedrock => vec!["hidden".into()],
-    }
-}
