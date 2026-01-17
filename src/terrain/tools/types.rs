@@ -30,6 +30,11 @@ impl TerrainTool {
             Self::Smooth => "Smooth",
         }
     }
+
+    /// Get all terrain tools in order (for hotbar display)
+    pub fn all_tools() -> [TerrainTool; 4] {
+        [Self::Raise, Self::Lower, Self::Level, Self::Smooth]
+    }
 }
 
 #[derive(Resource)]
@@ -38,6 +43,8 @@ pub struct TerrainToolState {
     pub radius: f32,
     pub strength: f32,
     pub target_height: Option<f32>,
+    /// Whether terraforming mode is active (T key toggle)
+    pub terraforming_mode: bool,
 }
 
 impl Default for TerrainToolState {
@@ -47,6 +54,7 @@ impl Default for TerrainToolState {
             radius: 3.0,
             strength: 1.0,
             target_height: None,
+            terraforming_mode: false,
         }
     }
 }

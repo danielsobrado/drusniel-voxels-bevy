@@ -21,7 +21,7 @@ pub use types::{
 };
 
 use types::{
-    ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot,
+    ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot, SettingsInputState,
 };
 
 use crate::chat::ChatState;
@@ -46,6 +46,7 @@ impl Plugin for PauseMenuPlugin {
             .init_resource::<ChatState>()
             .init_resource::<NetworkSession>()
             .init_resource::<types::VisualSettings>()
+            .init_resource::<SettingsInputState>()
             // Core menu systems
             .add_systems(Update, toggle_pause_menu)
             .add_systems(Update, handle_menu_buttons)
@@ -74,6 +75,10 @@ impl Plugin for PauseMenuPlugin {
             .add_systems(Update, multiplayer::handle_input_interaction)
             .add_systems(Update, multiplayer::process_input_characters)
             .add_systems(Update, (multiplayer::update_input_texts, multiplayer::update_input_backgrounds))
+            .add_systems(Update, settings::handle_settings_input_interaction)
+            .add_systems(Update, settings::process_settings_input_characters)
+            .add_systems(Update, settings::update_settings_input_backgrounds)
+            .add_systems(Update, settings::clear_settings_input_on_close)
             // Settings UI updates
             .add_systems(
                 Update,

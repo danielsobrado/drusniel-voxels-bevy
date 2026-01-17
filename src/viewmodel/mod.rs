@@ -46,6 +46,14 @@ pub struct TorchFlicker {
     pub amplitude: f32,
 }
 
+/// Component marking the shovel viewmodel
+#[derive(Component)]
+pub struct ShovelViewModel;
+
+/// Component marking the rake viewmodel
+#[derive(Component)]
+pub struct RakeViewModel;
+
 
 /// Resource to track swing state
 #[derive(Resource, Default)]
@@ -204,7 +212,7 @@ pub fn spawn_axe(
         return;
     };
 
-    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/Axe.glb#Scene0");
+    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/MedievalAxe.glb#Scene0");
 
     commands.entity(camera_entity).with_children(|parent| {
         parent
@@ -278,7 +286,7 @@ pub fn spawn_torch(
     };
 
     let scene_handle: Handle<Scene> =
-        asset_server.load("models/Models/GLB format/Torch 1.glb#Scene0");
+        asset_server.load("models/Models/GLB format/MedievalTorch.glb#Scene0");
 
     // Create fire particle effect
     let fire_handle = create_torch_fire_effect(&mut effects);
@@ -329,6 +337,90 @@ pub fn spawn_torch(
 }
 
 
+
+/// Spawn the shovel viewmodel as a child of the camera
+pub fn spawn_shovel(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
+) {
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/Shovel.glb#Scene0");
+
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x + 0.1,
+                    config.position.offset.y - 0.2,
+                    config.position.offset.z - 0.2,
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x,
+                    config.position.rotation.y,
+                    config.position.rotation.z,
+                )),
+                Visibility::Hidden,
+                ShovelViewModel,
+            ))
+            .with_children(|shovel| {
+                shovel.spawn((
+                    SceneRoot(scene_handle),
+                    Transform::from_scale(Vec3::splat(1.1))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.0, -0.2)),
+                ));
+            });
+    });
+}
+
+/// Spawn the rake viewmodel as a child of the camera
+pub fn spawn_rake(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
+    config: Res<ViewmodelConfig>,
+) {
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/Hand Rake.glb#Scene0");
+
+    commands.entity(camera_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Transform::from_xyz(
+                    config.position.offset.x + 0.15,
+                    config.position.offset.y - 0.15,
+                    config.position.offset.z - 0.15,
+                )
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    config.position.rotation.x,
+                    config.position.rotation.y,
+                    config.position.rotation.z,
+                )),
+                Visibility::Hidden,
+                RakeViewModel,
+            ))
+            .with_children(|rake| {
+                rake.spawn((
+                    SceneRoot(scene_handle),
+                    Transform::from_scale(Vec3::splat(1.1))
+                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.4, 1.5, 0.0)),
+                ));
+            });
+    });
+}
+
+
 pub fn update_pickaxe_visibility(
     equipped: Res<EquippedItem>,
     mut pickaxe_query: Query<&mut Visibility, With<PickaxeViewModel>>,
@@ -337,7 +429,7 @@ pub fn update_pickaxe_visibility(
         return;
     }
 
-    let visible = matches!(equipped.item, Some(ItemType::Pickaxe));
+    let visible = matches!(equipped.item, Some(ItemType::Pickaxe) | Some(ItemType::TerrainLower));
     let visibility = if visible {
         Visibility::Visible
     } else {
@@ -406,6 +498,44 @@ pub fn update_torch_visibility(
     }
 }
 
+pub fn update_shovel_visibility(
+    equipped: Res<EquippedItem>,
+    mut shovel_query: Query<&mut Visibility, With<ShovelViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visibility = if matches!(equipped.item, Some(ItemType::TerrainRaise)) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut shovel_visibility in shovel_query.iter_mut() {
+        *shovel_visibility = visibility;
+    }
+}
+
+pub fn update_rake_visibility(
+    equipped: Res<EquippedItem>,
+    mut rake_query: Query<&mut Visibility, With<RakeViewModel>>,
+) {
+    if !equipped.is_changed() {
+        return;
+    }
+
+    let visibility = if matches!(equipped.item, Some(ItemType::TerrainLevel) | Some(ItemType::TerrainSmooth)) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut rake_visibility in rake_query.iter_mut() {
+        *rake_visibility = visibility;
+    }
+}
+
 /// Plugin for all viewmodels
 pub struct PickaxePlugin;
 
@@ -415,7 +545,7 @@ impl Plugin for PickaxePlugin {
             .init_resource::<ViewmodelConfig>()
             .add_systems(
                 PostStartup,
-                (spawn_pickaxe, spawn_axe, spawn_sword, spawn_torch),
+                (spawn_pickaxe, spawn_axe, spawn_sword, spawn_torch, spawn_shovel, spawn_rake),
             )
             .add_systems(
                 Update,
@@ -428,6 +558,8 @@ impl Plugin for PickaxePlugin {
                     update_axe_visibility,
                     update_sword_visibility,
                     update_torch_visibility,
+                    update_shovel_visibility,
+                    update_rake_visibility,
                 ),
             );
     }

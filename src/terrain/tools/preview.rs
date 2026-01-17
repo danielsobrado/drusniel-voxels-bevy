@@ -23,6 +23,23 @@ pub fn spawn_preview(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Create a translucent filled circle for the affected area
+    let fill_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 1.0, 0.8, 0.15),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(meshes.add(Circle::new(1.0))),
+        MeshMaterial3d(fill_material),
+        Transform::default(),
+        Visibility::Hidden,
+        TerrainToolPreview { radius_factor: 1.0 },
+    ));
+
     // Create multiple concentric rings for better visibility
     let ring_configs = [
         (0.95, 1.0, 0.8),   // Outer ring - brightest
@@ -35,7 +52,7 @@ pub fn spawn_preview(
             base_color: Color::srgba(1.0, 1.0, 0.9, alpha),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
-            cull_mode: None, // Visible from both sides
+            cull_mode: None,
             ..default()
         });
 

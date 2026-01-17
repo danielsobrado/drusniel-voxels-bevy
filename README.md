@@ -16,7 +16,8 @@
 *   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
 *   **Chunk LOD System**: High/low/culled LODs with skirts for seam hiding and integrated GPU fallbacks.
 *   **Config-Driven Tuning**: YAML configs for fog, AO, terrain generation, props, camera exposure, clouds, water, wind, weather, and GI.
-*   **World + Tools**: Save/load persistence, terrain editing tools, minimap, and debug overlays.
+*   **World + Tools**: Save/load persistence, minimap, and debug overlays.
+*   **Enhanced Terrain Tools**: Gradual sculpting (Raise/Lower/Level/Smooth) with brush size/strength controls and visual preview cursor. Toggled via T key with dedicated hotbar UI.
 *   **UI + Modes**: Settings menu (graphics/atmosphere/fog/visual sliders), map overlay, inventory/hotbar, chat overlay, and photo mode (DoF/motion blur).
 
 ### V0.3
@@ -65,6 +66,16 @@
 ### Interaction
 *   **Left Click**: Break Block / Attack Entity
 *   **Right Click**: Place Block
+
+### Terraforming Mode (Toggle with T)
+*   **T**: Toggle Mode (Switch Hotbar)
+*   **1**: Raise Tool
+*   **2**: Lower Tool
+*   **3**: Level Tool (Right-click to set target height)
+*   **4**: Smooth Tool
+*   **Left Click**: Apply Tool
+*   **Shift + Scroll**: Adjust Brush Radius
+*   **Ctrl + Scroll**: Adjust Brush Strength
 
 ### Edit Mode (Toggle with Shift + M)
 *   **Left Click + Drag**: Move Block

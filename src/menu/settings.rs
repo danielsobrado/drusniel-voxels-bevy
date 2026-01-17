@@ -5,8 +5,9 @@
 //! - Gameplay settings (walk/run speed, jump/float height)
 //! - Atmosphere settings (day/night cycle, fog, lighting)
 
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
-use bevy::ui::RelativeCursorPosition;
+use bevy::ui::{FlexWrap, RelativeCursorPosition};
 use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, WindowMode, WindowResolution};
 
 use crate::atmosphere::FogConfig;
@@ -15,7 +16,7 @@ use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
 
 use super::types::*;
-use super::ui::{ACTIVE_BG, BUTTON_BG, INACTIVE_BG};
+use super::ui::{ACTIVE_BG, BUTTON_BG, INACTIVE_BG, INPUT_ACTIVE_BG, INPUT_INACTIVE_BG};
 
 // ============================================================================
 // Settings Dialog Spawning
@@ -31,8 +32,8 @@ pub fn spawn_settings_dialog(
 ) -> Entity {
     let mut dialog_entity = commands.spawn((
         Node {
-            width: Val::Percent(70.0),
-            height: Val::Percent(70.0),
+            width: Val::Percent(80.0),
+            height: Val::Percent(75.0),
             padding: UiRect::all(Val::Px(20.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
@@ -374,35 +375,54 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             FogTabContent,
         ))
         .with_children(|content| {
-            spawn_option_row(content, font, "Distance Fog", |options, font| {
-                spawn_graphics_option(options, font, "Off", DistanceFogOption(false));
-                spawn_graphics_option(options, font, "On", DistanceFogOption(true));
-            });
-
-            spawn_option_row(content, font, "Volumetric Fog", |options, font| {
-                spawn_graphics_option(options, font, "Off", VolumetricFogOption(false));
-                spawn_graphics_option(options, font, "On", VolumetricFogOption(true));
-            });
-
             spawn_option_row(content, font, "Fog Preset", |options, font| {
                 spawn_graphics_option(options, font, "Clear", FogPresetOption::Clear);
                 spawn_graphics_option(options, font, "Balanced", FogPresetOption::Balanced);
                 spawn_graphics_option(options, font, "Misty", FogPresetOption::Misty);
             });
 
-            spawn_fog_slider_row(content, font, "Fog Start", FogSlider::DistanceStart);
-            spawn_fog_slider_row(content, font, "Fog End", FogSlider::DistanceEnd);
-            spawn_fog_slider_row(content, font, "Blue Tint", FogSlider::FogBlueTint);
-            spawn_fog_slider_row(content, font, "Brightness", FogSlider::FogBrightness);
-            spawn_fog_slider_row(content, font, "Aerial Strength", FogSlider::AerialStrength);
-            spawn_fog_slider_row(content, font, "Volume Density", FogSlider::VolumeDensity);
-            spawn_fog_slider_row(content, font, "Scattering", FogSlider::VolumeScattering);
-            spawn_fog_slider_row(content, font, "Absorption", FogSlider::VolumeAbsorption);
-            spawn_fog_slider_row(content, font, "Asymmetry", FogSlider::ScatteringAsymmetry);
-            spawn_fog_slider_row(content, font, "Volume Size", FogSlider::VolumeSize);
-            spawn_fog_slider_row(content, font, "Step Count", FogSlider::StepCount);
-            spawn_fog_slider_row(content, font, "Jitter", FogSlider::Jitter);
-            spawn_fog_slider_row(content, font, "Ambient", FogSlider::AmbientIntensity);
+            content
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(18.0),
+                    row_gap: Val::Px(12.0),
+                    align_items: AlignItems::FlexStart,
+                    ..default()
+                })
+                .with_children(|columns| {
+                    spawn_settings_column(columns, font, "Distance", |column, font| {
+                        spawn_option_row(column, font, "Distance Fog", |options, font| {
+                            spawn_graphics_option(options, font, "Off", DistanceFogOption(false));
+                            spawn_graphics_option(options, font, "On", DistanceFogOption(true));
+                        });
+
+                        spawn_option_row(column, font, "Volumetric Fog", |options, font| {
+                            spawn_graphics_option(options, font, "Off", VolumetricFogOption(false));
+                            spawn_graphics_option(options, font, "On", VolumetricFogOption(true));
+                        });
+
+                        spawn_fog_slider_row(column, font, "Fog Start", FogSlider::DistanceStart);
+                        spawn_fog_slider_row(column, font, "Fog End", FogSlider::DistanceEnd);
+                    });
+
+                    spawn_settings_column(columns, font, "Color", |column, font| {
+                        spawn_fog_slider_row(column, font, "Blue Tint", FogSlider::FogBlueTint);
+                        spawn_fog_slider_row(column, font, "Brightness", FogSlider::FogBrightness);
+                        spawn_fog_slider_row(column, font, "Aerial Strength", FogSlider::AerialStrength);
+                        spawn_fog_slider_row(column, font, "Ambient", FogSlider::AmbientIntensity);
+                    });
+
+                    spawn_settings_column(columns, font, "Volume", |column, font| {
+                        spawn_fog_slider_row(column, font, "Volume Density", FogSlider::VolumeDensity);
+                        spawn_fog_slider_row(column, font, "Scattering", FogSlider::VolumeScattering);
+                        spawn_fog_slider_row(column, font, "Absorption", FogSlider::VolumeAbsorption);
+                        spawn_fog_slider_row(column, font, "Asymmetry", FogSlider::ScatteringAsymmetry);
+                        spawn_fog_slider_row(column, font, "Volume Size", FogSlider::VolumeSize);
+                        spawn_fog_slider_row(column, font, "Step Count", FogSlider::StepCount);
+                        spawn_fog_slider_row(column, font, "Jitter", FogSlider::Jitter);
+                    });
+                });
         });
 }
 
@@ -422,14 +442,30 @@ fn spawn_visual_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             VisualTabContent,
         ))
         .with_children(|content| {
-            spawn_slider_row(content, font, "Temperature", VisualSlider::Temperature, -0.3, 0.3);
-            spawn_slider_row(content, font, "Saturation", VisualSlider::Saturation, 0.5, 2.0);
-            spawn_slider_row(content, font, "Exposure", VisualSlider::Exposure, -1.0, 1.0);
-            spawn_slider_row(content, font, "Gamma", VisualSlider::Gamma, 0.5, 1.5);
-            spawn_slider_row(content, font, "Highlights", VisualSlider::HighlightsGain, 0.5, 1.5);
-            spawn_slider_row(content, font, "Sun Warmth", VisualSlider::SunWarmth, 0.0, 0.3);
-            spawn_slider_row(content, font, "Illuminance", VisualSlider::Illuminance, 5000.0, 50000.0);
-            spawn_slider_row(content, font, "Sky Light", VisualSlider::SkyboxBrightness, 1000.0, 10000.0);
+            content
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(18.0),
+                    row_gap: Val::Px(12.0),
+                    align_items: AlignItems::FlexStart,
+                    ..default()
+                })
+                .with_children(|columns| {
+                    spawn_settings_column(columns, font, "Color", |column, font| {
+                        spawn_slider_row(column, font, "Temperature", VisualSlider::Temperature, -0.3, 0.3);
+                        spawn_slider_row(column, font, "Saturation", VisualSlider::Saturation, 0.5, 2.0);
+                        spawn_slider_row(column, font, "Exposure", VisualSlider::Exposure, -1.0, 1.0);
+                        spawn_slider_row(column, font, "Gamma", VisualSlider::Gamma, 0.5, 1.5);
+                    });
+
+                    spawn_settings_column(columns, font, "Light", |column, font| {
+                        spawn_slider_row(column, font, "Highlights", VisualSlider::HighlightsGain, 0.5, 1.5);
+                        spawn_slider_row(column, font, "Sun Warmth", VisualSlider::SunWarmth, 0.0, 0.3);
+                        spawn_slider_row(column, font, "Illuminance", VisualSlider::Illuminance, 5000.0, 50000.0);
+                        spawn_slider_row(column, font, "Sky Light", VisualSlider::SkyboxBrightness, 1000.0, 10000.0);
+                    });
+                });
         });
 }
 
@@ -446,8 +482,8 @@ fn spawn_slider_row(
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            height: Val::Px(32.0),
+            column_gap: Val::Px(10.0),
+            height: Val::Px(28.0),
             ..default()
         })
         .with_children(|row| {
@@ -461,7 +497,7 @@ fn spawn_slider_row(
                 },
                 TextColor(Color::WHITE),
                 Node {
-                    width: Val::Px(100.0),
+                    width: Val::Px(110.0),
                     ..default()
                 },
             ));
@@ -470,8 +506,8 @@ fn spawn_slider_row(
             row.spawn((
                 Button,
                 Node {
-                    width: Val::Px(200.0),
-                    height: Val::Px(20.0),
+                    width: Val::Px(130.0),
+                    height: Val::Px(18.0),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 1.0)),
@@ -491,21 +527,32 @@ fn spawn_slider_row(
                 ));
             });
 
-            // Value text
+            // Value input
             row.spawn((
-                Text::new("0.00"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.8, 0.8, 0.8, 1.0)),
+                Button,
                 Node {
-                    width: Val::Px(70.0),
+                    width: Val::Px(60.0),
+                    height: Val::Px(22.0),
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    justify_content: JustifyContent::FlexEnd,
+                    align_items: AlignItems::Center,
                     ..default()
                 },
-                SliderValueText(slider),
-            ));
+                BackgroundColor(INPUT_INACTIVE_BG),
+                SettingsInputButton(SettingsInputField::Visual(slider)),
+            ))
+            .with_children(|input| {
+                input.spawn((
+                    Text::new("0.00"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+                    SliderValueText(slider),
+                ));
+            });
         });
 }
 
@@ -519,8 +566,8 @@ fn spawn_fog_slider_row(
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            height: Val::Px(32.0),
+            column_gap: Val::Px(10.0),
+            height: Val::Px(28.0),
             ..default()
         })
         .with_children(|row| {
@@ -528,12 +575,12 @@ fn spawn_fog_slider_row(
                 Text::new(label),
                 TextFont {
                     font: font.clone(),
-                    font_size: 14.0,
+                    font_size: 13.0,
                     ..default()
                 },
                 TextColor(Color::WHITE),
                 Node {
-                    width: Val::Px(120.0),
+                    width: Val::Px(110.0),
                     ..default()
                 },
             ));
@@ -541,8 +588,8 @@ fn spawn_fog_slider_row(
             row.spawn((
                 Button,
                 Node {
-                    width: Val::Px(200.0),
-                    height: Val::Px(20.0),
+                    width: Val::Px(130.0),
+                    height: Val::Px(18.0),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 1.0)),
@@ -562,19 +609,60 @@ fn spawn_fog_slider_row(
             });
 
             row.spawn((
-                Text::new("0.00"),
+                Button,
+                Node {
+                    width: Val::Px(60.0),
+                    height: Val::Px(22.0),
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    justify_content: JustifyContent::FlexEnd,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(INPUT_INACTIVE_BG),
+                SettingsInputButton(SettingsInputField::Fog(slider)),
+            ))
+            .with_children(|input| {
+                input.spawn((
+                    Text::new("0.00"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+                    FogSliderValueText(slider),
+                ));
+            });
+        });
+}
+
+fn spawn_settings_column<F>(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    title: &str,
+    spawn_rows: F,
+) where
+    F: FnOnce(&mut ChildSpawnerCommands, &Handle<Font>),
+{
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            width: Val::Px(320.0),
+            ..default()
+        })
+        .with_children(|column| {
+            column.spawn((
+                Text::new(title),
                 TextFont {
                     font: font.clone(),
-                    font_size: 14.0,
+                    font_size: 13.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.8, 0.8, 0.8, 1.0)),
-                Node {
-                    width: Val::Px(70.0),
-                    ..default()
-                },
-                FogSliderValueText(slider),
+                TextColor(Color::srgba(0.78, 0.82, 0.86, 1.0)),
             ));
+
+            spawn_rows(column, font);
         });
 }
 
@@ -668,6 +756,7 @@ pub fn close_settings_dialog(commands: &mut Commands, settings_state: &mut Setti
 pub fn handle_settings_tabs(
     state: Res<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
+    mut input_state: ResMut<SettingsInputState>,
     mut tab_query: Query<(&Interaction, &SettingsTabButton), (Changed<Interaction>, With<Button>)>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -686,6 +775,8 @@ pub fn handle_settings_tabs(
             SettingsTabButton::Fog => SettingsTab::Fog,
             SettingsTabButton::Visual => SettingsTab::Visual,
         };
+        input_state.active = None;
+        input_state.buffer.clear();
     }
 }
 
@@ -1449,6 +1540,120 @@ pub fn update_fog_toggle_backgrounds(
 }
 
 // ============================================================================
+// Settings Input Field Systems
+// ============================================================================
+
+/// Handles clicking on settings input fields.
+pub fn handle_settings_input_interaction(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut input_state: ResMut<SettingsInputState>,
+    visual_settings: Res<VisualSettings>,
+    fog_config: Res<FogConfig>,
+    query: Query<(&Interaction, &SettingsInputButton), (Changed<Interaction>, With<Button>)>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, input) in query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        input_state.active = Some(input.0);
+        input_state.buffer = format_settings_input_value(&visual_settings, &fog_config, input.0);
+    }
+}
+
+/// Processes keyboard input for the active settings input field.
+pub fn process_settings_input_characters(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut input_state: ResMut<SettingsInputState>,
+    mut keyboard_events: MessageReader<KeyboardInput>,
+    mut fog_config: ResMut<FogConfig>,
+    mut visual_settings: ResMut<VisualSettings>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    if input_state.active.is_none() {
+        return;
+    }
+
+    for event in keyboard_events.read() {
+        if !event.state.is_pressed() {
+            continue;
+        }
+
+        match &event.logical_key {
+            Key::Backspace => {
+                input_state.buffer.pop();
+            }
+            Key::Enter => {
+                input_state.active = None;
+                input_state.buffer.clear();
+                continue;
+            }
+            Key::Escape => {
+                input_state.active = None;
+                input_state.buffer.clear();
+                continue;
+            }
+            Key::Character(value) => {
+                if let Some(ch) = value.chars().next() {
+                    if ch.is_ascii_digit() {
+                        input_state.buffer.push(ch);
+                    } else if ch == '.' && !input_state.buffer.contains('.') {
+                        input_state.buffer.push(ch);
+                    } else if ch == '-' && input_state.buffer.is_empty() {
+                        input_state.buffer.push(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let Some(active) = input_state.active else { continue };
+        if let Ok(value) = input_state.buffer.parse::<f32>() {
+            apply_settings_input_value(active, value, &mut visual_settings, &mut fog_config);
+        }
+    }
+}
+
+/// Updates settings input field backgrounds based on active state.
+pub fn update_settings_input_backgrounds(
+    settings_state: Res<SettingsState>,
+    input_state: Res<SettingsInputState>,
+    mut query: Query<(&SettingsInputButton, &mut BackgroundColor)>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (field, mut background) in query.iter_mut() {
+        let is_active = input_state.active == Some(field.0);
+        *background = if is_active { INPUT_ACTIVE_BG } else { INPUT_INACTIVE_BG }.into();
+    }
+}
+
+pub fn clear_settings_input_on_close(
+    settings_state: Res<SettingsState>,
+    mut input_state: ResMut<SettingsInputState>,
+) {
+    if settings_state.dialog_root.is_some() {
+        return;
+    }
+
+    if input_state.active.is_some() || !input_state.buffer.is_empty() {
+        input_state.active = None;
+        input_state.buffer.clear();
+    }
+}
+
+// ============================================================================
 // Fog Settings Slider Systems
 // ============================================================================
 
@@ -1457,6 +1662,7 @@ pub fn handle_fog_sliders(
     state: Res<PauseMenuState>,
     settings_state: Res<SettingsState>,
     mut fog_config: ResMut<FogConfig>,
+    mut input_state: ResMut<SettingsInputState>,
     slider_query: Query<(&Interaction, &FogSliderTrack, &RelativeCursorPosition), With<Button>>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -1471,6 +1677,9 @@ pub fn handle_fog_sliders(
         let Some(relative_pos) = relative_cursor.normalized else { continue };
         let normalized = relative_pos.x.clamp(0.0, 1.0);
         apply_fog_slider(&mut fog_config, slider_track.0, normalized);
+        if input_state.active == Some(SettingsInputField::Fog(slider_track.0)) {
+            input_state.buffer = format_fog_slider_value(&fog_config, slider_track.0);
+        }
     }
 }
 
@@ -1478,6 +1687,7 @@ pub fn handle_fog_sliders(
 pub fn update_fog_slider_display(
     fog_config: Res<FogConfig>,
     settings_state: Res<SettingsState>,
+    input_state: Res<SettingsInputState>,
     mut fill_query: Query<(&FogSliderFill, &mut Node)>,
     mut text_query: Query<(&FogSliderValueText, &mut Text)>,
 ) {
@@ -1493,7 +1703,12 @@ pub fn update_fog_slider_display(
     }
 
     for (text_marker, mut text) in text_query.iter_mut() {
-        **text = format_fog_slider_value(&fog_config, text_marker.0);
+        let value = if input_state.active == Some(SettingsInputField::Fog(text_marker.0)) {
+            input_state.buffer.clone()
+        } else {
+            format_fog_slider_value(&fog_config, text_marker.0)
+        };
+        **text = value;
     }
 }
 
@@ -1506,6 +1721,7 @@ pub fn handle_visual_sliders(
     state: Res<PauseMenuState>,
     settings_state: Res<SettingsState>,
     mut visual_settings: ResMut<VisualSettings>,
+    mut input_state: ResMut<SettingsInputState>,
     slider_query: Query<(&Interaction, &SliderTrack, &RelativeCursorPosition), With<Button>>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -1521,32 +1737,9 @@ pub fn handle_visual_sliders(
         let Some(relative_pos) = relative_cursor.normalized else { continue };
         let normalized = relative_pos.x.clamp(0.0, 1.0);
 
-        // Update the corresponding setting based on slider type
-        match slider_track.0 {
-            VisualSlider::Temperature => {
-                visual_settings.temperature = lerp(-0.3, 0.3, normalized);
-            }
-            VisualSlider::Saturation => {
-                visual_settings.saturation = lerp(0.5, 2.0, normalized);
-            }
-            VisualSlider::Exposure => {
-                visual_settings.exposure = lerp(-1.0, 1.0, normalized);
-            }
-            VisualSlider::Gamma => {
-                visual_settings.gamma = lerp(0.5, 1.5, normalized);
-            }
-            VisualSlider::HighlightsGain => {
-                visual_settings.highlights_gain = lerp(0.5, 1.5, normalized);
-            }
-            VisualSlider::SunWarmth => {
-                visual_settings.sun_warmth = lerp(0.0, 0.3, normalized);
-            }
-            VisualSlider::Illuminance => {
-                visual_settings.illuminance = lerp(5000.0, 50000.0, normalized);
-            }
-            VisualSlider::SkyboxBrightness => {
-                visual_settings.skybox_brightness = lerp(1000.0, 10000.0, normalized);
-            }
+        apply_visual_slider(&mut visual_settings, slider_track.0, normalized);
+        if input_state.active == Some(SettingsInputField::Visual(slider_track.0)) {
+            input_state.buffer = format_visual_slider_value(&visual_settings, slider_track.0);
         }
     }
 }
@@ -1555,6 +1748,7 @@ pub fn handle_visual_sliders(
 pub fn update_visual_slider_display(
     visual_settings: Res<VisualSettings>,
     settings_state: Res<SettingsState>,
+    input_state: Res<SettingsInputState>,
     mut fill_query: Query<(&SliderFill, &mut Node)>,
     mut text_query: Query<(&SliderValueText, &mut Text)>,
 ) {
@@ -1563,31 +1757,80 @@ pub fn update_visual_slider_display(
     }
 
     for (fill, mut node) in fill_query.iter_mut() {
-        let normalized = match fill.0 {
-            VisualSlider::Temperature => inv_lerp(-0.3, 0.3, visual_settings.temperature),
-            VisualSlider::Saturation => inv_lerp(0.5, 2.0, visual_settings.saturation),
-            VisualSlider::Exposure => inv_lerp(-1.0, 1.0, visual_settings.exposure),
-            VisualSlider::Gamma => inv_lerp(0.5, 1.5, visual_settings.gamma),
-            VisualSlider::HighlightsGain => inv_lerp(0.5, 1.5, visual_settings.highlights_gain),
-            VisualSlider::SunWarmth => inv_lerp(0.0, 0.3, visual_settings.sun_warmth),
-            VisualSlider::Illuminance => inv_lerp(5000.0, 50000.0, visual_settings.illuminance),
-            VisualSlider::SkyboxBrightness => inv_lerp(1000.0, 10000.0, visual_settings.skybox_brightness),
-        };
+        let (min, max) = visual_slider_bounds(fill.0);
+        let value = visual_slider_value(&visual_settings, fill.0);
+        let normalized = inv_lerp(min, max, value);
         node.width = Val::Percent(normalized * 100.0);
     }
 
     for (text_marker, mut text) in text_query.iter_mut() {
-        let value_str = match text_marker.0 {
-            VisualSlider::Temperature => format!("{:.2}", visual_settings.temperature),
-            VisualSlider::Saturation => format!("{:.2}", visual_settings.saturation),
-            VisualSlider::Exposure => format!("{:.2}", visual_settings.exposure),
-            VisualSlider::Gamma => format!("{:.2}", visual_settings.gamma),
-            VisualSlider::HighlightsGain => format!("{:.2}", visual_settings.highlights_gain),
-            VisualSlider::SunWarmth => format!("{:.2}", visual_settings.sun_warmth),
-            VisualSlider::Illuminance => format!("{:.0}", visual_settings.illuminance),
-            VisualSlider::SkyboxBrightness => format!("{:.0}", visual_settings.skybox_brightness),
+        let value_str = if input_state.active == Some(SettingsInputField::Visual(text_marker.0)) {
+            input_state.buffer.clone()
+        } else {
+            format_visual_slider_value(&visual_settings, text_marker.0)
         };
         **text = value_str;
+    }
+}
+
+fn visual_slider_bounds(slider: VisualSlider) -> (f32, f32) {
+    match slider {
+        VisualSlider::Temperature => (-0.3, 0.3),
+        VisualSlider::Saturation => (0.5, 2.0),
+        VisualSlider::Exposure => (-1.0, 1.0),
+        VisualSlider::Gamma => (0.5, 1.5),
+        VisualSlider::HighlightsGain => (0.5, 1.5),
+        VisualSlider::SunWarmth => (0.0, 0.3),
+        VisualSlider::Illuminance => (5000.0, 50000.0),
+        VisualSlider::SkyboxBrightness => (1000.0, 10000.0),
+    }
+}
+
+fn visual_slider_value(settings: &VisualSettings, slider: VisualSlider) -> f32 {
+    match slider {
+        VisualSlider::Temperature => settings.temperature,
+        VisualSlider::Saturation => settings.saturation,
+        VisualSlider::Exposure => settings.exposure,
+        VisualSlider::Gamma => settings.gamma,
+        VisualSlider::HighlightsGain => settings.highlights_gain,
+        VisualSlider::SunWarmth => settings.sun_warmth,
+        VisualSlider::Illuminance => settings.illuminance,
+        VisualSlider::SkyboxBrightness => settings.skybox_brightness,
+    }
+}
+
+fn apply_visual_slider(settings: &mut VisualSettings, slider: VisualSlider, normalized: f32) {
+    let (min, max) = visual_slider_bounds(slider);
+    let value = lerp(min, max, normalized);
+    apply_visual_value(settings, slider, value);
+}
+
+fn apply_visual_value(settings: &mut VisualSettings, slider: VisualSlider, value: f32) {
+    let (min, max) = visual_slider_bounds(slider);
+    let value = value.clamp(min, max);
+
+    match slider {
+        VisualSlider::Temperature => settings.temperature = value,
+        VisualSlider::Saturation => settings.saturation = value,
+        VisualSlider::Exposure => settings.exposure = value,
+        VisualSlider::Gamma => settings.gamma = value,
+        VisualSlider::HighlightsGain => settings.highlights_gain = value,
+        VisualSlider::SunWarmth => settings.sun_warmth = value,
+        VisualSlider::Illuminance => settings.illuminance = value,
+        VisualSlider::SkyboxBrightness => settings.skybox_brightness = value,
+    }
+}
+
+fn format_visual_slider_value(settings: &VisualSettings, slider: VisualSlider) -> String {
+    match slider {
+        VisualSlider::Temperature => format!("{:.2}", settings.temperature),
+        VisualSlider::Saturation => format!("{:.2}", settings.saturation),
+        VisualSlider::Exposure => format!("{:.2}", settings.exposure),
+        VisualSlider::Gamma => format!("{:.2}", settings.gamma),
+        VisualSlider::HighlightsGain => format!("{:.2}", settings.highlights_gain),
+        VisualSlider::SunWarmth => format!("{:.2}", settings.sun_warmth),
+        VisualSlider::Illuminance => format!("{:.0}", settings.illuminance),
+        VisualSlider::SkyboxBrightness => format!("{:.0}", settings.skybox_brightness),
     }
 }
 
@@ -1630,6 +1873,12 @@ fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
 fn apply_fog_slider(config: &mut FogConfig, slider: FogSlider, normalized: f32) {
     let (min, max) = fog_slider_bounds(slider);
     let value = lerp(min, max, normalized).clamp(min, max);
+    apply_fog_value(config, slider, value);
+}
+
+fn apply_fog_value(config: &mut FogConfig, slider: FogSlider, value: f32) {
+    let (min, max) = fog_slider_bounds(slider);
+    let value = value.clamp(min, max);
 
     match slider {
         FogSlider::DistanceStart => {
@@ -1693,6 +1942,29 @@ fn format_fog_slider_value(config: &FogConfig, slider: FogSlider) -> String {
         FogSlider::StepCount => format!("{}", config.volumetric.step_count),
         FogSlider::Jitter => format!("{:.2}", config.volumetric.jitter),
         FogSlider::AmbientIntensity => format!("{:.2}", config.volumetric.ambient_intensity),
+    }
+}
+
+fn format_settings_input_value(
+    visual_settings: &VisualSettings,
+    fog_config: &FogConfig,
+    field: SettingsInputField,
+) -> String {
+    match field {
+        SettingsInputField::Visual(slider) => format_visual_slider_value(visual_settings, slider),
+        SettingsInputField::Fog(slider) => format_fog_slider_value(fog_config, slider),
+    }
+}
+
+fn apply_settings_input_value(
+    field: SettingsInputField,
+    value: f32,
+    visual_settings: &mut VisualSettings,
+    fog_config: &mut FogConfig,
+) {
+    match field {
+        SettingsInputField::Visual(slider) => apply_visual_value(visual_settings, slider, value),
+        SettingsInputField::Fog(slider) => apply_fog_value(fog_config, slider, value),
     }
 }
 

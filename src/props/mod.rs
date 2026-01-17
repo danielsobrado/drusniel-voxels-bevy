@@ -77,6 +77,8 @@ pub struct PropDefinition {
     pub path: String,
     #[serde(default = "default_scale_range")]
     pub scale_range: [f32; 2],
+    #[serde(default = "default_scale_jitter")]
+    pub scale_jitter: f32,
     #[serde(default)]
     pub y_offset: f32,
     #[serde(default)]
@@ -93,6 +95,10 @@ pub struct PropDefinition {
 
 fn default_scale_range() -> [f32; 2] {
     [0.8, 1.2]
+}
+
+fn default_scale_jitter() -> f32 {
+    0.0
 }
 
 fn default_density() -> f32 {

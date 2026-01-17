@@ -259,31 +259,114 @@ props:
       max_count: 0
 
     - id: boulder_large
-      path: "models/rocks/boulder_large.glb"
-      scale_range: [0.8, 2.0]
-      spawn_on: [Rock, TopSoil, SubSoil]
-      density: 0.005
-      min_slope: 0.0
-      max_slope: 0.8
-      max_count: 100
-
-    - id: boulder_small
-      path: "models/rocks/boulder_small.glb"
-      scale_range: [0.4, 1.0]
-      spawn_on: [Rock, TopSoil, SubSoil]
-      density: 0.012
+      path: "models/Models/GLB format/Rock Large.glb"
+      scale_range: [1.2, 2.1]
+      scale_jitter: 0.08
+      spawn_on: [Rock, SubSoil]
+      density: 0.003
       min_slope: 0.0
       max_slope: 0.9
-      max_count: 200
+      max_count: 90
+
+    - id: boulder_small
+      path: "models/Models/GLB format/Rock.glb"
+      scale_range: [0.7, 1.3]
+      scale_jitter: 0.12
+      spawn_on: [Rock, TopSoil, SubSoil]
+      density: 0.006
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 160
 
     - id: rock_flat
-      path: "models/rocks/rock_flat.glb"
-      scale_range: [0.6, 1.5]
-      spawn_on: [Rock, Sand]
-      density: 0.008
+      path: "models/Models/GLB format/Rock Flat.glb"
+      scale_range: [0.8, 1.6]
+      scale_jitter: 0.1
+      spawn_on: [Rock, Sand, Clay]
+      density: 0.005
       min_slope: 0.0
-      max_slope: 0.5
-      max_count: 150
+      max_slope: 0.4
+      max_count: 140
+
+    - id: rock_large_1
+      path: "models/Models/GLB format/Rock Large1.glb"
+      scale_range: [1.1, 1.9]
+      scale_jitter: 0.08
+      spawn_on: [Rock, SubSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.9
+      max_count: 80
+
+    - id: rock_large_2
+      path: "models/Models/GLB format/Rock Large2.glb"
+      scale_range: [1.1, 1.9]
+      scale_jitter: 0.08
+      spawn_on: [Rock, SubSoil]
+      density: 0.003
+      min_slope: 0.0
+      max_slope: 0.9
+      max_count: 80
+
+    - id: rock_medium
+      path: "models/Models/GLB format/Rock Medium.glb"
+      scale_range: [0.9, 1.6]
+      scale_jitter: 0.1
+      spawn_on: [Rock, TopSoil, SubSoil]
+      density: 0.007
+      min_slope: 0.0
+      max_slope: 0.7
+      max_count: 160
+
+    - id: rock_small_1
+      path: "models/Models/GLB format/Rock1.glb"
+      scale_range: [0.6, 1.1]
+      scale_jitter: 0.15
+      spawn_on: [Rock, Sand, Clay, TopSoil]
+      density: 0.01
+      min_slope: 0.0
+      max_slope: 0.6
+      max_count: 220
+
+    - id: rock_small_2
+      path: "models/Models/GLB format/Rock2.glb"
+      scale_range: [0.6, 1.1]
+      scale_jitter: 0.15
+      spawn_on: [Rock, Sand, Clay, TopSoil]
+      density: 0.01
+      min_slope: 0.0
+      max_slope: 0.6
+      max_count: 220
+
+    - id: rocks_cluster
+      path: "models/Models/GLB format/Rocks.glb"
+      scale_range: [0.7, 1.2]
+      scale_jitter: 0.12
+      spawn_on: [Rock, Sand, Clay]
+      density: 0.012
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 260
+
+    - id: rocks_cluster_1
+      path: "models/Models/GLB format/Rocks1.glb"
+      scale_range: [0.7, 1.2]
+      scale_jitter: 0.12
+      spawn_on: [Rock, Sand, Clay]
+      density: 0.012
+      min_slope: 0.0
+      max_slope: 0.45
+      max_count: 260
+
+    - id: pebble_square
+      path: "models/Models/GLB format/Pebble Square.glb"
+      scale_range: [0.35, 0.8]
+      scale_jitter: 0.2
+      spawn_on: [Sand, Clay, Rock]
+      density: 0.02
+      min_slope: 0.0
+      max_slope: 0.25
+      max_count: 500
 
   bushes:
     - id: bush_green

@@ -92,6 +92,9 @@ struct HotbarDragText;
 #[derive(Component)]
 struct HotbarSlotList;
 
+#[derive(Component)]
+struct HotbarTitleText;
+
 impl Plugin for InventoryUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryUiState>()
@@ -160,6 +163,7 @@ fn spawn_hotbar_ui(
     asset_server: Res<AssetServer>,
     hotbar: Res<HotbarState>,
     dragged: Res<DraggedItem>,
+    terrain_state: Res<TerrainToolState>,
     icons: Res<HotbarIconAssets>,
     mut ui_state: ResMut<HotbarUiState>,
 ) {
@@ -198,6 +202,7 @@ fn spawn_hotbar_ui(
                             ..default()
                         },
                         TextColor(Color::srgba(0.85, 0.85, 0.85, 0.9)),
+                        HotbarTitleText,
                     ));
 
                     panel.spawn((
@@ -222,7 +227,7 @@ fn spawn_hotbar_ui(
                             HotbarSlotList,
                         ))
                         .with_children(|list| {
-                            spawn_hotbar_slots(list, &hotbar, &font, &icons);
+                            spawn_hotbar_slots(list, &hotbar, &terrain_state, &font, &icons);
                         });
                 });
         })
@@ -254,8 +259,9 @@ fn handle_hotbar_input(
     mut hotbar: ResMut<HotbarState>,
     pause_menu: Res<PauseMenuState>,
     chat_state: Option<Res<ChatState>>,
+    terrain_state: Res<TerrainToolState>,
 ) {
-    if pause_menu.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) {
+    if pause_menu.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) || terrain_state.terraforming_mode {
         return;
     }
 
@@ -302,7 +308,7 @@ fn sync_equipped_from_hotbar(
     mut equipped: ResMut<EquippedItem>,
     mut terrain_state: ResMut<TerrainToolState>,
 ) {
-    if !hotbar.is_changed() {
+    if !hotbar.is_changed() || terrain_state.terraforming_mode {
         return;
     }
 
@@ -361,18 +367,28 @@ fn refresh_inventory_ui(
 fn refresh_hotbar_ui(
     hotbar: Res<HotbarState>,
     dragged: Res<DraggedItem>,
+    terrain_state: Res<TerrainToolState>,
     list_query: Query<Entity, With<HotbarSlotList>>,
-    mut drag_query: Query<&mut Text, With<HotbarDragText>>,
+    mut drag_query: Query<&mut Text, (With<HotbarDragText>, Without<HotbarTitleText>)>,
+    mut title_query: Query<&mut Text, (With<HotbarTitleText>, Without<HotbarDragText>)>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     icons: Res<HotbarIconAssets>,
 ) {
-    if !hotbar.is_changed() && !dragged.is_changed() {
+    if !hotbar.is_changed() && !dragged.is_changed() && !terrain_state.is_changed() {
         return;
     }
 
     if let Ok(mut text) = drag_query.single_mut() {
         text.0 = drag_label(&dragged);
+    }
+
+    if let Ok(mut text) = title_query.single_mut() {
+        text.0 = if terrain_state.terraforming_mode {
+            "Terraforming Tools (1-4)".to_string()
+        } else {
+            "Hotbar (1-8)".to_string()
+        };
     }
 
     let Ok(list_entity) = list_query.single() else {
@@ -383,7 +399,7 @@ fn refresh_hotbar_ui(
 
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
     commands.entity(list_entity).with_children(|list| {
-        spawn_hotbar_slots(list, &hotbar, &font, &icons);
+        spawn_hotbar_slots(list, &hotbar, &terrain_state, &font, &icons);
     });
 }
 
@@ -549,63 +565,143 @@ fn spawn_inventory_items(
 fn spawn_hotbar_slots(
     list: &mut ChildSpawnerCommands,
     hotbar: &HotbarState,
+    terrain_state: &TerrainToolState,
     font: &Handle<Font>,
     icons: &HotbarIconAssets,
 ) {
-    for (index, slot) in hotbar.slots.iter().enumerate() {
-        let is_selected = hotbar.selected == index;
-        let label = slot.map(|item| item.display_name()).unwrap_or("Empty");
-        let icon_handle = slot.and_then(|item| icons.images.get(&item).cloned());
+    if terrain_state.terraforming_mode {
+        // Render terrain tools (only 4 slots)
+        let tools = TerrainTool::all_tools();
+        for (index, tool) in tools.iter().enumerate() {
+            let is_selected = terrain_state.active_tool == *tool;
+            let label = tool.display_name();
+            // Map terrain tool to item type for icon lookup
+            let item_type = match tool {
+                TerrainTool::Raise => ItemType::TerrainRaise,
+                TerrainTool::Lower => ItemType::TerrainLower,
+                TerrainTool::Level => ItemType::TerrainLevel,
+                TerrainTool::Smooth => ItemType::TerrainSmooth,
+                TerrainTool::None => ItemType::Pickaxe, // Should not happen in loop
+            };
+            let icon_handle = icons.images.get(&item_type).cloned();
 
-        list.spawn((
-            Button,
-            Node {
-                width: Val::Px(64.0),
-                height: Val::Px(64.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(2.0),
-                ..default()
-            },
-            BackgroundColor(if is_selected {
-                Color::srgba(0.35, 0.45, 0.2, 0.9)
-            } else {
-                Color::srgba(0.12, 0.12, 0.15, 0.85)
-            }),
-            HotbarSlot(index),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(format!("{}", index + 1)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
+            list.spawn((
+                Button,
+                Node {
+                    width: Val::Px(64.0),
+                    height: Val::Px(64.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(2.0),
                     ..default()
                 },
-                TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
-            ));
-            if let Some(icon) = icon_handle {
+                BackgroundColor(if is_selected {
+                    Color::srgba(0.35, 0.45, 0.2, 0.9)
+                } else {
+                    Color::srgba(0.12, 0.12, 0.15, 0.85)
+                }),
+                // Use a dummy index for hotbar slot component since we don't want these to be clickable/swappable like normal inventory
+                HotbarSlot(100 + index), 
+            ))
+            .with_children(|button| {
                 button.spawn((
-                    Node {
-                        width: Val::Px(HOTBAR_ICON_UI_SIZE),
-                        height: Val::Px(HOTBAR_ICON_UI_SIZE),
-                        ..default()
-                    },
-                    ImageNode::new(icon),
-                ));
-            } else {
-                button.spawn((
-                    Text::new(label),
+                    Text::new(format!("{}", index + 1)),
                     TextFont {
                         font: font.clone(),
-                        font_size: 13.0,
+                        font_size: 12.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
                 ));
-            }
-        });
+                if let Some(icon) = icon_handle {
+                    button.spawn((
+                        Node {
+                            width: Val::Px(HOTBAR_ICON_UI_SIZE),
+                            height: Val::Px(HOTBAR_ICON_UI_SIZE),
+                            ..default()
+                        },
+                        ImageNode::new(icon),
+                    ));
+                    button.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.8, 0.8, 0.8, 0.8)),
+                    ));
+                } else {
+                    button.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                }
+            });
+        }
+    } else {
+        // Render normal hotbar slots
+        for (index, slot) in hotbar.slots.iter().enumerate() {
+            let is_selected = hotbar.selected == index;
+            let label = slot.map(|item| item.display_name()).unwrap_or("Empty");
+            let icon_handle = slot.and_then(|item| icons.images.get(&item).cloned());
+
+            list.spawn((
+                Button,
+                Node {
+                    width: Val::Px(64.0),
+                    height: Val::Px(64.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(2.0),
+                    ..default()
+                },
+                BackgroundColor(if is_selected {
+                    Color::srgba(0.35, 0.45, 0.2, 0.9)
+                } else {
+                    Color::srgba(0.12, 0.12, 0.15, 0.85)
+                }),
+                HotbarSlot(index),
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new(format!("{}", index + 1)),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
+                ));
+                if let Some(icon) = icon_handle {
+                    button.spawn((
+                        Node {
+                            width: Val::Px(HOTBAR_ICON_UI_SIZE),
+                            height: Val::Px(HOTBAR_ICON_UI_SIZE),
+                            ..default()
+                        },
+                        ImageNode::new(icon),
+                    ));
+                } else {
+                    button.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                }
+            });
+        }
     }
 }
 
@@ -703,39 +799,39 @@ fn hotbar_icon_specs() -> Vec<HotbarIconSpec> {
         },
         HotbarIconSpec {
             item: ItemType::Axe,
-            scene_path: "models/Models/GLB format/Axe.glb#Scene0",
+            scene_path: "models/Models/GLB format/MedievalAxe.glb#Scene0",
             transform: Transform::from_scale(Vec3::splat(0.9))
                 .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.1, 0.8, 0.0)),
         },
         HotbarIconSpec {
             item: ItemType::Torch,
-            scene_path: "models/Models/GLB format/Torch 1.glb#Scene0",
+            scene_path: "models/Models/GLB format/MedievalTorch.glb#Scene0",
             transform: Transform::from_scale(Vec3::splat(0.85))
                 .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.8, 0.0)),
         },
         HotbarIconSpec {
             item: ItemType::TerrainRaise,
-            scene_path: "models/Models/GLB format/Arrow.glb#Scene0",
-            transform: Transform::from_scale(base_scale)
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, -0.2, 0.9, 0.0)),
+            scene_path: "models/Models/GLB format/Shovel.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(1.1))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -0.4)),
         },
         HotbarIconSpec {
             item: ItemType::TerrainLower,
-            scene_path: "models/Models/GLB format/Arrow.glb#Scene0",
+            scene_path: "models/Models/GLB format/Pickaxe.glb#Scene0",
             transform: Transform::from_scale(base_scale)
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, std::f32::consts::PI + 0.2, 0.9, 0.0)),
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 3.14, -0.4)),
         },
         HotbarIconSpec {
             item: ItemType::TerrainLevel,
-            scene_path: "models/Models/GLB format/Sword.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(0.8))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.4, 0.6, 0.0)),
+            scene_path: "models/Models/GLB format/Hand Rake.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(1.2))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 1.5, 0.0)),
         },
         HotbarIconSpec {
             item: ItemType::TerrainSmooth,
-            scene_path: "models/Models/GLB format/Bow.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(0.9))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 1.1, 0.0)),
+            scene_path: "models/Models/GLB format/Hand Rake.glb#Scene0",
+            transform: Transform::from_scale(Vec3::splat(1.2))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -0.4)),
         },
     ]
 }

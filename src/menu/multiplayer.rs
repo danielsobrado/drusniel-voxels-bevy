@@ -438,7 +438,7 @@ pub fn handle_input_interaction(
     state: Res<PauseMenuState>,
     query: Query<(&Interaction, &InputField), (Changed<Interaction>, With<Button>)>,
 ) {
-    if !state.open {
+    if !state.open || state.current_screen != MenuScreen::Multiplayer {
         return;
     }
 
@@ -455,7 +455,7 @@ pub fn process_input_characters(
     state: Res<PauseMenuState>,
     mut keyboard_events: MessageReader<KeyboardInput>,
 ) {
-    if !state.open {
+    if !state.open || state.current_screen != MenuScreen::Multiplayer {
         return;
     }
 
@@ -506,7 +506,7 @@ pub fn update_input_texts(
     state: Res<PauseMenuState>,
     mut query: Query<(&InputText, &mut Text)>,
 ) {
-    if !state.open {
+    if !state.open || state.current_screen != MenuScreen::Multiplayer {
         return;
     }
 
@@ -539,7 +539,7 @@ pub fn update_input_backgrounds(
     state: Res<PauseMenuState>,
     mut query: Query<(&InputField, &mut BackgroundColor)>,
 ) {
-    if !state.open {
+    if !state.open || state.current_screen != MenuScreen::Multiplayer {
         return;
     }
 
@@ -555,7 +555,7 @@ pub fn handle_favorite_buttons(
     state: Res<PauseMenuState>,
     mut query: Query<(&Interaction, &FavoriteButton), (Changed<Interaction>, With<Button>)>,
 ) {
-    if !state.open {
+    if !state.open || state.current_screen != MenuScreen::Multiplayer {
         return;
     }
 

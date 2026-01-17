@@ -550,3 +550,22 @@ pub struct FogSliderTrack(pub FogSlider);
 /// Component for the fog slider fill (the colored portion)
 #[derive(Component)]
 pub struct FogSliderFill(pub FogSlider);
+
+// ============================================================================
+// Settings Input Types
+// ============================================================================
+
+#[derive(Resource, Default)]
+pub struct SettingsInputState {
+    pub active: Option<SettingsInputField>,
+    pub buffer: String,
+}
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub enum SettingsInputField {
+    Visual(VisualSlider),
+    Fog(FogSlider),
+}
+
+#[derive(Component, Copy, Clone)]
+pub struct SettingsInputButton(pub SettingsInputField);
