@@ -1,5 +1,5 @@
 use super::{Prop, PropAssets, PropConfig, PropDefinition, PropType};
-use crate::constants::WATER_LEVEL;
+use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::player::Player;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
@@ -11,12 +11,17 @@ const WORLD_SCAN_SIZE: i32 = 512;
 const MAX_SCAN_HEIGHT: i32 = 64;
 const TREE_CELL_SIZE: i32 = 10;
 const ROCK_REGION_CELL_SIZE: i32 = 48;
+const MAX_BUILDING_SLOPE: f32 = 0.35;
+const BUILDING_SEARCH_RADIUS: i32 = 12;
 
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
 
 #[derive(Resource, Default)]
 pub struct PropsDebugSpawned(pub bool);
+
+#[derive(Resource, Default)]
+pub struct PropsLandmarksSpawned(pub bool);
 
 /// Spawn props on terrain based on configuration
 pub fn spawn_props_on_terrain(
@@ -138,6 +143,80 @@ pub fn spawn_debug_custom_props_near_player(
     }
 
     info!("Spawned debug custom props around player");
+}
+
+/// Spawn fixed landmark buildings across the world so players can visit them.
+pub fn spawn_landmark_buildings(
+    mut commands: Commands,
+    prop_assets: Res<PropAssets>,
+    config: Res<PropConfig>,
+    world: Res<VoxelWorld>,
+    mut spawned: ResMut<PropsLandmarksSpawned>,
+) {
+    if spawned.0 || !prop_assets.loaded {
+        return;
+    }
+
+    if world.get_chunk(IVec3::ZERO).is_none() {
+        return;
+    }
+
+    let world_size = world.world_size_chunks();
+    let world_width = (world_size.x * CHUNK_SIZE_I32).max(1) as f32;
+    let world_depth = (world_size.z * CHUNK_SIZE_I32).max(1) as f32;
+
+    let placements = [
+        ("building_fantasy_inn", Vec2::new(world_width * 0.2, world_depth * 0.25), 0.0),
+        ("building_fantasy_stable", Vec2::new(world_width * 0.45, world_depth * 0.25), 1.57),
+        ("building_house", Vec2::new(world_width * 0.7, world_depth * 0.35), 3.14),
+        ("building_hut", Vec2::new(world_width * 0.8, world_depth * 0.6), 4.71),
+    ];
+
+    let mut spawned_count = 0;
+
+    for (id, target, yaw) in placements {
+        let Some(scene_handle) = prop_assets.scenes.get(id) else {
+            warn!("Landmark building '{}' not found in registry", id);
+            continue;
+        };
+
+        let target_x = target.x.round() as i32;
+        let target_z = target.y.round() as i32;
+        let Some((world_x, world_z, surface_y)) =
+            find_surface_near(&world, target_x, target_z, BUILDING_SEARCH_RADIUS, MAX_BUILDING_SLOPE)
+        else {
+            warn!("No suitable surface found for landmark '{}'", id);
+            continue;
+        };
+
+        let (scale, y_offset) = if let Some(def) = find_def(config.as_ref(), id) {
+            (def.scale_range[0], def.y_offset)
+        } else {
+            (1.0, 0.0)
+        };
+
+        let world_xf = world_x as f32 + 0.5;
+        let world_zf = world_z as f32 + 0.5;
+        let surface_height = sample_smooth_surface_height(&world, world_xf, world_zf)
+            .unwrap_or(surface_y as f32 + 0.5);
+        let position = Vec3::new(world_xf, surface_height + y_offset, world_zf);
+
+        commands.spawn((
+            SceneRoot(scene_handle.clone()),
+            Transform::from_translation(position)
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::splat(scale)),
+            Prop {
+                id: id.to_string(),
+                prop_type: PropType::Rock,
+            },
+        ));
+
+        spawned_count += 1;
+    }
+
+    spawned.0 = true;
+    info!("Spawned {} landmark buildings", spawned_count);
 }
 
 fn spawn_category(
@@ -330,6 +409,33 @@ fn find_surface(world: &VoxelWorld, x: i32, z: i32) -> Option<(i32, VoxelType, f
                 }
                 let slope = calculate_slope(world, x, y, z);
                 return Some((y, voxel, slope));
+            }
+        }
+    }
+    None
+}
+
+fn find_surface_near(
+    world: &VoxelWorld,
+    start_x: i32,
+    start_z: i32,
+    radius: i32,
+    max_slope: f32,
+) -> Option<(i32, i32, i32)> {
+    for r in 0..=radius {
+        for dx in -r..=r {
+            for dz in -r..=r {
+                if dx.abs() != r && dz.abs() != r {
+                    continue;
+                }
+                let world_x = start_x + dx;
+                let world_z = start_z + dz;
+                let Some((surface_y, _voxel_type, slope)) = find_surface(world, world_x, world_z) else {
+                    continue;
+                };
+                if slope <= max_slope {
+                    return Some((world_x, world_z, surface_y));
+                }
             }
         }
     }

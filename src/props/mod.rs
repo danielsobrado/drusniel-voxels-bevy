@@ -14,6 +14,7 @@ impl Plugin for PropsPlugin {
             .init_resource::<PropConfig>()
             .init_resource::<spawner::PropsSpawned>()
             .init_resource::<spawner::PropsDebugSpawned>()
+            .init_resource::<spawner::PropsLandmarksSpawned>()
             .add_systems(Startup, loader::load_prop_config)
             .add_systems(
                 Update,
@@ -21,6 +22,7 @@ impl Plugin for PropsPlugin {
                     loader::track_asset_loading,
                     spawner::spawn_props_on_terrain,
                     spawner::spawn_debug_custom_props_near_player,
+                    spawner::spawn_landmark_buildings,
                     materials::apply_style_overrides,
                 )
                     .chain(),

@@ -258,6 +258,46 @@ props:
       max_slope: 1.0
       max_count: 0
 
+    - id: building_fantasy_inn
+      path: "models/Models/GLB format/Fantasy Inn.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: building_fantasy_stable
+      path: "models/Models/GLB format/Fantasy Stable.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: building_house
+      path: "models/Models/GLB format/House.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
+    - id: building_hut
+      path: "models/Models/GLB format/Hut.glb"
+      scale_range: [1.0, 1.0]
+      y_offset: 0.0
+      spawn_on: []
+      density: 0.0
+      min_slope: 0.0
+      max_slope: 1.0
+      max_count: 0
+
     - id: boulder_large
       path: "models/Models/GLB format/Rock Large.glb"
       scale_range: [1.2, 2.1]
