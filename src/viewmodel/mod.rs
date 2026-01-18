@@ -278,7 +278,7 @@ pub fn spawn_torch(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     camera_query: Query<Entity, With<crate::camera::controller::PlayerCamera>>,
-    config: Res<ViewmodelConfig>,
+    _config: Res<ViewmodelConfig>,
     mut effects: ResMut<Assets<EffectAsset>>,
 ) {
     let Ok(camera_entity) = camera_query.single() else {

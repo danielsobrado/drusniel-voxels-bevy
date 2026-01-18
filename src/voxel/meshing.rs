@@ -14,6 +14,9 @@ use crate::constants::{
     CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE,
     PADDED_CHUNK_SIZE_U32, UV_PADDING, CHUNK_BOUNDARY_SCALE,
     ATLAS_COLUMNS, ATLAS_ROWS,
+    // LOD grid configurations
+    LOD0_PADDED_SIZE, LOD0_STEP_SIZE, LOD0_GRID_VOLUME,
+    LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD1_GRID_VOLUME,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -624,6 +627,52 @@ fn add_face_no_ao(
 /// resulting in an 18x18x18 sample grid for a 16x16x16 chunk.
 type PaddedChunkShape = ConstShape3u32<PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32>;
 
+// =============================================================================
+// LOD Shape Types - Compile-time grid shapes for different detail levels
+// =============================================================================
+
+// Note: LOD 0 (High Detail) uses PaddedChunkShape defined above (18x18x18 grid, step size 1)
+
+/// LOD 1 (Low Detail): 10x10x10 grid, step size 2
+/// Samples every 2nd voxel, reducing vertex count by ~75%
+type LodShape1 = ConstShape3u32<{ LOD1_PADDED_SIZE }, { LOD1_PADDED_SIZE }, { LOD1_PADDED_SIZE }>;
+
+/// Configuration for LOD mesh generation
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LodMeshConfig {
+    /// Voxel sampling interval (1 = every voxel, 2 = every other, etc.)
+    pub step_size: u32,
+    /// Size of the padded SDF grid
+    pub padded_size: u32,
+    /// Total volume of the SDF grid (padded_size^3)
+    pub grid_volume: usize,
+}
+
+impl LodMeshConfig {
+    /// High detail configuration: full resolution (step 1, 18x18x18)
+    pub const HIGH: Self = Self {
+        step_size: LOD0_STEP_SIZE,
+        padded_size: LOD0_PADDED_SIZE,
+        grid_volume: LOD0_GRID_VOLUME,
+    };
+
+    /// Low detail configuration: half resolution (step 2, 10x10x10)
+    pub const LOW: Self = Self {
+        step_size: LOD1_STEP_SIZE,
+        padded_size: LOD1_PADDED_SIZE,
+        grid_volume: LOD1_GRID_VOLUME,
+    };
+
+    /// Get the appropriate config for a given LOD level
+    pub fn from_lod_level(level: LodLevel) -> Self {
+        match level {
+            LodLevel::High => Self::HIGH,
+            LodLevel::Low => Self::LOW,
+            LodLevel::Culled => Self::LOW, // Shouldn't be called for culled, but fallback
+        }
+    }
+}
+
 /// Sample voxel from world or chunk, returns true if solid OR water
 /// Water is treated as solid for SDF purposes to prevent surface nets from generating
 /// surfaces at solid-water boundaries (which would create visible seams with the blocky water mesh)
@@ -688,6 +737,7 @@ fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] 
 
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
+/// This is the LOD0 (high detail) version - samples every voxel.
 fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] { // 18^3 = 5832
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
@@ -703,6 +753,46 @@ fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] { // 18^3 = 58
 
     // Skip smoothing - it causes boundary vertices to differ between chunks, creating seams.
     // The raw binary SDF produces consistent boundary vertices across chunks.
+    sdf
+}
+
+/// Sample voxel at a world position, returns true if solid or liquid.
+/// Used for LOD sampling where coordinates may be outside the chunk.
+fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
+    match world.get_voxel(world_pos) {
+        Some(voxel) => voxel.is_solid() || voxel.is_liquid(),
+        None => false, // Outside world bounds = air
+    }
+}
+
+/// Generate an SDF array at LOD1 (half resolution) - samples every 2nd voxel.
+/// Returns a 10x10x10 grid (1000 elements) instead of 18x18x18 (5832).
+/// Vertex positions must be scaled by step_size (2) after mesh generation.
+fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3 = 1000
+    let mut sdf = [1.0f32; LodShape1::USIZE];
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let step = LOD1_STEP_SIZE as i32;
+
+    // Sample every 2nd voxel
+    for z in 0..LOD1_PADDED_SIZE {
+        for y in 0..LOD1_PADDED_SIZE {
+            for x in 0..LOD1_PADDED_SIZE {
+                let idx = LodShape1::linearize([x, y, z]) as usize;
+
+                // Map grid position to world position:
+                // - Grid position 0 is padding (-step from chunk start)
+                // - Grid position 1 is chunk start
+                // - Each grid step covers `step` voxels
+                let world_x = chunk_origin.x + (x as i32 - 1) * step;
+                let world_y = chunk_origin.y + (y as i32 - 1) * step;
+                let world_z = chunk_origin.z + (z as i32 - 1) * step;
+
+                let is_solid = sample_voxel_at_world_pos(world, IVec3::new(world_x, world_y, world_z));
+                sdf[idx] = if is_solid { -1.0 } else { 1.0 };
+            }
+        }
+    }
+
     sdf
 }
 
@@ -787,6 +877,68 @@ fn compute_vertex_material_weights(
     for dz in 0..2 {
         for dy in 0..2 {
             for dx in 0..2 {
+                let lx = base_x + dx;
+                let ly = base_y + dy;
+                let lz = base_z + dz;
+
+                let voxel = if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
+                    chunk.get(UVec3::new(lx as u32, ly as u32, lz as u32))
+                } else {
+                    let wx = chunk_origin.x + lx;
+                    let wy = chunk_origin.y + ly;
+                    let wz = chunk_origin.z + lz;
+                    world.get_voxel(IVec3::new(wx, wy, wz)).unwrap_or(VoxelType::Air)
+                };
+
+                if voxel != VoxelType::Air && voxel != VoxelType::Water {
+                    let mat_idx = match voxel {
+                        VoxelType::TopSoil | VoxelType::Leaves => 0,
+                        VoxelType::Rock | VoxelType::Bedrock |
+                        VoxelType::DungeonWall | VoxelType::DungeonFloor => 1,
+                        VoxelType::Sand => 2,
+                        _ => 3,
+                    };
+                    weights[mat_idx] += 1.0;
+                    total_weight += 1.0;
+                }
+            }
+        }
+    }
+
+    if total_weight > 0.0 {
+        [
+            weights[0] / total_weight,
+            weights[1] / total_weight,
+            weights[2] / total_weight,
+            weights[3] / total_weight,
+        ]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// Computes material weights for a vertex with LOD-aware sampling.
+/// Samples a larger area based on step_size to capture dominant materials.
+fn compute_vertex_material_weights_lod(
+    local_pos: Vec3,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    step_size: u32,
+) -> [f32; 4] {
+    let mut weights = [0.0f32; 4];
+    let mut total_weight = 0.0;
+
+    let base_x = local_pos.x.floor() as i32;
+    let base_y = local_pos.y.floor() as i32;
+    let base_z = local_pos.z.floor() as i32;
+
+    // Sample a larger area based on step_size
+    let range = step_size as i32;
+
+    for dz in 0..range {
+        for dy in 0..range {
+            for dx in 0..range {
                 let lx = base_x + dx;
                 let ly = base_y + dy;
                 let lz = base_z + dz;
@@ -1060,6 +1212,150 @@ pub fn generate_chunk_mesh_surface_nets(
     }
 }
 
+/// Generate mesh using Surface Nets at LOD1 (half resolution).
+/// This function samples every 2nd voxel, reducing vertex count by ~75%.
+/// Vertices are scaled by step_size (2) to match chunk dimensions.
+pub fn generate_chunk_mesh_surface_nets_lod1(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    skirt_config: &SkirtConfig,
+    _ao_config: &BakedAoConfig, // AO disabled for low LOD
+) -> ChunkMeshResult {
+    let mut solid_mesh = MeshData::new();
+    let mut local_positions: Vec<Vec3> = Vec::new();
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+
+    // Step size for LOD1 - each grid cell covers 2 voxels
+    let step = LOD1_STEP_SIZE as f32;
+
+    // Chunk center for scaling calculations
+    let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+
+    // Generate downsampled SDF (10x10x10 grid)
+    let sdf = generate_sdf_lod1(chunk, world);
+
+    // Run surface nets on the smaller SDF grid
+    let mut buffer = SurfaceNetsBuffer::default();
+    surface_nets(
+        &sdf,
+        &LodShape1 {},
+        [0; 3],
+        [(LOD1_PADDED_SIZE - 1) as u32; 3], // [9, 9, 9]
+        &mut buffer,
+    );
+
+    // Convert surface nets output to MeshData with vertex scaling
+    if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
+        for tri_idx in (0..buffer.indices.len()).step_by(3) {
+            let i0 = buffer.indices[tri_idx] as usize;
+            let i1 = buffer.indices[tri_idx + 1] as usize;
+            let i2 = buffer.indices[tri_idx + 2] as usize;
+
+            // Get sanitized positions for this triangle
+            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
+            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
+            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+
+            // Calculate local positions with step scaling:
+            // - Subtract 1.0 to remove padding offset (grid pos 1 = chunk start)
+            // - Multiply by step to scale to actual voxel coordinates
+            let local0 = Vec3::new(
+                (p0[0] - 1.0) * step,
+                (p0[1] - 1.0) * step,
+                (p0[2] - 1.0) * step,
+            );
+            let local1 = Vec3::new(
+                (p1[0] - 1.0) * step,
+                (p1[1] - 1.0) * step,
+                (p1[2] - 1.0) * step,
+            );
+            let local2 = Vec3::new(
+                (p2[0] - 1.0) * step,
+                (p2[1] - 1.0) * step,
+                (p2[2] - 1.0) * step,
+            );
+
+            // Get normals for this triangle
+            let normal0 = get_normalized_normal(&buffer.normals, i0);
+            let normal1 = get_normalized_normal(&buffer.normals, i1);
+            let normal2 = get_normalized_normal(&buffer.normals, i2);
+
+            // Calculate material weights with larger sampling radius for LOD1
+            let weights0 = compute_vertex_material_weights_lod(local0, chunk, world, chunk_origin, LOD1_STEP_SIZE);
+            let weights1 = compute_vertex_material_weights_lod(local1, chunk, world, chunk_origin, LOD1_STEP_SIZE);
+            let weights2 = compute_vertex_material_weights_lod(local2, chunk, world, chunk_origin, LOD1_STEP_SIZE);
+
+            // Skip AO for low LOD - distance makes it imperceptible
+            // Use full brightness (1.0)
+            let ao = 1.0;
+
+            // Add all 3 vertices for this triangle (not shared)
+            let base_idx = solid_mesh.positions.len() as u32;
+
+            // Vertex 0
+            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh.normals.push(normal0);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights0);
+            local_positions.push(local0);
+
+            // Vertex 1
+            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh.normals.push(normal1);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights1);
+            local_positions.push(local1);
+
+            // Vertex 2
+            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh.normals.push(normal2);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights2);
+            local_positions.push(local2);
+
+            // Add triangle indices
+            solid_mesh.indices.push(base_idx);
+            solid_mesh.indices.push(base_idx + 1);
+            solid_mesh.indices.push(base_idx + 2);
+        }
+    }
+
+    // Generate skirts for LOD boundaries
+    if !solid_mesh.indices.is_empty() {
+        let boundary_edges = extract_boundary_edges(
+            &local_positions,
+            &solid_mesh.positions,
+            &solid_mesh.normals,
+            &solid_mesh.indices,
+            &solid_mesh.colors,
+            CHUNK_SIZE as f32,
+        );
+
+        generate_skirts(
+            &mut solid_mesh.positions,
+            &mut solid_mesh.normals,
+            &mut solid_mesh.uvs,
+            &mut solid_mesh.colors,
+            &mut solid_mesh.indices,
+            &boundary_edges,
+            skirt_config,
+            my_lod,
+            &neighbor_lods,
+        );
+    }
+
+    // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
+    // For consistency, we could also LOD water, but it's typically minimal geometry
+    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+
+    ChunkMeshResult {
+        solid: solid_mesh,
+        water: water_mesh,
+    }
+}
+
 /// Mesh generation mode
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MeshMode {
@@ -1084,7 +1380,9 @@ impl Default for MeshSettings {
     }
 }
 
-/// Generate chunk mesh using the specified mode
+/// Generate chunk mesh using the specified mode.
+/// For SurfaceNets, automatically selects LOD0 (high detail) or LOD1 (low detail)
+/// based on the chunk's LOD level.
 pub fn generate_chunk_mesh_with_mode(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -1097,14 +1395,40 @@ pub fn generate_chunk_mesh_with_mode(
     match mode {
         MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config),
         MeshMode::SurfaceNets => {
-            generate_chunk_mesh_surface_nets(
-                chunk,
-                world,
-                my_lod,
-                neighbor_lods,
-                skirt_config,
-                ao_config,
-            )
+            // Select LOD-appropriate mesh generation
+            match my_lod {
+                LodLevel::High => {
+                    // Full detail Surface Nets (18x18x18 grid, step 1)
+                    generate_chunk_mesh_surface_nets(
+                        chunk,
+                        world,
+                        my_lod,
+                        neighbor_lods,
+                        skirt_config,
+                        ao_config,
+                    )
+                }
+                LodLevel::Low => {
+                    // Half detail Surface Nets (10x10x10 grid, step 2)
+                    // ~75% vertex reduction for distant chunks
+                    generate_chunk_mesh_surface_nets_lod1(
+                        chunk,
+                        world,
+                        my_lod,
+                        neighbor_lods,
+                        skirt_config,
+                        ao_config,
+                    )
+                }
+                LodLevel::Culled => {
+                    // Shouldn't reach here - culled chunks skip meshing entirely
+                    // But if we do, return empty mesh
+                    ChunkMeshResult {
+                        solid: MeshData::new(),
+                        water: MeshData::new(),
+                    }
+                }
+            }
         }
     }
 }

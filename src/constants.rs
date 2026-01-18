@@ -213,6 +213,36 @@ pub const INTEGRATED_GPU_HIGH_DETAIL_DISTANCE: f32 = 64.0;
 /// Cull distance for integrated GPUs.
 pub const INTEGRATED_GPU_CULL_DISTANCE: f32 = 160.0;
 
+/// Hysteresis buffer to prevent rapid LOD switching at boundaries.
+/// Camera must move this far past threshold before LOD changes.
+pub const LOD_HYSTERESIS: f32 = 10.0;
+
+// =============================================================================
+// LOD Mesh Grid Configurations
+// =============================================================================
+// These define the voxel sampling grids for different LOD levels.
+// Lower LOD uses larger step sizes (sampling fewer voxels) for simpler meshes.
+
+/// LOD 0 (High Detail): Full resolution sampling
+/// Grid: 18x18x18 (16 chunk + 2 padding), samples every voxel
+pub const LOD0_PADDED_SIZE: u32 = 18;
+pub const LOD0_STEP_SIZE: u32 = 1;
+pub const LOD0_GRID_VOLUME: usize = 5832; // 18^3
+
+/// LOD 1 (Low Detail): Half resolution sampling
+/// Grid: 10x10x10 ((16/2) + 2 padding), samples every 2nd voxel
+/// Reduces vertex count by ~75%
+pub const LOD1_PADDED_SIZE: u32 = 10;
+pub const LOD1_STEP_SIZE: u32 = 2;
+pub const LOD1_GRID_VOLUME: usize = 1000; // 10^3
+
+/// LOD 2 (Very Low Detail): Quarter resolution sampling (future use)
+/// Grid: 6x6x6 ((16/4) + 2 padding), samples every 4th voxel
+/// Reduces vertex count by ~94%
+pub const LOD2_PADDED_SIZE: u32 = 6;
+pub const LOD2_STEP_SIZE: u32 = 4;
+pub const LOD2_GRID_VOLUME: usize = 216; // 6^3
+
 // =============================================================================
 // Interaction Constants
 // =============================================================================
