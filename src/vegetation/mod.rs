@@ -778,23 +778,36 @@ pub fn spawn_floating_particles(
     // Small particle mesh for pollen/dust specks
     let particle_mesh = meshes.add(Sphere::new(0.06).mesh().build());
 
-    // Subtle golden pollen material
-    let pollen_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.95, 0.86, 0.55, 0.85),
-        emissive: LinearRgba::new(0.5, 0.45, 0.18, 1.0),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-
-    // Soft dust material
-    let dust_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.82, 0.78, 0.68, 0.7),
-        emissive: LinearRgba::new(0.22, 0.22, 0.22, 1.0),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
+    let particle_materials = vec![
+        materials.add(StandardMaterial {
+            base_color: Color::srgba(0.95, 0.86, 0.55, 0.85),
+            emissive: LinearRgba::new(0.5, 0.45, 0.18, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgba(0.78, 0.9, 0.52, 0.75),
+            emissive: LinearRgba::new(0.25, 0.4, 0.18, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgba(0.62, 0.82, 0.45, 0.65),
+            emissive: LinearRgba::new(0.2, 0.32, 0.16, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgba(0.88, 0.83, 0.7, 0.6),
+            emissive: LinearRgba::new(0.18, 0.18, 0.18, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+    ];
 
     let particle_count = 200;
 
@@ -812,14 +825,15 @@ pub fn spawn_floating_particles(
         let z = camera_pos.z + angle.sin() * radius;
         let y = camera_pos.y + height;
 
-        let material = if hash1 > 0.6 {
-            pollen_material.clone()
-        } else {
-            dust_material.clone()
-        };
+        let material_idx = ((hash1 * 1000.0) as usize) % particle_materials.len();
+        let material = particle_materials[material_idx].clone();
 
-        // Small particle size with light variation
-        let scale = 0.7 + hash2 * 0.9;
+        // Mix sharp and slightly "blurred" sizes
+        let scale = if hash3 > 0.7 {
+            1.2 + hash2 * 0.8
+        } else {
+            0.6 + hash2 * 0.6
+        };
 
         commands.spawn((
             Mesh3d(particle_mesh.clone()),
@@ -829,7 +843,7 @@ pub fn spawn_floating_particles(
             FloatingParticle {
                 base_y: y,
                 phase: hash3 * std::f32::consts::TAU,
-                speed: 0.15 + hash1 * 0.9,
+                speed: 0.12 + hash1 * 1.2,
                 drift: Vec3::new(
                     (hash1 - 0.5) * 2.0,
                     0.0,
