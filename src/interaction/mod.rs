@@ -17,7 +17,7 @@ mod targeting;
 pub use debug::{DebugDetailToggles, DebugOverlay, DebugOverlayState};
 pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode, mark_neighbors_dirty};
 pub use error::{BreakError, CombatError, DragError, LastGameplayError, PlacementError};
-pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity};
+pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity, TargetedProp};
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{ATTACK_DAMAGE, BEDROCK_DEPTH};
@@ -724,6 +724,7 @@ impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetedBlock>()
             .init_resource::<TargetedEntity>()
+            .init_resource::<TargetedProp>()
             .init_resource::<HeldBlock>()
             .init_resource::<EditMode>()
             .init_resource::<DeleteMode>()
@@ -743,6 +744,11 @@ impl Plugin for InteractionPlugin {
                 (
                     targeting::update_targeted_block,
                     targeting::update_targeted_entity,
+                    targeting::update_targeted_prop.run_if(
+                        |state: Res<DebugOverlayState>, toggles: Res<DebugDetailToggles>| {
+                            state.visible && toggles.show_prop_details
+                        },
+                    ),
                     palette::initialize_palette_items,
                     palette::toggle_palette,
                     palette::handle_palette_input,

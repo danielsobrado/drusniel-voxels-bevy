@@ -1,6 +1,7 @@
 pub mod loader;
 pub mod materials;
 pub mod spawner;
+pub mod foliage;
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -16,6 +17,12 @@ impl Plugin for PropsPlugin {
             .init_resource::<spawner::PropsDebugSpawned>()
             .init_resource::<spawner::PropsLandmarksSpawned>()
             .init_resource::<LandmarkLocations>()
+            .init_resource::<foliage::FoliageFadeSettings>()
+            .init_resource::<foliage::FoliageSpatialIndex>()
+            .init_resource::<foliage::FoliageFadeActive>()
+            .init_resource::<foliage::FoliageFadeCandidates>()
+            .init_resource::<foliage::GrassPropWindSettings>()
+            .init_resource::<foliage::GrassPropWindActive>()
             .add_systems(Startup, loader::load_prop_config)
             .add_systems(
                 Update,
@@ -27,6 +34,19 @@ impl Plugin for PropsPlugin {
                     materials::apply_style_overrides,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    foliage::index_foliage_fade_entities
+                        .after(materials::apply_style_overrides),
+                    foliage::index_grass_prop_wind_entities
+                        .after(materials::apply_style_overrides),
+                    foliage::update_foliage_fade
+                        .after(foliage::index_foliage_fade_entities),
+                    foliage::update_grass_prop_wind
+                        .after(foliage::index_grass_prop_wind_entities),
+                ),
             );
     }
 }

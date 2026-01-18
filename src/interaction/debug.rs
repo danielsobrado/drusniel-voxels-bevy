@@ -10,8 +10,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crate::interaction::editing::{EditMode, DeleteMode, DragState};
 use crate::interaction::targeting::TargetedBlock;
+use crate::interaction::TargetedProp;
 use crate::network::NetworkSession;
 use crate::props::Prop;
+use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::plugin::{ChunkGenerationState, RuntimeChunkStats};
@@ -39,6 +41,20 @@ impl EntityBreakdownQuery<'_, '_> {
             ui_nodes: self.ui_nodes.iter().count(),
         }
     }
+}
+
+#[derive(SystemParam)]
+pub struct DebugOverlayParams<'w> {
+    pub state: Res<'w, DebugOverlayState>,
+    pub toggles: Res<'w, DebugDetailToggles>,
+}
+
+#[derive(SystemParam)]
+pub struct PropDebugQuery<'w, 's> {
+    pub fade_settings: Option<Res<'w, FoliageFadeSettings>>,
+    pub props: Query<'w, 's, (&'static Prop, Option<&'static GrassPropWind>)>,
+    pub children: Query<'w, 's, &'static Children>,
+    pub fades: Query<'w, 's, &'static FoliageFade>,
 }
 
 /// Entity counts by category.
@@ -73,6 +89,7 @@ pub struct DebugDetailToggles {
     pub show_texture_details: bool,
     pub show_multiplayer: bool,
     pub show_chunk_stats: bool,
+    pub show_prop_details: bool,
 }
 
 /// Setup debug overlay UI.
@@ -135,13 +152,18 @@ pub fn toggle_debug_details(
     if alt_held && keyboard.just_pressed(KeyCode::KeyC) {
         toggles.show_chunk_stats = !toggles.show_chunk_stats;
     }
+
+    if alt_held && keyboard.just_pressed(KeyCode::KeyP) {
+        toggles.show_prop_details = !toggles.show_prop_details;
+    }
 }
 
 /// Update debug overlay text with real-time info.
 #[allow(clippy::too_many_arguments)]
 pub fn update_debug_overlay(
-    state: Res<DebugOverlayState>,
+    debug: DebugOverlayParams,
     targeted: Res<TargetedBlock>,
+    targeted_prop: Res<TargetedProp>,
     world: Res<VoxelWorld>,
     edit_mode: Res<EditMode>,
     delete_mode: Res<DeleteMode>,
@@ -152,12 +174,12 @@ pub fn update_debug_overlay(
     camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
     all_entities: Query<Entity>,
     diagnostics: Res<DiagnosticsStore>,
-    toggles: Res<DebugDetailToggles>,
     mut query: Query<&mut Text, With<DebugOverlay>>,
     // Entity breakdown - use combined query to avoid param limit
     entity_breakdown: EntityBreakdownQuery,
+    prop_debug: PropDebugQuery,
 ) {
-    if !state.visible {
+    if !debug.state.visible {
         return;
     }
 
@@ -229,7 +251,7 @@ pub fn update_debug_overlay(
         text_content.push_str(&format!("\nWater (5x5x5): {}\n", water_count));
         text_content.push_str(&format!("Water+Air adj: {}\n", water_with_air));
 
-        if toggles.show_texture_details {
+        if debug.toggles.show_texture_details {
             text_content.push_str("\n[Texture debug]\n");
             text_content.push_str(&format!("Atlas index: {}\n", voxel_type.atlas_index()));
             text_content.push_str(&format!(
@@ -243,7 +265,7 @@ pub fn update_debug_overlay(
             }
         }
 
-        if toggles.show_vertex_corners {
+        if debug.toggles.show_vertex_corners {
             text_content.push_str("\n[Vertex corners]\n");
             let base = pos.as_vec3();
             let corners = [
@@ -271,15 +293,63 @@ pub fn update_debug_overlay(
         text_content.push_str("Target: None\n");
     }
 
-    if toggles.show_multiplayer {
+    if debug.toggles.show_prop_details {
+        text_content.push_str("\n[Prop debug]\n");
+        if let Some(entity) = targeted_prop.entity {
+            if let Ok((prop, wind)) = prop_debug.props.get(entity) {
+                text_content.push_str(&format!("Prop: {} ({:?})\n", prop.id, prop.prop_type));
+                text_content.push_str(&format!("Distance: {:.2}\n", targeted_prop.distance));
+                text_content.push_str(&format!(
+                    "Grass-like: {}\n",
+                    if is_grass_like_prop(&prop.id) { "YES" } else { "NO" }
+                ));
+                text_content.push_str(&format!(
+                    "Wind: {}\n",
+                    if wind.is_some() { "YES" } else { "NO" }
+                ));
+
+                if let Some(fade_info) =
+                    collect_prop_fade_info(entity, &prop_debug.children, &prop_debug.fades)
+                {
+                    text_content.push_str(&format!("Fade meshes: {}\n", fade_info.count));
+                    text_content.push_str(&format!(
+                        "Alpha: base {:.2} current {:.2}\n",
+                        fade_info.base_alpha, fade_info.current_alpha
+                    ));
+                    text_content.push_str(&format!(
+                        "Fade scales: min {:.2} dist {:.2}\n",
+                        fade_info.min_alpha_scale, fade_info.distance_scale
+                    ));
+                } else {
+                    text_content.push_str("Fade: NONE\n");
+                }
+
+                if let Some(settings) = prop_debug.fade_settings.as_ref() {
+                    text_content.push_str(&format!(
+                        "Fade settings: start {:.2} end {:.2} min {:.2} max {:.1}\n",
+                        settings.near_fade_start,
+                        settings.near_fade_end,
+                        settings.near_fade_min_alpha,
+                        settings.max_update_distance
+                    ));
+                }
+            } else {
+                text_content.push_str("Prop: Not found\n");
+            }
+        } else {
+            text_content.push_str("Prop: None\n");
+        }
+    }
+
+    if debug.toggles.show_multiplayer {
         append_multiplayer_debug(&mut text_content, &network);
     }
 
-    if toggles.show_chunk_stats {
+    if debug.toggles.show_chunk_stats {
         append_chunk_stats_debug(&mut text_content, &chunk_stats);
     }
 
-    append_control_hints(&mut text_content, &edit_mode, &delete_mode, &drag_state, &toggles);
+    append_control_hints(&mut text_content, &edit_mode, &delete_mode, &drag_state, &debug.toggles);
 
     for mut text in query.iter_mut() {
         **text = text_content.clone();
@@ -321,6 +391,53 @@ fn count_nearby_water(world: &VoxelWorld, center: IVec3) -> (u32, u32) {
     }
 
     (water_count, water_with_air)
+}
+
+struct PropFadeInfo {
+    count: usize,
+    base_alpha: f32,
+    current_alpha: f32,
+    min_alpha_scale: f32,
+    distance_scale: f32,
+}
+
+fn collect_prop_fade_info(
+    root: Entity,
+    children_query: &Query<&Children>,
+    fade_query: &Query<&FoliageFade>,
+) -> Option<PropFadeInfo> {
+    let mut stack = vec![root];
+    let mut count = 0usize;
+    let mut sample: Option<PropFadeInfo> = None;
+
+    while let Some(entity) = stack.pop() {
+        if let Ok(fade) = fade_query.get(entity) {
+            count += 1;
+            if sample.is_none() {
+                sample = Some(PropFadeInfo {
+                    count: 0,
+                    base_alpha: fade.base_alpha,
+                    current_alpha: fade.current_alpha,
+                    min_alpha_scale: fade.min_alpha_scale,
+                    distance_scale: fade.distance_scale,
+                });
+            }
+        }
+
+        if let Ok(children) = children_query.get(entity) {
+            stack.extend(children.iter());
+        }
+    }
+
+    sample.map(|mut info| {
+        info.count = count;
+        info
+    })
+}
+
+fn is_grass_like_prop(prop_id: &str) -> bool {
+    let id = prop_id.to_lowercase();
+    id.contains("grass") || id.contains("fern") || id.contains("shrub")
 }
 
 /// Append chunk statistics debug info to text content.
@@ -495,6 +612,14 @@ fn append_control_hints(
     text_content.push_str(&format!(
         "\n[Alt+C] Chunk stats: {}",
         if toggles.show_chunk_stats {
+            "ON"
+        } else {
+            "OFF"
+        }
+    ));
+    text_content.push_str(&format!(
+        "\n[Alt+P] Prop debug: {}",
+        if toggles.show_prop_details {
             "ON"
         } else {
             "OFF"

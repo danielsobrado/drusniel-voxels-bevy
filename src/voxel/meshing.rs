@@ -820,34 +820,61 @@ fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3
     sdf
 }
 
-/// Sample voxel from world or chunk, returns true if water
-fn sample_voxel_water(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: u32, py: u32, pz: u32) -> bool {
-    let world_pos = chunk_origin + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
+/// Get voxel type at padded coordinates for water SDF generation.
+fn get_voxel_for_water_sdf(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: i32, py: i32, pz: i32) -> VoxelType {
+    let world_pos = chunk_origin + IVec3::new(px - 1, py - 1, pz - 1);
 
-    let voxel = if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
-        chunk.get(UVec3::new(px - 1, py - 1, pz - 1))
+    if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
+        chunk.get(UVec3::new((px - 1) as u32, (py - 1) as u32, (pz - 1) as u32))
     } else {
         world.get_voxel(world_pos).unwrap_or(VoxelType::Air)
-    };
-
-    voxel.is_liquid()
+    }
 }
 
-/// Generate an SDF array for water only.
+/// Check if any of the 6 neighbors of a position contains water.
+fn has_water_neighbor(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: i32, py: i32, pz: i32) -> bool {
+    for (dx, dy, dz) in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)] {
+        let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px + dx, py + dy, pz + dz);
+        if voxel.is_liquid() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Generate an SDF array for water surfaces.
+/// Only generates surfaces at water/air boundaries, not water/solid boundaries.
+/// Solid voxels adjacent to water are marked as "inside" to avoid hidden surfaces.
 fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
 
-    // First pass: set binary solid/air values
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        let is_water = sample_voxel_water(chunk, world, chunk_origin, px, py, pz);
-        // SDF: negative inside water, positive in air
-        sdf[i] = if is_water { -1.0 } else { 1.0 };
+        let px = px as i32;
+        let py = py as i32;
+        let pz = pz as i32;
+
+        let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px, py, pz);
+
+        sdf[i] = if voxel.is_liquid() {
+            // Water is "inside"
+            -1.0
+        } else if voxel.is_solid() {
+            // Solid adjacent to water is also "inside" to avoid hidden water/solid surfaces
+            // Solid NOT adjacent to water stays "outside" to avoid false surfaces
+            if has_water_neighbor(chunk, world, chunk_origin, px, py, pz) {
+                -1.0
+            } else {
+                1.0
+            }
+        } else {
+            // Air is "outside" - water surface generated at water/air boundary
+            1.0
+        };
     }
 
-    // Skip smoothing for consistent boundary vertices
     sdf
 }
 

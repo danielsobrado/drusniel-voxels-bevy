@@ -1,4 +1,6 @@
 use super::{Prop, PropConfig, PropType};
+use crate::props::foliage::FoliageFade;
+use bevy::color::Alpha;
 use bevy::prelude::*;
 
 /// Marker: prop has been styled
@@ -15,19 +17,22 @@ pub fn apply_style_overrides(
     material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
 ) {
     for (entity, prop) in props.iter() {
-        // Mark as processed immediately to avoid reprocessing
-        commands.entity(entity).insert(StyledProp);
-
         // Traverse hierarchy and apply material tweaks
-        apply_to_hierarchy(
+        let processed = apply_to_hierarchy(
             entity,
             &children,
             &material_handles,
             &mut materials,
+            &mut commands,
             &config.style,
             prop.prop_type,
             &prop.id,
         );
+
+        let has_children = children.get(entity).map(|kids| !kids.is_empty()).unwrap_or(false);
+        if processed || has_children {
+            commands.entity(entity).insert(StyledProp);
+        }
     }
 }
 
@@ -36,31 +41,99 @@ fn apply_to_hierarchy(
     children: &Query<&Children>,
     material_handles: &Query<&MeshMaterial3d<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
+    commands: &mut Commands,
     style: &super::StyleConfig,
     prop_type: PropType,
     prop_id: &str,
-) {
+) -> bool {
+    let mut processed = false;
+
     // Apply to this entity if it has a material
     if let Ok(mat_handle) = material_handles.get(entity) {
-        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+        processed = true;
+        let (should_fade, base_alpha) = if let Some(mat) = materials.get_mut(&mat_handle.0) {
+            let original_alpha_mode = mat.alpha_mode;
             tweak_material(mat, style, prop_type, prop_id);
+
+            let force_blend = should_force_blend(prop_type, prop_id);
+            let should_fade = is_foliage_prop(prop_type)
+                && is_grass_like_foliage(prop_type, prop_id)
+                && (force_blend || matches!(original_alpha_mode, AlphaMode::Mask(_) | AlphaMode::Blend));
+
+            if should_fade {
+                let base_alpha = mat.base_color.alpha();
+                (true, base_alpha)
+            } else {
+                (false, 0.0)
+            }
+        } else {
+            (false, 0.0)
+        };
+
+        if should_fade {
+                let (min_alpha_scale, distance_scale) = foliage_fade_scales(prop_type, prop_id);
+                let bounds_radius = foliage_bounds_radius(distance_scale);
+                commands.entity(entity).insert(FoliageFade {
+                    base_alpha,
+                    current_alpha: base_alpha,
+                    min_alpha_scale,
+                    distance_scale,
+                    bounds_radius,
+                    base_material: mat_handle.0.clone(),
+                    blended_material: None,
+                });
+            }
         }
-    }
 
     // Recurse into children
     if let Ok(kids) = children.get(entity) {
         for child in kids.iter() {
-            apply_to_hierarchy(
+            processed |= apply_to_hierarchy(
                 child,
                 children,
                 material_handles,
                 materials,
+                commands,
                 style,
                 prop_type,
                 prop_id,
             );
         }
     }
+
+    processed
+}
+
+fn is_foliage_prop(prop_type: PropType) -> bool {
+    matches!(prop_type, PropType::Tree | PropType::Bush | PropType::Flower)
+}
+
+fn should_force_blend(prop_type: PropType, prop_id: &str) -> bool {
+    if matches!(prop_type, PropType::Bush | PropType::Flower) {
+        return true;
+    }
+    let id = prop_id.to_lowercase();
+    id.contains("grass") || id.contains("fern") || id.contains("shrub")
+}
+
+fn foliage_fade_scales(prop_type: PropType, prop_id: &str) -> (f32, f32) {
+    if is_grass_like_foliage(prop_type, prop_id) {
+        (0.2, 2.5)
+    } else {
+        (1.0, 1.0)
+    }
+}
+
+fn foliage_bounds_radius(distance_scale: f32) -> f32 {
+    (distance_scale * 0.75).clamp(0.5, 3.0)
+}
+
+fn is_grass_like_foliage(prop_type: PropType, prop_id: &str) -> bool {
+    if prop_type != PropType::Bush {
+        return false;
+    }
+    let id = prop_id.to_lowercase();
+    id.contains("grass") || id.contains("fern") || id.contains("shrub")
 }
 
 fn tweak_material(

@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 use crate::constants::{INTERACTION_RANGE, RAY_STEP, ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS};
 use crate::entity::Wolf;
+use crate::props::Prop;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 
@@ -27,6 +28,17 @@ pub struct TargetedEntity {
     pub entity: Option<Entity>,
     /// Distance to the targeted entity.
     pub distance: f32,
+}
+
+/// Resource tracking the currently targeted prop.
+#[derive(Resource, Default)]
+pub struct TargetedProp {
+    /// Prop entity being targeted, if any.
+    pub entity: Option<Entity>,
+    /// Distance to the targeted prop.
+    pub distance: f32,
+    /// World position of the targeted prop, if any.
+    pub position: Option<Vec3>,
 }
 
 /// Cast a ray and find the first solid block hit.
@@ -141,6 +153,48 @@ pub fn update_targeted_entity(
                 targeted.entity = Some(entity);
                 targeted.distance = distance;
             }
+        }
+    }
+}
+
+/// System to update the targeted prop based on camera look direction.
+pub fn update_targeted_prop(
+    camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
+    prop_query: Query<(Entity, &GlobalTransform), With<Prop>>,
+    mut targeted: ResMut<TargetedProp>,
+) {
+    targeted.entity = None;
+    targeted.distance = f32::MAX;
+    targeted.position = None;
+
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    let origin = camera_transform.translation;
+    let direction = camera_transform.forward().as_vec3();
+
+    for (entity, transform) in prop_query.iter() {
+        let pos = transform.translation();
+        let to_entity = pos - origin;
+        let distance = to_entity.length();
+
+        if distance < 0.001 || distance > INTERACTION_RANGE {
+            continue;
+        }
+
+        let dot = to_entity.normalize().dot(direction);
+        if dot < ENTITY_TARGET_CONE {
+            continue;
+        }
+
+        let closest_point = origin + direction * dot * distance;
+        let dist_to_ray = (pos - closest_point).length();
+
+        if dist_to_ray < ENTITY_TARGET_RADIUS && distance < targeted.distance {
+            targeted.entity = Some(entity);
+            targeted.distance = distance;
+            targeted.position = Some(pos);
         }
     }
 }

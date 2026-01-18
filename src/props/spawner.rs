@@ -1,4 +1,4 @@
-use super::{LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition, PropType};
+use super::{foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition, PropType};
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::player::Player;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
@@ -130,16 +130,21 @@ pub fn spawn_debug_custom_props_near_player(
             world_zf,
         );
 
-        commands.spawn((
+        let transform = Transform::from_translation(position)
+            .with_rotation(Quat::from_rotation_y(rotation))
+            .with_scale(Vec3::splat(scale));
+        let mut entity = commands.spawn((
             SceneRoot(scene_handle.clone()),
-            Transform::from_translation(position)
-                .with_rotation(Quat::from_rotation_y(rotation))
-                .with_scale(Vec3::splat(scale)),
+            transform.clone(),
             Prop {
                 id: id.to_string(),
                 prop_type,
             },
         ));
+
+        if should_apply_grass_wind(id, prop_type) {
+            entity.insert(GrassPropWind::new(&transform, hash));
+        }
     }
 
     info!("Spawned debug custom props around player");
@@ -379,16 +384,21 @@ fn spawn_category(
             let grounded_y = (base_y - sink).max(surface_height - 0.4);
             let position = Vec3::new(world_xf, grounded_y, world_zf);
 
-            commands.spawn((
+            let transform = Transform::from_translation(position)
+                .with_rotation(Quat::from_rotation_y(rotation))
+                .with_scale(Vec3::splat(scale));
+            let mut entity = commands.spawn((
                 SceneRoot(scene_handle.clone()),
-                Transform::from_translation(position)
-                    .with_rotation(Quat::from_rotation_y(rotation))
-                    .with_scale(Vec3::splat(scale)),
+                transform.clone(),
                 Prop {
                     id: def.id.clone(),
                     prop_type,
                 },
             ));
+
+            if should_apply_grass_wind(&def.id, prop_type) {
+                entity.insert(GrassPropWind::new(&transform, hash));
+            }
 
             count += 1;
         }
@@ -597,6 +607,14 @@ fn prop_scale(
     let jitter_hash = deterministic_hash(world_x, world_z, id);
     let jitter = (jitter_hash * 2.0 - 1.0) * scale_jitter;
     (base * (1.0 + jitter)).clamp(scale_min, scale_max)
+}
+
+fn should_apply_grass_wind(id: &str, prop_type: PropType) -> bool {
+    if prop_type != PropType::Bush {
+        return false;
+    }
+    let id_lower = id.to_lowercase();
+    id_lower.contains("grass")
 }
 
 /// Deterministic hash for consistent prop placement

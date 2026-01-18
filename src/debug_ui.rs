@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::materials::WaterMaterial;
 use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
 use crate::voxel::plugin::LodSettings;
@@ -54,6 +55,8 @@ fn debug_settings_ui(
     state: Res<DebugUiState>,
     mut lod_settings: ResMut<LodSettings>,
     veg_config: Option<ResMut<VegetationConfig>>,
+    prop_fade: Option<ResMut<FoliageFadeSettings>>,
+    prop_wind: Option<ResMut<GrassPropWindSettings>>,
 ) {
     if !state.show_settings {
         return;
@@ -79,6 +82,30 @@ fn debug_settings_ui(
             ui.add(egui::Slider::new(&mut veg.near_fade_start, 0.0..=3.0).text("Fade Start"));
             ui.add(egui::Slider::new(&mut veg.near_fade_end, 0.0..=6.0).text("Fade End"));
             ui.add(egui::Slider::new(&mut veg.near_fade_min_alpha, 0.0..=1.0).text("Min Alpha"));
+        }
+
+        if let Some(mut prop_fade) = prop_fade {
+            ui.separator();
+            ui.heading("Prop Foliage");
+            ui.add(egui::Slider::new(&mut prop_fade.near_fade_start, 0.0..=5.0).text("Fade Start"));
+            ui.add(egui::Slider::new(&mut prop_fade.near_fade_end, 0.0..=8.0).text("Fade End"));
+            ui.add(egui::Slider::new(&mut prop_fade.near_fade_min_alpha, 0.0..=1.0).text("Min Alpha"));
+            ui.add(egui::Slider::new(&mut prop_fade.max_update_distance, 1.0..=8.0).text("Max Distance (cap 4)"));
+            ui.add(egui::Slider::new(&mut prop_fade.max_distance_scale, 0.5..=4.0).text("Max Distance Scale"));
+            ui.checkbox(&mut prop_fade.front_only, "Front Only");
+            ui.add(egui::Slider::new(&mut prop_fade.front_cone_cos, 0.0..=1.0).text("Front Cone (cos)"));
+            ui.add(egui::Slider::new(&mut prop_fade.update_interval, 0.0..=0.3).text("Update Interval"));
+        }
+
+        if let Some(mut prop_wind) = prop_wind {
+            ui.separator();
+            ui.heading("Grass Props Wind");
+            ui.add(egui::Slider::new(&mut prop_wind.sway_strength, 0.0..=0.6).text("Sway Strength"));
+            ui.add(egui::Slider::new(&mut prop_wind.sway_speed, 0.0..=3.0).text("Sway Speed"));
+            ui.add(egui::Slider::new(&mut prop_wind.push_radius, 0.5..=4.0).text("Push Radius"));
+            ui.add(egui::Slider::new(&mut prop_wind.push_strength, 0.0..=1.0).text("Push Strength"));
+            ui.add(egui::Slider::new(&mut prop_wind.max_effect_distance, 2.0..=120.0).text("Max Distance"));
+            ui.add(egui::Slider::new(&mut prop_wind.update_interval, 0.0..=0.3).text("Update Interval"));
         }
         
         ui.separator();
