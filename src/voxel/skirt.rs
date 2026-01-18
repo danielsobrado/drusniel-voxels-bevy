@@ -186,7 +186,10 @@ pub struct SkirtConfig {
 impl Default for SkirtConfig {
     fn default() -> Self {
         Self {
-            depth: VOXEL_SIZE * 0.5,
+            // Increased from 0.5 to 1.5 to better hide LOD transitions.
+            // LOD1 uses step size 2, so vertices can be up to 1 voxel off from LOD0.
+            // A depth of 1.5 ensures the skirt extends far enough to cover the gap.
+            depth: VOXEL_SIZE * 1.5,
             adaptive: true,
         }
     }

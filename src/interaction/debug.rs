@@ -371,17 +371,20 @@ fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats
 
     // Vertex count statistics (key LOD effectiveness metric)
     if stats.total_vertices > 0 {
-        let hi_pct = (stats.high_lod_vertices as f64 / stats.total_vertices as f64) * 100.0;
-        let lo_pct = (stats.low_lod_vertices as f64 / stats.total_vertices as f64) * 100.0;
         text_content.push_str(&format!(
             "Vertices: {}K total (hi:{}K lo:{}K)\n",
             stats.total_vertices / 1000,
             stats.high_lod_vertices / 1000,
             stats.low_lod_vertices / 1000,
         ));
+
+        // Show per-chunk averages to verify LOD reduction
+        let hi_avg = stats.avg_high_lod_vertices();
+        let lo_avg = stats.avg_low_lod_vertices();
+        let reduction = (1.0 - stats.lod_reduction_ratio()) * 100.0;
         text_content.push_str(&format!(
-            "  Hi LOD: {:.1}%, Lo LOD: {:.1}%\n",
-            hi_pct, lo_pct
+            "  Avg/chunk: hi={} lo={} ({:.0}% reduction)\n",
+            hi_avg, lo_avg, reduction
         ));
     }
 

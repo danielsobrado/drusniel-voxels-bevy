@@ -15,6 +15,7 @@ impl Plugin for PropsPlugin {
             .init_resource::<spawner::PropsSpawned>()
             .init_resource::<spawner::PropsDebugSpawned>()
             .init_resource::<spawner::PropsLandmarksSpawned>()
+            .init_resource::<LandmarkLocations>()
             .add_systems(Startup, loader::load_prop_config)
             .add_systems(
                 Update,
@@ -50,6 +51,12 @@ pub enum PropType {
 pub struct PropAssets {
     pub scenes: HashMap<String, Handle<Scene>>,
     pub loaded: bool,
+}
+
+/// Cached landmark building positions for minimap markers.
+#[derive(Resource, Default, Clone)]
+pub struct LandmarkLocations {
+    pub positions: Vec<Vec3>,
 }
 
 /// Root configuration loaded from YAML

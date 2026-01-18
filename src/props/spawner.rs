@@ -1,4 +1,4 @@
-use super::{Prop, PropAssets, PropConfig, PropDefinition, PropType};
+use super::{LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition, PropType};
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::player::Player;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
@@ -11,8 +11,8 @@ const WORLD_SCAN_SIZE: i32 = 512;
 const MAX_SCAN_HEIGHT: i32 = 64;
 const TREE_CELL_SIZE: i32 = 10;
 const ROCK_REGION_CELL_SIZE: i32 = 48;
-const MAX_BUILDING_SLOPE: f32 = 0.35;
-const BUILDING_SEARCH_RADIUS: i32 = 12;
+const MAX_BUILDING_SLOPE: f32 = 0.45;
+const BUILDING_SEARCH_RADIUS: i32 = 20;
 
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
@@ -151,6 +151,7 @@ pub fn spawn_landmark_buildings(
     prop_assets: Res<PropAssets>,
     config: Res<PropConfig>,
     world: Res<VoxelWorld>,
+    mut landmarks: ResMut<LandmarkLocations>,
     mut spawned: ResMut<PropsLandmarksSpawned>,
 ) {
     if spawned.0 || !prop_assets.loaded {
@@ -165,14 +166,61 @@ pub fn spawn_landmark_buildings(
     let world_width = (world_size.x * CHUNK_SIZE_I32).max(1) as f32;
     let world_depth = (world_size.z * CHUNK_SIZE_I32).max(1) as f32;
 
-    let placements = [
-        ("building_fantasy_inn", Vec2::new(world_width * 0.2, world_depth * 0.25), 0.0),
-        ("building_fantasy_stable", Vec2::new(world_width * 0.45, world_depth * 0.25), 1.57),
-        ("building_house", Vec2::new(world_width * 0.7, world_depth * 0.35), 3.14),
-        ("building_hut", Vec2::new(world_width * 0.8, world_depth * 0.6), 4.71),
+    let mut placements = Vec::new();
+    placements.push((
+        "building_fantasy_inn",
+        Vec2::new(world_width * 0.2, world_depth * 0.25),
+        0.0,
+    ));
+    placements.push((
+        "building_fantasy_stable",
+        Vec2::new(world_width * 0.45, world_depth * 0.25),
+        1.57,
+    ));
+
+    let house_ratios = [
+        (0.18, 0.2),
+        (0.28, 0.22),
+        (0.38, 0.2),
+        (0.48, 0.23),
+        (0.58, 0.2),
+        (0.68, 0.24),
+        (0.78, 0.22),
+        (0.25, 0.35),
+        (0.45, 0.38),
+        (0.65, 0.36),
     ];
+    for (idx, (x_ratio, z_ratio)) in house_ratios.iter().enumerate() {
+        placements.push((
+            "building_house",
+            Vec2::new(world_width * x_ratio, world_depth * z_ratio),
+            rotation_from_index(idx),
+        ));
+    }
+
+    let hut_ratios = [
+        (0.2, 0.6),
+        (0.3, 0.65),
+        (0.4, 0.6),
+        (0.5, 0.66),
+        (0.6, 0.6),
+        (0.7, 0.66),
+        (0.8, 0.6),
+        (0.25, 0.8),
+        (0.5, 0.8),
+        (0.75, 0.8),
+    ];
+    for (idx, (x_ratio, z_ratio)) in hut_ratios.iter().enumerate() {
+        placements.push((
+            "building_hut",
+            Vec2::new(world_width * x_ratio, world_depth * z_ratio),
+            rotation_from_index(idx + house_ratios.len()),
+        ));
+    }
 
     let mut spawned_count = 0;
+
+    landmarks.positions.clear();
 
     for (id, target, yaw) in placements {
         let Some(scene_handle) = prop_assets.scenes.get(id) else {
@@ -212,11 +260,16 @@ pub fn spawn_landmark_buildings(
             },
         ));
 
+        landmarks.positions.push(position);
         spawned_count += 1;
     }
 
     spawned.0 = true;
     info!("Spawned {} landmark buildings", spawned_count);
+}
+
+fn rotation_from_index(index: usize) -> f32 {
+    (index as f32) * 0.7 % std::f32::consts::TAU
 }
 
 fn spawn_category(

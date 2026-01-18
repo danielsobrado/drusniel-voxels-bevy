@@ -3,6 +3,9 @@ use bevy::prelude::*;
 use bevy::ecs::world::EntityWorldMut;
 
 use crate::physics::PhysicsLayer;
+
+const TERRAIN_COLLIDER_VOXEL_SIZE: f32 = 1.0;
+const TERRAIN_COLLIDER_MARGIN: f32 = 0.05;
 use crate::voxel::meshing::ChunkMesh;
 
 /// Marker for chunks that need collider generation.
@@ -24,20 +27,28 @@ pub fn generate_chunk_colliders(
             continue;
         };
 
-        if let Some(collider) = Collider::trimesh_from_mesh(mesh) {
+        let collider = Collider::voxelized_trimesh_from_mesh(
+            mesh,
+            TERRAIN_COLLIDER_VOXEL_SIZE,
+            FillMode::SurfaceOnly,
+        )
+        .or_else(|| Collider::trimesh_from_mesh_with_config(mesh, TrimeshFlags::FIX_INTERNAL_EDGES));
+
+        if let Some(collider) = collider {
             commands
                 .entity(entity)
                 .queue_silenced(|mut entity_world: EntityWorldMut| {
                     entity_world.insert((
                         RigidBody::Static,
                         collider,
+                        CollisionMargin(TERRAIN_COLLIDER_MARGIN),
                         CollisionLayers::new(PhysicsLayer::Terrain, PhysicsLayer::terrain_mask()),
                         ChunkCollider,
                     ));
                     entity_world.remove::<NeedsCollider>();
                 });
         } else {
-            trace!("Failed to generate trimesh collider for chunk {:?}", entity);
+            warn!("Failed to generate terrain collider for chunk {:?}", entity);
             commands
                 .entity(entity)
                 .queue_silenced(|mut entity_world: EntityWorldMut| {

@@ -20,6 +20,10 @@ use crate::constants::{
     INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
     LOD_HYSTERESIS,
 };
+
+/// Maximum number of chunks to mesh per frame to prevent frame spikes.
+/// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
+const MAX_CHUNKS_PER_FRAME: usize = 16;
 use crate::physics::NeedsCollider;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::VoxelMaterial;
@@ -94,6 +98,10 @@ pub struct RuntimeChunkStats {
     pub low_lod_vertices: u64,
     pub total_vertices: u64,
 
+    // Chunk counts for averaging (how many chunks contributed to vertex counts)
+    pub high_lod_mesh_count: u32,
+    pub low_lod_mesh_count: u32,
+
     // Per-frame meshing time tracking (microseconds)
     pub meshing_time_us: u64,
 }
@@ -149,16 +157,57 @@ impl RuntimeChunkStats {
         self.high_lod_vertices = 0;
         self.low_lod_vertices = 0;
         self.total_vertices = 0;
+        self.high_lod_mesh_count = 0;
+        self.low_lod_mesh_count = 0;
     }
 
     /// Add vertex count for a mesh at a given LOD level.
     pub fn add_mesh_vertices(&mut self, vertex_count: u32, lod_level: LodLevel) {
+        // Only count non-empty meshes for averaging
+        if vertex_count == 0 {
+            return;
+        }
         let count = vertex_count as u64;
         self.total_vertices += count;
         match lod_level {
-            LodLevel::High => self.high_lod_vertices += count,
-            LodLevel::Low => self.low_lod_vertices += count,
+            LodLevel::High => {
+                self.high_lod_vertices += count;
+                self.high_lod_mesh_count += 1;
+            }
+            LodLevel::Low => {
+                self.low_lod_vertices += count;
+                self.low_lod_mesh_count += 1;
+            }
             LodLevel::Culled => {} // No vertices for culled chunks
+        }
+    }
+
+    /// Get average vertices per chunk for high LOD meshes.
+    pub fn avg_high_lod_vertices(&self) -> u32 {
+        if self.high_lod_mesh_count > 0 {
+            (self.high_lod_vertices / self.high_lod_mesh_count as u64) as u32
+        } else {
+            0
+        }
+    }
+
+    /// Get average vertices per chunk for low LOD meshes.
+    pub fn avg_low_lod_vertices(&self) -> u32 {
+        if self.low_lod_mesh_count > 0 {
+            (self.low_lod_vertices / self.low_lod_mesh_count as u64) as u32
+        } else {
+            0
+        }
+    }
+
+    /// Get LOD reduction ratio (0.0 to 1.0, lower = more reduction).
+    pub fn lod_reduction_ratio(&self) -> f32 {
+        let hi_avg = self.avg_high_lod_vertices();
+        let lo_avg = self.avg_low_lod_vertices();
+        if hi_avg > 0 && lo_avg > 0 {
+            lo_avg as f32 / hi_avg as f32
+        } else {
+            1.0 // No data, assume no reduction
         }
     }
 }
@@ -670,8 +719,14 @@ fn mesh_dirty_chunks_system(
     }
     let mut chunks_meshed = 0u32;
     let mut chunks_skipped = 0u32;
+    let mut chunks_processed = 0usize;
 
     for chunk_pos in dirty_chunks {
+        // Throttle: limit chunks meshed per frame to prevent frame spikes
+        if chunks_processed >= MAX_CHUNKS_PER_FRAME {
+            break;
+        }
+        chunks_processed += 1;
         // Compute uniformity if unknown (lazy evaluation)
         if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
             if chunk.uniformity() == ChunkUniformity::Unknown {

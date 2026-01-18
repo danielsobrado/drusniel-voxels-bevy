@@ -1,6 +1,7 @@
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::menu::PauseMenuState;
+use crate::props::LandmarkLocations;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
@@ -16,6 +17,7 @@ pub struct MapState {
     pub open: bool,
     pub root_entity: Option<Entity>,
     pub map_texture: Option<Handle<Image>>,
+    pub map_container: Option<Entity>,
 }
 
 #[derive(Component)]
@@ -25,10 +27,16 @@ struct MapRoot;
 struct MapPlayerMarker;
 
 #[derive(Component)]
+struct MapLandmarkMarker {
+    world_pos: Vec3,
+}
+
+#[derive(Component)]
 struct MapCoordinatesText;
 
 const MAP_SIZE: f32 = 512.0;
 const MARKER_SIZE: f32 = 10.0;
+const LANDMARK_MARKER_SIZE: f32 = 8.0;
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
@@ -37,6 +45,7 @@ impl Plugin for MapPlugin {
             (
                 toggle_map_overlay,
                 update_player_marker,
+                update_landmark_markers,
                 update_coordinates_text,
             ),
         );
@@ -51,6 +60,7 @@ fn toggle_map_overlay(
     mut state: ResMut<MapState>,
     world: Res<VoxelWorld>,
     pause_menu: Res<PauseMenuState>,
+    landmarks: Res<LandmarkLocations>,
 ) {
     if !keys.just_pressed(KeyCode::KeyM) {
         return;
@@ -64,6 +74,7 @@ fn toggle_map_overlay(
         if let Some(entity) = state.root_entity.take() {
             commands.entity(entity).despawn();
         }
+        state.map_container = None;
         state.open = false;
         return;
     }
@@ -130,7 +141,7 @@ fn toggle_map_overlay(
                         TextColor(Color::WHITE),
                     ));
 
-                    parent
+                    let map_container = parent
                         .spawn((
                             Node {
                                 width: Val::Px(MAP_SIZE),
@@ -162,7 +173,12 @@ fn toggle_map_overlay(
                                 BackgroundColor(Color::srgb(0.9, 0.1, 0.2)),
                                 MapPlayerMarker,
                             ));
-                        });
+
+                            for landmark in landmarks.positions.iter() {
+                                spawn_landmark_marker(parent, &world, *landmark);
+                            }
+                        })
+                        .id();
 
                     parent.spawn((
                         Text::new("Position: --"),
@@ -174,6 +190,8 @@ fn toggle_map_overlay(
                         TextColor(Color::srgb(0.9, 0.9, 0.9)),
                         MapCoordinatesText,
                     ));
+
+                    state.map_container = Some(map_container);
                 });
         })
         .id();
@@ -196,28 +214,85 @@ fn update_player_marker(
         return;
     };
 
-    let world_size_chunks = world.world_size_chunks();
-    // Assuming world starts at (0,0,0) and extends to (X*16, Y*16, Z*16)
-    let world_width = (world_size_chunks.x * CHUNK_SIZE_I32) as f32;
-    let world_depth = (world_size_chunks.z * CHUNK_SIZE_I32) as f32;
-
-    if world_width <= 0.0 || world_depth <= 0.0 {
-        return;
-    }
-
     let pos = camera_transform.translation;
-    
-    // Calculate ratios based on world position
-    let x_ratio = (pos.x / world_width).clamp(0.0, 1.0);
-    let z_ratio = (pos.z / world_depth).clamp(0.0, 1.0);
-
-    let left = x_ratio * MAP_SIZE - (MARKER_SIZE * 0.5);
-    let top = (1.0 - z_ratio) * MAP_SIZE - (MARKER_SIZE * 0.5);
+    let Some((left, top)) = world_to_map_pos(&world, pos, MARKER_SIZE) else {
+        return;
+    };
 
     if let Ok(mut node) = marker_query.single_mut() {
         node.left = Val::Px(left);
         node.top = Val::Px(top);
     }
+}
+
+fn update_landmark_markers(
+    mut commands: Commands,
+    state: Res<MapState>,
+    world: Res<VoxelWorld>,
+    landmarks: Res<LandmarkLocations>,
+    marker_query: Query<Entity, With<MapLandmarkMarker>>,
+) {
+    if !state.open {
+        return;
+    }
+
+    let Some(container) = state.map_container else {
+        return;
+    };
+
+    if landmarks.positions.is_empty() {
+        return;
+    }
+
+    if marker_query.iter().count() == landmarks.positions.len() {
+        return;
+    }
+
+    for entity in marker_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    commands.entity(container).with_children(|parent| {
+        for landmark in landmarks.positions.iter() {
+            spawn_landmark_marker(parent, &world, *landmark);
+        }
+    });
+}
+
+fn spawn_landmark_marker(parent: &mut ChildSpawnerCommands, world: &VoxelWorld, position: Vec3) {
+    let Some((left, top)) = world_to_map_pos(world, position, LANDMARK_MARKER_SIZE) else {
+        return;
+    };
+
+    parent.spawn((
+        Node {
+            width: Val::Px(LANDMARK_MARKER_SIZE),
+            height: Val::Px(LANDMARK_MARKER_SIZE),
+            position_type: PositionType::Absolute,
+            left: Val::Px(left),
+            top: Val::Px(top),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.98, 0.82, 0.24)),
+        MapLandmarkMarker { world_pos: position },
+    ));
+}
+
+fn world_to_map_pos(world: &VoxelWorld, pos: Vec3, marker_size: f32) -> Option<(f32, f32)> {
+    let world_size_chunks = world.world_size_chunks();
+    let world_width = (world_size_chunks.x * CHUNK_SIZE_I32) as f32;
+    let world_depth = (world_size_chunks.z * CHUNK_SIZE_I32) as f32;
+
+    if world_width <= 0.0 || world_depth <= 0.0 {
+        return None;
+    }
+
+    let x_ratio = (pos.x / world_width).clamp(0.0, 1.0);
+    let z_ratio = (pos.z / world_depth).clamp(0.0, 1.0);
+
+    let left = x_ratio * MAP_SIZE - (marker_size * 0.5);
+    let top = (1.0 - z_ratio) * MAP_SIZE - (marker_size * 0.5);
+    Some((left, top))
 }
 
 fn update_coordinates_text(

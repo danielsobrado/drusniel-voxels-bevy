@@ -320,32 +320,33 @@ fn create_dust_effect(
         dimension: ShapeDimension::Volume,
     };
     
-    // Slow random movement
+    // Slow drift with some faster particles mixed in
+    let speed = (writer.lit(0.3) + writer.lit(1.7) * writer.rand(ScalarType::Float)).expr();
     let init_vel = SetVelocitySphereModifier {
         center: writer.lit(Vec3::ZERO).expr(),
-        speed: writer.lit(0.5).expr(),
+        speed,
     };
     
     let init_lifetime = SetAttributeModifier::new(
         Attribute::LIFETIME,
-        writer.lit(10.0).expr(),
+        writer.lit(6.0).expr(),
     );
     
-    let color = LinearRgba::new(
+    let base_color = Vec4::new(
         config.color[0],
         config.color[1],
         config.color[2],
         config.color[3],
     );
-    let init_color = SetAttributeModifier::new(
-        Attribute::COLOR,
-        writer.lit(color.as_u32()).expr(),
-    );
+    let color_range = Vec4::new(0.12, 0.12, 0.1, 0.15);
+    let color = (writer.lit(base_color) + writer.lit(color_range) * writer.rand(VectorType::VEC4F))
+        .pack4x8unorm();
+    let init_color = SetAttributeModifier::new(Attribute::COLOR, color.expr());
 
-    let init_size = SetAttributeModifier::new(
-        Attribute::SIZE,
-        writer.lit(config.particle_size).expr(),
-    );
+    let size = (writer.lit(config.particle_size)
+        * (writer.lit(0.4) + writer.lit(0.8) * writer.rand(ScalarType::Float)))
+    .expr();
+    let init_size = SetAttributeModifier::new(Attribute::SIZE, size);
 
     let spawner = SpawnerSettings::rate(config.intensity.into());
 

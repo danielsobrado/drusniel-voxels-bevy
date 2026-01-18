@@ -775,23 +775,23 @@ pub fn spawn_floating_particles(
 
     let camera_pos = camera_transform.translation;
 
-    // Larger particle mesh for better visibility
-    let particle_mesh = meshes.add(Sphere::new(0.25).mesh().build());
+    // Small particle mesh for pollen/dust specks
+    let particle_mesh = meshes.add(Sphere::new(0.06).mesh().build());
 
-    // Bright golden pollen material - very emissive for visibility
+    // Subtle golden pollen material
     let pollen_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.9, 0.4),
-        emissive: LinearRgba::new(5.0, 4.0, 1.5, 1.0),
-        alpha_mode: AlphaMode::Opaque,
+        base_color: Color::srgba(0.95, 0.86, 0.55, 0.85),
+        emissive: LinearRgba::new(0.5, 0.45, 0.18, 1.0),
+        alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default()
     });
 
-    // Bright white dust material
+    // Soft dust material
     let dust_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0),
-        emissive: LinearRgba::new(4.0, 4.0, 5.0, 1.0),
-        alpha_mode: AlphaMode::Opaque,
+        base_color: Color::srgba(0.82, 0.78, 0.68, 0.7),
+        emissive: LinearRgba::new(0.22, 0.22, 0.22, 1.0),
+        alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default()
     });
@@ -818,8 +818,8 @@ pub fn spawn_floating_particles(
             dust_material.clone()
         };
 
-        // Visible particle size - larger for debugging
-        let scale = 1.0 + hash2 * 1.0;
+        // Small particle size with light variation
+        let scale = 0.7 + hash2 * 0.9;
 
         commands.spawn((
             Mesh3d(particle_mesh.clone()),
@@ -829,7 +829,7 @@ pub fn spawn_floating_particles(
             FloatingParticle {
                 base_y: y,
                 phase: hash3 * std::f32::consts::TAU,
-                speed: 0.3 + hash1 * 0.5,
+                speed: 0.15 + hash1 * 0.9,
                 drift: Vec3::new(
                     (hash1 - 0.5) * 2.0,
                     0.0,
@@ -857,12 +857,13 @@ pub fn animate_particles(
 
     for (mut transform, particle) in particles.iter_mut() {
         // Gentle bobbing motion
-        let bob = (t * particle.speed + particle.phase).sin() * 0.5;
+        let bob = (t * particle.speed + particle.phase).sin() * 0.12;
         transform.translation.y = particle.base_y + bob;
 
         // Slow drift
-        transform.translation.x += particle.drift.x * time.delta_secs() * 0.3;
-        transform.translation.z += particle.drift.z * time.delta_secs() * 0.3;
+        let drift_scale = 0.12 + particle.speed * 0.2;
+        transform.translation.x += particle.drift.x * time.delta_secs() * drift_scale;
+        transform.translation.z += particle.drift.z * time.delta_secs() * drift_scale;
 
         // Wrap particles around player (keep them in view)
         let dist_to_camera = Vec2::new(

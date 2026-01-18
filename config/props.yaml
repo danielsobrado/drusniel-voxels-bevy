@@ -260,7 +260,7 @@ props:
 
     - id: building_fantasy_inn
       path: "models/Models/GLB format/Fantasy Inn.glb"
-      scale_range: [1.0, 1.0]
+      scale_range: [1.4, 1.4]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -270,7 +270,7 @@ props:
 
     - id: building_fantasy_stable
       path: "models/Models/GLB format/Fantasy Stable.glb"
-      scale_range: [1.0, 1.0]
+      scale_range: [1.4, 1.4]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -280,7 +280,7 @@ props:
 
     - id: building_house
       path: "models/Models/GLB format/House.glb"
-      scale_range: [1.0, 1.0]
+      scale_range: [12.0, 12.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -290,7 +290,7 @@ props:
 
     - id: building_hut
       path: "models/Models/GLB format/Hut.glb"
-      scale_range: [1.0, 1.0]
+      scale_range: [12.0, 12.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -409,15 +409,6 @@ props:
       max_count: 500
 
   bushes:
-    - id: bush_green
-      path: "models/plants/bush_green.glb"
-      scale_range: [0.7, 1.2]
-      spawn_on: [TopSoil]
-      density: 0.03
-      min_slope: 0.0
-      max_slope: 0.35
-      max_count: 400
-
     # Ultimate Stylized Nature (May 2022)
     - id: usn_bush
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush.gltf"
@@ -519,35 +510,7 @@ props:
       max_slope: 0.8
       max_count: 0
 
-    - id: fern
-      path: "models/plants/fern.glb"
-      scale_range: [0.6, 1.0]
-      spawn_on: [TopSoil]
-      density: 0.04
-      min_slope: 0.0
-      max_slope: 0.4
-      max_count: 500
-
-    - id: shrub
-      path: "models/plants/shrub.glb"
-      scale_range: [0.5, 0.9]
-      spawn_on: [TopSoil, SubSoil]
-      density: 0.025
-      min_slope: 0.0
-      max_slope: 0.5
-      max_count: 300
-
   flowers:
-    - id: flower_red
-      path: "models/plants/flower_red.glb"
-      scale_range: [6.0, 9.0]
-      y_offset: -0.5
-      spawn_on: [TopSoil]
-      density: 0.015
-      min_slope: 0.0
-      max_slope: 0.3
-      max_count: 200
-
     # Ultimate Stylized Nature (May 2022)
     - id: usn_flower_1
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_1.gltf"
@@ -638,24 +601,6 @@ props:
       min_slope: 0.0
       max_slope: 0.7
       max_count: 1200
-
-    - id: flower_yellow
-      path: "models/plants/flower_yellow.glb"
-      scale_range: [0.4, 0.8]
-      spawn_on: [TopSoil]
-      density: 0.015
-      min_slope: 0.0
-      max_slope: 0.3
-      max_count: 200
-
-    - id: mushroom
-      path: "models/plants/mushroom.glb"
-      scale_range: [0.3, 0.7]
-      spawn_on: [TopSoil, SubSoil]
-      density: 0.01
-      min_slope: 0.0
-      max_slope: 0.5
-      max_count: 150
 
 # Material style overrides for consistent look
 style:

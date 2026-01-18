@@ -36,11 +36,11 @@ dust:
   # Lower intensity for dust
   intensity: 500.0
   # Small particles
-  particle_size: 0.01
+  particle_size: 0.0015
   # Dust moves with wind
   wind_influence: 1.0
   # Sandy/earthy color
-  color: [0.8, 0.7, 0.5, 0.3]
+  color: [0.88, 0.78, 0.46, 0.35]
 
 # Global wind settings
 wind:
