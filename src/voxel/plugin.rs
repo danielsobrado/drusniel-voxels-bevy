@@ -7,6 +7,7 @@
 //! - Async chunk generation using Bevy's task pool
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use bevy::prelude::*;
 use bevy::tasks::{block_on, poll_once, AsyncComputeTaskPool, Task};
@@ -87,6 +88,14 @@ pub struct RuntimeChunkStats {
     pub high_lod_chunks: u32,
     pub low_lod_chunks: u32,
     pub culled_chunks: u32,
+
+    // Vertex count statistics (for measuring LOD effectiveness)
+    pub high_lod_vertices: u64,
+    pub low_lod_vertices: u64,
+    pub total_vertices: u64,
+
+    // Per-frame meshing time tracking (microseconds)
+    pub meshing_time_us: u64,
 }
 
 impl RuntimeChunkStats {
@@ -101,6 +110,7 @@ impl RuntimeChunkStats {
         self.high_lod_chunks = 0;
         self.low_lod_chunks = 0;
         self.culled_chunks = 0;
+        // Note: vertex counts are tracked during mesh generation, not here
 
         for (_, chunk) in world.chunk_entries() {
             self.total_chunks += 1;
@@ -131,6 +141,25 @@ impl RuntimeChunkStats {
     pub fn reset_frame_counters(&mut self) {
         self.chunks_meshed_this_frame = 0;
         self.chunks_skipped_this_frame = 0;
+        self.meshing_time_us = 0;
+    }
+
+    /// Reset vertex count statistics (called when recomputing all stats).
+    pub fn reset_vertex_counts(&mut self) {
+        self.high_lod_vertices = 0;
+        self.low_lod_vertices = 0;
+        self.total_vertices = 0;
+    }
+
+    /// Add vertex count for a mesh at a given LOD level.
+    pub fn add_mesh_vertices(&mut self, vertex_count: u32, lod_level: LodLevel) {
+        let count = vertex_count as u64;
+        self.total_vertices += count;
+        match lod_level {
+            LodLevel::High => self.high_lod_vertices += count,
+            LodLevel::Low => self.low_lod_vertices += count,
+            LodLevel::Culled => {} // No vertices for culled chunks
+        }
     }
 }
 
@@ -602,6 +631,7 @@ fn mesh_dirty_chunks_system(
     ao_config: Res<AmbientOcclusionConfig>,
     mut chunk_stats: ResMut<RuntimeChunkStats>,
     mut material_logged: Local<bool>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
 ) {
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
@@ -622,9 +652,22 @@ fn mesh_dirty_chunks_system(
         return;
     }
 
-    // Collect dirty chunks first to avoid borrowing issues
-    let dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
+    // Collect dirty chunks and sort by distance from camera (nearest first)
+    // This prioritizes meshing chunks close to the player for better visual quality
+    let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
     let had_dirty_chunks = !dirty_chunks.is_empty();
+
+    // Sort by distance to camera if available
+    if let Ok(camera_transform) = camera_query.single() {
+        let camera_pos = camera_transform.translation;
+        dirty_chunks.sort_by(|a, b| {
+            let world_a = VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            let world_b = VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            let dist_a = world_a.distance_squared(camera_pos);
+            let dist_b = world_b.distance_squared(camera_pos);
+            dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
     let mut chunks_meshed = 0u32;
     let mut chunks_skipped = 0u32;
 
@@ -697,7 +740,8 @@ fn mesh_dirty_chunks_system(
                 .map(|c| c.lod_level()),
         };
 
-        // Step 1: Generate mesh data using immutable borrow
+        // Step 1: Generate mesh data using immutable borrow (with timing)
+        let mesh_start = Instant::now();
         let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_with_mode(
                 chunk,
@@ -711,6 +755,10 @@ fn mesh_dirty_chunks_system(
         } else {
             continue;
         };
+        let mesh_elapsed = mesh_start.elapsed();
+
+        // Track vertex count for this mesh (before it's consumed)
+        let vertex_count = mesh_result.solid.positions.len() as u32;
 
         // Step 2: Update chunk state using mutable borrow
         if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
@@ -718,6 +766,10 @@ fn mesh_dirty_chunks_system(
             chunk.clear_dirty();
 
             let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
+
+            // Track meshing statistics
+            chunk_stats.meshing_time_us += mesh_elapsed.as_micros() as u64;
+            chunk_stats.add_mesh_vertices(vertex_count, lod_level);
 
             // Handle solid mesh
             if mesh_result.solid.is_empty() {

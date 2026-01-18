@@ -197,10 +197,14 @@ pub fn update_debug_overlay(
     text_content.push_str(&format!("Entities: {} (mesh:{} grass:{} prop:{} ui:{} other:{})\n",
         entity_count, counts.chunk_meshes, counts.grass_patches, counts.props, counts.ui_nodes, other_count));
 
-    // Chunk stats summary (always show basic info)
+    // Chunk stats summary (always show basic info with LOD breakdown)
     text_content.push_str(&format!(
-        "Chunks: {} (meshes: {})\n",
-        chunk_stats.total_chunks, chunk_stats.mesh_entities
+        "Chunks: {} (hi:{} lo:{} cull:{}) meshes:{}\n",
+        chunk_stats.total_chunks,
+        chunk_stats.high_lod_chunks,
+        chunk_stats.low_lod_chunks,
+        chunk_stats.culled_chunks,
+        chunk_stats.mesh_entities
     ));
 
     // Show generation progress if generating
@@ -365,11 +369,28 @@ fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats
         stats.mesh_entities, stats.water_mesh_entities
     ));
 
+    // Vertex count statistics (key LOD effectiveness metric)
+    if stats.total_vertices > 0 {
+        let hi_pct = (stats.high_lod_vertices as f64 / stats.total_vertices as f64) * 100.0;
+        let lo_pct = (stats.low_lod_vertices as f64 / stats.total_vertices as f64) * 100.0;
+        text_content.push_str(&format!(
+            "Vertices: {}K total (hi:{}K lo:{}K)\n",
+            stats.total_vertices / 1000,
+            stats.high_lod_vertices / 1000,
+            stats.low_lod_vertices / 1000,
+        ));
+        text_content.push_str(&format!(
+            "  Hi LOD: {:.1}%, Lo LOD: {:.1}%\n",
+            hi_pct, lo_pct
+        ));
+    }
+
     // Per-frame stats
     if stats.chunks_meshed_this_frame > 0 || stats.chunks_skipped_this_frame > 0 {
+        let mesh_time_ms = stats.meshing_time_us as f64 / 1000.0;
         text_content.push_str(&format!(
-            "This frame: {} meshed, {} skipped\n",
-            stats.chunks_meshed_this_frame, stats.chunks_skipped_this_frame
+            "This frame: {} meshed, {} skipped ({:.1}ms)\n",
+            stats.chunks_meshed_this_frame, stats.chunks_skipped_this_frame, mesh_time_ms
         ));
     }
 }
