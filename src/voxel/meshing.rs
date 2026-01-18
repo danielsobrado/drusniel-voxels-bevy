@@ -765,30 +765,54 @@ fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
     }
 }
 
-/// Generate an SDF array at LOD1 (half resolution) - samples every 2nd voxel.
+/// Generate an SDF array at LOD1 (half resolution) with multi-sample averaging.
 /// Returns a 10x10x10 grid (1000 elements) instead of 18x18x18 (5832).
 /// Vertex positions must be scaled by step_size (2) after mesh generation.
+///
+/// Instead of sampling a single voxel per cell, this samples all voxels in the
+/// 2x2x2 region covered by each LOD cell and computes a weighted density.
+/// This creates smoother SDF gradients that reduce stair-stepping on slopes.
 fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3 = 1000
     let mut sdf = [1.0f32; LodShape1::USIZE];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let step = LOD1_STEP_SIZE as i32;
 
-    // Sample every 2nd voxel
     for z in 0..LOD1_PADDED_SIZE {
         for y in 0..LOD1_PADDED_SIZE {
             for x in 0..LOD1_PADDED_SIZE {
                 let idx = LodShape1::linearize([x, y, z]) as usize;
 
-                // Map grid position to world position:
-                // - Grid position 0 is padding (-step from chunk start)
-                // - Grid position 1 is chunk start
-                // - Each grid step covers `step` voxels
-                let world_x = chunk_origin.x + (x as i32 - 1) * step;
-                let world_y = chunk_origin.y + (y as i32 - 1) * step;
-                let world_z = chunk_origin.z + (z as i32 - 1) * step;
+                // Base world position for this LOD cell
+                let base_x = chunk_origin.x + (x as i32 - 1) * step;
+                let base_y = chunk_origin.y + (y as i32 - 1) * step;
+                let base_z = chunk_origin.z + (z as i32 - 1) * step;
 
-                let is_solid = sample_voxel_at_world_pos(world, IVec3::new(world_x, world_y, world_z));
-                sdf[idx] = if is_solid { -1.0 } else { 1.0 };
+                // Sample all voxels in the 2x2x2 region and count solids
+                let mut solid_count = 0;
+                let sample_count = step * step * step; // 8 for step=2
+
+                for dz in 0..step {
+                    for dy in 0..step {
+                        for dx in 0..step {
+                            let world_pos = IVec3::new(
+                                base_x + dx,
+                                base_y + dy,
+                                base_z + dz,
+                            );
+                            if sample_voxel_at_world_pos(world, world_pos) {
+                                solid_count += 1;
+                            }
+                        }
+                    }
+                }
+
+                // Convert count to SDF value:
+                // 0 solids = +1.0 (fully air)
+                // 8 solids = -1.0 (fully solid)
+                // 4 solids = 0.0 (surface)
+                // This creates smooth gradients instead of hard -1/+1 edges
+                let density = solid_count as f32 / sample_count as f32;
+                sdf[idx] = 1.0 - 2.0 * density; // Maps 0->1, 0.5->0, 1->-1
             }
         }
     }

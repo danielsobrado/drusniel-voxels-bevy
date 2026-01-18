@@ -55,6 +55,9 @@ pub struct VegetationConfig {
     pub max_blades_per_chunk: usize,
     pub wind_strength: f32,
     pub wind_speed: f32,
+    pub near_fade_start: f32,
+    pub near_fade_end: f32,
+    pub near_fade_min_alpha: f32,
 }
 
 impl Default for VegetationConfig {
@@ -64,6 +67,9 @@ impl Default for VegetationConfig {
             max_blades_per_chunk: 200,
             wind_strength: 0.35,
             wind_speed: 1.8,
+            near_fade_start: 0.6,
+            near_fade_end: 2.0,
+            near_fade_min_alpha: 0.2,
         }
     }
 }
@@ -902,7 +908,7 @@ pub fn animate_particles(
 }
 
 
-/// Sync wind parameters from VegetationConfig to grass materials
+/// Sync wind and near-fade parameters from VegetationConfig to grass materials
 pub fn sync_grass_wind_config(
     veg_config: Res<VegetationConfig>,
     mut materials: ResMut<Assets<GrassMaterial>>,
@@ -915,6 +921,9 @@ pub fn sync_grass_wind_config(
         if let Some(material) = materials.get_mut(handle) {
             material.uniform_data.wind_strength = veg_config.wind_strength;
             material.uniform_data.wind_speed = veg_config.wind_speed;
+            material.uniform_data.near_fade_start = veg_config.near_fade_start.max(0.0);
+            material.uniform_data.near_fade_end = veg_config.near_fade_end.max(0.0);
+            material.uniform_data.near_fade_min_alpha = veg_config.near_fade_min_alpha.clamp(0.0, 1.0);
         }
     }
 }

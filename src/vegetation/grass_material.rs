@@ -28,6 +28,9 @@ pub struct GrassMaterialUniform {
     pub contact_shadow_strength: f32,
     pub grass_density: f32,
     pub shadow_length: f32,
+    pub near_fade_start: f32,
+    pub near_fade_end: f32,
+    pub near_fade_min_alpha: f32,
     pub _padding: Vec4,
 }
 
@@ -59,6 +62,9 @@ impl GrassMaterial {
                 contact_shadow_strength: 0.7,
                 grass_density: 0.6,
                 shadow_length: 1.5,
+                near_fade_start: 0.6,
+                near_fade_end: 2.0,
+                near_fade_min_alpha: 0.2,
                 _padding: Vec4::ZERO,
             },
         }
@@ -94,6 +100,9 @@ impl GrassMaterial {
                 contact_shadow_strength,
                 grass_density: 0.6,
                 shadow_length: 1.5,
+                near_fade_start: 0.6,
+                near_fade_end: 2.0,
+                near_fade_min_alpha: 0.2,
                 _padding: Vec4::ZERO,
             },
         }
@@ -123,6 +132,9 @@ impl Default for GrassMaterial {
                 contact_shadow_strength: 0.7,
                 grass_density: 0.6,
                 shadow_length: 1.5,
+                near_fade_start: 0.6,
+                near_fade_end: 2.0,
+                near_fade_min_alpha: 0.2,
                 _padding: Vec4::ZERO,
             },
         }

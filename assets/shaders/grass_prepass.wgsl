@@ -7,10 +7,24 @@
 struct GrassMaterial {
     base_color: vec4<f32>,
     tip_color: vec4<f32>,
+    fog_color: vec4<f32>,
+    sun_direction: vec4<f32>,
     wind_strength: f32,
     wind_speed: f32,
     wind_scale: f32,
     time: f32,
+    fog_start: f32,
+    fog_end: f32,
+    aerial_strength: f32,
+    sss_wrap: f32,
+    sss_strength: f32,
+    contact_shadow_strength: f32,
+    grass_density: f32,
+    shadow_length: f32,
+    near_fade_start: f32,
+    near_fade_end: f32,
+    near_fade_min_alpha: f32,
+    _padding: vec4<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: GrassMaterial;

@@ -74,6 +74,11 @@ fn debug_settings_ui(
             ui.heading("Wind");
             ui.add(egui::Slider::new(&mut veg.wind_strength, 0.0..=1.0).text("Wind Strength"));
             ui.add(egui::Slider::new(&mut veg.wind_speed, 0.5..=5.0).text("Wind Speed"));
+            ui.separator();
+            ui.heading("Near Fade");
+            ui.add(egui::Slider::new(&mut veg.near_fade_start, 0.0..=3.0).text("Fade Start"));
+            ui.add(egui::Slider::new(&mut veg.near_fade_end, 0.0..=6.0).text("Fade End"));
+            ui.add(egui::Slider::new(&mut veg.near_fade_min_alpha, 0.0..=1.0).text("Min Alpha"));
         }
         
         ui.separator();

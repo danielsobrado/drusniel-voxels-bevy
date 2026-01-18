@@ -33,6 +33,9 @@ struct GrassMaterial {
     contact_shadow_strength: f32,
     grass_density: f32,
     shadow_length: f32,
+    near_fade_start: f32,
+    near_fade_end: f32,
+    near_fade_min_alpha: f32,
     _padding: vec4<f32>,
 };
 
@@ -70,6 +73,11 @@ fn fbm(p: vec2<f32>) -> f32 {
     }
 
     return value;
+}
+
+fn interleaved_gradient_noise(pixel: vec2<f32>) -> f32 {
+    let magic = vec3<f32>(0.06711056, 0.00583715, 52.9829189);
+    return fract(magic.z * fract(dot(pixel, magic.xy)));
 }
 
 struct Vertex {
@@ -214,7 +222,7 @@ fn compute_grass_ao(
 }
 
 @fragment
-fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
+fn fragment(input: FragmentInput, @builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let alpha = blade_alpha(input.uv);
     
     // Get sun direction from material uniform
@@ -245,11 +253,26 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     // Apply shadows to lit color
     let shadowed_color = lit_color * shadow;
 
-    // Aerial perspective - blend toward fog color based on distance
     let distance = length(view.world_position - input.world_position);
+    var near_fade = 1.0;
+    if material.near_fade_end > material.near_fade_start + 0.001 {
+        near_fade = smoothstep(material.near_fade_start, material.near_fade_end, distance);
+    }
+    let min_alpha = clamp(material.near_fade_min_alpha, 0.0, 1.0);
+    let fade_alpha = mix(min_alpha, 1.0, near_fade);
+    let final_alpha = alpha * fade_alpha;
+
+    if fade_alpha < 0.999 {
+        let dither = interleaved_gradient_noise(frag_coord.xy);
+        if final_alpha < dither {
+            discard;
+        }
+    }
+
+    // Aerial perspective - blend toward fog color based on distance
     let fog_range = max(material.fog_end - material.fog_start, 1.0);
     let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0) * material.aerial_strength;
     let final_color = mix(shadowed_color, material.fog_color.rgb, fog_factor);
 
-    return vec4<f32>(final_color, alpha);
+    return vec4<f32>(final_color, final_alpha);
 }
