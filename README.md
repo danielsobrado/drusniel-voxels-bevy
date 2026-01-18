@@ -13,6 +13,7 @@
 *   **Enhanced Water**: Gerstner wave simulation with foam generation and caustic effects.
 *   **Weather Particles**: GPU-accelerated weather system (rain/snow/dust) via bevy_hanabi with camera-following emitters.
 *   **Vegetation Wind**: Multi-layer wind animation for vegetation (trunk sway, branch movement, leaf flutter) with configurable presets. Enhanced grass shader with SSS (subsurface scattering) and contact shadows for realistic foliage rendering.
+*   **Vegetation Alpha Fade**: Grass-like props fade to a configurable minimum alpha near the camera to keep visibility through dense foliage. Tuned in the F4 settings.
 *   **Shadow + LOD Alignment**: Cascade shadows tuned to fog visibility and chunk LOD cull distances to avoid dark banding.
 *   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
 *   **Chunk LOD System**: High/low/culled LODs with skirts for seam hiding and integrated GPU fallbacks.
@@ -20,6 +21,7 @@
 *   **World + Tools**: Save/load persistence, minimap, and debug overlays.
 *   **Enhanced Terrain Tools**: Gradual sculpting (Raise/Lower/Level/Smooth) with brush size/strength controls and visual preview cursor. Toggled via T key with dedicated hotbar UI.
 *   **UI + Modes**: Settings menu (graphics/atmosphere/fog/visual sliders), map overlay, inventory/hotbar, chat overlay, and photo mode (DoF/motion blur).
+*   **Prop Persistence System**: Calculate-once, persist-forever prop placement with multi-sample terrain analysis, slope-based rotation, and chunk-based JSON storage. Props are precisely placed using 5-point sampling for accurate ground contact, then saved to `saves/props/` for instant loading on subsequent runs. Supports dirty chunk regeneration when terrain is modified.
 
 
 ### V0.3
@@ -56,7 +58,7 @@
 
 ### Debug & Development
 *   **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
-*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks)
+*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade)
 *   **F6**: Toggle Water Visibility (debug builds only)
 *   **F7**: Toggle Grass Visibility (debug builds only)
 *   **F12**: Toggle Photo Mode (DoF, motion blur)
@@ -67,6 +69,7 @@
 *   **Alt+T**: Toggle Texture Debug Details
 *   **Alt+N**: Toggle Multiplayer Debug Info
 *   **Alt+C**: Toggle Chunk Statistics (uniformity, LOD, mesh counts)
+*   **Alt+P**: Toggle Prop Debug (targeted prop, alpha/fade info)
 
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)

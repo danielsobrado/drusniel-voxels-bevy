@@ -1,6 +1,20 @@
-use super::{foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition, PropType};
+use super::persistence::{
+    GroundContactData, PersistedProp, PropManifest, PropPersistenceState, PropPlacementData,
+};
+use super::placement::{
+    calculate_prop_rotation, quat_to_euler_degrees, seeded_random, PlacementConfig,
+    TerrainAnalyzer,
+};
+use super::{
+    foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition,
+    PropType,
+};
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::player::Player;
+use crate::props::persistence::{
+    load_chunk_props_if_exists, load_manifest, save_chunk_and_update_manifest, save_manifest,
+    saved_props_exist,
+};
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
@@ -14,6 +28,9 @@ const ROCK_REGION_CELL_SIZE: i32 = 48;
 const MAX_BUILDING_SLOPE: f32 = 0.45;
 const BUILDING_SEARCH_RADIUS: i32 = 20;
 
+/// Size of a "prop chunk" in world units (for persistence)
+const PROP_CHUNK_SIZE: i32 = 64;
+
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
 
@@ -23,13 +40,15 @@ pub struct PropsDebugSpawned(pub bool);
 #[derive(Resource, Default)]
 pub struct PropsLandmarksSpawned(pub bool);
 
-/// Spawn props on terrain based on configuration
+/// Spawn props on terrain based on configuration.
+/// Uses persistence: loads from disk if available, otherwise generates and saves.
 pub fn spawn_props_on_terrain(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
     config: Res<PropConfig>,
     world: Res<VoxelWorld>,
     mut spawned: ResMut<PropsSpawned>,
+    mut persistence_state: ResMut<PropPersistenceState>,
 ) {
     if spawned.0 || !prop_assets.loaded {
         return;
@@ -41,25 +60,426 @@ pub fn spawn_props_on_terrain(
     }
 
     spawned.0 = true;
+
+    // Try to load manifest or create new one
+    let manifest = if saved_props_exist() {
+        match load_manifest() {
+            Ok(m) => {
+                info!("Loaded existing prop manifest");
+                m
+            }
+            Err(e) => {
+                warn!("Failed to load prop manifest: {}, regenerating props", e);
+                PropManifest::new(0)
+            }
+        }
+    } else {
+        info!("No saved props found, will generate new placements");
+        PropManifest::new(0)
+    };
+    persistence_state.manifest = Some(manifest);
+
     let generator = TerrainGenerator::<ValueNoise>::default();
+    let placement_config = PlacementConfig::default();
 
     let mut total = 0u32;
+    let start_time = std::time::Instant::now();
 
-    // Spawn each category
+    // Calculate how many prop chunks cover the world
+    let num_chunks_x = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
+    let num_chunks_z = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
+
+    // Process each prop chunk
+    for chunk_x in 0..num_chunks_x {
+        for chunk_z in 0..num_chunks_z {
+            let chunk_pos = IVec2::new(chunk_x, chunk_z);
+
+            // Try to load from persistence
+            if let Some(props) = load_chunk_props_if_exists(chunk_pos) {
+                let entities = spawn_props_from_data(
+                    &mut commands,
+                    &props,
+                    &prop_assets,
+                    chunk_pos,
+                );
+                total += entities.len() as u32;
+                persistence_state.loaded_chunks.insert(chunk_pos, entities);
+                persistence_state
+                    .chunk_prop_data
+                    .insert(chunk_pos, props);
+            } else {
+                // Generate props for this chunk
+                let props = generate_chunk_props(
+                    chunk_pos,
+                    &world,
+                    &generator,
+                    &config,
+                    &placement_config,
+                );
+
+                // Save to disk
+                if let Some(ref mut manifest) = persistence_state.manifest {
+                    if let Err(e) = save_chunk_and_update_manifest(chunk_pos, &props, manifest) {
+                        warn!("Failed to save chunk {:?} props: {}", chunk_pos, e);
+                    }
+                }
+
+                // Spawn entities
+                let entities = spawn_props_from_data(
+                    &mut commands,
+                    &props,
+                    &prop_assets,
+                    chunk_pos,
+                );
+                total += entities.len() as u32;
+                persistence_state.loaded_chunks.insert(chunk_pos, entities);
+                persistence_state.chunk_prop_data.insert(chunk_pos, props);
+            }
+        }
+    }
+
+    // Update manifest metadata
+    if let Some(ref mut manifest) = persistence_state.manifest {
+        manifest.metadata.total_props = total as usize;
+        manifest.metadata.placement_time_ms = start_time.elapsed().as_millis() as u64;
+
+        if let Err(e) = save_manifest(manifest) {
+            warn!("Failed to save prop manifest: {}", e);
+        }
+    }
+
+    info!(
+        "Spawned {} total props in {:?}",
+        total,
+        start_time.elapsed()
+    );
+}
+
+/// Generate props for a specific chunk
+fn generate_chunk_props(
+    chunk_pos: IVec2,
+    world: &VoxelWorld,
+    generator: &TerrainGenerator<ValueNoise>,
+    config: &PropConfig,
+    placement_config: &PlacementConfig,
+) -> Vec<PropPlacementData> {
+    let mut props = Vec::new();
+    let analyzer = TerrainAnalyzer::new(world);
+
+    let chunk_min_x = chunk_pos.x * PROP_CHUNK_SIZE;
+    let chunk_min_z = chunk_pos.y * PROP_CHUNK_SIZE;
+    let chunk_max_x = (chunk_min_x + PROP_CHUNK_SIZE).min(WORLD_SCAN_SIZE);
+    let chunk_max_z = (chunk_min_z + PROP_CHUNK_SIZE).min(WORLD_SCAN_SIZE);
+
+    // Track counts per prop type
+    let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+
+    // Generate each category
     for def in &config.props.trees {
-        total += spawn_category(&mut commands, &prop_assets, &world, &generator, def, PropType::Tree);
+        generate_category_props(
+            &mut props,
+            &mut counts,
+            def,
+            PropType::Tree,
+            chunk_min_x,
+            chunk_min_z,
+            chunk_max_x,
+            chunk_max_z,
+            world,
+            generator,
+            &analyzer,
+            placement_config,
+        );
     }
     for def in &config.props.rocks {
-        total += spawn_category(&mut commands, &prop_assets, &world, &generator, def, PropType::Rock);
+        generate_category_props(
+            &mut props,
+            &mut counts,
+            def,
+            PropType::Rock,
+            chunk_min_x,
+            chunk_min_z,
+            chunk_max_x,
+            chunk_max_z,
+            world,
+            generator,
+            &analyzer,
+            placement_config,
+        );
     }
     for def in &config.props.bushes {
-        total += spawn_category(&mut commands, &prop_assets, &world, &generator, def, PropType::Bush);
+        generate_category_props(
+            &mut props,
+            &mut counts,
+            def,
+            PropType::Bush,
+            chunk_min_x,
+            chunk_min_z,
+            chunk_max_x,
+            chunk_max_z,
+            world,
+            generator,
+            &analyzer,
+            placement_config,
+        );
     }
     for def in &config.props.flowers {
-        total += spawn_category(&mut commands, &prop_assets, &world, &generator, def, PropType::Flower);
+        generate_category_props(
+            &mut props,
+            &mut counts,
+            def,
+            PropType::Flower,
+            chunk_min_x,
+            chunk_min_z,
+            chunk_max_x,
+            chunk_max_z,
+            world,
+            generator,
+            &analyzer,
+            placement_config,
+        );
     }
 
-    info!("Spawned {} total props", total);
+    props
+}
+
+/// Generate props for a category within chunk bounds
+#[allow(clippy::too_many_arguments)]
+fn generate_category_props(
+    props: &mut Vec<PropPlacementData>,
+    counts: &mut std::collections::HashMap<String, u32>,
+    def: &PropDefinition,
+    prop_type: PropType,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    _world: &VoxelWorld,
+    generator: &TerrainGenerator<ValueNoise>,
+    analyzer: &TerrainAnalyzer,
+    placement_config: &PlacementConfig,
+) {
+    let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
+    let current_count = counts.get(&def.id).copied().unwrap_or(0);
+    if current_count >= max_count {
+        return;
+    }
+
+    let is_tree = prop_type == PropType::Tree;
+    let cell_size = if is_tree { TREE_CELL_SIZE } else { 1 };
+
+    for x in min_x..max_x {
+        for z in min_z..max_z {
+            let count = counts.get(&def.id).copied().unwrap_or(0);
+            if count >= max_count {
+                return;
+            }
+
+            let world_x = x;
+            let world_z = z;
+
+            // Tree grid-based placement
+            if is_tree {
+                let cell_x = world_x / cell_size;
+                let cell_z = world_z / cell_size;
+                let cell_hash = deterministic_hash(cell_x, cell_z, &def.id);
+                if cell_hash > def.density {
+                    continue;
+                }
+                let jitter_x = deterministic_hash(cell_x * 31, cell_z * 17, &def.id);
+                let jitter_z = deterministic_hash(cell_x * 47, cell_z * 23, &def.id);
+                let offset_x = (jitter_x * (cell_size as f32 * 0.9)) as i32;
+                let offset_z = (jitter_z * (cell_size as f32 * 0.9)) as i32;
+                let target_x = (cell_x * cell_size + offset_x).min(WORLD_SCAN_SIZE - 1);
+                let target_z = (cell_z * cell_size + offset_z).min(WORLD_SCAN_SIZE - 1);
+                if world_x != target_x || world_z != target_z {
+                    continue;
+                }
+            } else {
+                let mut density = def.density;
+                if prop_type == PropType::Rock {
+                    let biome = generator.get_biome(world_x, world_z);
+                    let surface_hint = analyzer.find_column_height(world_x, world_z);
+                    let near_water = surface_hint.map(|y| y <= WATER_LEVEL + 2).unwrap_or(false);
+                    let (region_boost, palette_boost) =
+                        rock_region_modifiers(world_x, world_z, biome, &def.id, near_water);
+                    density *= region_boost * palette_boost;
+                }
+
+                let hash = deterministic_hash(world_x, world_z, &def.id);
+                if hash > density {
+                    continue;
+                }
+            }
+
+            // Use multi-sample placement for precise positioning
+            let hash = deterministic_hash(world_x, world_z, &def.id);
+            let offset_x = fract(hash * 17.0) - 0.5;
+            let offset_z = fract(hash * 23.0) - 0.5;
+            let world_xf = world_x as f32 + 0.5 + offset_x * 0.8;
+            let world_zf = world_z as f32 + 0.5 + offset_z * 0.8;
+
+            // Multi-sample terrain analysis
+            let footprint = prop_footprint(prop_type, &def.id);
+            let Some(sample_result) = analyzer.multi_sample_placement(
+                world_xf,
+                world_zf,
+                footprint.x * placement_config.footprint_scale,
+                footprint.y * placement_config.footprint_scale,
+            ) else {
+                continue;
+            };
+
+            // Validate placement
+            if sample_result.position.y <= WATER_LEVEL as f32 {
+                continue;
+            }
+
+            if !can_spawn_on(sample_result.voxel_type, &def.spawn_on) {
+                continue;
+            }
+
+            let slope = sample_result.normal.y.acos();
+            if slope < def.min_slope || slope > def.max_slope {
+                continue;
+            }
+
+            // Height variance check
+            if sample_result.height_variance > placement_config.max_height_variance {
+                continue;
+            }
+
+            // Calculate transform with proper slope alignment
+            let placement_seed = hash_to_seed(world_x, world_z, &def.id);
+            let scale = prop_scale(
+                def.scale_range[0],
+                def.scale_range[1],
+                def.scale_jitter,
+                &def.id,
+                prop_type,
+                hash,
+                world_x,
+                world_z,
+            );
+
+            let yaw = fract(hash * 13.0) * std::f32::consts::TAU;
+            let tilt_x = (seeded_random(placement_seed, 1) - 0.5)
+                * placement_config.max_random_tilt.to_radians();
+            let tilt_z = (seeded_random(placement_seed, 2) - 0.5)
+                * placement_config.max_random_tilt.to_radians();
+
+            let slope_strength = prop_slope_align_strength(prop_type, &def.id);
+            let rotation = calculate_prop_rotation(
+                sample_result.normal,
+                slope_strength,
+                yaw,
+                tilt_x,
+                tilt_z,
+            );
+
+            // Apply ground sink
+            let sink = prop_ground_sink(&def.id, prop_type, scale);
+            let position = Vec3::new(
+                sample_result.position.x,
+                (sample_result.position.y + def.y_offset - sink).max(sample_result.position.y - 0.4),
+                sample_result.position.z,
+            );
+
+            // Create placement data
+            let mut placement = PropPlacementData::new(
+                def.id.clone(),
+                prop_type,
+                position,
+                quat_to_euler_degrees(rotation),
+                Vec3::splat(scale),
+                placement_seed,
+            );
+
+            placement.ground_contact = GroundContactData::new(
+                sample_result.voxel_type,
+                sample_result.normal.y.acos().to_degrees(),
+                sample_result.normal,
+            );
+            placement.validated = true;
+
+            props.push(placement);
+            *counts.entry(def.id.clone()).or_insert(0) += 1;
+        }
+    }
+}
+
+/// Spawn entities from persisted prop data
+fn spawn_props_from_data(
+    commands: &mut Commands,
+    props: &[PropPlacementData],
+    assets: &PropAssets,
+    chunk_pos: IVec2,
+) -> Vec<Entity> {
+    props
+        .iter()
+        .filter_map(|prop| {
+            let scene_handle = assets.scenes.get(&prop.id)?;
+
+            let transform = prop.to_transform();
+            let prop_type: PropType = prop.prop_type.into();
+
+            let mut entity = commands.spawn((
+                SceneRoot(scene_handle.clone()),
+                transform.clone(),
+                Prop {
+                    id: prop.id.clone(),
+                    prop_type,
+                },
+                PersistedProp {
+                    chunk_pos,
+                    placement_seed: prop.placement_seed,
+                },
+            ));
+
+            if should_apply_grass_wind(&prop.id, prop_type) {
+                let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                entity.insert(GrassPropWind::new(&transform, hash));
+            }
+
+            Some(entity.id())
+        })
+        .collect()
+}
+
+/// Get the footprint size for a prop type (for multi-sample placement)
+fn prop_footprint(prop_type: PropType, id: &str) -> Vec2 {
+    let id_lower = id.to_lowercase();
+    match prop_type {
+        PropType::Tree => Vec2::new(1.5, 1.5),
+        PropType::Rock => {
+            if id_lower.contains("boulder") || id_lower.contains("large") {
+                Vec2::new(2.0, 2.0)
+            } else if id_lower.contains("pebble") {
+                Vec2::new(0.3, 0.3)
+            } else {
+                Vec2::new(1.0, 1.0)
+            }
+        }
+        PropType::Bush => Vec2::new(0.8, 0.8),
+        PropType::Flower => Vec2::new(0.4, 0.4),
+    }
+}
+
+/// Get slope alignment strength for a prop type
+fn prop_slope_align_strength(prop_type: PropType, id: &str) -> f32 {
+    let id_lower = id.to_lowercase();
+    match prop_type {
+        PropType::Tree => 0.0,   // Trees stay upright
+        PropType::Rock => 0.7,  // Rocks follow terrain somewhat
+        PropType::Bush => {
+            if id_lower.contains("grass") {
+                0.3 // Grass follows terrain slightly
+            } else {
+                0.5
+            }
+        }
+        PropType::Flower => 0.2, // Flowers mostly upright
+    }
 }
 
 /// Spawn a small ring of custom props near the player for quick verification.
@@ -97,17 +517,21 @@ pub fn spawn_debug_custom_props_near_player(
         ("custom_dandelion", PropType::Flower, Vec2::new(-4.0, -4.0)),
     ];
 
+    let analyzer = TerrainAnalyzer::new(&world);
+
     for (id, prop_type, offset) in placements {
         let Some(scene_handle) = prop_assets.scenes.get(id) else {
             warn!("Prop asset '{}' not found in registry (debug spawn)", id);
             continue;
         };
 
-        let world_x = (center.x + offset.x).round() as i32;
-        let world_z = (center.z + offset.y).round() as i32;
-        let Some((surface_y, _voxel_type, _slope)) = find_surface(&world, world_x, world_z) else {
+        let world_xf = center.x + offset.x;
+        let world_zf = center.z + offset.y;
+
+        let analysis = analyzer.analyze(world_xf, world_zf);
+        if !analysis.valid {
             continue;
-        };
+        }
 
         let (scale_min, scale_max, scale_jitter, y_offset) = if let Some(def) = find_def(config.as_ref(), id) {
             (def.scale_range[0], def.scale_range[1], def.scale_jitter, def.y_offset)
@@ -115,20 +539,13 @@ pub fn spawn_debug_custom_props_near_player(
             (0.8, 1.2, 0.0, 0.0)
         };
 
+        let world_x = world_xf.round() as i32;
+        let world_z = world_zf.round() as i32;
         let hash = deterministic_hash(world_x, world_z, id);
         let scale = prop_scale(scale_min, scale_max, scale_jitter, id, prop_type, hash, world_x, world_z);
         let rotation = fract(hash * 13.0) * std::f32::consts::TAU;
 
-        let world_xf = world_x as f32 + 0.5;
-        let world_zf = world_z as f32 + 0.5;
-        let surface_height = sample_smooth_surface_height(&world, world_xf, world_zf)
-            .unwrap_or(surface_y as f32 + 0.5);
-
-        let position = Vec3::new(
-            world_xf,
-            surface_height + y_offset,
-            world_zf,
-        );
+        let position = Vec3::new(world_xf, analysis.height + y_offset, world_zf);
 
         let transform = Transform::from_translation(position)
             .with_rotation(Quat::from_rotation_y(rotation))
@@ -223,6 +640,7 @@ pub fn spawn_landmark_buildings(
         ));
     }
 
+    let analyzer = TerrainAnalyzer::new(&world);
     let mut spawned_count = 0;
 
     landmarks.positions.clear();
@@ -250,7 +668,8 @@ pub fn spawn_landmark_buildings(
 
         let world_xf = world_x as f32 + 0.5;
         let world_zf = world_z as f32 + 0.5;
-        let surface_height = sample_smooth_surface_height(&world, world_xf, world_zf)
+        let surface_height = analyzer
+            .sample_smooth_height(world_xf, world_zf)
             .unwrap_or(surface_y as f32 + 0.5);
         let position = Vec3::new(world_xf, surface_height + y_offset, world_zf);
 
@@ -275,139 +694,6 @@ pub fn spawn_landmark_buildings(
 
 fn rotation_from_index(index: usize) -> f32 {
     (index as f32) * 0.7 % std::f32::consts::TAU
-}
-
-fn spawn_category(
-    commands: &mut Commands,
-    assets: &PropAssets,
-    world: &VoxelWorld,
-    generator: &TerrainGenerator<ValueNoise>,
-    def: &PropDefinition,
-    prop_type: PropType,
-) -> u32 {
-    let Some(scene_handle) = assets.scenes.get(&def.id) else {
-        warn!("Prop asset '{}' not found in registry", def.id);
-        return 0;
-    };
-
-    let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
-    let mut count = 0u32;
-
-    let is_tree = prop_type == PropType::Tree;
-    let cell_size = if is_tree { TREE_CELL_SIZE } else { 1 };
-
-    for x in 0..WORLD_SCAN_SIZE {
-        for z in 0..WORLD_SCAN_SIZE {
-            if count >= max_count {
-                break;
-            }
-
-            let world_x = x;
-            let world_z = z;
-
-            if is_tree {
-                // One candidate per grid cell with jitter, to keep trees separated.
-                let cell_x = world_x / cell_size;
-                let cell_z = world_z / cell_size;
-                let cell_hash = deterministic_hash(cell_x, cell_z, &def.id);
-                if cell_hash > def.density {
-                    continue;
-                }
-                let jitter_x = deterministic_hash(cell_x * 31, cell_z * 17, &def.id);
-                let jitter_z = deterministic_hash(cell_x * 47, cell_z * 23, &def.id);
-                let offset_x = (jitter_x * (cell_size as f32 * 0.9)) as i32;
-                let offset_z = (jitter_z * (cell_size as f32 * 0.9)) as i32;
-                let target_x = (cell_x * cell_size + offset_x).min(WORLD_SCAN_SIZE - 1);
-                let target_z = (cell_z * cell_size + offset_z).min(WORLD_SCAN_SIZE - 1);
-                if world_x != target_x || world_z != target_z {
-                    continue;
-                }
-            } else {
-                let mut density = def.density;
-                if prop_type == PropType::Rock {
-                    let biome = generator.get_biome(world_x, world_z);
-                    let surface_hint = find_column_height(world, world_x, world_z);
-                    let near_water = surface_hint.map(|y| y <= WATER_LEVEL + 2).unwrap_or(false);
-                    let (region_boost, palette_boost) =
-                        rock_region_modifiers(world_x, world_z, biome, &def.id, near_water);
-                    density *= region_boost * palette_boost;
-                }
-
-                // Density check with deterministic hash
-                let hash = deterministic_hash(world_x, world_z, &def.id);
-                if hash > density {
-                    continue;
-                }
-            }
-
-            // Find surface and validate spawn conditions
-            let Some((surface_y, voxel_type, slope)) = find_surface(world, world_x, world_z) else {
-                continue;
-            };
-
-            // Prevent underwater vegetation
-            if surface_y <= WATER_LEVEL {
-                continue;
-            }
-
-            if !can_spawn_on(voxel_type, &def.spawn_on) {
-                continue;
-            }
-
-            if slope < def.min_slope || slope > def.max_slope {
-                continue;
-            }
-
-            // Calculate transform with variation
-            let hash = deterministic_hash(world_x, world_z, &def.id);
-            let scale = prop_scale(
-                def.scale_range[0],
-                def.scale_range[1],
-                def.scale_jitter,
-                &def.id,
-                prop_type,
-                hash,
-                world_x,
-                world_z,
-            );
-            let rotation = fract(hash * 13.0) * std::f32::consts::TAU;
-            let offset_x = fract(hash * 17.0) - 0.5;
-            let offset_z = fract(hash * 23.0) - 0.5;
-
-            let world_xf = world_x as f32 + 0.5 + offset_x * 0.8;
-            let world_zf = world_z as f32 + 0.5 + offset_z * 0.8;
-            let surface_height = sample_smooth_surface_height(world, world_xf, world_zf)
-                .unwrap_or(surface_y as f32 + 0.5);
-
-            let base_y = surface_height + def.y_offset;
-            let sink = prop_ground_sink(&def.id, prop_type, scale);
-            let grounded_y = (base_y - sink).max(surface_height - 0.4);
-            let position = Vec3::new(world_xf, grounded_y, world_zf);
-
-            let transform = Transform::from_translation(position)
-                .with_rotation(Quat::from_rotation_y(rotation))
-                .with_scale(Vec3::splat(scale));
-            let mut entity = commands.spawn((
-                SceneRoot(scene_handle.clone()),
-                transform.clone(),
-                Prop {
-                    id: def.id.clone(),
-                    prop_type,
-                },
-            ));
-
-            if should_apply_grass_wind(&def.id, prop_type) {
-                entity.insert(GrassPropWind::new(&transform, hash));
-            }
-
-            count += 1;
-        }
-    }
-
-    if count > 0 {
-        info!("Spawned {} x {}", count, def.id);
-    }
-    count
 }
 
 fn find_def<'a>(config: &'a PropConfig, id: &str) -> Option<&'a PropDefinition> {
@@ -507,45 +793,16 @@ fn find_surface_near(
 
 /// Calculate terrain slope from height differences
 fn calculate_slope(world: &VoxelWorld, x: i32, y: i32, z: i32) -> f32 {
+    let analyzer = TerrainAnalyzer::new(world);
     let mut max_diff = 0i32;
 
     for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        if let Some(ny) = find_column_height(world, x + dx, z + dz) {
+        if let Some(ny) = analyzer.find_column_height(x + dx, z + dz) {
             max_diff = max_diff.max((y - ny).abs());
         }
     }
 
     (max_diff as f32 / 4.0).clamp(0.0, 1.0)
-}
-
-fn find_column_height(world: &VoxelWorld, x: i32, z: i32) -> Option<i32> {
-    for y in (0..MAX_SCAN_HEIGHT).rev() {
-        if let Some(v) = world.get_voxel(IVec3::new(x, y, z)) {
-            if v.is_solid() && !v.is_liquid() {
-                return Some(y);
-            }
-        }
-    }
-    None
-}
-
-fn sample_smooth_surface_height(world: &VoxelWorld, world_x: f32, world_z: f32) -> Option<f32> {
-    let x0 = world_x.floor() as i32;
-    let z0 = world_z.floor() as i32;
-    let x1 = x0 + 1;
-    let z1 = z0 + 1;
-
-    let fx = world_x - x0 as f32;
-    let fz = world_z - z0 as f32;
-
-    let h00 = find_column_height(world, x0, z0)? as f32 + 0.5;
-    let h10 = find_column_height(world, x1, z0)? as f32 + 0.5;
-    let h01 = find_column_height(world, x0, z1)? as f32 + 0.5;
-    let h11 = find_column_height(world, x1, z1)? as f32 + 0.5;
-
-    let h0 = lerp(h00, h10, fx);
-    let h1 = lerp(h01, h11, fx);
-    Some(lerp(h0, h1, fz))
 }
 
 /// Check if voxel type is in allowed spawn list
@@ -559,16 +816,24 @@ fn can_spawn_on(voxel: VoxelType, allowed: &[String]) -> bool {
 
 fn prop_ground_sink(id: &str, prop_type: PropType, scale: f32) -> f32 {
     let id_lower = id.to_lowercase();
-    
+
     // Determine base sink factor based on type and id
     let factor = if prop_type == PropType::Rock {
-        if id_lower.contains("pebble") { 0.18 }
-        else if id_lower.contains("large") || id_lower.contains("boulder") { 0.55 }
-        else if id_lower.contains("medium") { 0.45 }
-        else if id_lower.contains("small") { 0.35 }
-        else if id_lower.contains("flat") { 0.25 }
-        else if id_lower.contains("cluster") { 0.3 }
-        else { 0.4 }
+        if id_lower.contains("pebble") {
+            0.18
+        } else if id_lower.contains("large") || id_lower.contains("boulder") {
+            0.55
+        } else if id_lower.contains("medium") {
+            0.45
+        } else if id_lower.contains("small") {
+            0.35
+        } else if id_lower.contains("flat") {
+            0.25
+        } else if id_lower.contains("cluster") {
+            0.3
+        } else {
+            0.4
+        }
     } else if prop_type == PropType::Tree {
         0.2 // Trees usually have roots/trunk base to hide
     } else {
@@ -627,6 +892,16 @@ fn deterministic_hash(x: i32, z: i32, id: &str) -> f32 {
     let n = (n ^ (n >> 13)).wrapping_mul(1274126177);
     let n = n ^ (n >> 16);
     (n as u32 as f32) / (u32::MAX as f32)
+}
+
+/// Convert hash inputs to a u64 seed
+fn hash_to_seed(x: i32, z: i32, id: &str) -> u64 {
+    let id_hash: i32 = id.bytes().fold(0i32, |acc, b| acc.wrapping_add(b as i32));
+    let n = (x as i64)
+        .wrapping_mul(374761393)
+        .wrapping_add((z as i64).wrapping_mul(668265263))
+        .wrapping_add((id_hash as i64).wrapping_mul(1274126177));
+    n as u64
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

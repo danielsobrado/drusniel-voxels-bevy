@@ -90,7 +90,7 @@ fn debug_settings_ui(
             ui.add(egui::Slider::new(&mut prop_fade.near_fade_start, 0.0..=5.0).text("Fade Start"));
             ui.add(egui::Slider::new(&mut prop_fade.near_fade_end, 0.0..=8.0).text("Fade End"));
             ui.add(egui::Slider::new(&mut prop_fade.near_fade_min_alpha, 0.0..=1.0).text("Min Alpha"));
-            ui.add(egui::Slider::new(&mut prop_fade.max_update_distance, 1.0..=8.0).text("Max Distance (cap 4)"));
+            ui.add(egui::Slider::new(&mut prop_fade.max_update_distance, 1.0..=15.0).text("Max Distance (cap 15)"));
             ui.add(egui::Slider::new(&mut prop_fade.max_distance_scale, 0.5..=4.0).text("Max Distance Scale"));
             ui.checkbox(&mut prop_fade.front_only, "Front Only");
             ui.add(egui::Slider::new(&mut prop_fade.front_cone_cos, 0.0..=1.0).text("Front Cone (cos)"));

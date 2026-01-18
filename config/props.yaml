@@ -602,6 +602,15 @@ props:
       max_slope: 0.7
       max_count: 1200
 
+# Prop persistence configuration
+persistence:
+  # Enable/disable prop persistence (saves placements to disk)
+  enabled: true
+  # Directory for save files
+  save_directory: "saves/props"
+  # Use pretty-printed JSON (slower but readable)
+  pretty_json: true
+
 # Material style overrides for consistent look
 style:
   # Boost color saturation (Valheim has vibrant colors)

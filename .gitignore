@@ -35,3 +35,4 @@ v0.3_grass_material.rs
 v0.3_vegetation_mod.rs
 *.txt
 assets/models/plants/custom/*.glb
+saves/

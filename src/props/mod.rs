@@ -1,11 +1,18 @@
+pub mod foliage;
 pub mod loader;
 pub mod materials;
+pub mod persistence;
+pub mod placement;
 pub mod spawner;
-pub mod foliage;
 
 use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
+
+use persistence::{
+    delete_all_props, save_chunk_and_update_manifest, PropEditState, PropPersistenceState,
+};
+use placement::TerrainAnalyzer;
 
 pub struct PropsPlugin;
 
@@ -23,6 +30,11 @@ impl Plugin for PropsPlugin {
             .init_resource::<foliage::FoliageFadeCandidates>()
             .init_resource::<foliage::GrassPropWindSettings>()
             .init_resource::<foliage::GrassPropWindActive>()
+            // Persistence resources
+            .init_resource::<PropPersistenceState>()
+            .init_resource::<PropEditState>()
+            .add_message::<RegenerateDirtyChunksEvent>()
+            .add_message::<ClearPropCacheEvent>()
             .add_systems(Startup, loader::load_prop_config)
             .add_systems(
                 Update,
@@ -46,6 +58,14 @@ impl Plugin for PropsPlugin {
                         .after(foliage::index_foliage_fade_entities),
                     foliage::update_grass_prop_wind
                         .after(foliage::index_grass_prop_wind_entities),
+                ),
+            )
+            // Persistence systems
+            .add_systems(
+                Update,
+                (
+                    regenerate_dirty_chunks,
+                    handle_clear_prop_cache,
                 ),
             );
     }
@@ -86,6 +106,44 @@ pub struct PropConfig {
     pub props: PropCategories,
     #[serde(default)]
     pub style: StyleConfig,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
+}
+
+/// Configuration for prop persistence
+#[derive(Deserialize, Clone, Debug)]
+pub struct PersistenceConfig {
+    /// Whether persistence is enabled
+    #[serde(default = "default_persistence_enabled")]
+    pub enabled: bool,
+    /// Directory for save files
+    #[serde(default = "default_save_directory")]
+    pub save_directory: String,
+    /// Whether to use pretty-printed JSON
+    #[serde(default = "default_pretty_json")]
+    pub pretty_json: bool,
+}
+
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            save_directory: "saves/props".to_string(),
+            pretty_json: true,
+        }
+    }
+}
+
+fn default_persistence_enabled() -> bool {
+    true
+}
+
+fn default_save_directory() -> String {
+    "saves/props".to_string()
+}
+
+fn default_pretty_json() -> bool {
+    true
 }
 
 #[derive(Default, Deserialize, Clone)]
@@ -224,4 +282,345 @@ fn default_custom_disable_normal_maps() -> bool {
 
 fn default_custom_disable_occlusion_maps() -> bool {
     true
+}
+
+// Messages for prop persistence
+
+/// Message to trigger regeneration of dirty chunks
+#[derive(bevy::ecs::message::Message)]
+pub struct RegenerateDirtyChunksEvent;
+
+/// Message to clear all persisted prop data
+#[derive(bevy::ecs::message::Message)]
+pub struct ClearPropCacheEvent;
+
+/// System to regenerate props in dirty chunks
+fn regenerate_dirty_chunks(
+    mut commands: Commands,
+    mut events: MessageReader<RegenerateDirtyChunksEvent>,
+    mut state: ResMut<PropPersistenceState>,
+    mut edit_state: ResMut<PropEditState>,
+    world: Res<crate::voxel::world::VoxelWorld>,
+    config: Res<PropConfig>,
+    assets: Res<PropAssets>,
+) {
+    // Check if we have any events
+    if events.read().next().is_none() {
+        return;
+    }
+
+    if !assets.loaded {
+        return;
+    }
+
+    // Merge terrain-modified chunks into dirty set
+    for chunk_pos in edit_state.terrain_modified_chunks.drain() {
+        state.mark_dirty_with_neighbors(chunk_pos);
+    }
+
+    if state.dirty_chunks.is_empty() {
+        return;
+    }
+
+    let dirty: Vec<IVec2> = state.take_dirty_chunks();
+    info!("Regenerating {} dirty prop chunks", dirty.len());
+
+    let generator = crate::voxel::terrain::TerrainGenerator::<crate::voxel::terrain::ValueNoise>::default();
+    let placement_config = placement::PlacementConfig::default();
+
+    for chunk_pos in dirty {
+        // Despawn existing props in this chunk
+        if let Some(entities) = state.loaded_chunks.remove(&chunk_pos) {
+            for entity in entities {
+                commands.entity(entity).despawn();
+            }
+        }
+
+        // Regenerate props for this chunk
+        let props = regenerate_chunk_props(
+            chunk_pos,
+            &world,
+            &generator,
+            &config,
+            &placement_config,
+        );
+
+        // Save to disk
+        if let Some(ref mut manifest) = state.manifest {
+            if let Err(e) = save_chunk_and_update_manifest(chunk_pos, &props, manifest) {
+                warn!("Failed to save regenerated chunk {:?}: {}", chunk_pos, e);
+            }
+        }
+
+        // Spawn new entities
+        let entities = spawn_props_from_placement_data(
+            &mut commands,
+            &props,
+            &assets,
+            chunk_pos,
+        );
+        state.loaded_chunks.insert(chunk_pos, entities);
+        state.chunk_prop_data.insert(chunk_pos, props);
+    }
+}
+
+/// Regenerate props for a chunk (used by dirty chunk system)
+fn regenerate_chunk_props(
+    chunk_pos: IVec2,
+    world: &crate::voxel::world::VoxelWorld,
+    _generator: &crate::voxel::terrain::TerrainGenerator<crate::voxel::terrain::ValueNoise>,
+    config: &PropConfig,
+    placement_config: &placement::PlacementConfig,
+) -> Vec<persistence::PropPlacementData> {
+    use crate::constants::WATER_LEVEL;
+
+    const PROP_CHUNK_SIZE: i32 = 64;
+    const WORLD_SCAN_SIZE: i32 = 512;
+    const DEFAULT_MAX_PER_TYPE: u32 = 500;
+
+    let mut props = Vec::new();
+    let analyzer = TerrainAnalyzer::new(world);
+
+    let chunk_min_x = chunk_pos.x * PROP_CHUNK_SIZE;
+    let chunk_min_z = chunk_pos.y * PROP_CHUNK_SIZE;
+    let chunk_max_x = (chunk_min_x + PROP_CHUNK_SIZE).min(WORLD_SCAN_SIZE);
+    let chunk_max_z = (chunk_min_z + PROP_CHUNK_SIZE).min(WORLD_SCAN_SIZE);
+
+    let mut counts: HashMap<String, u32> = HashMap::new();
+
+    // Helper to check spawn conditions
+    let mut try_spawn = |def: &PropDefinition, prop_type: PropType, x: i32, z: i32| -> Option<persistence::PropPlacementData> {
+        let count = counts.get(&def.id).copied().unwrap_or(0);
+        let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
+        if count >= max_count {
+            return None;
+        }
+
+        let hash = deterministic_hash(x, z, &def.id);
+        let offset_x = fract(hash * 17.0) - 0.5;
+        let offset_z = fract(hash * 23.0) - 0.5;
+        let world_xf = x as f32 + 0.5 + offset_x * 0.8;
+        let world_zf = z as f32 + 0.5 + offset_z * 0.8;
+
+        let footprint = match prop_type {
+            PropType::Tree => bevy::math::Vec2::new(1.5, 1.5),
+            PropType::Rock => bevy::math::Vec2::new(1.0, 1.0),
+            PropType::Bush => bevy::math::Vec2::new(0.8, 0.8),
+            PropType::Flower => bevy::math::Vec2::new(0.4, 0.4),
+        };
+
+        let sample_result = analyzer.multi_sample_placement(
+            world_xf,
+            world_zf,
+            footprint.x * placement_config.footprint_scale,
+            footprint.y * placement_config.footprint_scale,
+        )?;
+
+        if sample_result.position.y <= WATER_LEVEL as f32 {
+            return None;
+        }
+
+        if !can_spawn_on(sample_result.voxel_type, &def.spawn_on) {
+            return None;
+        }
+
+        let slope = sample_result.normal.y.acos();
+        if slope < def.min_slope || slope > def.max_slope {
+            return None;
+        }
+
+        if sample_result.height_variance > placement_config.max_height_variance {
+            return None;
+        }
+
+        let placement_seed = hash_to_seed(x, z, &def.id);
+        let scale = lerp(def.scale_range[0], def.scale_range[1], fract(hash * 7.0));
+        let yaw = fract(hash * 13.0) * std::f32::consts::TAU;
+
+        let slope_strength = match prop_type {
+            PropType::Tree => 0.0,
+            PropType::Rock => 0.7,
+            PropType::Bush => 0.3,
+            PropType::Flower => 0.2,
+        };
+
+        let tilt_x = (placement::seeded_random(placement_seed, 1) - 0.5) * placement_config.max_random_tilt.to_radians();
+        let tilt_z = (placement::seeded_random(placement_seed, 2) - 0.5) * placement_config.max_random_tilt.to_radians();
+
+        let rotation = placement::calculate_prop_rotation(
+            sample_result.normal,
+            slope_strength,
+            yaw,
+            tilt_x,
+            tilt_z,
+        );
+
+        let sink = scale * 0.15; // Default sink factor
+        let position = Vec3::new(
+            sample_result.position.x,
+            (sample_result.position.y + def.y_offset - sink).max(sample_result.position.y - 0.4),
+            sample_result.position.z,
+        );
+
+        let mut placement = persistence::PropPlacementData::new(
+            def.id.clone(),
+            prop_type,
+            position,
+            placement::quat_to_euler_degrees(rotation),
+            Vec3::splat(scale),
+            placement_seed,
+        );
+        placement.ground_contact = persistence::GroundContactData::new(
+            sample_result.voxel_type,
+            sample_result.normal.y.acos().to_degrees(),
+            sample_result.normal,
+        );
+        placement.validated = true;
+
+        *counts.entry(def.id.clone()).or_insert(0) += 1;
+        Some(placement)
+    };
+
+    // Process each position in the chunk
+    for x in chunk_min_x..chunk_max_x {
+        for z in chunk_min_z..chunk_max_z {
+            // Check each category
+            for def in &config.props.trees {
+                let hash = deterministic_hash(x, z, &def.id);
+                if hash <= def.density {
+                    if let Some(p) = try_spawn(def, PropType::Tree, x, z) {
+                        props.push(p);
+                    }
+                }
+            }
+            for def in &config.props.rocks {
+                let hash = deterministic_hash(x, z, &def.id);
+                if hash <= def.density {
+                    if let Some(p) = try_spawn(def, PropType::Rock, x, z) {
+                        props.push(p);
+                    }
+                }
+            }
+            for def in &config.props.bushes {
+                let hash = deterministic_hash(x, z, &def.id);
+                if hash <= def.density {
+                    if let Some(p) = try_spawn(def, PropType::Bush, x, z) {
+                        props.push(p);
+                    }
+                }
+            }
+            for def in &config.props.flowers {
+                let hash = deterministic_hash(x, z, &def.id);
+                if hash <= def.density {
+                    if let Some(p) = try_spawn(def, PropType::Flower, x, z) {
+                        props.push(p);
+                    }
+                }
+            }
+        }
+    }
+
+    props
+}
+
+/// Spawn entities from placement data
+fn spawn_props_from_placement_data(
+    commands: &mut Commands,
+    props: &[persistence::PropPlacementData],
+    assets: &PropAssets,
+    chunk_pos: IVec2,
+) -> Vec<Entity> {
+    props
+        .iter()
+        .filter_map(|prop| {
+            let scene_handle = assets.scenes.get(&prop.id)?;
+            let transform = prop.to_transform();
+            let prop_type: PropType = prop.prop_type.into();
+
+            let mut entity = commands.spawn((
+                SceneRoot(scene_handle.clone()),
+                transform.clone(),
+                Prop {
+                    id: prop.id.clone(),
+                    prop_type,
+                },
+                persistence::PersistedProp {
+                    chunk_pos,
+                    placement_seed: prop.placement_seed,
+                },
+            ));
+
+            if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
+                let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                entity.insert(foliage::GrassPropWind::new(&transform, hash));
+            }
+
+            Some(entity.id())
+        })
+        .collect()
+}
+
+/// Handle clearing the prop cache
+fn handle_clear_prop_cache(
+    mut events: MessageReader<ClearPropCacheEvent>,
+    mut state: ResMut<PropPersistenceState>,
+    mut spawned: ResMut<spawner::PropsSpawned>,
+) {
+    if events.read().next().is_none() {
+        return;
+    }
+
+    info!("Clearing prop cache...");
+
+    if let Err(e) = delete_all_props() {
+        warn!("Failed to delete prop cache: {}", e);
+        return;
+    }
+
+    // Reset state to trigger regeneration
+    state.manifest = None;
+    state.loaded_chunks.clear();
+    state.chunk_prop_data.clear();
+    state.dirty_chunks.clear();
+    spawned.0 = false;
+
+    info!("Prop cache cleared. Props will regenerate on next frame.");
+}
+
+// Helper functions for regeneration
+
+fn deterministic_hash(x: i32, z: i32, id: &str) -> f32 {
+    let id_hash: i32 = id.bytes().fold(0i32, |acc, b| acc.wrapping_add(b as i32));
+    let n = x
+        .wrapping_mul(374761393)
+        .wrapping_add(z.wrapping_mul(668265263))
+        .wrapping_add(id_hash.wrapping_mul(1274126177));
+    let n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+    let n = n ^ (n >> 16);
+    (n as u32 as f32) / (u32::MAX as f32)
+}
+
+fn hash_to_seed(x: i32, z: i32, id: &str) -> u64 {
+    let id_hash: i32 = id.bytes().fold(0i32, |acc, b| acc.wrapping_add(b as i32));
+    let n = (x as i64)
+        .wrapping_mul(374761393)
+        .wrapping_add((z as i64).wrapping_mul(668265263))
+        .wrapping_add((id_hash as i64).wrapping_mul(1274126177));
+    n as u64
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn fract(x: f32) -> f32 {
+    x - x.floor()
+}
+
+fn can_spawn_on(voxel: crate::voxel::types::VoxelType, allowed: &[String]) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    let voxel_name = format!("{:?}", voxel);
+    allowed.iter().any(|a| a.eq_ignore_ascii_case(&voxel_name))
 }
