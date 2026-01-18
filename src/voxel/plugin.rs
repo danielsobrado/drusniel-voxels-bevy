@@ -17,6 +17,7 @@ use crate::constants::{
     // LOD
     DEFAULT_HIGH_DETAIL_DISTANCE, DEFAULT_CULL_DISTANCE,
     INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
+    LOD_HYSTERESIS,
 };
 use crate::physics::NeedsCollider;
 use crate::rendering::capabilities::GraphicsCapabilities;
@@ -853,12 +854,58 @@ fn adjust_lod_for_integrated_gpu(
     *applied = true;
 }
 
+/// Calculates the target LOD level with hysteresis to prevent rapid switching.
+///
+/// Hysteresis means the threshold to switch FROM a level is different than TO it:
+/// - To switch from High → Low: must exceed high_detail_distance + hysteresis
+/// - To switch from Low → High: must be within high_detail_distance - hysteresis
+/// This prevents flip-flopping when camera hovers near a threshold.
+fn calculate_target_lod_with_hysteresis(
+    distance: f32,
+    current_lod: LodLevel,
+    settings: &LodSettings,
+) -> LodLevel {
+    match current_lod {
+        LodLevel::High => {
+            // Currently high detail - need to go PAST threshold to switch to low
+            if distance > settings.high_detail_distance + LOD_HYSTERESIS {
+                LodLevel::Low
+            } else {
+                LodLevel::High
+            }
+        }
+        LodLevel::Low => {
+            // Currently low detail - check both directions with hysteresis
+            if distance < settings.high_detail_distance - LOD_HYSTERESIS {
+                // Close enough to switch to high detail
+                LodLevel::High
+            } else if distance > settings.cull_distance + LOD_HYSTERESIS {
+                // Far enough to cull
+                LodLevel::Culled
+            } else {
+                // Stay at low detail
+                LodLevel::Low
+            }
+        }
+        LodLevel::Culled => {
+            // Currently culled - need to come INSIDE cull threshold to show
+            if distance < settings.cull_distance - LOD_HYSTERESIS {
+                LodLevel::Low
+            } else {
+                LodLevel::Culled
+            }
+        }
+    }
+}
+
 /// Updates the LOD level of each chunk based on distance from the camera.
 ///
 /// Chunks are assigned to one of three LOD levels:
 /// - `High`: Close to camera, uses full detail meshing
 /// - `Low`: Medium distance, uses simplified meshing
 /// - `Culled`: Far away, not rendered at all
+///
+/// Uses hysteresis to prevent rapid LOD switching when camera is near thresholds.
 fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
@@ -877,13 +924,9 @@ fn update_chunk_lod_system(
         let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = chunk_center.distance(camera_pos);
 
-        let target_lod = if distance <= lod_settings.high_detail_distance {
-            LodLevel::High
-        } else if distance <= lod_settings.cull_distance {
-            LodLevel::Low
-        } else {
-            LodLevel::Culled
-        };
+        // Use hysteresis-aware LOD calculation
+        let current_lod = chunk.lod_level();
+        let target_lod = calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings);
 
         if chunk.set_lod_level(target_lod) {
             lod_changed.push(*chunk_pos);
