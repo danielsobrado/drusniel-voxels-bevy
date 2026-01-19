@@ -1,7 +1,13 @@
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
+use bevy_water::water::material::{StandardWaterMaterial, WaterMaterial as BevyWaterMaterial};
+use bevy_water::WaterSettings;
 use std::path::Path;
 use crate::atmosphere::FogUniforms;
+use crate::constants::{
+    VOXEL_WATER_WAVE_AMPLITUDE_MULT, VOXEL_WATER_WAVE_UV_SCALE,
+    VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT,
+};
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingUniforms};
 use crate::rendering::capabilities::GraphicsCapabilities;
@@ -16,7 +22,8 @@ pub struct VoxelMaterial {
 
 #[derive(Resource)]
 pub struct WaterMaterial {
-    pub handle: Handle<StandardMaterial>,
+    pub near_handle: Handle<StandardWaterMaterial>,
+    pub far_handle: Handle<StandardMaterial>,
 }
 
 fn load_image_if_exists(asset_server: &AssetServer, asset_path: &str) -> Option<Handle<Image>> {
@@ -36,25 +43,96 @@ fn load_image_if_exists(asset_server: &AssetServer, asset_path: &str) -> Option<
 
 pub fn setup_water_material(
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut fancy_materials: ResMut<Assets<StandardWaterMaterial>>,
+    mut cheap_materials: ResMut<Assets<StandardMaterial>>,
+    water_settings: Option<Res<WaterSettings>>,
 ) {
-    // Water material - semi-transparent blue with proper depth handling
-    // Use a negative depth_bias so water renders behind terrain (positive biases render *closer*).
-    let water_handle = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.1, 0.4, 0.7, 0.6),
+    let settings = water_settings.as_deref().cloned().unwrap_or_default();
+    // Voxel water uses the same water shader as the ocean tiles for wave/foam effects.
+    // Base parameters match the v0.3 blue partial-alpha look.
+    let near_handle = fancy_materials.add(StandardWaterMaterial {
+        base: StandardMaterial {
+            base_color: Color::srgba(0.0, 0.3, 0.8, 0.8),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.02,
+            metallic: 0.0,
+            reflectance: 0.95,
+            clearcoat: 1.0,
+            clearcoat_perceptual_roughness: 0.04,
+            double_sided: true,
+            cull_mode: None,
+            depth_bias: 4.0,
+            ..default()
+        },
+        extension: BevyWaterMaterial {
+            amplitude: settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT,
+            clarity: settings.clarity * VOXEL_WATER_CLARITY_MULT,
+            deep_color: settings.deep_color,
+            shallow_color: settings.shallow_color,
+            edge_color: settings.shallow_color,
+            edge_scale: settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT,
+            coord_offset: Vec2::ZERO,
+            coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
+            quality: settings.water_quality.into(),
+            ..default()
+        },
+    });
+
+    let far_handle = cheap_materials.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.3, 0.8, 0.8),
         alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.02,  // Very smooth
+        perceptual_roughness: 0.04,
         metallic: 0.0,
-        reflectance: 0.9,            // High reflection
+        reflectance: 0.9,
+        clearcoat: 0.8,
+        clearcoat_perceptual_roughness: 0.06,
         double_sided: true,
         cull_mode: None,
-        depth_bias: -0.5,            // Reduce z-fighting (render behind terrain)
+        depth_bias: 4.0,
         ..default()
     });
 
     commands.insert_resource(WaterMaterial {
-        handle: water_handle,
+        near_handle,
+        far_handle,
     });
+}
+
+pub fn sync_voxel_water_material_overrides(
+    water_settings: Option<Res<WaterSettings>>,
+    water_material: Option<Res<WaterMaterial>>,
+    mut materials: ResMut<Assets<StandardWaterMaterial>>,
+) {
+    let (Some(settings), Some(water_material)) = (water_settings, water_material) else {
+        return;
+    };
+
+    if !settings.is_changed() {
+        return;
+    }
+
+    if let Some(mat) = materials.get_mut(&water_material.near_handle) {
+        mat.base.base_color = Color::srgba(0.0, 0.3, 0.8, 0.8);
+        mat.base.alpha_mode = settings.alpha_mode;
+        mat.base.perceptual_roughness = 0.02;
+        mat.base.metallic = 0.0;
+        mat.base.reflectance = 0.95;
+        mat.base.clearcoat = 1.0;
+        mat.base.clearcoat_perceptual_roughness = 0.04;
+        mat.base.double_sided = true;
+        mat.base.cull_mode = None;
+        mat.base.depth_bias = 4.0;
+
+        mat.extension.amplitude = settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT;
+        mat.extension.clarity = settings.clarity * VOXEL_WATER_CLARITY_MULT;
+        mat.extension.deep_color = settings.deep_color;
+        mat.extension.shallow_color = settings.shallow_color;
+        mat.extension.edge_color = settings.shallow_color;
+        mat.extension.edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
+        mat.extension.coord_offset = Vec2::ZERO;
+        mat.extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);
+        mat.extension.quality = settings.water_quality.into();
+    }
 }
 
 /// Ensure the atlas uses a repeat/mipmapped sampler so tiled terrain does not clamp or alias

@@ -217,6 +217,37 @@ pub const INTEGRATED_GPU_CULL_DISTANCE: f32 = 160.0;
 /// Camera must move this far past threshold before LOD changes.
 pub const LOD_HYSTERESIS: f32 = 10.0;
 
+/// Distance in world units where voxel water uses the fancy water shader.
+pub const WATER_FANCY_DISTANCE: f32 = 64.0;
+
+/// Hysteresis buffer for switching water materials near the threshold.
+pub const WATER_FANCY_HYSTERESIS: f32 = 8.0;
+
+/// Interval in seconds for updating water material LODs.
+pub const WATER_MATERIAL_UPDATE_INTERVAL: f32 = 0.25;
+
+/// Minimum water mesh triangle count before enabling the fancy shader.
+pub const WATER_FANCY_MIN_TRIANGLES: usize = 200;
+
+/// Minimum vertical water depth (voxels) before enabling the fancy shader.
+pub const WATER_FANCY_MIN_DEPTH: usize = 3;
+
+/// Wave amplitude multiplier for voxel water using the fancy shader.
+pub const VOXEL_WATER_WAVE_AMPLITUDE_MULT: f32 = 1.6;
+
+/// UV scale multiplier to increase visible wave detail on voxel water.
+pub const VOXEL_WATER_WAVE_UV_SCALE: f32 = 4.0;
+
+/// Water clarity multiplier to keep shallow voxel water visible.
+pub const VOXEL_WATER_CLARITY_MULT: f32 = 2.5;
+
+/// Edge scale multiplier for voxel water edge blending.
+pub const VOXEL_WATER_EDGE_SCALE_MULT: f32 = 0.6;
+
+/// Small vertical offset to reduce z-fighting between water and terrain.
+/// Zero offset keeps water at actual surface level; depth_bias handles z-fighting.
+pub const WATER_SURFACE_OFFSET: f32 = 0.0;
+
 // =============================================================================
 // LOD Mesh Grid Configurations
 // =============================================================================
@@ -284,13 +315,13 @@ pub const FALLBACK_BIND_GROUPS: u32 = 8;
 // =============================================================================
 
 /// Default player walking speed in units per second.
-pub const DEFAULT_WALK_SPEED: f32 = 6.0;
+pub const DEFAULT_WALK_SPEED: f32 = 8.0;
 
 /// Default player running speed in units per second.
-pub const DEFAULT_RUN_SPEED: f32 = 12.0;
+pub const DEFAULT_RUN_SPEED: f32 = 16.0;
 
 /// Default jump height in world units.
-pub const DEFAULT_JUMP_HEIGHT: f32 = 2.0;
+pub const DEFAULT_JUMP_HEIGHT: f32 = 4.0;
 
 /// Default float height for physics ground detection.
 pub const DEFAULT_FLOAT_HEIGHT: f32 = 1.5;

@@ -39,6 +39,15 @@ pub struct ChunkMesh {
     pub chunk_position: IVec3,
 }
 
+#[derive(Component)]
+pub struct WaterMesh;
+
+#[derive(Component, Copy, Clone, Debug)]
+pub struct WaterMeshDetail {
+    pub triangle_count: usize,
+    pub max_depth: usize,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum Face {
     Top,
@@ -831,20 +840,9 @@ fn get_voxel_for_water_sdf(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec
     }
 }
 
-/// Check if any of the 6 neighbors of a position contains water.
-fn has_water_neighbor(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: i32, py: i32, pz: i32) -> bool {
-    for (dx, dy, dz) in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)] {
-        let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px + dx, py + dy, pz + dz);
-        if voxel.is_liquid() {
-            return true;
-        }
-    }
-    false
-}
-
 /// Generate an SDF array for water surfaces.
-/// Only generates surfaces at water/air boundaries, not water/solid boundaries.
-/// Solid voxels adjacent to water are marked as "inside" to avoid hidden surfaces.
+/// Only generates surfaces at water/air boundaries.
+/// Solid voxels are treated as "outside" to prevent water from appearing on terrain.
 fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
@@ -859,18 +857,12 @@ fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
         let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px, py, pz);
 
         sdf[i] = if voxel.is_liquid() {
-            // Water is "inside"
+            // Water is "inside" - surface generated at water/air boundary
             -1.0
-        } else if voxel.is_solid() {
-            // Solid adjacent to water is also "inside" to avoid hidden water/solid surfaces
-            // Solid NOT adjacent to water stays "outside" to avoid false surfaces
-            if has_water_neighbor(chunk, world, chunk_origin, px, py, pz) {
-                -1.0
-            } else {
-                1.0
-            }
         } else {
-            // Air is "outside" - water surface generated at water/air boundary
+            // Both solid and air are "outside"
+            // This ensures water surface only appears at water/air boundaries,
+            // not at solid/air boundaries above water (which caused striping)
             1.0
         };
     }
@@ -1030,8 +1022,54 @@ fn compute_vertex_material_weights_lod(
     }
 }
 
-/// Generates water mesh from SDF using Surface Nets algorithm.
+/// Generates water mesh using blocky faces for clean edges.
+/// Uses exact voxel boundaries to prevent interpolation artifacts.
 fn generate_water_mesh(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    _chunk_center: Vec3,
+    _chunk_origin: IVec3,
+) -> MeshData {
+    let mut water_mesh = MeshData::new();
+
+    // Use blocky face generation for clean water edges
+    for x in 0..16u32 {
+        for y in 0..16u32 {
+            for z in 0..16u32 {
+                let local = UVec3::new(x, y, z);
+                let voxel = chunk.get(local);
+
+                if voxel.is_liquid() {
+                    // Generate water mesh faces (only visible against air)
+                    if is_water_face_visible(chunk, world, local, Face::Top) {
+                        add_face_no_ao(&mut water_mesh, local, Face::Top, voxel);
+                    }
+                    if is_water_face_visible(chunk, world, local, Face::Bottom) {
+                        add_face_no_ao(&mut water_mesh, local, Face::Bottom, voxel);
+                    }
+                    if is_water_face_visible(chunk, world, local, Face::North) {
+                        add_face_no_ao(&mut water_mesh, local, Face::North, voxel);
+                    }
+                    if is_water_face_visible(chunk, world, local, Face::South) {
+                        add_face_no_ao(&mut water_mesh, local, Face::South, voxel);
+                    }
+                    if is_water_face_visible(chunk, world, local, Face::East) {
+                        add_face_no_ao(&mut water_mesh, local, Face::East, voxel);
+                    }
+                    if is_water_face_visible(chunk, world, local, Face::West) {
+                        add_face_no_ao(&mut water_mesh, local, Face::West, voxel);
+                    }
+                }
+            }
+        }
+    }
+
+    water_mesh
+}
+
+/// Old Surface Nets water mesh generation (kept for reference).
+#[allow(dead_code)]
+fn generate_water_mesh_surface_nets(
     chunk: &Chunk,
     world: &VoxelWorld,
     chunk_center: Vec3,
@@ -1084,26 +1122,27 @@ fn generate_water_mesh(
 
         let start_idx = water_mesh.positions.len() as u32;
 
-        water_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
-        water_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
-        water_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+        let offset = Vec3::Y * crate::constants::WATER_SURFACE_OFFSET;
+        water_mesh.positions.push(scale_vertex_from_center(local0 + offset, chunk_center));
+        water_mesh.positions.push(scale_vertex_from_center(local1 + offset, chunk_center));
+        water_mesh.positions.push(scale_vertex_from_center(local2 + offset, chunk_center));
 
         water_mesh.normals.push(final_normal);
         water_mesh.normals.push(final_normal);
         water_mesh.normals.push(final_normal);
 
-        // World-space UVs for water
+        // World-space UVs for water to keep waves continuous across chunks.
         let get_uv = |p: Vec3| -> [f32; 2] {
             let world_pos = chunk_origin.as_vec3() + p * VOXEL_SIZE;
-            [world_pos.x * 0.1, world_pos.z * 0.1]
+            [world_pos.x, world_pos.z]
         };
         water_mesh.uvs.push(get_uv(local0));
         water_mesh.uvs.push(get_uv(local1));
         water_mesh.uvs.push(get_uv(local2));
 
-        water_mesh.colors.push([1.0, 1.0, 1.0, 0.7]);
-        water_mesh.colors.push([1.0, 1.0, 1.0, 0.7]);
-        water_mesh.colors.push([1.0, 1.0, 1.0, 0.7]);
+        water_mesh.colors.push([1.0, 1.0, 1.0, 1.0]);
+        water_mesh.colors.push([1.0, 1.0, 1.0, 1.0]);
+        water_mesh.colors.push([1.0, 1.0, 1.0, 1.0]);
 
         water_mesh.indices.push(start_idx);
         water_mesh.indices.push(start_idx + 1);

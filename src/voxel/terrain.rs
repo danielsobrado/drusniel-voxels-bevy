@@ -292,6 +292,54 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         (value / max_value) * cfg.amplitude
     }
 
+    /// Calculates river carving depth at a position.
+    /// Returns 0 if no river, or a positive depth value to subtract from terrain.
+    fn river_carve(&self, x: f32, z: f32) -> f32 {
+        let cfg = &self.config.rivers;
+        if !cfg.enabled {
+            return 0.0;
+        }
+
+        // Main river: use domain-warped noise for meandering
+        let warp_x = self.noise.sample_2d(x * 0.002 + 500.0, z * 0.002) * 50.0;
+        let warp_z = self.noise.sample_2d(x * 0.002, z * 0.002 + 500.0) * 50.0;
+
+        let warped_x = x + warp_x;
+        let warped_z = z + warp_z;
+
+        // Main river pattern using sine-based channel
+        let river_noise = self.fbm_configurable(
+            warped_x, warped_z,
+            cfg.scale,
+            cfg.octaves,
+            0.5,
+            2.0,
+        );
+
+        // Convert to river presence: values near 0.5 are river centers
+        let river_dist = (river_noise - 0.5).abs() * 2.0; // Distance from river center [0,1]
+        let main_river = (1.0 - river_dist / (cfg.width * 0.01)).max(0.0);
+
+        // Tributary rivers (smaller, more frequent)
+        let trib_noise = self.fbm_configurable(
+            x + 1000.0, z + 1000.0,
+            cfg.tributary_scale,
+            2,
+            0.5,
+            2.0,
+        );
+        let trib_dist = (trib_noise - 0.5).abs() * 2.0;
+        let tributary = (1.0 - trib_dist / (cfg.tributary_width * 0.01)).max(0.0);
+
+        // Combine rivers, main river takes priority
+        let river_strength = main_river.max(tributary * 0.6);
+
+        // Smooth the river edges with a curve
+        let smooth_river = river_strength * river_strength * (3.0 - 2.0 * river_strength);
+
+        smooth_river * cfg.depth
+    }
+
     /// Calculates terrain height at a given world position.
     ///
     /// Uses multiple noise layers for varied terrain:
@@ -345,7 +393,18 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         ) * cfg.detail.amplitude;
 
         // Combine all layers
-        let height = continent + mountains + hills + detail;
+        let mut height = continent + mountains + hills + detail;
+
+        // Apply river carving - rivers cut into terrain toward water level
+        let river_carve = self.river_carve(x, z);
+        if river_carve > 0.0 {
+            // Rivers carve terrain down toward just below water level
+            let target_height = (WATER_LEVEL as f32) - river_carve;
+            // Only carve if terrain is above the target
+            if height > target_height {
+                height = target_height;
+            }
+        }
 
         // Clamp to world bounds from config
         height.clamp(cfg.height.min, cfg.height.max) as i32

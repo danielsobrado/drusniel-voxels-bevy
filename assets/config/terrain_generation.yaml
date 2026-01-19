@@ -35,6 +35,16 @@ terrain:
     persistence: 0.5
     lacunarity: 2.0
 
+  # River generation
+  rivers:
+    enabled: true
+    scale: 0.003         # Lower = larger, more spaced rivers
+    width: 4.0           # Width of main rivers in voxels
+    depth: 6.0           # How deep rivers carve below water level
+    octaves: 3           # Noise detail for meandering
+    tributary_scale: 0.008  # Scale for smaller streams
+    tributary_width: 2.0    # Width of tributaries
+
   # Biome influence on height
   biome_modifiers:
     plains: 0.3       # Flatten

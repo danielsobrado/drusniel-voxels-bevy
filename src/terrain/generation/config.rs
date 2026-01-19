@@ -16,7 +16,42 @@ pub struct TerrainConfig {
     pub hills: NoiseLayer,
     pub detail: NoiseLayer,
     #[serde(default)]
+    pub rivers: RiverConfig,
+    #[serde(default)]
     pub biome_modifiers: HashMap<String, f32>,
+}
+
+/// Configuration for river generation
+#[derive(Deserialize, Clone)]
+pub struct RiverConfig {
+    /// Enable river generation
+    pub enabled: bool,
+    /// Scale of the main river pattern (lower = larger rivers)
+    pub scale: f32,
+    /// Width of rivers in voxels
+    pub width: f32,
+    /// Maximum depth of river channels below water level
+    pub depth: f32,
+    /// Number of noise octaves for river meandering
+    pub octaves: u32,
+    /// Scale of secondary river network
+    pub tributary_scale: f32,
+    /// Width of tributary rivers
+    pub tributary_width: f32,
+}
+
+impl Default for RiverConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scale: 0.003,
+            width: 4.0,
+            depth: 6.0,
+            octaves: 3,
+            tributary_scale: 0.008,
+            tributary_width: 2.0,
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -82,6 +117,7 @@ impl Default for TerrainConfig {
                 persistence: 0.5,
                 lacunarity: 2.0,
             },
+            rivers: RiverConfig::default(),
             biome_modifiers: HashMap::new(),
         }
     }
