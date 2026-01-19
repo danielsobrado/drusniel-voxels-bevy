@@ -21,6 +21,12 @@ const ROCK_ROUGHNESS: f32 = 0.90;
 const SAND_ROUGHNESS: f32 = 0.98;
 const DIRT_ROUGHNESS: f32 = 0.92;
 
+// Wet sand effect constants
+const WATER_LEVEL: f32 = 18.0;
+const WET_SAND_HEIGHT: f32 = 5.0;  // How far above water level gets wet
+const WET_SAND_DARKEN: f32 = 0.45; // Darken factor (lower = darker)
+const WET_ROUGHNESS: f32 = 0.25;   // Wet surfaces are shinier
+
 const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(0.0, 1.0, 0.0, 1.0);
 
@@ -212,12 +218,26 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let ao_factor = 1.0 + (baked_ao - 1.0) * ao_strength;
 
     // Calculate uniform roughness based on material blend
-    let roughness = w.x * GRASS_ROUGHNESS +
+    var roughness = w.x * GRASS_ROUGHNESS +
                     w.y * ROCK_ROUGHNESS +
                     w.z * SAND_ROUGHNESS +
                     w.w * DIRT_ROUGHNESS;
 
-    pbr_input.material.base_color = albedo;
+    // Wet sand effect: darken and smooth terrain near water level
+    let height_above_water = world_pos.y - WATER_LEVEL;
+    // Smooth gradient from water level up to WET_SAND_HEIGHT
+    let wet_factor = clamp(1.0 - (height_above_water / WET_SAND_HEIGHT), 0.0, 1.0);
+    // Apply to all terrain near water (sand, dirt, grass at shoreline)
+    let wet_strength = wet_factor * wet_factor; // Quadratic falloff for natural look
+
+    // Darken the albedo for wet terrain
+    let wet_albedo = albedo * vec4<f32>(WET_SAND_DARKEN, WET_SAND_DARKEN, WET_SAND_DARKEN, 1.0);
+    var final_albedo = mix(albedo, wet_albedo, wet_strength);
+
+    // Reduce roughness for wet surfaces (wet = shinier)
+    roughness = mix(roughness, WET_ROUGHNESS, wet_strength);
+
+    pbr_input.material.base_color = final_albedo;
     pbr_input.material.perceptual_roughness = clamp(roughness, 0.04, 1.0);
     pbr_input.material.metallic = 0.0;
     pbr_input.N = blended_n;

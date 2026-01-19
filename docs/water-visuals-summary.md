@@ -24,6 +24,12 @@ Improve close-range water visuals without a large performance hit, while keeping
   - `VOXEL_WATER_WAVE_UV_SCALE`
   - `VOXEL_WATER_CLARITY_MULT`
   - `VOXEL_WATER_EDGE_SCALE_MULT`
+- Water-terrain transitions:
+  - `WET_SAND_HEIGHT` - Height above water that gets wet effect (in `triplanar_terrain.wgsl`)
+  - `WET_SAND_DARKEN` - How much to darken wet terrain (lower = darker)
+  - `WET_ROUGHNESS` - Roughness for wet surfaces (lower = shinier)
+  - `FOAM_EDGE_END` - Depth where foam fades out (in `water_fragment.wgsl`)
+  - `FOAM_STRENGTH` - Maximum foam intensity
 
 ## Files touched
 - Water visuals: `src/rendering/materials.rs`, `src/voxel/plugin.rs`, `src/voxel/meshing.rs`, `src/constants.rs`, `src/environment.rs`, `src/debug_ui.rs`, `src/rendering/plugin.rs`
@@ -87,8 +93,36 @@ rivers:
 - `src/rendering/materials.rs` - Updated depth_bias values
 - `assets/shaders/water_fragment.wgsl` - Added voxel water depth fixes
 
+## Water-Terrain Transitions (Session 3)
+
+### Wet Sand Effect
+Added a wet sand effect to the terrain shader that darkens sand/dirt near water level for a natural transition.
+
+**Implementation** (`assets/shaders/triplanar_terrain.wgsl`):
+- Detects terrain height relative to `WATER_LEVEL` (18.0)
+- Within `WET_SAND_HEIGHT` (2.0 voxels) above water, applies:
+  - Darker albedo (`WET_SAND_DARKEN` = 0.65)
+  - Lower roughness (`WET_ROUGHNESS` = 0.4) for shiny wet appearance
+- Effect strength scales with sand/dirt material weight
+- Uses `smoothstep` for gradual dry-to-wet blend
+
+### Shore Foam Effect
+Added shore foam to water edges where water meets terrain.
+
+**Implementation** (`assets/shaders/water_fragment.wgsl`):
+- Uses depth buffer to detect shallow water edges
+- Blends white foam color at edges (`FOAM_EDGE_END` = 0.8 depth)
+- `FOAM_STRENGTH` (0.6) controls maximum foam intensity
+- Foam color has slight blue tint for natural look
+
+**Files touched:**
+- `assets/shaders/triplanar_terrain.wgsl` - Wet sand effect
+- `assets/shaders/water_fragment.wgsl` - Shore foam effect
+
 ## Current status
 - Water striping issue is **FIXED**
 - Water now renders with clean blocky edges
 - Both near and far water look correct
 - River generation creates varied water channels
+- Wet sand darkens terrain near water level
+- Shore foam appears at water edges

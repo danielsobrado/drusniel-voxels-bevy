@@ -25,6 +25,12 @@
 #import bevy_water::water_bindings
 #import bevy_water::water_functions as water_fn
 
+// Shore foam constants
+const FOAM_COLOR: vec3<f32> = vec3<f32>(0.9, 0.95, 1.0);   // White with slight blue tint
+const FOAM_EDGE_START: f32 = 0.0;   // Start foam at water edge
+const FOAM_EDGE_END: f32 = 2.0;     // Foam fades out at this depth
+const FOAM_STRENGTH: f32 = 0.8;     // Maximum foam intensity
+
 @fragment
 fn fragment(
 #ifdef MESHLET_MESH_MATERIAL_PASS
@@ -87,6 +93,10 @@ fn fragment(
   let beers_law = clamp(exp(-depth_diff_view * water_clarity), 0.0, 1.0);
   let depth_color = vec4<f32>(mix(deep_color.xyz, shallow_color.xyz, beers_law), 1.0 - beers_law);
   water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
+
+  // Shore foam effect: add foam at shallow water edges
+  let foam_factor = (1.0 - smoothstep(FOAM_EDGE_START, FOAM_EDGE_END, depth_diff_view)) * FOAM_STRENGTH;
+  water_color = vec4<f32>(mix(water_color.rgb, FOAM_COLOR, foam_factor), water_color.a);
 #endif
 #endif
 #endif
