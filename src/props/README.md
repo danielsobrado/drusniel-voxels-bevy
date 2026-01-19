@@ -94,6 +94,7 @@ If assets are FBX format:
 **Wrong colors:**
 - Adjust `style.saturation_boost` in props.yaml
 - Use `style.foliage_brightness_max` to clamp bright bushes/flowers
+- Use `style.rock_tint` for untextured rock props
 - For custom foliage, tweak `style.custom.*` to match the stylized palette
 - Check source textures are embedded in GLB
 

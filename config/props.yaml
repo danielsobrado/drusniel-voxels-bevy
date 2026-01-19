@@ -619,6 +619,10 @@ style:
   roughness_min: 0.75
   # Maximum metallic to keep matte look
   metallic_max: 0.05
+  # Clamp foliage brightness to avoid blowout
+  foliage_brightness_max: 0.7
+  # Default tint for untextured rock materials
+  rock_tint: [0.45, 0.43, 0.4]
   custom:
     # Extra boost for photoreal foliage cards
     saturation_boost: 0.15

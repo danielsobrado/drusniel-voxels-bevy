@@ -159,6 +159,16 @@ fn tweak_material(
         PropType::Rock => {
             // Rocks: use GLTF values, just ensure no transmission
             mat.diffuse_transmission = 0.0;
+            if mat.base_color_texture.is_none() {
+                let tint = style.rock_tint;
+                let alpha = mat.base_color.alpha();
+                mat.base_color = Color::srgba(
+                    tint[0].clamp(0.0, 1.0),
+                    tint[1].clamp(0.0, 1.0),
+                    tint[2].clamp(0.0, 1.0),
+                    alpha,
+                );
+            }
         }
         PropType::Bush | PropType::Flower => {
             // Foliage: alpha mask, double-sided, solid look
@@ -179,6 +189,7 @@ fn tweak_material(
         mat.base_color = clamp_luminance(mat.base_color, style.foliage_brightness_max);
     }
 }
+
 
 fn apply_common_style(mat: &mut StandardMaterial, style: &super::StyleConfig) {
     mat.base_color = boost_saturation(mat.base_color, style.saturation_boost);

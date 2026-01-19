@@ -206,6 +206,8 @@ pub struct StyleConfig {
     pub metallic_max: f32,
     #[serde(default = "default_foliage_brightness_max")]
     pub foliage_brightness_max: f32,
+    #[serde(default = "default_rock_tint")]
+    pub rock_tint: [f32; 3],
     #[serde(default)]
     pub custom: CustomStyleConfig,
 }
@@ -217,6 +219,7 @@ impl Default for StyleConfig {
             roughness_min: 0.7,
             metallic_max: 0.1,
             foliage_brightness_max: 0.7,
+            rock_tint: default_rock_tint(),
             custom: CustomStyleConfig::default(),
         }
     }
@@ -236,6 +239,10 @@ fn default_metallic_max() -> f32 {
 
 fn default_foliage_brightness_max() -> f32 {
     0.7
+}
+
+fn default_rock_tint() -> [f32; 3] {
+    [0.45, 0.43, 0.4]
 }
 
 #[derive(Deserialize, Clone)]
