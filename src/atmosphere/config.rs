@@ -102,7 +102,7 @@ impl Default for FogConfig {
                 falloff: FogFalloffMode::Linear,
             },
             volumetric: VolumetricConfig {
-                enabled: false,
+                enabled: true,
                 step_count: 64,
                 jitter: 0.5,
                 ambient_intensity: 0.0,

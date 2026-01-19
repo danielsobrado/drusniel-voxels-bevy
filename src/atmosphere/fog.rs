@@ -5,13 +5,15 @@ use bevy::render::render_resource::ShaderType;
 use crate::atmosphere::config::{FogColorModifiers, FogConfig, FogFalloffMode};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
+use crate::voxel::types::Voxel;
+use crate::voxel::world::VoxelWorld;
 
 pub struct FogPlugin;
 
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
-const VOLUME_DENSITY_SCALE: f32 = 0.2; // Volumetric density scale (lower = brighter scene)
-const MIN_VOLUME_DENSITY: f32 = 0.001; // Very low minimum for subtle god rays
-const MAX_VOLUME_DENSITY: f32 = 0.02; // Cap to prevent over-dark scenes
+const VOLUME_DENSITY_SCALE: f32 = 1.0; // Volumetric density scale for visible god rays
+const MIN_VOLUME_DENSITY: f32 = 0.01; // Minimum to ensure shafts are visible
+const MAX_VOLUME_DENSITY: f32 = 2.0; // High cap for testing god rays
 const MIN_DISTANCE_SCALE: f32 = 0.25; // Prevents overly aggressive linear fog compression
 const MAX_DISTANCE_SCALE: f32 = 2.5; // Prevents excessively thin fog
 const MIN_DISTANCE_SPAN: f32 = 1.0; // Keep end > start
@@ -34,8 +36,60 @@ impl Plugin for FogPlugin {
                     update_fog_from_atmosphere,
                     update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
+                    debug_god_rays_status,
                 ).chain(),
             );
+    }
+}
+
+/// Debug system to verify all god rays components exist
+fn debug_god_rays_status(
+    time: Res<Time>,
+    mut last_log: Local<f32>,
+    fog_volume_query: Query<(&FogVolume, &Transform), With<GlobalFogVolume>>,
+    volumetric_fog_query: Query<&VolumetricFog, With<FogCamera>>,
+    volumetric_light_query: Query<(&VolumetricLight, &DirectionalLight), With<Sun>>,
+    camera_query: Query<&Transform, With<FogCamera>>,
+) {
+    // Only log every 5 seconds
+    *last_log += time.delta_secs();
+    if *last_log < 5.0 {
+        return;
+    }
+    *last_log = 0.0;
+
+    let has_fog_volume = fog_volume_query.iter().next().is_some();
+    let has_volumetric_fog = volumetric_fog_query.iter().next().is_some();
+    let has_volumetric_light = volumetric_light_query.iter().next().is_some();
+
+    if has_fog_volume && has_volumetric_fog && has_volumetric_light {
+        if let (Ok((volume, vol_tf)), Ok(cam_tf), Ok(vfog), Ok((_, sun))) = (
+            fog_volume_query.single(),
+            camera_query.single(),
+            volumetric_fog_query.single(),
+            volumetric_light_query.single(),
+        ) {
+            info!(
+                "God rays: density={:.4}, scattering={:.2}, absorption={:.5}, light_intensity={:.1}, scale={:.0}, steps={}, shadows={}",
+                volume.density_factor,
+                volume.scattering,
+                volume.absorption,
+                volume.light_intensity,
+                vol_tf.scale.x,
+                vfog.step_count,
+                sun.shadows_enabled,
+            );
+            info!(
+                "  Volume pos: ({:.1}, {:.1}, {:.1}), Camera pos: ({:.1}, {:.1}, {:.1})",
+                vol_tf.translation.x, vol_tf.translation.y, vol_tf.translation.z,
+                cam_tf.translation.x, cam_tf.translation.y, cam_tf.translation.z,
+            );
+        }
+    } else {
+        warn!(
+            "God rays MISSING: FogVolume={}, VolumetricFog={}, VolumetricLight={}",
+            has_fog_volume, has_volumetric_fog, has_volumetric_light
+        );
     }
 }
 
@@ -87,31 +141,36 @@ impl Default for FogUniforms {
     }
 }
 
-fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
+fn spawn_global_fog_volume(commands: &mut Commands, _config: &FogConfig) {
+    // EXACT copy of Bevy example - minimal FogVolume with defaults
+    // Bevy example: FogVolume::default() with Transform::from_scale(Vec3::splat(35.0))
+    info!(
+        "Spawning FogVolume with BEVY EXAMPLE defaults - density=0.1 (default), scale=35"
+    );
+
     commands.spawn((
         Name::new("GlobalFogVolume"),
         GlobalFogVolume,
-        FogVolume {
-            fog_color: Color::WHITE,
-            density_factor: config.volume.density,
-            density_texture: None,
-            density_texture_offset: Vec3::ZERO,
-            absorption: config.volume.absorption,
-            scattering: config.volume.scattering,
-            scattering_asymmetry: config.volume.scattering_asymmetry,
-            light_tint: Color::WHITE,
-            light_intensity: 1.0,
-        },
-        Transform::from_scale(Vec3::splat(config.volume.size)),
-        Visibility::Visible,
+        FogVolume::default(), // Use pure defaults like the example
+        Transform::from_scale(Vec3::splat(35.0)), // Same scale as Bevy example
     ));
 }
 
 fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
+    info!(
+        "Fog setup: volumetric.enabled={}, volume.density={}, volume.size={}",
+        config.volumetric.enabled,
+        config.volume.density,
+        config.volume.size
+    );
+
     if config.volumetric.enabled {
         // Spawn global fog volume centered at origin
         // Will be repositioned to follow camera
+        info!("Spawning GlobalFogVolume for god rays");
         spawn_global_fog_volume(&mut commands, &config);
+    } else {
+        warn!("Volumetric fog disabled - no god rays will be visible");
     }
     
     // Initialize atmosphere sample and fog range resources
@@ -129,7 +188,11 @@ fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
 
 /// Call this when spawning the main camera to add fog components
 pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
-    (FogCamera, distance_fog_component(config))
+    (
+        FogCamera,
+        distance_fog_component(config),
+        volumetric_fog_component(config),
+    )
 }
 
 fn distance_fog_component(config: &FogConfig) -> DistanceFog {
@@ -175,12 +238,12 @@ pub fn sun_volumetric_components() -> VolumetricLight {
 }
 
 fn volumetric_fog_component(config: &FogConfig) -> VolumetricFog {
-    VolumetricFog {
-        step_count: config.volumetric.step_count,
-        jitter: config.volumetric.jitter,
-        ambient_intensity: config.volumetric.ambient_intensity,
-        ambient_color: Color::WHITE,
-    }
+    // Use defaults like Bevy example, but allow config overrides
+    let mut vfog = VolumetricFog::default();
+    vfog.step_count = config.volumetric.step_count;
+    vfog.jitter = config.volumetric.jitter;
+    vfog.ambient_intensity = config.volumetric.ambient_intensity;
+    vfog
 }
 
 fn sync_fog_toggles(
@@ -233,6 +296,8 @@ fn update_fog_from_atmosphere(
     mut fog_range: ResMut<FogDistanceState>,
     mut fog_uniforms: ResMut<FogUniforms>,
     ambient: Res<AmbientLight>,
+    world: Res<VoxelWorld>,
+    camera_query: Query<&Transform, With<FogCamera>>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
@@ -310,7 +375,7 @@ fn update_fog_from_atmosphere(
         fog_range.end = end;
     }
 
-    let ambient_intensity = (ambient.brightness / 6000.0).clamp(0.02, 0.22)
+    let ambient_intensity = (ambient.brightness / 16000.0).clamp(0.01, 0.12)
         .max(config.volumetric.ambient_intensity);
 
     let mods = &config.color_modifiers;
@@ -362,10 +427,16 @@ fn update_fog_from_atmosphere(
         volumetric.jitter = config.volumetric.jitter;
     }
     
+    let interior_boost = camera_query
+        .single()
+        .map(|camera| indoor_density_boost(&world, camera.translation))
+        .unwrap_or(1.0);
+
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
-        volume.density_factor = (config.volume.density * density_mult * VOLUME_DENSITY_SCALE * preset_scale)
-            .clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        // For testing: use config density directly without complex multipliers
+        volume.density_factor = config.volume.density.clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        volume.absorption = config.volume.absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
         volume.light_tint = Color::srgba(
             directional_color[0],
@@ -373,11 +444,11 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        volume.light_intensity = lerp(2.0, 5.0, daylight) * (1.0 + twilight * 0.5);
-        // Connect Mie settings to fog scattering
-        // mie_strength (0.0035-0.0075) scaled up to have visible impact
-        let mie_factor = (mie_strength / 0.005).clamp(0.5, 2.0); // Normalize around 1.0
-        volume.scattering = (config.volume.scattering * mie_factor).clamp(0.3, 1.0);
+        volume.light_intensity = lerp(4.0, 9.0, daylight)
+            * (1.0 + twilight * 0.5)
+            * interior_boost.min(2.0);
+        // For testing: use config scattering directly without modifications
+        volume.scattering = config.volume.scattering;
         // mie_direction controls forward scattering asymmetry
         // Lower = more visible from all angles, higher = only toward sun
         volume.scattering_asymmetry = config.volume.scattering_asymmetry * mie_direction;
@@ -515,6 +586,41 @@ fn apply_color_modifiers3(color: [f32; 3], mods: &FogColorModifiers) -> [f32; 3]
 fn apply_color_modifiers4(color: [f32; 4], mods: &FogColorModifiers) -> [f32; 4] {
     let rgb = apply_color_modifiers3([color[0], color[1], color[2]], mods);
     [rgb[0], rgb[1], rgb[2], color[3]]
+}
+
+fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
+    let offsets = [
+        Vec3::ZERO,
+        Vec3::X * 0.5,
+        Vec3::NEG_X * 0.5,
+        Vec3::Z * 0.5,
+        Vec3::NEG_Z * 0.5,
+    ];
+    let mut blocked = 0;
+    for offset in offsets {
+        if column_blocked(world, position + offset, 8) {
+            blocked += 1;
+        }
+    }
+    let ratio = blocked as f32 / offsets.len() as f32;
+    1.0 + ratio * 1.5
+}
+
+fn column_blocked(world: &VoxelWorld, position: Vec3, max_height: i32) -> bool {
+    let base = IVec3::new(
+        position.x.floor() as i32,
+        position.y.floor() as i32,
+        position.z.floor() as i32,
+    );
+    for step in 1..=max_height {
+        let pos = base + IVec3::Y * step;
+        if let Some(voxel) = world.get_voxel(pos) {
+            if voxel.is_solid() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Load fog configuration from YAML file

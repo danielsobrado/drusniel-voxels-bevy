@@ -1,6 +1,7 @@
 atmosphere:
   # Bevy 0.17+ built-in atmosphere (Nishita-based physical sky)
-  enabled: true
+  # Disabled temporarily - using skybox instead for clearer god ray testing
+  enabled: false
 
   # Rendering mode: "raymarched" (better quality) or "lookup" (faster)
   rendering_mode: lookup
