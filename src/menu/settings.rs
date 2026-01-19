@@ -1177,10 +1177,11 @@ pub fn handle_fog_settings(
                 FogPresetOption::Balanced => Vec2::new(0.0009, 0.0022),
                 FogPresetOption::Misty => Vec2::new(0.0012, 0.003),
             };
+            // Volume density: lower = brighter scene, higher = more fog/darker
             fog_config.volume.density = match option {
-                FogPresetOption::Clear => 0.015,
-                FogPresetOption::Balanced => 0.04,
-                FogPresetOption::Misty => 0.08,
+                FogPresetOption::Clear => 0.005,    // Very sunny, minimal fog
+                FogPresetOption::Balanced => 0.015, // Normal daytime
+                FogPresetOption::Misty => 0.04,     // Foggy conditions
             };
         }
     }

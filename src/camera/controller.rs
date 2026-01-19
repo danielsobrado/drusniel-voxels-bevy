@@ -17,7 +17,6 @@ use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::MouseMotion;
-use bevy::light::VolumetricFog;
 use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
@@ -198,14 +197,8 @@ pub fn spawn_camera(
         _ => {}
     }
 
-    if fog_config.volumetric.enabled {
-        camera.insert(VolumetricFog {
-            step_count: fog_config.volumetric.step_count,
-            jitter: fog_config.volumetric.jitter,
-            ambient_intensity: fog_config.volumetric.ambient_intensity,
-            ambient_color: Color::WHITE,
-        });
-    }
+    // Note: VolumetricFog is already added via fog_camera_components() at line 114
+    // The sync_fog_toggles system in fog.rs handles enabling/disabling based on config
 
     // SSR currently disabled: enabling deferred + SSR can exceed per-stage texture binding limits
     // on some environments, causing a render-prepass panic.

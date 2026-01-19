@@ -19,6 +19,8 @@ use crate::constants::{
     DEFAULT_HIGH_DETAIL_DISTANCE, DEFAULT_CULL_DISTANCE,
     INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
     LOD_HYSTERESIS,
+    WATER_FANCY_DISTANCE, WATER_FANCY_HYSTERESIS, WATER_MATERIAL_UPDATE_INTERVAL,
+    WATER_FANCY_MIN_TRIANGLES, WATER_FANCY_MIN_DEPTH,
 };
 
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
@@ -26,16 +28,19 @@ use crate::constants::{
 const MAX_CHUNKS_PER_FRAME: usize = 16;
 use crate::physics::NeedsCollider;
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::materials::VoxelMaterial;
+use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
-use crate::voxel::meshing::{generate_chunk_mesh_with_mode, MeshMode, MeshSettings};
+use crate::voxel::meshing::{
+    generate_chunk_mesh_with_mode, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
+};
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::terrain::TerrainGenerator;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{VoxelType, Voxel};
 use crate::voxel::world::VoxelWorld;
+use bevy_water::water::material::StandardWaterMaterial;
 
 pub struct VoxelPlugin;
 
@@ -305,6 +310,7 @@ impl Plugin for VoxelPlugin {
                 adjust_lod_for_integrated_gpu,
                 update_chunk_lod_system,
                 mesh_dirty_chunks_system,
+                update_water_material_lod,
             )
                 .chain(),
         );
@@ -673,7 +679,7 @@ fn mesh_dirty_chunks_system(
     mut meshes: ResMut<Assets<Mesh>>,
     blocky_material: Option<Res<VoxelMaterial>>,
     triplanar_material: Res<TriplanarMaterialHandle>,
-    water_material: Res<crate::rendering::materials::WaterMaterial>,
+    water_material: Res<WaterMaterial>,
     mesh_settings: Res<MeshSettings>,
     lod_settings: Res<LodSettings>,
     skirt_config: Res<SkirtConfig>,
@@ -705,10 +711,11 @@ fn mesh_dirty_chunks_system(
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
     let had_dirty_chunks = !dirty_chunks.is_empty();
+    let camera_pos = camera_query.single().ok().map(|transform| transform.translation);
+    let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
 
     // Sort by distance to camera if available
-    if let Ok(camera_transform) = camera_query.single() {
-        let camera_pos = camera_transform.translation;
+    if let Some(camera_pos) = camera_pos {
         dirty_chunks.sort_by(|a, b| {
             let world_a = VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
             let world_b = VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
@@ -815,12 +822,19 @@ fn mesh_dirty_chunks_system(
         // Track vertex count for this mesh (before it's consumed)
         let vertex_count = mesh_result.solid.positions.len() as u32;
 
+        let water_max_depth = if mesh_result.water.is_empty() {
+            0
+        } else {
+            compute_water_max_depth(&world, chunk_pos)
+        };
+
         // Step 2: Update chunk state using mutable borrow
         if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
             // Clear dirty flag
             chunk.clear_dirty();
 
             let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
+            let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
 
             // Track meshing statistics
             chunk_stats.meshing_time_us += mesh_elapsed.as_micros() as u64;
@@ -890,26 +904,58 @@ fn mesh_dirty_chunks_system(
                     chunk.clear_water_mesh_entity();
                 }
             } else {
+                let water_triangle_count = mesh_result.water.indices.len() / 3;
+                let allow_fancy_water = water_triangle_count >= WATER_FANCY_MIN_TRIANGLES
+                    && water_max_depth >= WATER_FANCY_MIN_DEPTH;
                 let water_mesh = mesh_result.water.into_mesh();
                 let water_mesh_handle = meshes.add(water_mesh);
+                let use_fancy_water = camera_pos
+                    .map(|pos| chunk_center.distance_squared(pos) <= fancy_distance_sq)
+                    .unwrap_or(true);
+                let use_fancy_water = use_fancy_water && allow_fancy_water;
 
                 if let Some(entity) = chunk.water_mesh_entity() {
-                    commands.entity(entity).insert(Mesh3d(water_mesh_handle));
+                    let mut entity_cmd = commands.entity(entity);
+                    entity_cmd.insert((
+                        Mesh3d(water_mesh_handle),
+                        WaterMesh,
+                        WaterMeshDetail {
+                            triangle_count: water_triangle_count,
+                            max_depth: water_max_depth,
+                        },
+                    ));
+                    if use_fancy_water {
+                        entity_cmd
+                            .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                            .remove::<MeshMaterial3d<StandardMaterial>>();
+                    } else {
+                        entity_cmd
+                            .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                            .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+                    }
                 } else {
-                    let entity = commands
-                        .spawn((
-                            Mesh3d(water_mesh_handle),
-                            MeshMaterial3d(water_material.handle.clone()),
-                            Transform::from_xyz(
-                                world_pos.x as f32,
-                                world_pos.y as f32,
-                                world_pos.z as f32,
-                            ),
-                            crate::voxel::meshing::ChunkMesh {
-                                chunk_position: chunk_pos,
-                            },
-                        ))
-                        .id();
+                    let mut entity_cmd = commands.spawn((
+                        Mesh3d(water_mesh_handle),
+                        Transform::from_xyz(
+                            world_pos.x as f32,
+                            world_pos.y as f32,
+                            world_pos.z as f32,
+                        ),
+                        crate::voxel::meshing::ChunkMesh {
+                            chunk_position: chunk_pos,
+                        },
+                        WaterMesh,
+                        WaterMeshDetail {
+                            triangle_count: water_triangle_count,
+                            max_depth: water_max_depth,
+                        },
+                    ));
+                    if use_fancy_water {
+                        entity_cmd.insert(MeshMaterial3d(water_material.near_handle.clone()));
+                    } else {
+                        entity_cmd.insert(MeshMaterial3d(water_material.far_handle.clone()));
+                    }
+                    let entity = entity_cmd.id();
                     chunk.set_water_mesh_entity(entity);
                 }
             }
@@ -926,6 +972,130 @@ fn mesh_dirty_chunks_system(
     if had_dirty_chunks {
         chunk_stats.recompute_from_world(&world);
     }
+}
+
+fn update_water_material_lod(
+    time: Res<Time>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    water_material: Res<WaterMaterial>,
+    mut commands: Commands,
+    water_meshes: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&MeshMaterial3d<StandardWaterMaterial>>,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+            Option<&WaterMeshDetail>,
+        ),
+        With<WaterMesh>,
+    >,
+    mut last_update: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last_update < WATER_MATERIAL_UPDATE_INTERVAL {
+        return;
+    }
+    *last_update = now;
+
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    let camera_pos = camera_transform.translation;
+    let fancy_in = (WATER_FANCY_DISTANCE - WATER_FANCY_HYSTERESIS).max(0.0);
+    let fancy_out = WATER_FANCY_DISTANCE + WATER_FANCY_HYSTERESIS;
+    let fancy_in_sq = fancy_in * fancy_in;
+    let fancy_out_sq = fancy_out * fancy_out;
+    let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
+
+    for (entity, transform, fancy_mat, cheap_mat, detail) in water_meshes.iter() {
+        let allow_fancy_water = detail
+            .map(|detail| {
+                detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES
+                    && detail.max_depth >= WATER_FANCY_MIN_DEPTH
+            })
+            .unwrap_or(true);
+        let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let dist_sq = chunk_center.distance_squared(camera_pos);
+
+        if !allow_fancy_water {
+            if cheap_mat.is_none() {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+            }
+            continue;
+        }
+
+        if fancy_mat.is_some() {
+            if dist_sq > fancy_out_sq {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+            }
+        } else if cheap_mat.is_some() {
+            if dist_sq < fancy_in_sq {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
+            }
+        } else {
+            if dist_sq <= fancy_distance_sq {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.near_handle.clone()));
+            } else {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.far_handle.clone()));
+            }
+        }
+    }
+}
+
+fn compute_water_max_depth(world: &VoxelWorld, chunk_pos: IVec3) -> usize {
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+    let mut max_depth = 0usize;
+
+    for x in 0..CHUNK_SIZE_I32 {
+        for z in 0..CHUNK_SIZE_I32 {
+            for y in (0..CHUNK_SIZE_I32).rev() {
+                let world_pos = chunk_origin + IVec3::new(x, y, z);
+                let Some(voxel) = world.get_voxel(world_pos) else {
+                    continue;
+                };
+                if !voxel.is_liquid() {
+                    continue;
+                }
+
+                let above = world.get_voxel(world_pos + IVec3::Y);
+                if matches!(above, Some(v) if v.is_liquid()) {
+                    continue;
+                }
+
+                let mut depth = 1usize;
+                loop {
+                    let below_pos = world_pos - IVec3::Y * depth as i32;
+                    match world.get_voxel(below_pos) {
+                        Some(v) if v.is_liquid() => {
+                            depth += 1;
+                        }
+                        _ => break,
+                    }
+                }
+
+                if depth > max_depth {
+                    max_depth = depth;
+                }
+                break;
+            }
+        }
+    }
+
+    max_depth
 }
 
 /// Adjusts LOD settings for integrated GPUs to maintain performance.

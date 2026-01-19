@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
-use crate::rendering::materials::WaterMaterial;
 use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
+use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::LodSettings;
 use crate::vegetation::VegetationConfig;
 
@@ -133,10 +133,9 @@ impl Default for DebugVisibilityToggles {
 #[cfg(debug_assertions)]
 fn toggle_scene_visibility(
     keys: Res<ButtonInput<KeyCode>>,
-    water_material: Option<Res<WaterMaterial>>,
     mut visibility_queries: ParamSet<(
         Query<&mut Visibility, With<bevy_water::WaterTiles>>,
-        Query<(&MeshMaterial3d<StandardMaterial>, &mut Visibility)>,
+        Query<&mut Visibility, With<WaterMesh>>,
         Query<&mut Visibility, With<GrassBlade>>,
         Query<&mut Visibility, With<ProceduralGrassPatch>>,
     )>,
@@ -166,12 +165,8 @@ fn toggle_scene_visibility(
             *visibility = water_visibility;
         }
 
-        if let Some(water_material) = water_material {
-            for (material, mut visibility) in visibility_queries.p1().iter_mut() {
-                if material.0 == water_material.handle {
-                    *visibility = water_visibility;
-                }
-            }
+        for mut visibility in visibility_queries.p1().iter_mut() {
+            *visibility = water_visibility;
         }
 
         info!("Water visibility: {}", toggles.show_water);

@@ -13,7 +13,7 @@ use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
     setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material,
-    sync_fog_to_materials,
+    sync_fog_to_materials, sync_voxel_water_material_overrides,
 };
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
@@ -72,6 +72,7 @@ impl Plugin for RenderingPlugin {
                     configure_props_textures,
                     create_texture_array,
                     sync_fog_to_materials,
+                    sync_voxel_water_material_overrides.after(bevy_water::update_materials),
                 ),
             );
     }

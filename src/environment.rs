@@ -78,6 +78,8 @@ impl Plugin for AtmospherePlugin {
             .insert_resource(WaterSettings {
                 height: WATER_LEVEL as f32,
                 amplitude: 0.5,
+                alpha_mode: AlphaMode::Blend,
+                base_color: Color::srgba(0.12, 0.42, 0.75, 0.6),
                 clarity: 0.4,
                 deep_color: Color::srgba(0.05, 0.15, 0.35, 0.95).into(),
                 shallow_color: Color::srgba(0.2, 0.5, 0.7, 0.85).into(),

@@ -8,7 +8,6 @@ use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::{VoxelType, Voxel};
 use crate::voxel::meshing::ChunkMesh;
-use crate::rendering::materials::WaterMaterial;
 use crate::camera::controller::PlayerCamera;
 
 pub use grass_material::{GrassMaterial, GrassMaterialPlugin, GrassMaterialHandles};
@@ -119,7 +118,6 @@ pub fn setup_grass_patch_assets(
 pub fn attach_procedural_grass_to_chunks(
     mut commands: Commands,
     assets: Res<GrassPatchAssets>,
-    water_material: Res<WaterMaterial>,
     veg_config: Res<VegetationConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     // Query chunks with StandardMaterial (blocky mode)
@@ -127,7 +125,6 @@ pub fn attach_procedural_grass_to_chunks(
         Entity,
         &ChunkMesh,
         &Mesh3d,
-        &MeshMaterial3d<StandardMaterial>,
         &Transform,
     ), Without<ChunkGrassAttached>>,
     // Query chunks with TriplanarMaterial (surface nets mode)
@@ -143,13 +140,18 @@ pub fn attach_procedural_grass_to_chunks(
     let max_count = veg_config.max_blades_per_chunk;
 
     // Process blocky chunks
-    for (entity, chunk, chunk_mesh, material, transform) in blocky_chunk_query.iter() {
-        // Skip water surfaces
-        if material.0 == water_material.handle {
-            continue;
-        }
-
-        process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform, density, max_count);
+    for (entity, chunk, chunk_mesh, transform) in blocky_chunk_query.iter() {
+        process_chunk_for_grass(
+            &mut commands,
+            &assets,
+            &mut meshes,
+            entity,
+            chunk,
+            chunk_mesh,
+            transform,
+            density,
+            max_count,
+        );
     }
 
     // Process triplanar chunks (surface nets mode)

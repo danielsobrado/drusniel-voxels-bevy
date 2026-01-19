@@ -204,6 +204,8 @@ pub struct StyleConfig {
     pub roughness_min: f32,
     #[serde(default = "default_metallic_max")]
     pub metallic_max: f32,
+    #[serde(default = "default_foliage_brightness_max")]
+    pub foliage_brightness_max: f32,
     #[serde(default)]
     pub custom: CustomStyleConfig,
 }
@@ -214,6 +216,7 @@ impl Default for StyleConfig {
             saturation_boost: 0.1,
             roughness_min: 0.7,
             metallic_max: 0.1,
+            foliage_brightness_max: 0.7,
             custom: CustomStyleConfig::default(),
         }
     }
@@ -229,6 +232,10 @@ fn default_roughness_min() -> f32 {
 
 fn default_metallic_max() -> f32 {
     0.1
+}
+
+fn default_foliage_brightness_max() -> f32 {
+    0.7
 }
 
 #[derive(Deserialize, Clone)]

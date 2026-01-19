@@ -27,7 +27,7 @@ impl Default for FoliageFadeSettings {
             near_fade_min_alpha: 0.25,
             max_update_distance: 15.0,
             max_distance_scale: 2.5,
-            front_only: true,
+            front_only: false,
             front_cone_cos: 0.2,
             update_interval: 0.1,
         }

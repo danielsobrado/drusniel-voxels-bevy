@@ -56,8 +56,7 @@ fn apply_to_hierarchy(
             tweak_material(mat, style, prop_type, prop_id);
 
             let force_blend = should_force_blend(prop_type, prop_id);
-            let should_fade = is_foliage_prop(prop_type)
-                && is_grass_like_foliage(prop_type, prop_id)
+            let should_fade = matches!(prop_type, PropType::Bush | PropType::Flower)
                 && (force_blend || matches!(original_alpha_mode, AlphaMode::Mask(_) | AlphaMode::Blend));
 
             if should_fade {
@@ -119,6 +118,8 @@ fn should_force_blend(prop_type: PropType, prop_id: &str) -> bool {
 fn foliage_fade_scales(prop_type: PropType, prop_id: &str) -> (f32, f32) {
     if is_grass_like_foliage(prop_type, prop_id) {
         (0.2, 2.5)
+    } else if matches!(prop_type, PropType::Bush | PropType::Flower) {
+        (0.6, 2.0)
     } else {
         (1.0, 1.0)
     }
@@ -172,6 +173,10 @@ fn tweak_material(
 
     if matches!(prop_type, PropType::Bush | PropType::Flower) && is_custom {
         apply_custom_foliage_style(mat, &style.custom);
+    }
+
+    if matches!(prop_type, PropType::Bush | PropType::Flower) && style.foliage_brightness_max > 0.0 {
+        mat.base_color = clamp_luminance(mat.base_color, style.foliage_brightness_max);
     }
 }
 
@@ -233,4 +238,17 @@ fn adjust_brightness(color: Color, amount: f32) -> Color {
     };
 
     Color::linear_rgba(red.clamp(0.0, 1.0), green.clamp(0.0, 1.0), blue.clamp(0.0, 1.0), linear.alpha)
+}
+
+fn clamp_luminance(color: Color, max_luma: f32) -> Color {
+    let linear = color.to_linear();
+    let luma = linear.red * 0.2126 + linear.green * 0.7152 + linear.blue * 0.0722;
+    if luma <= max_luma || luma <= 0.0001 {
+        return color;
+    }
+    let scale = (max_luma / luma).clamp(0.0, 1.0);
+    let red = (linear.red * scale).clamp(0.0, 1.0);
+    let green = (linear.green * scale).clamp(0.0, 1.0);
+    let blue = (linear.blue * scale).clamp(0.0, 1.0);
+    Color::linear_rgba(red, green, blue, linear.alpha)
 }

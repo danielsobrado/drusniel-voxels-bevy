@@ -47,6 +47,7 @@ props:
     - id: boulder_large
       path: "models/rocks/boulder_large.glb"
       scale_range: [0.8, 2.0]
+      scale_jitter: 0.18
       spawn_on: [Rock, TopSoil, SubSoil]
       density: 0.005
       min_slope: 0.0
@@ -56,6 +57,7 @@ props:
     - id: boulder_small
       path: "models/rocks/boulder_small.glb"
       scale_range: [0.4, 1.0]
+      scale_jitter: 0.2
       spawn_on: [Rock, TopSoil, SubSoil]
       density: 0.012
       min_slope: 0.0
@@ -65,6 +67,7 @@ props:
     - id: rock_flat
       path: "models/rocks/rock_flat.glb"
       scale_range: [0.6, 1.5]
+      scale_jitter: 0.15
       spawn_on: [Rock, Sand]
       density: 0.008
       min_slope: 0.0
@@ -74,7 +77,8 @@ props:
   bushes:
     - id: bush_green
       path: "models/plants/bush_green.glb"
-      scale_range: [0.7, 1.2]
+      scale_range: [0.5, 0.9]
+      scale_jitter: 0.12
       spawn_on: [TopSoil]
       density: 0.03
       min_slope: 0.0
@@ -83,7 +87,8 @@ props:
 
     - id: fern
       path: "models/plants/fern.glb"
-      scale_range: [0.6, 1.0]
+      scale_range: [0.45, 0.8]
+      scale_jitter: 0.12
       spawn_on: [TopSoil]
       density: 0.04
       min_slope: 0.0
@@ -92,7 +97,8 @@ props:
 
     - id: shrub
       path: "models/plants/shrub.glb"
-      scale_range: [0.5, 0.9]
+      scale_range: [0.4, 0.75]
+      scale_jitter: 0.12
       spawn_on: [TopSoil, SubSoil]
       density: 0.025
       min_slope: 0.0
@@ -102,7 +108,8 @@ props:
   flowers:
     - id: flower_red
       path: "models/plants/flower_red.glb"
-      scale_range: [0.4, 0.8]
+      scale_range: [0.25, 0.6]
+      scale_jitter: 0.15
       spawn_on: [TopSoil]
       density: 0.015
       min_slope: 0.0
@@ -111,7 +118,8 @@ props:
 
     - id: flower_yellow
       path: "models/plants/flower_yellow.glb"
-      scale_range: [0.4, 0.8]
+      scale_range: [0.25, 0.6]
+      scale_jitter: 0.15
       spawn_on: [TopSoil]
       density: 0.015
       min_slope: 0.0
@@ -120,7 +128,8 @@ props:
 
     - id: mushroom
       path: "models/plants/mushroom.glb"
-      scale_range: [0.3, 0.7]
+      scale_range: [0.2, 0.5]
+      scale_jitter: 0.1
       spawn_on: [TopSoil, SubSoil]
       density: 0.01
       min_slope: 0.0
@@ -135,6 +144,8 @@ style:
   roughness_min: 0.75
   # Maximum metallic to keep matte look
   metallic_max: 0.05
+  # Clamp foliage brightness to avoid blowout
+  foliage_brightness_max: 0.7
   custom:
     # Extra boost for photoreal foliage cards
     saturation_boost: 0.15
