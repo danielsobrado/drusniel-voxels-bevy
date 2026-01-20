@@ -592,15 +592,55 @@ props:
       max_slope: 0.7
       max_count: 1200
 
-    - id: custom_dandelion
-      path: "models/plants/custom/dandelion_01_1k.glb"
+    - id: custom_dandelion_a
+      path: "models/plants/custom/dandelion_01_a.glb"
       scale_range: [6.0, 9.0]
-      y_offset: -0.5
+      y_offset: 0.0
       spawn_on: [TopSoil]
-      density: 0.0025
+      density: 0.0005
       min_slope: 0.0
       max_slope: 0.7
-      max_count: 1200
+      max_count: 240
+
+    - id: custom_dandelion_b
+      path: "models/plants/custom/dandelion_01_b.glb"
+      scale_range: [6.0, 9.0]
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 0.0005
+      min_slope: 0.0
+      max_slope: 0.7
+      max_count: 240
+
+    - id: custom_dandelion_c
+      path: "models/plants/custom/dandelion_01_c.glb"
+      scale_range: [6.0, 9.0]
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 0.0005
+      min_slope: 0.0
+      max_slope: 0.7
+      max_count: 240
+
+    - id: custom_dandelion_d
+      path: "models/plants/custom/dandelion_01_d.glb"
+      scale_range: [6.0, 9.0]
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 0.0005
+      min_slope: 0.0
+      max_slope: 0.7
+      max_count: 240
+
+    - id: custom_dandelion_e
+      path: "models/plants/custom/dandelion_01_e.glb"
+      scale_range: [6.0, 9.0]
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 0.0005
+      min_slope: 0.0
+      max_slope: 0.7
+      max_count: 240
 
 # Prop persistence configuration
 persistence:

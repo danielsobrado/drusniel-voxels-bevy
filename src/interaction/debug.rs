@@ -16,13 +16,16 @@ use crate::interaction::editing::{EditMode, DeleteMode, DragState};
 use crate::interaction::targeting::TargetedBlock;
 use crate::interaction::TargetedProp;
 use crate::network::NetworkSession;
-use crate::props::Prop;
+use crate::props::{Prop, PropChunkCullState};
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
+use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace, stop_area_trace};
+use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::plugin::{ChunkGenerationState, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 /// System parameter bundling entity breakdown queries for debug overlay.
 #[derive(SystemParam)]
@@ -52,6 +55,11 @@ pub struct DebugOverlayParams<'w> {
     pub state: Res<'w, DebugOverlayState>,
     pub toggles: Res<'w, DebugDetailToggles>,
     pub perf_metrics: ResMut<'w, PerformanceMetrics>,
+    pub prop_cull_state: Res<'w, PropChunkCullState>,
+    pub system_monitor: Res<'w, SystemPerformanceMonitor>,
+    pub graphics: Option<Res<'w, GraphicsCapabilities>>,
+    pub timing_recorder: Res<'w, AreaTimingRecorder>,
+    pub timing_capture: Res<'w, AreaTimingCapture>,
 }
 
 #[derive(SystemParam)]
@@ -96,6 +104,7 @@ pub struct DebugDetailToggles {
     pub show_chunk_stats: bool,
     pub show_prop_details: bool,
     pub show_performance: bool,
+    pub show_timing_breakdown: bool,
 }
 
 /// Resource tracking performance metrics for debug display.
@@ -180,6 +189,57 @@ impl PerformanceMetrics {
     }
 }
 
+/// Local system stats to show CPU/RAM when diagnostics are unavailable.
+#[derive(Resource)]
+pub struct SystemPerformanceMonitor {
+    system: System,
+    last_refresh: f64,
+    cpu_usage: Option<f32>,
+    cpu_cores: usize,
+    cpu_core_usages: Vec<f32>,
+    mem_used_mb: Option<u64>,
+}
+
+impl Default for SystemPerformanceMonitor {
+    fn default() -> Self {
+        let refresh = RefreshKind::everything()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything());
+        let mut system = System::new_with_specifics(refresh);
+        system.refresh_cpu_all();
+        system.refresh_memory();
+        Self {
+            system,
+            last_refresh: 0.0,
+            cpu_usage: None,
+            cpu_cores: 0,
+            cpu_core_usages: Vec::new(),
+            mem_used_mb: None,
+        }
+    }
+}
+
+/// Periodically refresh CPU/RAM stats for debug overlay fallback.
+pub fn update_system_monitor(mut monitor: ResMut<SystemPerformanceMonitor>, time: Res<Time>) {
+    let now = time.elapsed_secs_f64();
+    if now - monitor.last_refresh < 0.5 {
+        return;
+    }
+
+    monitor.last_refresh = now;
+    monitor.system.refresh_cpu_all();
+    monitor.system.refresh_memory();
+    monitor.cpu_usage = Some(monitor.system.global_cpu_usage());
+    monitor.cpu_cores = monitor.system.cpus().len();
+    monitor.cpu_core_usages = monitor
+        .system
+        .cpus()
+        .iter()
+        .map(|cpu| cpu.cpu_usage())
+        .collect();
+    monitor.mem_used_mb = Some((monitor.system.used_memory() / 1024) as u64);
+}
+
 /// Setup debug overlay UI.
 pub fn setup_debug_overlay(mut commands: Commands) {
     commands.spawn((
@@ -222,8 +282,11 @@ pub fn toggle_debug_overlay(
 pub fn toggle_debug_details(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut toggles: ResMut<DebugDetailToggles>,
+    mut timing_recorder: ResMut<AreaTimingRecorder>,
+    mut timing_capture: ResMut<AreaTimingCapture>,
 ) {
     let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
 
     if alt_held && keyboard.just_pressed(KeyCode::KeyV) {
         toggles.show_vertex_corners = !toggles.show_vertex_corners;
@@ -247,6 +310,20 @@ pub fn toggle_debug_details(
 
     if alt_held && keyboard.just_pressed(KeyCode::KeyF) {
         toggles.show_performance = !toggles.show_performance;
+    }
+
+    if alt_held && shift_held && keyboard.just_pressed(KeyCode::KeyT) {
+        toggles.show_timing_breakdown = !toggles.show_timing_breakdown;
+        timing_recorder.set_enabled(toggles.show_timing_breakdown || timing_capture.active);
+    }
+
+    if alt_held && shift_held && keyboard.just_pressed(KeyCode::KeyR) {
+        if timing_capture.active {
+            let _ = stop_area_trace(&mut timing_capture);
+        } else {
+            start_area_trace(&mut timing_capture);
+        }
+        timing_recorder.set_enabled(toggles.show_timing_breakdown || timing_capture.active);
     }
 }
 
@@ -450,10 +527,28 @@ pub fn update_debug_overlay(
     }
 
     if debug.toggles.show_performance {
-        append_performance_debug(&mut text_content, &diagnostics, &debug.perf_metrics, &chunk_stats);
+        append_performance_debug(
+            &mut text_content,
+            &diagnostics,
+            &debug.perf_metrics,
+            &chunk_stats,
+            &debug.prop_cull_state,
+            &debug.system_monitor,
+            debug.graphics.as_deref(),
+            debug.toggles.show_timing_breakdown,
+            &debug.timing_recorder,
+            &debug.timing_capture,
+        );
     }
 
-    append_control_hints(&mut text_content, &edit_mode, &delete_mode, &drag_state, &debug.toggles);
+    append_control_hints(
+        &mut text_content,
+        &edit_mode,
+        &delete_mode,
+        &drag_state,
+        &debug.toggles,
+        &debug.timing_capture,
+    );
 
     for mut text in query.iter_mut() {
         **text = text_content.clone();
@@ -625,6 +720,12 @@ fn append_performance_debug(
     diagnostics: &DiagnosticsStore,
     perf: &PerformanceMetrics,
     chunk_stats: &RuntimeChunkStats,
+    prop_cull: &PropChunkCullState,
+    system_monitor: &SystemPerformanceMonitor,
+    graphics: Option<&GraphicsCapabilities>,
+    show_timing_breakdown: bool,
+    timing_recorder: &AreaTimingRecorder,
+    timing_capture: &AreaTimingCapture,
 ) {
     text_content.push_str("\n[Performance]\n");
 
@@ -677,15 +778,56 @@ fn append_performance_debug(
         .get(&SystemInformationDiagnosticsPlugin::SYSTEM_CPU_USAGE)
         .and_then(|d| d.value())
         .map(|v| format!("{:.1}%", v))
+        .or_else(|| {
+            system_monitor
+                .cpu_usage
+                .map(|v| format!("{:.1}%", v))
+        })
         .unwrap_or_else(|| "N/A".to_string());
 
     let mem_usage = diagnostics
         .get(&SystemInformationDiagnosticsPlugin::SYSTEM_MEM_USAGE)
         .and_then(|d| d.value())
-        .map(|v| format!("{:.0} MB", v / (1024.0 * 1024.0)))
+        .map(|v| format!("{:.1} GB", v / (1024.0 * 1024.0 * 1024.0)))
+        .or_else(|| {
+            system_monitor
+                .mem_used_mb
+                .map(|v| format!("{:.1} GB", v as f64 / 1024.0))
+        })
         .unwrap_or_else(|| "N/A".to_string());
 
-    text_content.push_str(&format!("CPU: {}  RAM: {}\n", cpu_usage, mem_usage));
+    let cpu_label = if system_monitor.cpu_cores > 0 {
+        format!("{} ({} cores)", cpu_usage, system_monitor.cpu_cores)
+    } else {
+        cpu_usage
+    };
+    text_content.push_str(&format!("CPU: {}  RAM: {}\n", cpu_label, mem_usage));
+    if !system_monitor.cpu_core_usages.is_empty() {
+        let cores: Vec<String> = system_monitor
+            .cpu_core_usages
+            .iter()
+            .map(|v| format!("{:.0}%", v))
+            .collect();
+        text_content.push_str(&format!("CPU Cores: {}\n", cores.join(", ")));
+    }
+    let gpu_name = graphics
+        .and_then(|capabilities| capabilities.adapter_name.as_deref())
+        .unwrap_or("N/A");
+    let gpu_type = graphics
+        .map(|capabilities| {
+            if capabilities.integrated_gpu {
+                "Integrated"
+            } else {
+                "Discrete"
+            }
+        })
+        .unwrap_or("Unknown");
+    text_content.push_str(&format!("GPU: {} ({})\n", gpu_name, gpu_type));
+    let trace_status = if timing_capture.active { "REC" } else { "OFF" };
+    text_content.push_str(&format!("Trace: {}\n", trace_status));
+    if let Some(path) = timing_capture.last_output.as_deref() {
+        text_content.push_str(&format!("Trace file: {}\n", path));
+    }
 
     // Entity count from diagnostic
     let entity_count = diagnostics
@@ -695,11 +837,26 @@ fn append_performance_debug(
         .unwrap_or_else(|| "N/A".to_string());
     text_content.push_str(&format!("Entities: {}\n", entity_count));
 
+    // Prop culling stats
+    let total_props = prop_cull.visible_count + prop_cull.culled_count;
+    if total_props > 0 {
+        let cull_percent = (prop_cull.culled_count as f32 / total_props as f32) * 100.0;
+        text_content.push_str(&format!(
+            "Props: {} visible, {} culled ({:.0}% culled)\n",
+            prop_cull.visible_count, prop_cull.culled_count, cull_percent
+        ));
+        text_content.push_str(&format!(
+            "Prop Chunks: {} visible\n",
+            prop_cull.visible_chunks.len()
+        ));
+    }
+
     // Estimated draw calls (mesh entities are roughly 1 draw call each)
     let estimated_draws = chunk_stats.mesh_entities + chunk_stats.water_mesh_entities;
+    let prop_draws = prop_cull.visible_count; // Each visible prop is ~1 draw call
     text_content.push_str(&format!(
-        "Est. Draw Calls: ~{} (chunks) + props\n",
-        estimated_draws
+        "Est. Draw Calls: ~{} (chunks) + ~{} (props)\n",
+        estimated_draws, prop_draws
     ));
 
     // Meshing time from chunk stats
@@ -734,6 +891,17 @@ fn append_performance_debug(
                 "  Props: {:.2}ms\n",
                 perf.prop_update_time_us as f64 / 1000.0
             ));
+        }
+    }
+
+    if show_timing_breakdown {
+        text_content.push_str("\n[Area Timings]\n");
+        if timing_recorder.areas().is_empty() {
+            text_content.push_str("  (no data)\n");
+        } else {
+            for (area, us) in timing_recorder.areas() {
+                text_content.push_str(&format!("  {}: {:.2}ms\n", area, *us as f64 / 1000.0));
+            }
         }
     }
 
@@ -795,6 +963,7 @@ fn append_control_hints(
     delete_mode: &DeleteMode,
     drag_state: &DragState,
     toggles: &DebugDetailToggles,
+    timing_capture: &AreaTimingCapture,
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[G] Detailed log");
@@ -869,5 +1038,17 @@ fn append_control_hints(
         } else {
             "OFF"
         }
+    ));
+    text_content.push_str(&format!(
+        "\n[Alt+Shift+T] Area timings: {}",
+        if toggles.show_timing_breakdown {
+            "ON"
+        } else {
+            "OFF"
+        }
+    ));
+    text_content.push_str(&format!(
+        "\n[Alt+Shift+R] Timing trace: {}",
+        if timing_capture.active { "REC" } else { "OFF" }
     ));
 }

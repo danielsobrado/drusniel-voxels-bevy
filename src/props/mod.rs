@@ -5,10 +5,18 @@ pub mod persistence;
 pub mod placement;
 pub mod spawner;
 
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::camera::controller::PlayerCamera;
+use crate::constants::{
+    PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL, PROP_VIEW_DISTANCE_BASE,
+    PROP_VIEW_DISTANCE_BUSH_MULT, PROP_VIEW_DISTANCE_FLOWER_MULT,
+    PROP_VIEW_DISTANCE_HYSTERESIS, PROP_VIEW_DISTANCE_ROCK_MULT, PROP_VIEW_DISTANCE_TREE_MULT,
+};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use persistence::{
     delete_all_props, save_chunk_and_update_manifest, PropEditState, PropPersistenceState,
 };
@@ -33,6 +41,9 @@ impl Plugin for PropsPlugin {
             // Persistence resources
             .init_resource::<PropPersistenceState>()
             .init_resource::<PropEditState>()
+            // Culling resources
+            .init_resource::<PropViewDistanceConfig>()
+            .init_resource::<PropChunkCullState>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
             .add_systems(Startup, loader::load_prop_config)
@@ -67,6 +78,11 @@ impl Plugin for PropsPlugin {
                     regenerate_dirty_chunks,
                     handle_clear_prop_cache,
                 ),
+            )
+            // Culling system
+            .add_systems(
+                Update,
+                update_prop_chunk_visibility.after(spawner::spawn_props_on_terrain),
             );
     }
 }
@@ -84,6 +100,75 @@ pub enum PropType {
     Rock,
     Bush,
     Flower,
+}
+
+impl PropType {
+    /// Get the view distance multiplier for this prop type.
+    pub fn view_distance_multiplier(&self) -> f32 {
+        match self {
+            PropType::Tree => PROP_VIEW_DISTANCE_TREE_MULT,
+            PropType::Rock => PROP_VIEW_DISTANCE_ROCK_MULT,
+            PropType::Bush => PROP_VIEW_DISTANCE_BUSH_MULT,
+            PropType::Flower => PROP_VIEW_DISTANCE_FLOWER_MULT,
+        }
+    }
+}
+
+// =============================================================================
+// Prop Chunk Culling
+// =============================================================================
+
+/// Configuration for prop view distance culling.
+#[derive(Resource)]
+pub struct PropViewDistanceConfig {
+    pub base_distance: f32,
+    pub tree_mult: f32,
+    pub rock_mult: f32,
+    pub bush_mult: f32,
+    pub flower_mult: f32,
+    pub hysteresis: f32,
+    pub update_interval: f32,
+}
+
+impl Default for PropViewDistanceConfig {
+    fn default() -> Self {
+        Self {
+            base_distance: PROP_VIEW_DISTANCE_BASE,
+            tree_mult: PROP_VIEW_DISTANCE_TREE_MULT,
+            rock_mult: PROP_VIEW_DISTANCE_ROCK_MULT,
+            bush_mult: PROP_VIEW_DISTANCE_BUSH_MULT,
+            flower_mult: PROP_VIEW_DISTANCE_FLOWER_MULT,
+            hysteresis: PROP_VIEW_DISTANCE_HYSTERESIS,
+            update_interval: PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL,
+        }
+    }
+}
+
+/// State tracking for prop chunk visibility culling.
+#[derive(Resource)]
+pub struct PropChunkCullState {
+    /// Chunks that are currently visible (have visible entities).
+    pub visible_chunks: HashSet<IVec2>,
+    /// Last known camera chunk position (for change detection).
+    pub last_camera_chunk: IVec2,
+    /// Timer for update throttling.
+    pub update_timer: f32,
+    /// Number of props culled this frame (for debug display).
+    pub culled_count: usize,
+    /// Number of props visible this frame (for debug display).
+    pub visible_count: usize,
+}
+
+impl Default for PropChunkCullState {
+    fn default() -> Self {
+        Self {
+            visible_chunks: HashSet::new(),
+            last_camera_chunk: IVec2::new(i32::MIN, i32::MIN),
+            update_timer: 0.0,
+            culled_count: 0,
+            visible_count: 0,
+        }
+    }
 }
 
 /// Cached scene handles for all props
@@ -599,6 +684,124 @@ fn handle_clear_prop_cache(
     spawned.0 = false;
 
     info!("Prop cache cleared. Props will regenerate on next frame.");
+}
+
+// =============================================================================
+// Prop Chunk Visibility Culling System
+// =============================================================================
+
+/// Size of a "prop chunk" for culling purposes (matches persistence chunk size).
+const PROP_CHUNK_SIZE_CULL: f32 = 64.0;
+
+/// Update prop visibility based on camera distance.
+/// Props beyond their type's view distance are hidden to reduce draw calls.
+fn update_prop_chunk_visibility(
+    time: Res<Time>,
+    config: Res<PropViewDistanceConfig>,
+    mut cull_state: ResMut<PropChunkCullState>,
+    persistence_state: Res<PropPersistenceState>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut prop_query: Query<(&Prop, &GlobalTransform, &mut Visibility, &persistence::PersistedProp)>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let _timer = area_timer(&mut timing, frame.0, "Prop Culling");
+    // Throttle updates
+    cull_state.update_timer += time.delta_secs();
+    if cull_state.update_timer < config.update_interval {
+        return;
+    }
+    cull_state.update_timer = 0.0;
+
+    // Get camera position
+    let camera_pos = match camera_query.iter().next() {
+        Some(transform) => transform.translation(),
+        None => return,
+    };
+    let camera_pos_2d = Vec2::new(camera_pos.x, camera_pos.z);
+
+    // Calculate current camera chunk
+    let camera_chunk = IVec2::new(
+        (camera_pos.x / PROP_CHUNK_SIZE_CULL).floor() as i32,
+        (camera_pos.z / PROP_CHUNK_SIZE_CULL).floor() as i32,
+    );
+
+    // Determine which chunks should be visible based on max view distance
+    let max_view_dist = config.base_distance * config.tree_mult; // Trees have furthest view
+    let chunk_radius = ((max_view_dist / PROP_CHUNK_SIZE_CULL).ceil() as i32) + 1;
+
+    let mut new_visible_chunks = HashSet::new();
+    for dx in -chunk_radius..=chunk_radius {
+        for dz in -chunk_radius..=chunk_radius {
+            let chunk = IVec2::new(camera_chunk.x + dx, camera_chunk.y + dz);
+            // Check if this chunk has any loaded props
+            if persistence_state.loaded_chunks.contains_key(&chunk) {
+                // Calculate chunk center distance
+                let chunk_center = Vec2::new(
+                    (chunk.x as f32 + 0.5) * PROP_CHUNK_SIZE_CULL,
+                    (chunk.y as f32 + 0.5) * PROP_CHUNK_SIZE_CULL,
+                );
+                let dist = camera_pos_2d.distance(chunk_center);
+
+                // Use hysteresis: if already visible, use larger threshold to hide
+                let threshold = if cull_state.visible_chunks.contains(&chunk) {
+                    max_view_dist + config.hysteresis
+                } else {
+                    max_view_dist
+                };
+
+                if dist <= threshold {
+                    new_visible_chunks.insert(chunk);
+                }
+            }
+        }
+    }
+
+    // Now update individual prop visibility based on their type-specific distances
+    let mut visible_count = 0usize;
+    let mut culled_count = 0usize;
+
+    for (prop, transform, mut visibility, persisted) in prop_query.iter_mut() {
+        let prop_pos = transform.translation();
+        let prop_pos_2d = Vec2::new(prop_pos.x, prop_pos.z);
+        let dist = camera_pos_2d.distance(prop_pos_2d);
+
+        // Get type-specific view distance
+        let type_mult = prop.prop_type.view_distance_multiplier();
+        let view_dist = config.base_distance * type_mult;
+
+        // Check if chunk is in potentially visible set
+        let chunk_visible = new_visible_chunks.contains(&persisted.chunk_pos);
+
+        // Determine if this specific prop should be visible
+        // Use hysteresis based on current visibility state
+        let currently_visible = *visibility != Visibility::Hidden;
+        let threshold = if currently_visible {
+            view_dist + config.hysteresis
+        } else {
+            view_dist
+        };
+
+        let should_be_visible = chunk_visible && dist <= threshold;
+
+        if should_be_visible {
+            if *visibility == Visibility::Hidden {
+                *visibility = Visibility::Inherited;
+            }
+            visible_count += 1;
+        } else {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+            culled_count += 1;
+        }
+    }
+
+    // Update state
+    cull_state.visible_chunks = new_visible_chunks;
+    cull_state.last_camera_chunk = camera_chunk;
+    cull_state.visible_count = visible_count;
+    cull_state.culled_count = culled_count;
 }
 
 // Helper functions for regeneration

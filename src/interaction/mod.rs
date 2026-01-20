@@ -24,8 +24,10 @@ use crate::constants::{ATTACK_DAMAGE, BEDROCK_DEPTH};
 use crate::entity::Health;
 use crate::menu::PauseMenuState;
 use crate::particles::{ParticleType, SpawnParticleEvent};
+use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use palette::PlacementPaletteState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
@@ -732,6 +734,9 @@ impl Plugin for InteractionPlugin {
             .init_resource::<DebugOverlayState>()
             .init_resource::<DebugDetailToggles>()
             .init_resource::<debug::PerformanceMetrics>()
+            .init_resource::<debug::SystemPerformanceMonitor>()
+            .init_resource::<AreaTimingRecorder>()
+            .init_resource::<AreaTimingCapture>()
             .init_resource::<LastGameplayError>()
             .init_resource::<palette::PaletteItems>()
             .init_resource::<PlacementPaletteState>()
@@ -782,13 +787,15 @@ impl Plugin for InteractionPlugin {
             .add_systems(
                 Update,
                 (
-                    debug_voxel_info_system,
-                    debug::toggle_debug_overlay,
-                    debug::toggle_debug_details,
-                    debug::update_debug_overlay,
-                    clear_expired_errors,
+                    debug_voxel_info_system.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::toggle_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::toggle_debug_details.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
+                    clear_expired_errors.run_if(|state: Res<PauseMenuState>| !state.open),
                 )
-                    .run_if(|state: Res<PauseMenuState>| !state.open),
             );
+        app.add_systems(PreUpdate, crate::performance::reset_area_timing_frame);
+        app.add_systems(PostUpdate, crate::performance::capture_area_timings);
     }
 }

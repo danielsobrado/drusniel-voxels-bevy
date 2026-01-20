@@ -1,8 +1,10 @@
 use avian3d::prelude::*;
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::ecs::world::EntityWorldMut;
 
 use crate::physics::PhysicsLayer;
+use crate::performance::{AreaTimingRecorder, area_timer};
 
 const TERRAIN_COLLIDER_VOXEL_SIZE: f32 = 1.0;
 const TERRAIN_COLLIDER_MARGIN: f32 = 0.05;
@@ -21,7 +23,10 @@ pub fn generate_chunk_colliders(
     mut commands: Commands,
     chunks: Query<(Entity, &Mesh3d), (With<ChunkMesh>, With<NeedsCollider>)>,
     meshes: Res<Assets<Mesh>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Collider Build");
     for (entity, mesh_handle) in chunks.iter() {
         let Some(mesh) = meshes.get(&mesh_handle.0) else {
             continue;
@@ -62,7 +67,10 @@ pub fn generate_chunk_colliders(
 pub fn handle_chunk_modification(
     mut commands: Commands,
     modified_chunks: Query<Entity, (With<ChunkMesh>, Changed<Mesh3d>, With<ChunkCollider>)>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Collider Update");
     for entity in modified_chunks.iter() {
         commands
             .entity(entity)

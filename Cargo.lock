@@ -7962,6 +7962,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.17",
  "wgpu 26.0.1",

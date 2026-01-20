@@ -9,7 +9,9 @@ use super::{
     foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition,
     PropType,
 };
+use bevy::diagnostic::FrameCount;
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::player::Player;
 use crate::props::persistence::{
     load_chunk_props_if_exists, load_manifest, save_chunk_and_update_manifest, save_manifest,
@@ -25,6 +27,14 @@ const WORLD_SCAN_SIZE: i32 = 512;
 const MAX_SCAN_HEIGHT: i32 = 64;
 const TREE_CELL_SIZE: i32 = 10;
 const ROCK_REGION_CELL_SIZE: i32 = 48;
+const ROCK_CLUSTER_CELL_SIZE: i32 = 64;
+const BUSH_CLUSTER_CELL_SIZE: i32 = 36;
+const ROCK_CLUSTER_THRESHOLD: f32 = 0.4;
+const BUSH_CLUSTER_THRESHOLD: f32 = 0.35;
+const ROCK_CLUSTER_BASE: f32 = 0.25;
+const ROCK_CLUSTER_PEAK: f32 = 2.6;
+const BUSH_CLUSTER_BASE: f32 = 0.4;
+const BUSH_CLUSTER_PEAK: f32 = 1.8;
 const MAX_BUILDING_SLOPE: f32 = 0.45;
 const BUILDING_SEARCH_RADIUS: i32 = 20;
 
@@ -49,7 +59,10 @@ pub fn spawn_props_on_terrain(
     world: Res<VoxelWorld>,
     mut spawned: ResMut<PropsSpawned>,
     mut persistence_state: ResMut<PropPersistenceState>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Prop Spawn");
     if spawned.0 || !prop_assets.loaded {
         return;
     }
@@ -304,6 +317,25 @@ fn generate_category_props(
                     let (region_boost, palette_boost) =
                         rock_region_modifiers(world_x, world_z, biome, &def.id, near_water);
                     density *= region_boost * palette_boost;
+                    density *= cluster_density_multiplier(
+                        world_x,
+                        world_z,
+                        "rock_cluster",
+                        ROCK_CLUSTER_CELL_SIZE,
+                        ROCK_CLUSTER_THRESHOLD,
+                        ROCK_CLUSTER_BASE,
+                        ROCK_CLUSTER_PEAK,
+                    );
+                } else if prop_type == PropType::Bush {
+                    density *= cluster_density_multiplier(
+                        world_x,
+                        world_z,
+                        "bush_cluster",
+                        BUSH_CLUSTER_CELL_SIZE,
+                        BUSH_CLUSTER_THRESHOLD,
+                        BUSH_CLUSTER_BASE,
+                        BUSH_CLUSTER_PEAK,
+                    );
                 }
 
                 let hash = deterministic_hash(world_x, world_z, &def.id);
@@ -744,6 +776,40 @@ fn rock_region_modifiers(
     (biome_boost * pebble_boost, palette_boost)
 }
 
+fn cluster_density_multiplier(
+    world_x: i32,
+    world_z: i32,
+    cluster_id: &str,
+    cell_size: i32,
+    cluster_threshold: f32,
+    base: f32,
+    peak: f32,
+) -> f32 {
+    let cell_x = world_x.div_euclid(cell_size);
+    let cell_z = world_z.div_euclid(cell_size);
+    let cell_hash = deterministic_hash(cell_x, cell_z, cluster_id);
+
+    if cell_hash < cluster_threshold {
+        return base;
+    }
+
+    let cell_size_f = cell_size as f32;
+    let center_x = cell_x as f32 * cell_size_f + fract(cell_hash * 11.0) * cell_size_f;
+    let center_z = cell_z as f32 * cell_size_f + fract(cell_hash * 17.0) * cell_size_f;
+    let dx = world_x as f32 + 0.5 - center_x;
+    let dz = world_z as f32 + 0.5 - center_z;
+    let dist_sq = dx * dx + dz * dz;
+
+    let radius = cell_size_f * (0.35 + fract(cell_hash * 23.0) * 0.35);
+    let radius_sq = radius * radius;
+    if dist_sq >= radius_sq {
+        return base;
+    }
+
+    let t = 1.0 - (dist_sq.sqrt() / radius);
+    base + (peak - base) * t * t
+}
+
 /// Find surface voxel and calculate slope
 fn find_surface(world: &VoxelWorld, x: i32, z: i32) -> Option<(i32, VoxelType, f32)> {
     for y in (0..MAX_SCAN_HEIGHT).rev() {
@@ -849,7 +915,7 @@ fn prop_scale(
     scale_max: f32,
     scale_jitter: f32,
     id: &str,
-    prop_type: PropType,
+    _prop_type: PropType,
     hash: f32,
     world_x: i32,
     world_z: i32,
@@ -858,12 +924,7 @@ fn prop_scale(
         return scale_min;
     }
 
-    let base = if prop_type == PropType::Rock {
-        let id_hash = deterministic_hash(0, 0, id);
-        lerp(scale_min, scale_max, fract(id_hash * 7.0))
-    } else {
-        lerp(scale_min, scale_max, fract(hash * 7.0))
-    };
+    let base = lerp(scale_min, scale_max, fract(hash * 7.0));
 
     if scale_jitter <= 0.0 {
         return base;

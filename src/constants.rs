@@ -354,3 +354,29 @@ pub const BEDROCK_DEPTH: i32 = 0;
 
 /// Smooth transition thickness for bedrock blending in SDF.
 pub const BEDROCK_BLEND: f32 = 2.0;
+
+// =============================================================================
+// Prop View Distance Settings
+// =============================================================================
+
+/// Base view distance for props in world units.
+/// Props beyond this distance (multiplied by type multiplier) are culled.
+pub const PROP_VIEW_DISTANCE_BASE: f32 = 200.0;
+
+/// View distance multiplier for trees (tallest, most visible).
+pub const PROP_VIEW_DISTANCE_TREE_MULT: f32 = 1.0;
+
+/// View distance multiplier for rocks.
+pub const PROP_VIEW_DISTANCE_ROCK_MULT: f32 = 0.75;
+
+/// View distance multiplier for bushes.
+pub const PROP_VIEW_DISTANCE_BUSH_MULT: f32 = 0.5;
+
+/// View distance multiplier for flowers (smallest, least visible).
+pub const PROP_VIEW_DISTANCE_FLOWER_MULT: f32 = 0.25;
+
+/// Hysteresis buffer for prop visibility to prevent rapid toggling.
+pub const PROP_VIEW_DISTANCE_HYSTERESIS: f32 = 10.0;
+
+/// Interval in seconds between prop chunk visibility updates.
+pub const PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL: f32 = 0.25;

@@ -20,3 +20,4 @@ pub mod voxel;
 pub mod debug_ui;
 pub mod particles;
 pub mod player;
+pub mod performance;

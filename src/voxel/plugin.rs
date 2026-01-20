@@ -9,10 +9,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, poll_once, AsyncComputeTaskPool, Task};
 
 use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::constants::{
     BEDROCK_DEPTH, CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32,
     // LOD
@@ -687,7 +689,10 @@ fn mesh_dirty_chunks_system(
     mut chunk_stats: ResMut<RuntimeChunkStats>,
     mut material_logged: Local<bool>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Chunk Meshing");
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
 

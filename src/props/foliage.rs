@@ -1,8 +1,10 @@
 use bevy::color::Alpha;
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::player::Player;
 use crate::vegetation::VegetationConfig;
 use crate::vegetation::WindState;
@@ -155,7 +157,10 @@ pub fn update_foliage_fade(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut foliage_query: Query<(&GlobalTransform, &mut MeshMaterial3d<StandardMaterial>, &mut FoliageFade)>,
     mut last_update: Local<f32>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Foliage Fade");
     let interval = settings.update_interval.max(0.0);
     if interval > 0.0 {
         let now = time.elapsed_secs();
@@ -358,7 +363,10 @@ pub fn update_grass_prop_wind(
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut props_query: Query<(&mut Transform, &GrassPropWind)>,
     mut last_update: Local<f32>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Grass Wind");
     let interval = settings.update_interval.max(0.0);
     if interval > 0.0 {
         let now = time.elapsed_secs();
