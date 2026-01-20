@@ -2,7 +2,9 @@
 //!
 //! This is the main entry point that initializes the Bevy app with all plugins.
 
-use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::diagnostic::{
+    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+};
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings, WgpuLimits};
 use bevy::render::RenderPlugin;
@@ -233,7 +235,11 @@ fn main() {
 
     App::new()
         .add_plugins(plugins)
-        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins((
+            FrameTimeDiagnosticsPlugin::default(),
+            EntityCountDiagnosticsPlugin::default(),
+            SystemInformationDiagnosticsPlugin::default(),
+        ))
         .add_plugins(PhysicsPlugin)
         .add_plugins(PlayerPlugin)
         .add_plugins(VoxelPlugin)

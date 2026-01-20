@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "voxel_builder"
 
 [dependencies]
-bevy = { version = "0.17", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures"] }
+bevy = { version = "0.17", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures", "sysinfo_plugin"] }
 bevy_mesh = "0.17"
 bevy_shader = "0.17"
 bevy_water = "0.17"

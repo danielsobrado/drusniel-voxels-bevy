@@ -5,7 +5,11 @@
 //! - G key for detailed block logging
 //! - Various toggle keys for specific debug information
 
-use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::diagnostic::{
+    DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
+    SystemInformationDiagnosticsPlugin,
+};
+use std::time::Instant;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crate::interaction::editing::{EditMode, DeleteMode, DragState};
@@ -47,6 +51,7 @@ impl EntityBreakdownQuery<'_, '_> {
 pub struct DebugOverlayParams<'w> {
     pub state: Res<'w, DebugOverlayState>,
     pub toggles: Res<'w, DebugDetailToggles>,
+    pub perf_metrics: ResMut<'w, PerformanceMetrics>,
 }
 
 #[derive(SystemParam)]
@@ -90,6 +95,89 @@ pub struct DebugDetailToggles {
     pub show_multiplayer: bool,
     pub show_chunk_stats: bool,
     pub show_prop_details: bool,
+    pub show_performance: bool,
+}
+
+/// Resource tracking performance metrics for debug display.
+#[derive(Resource)]
+pub struct PerformanceMetrics {
+    /// Frame time history for min/max calculation (last N frames)
+    pub frame_times_ms: Vec<f64>,
+    /// Current index in circular buffer
+    frame_time_index: usize,
+    /// Physics step timing (updated by wrapper system)
+    pub physics_time_us: u64,
+    /// Visibility/culling timing
+    pub visibility_time_us: u64,
+    /// Transform propagation timing
+    pub transform_time_us: u64,
+    /// Prop update timing
+    pub prop_update_time_us: u64,
+    /// Last frame's total tracked time
+    pub total_tracked_time_us: u64,
+    /// Timestamp for measuring frame sections
+    pub section_start: Option<Instant>,
+}
+
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self {
+            frame_times_ms: vec![0.0; 120], // 2 seconds at 60fps
+            frame_time_index: 0,
+            physics_time_us: 0,
+            visibility_time_us: 0,
+            transform_time_us: 0,
+            prop_update_time_us: 0,
+            total_tracked_time_us: 0,
+            section_start: None,
+        }
+    }
+}
+
+impl PerformanceMetrics {
+    /// Record a frame time sample
+    pub fn record_frame_time(&mut self, time_ms: f64) {
+        self.frame_times_ms[self.frame_time_index] = time_ms;
+        self.frame_time_index = (self.frame_time_index + 1) % self.frame_times_ms.len();
+    }
+
+    /// Get min frame time from history
+    pub fn min_frame_time(&self) -> f64 {
+        self.frame_times_ms
+            .iter()
+            .filter(|&&t| t > 0.0)
+            .copied()
+            .fold(f64::MAX, f64::min)
+    }
+
+    /// Get max frame time from history
+    pub fn max_frame_time(&self) -> f64 {
+        self.frame_times_ms
+            .iter()
+            .copied()
+            .fold(0.0, f64::max)
+    }
+
+    /// Get average frame time from history
+    pub fn avg_frame_time(&self) -> f64 {
+        let valid: Vec<_> = self.frame_times_ms.iter().filter(|&&t| t > 0.0).collect();
+        if valid.is_empty() {
+            return 0.0;
+        }
+        valid.iter().copied().sum::<f64>() / valid.len() as f64
+    }
+
+    /// Reset per-frame timings
+    pub fn reset_frame_timings(&mut self) {
+        self.total_tracked_time_us = self.physics_time_us
+            + self.visibility_time_us
+            + self.transform_time_us
+            + self.prop_update_time_us;
+        self.physics_time_us = 0;
+        self.visibility_time_us = 0;
+        self.transform_time_us = 0;
+        self.prop_update_time_us = 0;
+    }
 }
 
 /// Setup debug overlay UI.
@@ -156,12 +244,16 @@ pub fn toggle_debug_details(
     if alt_held && keyboard.just_pressed(KeyCode::KeyP) {
         toggles.show_prop_details = !toggles.show_prop_details;
     }
+
+    if alt_held && keyboard.just_pressed(KeyCode::KeyF) {
+        toggles.show_performance = !toggles.show_performance;
+    }
 }
 
 /// Update debug overlay text with real-time info.
 #[allow(clippy::too_many_arguments)]
 pub fn update_debug_overlay(
-    debug: DebugOverlayParams,
+    mut debug: DebugOverlayParams,
     targeted: Res<TargetedBlock>,
     targeted_prop: Res<TargetedProp>,
     world: Res<VoxelWorld>,
@@ -181,6 +273,14 @@ pub fn update_debug_overlay(
 ) {
     if !debug.state.visible {
         return;
+    }
+
+    // Record frame time for history (use smoothed for stable values)
+    if let Some(frame_time) = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(|d| d.smoothed())
+    {
+        debug.perf_metrics.record_frame_time(frame_time * 1000.0); // Convert to ms
     }
 
     let mut text_content = String::new();
@@ -349,6 +449,10 @@ pub fn update_debug_overlay(
         append_chunk_stats_debug(&mut text_content, &chunk_stats);
     }
 
+    if debug.toggles.show_performance {
+        append_performance_debug(&mut text_content, &diagnostics, &debug.perf_metrics, &chunk_stats);
+    }
+
     append_control_hints(&mut text_content, &edit_mode, &delete_mode, &drag_state, &debug.toggles);
 
     for mut text in query.iter_mut() {
@@ -515,6 +619,139 @@ fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats
     }
 }
 
+/// Append performance debug info to text content.
+fn append_performance_debug(
+    text_content: &mut String,
+    diagnostics: &DiagnosticsStore,
+    perf: &PerformanceMetrics,
+    chunk_stats: &RuntimeChunkStats,
+) {
+    text_content.push_str("\n[Performance]\n");
+
+    // Frame timing - use smoothed() for stable display, value() for instant
+    let frame_time = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(|d| d.smoothed())
+        .map(|v| v * 1000.0) // Convert to ms
+        .unwrap_or(0.0);
+
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+
+    text_content.push_str(&format!(
+        "Frame: {:.2}ms ({:.0} FPS)\n",
+        frame_time, fps
+    ));
+
+    // Frame time range from history
+    let min_time = perf.min_frame_time();
+    let max_time = perf.max_frame_time();
+    let avg_time = perf.avg_frame_time();
+    if min_time < f64::MAX && max_time > 0.0 {
+        text_content.push_str(&format!(
+            "  Range: {:.1}ms - {:.1}ms (avg: {:.1}ms)\n",
+            min_time, max_time, avg_time
+        ));
+    }
+
+    // Frame budget analysis
+    let target_60fps = 16.67;
+    let target_30fps = 33.33;
+    let budget_used = (frame_time / target_60fps) * 100.0;
+    let budget_indicator = if frame_time < target_60fps {
+        "OK"
+    } else if frame_time < target_30fps {
+        "WARN"
+    } else {
+        "SLOW"
+    };
+    text_content.push_str(&format!(
+        "  Budget: {:.0}% of 16.7ms [{}]\n",
+        budget_used, budget_indicator
+    ));
+
+    // CPU/Memory from SystemInformationDiagnosticsPlugin
+    let cpu_usage = diagnostics
+        .get(&SystemInformationDiagnosticsPlugin::SYSTEM_CPU_USAGE)
+        .and_then(|d| d.value())
+        .map(|v| format!("{:.1}%", v))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let mem_usage = diagnostics
+        .get(&SystemInformationDiagnosticsPlugin::SYSTEM_MEM_USAGE)
+        .and_then(|d| d.value())
+        .map(|v| format!("{:.0} MB", v / (1024.0 * 1024.0)))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    text_content.push_str(&format!("CPU: {}  RAM: {}\n", cpu_usage, mem_usage));
+
+    // Entity count from diagnostic
+    let entity_count = diagnostics
+        .get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT)
+        .and_then(|d| d.value())
+        .map(|v| format!("{:.0}", v))
+        .unwrap_or_else(|| "N/A".to_string());
+    text_content.push_str(&format!("Entities: {}\n", entity_count));
+
+    // Estimated draw calls (mesh entities are roughly 1 draw call each)
+    let estimated_draws = chunk_stats.mesh_entities + chunk_stats.water_mesh_entities;
+    text_content.push_str(&format!(
+        "Est. Draw Calls: ~{} (chunks) + props\n",
+        estimated_draws
+    ));
+
+    // Meshing time from chunk stats
+    if chunk_stats.meshing_time_us > 0 {
+        let mesh_time_ms = chunk_stats.meshing_time_us as f64 / 1000.0;
+        text_content.push_str(&format!("Meshing: {:.2}ms\n", mesh_time_ms));
+    }
+
+    // Custom tracked timings (if instrumented)
+    if perf.total_tracked_time_us > 0 {
+        text_content.push_str("\n[System Timing]\n");
+        if perf.physics_time_us > 0 {
+            text_content.push_str(&format!(
+                "  Physics: {:.2}ms\n",
+                perf.physics_time_us as f64 / 1000.0
+            ));
+        }
+        if perf.visibility_time_us > 0 {
+            text_content.push_str(&format!(
+                "  Visibility: {:.2}ms\n",
+                perf.visibility_time_us as f64 / 1000.0
+            ));
+        }
+        if perf.transform_time_us > 0 {
+            text_content.push_str(&format!(
+                "  Transforms: {:.2}ms\n",
+                perf.transform_time_us as f64 / 1000.0
+            ));
+        }
+        if perf.prop_update_time_us > 0 {
+            text_content.push_str(&format!(
+                "  Props: {:.2}ms\n",
+                perf.prop_update_time_us as f64 / 1000.0
+            ));
+        }
+    }
+
+    // Bottleneck analysis hint
+    text_content.push_str("\n[Bottleneck Hints]\n");
+    if estimated_draws > 1000 {
+        text_content.push_str("  ! High draw calls - consider instancing\n");
+    }
+    if frame_time > target_60fps && budget_used > 100.0 {
+        let gpu_bound_hint = if chunk_stats.total_vertices > 500_000 {
+            "  ! High vertex count - may be GPU bound\n"
+        } else {
+            "  ! Likely CPU bound (ECS/draw calls)\n"
+        };
+        text_content.push_str(gpu_bound_hint);
+    }
+}
+
 /// Append multiplayer debug info to text content.
 fn append_multiplayer_debug(text_content: &mut String, network: &NetworkSession) {
     text_content.push_str("\n[Multiplayer]\n");
@@ -620,6 +857,14 @@ fn append_control_hints(
     text_content.push_str(&format!(
         "\n[Alt+P] Prop debug: {}",
         if toggles.show_prop_details {
+            "ON"
+        } else {
+            "OFF"
+        }
+    ));
+    text_content.push_str(&format!(
+        "\n[Alt+F] Performance: {}",
+        if toggles.show_performance {
             "ON"
         } else {
             "OFF"

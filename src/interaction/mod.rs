@@ -731,6 +731,7 @@ impl Plugin for InteractionPlugin {
             .init_resource::<DragState>()
             .init_resource::<DebugOverlayState>()
             .init_resource::<DebugDetailToggles>()
+            .init_resource::<debug::PerformanceMetrics>()
             .init_resource::<LastGameplayError>()
             .init_resource::<palette::PaletteItems>()
             .init_resource::<PlacementPaletteState>()
