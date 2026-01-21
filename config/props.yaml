@@ -422,7 +422,7 @@ props:
 
     - id: usn_bush_flowers
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Flowers.gltf"
-      scale_range: [0.7, 1.2]
+      scale_range: [0.55, 0.95]
       y_offset: -1.0
       spawn_on: [TopSoil]
       density: 0.012
@@ -442,7 +442,7 @@ props:
 
     - id: usn_bush_large_flowers
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Large_Flowers.gltf"
-      scale_range: [0.9, 1.4]
+      scale_range: [0.7, 1.1]
       y_offset: -1.0
       spawn_on: [TopSoil, SubSoil]
       density: 0.01
@@ -462,7 +462,7 @@ props:
 
     - id: usn_bush_small_flowers
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Small_Flowers.gltf"
-      scale_range: [8.0, 12.0]
+      scale_range: [6.0, 9.0]
       y_offset: -0.2
       spawn_on: [TopSoil]
       density: 0.02

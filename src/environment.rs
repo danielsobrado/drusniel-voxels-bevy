@@ -77,13 +77,14 @@ impl Plugin for AtmospherePlugin {
             // bevy_water for dynamic ocean waves
             .insert_resource(WaterSettings {
                 height: WATER_LEVEL as f32,
-                amplitude: 0.5,
+                amplitude: 0.9,
                 alpha_mode: AlphaMode::Blend,
-                base_color: Color::srgba(0.12, 0.42, 0.75, 0.6),
-                clarity: 0.4,
-                deep_color: Color::srgba(0.05, 0.15, 0.35, 0.95).into(),
-                shallow_color: Color::srgba(0.2, 0.5, 0.7, 0.85).into(),
-                edge_color: Color::srgba(0.6, 0.8, 0.9, 0.7).into(),
+                base_color: Color::srgba(0.02, 0.1, 0.2, 0.92),
+                clarity: 0.14,
+                deep_color: Color::srgba(0.01, 0.04, 0.12, 0.98).into(),
+                shallow_color: Color::srgba(0.04, 0.18, 0.36, 0.9).into(),
+                edge_color: Color::srgba(0.18, 0.38, 0.55, 0.75).into(),
+                edge_scale: 0.4,
                 ..default()
             })
             .add_plugins((WaterPlugin, ImageUtilsPlugin))

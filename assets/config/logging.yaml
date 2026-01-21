@@ -1,0 +1,35 @@
+# Logging Configuration
+#
+# Levels: error, warn, info, debug, trace
+# Default level applies to all modules unless overridden
+
+# Default log level for the entire application
+default_level: info
+
+# Module-specific log levels (override default)
+modules:
+  # Prop systems - set to debug to see merging details
+  voxel_builder::props::merging: warn
+  voxel_builder::props::spawner: info
+  voxel_builder::props::instancing: info
+  voxel_builder::props: info
+
+  # Atmosphere (very noisy, keep at warn or higher)
+  voxel_builder::atmosphere::fog: warn
+
+  # Rendering
+  voxel_builder::rendering: info
+
+  # Voxel systems
+  voxel_builder::voxel: info
+
+  # Physics
+  voxel_builder::physics: warn
+
+  # Bevy internals (keep quiet unless debugging)
+  bevy_ecs: warn
+  bevy_render: warn
+  bevy_app: warn
+  wgpu: warn
+  wgpu_core: error
+  naga: error

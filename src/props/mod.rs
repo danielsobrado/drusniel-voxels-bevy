@@ -1,6 +1,8 @@
 pub mod foliage;
+pub mod instancing;
 pub mod loader;
 pub mod materials;
+pub mod merging;
 pub mod persistence;
 pub mod placement;
 pub mod spawner;
@@ -44,6 +46,11 @@ impl Plugin for PropsPlugin {
             // Culling resources
             .init_resource::<PropViewDistanceConfig>()
             .init_resource::<PropChunkCullState>()
+            // Merging resources
+            .init_resource::<merging::PropMergeState>()
+            // Instancing resources
+            .init_resource::<instancing::PropMeshCache>()
+            .init_resource::<instancing::InstancingStats>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
             .add_systems(Startup, loader::load_prop_config)
@@ -51,6 +58,8 @@ impl Plugin for PropsPlugin {
                 Update,
                 (
                     loader::track_asset_loading,
+                    // Mesh extraction must run before spawning so cache is ready
+                    instancing::extract_prop_meshes,
                     spawner::spawn_props_on_terrain,
                     spawner::spawn_debug_custom_props_near_player,
                     spawner::spawn_landmark_buildings,
@@ -83,7 +92,21 @@ impl Plugin for PropsPlugin {
             .add_systems(
                 Update,
                 update_prop_chunk_visibility.after(spawner::spawn_props_on_terrain),
-            );
+            )
+            // Merging systems (run after spawning and materials)
+            .add_systems(
+                Update,
+                (
+                    merging::mark_merge_candidates
+                        .after(materials::apply_style_overrides),
+                    merging::check_scene_ready
+                        .after(merging::mark_merge_candidates),
+                    merging::process_chunk_merges
+                        .after(merging::check_scene_ready),
+                    merging::cleanup_merged_meshes,
+                ),
+            )
+;
     }
 }
 
@@ -94,7 +117,7 @@ pub struct Prop {
     pub prop_type: PropType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PropType {
     Tree,
     Rock,
@@ -402,6 +425,8 @@ fn regenerate_dirty_chunks(
     world: Res<crate::voxel::world::VoxelWorld>,
     config: Res<PropConfig>,
     assets: Res<PropAssets>,
+    mesh_cache: Res<instancing::PropMeshCache>,
+    mut instancing_stats: ResMut<instancing::InstancingStats>,
 ) {
     // Check if we have any events
     if events.read().next().is_none() {
@@ -456,6 +481,8 @@ fn regenerate_dirty_chunks(
             &mut commands,
             &props,
             &assets,
+            &mesh_cache,
+            &mut instancing_stats,
             chunk_pos,
         );
         state.loaded_chunks.insert(chunk_pos, entities);
@@ -622,19 +649,53 @@ fn regenerate_chunk_props(
     props
 }
 
-/// Spawn entities from placement data
+/// Spawn entities from placement data.
+/// Uses instanced rendering when the mesh cache is ready, otherwise falls back to SceneRoot.
 fn spawn_props_from_placement_data(
     commands: &mut Commands,
     props: &[persistence::PropPlacementData],
     assets: &PropAssets,
+    mesh_cache: &instancing::PropMeshCache,
+    stats: &mut instancing::InstancingStats,
     chunk_pos: IVec2,
 ) -> Vec<Entity> {
     props
         .iter()
         .filter_map(|prop| {
-            let scene_handle = assets.scenes.get(&prop.id)?;
             let transform = prop.to_transform();
             let prop_type: PropType = prop.prop_type.into();
+
+            // Try instanced spawning first (uses cached mesh handles for GPU batching)
+            if let Some(entity) = instancing::spawn_instanced_prop(
+                commands,
+                mesh_cache,
+                &prop.id,
+                transform.clone(),
+                prop_type,
+            ) {
+                // Add common components
+                commands.entity(entity).insert((
+                    Prop {
+                        id: prop.id.clone(),
+                        prop_type,
+                    },
+                    persistence::PersistedProp {
+                        chunk_pos,
+                        placement_seed: prop.placement_seed,
+                    },
+                ));
+
+                if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
+                    let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                    commands.entity(entity).insert(foliage::GrassPropWind::new(&transform, hash));
+                }
+
+                stats.instanced_spawns += 1;
+                return Some(entity);
+            }
+
+            // Fallback to SceneRoot spawning
+            let scene_handle = assets.scenes.get(&prop.id)?;
 
             let mut entity = commands.spawn((
                 SceneRoot(scene_handle.clone()),
@@ -654,6 +715,7 @@ fn spawn_props_from_placement_data(
                 entity.insert(foliage::GrassPropWind::new(&transform, hash));
             }
 
+            stats.scene_spawns += 1;
             Some(entity.id())
         })
         .collect()

@@ -1,3 +1,4 @@
+use super::instancing::{PropMeshCache, spawn_instanced_prop, InstancingStats};
 use super::persistence::{
     GroundContactData, PersistedProp, PropManifest, PropPersistenceState, PropPlacementData,
 };
@@ -52,6 +53,7 @@ pub struct PropsLandmarksSpawned(pub bool);
 
 /// Spawn props on terrain based on configuration.
 /// Uses persistence: loads from disk if available, otherwise generates and saves.
+/// When mesh cache is ready, uses GPU instancing for better performance.
 pub fn spawn_props_on_terrain(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
@@ -59,6 +61,8 @@ pub fn spawn_props_on_terrain(
     world: Res<VoxelWorld>,
     mut spawned: ResMut<PropsSpawned>,
     mut persistence_state: ResMut<PropPersistenceState>,
+    mesh_cache: Res<PropMeshCache>,
+    mut instancing_stats: ResMut<InstancingStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -69,6 +73,20 @@ pub fn spawn_props_on_terrain(
 
     // Wait for world to be populated
     if world.get_chunk(IVec3::ZERO).is_none() {
+        return;
+    }
+
+    // Wait for mesh cache to be ready when instancing is enabled
+    // This ensures GLTF mesh extraction completes before spawning
+    if mesh_cache.enabled && !mesh_cache.is_ready() {
+        // Log progress occasionally
+        if frame.0 % 60 == 0 {
+            info!(
+                "Waiting for mesh cache: {} pending GLTFs, {} cached",
+                mesh_cache.pending_gltfs.len(),
+                mesh_cache.meshes.len()
+            );
+        }
         return;
     }
 
@@ -98,6 +116,14 @@ pub fn spawn_props_on_terrain(
     let mut total = 0u32;
     let start_time = std::time::Instant::now();
 
+    // Check if instancing is ready
+    let use_instancing = mesh_cache.is_ready();
+    if use_instancing {
+        info!("Using GPU instancing for prop spawning ({} cached types)", mesh_cache.meshes.len());
+    } else {
+        info!("Mesh cache not ready, using SceneRoot spawning (instancing will be used after cache is ready)");
+    }
+
     // Calculate how many prop chunks cover the world
     let num_chunks_x = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
     let num_chunks_z = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
@@ -113,6 +139,8 @@ pub fn spawn_props_on_terrain(
                     &mut commands,
                     &props,
                     &prop_assets,
+                    &mesh_cache,
+                    &mut instancing_stats,
                     chunk_pos,
                 );
                 total += entities.len() as u32;
@@ -142,6 +170,8 @@ pub fn spawn_props_on_terrain(
                     &mut commands,
                     &props,
                     &prop_assets,
+                    &mesh_cache,
+                    &mut instancing_stats,
                     chunk_pos,
                 );
                 total += entities.len() as u32;
@@ -161,10 +191,13 @@ pub fn spawn_props_on_terrain(
         }
     }
 
+    // Log instancing stats
     info!(
-        "Spawned {} total props in {:?}",
+        "Spawned {} total props in {:?} ({} instanced, {} scene-based)",
         total,
-        start_time.elapsed()
+        start_time.elapsed(),
+        instancing_stats.instanced_spawns,
+        instancing_stats.scene_spawns,
     );
 }
 
@@ -440,20 +473,53 @@ fn generate_category_props(
     }
 }
 
-/// Spawn entities from persisted prop data
+/// Spawn entities from persisted prop data.
+/// Uses instanced rendering when the mesh cache is ready, otherwise falls back to SceneRoot.
 fn spawn_props_from_data(
     commands: &mut Commands,
     props: &[PropPlacementData],
     assets: &PropAssets,
+    mesh_cache: &PropMeshCache,
+    stats: &mut InstancingStats,
     chunk_pos: IVec2,
 ) -> Vec<Entity> {
     props
         .iter()
         .filter_map(|prop| {
-            let scene_handle = assets.scenes.get(&prop.id)?;
-
             let transform = prop.to_transform();
             let prop_type: PropType = prop.prop_type.into();
+
+            // Try instanced spawning first (uses cached mesh handles for GPU batching)
+            if let Some(entity) = spawn_instanced_prop(
+                commands,
+                mesh_cache,
+                &prop.id,
+                transform.clone(),
+                prop_type,
+            ) {
+                // Add common components to the instanced entity
+                commands.entity(entity).insert((
+                    Prop {
+                        id: prop.id.clone(),
+                        prop_type,
+                    },
+                    PersistedProp {
+                        chunk_pos,
+                        placement_seed: prop.placement_seed,
+                    },
+                ));
+
+                if should_apply_grass_wind(&prop.id, prop_type) {
+                    let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                    commands.entity(entity).insert(GrassPropWind::new(&transform, hash));
+                }
+
+                stats.instanced_spawns += 1;
+                return Some(entity);
+            }
+
+            // Fallback to SceneRoot spawning
+            let scene_handle = assets.scenes.get(&prop.id)?;
 
             let mut entity = commands.spawn((
                 SceneRoot(scene_handle.clone()),
@@ -473,6 +539,7 @@ fn spawn_props_from_data(
                 entity.insert(GrassPropWind::new(&transform, hash));
             }
 
+            stats.scene_spawns += 1;
             Some(entity.id())
         })
         .collect()

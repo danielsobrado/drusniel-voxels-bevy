@@ -52,13 +52,13 @@ pub fn setup_water_material(
     // Base parameters match the v0.3 blue partial-alpha look.
     let near_handle = fancy_materials.add(StandardWaterMaterial {
         base: StandardMaterial {
-            base_color: Color::srgba(0.0, 0.3, 0.8, 0.8),
+            base_color: settings.base_color,
             alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.02,
+            perceptual_roughness: 0.06,
             metallic: 0.0,
-            reflectance: 0.95,
-            clearcoat: 1.0,
-            clearcoat_perceptual_roughness: 0.04,
+            reflectance: 0.8,
+            clearcoat: 0.6,
+            clearcoat_perceptual_roughness: 0.1,
             double_sided: true,
             cull_mode: None,
             depth_bias: 4.0,
@@ -79,13 +79,13 @@ pub fn setup_water_material(
     });
 
     let far_handle = cheap_materials.add(StandardMaterial {
-        base_color: Color::srgba(0.0, 0.3, 0.8, 0.8),
+        base_color: settings.base_color,
         alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.04,
+        perceptual_roughness: 0.08,
         metallic: 0.0,
-        reflectance: 0.9,
-        clearcoat: 0.8,
-        clearcoat_perceptual_roughness: 0.06,
+        reflectance: 0.78,
+        clearcoat: 0.5,
+        clearcoat_perceptual_roughness: 0.12,
         double_sided: true,
         cull_mode: None,
         depth_bias: 4.0,
@@ -112,13 +112,13 @@ pub fn sync_voxel_water_material_overrides(
     }
 
     if let Some(mat) = materials.get_mut(&water_material.near_handle) {
-        mat.base.base_color = Color::srgba(0.0, 0.3, 0.8, 0.8);
+        mat.base.base_color = settings.base_color;
         mat.base.alpha_mode = settings.alpha_mode;
-        mat.base.perceptual_roughness = 0.02;
+        mat.base.perceptual_roughness = 0.06;
         mat.base.metallic = 0.0;
-        mat.base.reflectance = 0.95;
-        mat.base.clearcoat = 1.0;
-        mat.base.clearcoat_perceptual_roughness = 0.04;
+        mat.base.reflectance = 0.8;
+        mat.base.clearcoat = 0.6;
+        mat.base.clearcoat_perceptual_roughness = 0.1;
         mat.base.double_sided = true;
         mat.base.cull_mode = None;
         mat.base.depth_bias = 4.0;

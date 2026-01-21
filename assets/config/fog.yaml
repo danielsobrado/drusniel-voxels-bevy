@@ -13,10 +13,12 @@ fog:
     near_fade: 0.35
     
   # Volumetric fog (god rays, local volumes)
+  # WARNING: Very expensive! Drops FPS from 40-50 to ~10 FPS.
+  # Only enable on high-end GPUs.
   volumetric:
-    enabled: true
-    # Raymarching quality (32=fast, 64=quality, 128=ultra)
-    step_count: 64
+    enabled: false
+    # Raymarching quality (16=minimum, 32=fast, 64=quality)
+    step_count: 32
     # Jitter for TAA integration
     jitter: 0.5
     # Ambient intensity (0 if using environment maps)

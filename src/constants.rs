@@ -236,13 +236,13 @@ pub const WATER_FANCY_MIN_DEPTH: usize = 3;
 pub const VOXEL_WATER_WAVE_AMPLITUDE_MULT: f32 = 1.6;
 
 /// UV scale multiplier to increase visible wave detail on voxel water.
-pub const VOXEL_WATER_WAVE_UV_SCALE: f32 = 4.0;
+pub const VOXEL_WATER_WAVE_UV_SCALE: f32 = 6.5;
 
 /// Water clarity multiplier to keep shallow voxel water visible.
-pub const VOXEL_WATER_CLARITY_MULT: f32 = 2.5;
+pub const VOXEL_WATER_CLARITY_MULT: f32 = 1.2;
 
 /// Edge scale multiplier for voxel water edge blending.
-pub const VOXEL_WATER_EDGE_SCALE_MULT: f32 = 0.6;
+pub const VOXEL_WATER_EDGE_SCALE_MULT: f32 = 0.45;
 
 /// Small vertical offset to reduce z-fighting between water and terrain.
 /// Zero offset keeps water at actual surface level; depth_bias handles z-fighting.
