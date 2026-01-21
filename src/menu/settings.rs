@@ -14,6 +14,8 @@ use crate::atmosphere::FogConfig;
 use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::voxel::plugin::WorldConfig;
+use crate::voxel::world::VoxelWorld;
 
 use super::types::*;
 use super::ui::{ACTIVE_BG, BUTTON_BG, INACTIVE_BG, INPUT_ACTIVE_BG, INPUT_INACTIVE_BG};
@@ -120,6 +122,7 @@ fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
         })
         .with_children(|tabs| {
             spawn_settings_tab_button(tabs, font, "Graphics", SettingsTabButton::Graphics);
+            spawn_settings_tab_button(tabs, font, "Meshing", SettingsTabButton::Meshing);
             spawn_settings_tab_button(tabs, font, "Gameplay", SettingsTabButton::Gameplay);
             spawn_settings_tab_button(tabs, font, "Atmosphere", SettingsTabButton::Atmosphere);
             spawn_settings_tab_button(tabs, font, "Fog", SettingsTabButton::Fog);
@@ -165,6 +168,7 @@ fn spawn_settings_content(
     ray_tracing_supported: bool,
 ) {
     spawn_graphics_tab(dialog, font, ray_tracing_supported);
+    spawn_meshing_tab(dialog, font);
     spawn_gameplay_tab(dialog, font);
     spawn_atmosphere_tab(dialog, font);
     spawn_fog_tab(dialog, font);
@@ -256,6 +260,27 @@ fn spawn_graphics_tab(
                 spawn_graphics_option(options, font, "1280x720", ResolutionOption(UVec2::new(1280, 720)));
                 spawn_graphics_option(options, font, "1920x1080", ResolutionOption(UVec2::new(1920, 1080)));
                 spawn_graphics_option(options, font, "2560x1440", ResolutionOption(UVec2::new(2560, 1440)));
+            });
+        });
+}
+
+fn spawn_meshing_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+    dialog
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            MeshingTabContent,
+        ))
+        .with_children(|content| {
+            spawn_option_row(content, font, "Greedy Meshing", |options, font| {
+                spawn_graphics_option(options, font, "Off", GreedyMeshingOption(false));
+                spawn_graphics_option(options, font, "On", GreedyMeshingOption(true));
             });
         });
 }
@@ -815,6 +840,7 @@ pub fn handle_settings_tabs(
 
         settings_state.active_tab = match tab {
             SettingsTabButton::Graphics => SettingsTab::Graphics,
+            SettingsTabButton::Meshing => SettingsTab::Meshing,
             SettingsTabButton::Gameplay => SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => SettingsTab::Atmosphere,
             SettingsTabButton::Fog => SettingsTab::Fog,
@@ -882,6 +908,32 @@ pub fn handle_graphics_settings(
     for (interaction, option) in shadow_query.iter() {
         if *interaction == Interaction::Pressed {
             settings_state.shadow_filtering = option.0;
+        }
+    }
+}
+
+/// Handles meshing settings changes.
+pub fn handle_meshing_settings(
+    state: Res<PauseMenuState>,
+    mut settings_state: ResMut<SettingsState>,
+    greedy_query: Query<(&Interaction, &GreedyMeshingOption), (Changed<Interaction>, With<Button>)>,
+    mut world_config: ResMut<WorldConfig>,
+    mut world: ResMut<VoxelWorld>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, option) in greedy_query.iter() {
+        if *interaction == Interaction::Pressed {
+            if settings_state.greedy_meshing == option.0 {
+                continue;
+            }
+            settings_state.greedy_meshing = option.0;
+            world_config.greedy_meshing = option.0;
+            for (_, chunk) in world.chunk_entries_mut() {
+                chunk.mark_dirty();
+            }
         }
     }
 }
@@ -1236,6 +1288,7 @@ pub fn update_settings_tab_backgrounds(
     for (tab, mut background) in query.iter_mut() {
         let active = match tab {
             SettingsTabButton::Graphics => settings_state.active_tab == SettingsTab::Graphics,
+            SettingsTabButton::Meshing => settings_state.active_tab == SettingsTab::Meshing,
             SettingsTabButton::Gameplay => settings_state.active_tab == SettingsTab::Gameplay,
             SettingsTabButton::Atmosphere => settings_state.active_tab == SettingsTab::Atmosphere,
             SettingsTabButton::Fog => settings_state.active_tab == SettingsTab::Fog,
@@ -1248,11 +1301,12 @@ pub fn update_settings_tab_backgrounds(
 /// Updates settings content visibility based on active tab.
 pub fn update_settings_content_visibility(
     settings_state: Res<SettingsState>,
-    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
-    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
-    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
-    mut fog_query: Query<&mut Node, (With<FogTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
-    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>)>,
+    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<MeshingTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut meshing_query: Query<&mut Node, (With<MeshingTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<FogTabContent>, Without<VisualTabContent>)>,
+    mut fog_query: Query<&mut Node, (With<FogTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>)>,
+    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>)>,
 ) {
     if settings_state.dialog_root.is_none() {
         return;
@@ -1260,6 +1314,14 @@ pub fn update_settings_content_visibility(
 
     for mut node in graphics_query.iter_mut() {
         node.display = if settings_state.active_tab == SettingsTab::Graphics {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    for mut node in meshing_query.iter_mut() {
+        node.display = if settings_state.active_tab == SettingsTab::Meshing {
             Display::Flex
         } else {
             Display::None
@@ -1322,6 +1384,20 @@ pub fn update_settings_aa_backgrounds(
     }
     for (option, mut background) in query.iter_mut() {
         *background = if settings_state.anti_aliasing == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+}
+
+/// Updates greedy meshing option backgrounds.
+pub fn update_settings_greedy_meshing_backgrounds(
+    settings_state: Res<SettingsState>,
+    mut query: Query<(&GreedyMeshingOption, &mut BackgroundColor)>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (option, mut background) in query.iter_mut() {
+        *background = if settings_state.greedy_meshing == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
     }
 }
 

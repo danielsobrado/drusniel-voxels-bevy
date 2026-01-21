@@ -27,7 +27,7 @@ use types::{
 use crate::chat::ChatState;
 use crate::network::NetworkSession;
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::voxel::{meshing::ChunkMesh, persistence, world::VoxelWorld};
+use crate::voxel::{meshing::ChunkMesh, persistence, plugin::WorldConfig, world::VoxelWorld};
 use bevy::prelude::*;
 
 // ============================================================================
@@ -58,6 +58,7 @@ impl Plugin for PauseMenuPlugin {
                 (
                     settings::handle_settings_tabs,
                     settings::handle_graphics_settings,
+                    settings::handle_meshing_settings,
                     settings::handle_gameplay_settings,
                     settings::handle_atmosphere_settings,
                 ),
@@ -90,6 +91,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::update_settings_content_visibility,
                     settings::update_settings_graphics_backgrounds,
                     settings::update_settings_aa_backgrounds,
+                    settings::update_settings_greedy_meshing_backgrounds,
                     settings::update_settings_walk_speed_backgrounds,
                     settings::update_settings_run_speed_backgrounds,
                 ),
@@ -226,6 +228,7 @@ fn handle_menu_buttons(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
     capabilities: Res<GraphicsCapabilities>,
+    world_config: Res<WorldConfig>,
 ) {
     for (interaction, action) in interaction_query.iter_mut() {
         if *interaction != Interaction::Pressed {
@@ -258,6 +261,7 @@ fn handle_menu_buttons(
                     &mut settings_state,
                     &capabilities,
                     &drag_state,
+                    &world_config,
                 );
             }
             PauseMenuButton::Multiplayer => {
@@ -316,10 +320,12 @@ fn handle_settings_button(
     settings_state: &mut SettingsState,
     capabilities: &GraphicsCapabilities,
     drag_state: &SettingsDialogDrag,
+    world_config: &WorldConfig,
 ) {
     if settings_state.dialog_root.is_none() {
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
         settings_state.active_tab = SettingsTab::Graphics;
+        settings_state.greedy_meshing = world_config.greedy_meshing;
         settings_state.dialog_root = Some(settings::spawn_settings_dialog(
             commands,
             state.root_entity,

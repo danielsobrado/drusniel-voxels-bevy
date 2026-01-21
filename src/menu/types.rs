@@ -122,6 +122,7 @@ pub struct SettingsState {
     pub ray_tracing: bool,
     pub display_mode: DisplayMode,
     pub resolution: UVec2,
+    pub greedy_meshing: bool,
     pub day_length: DayLengthOption,
     pub time_scale: TimeScaleOption,
     pub rayleigh: RayleighOption,
@@ -153,6 +154,7 @@ impl Default for SettingsState {
             ray_tracing: false,
             display_mode: DisplayMode::Bordered,
             resolution: UVec2::new(1920, 1080),
+            greedy_meshing: true,
             day_length: DayLengthOption::Standard,
             time_scale: TimeScaleOption::RealTime,
             rayleigh: RayleighOption::Balanced,
@@ -204,6 +206,7 @@ pub(crate) struct PlayerFloatHeightOption(pub FloatHeightPreset);
 #[derive(Component, Copy, Clone)]
 pub(crate) enum SettingsTabButton {
     Graphics,
+    Meshing,
     Gameplay,
     Atmosphere,
     Fog,
@@ -246,6 +249,9 @@ pub(crate) struct AntiAliasingOption(pub AntiAliasing);
 pub(crate) struct RayTracingOption(pub bool);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct GreedyMeshingOption(pub bool);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum DisplayModeOption {
     Bordered,
     Borderless,
@@ -261,6 +267,7 @@ pub(crate) struct CloseSettingsButton;
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub enum SettingsTab {
     Graphics,
+    Meshing,
     Gameplay,
     Atmosphere,
     Fog,
@@ -269,6 +276,9 @@ pub enum SettingsTab {
 
 #[derive(Component)]
 pub(crate) struct GraphicsTabContent;
+
+#[derive(Component)]
+pub(crate) struct MeshingTabContent;
 
 #[derive(Component)]
 pub(crate) struct GameplayTabContent;
