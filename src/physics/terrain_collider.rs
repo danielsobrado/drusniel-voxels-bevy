@@ -28,6 +28,9 @@ pub fn generate_chunk_colliders(
     let _timer = area_timer(&mut timing, frame.0, "Collider Build");
     for (entity, mesh_handle) in chunks.iter() {
         let Some(mesh) = meshes.get(&mesh_handle.0) else {
+            // Mesh not yet available in asset system - will retry next frame
+            // (NeedsCollider stays on the entity)
+            trace!("Collider gen deferred for {:?} - mesh not ready", entity);
             continue;
         };
 
@@ -49,6 +52,7 @@ pub fn generate_chunk_colliders(
                 ChunkCollider,
             ));
             commands.entity(entity).remove::<NeedsCollider>();
+            trace!("Generated collider for chunk {:?}", entity);
         } else {
             warn!("Failed to generate terrain collider for chunk {:?}", entity);
             commands.entity(entity).remove::<NeedsCollider>();
