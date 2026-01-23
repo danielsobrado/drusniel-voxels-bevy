@@ -28,14 +28,14 @@ fog:
   volume:
     # Size in world units (cover area around camera)
     size: 256.0
-    # Base density - VERY LOW for subtle god rays without darkening
-    density: 0.0005
+    # Base density - EXTREMELY LOW to eliminate outdoor whiteout
+    density: 0.00001
     # Light absorption - very low to avoid darkening
     absorption: 0.001
-    # Light scattering - Bevy default is 0.3, higher for stronger shafts
-    scattering: 0.6
+    # Light scattering - Lowered to prevent milky look
+    scattering: 0.2
     # Scattering asymmetry (Bevy default is 0.5)
-    scattering_asymmetry: 0.5
+    scattering_asymmetry: 0.6
     
   # Day/night color presets
   colors:

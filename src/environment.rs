@@ -45,7 +45,8 @@ impl Default for AtmosphereSettings {
             exposure: 1.0,
             twilight_band: 0.6,
             night_floor: 0.08,
-            fog_density: Vec2::new(0.0009, 0.0022),
+            // Much lower density for clearer outdoor views
+            fog_density: Vec2::new(0.0001, 0.0010),
             cycle_enabled: false,
         }
     }

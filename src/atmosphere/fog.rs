@@ -359,12 +359,15 @@ fn update_fog_from_atmosphere(
     world: Res<VoxelWorld>,
     time: Res<Time>,
     mut current_boost: Local<f32>,
+    mut boost_timer: Local<f32>,
+    mut target_boost: Local<f32>,
     camera_query: Query<&Transform, With<FogCamera>>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
     if *current_boost == 0.0 { *current_boost = 1.0; }
+    if *target_boost == 0.0 { *target_boost = 1.0; }
     let Some(atmo_settings) = atmosphere_settings else { return };
 
     // Get Mie settings from atmosphere (connected to menu settings)
@@ -490,14 +493,21 @@ fn update_fog_from_atmosphere(
         volumetric.jitter = config.volumetric.jitter;
     }
     
-    let target_boost = camera_query
-        .single()
-        .map(|camera| indoor_density_boost(&world, camera.translation))
-        .unwrap_or(1.0);
+    // Throttled check for indoor boost (10Hz is plenty)
+    *boost_timer += time.delta_secs();
+    if *boost_timer > 0.1 {
+        *boost_timer = 0.0;
+        *target_boost = camera_query
+            .single()
+            .map(|camera| indoor_density_boost(&world, camera.translation))
+            .unwrap_or(1.0);
+    }
+    
+    let target = *target_boost;
 
     // Smoothly interpolate boost to avoid jarring pops when walking under trees
     let interpolation_speed = 2.0;
-    *current_boost = lerp(*current_boost, target_boost, (time.delta_secs() * interpolation_speed).clamp(0.0, 1.0));
+    *current_boost = lerp(*current_boost, target, (time.delta_secs() * interpolation_speed).clamp(0.0, 1.0));
 
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
@@ -514,7 +524,7 @@ fn update_fog_from_atmosphere(
         );
         // High light intensity for visible god rays (50-100 range for bright shafts)
         // Boosted significantly to ensure visibility even with lower sun intensities
-        let base_intensity = 150.0 * daylight + 30.0 * night;
+        let base_intensity = 300.0 * daylight + 60.0 * night;
         volume.light_intensity = base_intensity * (1.0 + twilight * 1.5);
         // For testing: use config scattering directly without modifications
         volume.scattering = config.volume.scattering;
@@ -690,8 +700,9 @@ fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
     }
     let ratio = blocked as f32 / offsets.len() as f32;
     // Significantly boost density indoors to make light shafts visible against dark interior
-    // Multiplier increased to 400.0 to compensate for very low base density (0.0005)
-    1.0 + ratio * 400.0
+    // Multiplier massively increased to 4000.0 to compensate for extremely low base density (0.0002)
+    // This ensures visible shafts indoors while outside is clear.
+    1.0 + ratio * 4000.0
 }
 
 fn column_blocked(world: &VoxelWorld, position: Vec3, max_height: i32) -> bool {

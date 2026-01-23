@@ -55,10 +55,10 @@ textures:
 voxel_mapping:
   TopSoil:
     top: 0      # grass
-    side: 0     # grass (could use grass_side from atlas for V0.1 look)
+    side: 7     # grass (could use grass_side from atlas for V0.1 look)
     bottom: 1   # dirt
   SubSoil:
-    all: 1      # dirt
+    all: 0      # dirt
   Clay:
     all: 1      # dirt (or could map to clay texture)
   Rock:
