@@ -227,10 +227,10 @@ pub const WATER_FANCY_HYSTERESIS: f32 = 8.0;
 pub const WATER_MATERIAL_UPDATE_INTERVAL: f32 = 0.25;
 
 /// Minimum water mesh triangle count before enabling the fancy shader.
-pub const WATER_FANCY_MIN_TRIANGLES: usize = 200;
+pub const WATER_FANCY_MIN_TRIANGLES: usize = 50;
 
 /// Minimum vertical water depth (voxels) before enabling the fancy shader.
-pub const WATER_FANCY_MIN_DEPTH: usize = 3;
+pub const WATER_FANCY_MIN_DEPTH: usize = 1;
 
 /// Wave amplitude multiplier for voxel water using the fancy shader.
 pub const VOXEL_WATER_WAVE_AMPLITUDE_MULT: f32 = 1.6;
@@ -407,3 +407,18 @@ pub const BILLBOARD_ALPHA_CUTOFF: f32 = 0.5;
 
 /// Billboard wind sway strength (subtle movement).
 pub const BILLBOARD_WIND_STRENGTH: f32 = 0.02;
+
+// =============================================================================
+// Prop Shadow and Material LOD Settings
+// =============================================================================
+
+/// Distance beyond which props stop casting shadows.
+/// Shadow maps are expensive - culling distant shadow casters saves GPU time.
+pub const PROP_SHADOW_CULL_DISTANCE: f32 = 80.0;
+
+/// Distance beyond which props use simplified (unlit) material.
+/// Saves fragment shader cost by skipping normal maps and PBR calculations.
+pub const PROP_SIMPLE_MATERIAL_DISTANCE: f32 = 120.0;
+
+/// Hysteresis for shadow/material LOD to prevent flickering.
+pub const PROP_LOD_MATERIAL_HYSTERESIS: f32 = 8.0;

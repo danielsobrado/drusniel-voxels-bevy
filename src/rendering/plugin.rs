@@ -18,6 +18,7 @@ use crate::rendering::materials::{
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
 use crate::props::billboard::BillboardMaterial;
+use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::ssao::SsaoPlugin;
 use crate::rendering::triplanar_material::TriplanarMaterial;
@@ -56,6 +57,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<PropsMaterial>::default())
             // Register BillboardMaterial for tree LOD
             .add_plugins(MaterialPlugin::<BillboardMaterial>::default())
+            // Register SimpleLodMaterial for distant props (no PBR)
+            .add_plugins(MaterialPlugin::<SimpleLodMaterial>::default())
             .add_systems(
                 Startup,
                 (

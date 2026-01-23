@@ -3,6 +3,7 @@ pub mod decimation;
 pub mod foliage;
 pub mod instancing;
 pub mod loader;
+pub mod lod_material;
 pub mod materials;
 pub mod merging;
 pub mod persistence;
@@ -62,9 +63,16 @@ impl Plugin for PropsPlugin {
             .init_resource::<decimation::DecimatedMeshCache>()
             .init_resource::<decimation::DecimationStats>()
             .init_resource::<decimation::MeshLodDistances>()
+            // Shadow and material LOD resources
+            .init_resource::<lod_material::PropLodConfig>()
+            .init_resource::<lod_material::PropLodStats>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
-            .add_systems(Startup, (loader::load_prop_config, billboard::initialize_billboard_cache))
+            .add_systems(Startup, (
+                loader::load_prop_config,
+                billboard::initialize_billboard_cache,
+                lod_material::setup_simple_lod_material,
+            ))
             .add_systems(
                 Update,
                 (
@@ -118,6 +126,12 @@ impl Plugin for PropsPlugin {
                 Update,
                 decimation::create_decimated_meshes
                     .after(instancing::extract_prop_meshes),
+            )
+            // Shadow distance culling system
+            .add_systems(
+                Update,
+                lod_material::update_prop_shadow_lod
+                    .after(update_prop_chunk_visibility),
             )
             // Merging systems (run after spawning and materials)
             .add_systems(
