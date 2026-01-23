@@ -1143,8 +1143,9 @@ fn adjust_lod_for_integrated_gpu(
         lod_settings.high_detail_distance = INTEGRATED_GPU_HIGH_DETAIL_DISTANCE;
         lod_settings.cull_distance = INTEGRATED_GPU_CULL_DISTANCE;
         lod_settings.low_detail_mode = MeshMode::Blocky;
-        mesh_settings.mode = MeshMode::Blocky;
-        info!("Integrated GPU detected; using more aggressive chunk LOD distances.");
+        // Keep mesh_settings.mode as SurfaceNets for nearby chunks (V0.3 triplanar PBR look)
+        // Only distant LOD chunks use Blocky mode for performance
+        info!("Integrated GPU detected; using more aggressive LOD distances, keeping SurfaceNets for nearby terrain.");
     }
 
     *applied = true;
