@@ -159,6 +159,8 @@ pub fn setup_triplanar_material(
                 blend_sharpness: 4.0,
                 normal_intensity: 1.0,
                 parallax_scale: 0.0,
+                ao_strength: 0.0,
+                _padding: 0.0,
             },
             grass_albedo: None,
             grass_normal: None,
@@ -177,6 +179,8 @@ pub fn setup_triplanar_material(
                 blend_sharpness: 4.0,   // Moderate blend between projections
                 normal_intensity: 1.0,  // Full normal map strength
                 parallax_scale: 0.04,   // Subtle parallax depth
+                ao_strength: 0.0,       // V0.3 soft shadow look
+                _padding: 0.0,
             },
             // Grass textures (for TopSoil top faces)
             grass_albedo: Some(asset_server.load("pbr/grass/albedo.png")),

@@ -6,11 +6,28 @@ use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::LodSettings;
 use crate::vegetation::VegetationConfig;
+use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 
 #[derive(Resource, Default)]
 pub struct DebugUiState {
     pub show_inspector: bool,
     pub show_settings: bool,
+}
+
+/// Controls terrain visual style settings.
+/// Persists the ao_strength value that gets applied to the triplanar material.
+#[derive(Resource)]
+pub struct TerrainStyleSettings {
+    /// Baked AO strength (0.0 = V0.3 soft look, 1.0 = full baked AO)
+    pub ao_strength: f32,
+}
+
+impl Default for TerrainStyleSettings {
+    fn default() -> Self {
+        Self {
+            ao_strength: 0.0, // Default to V0.3 look
+        }
+    }
 }
 
 pub struct DebugUiPlugin;
@@ -29,7 +46,8 @@ impl Plugin for DebugUiPlugin {
         app.add_plugins(WorldInspectorPlugin::new().run_if(should_show_inspector));
 
         app.init_resource::<DebugUiState>()
-           .add_systems(Update, (toggle_debug_ui, debug_settings_ui));
+           .init_resource::<TerrainStyleSettings>()
+           .add_systems(Update, (toggle_debug_ui, debug_settings_ui, toggle_ao_style, toggle_ssao_key, apply_terrain_style_settings));
 
         #[cfg(debug_assertions)]
         app.add_systems(Update, toggle_scene_visibility);
@@ -54,6 +72,7 @@ fn debug_settings_ui(
     mut contexts: EguiContexts,
     state: Res<DebugUiState>,
     mut lod_settings: ResMut<LodSettings>,
+    mut terrain_style: ResMut<TerrainStyleSettings>,
     veg_config: Option<ResMut<VegetationConfig>>,
     prop_fade: Option<ResMut<FoliageFadeSettings>>,
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
@@ -66,6 +85,11 @@ fn debug_settings_ui(
         ui.heading("LOD Settings");
         ui.add(egui::Slider::new(&mut lod_settings.high_detail_distance, 32.0..=512.0).text("High Detail Dist"));
         ui.add(egui::Slider::new(&mut lod_settings.cull_distance, 64.0..=1024.0).text("Cull Dist"));
+        
+        ui.separator();
+        ui.heading("Terrain Style");
+        ui.add(egui::Slider::new(&mut terrain_style.ao_strength, 0.0..=1.0).text("Baked AO Strength"));
+        ui.label("0 = V0.3 soft look, 1 = full baked AO");
         
         ui.separator();
         if let Some(mut veg) = veg_config {
@@ -110,7 +134,65 @@ fn debug_settings_ui(
         
         ui.separator();
         ui.label("Press F4 to toggle this window and Inspector");
+        ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
     });
+}
+
+/// Toggle AO style with F8 key (quick toggle between V0.3 and full AO)
+fn toggle_ao_style(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut terrain_style: ResMut<TerrainStyleSettings>,
+) {
+    if keys.just_pressed(KeyCode::F8) {
+        // Toggle between 0.0 (V0.3 look) and 1.0 (full AO)
+        terrain_style.ao_strength = if terrain_style.ao_strength < 0.5 { 1.0 } else { 0.0 };
+        let style_name = if terrain_style.ao_strength < 0.5 { "V0.3 (soft)" } else { "Full AO" };
+        info!("Terrain style: {} (F8 to toggle)", style_name);
+    }
+}
+
+/// Toggle SSAO with F9 key to identify if dark shadows come from screen-space AO
+fn toggle_ssao_key(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    cameras: Query<(Entity, Option<&bevy::pbr::ScreenSpaceAmbientOcclusion>), With<Camera3d>>,
+    mut ssao_enabled: Local<bool>,
+) {
+    if keys.just_pressed(KeyCode::F9) {
+        *ssao_enabled = !*ssao_enabled;
+        for (entity, existing) in cameras.iter() {
+            if *ssao_enabled && existing.is_none() {
+                commands.entity(entity).insert(bevy::pbr::ScreenSpaceAmbientOcclusion::default());
+                info!("SSAO: ON (F9 to toggle)");
+            } else if !*ssao_enabled && existing.is_some() {
+                commands.entity(entity).remove::<bevy::pbr::ScreenSpaceAmbientOcclusion>();
+                info!("SSAO: OFF (F9 to toggle)");
+            }
+        }
+    }
+}
+
+/// Apply terrain style settings to the triplanar material
+fn apply_terrain_style_settings(
+    terrain_style: Res<TerrainStyleSettings>,
+    mat_handle: Option<Res<TriplanarMaterialHandle>>,
+    mut materials: ResMut<Assets<TriplanarMaterial>>,
+) {
+    if !terrain_style.is_changed() {
+        return;
+    }
+
+    let Some(handle) = mat_handle else { return };
+    
+    // Check current value first (immutable access doesn't trigger change detection)
+    let needs_update = materials.get(&handle.handle)
+        .is_some_and(|m| (m.uniforms.ao_strength - terrain_style.ao_strength).abs() > 0.001);
+    
+    if needs_update {
+        if let Some(material) = materials.get_mut(&handle.handle) {
+            material.uniforms.ao_strength = terrain_style.ao_strength;
+        }
+    }
 }
 
 #[cfg(debug_assertions)]

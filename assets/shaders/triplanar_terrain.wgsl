@@ -13,6 +13,8 @@ struct TriplanarUniforms {
     blend_sharpness: f32,
     normal_intensity: f32,
     parallax_scale: f32, // Only used for rock material
+    ao_strength: f32,    // 0.0 = V0.3 look (no baked AO), 1.0 = full AO
+    _padding: f32,       // Alignment padding
 };
 
 // Uniform roughness values per terrain material (no texture maps needed)
@@ -212,9 +214,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     albedo = albedo * uniforms.base_color;
     let blended_n = normalize(final_normal);
 
-    // Baked vertex AO - DISABLED: was causing harsh shadows not present in V0.3
-    // SSAO handles ambient occlusion screen-space instead
-    let ao_factor = 1.0; // No baked AO - smooth V0.3 look
+    // Baked vertex AO - controlled by ao_strength uniform
+    // 0.0 = V0.3 look (soft shadows via SSAO only)
+    // 1.0 = full baked AO (darker shadows in crevices)
+    let vertex_ao = in.color.r; // AO baked into vertex red channel
+    let ao_factor = mix(1.0, vertex_ao, uniforms.ao_strength);
 
     // Calculate uniform roughness based on material blend
     var roughness = w.x * GRASS_ROUGHNESS +

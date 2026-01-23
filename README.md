@@ -66,9 +66,12 @@
 
 ### Debug & Development
 *   **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
-*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade)
+*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
+*   **F5**: Toggle Mesh Mode (Blocky ↔ SurfaceNets)
 *   **F6**: Toggle Water Visibility (debug builds only)
 *   **F7**: Toggle Grass Visibility (debug builds only)
+*   **F8**: Toggle Terrain AO Style (V0.3 soft ↔ Full baked AO)
+*   **F9**: Toggle SSAO (Screen-Space Ambient Occlusion)
 *   **F12**: Toggle Photo Mode (DoF, motion blur)
 *   **G**: Print Detailed Block Debug Info to Console
 

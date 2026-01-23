@@ -2359,6 +2359,16 @@ pub enum MeshMode {
     SurfaceNets,
 }
 
+impl MeshMode {
+    /// Toggle between Blocky and SurfaceNets modes.
+    pub fn toggle(&mut self) {
+        *self = match self {
+            MeshMode::Blocky => MeshMode::SurfaceNets,
+            MeshMode::SurfaceNets => MeshMode::Blocky,
+        };
+    }
+}
+
 /// Resource to control mesh generation mode globally
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct MeshSettings {

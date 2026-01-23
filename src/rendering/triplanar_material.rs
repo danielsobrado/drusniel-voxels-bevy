@@ -19,6 +19,10 @@ pub struct TriplanarUniforms {
     pub normal_intensity: f32,
     /// Parallax depth scale for displacement
     pub parallax_scale: f32,
+    /// Baked ambient occlusion strength (0.0 = V0.3 look, 1.0 = full AO)
+    pub ao_strength: f32,
+    /// Padding for 16-byte alignment
+    pub _padding: f32,
 }
 
 impl Default for TriplanarUniforms {
@@ -30,6 +34,8 @@ impl Default for TriplanarUniforms {
             blend_sharpness: 4.0,
             normal_intensity: 1.0,
             parallax_scale: 0.04,
+            ao_strength: 0.0, // Default to V0.3 look (no baked AO)
+            _padding: 0.0,
         }
     }
 }

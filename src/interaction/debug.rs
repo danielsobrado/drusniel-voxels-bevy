@@ -21,7 +21,7 @@ use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace, stop_area_trace};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
-use crate::voxel::meshing::ChunkMesh;
+use crate::voxel::meshing::{ChunkMesh, MeshSettings};
 use crate::voxel::plugin::{ChunkGenerationState, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
@@ -341,6 +341,26 @@ pub fn toggle_debug_details(
     if alt_held && keyboard.just_pressed(KeyCode::KeyL) {
         toggles.volumetric_fog_enabled = !toggles.volumetric_fog_enabled;
         info!("Debug toggle: Volumetric Fog = {}", if toggles.volumetric_fog_enabled { "ON" } else { "OFF" });
+    }
+}
+
+/// Toggle mesh mode with F5 key (Blocky <-> SurfaceNets).
+///
+/// Marks all chunks dirty to trigger re-meshing with the new mode.
+pub fn toggle_mesh_mode(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut mesh_settings: ResMut<MeshSettings>,
+    mut world: ResMut<crate::voxel::world::VoxelWorld>,
+) {
+    if keyboard.just_pressed(KeyCode::F5) {
+        mesh_settings.mode.toggle();
+        // Mark all chunks dirty to trigger re-meshing
+        for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
+            if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+                chunk.mark_dirty();
+            }
+        }
+        info!("Mesh mode: {:?} (F5 to toggle)", mesh_settings.mode);
     }
 }
 

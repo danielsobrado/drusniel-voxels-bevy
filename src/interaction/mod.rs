@@ -790,6 +790,7 @@ impl Plugin for InteractionPlugin {
                     debug_voxel_info_system.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_debug_details.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::toggle_mesh_mode.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     clear_expired_errors.run_if(|state: Res<PauseMenuState>| !state.open),
