@@ -103,8 +103,8 @@ fn fragment(
   // Voxel water uses a much smaller coord scale; keep it visibly blue up close.
   let voxel_water = water_bindings::material.coord_scale.x < 8.0;
   if (voxel_water) {
-    // Use shallow_color more aggressively to prevent sandy reads from depth buffer
-    water_color = vec4<f32>(mix(water_color.rgb, shallow_color.rgb, 0.85), 1.0);
+    // Light blend toward shallow_color - let wave lighting variations show through
+    water_color = vec4<f32>(mix(water_color.rgb, shallow_color.rgb, 0.3), 1.0);
     // Higher minimum alpha ensures water is always visible even in shallow areas
     let base_alpha = max(pbr_input.material.base_color.a, 0.95);
     pbr_input.material.base_color = vec4<f32>(water_color.rgb, base_alpha);

@@ -982,6 +982,113 @@ fn add_face_no_ao(
     mesh_data.indices.push(start_idx + 2);
 }
 
+/// Add a water face with world-space UVs for proper wave calculation.
+/// Unlike solid terrain which uses atlas UVs, water needs world XZ coordinates
+/// so the wave shader can compute spatially-varying wave heights.
+fn add_water_face(
+    mesh_data: &mut MeshData,
+    local: UVec3,
+    face: Face,
+    chunk_origin: IVec3,
+) {
+    let x = local.x as f32 * VOXEL_SIZE;
+    let y = local.y as f32 * VOXEL_SIZE;
+    let z = local.z as f32 * VOXEL_SIZE;
+    let s = VOXEL_SIZE;
+
+    let (v0, v1, v2, v3, normal) = match face {
+        Face::Top => (
+            [x, y + s, z + s], [x + s, y + s, z + s],
+            [x + s, y + s, z], [x, y + s, z],
+            [0.0, 1.0, 0.0]
+        ),
+        Face::Bottom => (
+            [x, y, z], [x + s, y, z],
+            [x + s, y, z + s], [x, y, z + s],
+            [0.0, -1.0, 0.0]
+        ),
+        Face::North => (
+            [x + s, y, z], [x, y, z],
+            [x, y + s, z], [x + s, y + s, z],
+            [0.0, 0.0, -1.0]
+        ),
+        Face::South => (
+            [x, y, z + s], [x + s, y, z + s],
+            [x + s, y + s, z + s], [x, y + s, z + s],
+            [0.0, 0.0, 1.0]
+        ),
+        Face::East => (
+            [x + s, y, z + s], [x + s, y, z],
+            [x + s, y + s, z], [x + s, y + s, z + s],
+            [1.0, 0.0, 0.0]
+        ),
+        Face::West => (
+            [x, y, z], [x, y, z + s],
+            [x, y + s, z + s], [x, y + s, z],
+            [-1.0, 0.0, 0.0]
+        ),
+    };
+
+    let start_idx = mesh_data.positions.len() as u32;
+
+    mesh_data.positions.push(v0);
+    mesh_data.positions.push(v1);
+    mesh_data.positions.push(v2);
+    mesh_data.positions.push(v3);
+
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+
+    // Full brightness for water (no AO needed)
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+
+    // Use world-space XZ coordinates for UVs so wave shader gets proper spatial variation.
+    // The wave function uses: coord_offset + (uv * coord_scale) to get wave position.
+    // With world coords as UVs and coord_scale ~6.5, we get good wave frequency.
+    let world_x = chunk_origin.x as f32 + x;
+    let world_z = chunk_origin.z as f32 + z;
+
+    // Generate UVs based on face orientation (use world XZ for horizontal faces)
+    let (uv0, uv1, uv2, uv3) = match face {
+        Face::Top | Face::Bottom => (
+            [world_x, world_z + s],
+            [world_x + s, world_z + s],
+            [world_x + s, world_z],
+            [world_x, world_z],
+        ),
+        Face::North | Face::South => (
+            [world_x, y],
+            [world_x + s, y],
+            [world_x + s, y + s],
+            [world_x, y + s],
+        ),
+        Face::East | Face::West => (
+            [world_z, y],
+            [world_z + s, y],
+            [world_z + s, y + s],
+            [world_z, y + s],
+        ),
+    };
+
+    mesh_data.uvs.push(uv0);
+    mesh_data.uvs.push(uv1);
+    mesh_data.uvs.push(uv2);
+    mesh_data.uvs.push(uv3);
+
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 2);
+    mesh_data.indices.push(start_idx + 1);
+
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 3);
+    mesh_data.indices.push(start_idx + 2);
+}
+
 // =============================================================================
 // Surface Nets Smooth Meshing
 // =============================================================================
@@ -1500,7 +1607,7 @@ fn generate_water_mesh(
     chunk: &Chunk,
     world: &VoxelWorld,
     _chunk_center: Vec3,
-    _chunk_origin: IVec3,
+    chunk_origin: IVec3,
 ) -> MeshData {
     let mut water_mesh = MeshData::new();
 
@@ -1514,22 +1621,22 @@ fn generate_water_mesh(
                 if voxel.is_liquid() {
                     // Generate water mesh faces (only visible against air)
                     if is_water_face_visible(chunk, world, local, Face::Top) {
-                        add_face_no_ao(&mut water_mesh, local, Face::Top, voxel);
+                        add_water_face(&mut water_mesh, local, Face::Top, chunk_origin);
                     }
                     if is_water_face_visible(chunk, world, local, Face::Bottom) {
-                        add_face_no_ao(&mut water_mesh, local, Face::Bottom, voxel);
+                        add_water_face(&mut water_mesh, local, Face::Bottom, chunk_origin);
                     }
                     if is_water_face_visible(chunk, world, local, Face::North) {
-                        add_face_no_ao(&mut water_mesh, local, Face::North, voxel);
+                        add_water_face(&mut water_mesh, local, Face::North, chunk_origin);
                     }
                     if is_water_face_visible(chunk, world, local, Face::South) {
-                        add_face_no_ao(&mut water_mesh, local, Face::South, voxel);
+                        add_water_face(&mut water_mesh, local, Face::South, chunk_origin);
                     }
                     if is_water_face_visible(chunk, world, local, Face::East) {
-                        add_face_no_ao(&mut water_mesh, local, Face::East, voxel);
+                        add_water_face(&mut water_mesh, local, Face::East, chunk_origin);
                     }
                     if is_water_face_visible(chunk, world, local, Face::West) {
-                        add_face_no_ao(&mut water_mesh, local, Face::West, voxel);
+                        add_water_face(&mut water_mesh, local, Face::West, chunk_origin);
                     }
                 }
             }

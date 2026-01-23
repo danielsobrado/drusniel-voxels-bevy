@@ -227,16 +227,17 @@ pub const WATER_FANCY_HYSTERESIS: f32 = 8.0;
 pub const WATER_MATERIAL_UPDATE_INTERVAL: f32 = 0.25;
 
 /// Minimum water mesh triangle count before enabling the fancy shader.
-pub const WATER_FANCY_MIN_TRIANGLES: usize = 50;
+pub const WATER_FANCY_MIN_TRIANGLES: usize = 1;
 
 /// Minimum vertical water depth (voxels) before enabling the fancy shader.
-pub const WATER_FANCY_MIN_DEPTH: usize = 1;
+pub const WATER_FANCY_MIN_DEPTH: usize = 0;
 
 /// Wave amplitude multiplier for voxel water using the fancy shader.
-pub const VOXEL_WATER_WAVE_AMPLITUDE_MULT: f32 = 1.6;
+pub const VOXEL_WATER_WAVE_AMPLITUDE_MULT: f32 = 4.0;
 
-/// UV scale multiplier to increase visible wave detail on voxel water.
-pub const VOXEL_WATER_WAVE_UV_SCALE: f32 = 6.5;
+/// UV scale multiplier for wave frequency on voxel water.
+/// With world-space UVs, smaller values give larger waves (0.1 = ~10 unit wavelength).
+pub const VOXEL_WATER_WAVE_UV_SCALE: f32 = 0.1;
 
 /// Water clarity multiplier to keep shallow voxel water visible.
 pub const VOXEL_WATER_CLARITY_MULT: f32 = 1.2;
