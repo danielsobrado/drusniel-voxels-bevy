@@ -1975,7 +1975,7 @@ fn visual_slider_bounds(slider: VisualSlider) -> (f32, f32) {
         VisualSlider::Gamma => (0.5, 1.5),
         VisualSlider::HighlightsGain => (0.5, 1.5),
         VisualSlider::SunWarmth => (0.0, 0.3),
-        VisualSlider::Illuminance => (5000.0, 50000.0),
+        VisualSlider::Illuminance => (5000.0, 100_000.0),
         VisualSlider::SkyboxBrightness => (1000.0, 10000.0),
     }
 }

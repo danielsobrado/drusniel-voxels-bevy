@@ -105,6 +105,16 @@ pub struct DebugDetailToggles {
     pub show_prop_details: bool,
     pub show_performance: bool,
     pub show_timing_breakdown: bool,
+    pub volumetric_fog_enabled: bool,
+}
+
+impl DebugDetailToggles {
+    pub fn new(volumetric_enabled: bool) -> Self {
+        Self {
+            volumetric_fog_enabled: volumetric_enabled,
+            ..default()
+        }
+    }
 }
 
 /// Resource tracking performance metrics for debug display.
@@ -324,6 +334,13 @@ pub fn toggle_debug_details(
             start_area_trace(&mut timing_capture);
         }
         timing_recorder.set_enabled(toggles.show_timing_breakdown || timing_capture.active);
+    }
+
+    
+    // Volumetric fog toggle (Alt+L "Light")
+    if alt_held && keyboard.just_pressed(KeyCode::KeyL) {
+        toggles.volumetric_fog_enabled = !toggles.volumetric_fog_enabled;
+        info!("Debug toggle: Volumetric Fog = {}", if toggles.volumetric_fog_enabled { "ON" } else { "OFF" });
     }
 }
 

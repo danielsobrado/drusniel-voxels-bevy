@@ -103,7 +103,7 @@ fn setup_atmosphere(mut commands: Commands) {
             color: Color::srgb(1.0, 0.98, 0.95),  // Slightly warm white sun
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
             // Tuned for balanced color rendering
-            illuminance: 5_000.0,
+            illuminance: 100_000.0,
             shadows_enabled: true,
             shadow_depth_bias: 0.04,
             shadow_normal_bias: 1.8,
@@ -114,8 +114,8 @@ fn setup_atmosphere(mut commands: Commands) {
         CascadeShadowConfigBuilder {
             num_cascades: 4,
             minimum_distance: 0.5,
-            maximum_distance: 256.0,
-            first_cascade_far_bound: 12.0,
+            maximum_distance: 1024.0,
+            first_cascade_far_bound: 24.0,
             overlap_proportion: 0.35,
             ..default()
         }

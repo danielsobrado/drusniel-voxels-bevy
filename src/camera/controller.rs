@@ -105,7 +105,7 @@ pub fn spawn_camera(
         )
         .looking_at(camera_config.spawn.look_at, Vec3::Y),
         PlayerCamera::from_config(&camera_config),
-        match SettingsState::default().shadow_filtering {
+        match settings_state.shadow_filtering {
             ShadowFiltering::Gaussian => ShadowFilteringMethod::Gaussian,
             ShadowFiltering::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
             ShadowFiltering::Temporal => ShadowFilteringMethod::Temporal,

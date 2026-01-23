@@ -518,8 +518,8 @@ impl Default for VisualSettings {
             gamma: 0.95,
             highlights_gain: 0.9,
             sun_warmth: 0.05,
-            illuminance: 20_000.0,
-            skybox_brightness: 4000.0,
+            illuminance: 100_000.0,
+            skybox_brightness: 1000.0,
         }
     }
 }

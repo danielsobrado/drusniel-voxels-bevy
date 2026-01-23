@@ -46,11 +46,20 @@ impl Plugin for FogPlugin {
 fn debug_god_rays_status(
     time: Res<Time>,
     mut last_log: Local<f32>,
+    mut fps_samples: Local<Vec<f32>>,
     fog_volume_query: Query<(&FogVolume, &Transform), With<GlobalFogVolume>>,
     volumetric_fog_query: Query<&VolumetricFog, With<FogCamera>>,
     volumetric_light_query: Query<(&VolumetricLight, &DirectionalLight), With<Sun>>,
     camera_query: Query<&Transform, With<FogCamera>>,
 ) {
+    // Track FPS
+    let fps = 1.0 / time.delta_secs().max(0.001);
+    fps_samples.push(fps);
+    if fps_samples.len() > 60 {
+        fps_samples.remove(0);
+    }
+    let avg_fps = fps_samples.iter().sum::<f32>() / fps_samples.len() as f32;
+
     // Only log every 5 seconds
     *last_log += time.delta_secs();
     if *last_log < 5.0 {
@@ -70,25 +79,21 @@ fn debug_god_rays_status(
             volumetric_light_query.single(),
         ) {
             info!(
-                "God rays: density={:.4}, scattering={:.2}, absorption={:.5}, light_intensity={:.1}, scale={:.0}, steps={}, shadows={}",
+                "God rays ACTIVE (FPS={:.0}): density={:.4}, scattering={:.2}, absorption={:.5}, intensity={:.1}, scale={:.0}, steps={}",
+                avg_fps,
                 volume.density_factor,
                 volume.scattering,
                 volume.absorption,
                 volume.light_intensity,
                 vol_tf.scale.x,
                 vfog.step_count,
-                sun.shadows_enabled,
-            );
-            info!(
-                "  Volume pos: ({:.1}, {:.1}, {:.1}), Camera pos: ({:.1}, {:.1}, {:.1})",
-                vol_tf.translation.x, vol_tf.translation.y, vol_tf.translation.z,
-                cam_tf.translation.x, cam_tf.translation.y, cam_tf.translation.z,
             );
         }
     } else {
+        let camera_count = camera_query.iter().len();
         warn!(
-            "God rays MISSING: FogVolume={}, VolumetricFog={}, VolumetricLight={}",
-            has_fog_volume, has_volumetric_fog, has_volumetric_light
+            "God rays MISSING (FPS={:.0}): FogVolume={}, VolumetricFog={}, VolumetricLight={}, CameraCount={}",
+            avg_fps, has_fog_volume, has_volumetric_fog, has_volumetric_light, camera_count
         );
     }
 }
@@ -141,22 +146,41 @@ impl Default for FogUniforms {
     }
 }
 
-fn spawn_global_fog_volume(commands: &mut Commands, _config: &FogConfig) {
-    // EXACT copy of Bevy example - minimal FogVolume with defaults
-    // Bevy example: FogVolume::default() with Transform::from_scale(Vec3::splat(35.0))
+fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
+    // Use config values for proper god rays - low absorption for brightness
+    let density = config.volume.density.max(MIN_VOLUME_DENSITY);
+    let size = config.volume.size;
+    let scattering = config.volume.scattering;
+    let absorption = config.volume.absorption;
+    let asymmetry = config.volume.scattering_asymmetry;
+    
     info!(
-        "Spawning FogVolume with BEVY EXAMPLE defaults - density=0.1 (default), scale=35"
+        "Spawning FogVolume: density={:.4}, scattering={:.2}, absorption={:.4}, size={:.0}",
+        density, scattering, absorption, size
     );
 
     commands.spawn((
         Name::new("GlobalFogVolume"),
         GlobalFogVolume,
-        FogVolume::default(), // Use pure defaults like the example
-        Transform::from_scale(Vec3::splat(35.0)), // Same scale as Bevy example
+        FogVolume {
+            density_factor: density,
+            scattering,
+            absorption,
+            scattering_asymmetry: asymmetry,
+            ..default()
+        },
+        Transform::from_scale(Vec3::splat(size)),
     ));
 }
 
-fn setup_fog(mut commands: Commands, config: Res<FogConfig>) {
+fn setup_fog(
+    mut commands: Commands,
+    config: Res<FogConfig>,
+    mut debug_toggles: ResMut<crate::interaction::DebugDetailToggles>,
+) {
+    // Sync debug toggle to match loaded config
+    debug_toggles.volumetric_fog_enabled = config.volumetric.enabled;
+
     info!(
         "Fog setup: volumetric.enabled={}, volume.density={}, volume.size={}",
         config.volumetric.enabled,
@@ -247,13 +271,44 @@ fn volumetric_fog_component(config: &FogConfig) -> VolumetricFog {
 }
 
 fn sync_fog_toggles(
+    time: Res<Time>,
     mut commands: Commands,
-    config: Res<FogConfig>,
+    mut config: ResMut<FogConfig>,
+    debug_toggles: Res<crate::interaction::DebugDetailToggles>,
     camera_query: Query<(Entity, Option<&DistanceFog>, Option<&VolumetricFog>), With<FogCamera>>,
     volume_query: Query<Entity, With<GlobalFogVolume>>,
+    mut trace_timer: Local<f32>,
 ) {
+    // Periodic state log for debugging (every 2 seconds)
+    *trace_timer += time.delta_secs();
+    if *trace_timer > 2.0 {
+        *trace_timer = 0.0;
+        let has_vol = volume_query.iter().next().is_some();
+        let cam_has_vfog = camera_query.iter().any(|(_, _, vf)| vf.is_some());
+        warn!(
+            "FOG STATE: config.enabled={}, toggle.enabled={}, FogVolume={}, CamVFog={}, toggle_changed={}, config_changed={}",
+            config.volumetric.enabled, debug_toggles.volumetric_fog_enabled, has_vol, cam_has_vfog,
+            debug_toggles.is_changed(), config.is_changed()
+        );
+    }
+
+    // Sync debug toggle to config if changed
+    if debug_toggles.is_changed() {
+        if config.volumetric.enabled != debug_toggles.volumetric_fog_enabled {
+            info!("Syncing fog toggle: Volumetric Fog -> {}", debug_toggles.volumetric_fog_enabled);
+            config.volumetric.enabled = debug_toggles.volumetric_fog_enabled;
+        }
+    }
+
     if !config.is_changed() {
-        return;
+        // Force check if debug toggle was just enabled but config thinks it didn't change (rare/unlikely)
+        if !debug_toggles.is_changed() {
+            return;
+        }
+    }
+    
+    if camera_query.iter().len() == 0 {
+        warn!("sync_fog_toggles: No FogCamera found! Cannot apply fog components.");
     }
 
     for (entity, distance_fog, volumetric_fog) in camera_query.iter() {
@@ -261,6 +316,7 @@ fn sync_fog_toggles(
 
         if config.distance.enabled {
             if distance_fog.is_none() {
+                // info!("Adding DistanceFog to camera");
                 camera.insert(distance_fog_component(&config));
             }
         } else if distance_fog.is_some() {
@@ -269,19 +325,23 @@ fn sync_fog_toggles(
 
         if config.volumetric.enabled {
             if volumetric_fog.is_none() {
+                info!("Adding VolumetricFog to camera");
                 camera.insert(volumetric_fog_component(&config));
             }
         } else if volumetric_fog.is_some() {
+            info!("Removing VolumetricFog from camera");
             camera.remove::<VolumetricFog>();
         }
     }
 
     if config.volumetric.enabled {
         if volume_query.iter().next().is_none() {
+            info!("Spawning GlobalFogVolume for god rays (sync)");
             spawn_global_fog_volume(&mut commands, &config);
         }
     } else {
         for entity in volume_query.iter() {
+            info!("Despawning GlobalFogVolume");
             commands.entity(entity).despawn();
         }
     }
@@ -434,8 +494,9 @@ fn update_fog_from_atmosphere(
 
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
-        // For testing: use config density directly without complex multipliers
-        volume.density_factor = config.volume.density.clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        // Use config density directly - lower values = more transparent fog
+        let density = config.volume.density.clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        volume.density_factor = density;
         volume.absorption = config.volume.absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
         volume.light_tint = Color::srgba(
@@ -444,9 +505,9 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        volume.light_intensity = lerp(4.0, 9.0, daylight)
-            * (1.0 + twilight * 0.5)
-            * interior_boost.min(2.0);
+        // High light intensity for visible god rays (50-100 range for bright shafts)
+        let base_intensity = 50.0 * daylight + 10.0 * night;
+        volume.light_intensity = base_intensity * (1.0 + twilight * 1.5);
         // For testing: use config scattering directly without modifications
         volume.scattering = config.volume.scattering;
         // mie_direction controls forward scattering asymmetry

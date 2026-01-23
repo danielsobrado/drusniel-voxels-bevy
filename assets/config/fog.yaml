@@ -27,13 +27,13 @@ fog:
   # Global fog volume parameters
   volume:
     # Size in world units (cover area around camera)
-    size: 100.0
-    # Base density - normal daytime (Balanced preset)
-    density: 0.015
-    # Light absorption - low for god rays
-    absorption: 0.01
-    # Light scattering - Bevy default is 0.3
-    scattering: 0.3
+    size: 256.0
+    # Base density - VERY LOW for subtle god rays without darkening
+    density: 0.005
+    # Light absorption - very low to avoid darkening
+    absorption: 0.001
+    # Light scattering - Bevy default is 0.3, higher for stronger shafts
+    scattering: 0.6
     # Scattering asymmetry (Bevy default is 0.5)
     scattering_asymmetry: 0.5
     
