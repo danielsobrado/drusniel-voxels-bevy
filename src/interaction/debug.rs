@@ -22,7 +22,7 @@ use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
 use crate::voxel::meshing::{ChunkMesh, MeshSettings};
-use crate::voxel::plugin::{ChunkGenerationState, RuntimeChunkStats};
+use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
@@ -347,20 +347,26 @@ pub fn toggle_debug_details(
 /// Toggle mesh mode with F5 key (Blocky <-> SurfaceNets).
 ///
 /// Marks all chunks dirty to trigger re-meshing with the new mode.
+/// Also updates the low_detail_mode in LodSettings so ALL LOD levels
+/// use the toggled mode consistently.
 pub fn toggle_mesh_mode(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut mesh_settings: ResMut<MeshSettings>,
+    mut lod_settings: ResMut<LodSettings>,
     mut world: ResMut<crate::voxel::world::VoxelWorld>,
 ) {
     if keyboard.just_pressed(KeyCode::F5) {
         mesh_settings.mode.toggle();
+        // Also toggle the low_detail_mode so ALL LOD levels use the same mode
+        // This ensures blocky terrain applies to distant chunks too, not just LOD0
+        lod_settings.low_detail_mode = mesh_settings.mode;
         // Mark all chunks dirty to trigger re-meshing
         for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
             if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
                 chunk.mark_dirty();
             }
         }
-        info!("Mesh mode: {:?} (F5 to toggle)", mesh_settings.mode);
+        info!("Mesh mode: {:?} (all LODs) (F5 to toggle)", mesh_settings.mode);
     }
 }
 
