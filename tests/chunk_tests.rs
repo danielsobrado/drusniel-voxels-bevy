@@ -106,9 +106,9 @@ fn corner_voxels_accessible() {
 }
 
 #[test]
-fn default_lod_is_high() {
+fn default_lod_is_lod0() {
     let chunk = Chunk::new(IVec3::ZERO);
-    assert_eq!(chunk.lod_level(), LodLevel::High);
+    assert_eq!(chunk.lod_level(), LodLevel::Lod0);
 }
 
 #[test]
@@ -116,10 +116,10 @@ fn set_lod_level_returns_true_on_change() {
     let mut chunk = Chunk::new(IVec3::ZERO);
     chunk.clear_dirty();
 
-    let changed = chunk.set_lod_level(LodLevel::Low);
+    let changed = chunk.set_lod_level(LodLevel::Lod1);
     assert!(changed);
     assert!(chunk.is_dirty());
-    assert_eq!(chunk.lod_level(), LodLevel::Low);
+    assert_eq!(chunk.lod_level(), LodLevel::Lod1);
 }
 
 #[test]
@@ -127,24 +127,26 @@ fn set_lod_level_returns_false_when_same() {
     let mut chunk = Chunk::new(IVec3::ZERO);
     chunk.clear_dirty();
 
-    let changed = chunk.set_lod_level(LodLevel::High);
+    let changed = chunk.set_lod_level(LodLevel::Lod0);
     assert!(!changed);
     assert!(!chunk.is_dirty());
 }
 
 #[test]
 fn lod_level_comparison() {
-    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Low));
-    assert!(LodLevel::Low.is_lower_detail_than(LodLevel::High));
-    assert!(LodLevel::High.is_higher_detail_than(LodLevel::Low));
-    assert!(LodLevel::Low.is_higher_detail_than(LodLevel::Culled));
+    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Lod1));
+    assert!(LodLevel::Lod1.is_lower_detail_than(LodLevel::Lod0));
+    assert!(LodLevel::Lod0.is_higher_detail_than(LodLevel::Lod1));
+    assert!(LodLevel::Lod1.is_higher_detail_than(LodLevel::Culled));
 }
 
 #[test]
 fn lod_detail_values() {
     assert_eq!(LodLevel::Culled.detail_value(), 0);
-    assert_eq!(LodLevel::Low.detail_value(), 1);
-    assert_eq!(LodLevel::High.detail_value(), 2);
+    assert_eq!(LodLevel::Lod3.detail_value(), 1);
+    assert_eq!(LodLevel::Lod2.detail_value(), 2);
+    assert_eq!(LodLevel::Lod1.detail_value(), 3);
+    assert_eq!(LodLevel::Lod0.detail_value(), 4);
 }
 
 #[test]

@@ -235,16 +235,19 @@ fn mesh_data_creation() {
 fn lod_level_ordering() {
     use voxel_builder::voxel::chunk::LodLevel;
 
-    // Verify LOD level ordering
-    assert!(LodLevel::Culled.detail_value() < LodLevel::Low.detail_value());
-    assert!(LodLevel::Low.detail_value() < LodLevel::High.detail_value());
+    // Verify LOD level ordering (Lod0 is highest detail, Culled is lowest)
+    assert!(LodLevel::Culled.detail_value() < LodLevel::Lod3.detail_value());
+    assert!(LodLevel::Lod3.detail_value() < LodLevel::Lod2.detail_value());
+    assert!(LodLevel::Lod2.detail_value() < LodLevel::Lod1.detail_value());
+    assert!(LodLevel::Lod1.detail_value() < LodLevel::Lod0.detail_value());
 
     // Verify comparison methods
-    assert!(LodLevel::High.is_higher_detail_than(LodLevel::Low));
-    assert!(LodLevel::High.is_higher_detail_than(LodLevel::Culled));
-    assert!(LodLevel::Low.is_higher_detail_than(LodLevel::Culled));
+    assert!(LodLevel::Lod0.is_higher_detail_than(LodLevel::Lod1));
+    assert!(LodLevel::Lod0.is_higher_detail_than(LodLevel::Culled));
+    assert!(LodLevel::Lod1.is_higher_detail_than(LodLevel::Culled));
 
-    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Low));
-    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::High));
-    assert!(LodLevel::Low.is_lower_detail_than(LodLevel::High));
+    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Lod1));
+    assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Lod0));
+    assert!(LodLevel::Lod1.is_lower_detail_than(LodLevel::Lod0));
 }
+

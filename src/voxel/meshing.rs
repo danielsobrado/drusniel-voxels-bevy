@@ -1,7 +1,7 @@
 //! Mesh generation for voxel chunks.
 //!
 //! This module provides two meshing modes:
-//! - **Blocky**: Traditional Minecraft-style meshing with cube faces
+//! - **Blocky**: Greedy meshing that combines adjacent faces of the same material
 //! - **Surface Nets**: Smooth terrain meshing using the Surface Nets algorithm
 //!
 //! Both modes support ambient occlusion and proper chunk boundary handling.
@@ -9,7 +9,6 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::constants::{
     CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE,
     PADDED_CHUNK_SIZE_U32, UV_PADDING, CHUNK_BOUNDARY_SCALE,
@@ -17,6 +16,7 @@ use crate::constants::{
     // LOD grid configurations
     LOD0_PADDED_SIZE, LOD0_STEP_SIZE, LOD0_GRID_VOLUME,
     LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD1_GRID_VOLUME,
+    LOD2_PADDED_SIZE, LOD2_STEP_SIZE, LOD2_GRID_VOLUME,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -28,11 +28,6 @@ use crate::voxel::world::VoxelWorld;
 // Surface nets imports for smooth meshing
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::{ConstShape, ConstShape3u32};
-
-// Debug helper: log if a solid face ends up using the water atlas tile
-const DEBUG_LOG_WATER_TILE_ON_SOLIDS: bool = true;
-const DEBUG_MAX_LOGS: usize = 64;
-static DEBUG_WATER_SOLID_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Component)]
 pub struct ChunkMesh {
@@ -98,6 +93,365 @@ pub struct ChunkMeshResult {
     pub water: MeshData,
 }
 
+// =============================================================================
+// Greedy Meshing Types and Implementation
+// =============================================================================
+
+/// Information about a face for greedy meshing.
+/// Faces can only be merged if all fields match.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+struct FaceInfo {
+    /// The voxel type (for material/texture selection)
+    voxel: VoxelType,
+    /// Whether this face slot is visible and should be meshed
+    visible: bool,
+}
+
+/// A merged rectangle from greedy meshing
+struct GreedyQuad {
+    /// Starting position in the 2D slice (u, v coordinates)
+    start: (u32, u32),
+    /// Size of the quad (width, height in the slice)
+    size: (u32, u32),
+    /// The voxel type for this quad
+    voxel: VoxelType,
+    /// The depth (position along the face normal direction)
+    depth: u32,
+}
+
+/// Build a 2D mask of visible faces for a given slice.
+/// Returns a CHUNK_SIZE x CHUNK_SIZE array of FaceInfo.
+fn build_face_mask(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    face: Face,
+    depth: u32,
+) -> [[FaceInfo; CHUNK_SIZE]; CHUNK_SIZE] {
+    let mut mask = [[FaceInfo::default(); CHUNK_SIZE]; CHUNK_SIZE];
+
+    // Map face direction to axis and iteration order
+    // For each face, we iterate over the 2D slice perpendicular to the face normal
+    for u in 0..CHUNK_SIZE {
+        for v in 0..CHUNK_SIZE {
+            // Convert (depth, u, v) to local voxel coordinates based on face direction
+            let local = match face {
+                Face::Top | Face::Bottom => UVec3::new(u as u32, depth, v as u32),
+                Face::North | Face::South => UVec3::new(u as u32, v as u32, depth),
+                Face::East | Face::West => UVec3::new(depth, v as u32, u as u32),
+            };
+
+            let voxel = chunk.get(local);
+
+            // Skip non-solid voxels (air, water handled separately)
+            if !voxel.is_solid() {
+                continue;
+            }
+
+            // Check if this face is visible
+            if is_face_visible(chunk, world, local, face) {
+                mask[u][v] = FaceInfo {
+                    voxel,
+                    visible: true,
+                };
+            }
+        }
+    }
+
+    mask
+}
+
+/// Greedy meshing: find maximal rectangles in a 2D face mask.
+/// Returns a list of merged quads for this slice.
+fn greedy_mesh_slice(
+    mask: &mut [[FaceInfo; CHUNK_SIZE]; CHUNK_SIZE],
+    depth: u32,
+) -> Vec<GreedyQuad> {
+    let mut quads = Vec::new();
+
+    for start_u in 0..CHUNK_SIZE {
+        for start_v in 0..CHUNK_SIZE {
+            let info = mask[start_u][start_v];
+
+            // Skip empty/already processed cells
+            if !info.visible {
+                continue;
+            }
+
+            // Find the width (extend in u direction)
+            let mut width = 1;
+            while start_u + width < CHUNK_SIZE {
+                let next = mask[start_u + width][start_v];
+                if next.visible && next.voxel == info.voxel {
+                    width += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Find the height (extend in v direction)
+            let mut height = 1;
+            'height_loop: while start_v + height < CHUNK_SIZE {
+                // Check if the entire row matches
+                for du in 0..width {
+                    let next = mask[start_u + du][start_v + height];
+                    if !next.visible || next.voxel != info.voxel {
+                        break 'height_loop;
+                    }
+                }
+                height += 1;
+            }
+
+            // Mark all cells in this quad as processed
+            for du in 0..width {
+                for dv in 0..height {
+                    mask[start_u + du][start_v + dv].visible = false;
+                }
+            }
+
+            // Add the quad
+            quads.push(GreedyQuad {
+                start: (start_u as u32, start_v as u32),
+                size: (width as u32, height as u32),
+                voxel: info.voxel,
+                depth,
+            });
+        }
+    }
+
+    quads
+}
+
+/// Add a greedy quad to the mesh data with proper AO calculation.
+fn add_greedy_quad(
+    mesh_data: &mut MeshData,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    quad: &GreedyQuad,
+    face: Face,
+    ao_config: &BakedAoConfig,
+) {
+    let s = VOXEL_SIZE;
+    let (u_start, v_start) = quad.start;
+    let (u_size, v_size) = quad.size;
+
+    // Convert quad coordinates to world-space vertices based on face direction
+    // The quad spans from (u_start, v_start) to (u_start + u_size, v_start + v_size)
+    let (v0, v1, v2, v3, normal) = match face {
+        Face::Top => {
+            let y = (quad.depth as f32 + 1.0) * s;
+            let x0 = u_start as f32 * s;
+            let x1 = (u_start + u_size) as f32 * s;
+            let z0 = v_start as f32 * s;
+            let z1 = (v_start + v_size) as f32 * s;
+            (
+                [x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0],
+                [0.0, 1.0, 0.0]
+            )
+        }
+        Face::Bottom => {
+            let y = quad.depth as f32 * s;
+            let x0 = u_start as f32 * s;
+            let x1 = (u_start + u_size) as f32 * s;
+            let z0 = v_start as f32 * s;
+            let z1 = (v_start + v_size) as f32 * s;
+            (
+                [x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1],
+                [0.0, -1.0, 0.0]
+            )
+        }
+        Face::North => {
+            let z = quad.depth as f32 * s;
+            let x0 = u_start as f32 * s;
+            let x1 = (u_start + u_size) as f32 * s;
+            let y0 = v_start as f32 * s;
+            let y1 = (v_start + v_size) as f32 * s;
+            (
+                [x1, y0, z], [x0, y0, z], [x0, y1, z], [x1, y1, z],
+                [0.0, 0.0, -1.0]
+            )
+        }
+        Face::South => {
+            let z = (quad.depth as f32 + 1.0) * s;
+            let x0 = u_start as f32 * s;
+            let x1 = (u_start + u_size) as f32 * s;
+            let y0 = v_start as f32 * s;
+            let y1 = (v_start + v_size) as f32 * s;
+            (
+                [x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z],
+                [0.0, 0.0, 1.0]
+            )
+        }
+        Face::East => {
+            let x = (quad.depth as f32 + 1.0) * s;
+            let z0 = u_start as f32 * s;
+            let z1 = (u_start + u_size) as f32 * s;
+            let y0 = v_start as f32 * s;
+            let y1 = (v_start + v_size) as f32 * s;
+            (
+                [x, y0, z1], [x, y0, z0], [x, y1, z0], [x, y1, z1],
+                [1.0, 0.0, 0.0]
+            )
+        }
+        Face::West => {
+            let x = quad.depth as f32 * s;
+            let z0 = u_start as f32 * s;
+            let z1 = (u_start + u_size) as f32 * s;
+            let y0 = v_start as f32 * s;
+            let y1 = (v_start + v_size) as f32 * s;
+            (
+                [x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0],
+                [-1.0, 0.0, 0.0]
+            )
+        }
+    };
+
+    // Calculate AO for each corner of the merged quad
+    // We sample AO at the corner voxels of the quad
+    let ao = get_greedy_quad_ao(chunk, world, quad, face, ao_config);
+
+    let start_idx = mesh_data.positions.len() as u32;
+
+    mesh_data.positions.push(v0);
+    mesh_data.positions.push(v1);
+    mesh_data.positions.push(v2);
+    mesh_data.positions.push(v3);
+
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+
+    let material_index = get_blocky_material_index(quad.voxel, face) as f32 / 255.0;
+    mesh_data.colors.push([ao[0], ao[0], ao[0], material_index]);
+    mesh_data.colors.push([ao[1], ao[1], ao[1], material_index]);
+    mesh_data.colors.push([ao[2], ao[2], ao[2], material_index]);
+    mesh_data.colors.push([ao[3], ao[3], ao[3], material_index]);
+
+    // UVs scaled by quad size for proper texture tiling
+    let u_scale = u_size as f32;
+    let v_scale = v_size as f32;
+    mesh_data.uvs.push([0.0, v_scale]);
+    mesh_data.uvs.push([u_scale, v_scale]);
+    mesh_data.uvs.push([u_scale, 0.0]);
+    mesh_data.uvs.push([0.0, 0.0]);
+
+    // Use flipped winding for proper AO interpolation when needed
+    if !ao_config.fix_anisotropy || ao[0] + ao[2] > ao[1] + ao[3] {
+        mesh_data.indices.push(start_idx);
+        mesh_data.indices.push(start_idx + 2);
+        mesh_data.indices.push(start_idx + 1);
+        mesh_data.indices.push(start_idx);
+        mesh_data.indices.push(start_idx + 3);
+        mesh_data.indices.push(start_idx + 2);
+    } else {
+        mesh_data.indices.push(start_idx + 1);
+        mesh_data.indices.push(start_idx);
+        mesh_data.indices.push(start_idx + 3);
+        mesh_data.indices.push(start_idx + 1);
+        mesh_data.indices.push(start_idx + 3);
+        mesh_data.indices.push(start_idx + 2);
+    }
+}
+
+/// Calculate AO values for the 4 corners of a greedy quad.
+/// For each corner, we sample the neighboring voxels to compute occlusion.
+fn get_greedy_quad_ao(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    quad: &GreedyQuad,
+    face: Face,
+    ao_config: &BakedAoConfig,
+) -> [f32; 4] {
+    if !ao_config.enabled {
+        return [1.0; 4];
+    }
+
+    let (u_start, v_start) = quad.start;
+    let (u_size, v_size) = quad.size;
+
+    // For each corner of the quad, we need to find the voxel that corner belongs to
+    // and get the appropriate AO value for that vertex.
+    // Corners map to vertices: v0, v1, v2, v3 (see add_greedy_quad)
+
+    let mut ao = [1.0; 4];
+
+    // For greedy quads, we sample AO at the corner voxels and use the vertex index
+    // that corresponds to that corner's position within the face.
+    //
+    // The vertex order for each face (matching add_face_with_ao):
+    // Top:    v0(x,y+1,z+1), v1(x+1,y+1,z+1), v2(x+1,y+1,z), v3(x,y+1,z)
+    // Bottom: v0(x,y,z), v1(x+1,y,z), v2(x+1,y,z+1), v3(x,y,z+1)
+    // North:  v0(x+1,y,z), v1(x,y,z), v2(x,y+1,z), v3(x+1,y+1,z)
+    // South:  v0(x,y,z+1), v1(x+1,y,z+1), v2(x+1,y+1,z+1), v3(x,y+1,z+1)
+    // East:   v0(x+1,y,z+1), v1(x+1,y,z), v2(x+1,y+1,z), v3(x+1,y+1,z+1)
+    // West:   v0(x,y,z), v1(x,y,z+1), v2(x,y+1,z+1), v3(x,y+1,z)
+
+    // For a greedy quad, we need to sample the corner voxel and get the right vertex AO.
+    // Corner 0 (v0): top-left in (u,v) space -> maps to specific voxel + vertex
+    // Corner 1 (v1): top-right
+    // Corner 2 (v2): bottom-right
+    // Corner 3 (v3): bottom-left
+
+    // Get AO for each corner by sampling the voxel at that corner
+    // We clamp u-1 and v-1 to stay in bounds for corners at the edge
+    let corner_voxels: [(u32, u32, usize); 4] = match face {
+        Face::Top => [
+            // v0 at (u_start, v_start + v_size) -> voxel (u_start, v_start+v_size-1), vertex 0
+            (u_start, v_start + v_size - 1, 0),
+            // v1 at (u_start + u_size, v_start + v_size) -> voxel (u_start+u_size-1, v_start+v_size-1), vertex 1
+            (u_start + u_size - 1, v_start + v_size - 1, 1),
+            // v2 at (u_start + u_size, v_start) -> voxel (u_start+u_size-1, v_start), vertex 2
+            (u_start + u_size - 1, v_start, 2),
+            // v3 at (u_start, v_start) -> voxel (u_start, v_start), vertex 3
+            (u_start, v_start, 3),
+        ],
+        Face::Bottom => [
+            (u_start, v_start, 0),
+            (u_start + u_size - 1, v_start, 1),
+            (u_start + u_size - 1, v_start + v_size - 1, 2),
+            (u_start, v_start + v_size - 1, 3),
+        ],
+        Face::North => [
+            (u_start + u_size - 1, v_start, 0),
+            (u_start, v_start, 1),
+            (u_start, v_start + v_size - 1, 2),
+            (u_start + u_size - 1, v_start + v_size - 1, 3),
+        ],
+        Face::South => [
+            (u_start, v_start, 0),
+            (u_start + u_size - 1, v_start, 1),
+            (u_start + u_size - 1, v_start + v_size - 1, 2),
+            (u_start, v_start + v_size - 1, 3),
+        ],
+        Face::East => [
+            (u_start + u_size - 1, v_start, 0),
+            (u_start, v_start, 1),
+            (u_start, v_start + v_size - 1, 2),
+            (u_start + u_size - 1, v_start + v_size - 1, 3),
+        ],
+        Face::West => [
+            (u_start, v_start, 0),
+            (u_start + u_size - 1, v_start, 1),
+            (u_start + u_size - 1, v_start + v_size - 1, 2),
+            (u_start, v_start + v_size - 1, 3),
+        ],
+    };
+
+    for (corner_idx, (u, v, vertex_idx)) in corner_voxels.iter().enumerate() {
+        // Convert (depth, u, v) to local voxel coordinates
+        let local = match face {
+            Face::Top | Face::Bottom => UVec3::new(*u, quad.depth, *v),
+            Face::North | Face::South => UVec3::new(*u, *v, quad.depth),
+            Face::East | Face::West => UVec3::new(quad.depth, *v, *u),
+        };
+
+        let face_ao = get_face_ao(chunk, world, local, face, ao_config);
+        ao[corner_idx] = face_ao[*vertex_idx];
+    }
+
+    ao
+}
+
 pub fn generate_chunk_mesh(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -105,33 +459,39 @@ pub fn generate_chunk_mesh(
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::new();
     let mut water_mesh = MeshData::new();
-    
+
+    // Greedy meshing for solid blocks - process each face direction
+    let faces = [Face::Top, Face::Bottom, Face::North, Face::South, Face::East, Face::West];
+
+    for face in faces {
+        // Process each slice perpendicular to the face direction
+        for depth in 0..CHUNK_SIZE as u32 {
+            // Build mask of visible faces for this slice
+            let mut mask = build_face_mask(chunk, world, face, depth);
+
+            // Find and emit greedy quads
+            let quads = greedy_mesh_slice(&mut mask, depth);
+
+            for quad in &quads {
+                add_greedy_quad(&mut solid_mesh, chunk, world, quad, face, ao_config);
+            }
+        }
+    }
+
+    // Water still uses per-face generation (typically few water faces, and they need special handling)
     for x in 0..16 {
         for y in 0..16 {
             for z in 0..16 {
                 let local = UVec3::new(x, y, z);
                 let voxel = chunk.get(local);
-                
-                if voxel == VoxelType::Air {
-                    continue;
-                }
 
                 if voxel.is_liquid() {
-                    // Generate water mesh faces (only visible against air)
                     check_water_face(chunk, world, local, Face::Top, &mut water_mesh, voxel);
                     check_water_face(chunk, world, local, Face::Bottom, &mut water_mesh, voxel);
                     check_water_face(chunk, world, local, Face::North, &mut water_mesh, voxel);
                     check_water_face(chunk, world, local, Face::South, &mut water_mesh, voxel);
                     check_water_face(chunk, world, local, Face::East, &mut water_mesh, voxel);
                     check_water_face(chunk, world, local, Face::West, &mut water_mesh, voxel);
-                } else if voxel.is_solid() {
-                    // Solid blocks - render faces adjacent to air or water (transparent)
-                    check_face(chunk, world, local, Face::Top, &mut solid_mesh, voxel, ao_config);
-                    check_face(chunk, world, local, Face::Bottom, &mut solid_mesh, voxel, ao_config);
-                    check_face(chunk, world, local, Face::North, &mut solid_mesh, voxel, ao_config);
-                    check_face(chunk, world, local, Face::South, &mut solid_mesh, voxel, ao_config);
-                    check_face(chunk, world, local, Face::East, &mut solid_mesh, voxel, ao_config);
-                    check_face(chunk, world, local, Face::West, &mut solid_mesh, voxel, ao_config);
                 }
             }
         }
@@ -143,6 +503,8 @@ pub fn generate_chunk_mesh(
     }
 }
 
+/// Legacy per-voxel face check (replaced by greedy meshing).
+#[allow(dead_code)]
 fn check_face(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -276,7 +638,8 @@ fn is_water_face_visible(
     )
 }
 
-/// Calculate vertex ambient occlusion (0-3 scale, 0 = fully occluded, 3 = not occluded).
+/// Calculate vertex ambient occlusion (0-1 scale, 0 = fully occluded, 1 = not occluded).
+/// Returns a minimum of 0.15 to prevent faces from going completely black.
 fn calculate_vertex_ao(side1: bool, side2: bool, corner: bool, ao_config: &BakedAoConfig) -> f32 {
     if !ao_config.enabled {
         return 1.0;
@@ -289,7 +652,10 @@ fn calculate_vertex_ao(side1: bool, side2: bool, corner: bool, ao_config: &Baked
         1.0 - (count as f32 * ao_config.corner_darkness / 3.0)
     };
 
-    ao_value * ao_config.strength + (1.0 - ao_config.strength)
+    let result = ao_value * ao_config.strength + (1.0 - ao_config.strength);
+
+    // Ensure minimum AO to prevent faces from going completely black
+    result.max(0.15)
 }
 
 /// Check if a world position contains a solid block (for AO calculation)
@@ -389,7 +755,9 @@ fn get_face_ao(
     ao
 }
 
-/// Get the atlas index for a voxel face (supports face-specific textures)
+/// Get the atlas index for a voxel face (supports face-specific textures).
+/// Legacy: kept for reference, replaced by material index approach in greedy meshing.
+#[allow(dead_code)]
 fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
     match voxel {
         VoxelType::TopSoil => {
@@ -417,6 +785,8 @@ fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
     }
 }
 
+/// Legacy per-voxel face generation with AO (replaced by add_greedy_quad).
+#[allow(dead_code)]
 fn add_face_with_ao(
     mesh_data: &mut MeshData,
     chunk: &Chunk,
@@ -479,24 +849,8 @@ fn add_face_with_ao(
     mesh_data.colors.push([ao[1], ao[1], ao[1], material_index]);
     mesh_data.colors.push([ao[2], ao[2], ao[2], material_index]);
     mesh_data.colors.push([ao[3], ao[3], ao[3], material_index]);
-    
-    // Face-specific texture
-    let atlas_idx = get_face_atlas_index(voxel, face);
-
-    if DEBUG_LOG_WATER_TILE_ON_SOLIDS && atlas_idx == VoxelType::Water.atlas_index() {
-        let count = DEBUG_WATER_SOLID_LOGS.fetch_add(1, Ordering::Relaxed);
-        if count < DEBUG_MAX_LOGS {
-            let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-            let world_pos = chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32);
-            info!(
-                "Solid face using water tile at {:?}, voxel {:?}, face {:?}",
-                world_pos, voxel, face
-            );
-        }
-    }
 
     // For Texture Arrays, we use full 0..1 UVs as each layer is a complete texture
-    // Atlas logic removed as it causes incorrect sampling (zoomed in patches)
     
     let u_min = 0.0;
     let u_max = 1.0;
@@ -646,6 +1000,9 @@ type PaddedChunkShape = ConstShape3u32<PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_
 /// Samples every 2nd voxel, reducing vertex count by ~75%
 type LodShape1 = ConstShape3u32<{ LOD1_PADDED_SIZE }, { LOD1_PADDED_SIZE }, { LOD1_PADDED_SIZE }>;
 
+/// Samples every 4th voxel, reducing vertex count by ~94%
+type LodShape2 = ConstShape3u32<{ LOD2_PADDED_SIZE }, { LOD2_PADDED_SIZE }, { LOD2_PADDED_SIZE }>;
+
 /// Configuration for LOD mesh generation
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LodMeshConfig {
@@ -666,21 +1023,31 @@ impl LodMeshConfig {
     };
 
     /// Low detail configuration: half resolution (step 2, 10x10x10)
-    pub const LOW: Self = Self {
+    pub const LOD1: Self = Self {
         step_size: LOD1_STEP_SIZE,
         padded_size: LOD1_PADDED_SIZE,
         grid_volume: LOD1_GRID_VOLUME,
     };
 
+    /// Very low detail configuration: quarter resolution (step 4, 6x6x6)
+    pub const LOD2: Self = Self {
+        step_size: LOD2_STEP_SIZE,
+        padded_size: LOD2_PADDED_SIZE,
+        grid_volume: LOD2_GRID_VOLUME,
+    };
+
     /// Get the appropriate config for a given LOD level
     pub fn from_lod_level(level: LodLevel) -> Self {
         match level {
-            LodLevel::High => Self::HIGH,
-            LodLevel::Low => Self::LOW,
-            LodLevel::Culled => Self::LOW, // Shouldn't be called for culled, but fallback
+            LodLevel::Lod0 => Self::HIGH,
+            LodLevel::Lod1 => Self::LOD1,
+            LodLevel::Lod2 => Self::LOD2,
+            LodLevel::Lod3 => Self::LOD2, // LOD3 uses same as LOD2 for now (proxy TODO)
+            LodLevel::Culled => Self::LOD2, // Fallback
         }
     }
 }
+
 
 /// Sample voxel from world or chunk, returns true if solid OR water
 /// Water is treated as solid for SDF purposes to prevent surface nets from generating
@@ -822,6 +1189,53 @@ fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3
                 // This creates smooth gradients instead of hard -1/+1 edges
                 let density = solid_count as f32 / sample_count as f32;
                 sdf[idx] = 1.0 - 2.0 * density; // Maps 0->1, 0.5->0, 1->-1
+            }
+        }
+    }
+
+    sdf
+}
+
+/// Generate an SDF array at LOD2 (quarter resolution).
+/// Returns a 6x6x6 grid (216 elements).
+/// Vertex positions must be scaled by step_size (4) after mesh generation.
+fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] { // 6^3 = 216
+    let mut sdf = [1.0f32; LodShape2::USIZE];
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let step = LOD2_STEP_SIZE as i32;
+
+    for z in 0..LOD2_PADDED_SIZE {
+        for y in 0..LOD2_PADDED_SIZE {
+            for x in 0..LOD2_PADDED_SIZE {
+                let idx = LodShape2::linearize([x, y, z]) as usize;
+
+                // Base world position for this LOD cell
+                let base_x = chunk_origin.x + (x as i32 - 1) * step;
+                let base_y = chunk_origin.y + (y as i32 - 1) * step;
+                let base_z = chunk_origin.z + (z as i32 - 1) * step;
+
+                // Sample all voxels in the 4x4x4 region and count solids
+                let mut solid_count = 0;
+                let sample_count = step * step * step; // 64 for step=4
+
+                for dz in 0..step {
+                    for dy in 0..step {
+                        for dx in 0..step {
+                            let world_pos = IVec3::new(
+                                base_x + dx,
+                                base_y + dy,
+                                base_z + dz,
+                            );
+                            if sample_voxel_at_world_pos(world, world_pos) {
+                                solid_count += 1;
+                            }
+                        }
+                    }
+                }
+
+                // Convert count to SDF value
+                let density = solid_count as f32 / sample_count as f32;
+                sdf[idx] = 1.0 - 2.0 * density;
             }
         }
     }
@@ -1446,6 +1860,150 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     }
 }
 
+/// Generate mesh using Surface Nets at LOD2 (quarter resolution).
+/// This function samples every 4th voxel, reducing vertex count by ~94%.
+/// Vertices are scaled by step_size (4) to match chunk dimensions.
+pub fn generate_chunk_mesh_surface_nets_lod2(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    skirt_config: &SkirtConfig,
+    _ao_config: &BakedAoConfig, // AO disabled for low LOD
+) -> ChunkMeshResult {
+    let mut solid_mesh = MeshData::new();
+    let mut local_positions: Vec<Vec3> = Vec::new();
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+
+    // Step size for LOD2 - each grid cell covers 4 voxels
+    let step = LOD2_STEP_SIZE as f32;
+
+    // Chunk center for scaling calculations
+    let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+
+    // Generate downsampled SDF (6x6x6 grid)
+    let sdf = generate_sdf_lod2(chunk, world);
+
+    // Run surface nets on the smaller SDF grid
+    let mut buffer = SurfaceNetsBuffer::default();
+    surface_nets(
+        &sdf,
+        &LodShape2 {},
+        [0; 3],
+        [(LOD2_PADDED_SIZE - 1) as u32; 3],
+        &mut buffer,
+    );
+
+    // Convert surface nets output to MeshData with vertex scaling
+    if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
+        for tri_idx in (0..buffer.indices.len()).step_by(3) {
+            let i0 = buffer.indices[tri_idx] as usize;
+            let i1 = buffer.indices[tri_idx + 1] as usize;
+            let i2 = buffer.indices[tri_idx + 2] as usize;
+
+            // Get sanitized positions for this triangle
+            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
+            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
+            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+
+            // Calculate local positions with step scaling:
+            // - Subtract 1.0 to remove padding offset (grid pos 1 = chunk start)
+            // - Multiply by step to scale to actual voxel coordinates
+            let local0 = Vec3::new(
+                (p0[0] - 1.0) * step,
+                (p0[1] - 1.0) * step,
+                (p0[2] - 1.0) * step,
+            );
+            let local1 = Vec3::new(
+                (p1[0] - 1.0) * step,
+                (p1[1] - 1.0) * step,
+                (p1[2] - 1.0) * step,
+            );
+            let local2 = Vec3::new(
+                (p2[0] - 1.0) * step,
+                (p2[1] - 1.0) * step,
+                (p2[2] - 1.0) * step,
+            );
+
+            // Get normals for this triangle
+            let normal0 = get_normalized_normal(&buffer.normals, i0);
+            let normal1 = get_normalized_normal(&buffer.normals, i1);
+            let normal2 = get_normalized_normal(&buffer.normals, i2);
+
+            // Calculate material weights with larger sampling radius for LOD2
+            let weights0 = compute_vertex_material_weights_lod(local0, chunk, world, chunk_origin, LOD2_STEP_SIZE);
+            let weights1 = compute_vertex_material_weights_lod(local1, chunk, world, chunk_origin, LOD2_STEP_SIZE);
+            let weights2 = compute_vertex_material_weights_lod(local2, chunk, world, chunk_origin, LOD2_STEP_SIZE);
+
+            // Skip AO for low LOD - distance makes it imperceptible
+            // Use full brightness (1.0)
+            let ao = 1.0;
+
+            // Add all 3 vertices for this triangle (not shared)
+            let base_idx = solid_mesh.positions.len() as u32;
+
+            // Vertex 0
+            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh.normals.push(normal0);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights0);
+            local_positions.push(local0);
+
+            // Vertex 1
+            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh.normals.push(normal1);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights1);
+            local_positions.push(local1);
+
+            // Vertex 2
+            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh.normals.push(normal2);
+            solid_mesh.uvs.push([ao, 0.0]);
+            solid_mesh.colors.push(weights2);
+            local_positions.push(local2);
+
+            // Add triangle indices
+            solid_mesh.indices.push(base_idx);
+            solid_mesh.indices.push(base_idx + 1);
+            solid_mesh.indices.push(base_idx + 2);
+        }
+    }
+
+    // Generate skirts for LOD boundaries
+    if !solid_mesh.indices.is_empty() {
+        let boundary_edges = extract_boundary_edges(
+            &local_positions,
+            &solid_mesh.positions,
+            &solid_mesh.normals,
+            &solid_mesh.indices,
+            &solid_mesh.colors,
+            CHUNK_SIZE as f32,
+        );
+
+        generate_skirts(
+            &mut solid_mesh.positions,
+            &mut solid_mesh.normals,
+            &mut solid_mesh.uvs,
+            &mut solid_mesh.colors,
+            &mut solid_mesh.indices,
+            &boundary_edges,
+            skirt_config,
+            my_lod,
+            &neighbor_lods,
+        );
+    }
+
+    // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
+    // For consistency, we could also LOD water, but it's typically minimal geometry
+    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+
+    ChunkMeshResult {
+        solid: solid_mesh,
+        water: water_mesh,
+    }
+}
+
 /// Mesh generation mode
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MeshMode {
@@ -1487,7 +2045,7 @@ pub fn generate_chunk_mesh_with_mode(
         MeshMode::SurfaceNets => {
             // Select LOD-appropriate mesh generation
             match my_lod {
-                LodLevel::High => {
+                LodLevel::Lod0 => {
                     // Full detail Surface Nets (18x18x18 grid, step 1)
                     generate_chunk_mesh_surface_nets(
                         chunk,
@@ -1498,10 +2056,23 @@ pub fn generate_chunk_mesh_with_mode(
                         ao_config,
                     )
                 }
-                LodLevel::Low => {
+                LodLevel::Lod1 => {
                     // Half detail Surface Nets (10x10x10 grid, step 2)
                     // ~75% vertex reduction for distant chunks
                     generate_chunk_mesh_surface_nets_lod1(
+                        chunk,
+                        world,
+                        my_lod,
+                        neighbor_lods,
+                        skirt_config,
+                        ao_config,
+                    )
+                }
+                LodLevel::Lod2 | LodLevel::Lod3 => {
+                    // Quarter detail Surface Nets (6x6x6 grid, step 4)
+                    // ~94% vertex reduction for very distant chunks
+
+                    generate_chunk_mesh_surface_nets_lod2(
                         chunk,
                         world,
                         my_lod,
@@ -1522,4 +2093,5 @@ pub fn generate_chunk_mesh_with_mode(
         }
     }
 }
+
 

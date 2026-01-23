@@ -56,7 +56,7 @@ fn apply_to_hierarchy(
             tweak_material(mat, style, prop_type, prop_id);
 
             let force_blend = should_force_blend(prop_type, prop_id);
-            let should_fade = matches!(prop_type, PropType::Bush | PropType::Flower)
+            let should_fade = is_foliage_prop(prop_type)
                 && (force_blend || matches!(original_alpha_mode, AlphaMode::Mask(_) | AlphaMode::Blend));
 
             if should_fade {
@@ -70,19 +70,19 @@ fn apply_to_hierarchy(
         };
 
         if should_fade {
-                let (min_alpha_scale, distance_scale) = foliage_fade_scales(prop_type, prop_id);
-                let bounds_radius = foliage_bounds_radius(distance_scale);
-                commands.entity(entity).insert(FoliageFade {
-                    base_alpha,
-                    current_alpha: base_alpha,
-                    min_alpha_scale,
-                    distance_scale,
-                    bounds_radius,
-                    base_material: mat_handle.0.clone(),
-                    blended_material: None,
-                });
-            }
+            let (min_alpha_scale, distance_scale) = foliage_fade_scales(prop_type, prop_id);
+            let bounds_radius = foliage_bounds_radius(distance_scale);
+            commands.entity(entity).insert(FoliageFade {
+                base_alpha,
+                current_alpha: base_alpha,
+                min_alpha_scale,
+                distance_scale,
+                bounds_radius,
+                base_material: mat_handle.0.clone(),
+                blended_material: None,
+            });
         }
+    }
 
     // Recurse into children
     if let Ok(kids) = children.get(entity) {
@@ -108,7 +108,7 @@ fn is_foliage_prop(prop_type: PropType) -> bool {
 }
 
 fn should_force_blend(prop_type: PropType, prop_id: &str) -> bool {
-    if matches!(prop_type, PropType::Bush | PropType::Flower) {
+    if is_foliage_prop(prop_type) {
         return true;
     }
     let id = prop_id.to_lowercase();
@@ -118,7 +118,7 @@ fn should_force_blend(prop_type: PropType, prop_id: &str) -> bool {
 fn foliage_fade_scales(prop_type: PropType, prop_id: &str) -> (f32, f32) {
     if is_grass_like_foliage(prop_type, prop_id) {
         (0.2, 2.5)
-    } else if matches!(prop_type, PropType::Bush | PropType::Flower) {
+    } else if is_foliage_prop(prop_type) {
         (0.6, 2.0)
     } else {
         (1.0, 1.0)
@@ -149,12 +149,15 @@ fn tweak_material(
 
     // Type-specific adjustments (GLTF material values preserved)
     match prop_type {
-        PropType::Tree => {
-            // Leaves: double-sided, higher alpha threshold for solid look
+        PropType::Tree | PropType::Bush | PropType::Flower => {
+            // Foliage: alpha mask, double-sided, solid look
             mat.diffuse_transmission = 0.0;
             mat.double_sided = true;
             mat.cull_mode = None;
-            mat.alpha_mode = AlphaMode::Mask(0.5);
+            // Trees and non-custom shrubs get mask
+            if prop_type == PropType::Tree || !is_custom {
+                mat.alpha_mode = AlphaMode::Mask(0.5);
+            }
         }
         PropType::Rock => {
             // Rocks: use GLTF values, just ensure no transmission
@@ -170,22 +173,13 @@ fn tweak_material(
                 );
             }
         }
-        PropType::Bush | PropType::Flower => {
-            // Foliage: alpha mask, double-sided, solid look
-            mat.double_sided = true;
-            mat.cull_mode = None;
-            mat.diffuse_transmission = 0.0;
-            if !is_custom {
-                mat.alpha_mode = AlphaMode::Mask(0.5);
-            }
-        }
     }
 
-    if matches!(prop_type, PropType::Bush | PropType::Flower) && is_custom {
+    if is_foliage_prop(prop_type) && is_custom {
         apply_custom_foliage_style(mat, &style.custom);
     }
 
-    if matches!(prop_type, PropType::Bush | PropType::Flower) && style.foliage_brightness_max > 0.0 {
+    if is_foliage_prop(prop_type) && style.foliage_brightness_max > 0.0 {
         mat.base_color = clamp_luminance(mat.base_color, style.foliage_brightness_max);
     }
 }

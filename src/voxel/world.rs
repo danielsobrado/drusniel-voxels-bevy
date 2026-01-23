@@ -93,6 +93,16 @@ impl VoxelWorld {
         self.chunks.iter()
     }
 
+    /// Returns an iterator over all loaded chunk positions.
+    pub fn chunk_positions(&self) -> impl Iterator<Item = IVec3> + '_ {
+        self.chunks.keys().copied()
+    }
+
+    /// Returns the number of loaded chunks.
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
     pub fn all_chunk_positions(&self) -> impl Iterator<Item = IVec3> + '_ {
         // Generate all positions within world bounds
         // This is a naive implementation, might want to just iterate loaded chunks

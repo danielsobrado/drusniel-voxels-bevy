@@ -1,7 +1,6 @@
 use avian3d::prelude::*;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
-use bevy::ecs::world::EntityWorldMut;
 
 use crate::physics::PhysicsLayer;
 use crate::performance::{AreaTimingRecorder, area_timer};
@@ -40,30 +39,24 @@ pub fn generate_chunk_colliders(
         .or_else(|| Collider::trimesh_from_mesh_with_config(mesh, TrimeshFlags::FIX_INTERNAL_EDGES));
 
         if let Some(collider) = collider {
-            commands
-                .entity(entity)
-                .queue_silenced(|mut entity_world: EntityWorldMut| {
-                    entity_world.insert((
-                        RigidBody::Static,
-                        collider,
-                        CollisionMargin(TERRAIN_COLLIDER_MARGIN),
-                        CollisionLayers::new(PhysicsLayer::Terrain, PhysicsLayer::terrain_mask()),
-                        ChunkCollider,
-                    ));
-                    entity_world.remove::<NeedsCollider>();
-                });
+            // Use regular commands (not queue_silenced) so Avian's observers
+            // can detect the collider change and sync physics state properly
+            commands.entity(entity).insert((
+                RigidBody::Static,
+                collider,
+                CollisionMargin(TERRAIN_COLLIDER_MARGIN),
+                CollisionLayers::new(PhysicsLayer::Terrain, PhysicsLayer::terrain_mask()),
+                ChunkCollider,
+            ));
+            commands.entity(entity).remove::<NeedsCollider>();
         } else {
             warn!("Failed to generate terrain collider for chunk {:?}", entity);
-            commands
-                .entity(entity)
-                .queue_silenced(|mut entity_world: EntityWorldMut| {
-                    entity_world.remove::<NeedsCollider>();
-                });
+            commands.entity(entity).remove::<NeedsCollider>();
         }
     }
 }
 
-/// System to remove and regenerate colliders when chunks are modified.
+/// System to mark colliders for regeneration when chunk meshes change.
 pub fn handle_chunk_modification(
     mut commands: Commands,
     modified_chunks: Query<Entity, (With<ChunkMesh>, Changed<Mesh3d>, With<ChunkCollider>)>,
@@ -72,12 +65,6 @@ pub fn handle_chunk_modification(
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Collider Update");
     for entity in modified_chunks.iter() {
-        commands
-            .entity(entity)
-            .queue_silenced(|mut entity_world: EntityWorldMut| {
-                entity_world.remove::<Collider>();
-                entity_world.remove::<ChunkCollider>();
-                entity_world.insert(NeedsCollider);
-            });
+        commands.entity(entity).insert(NeedsCollider);
     }
 }

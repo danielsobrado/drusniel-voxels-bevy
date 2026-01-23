@@ -37,10 +37,15 @@ use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
 use crate::voxel::meshing::{
     generate_chunk_mesh_with_mode, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
 };
+use crate::voxel::occlusion::{
+    update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks,
+};
+use crate::voxel::octree::ChunkOctree;
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::terrain::TerrainGenerator;
 use crate::voxel::types::{VoxelType, Voxel};
+use crate::voxel::visibility::compute_face_visibility;
 use crate::voxel::world::VoxelWorld;
 use bevy_water::water::material::StandardWaterMaterial;
 
@@ -145,8 +150,8 @@ impl RuntimeChunkStats {
             }
 
             match chunk.lod_level() {
-                LodLevel::High => self.high_lod_chunks += 1,
-                LodLevel::Low => self.low_lod_chunks += 1,
+                LodLevel::Lod0 => self.high_lod_chunks += 1,
+                LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 => self.low_lod_chunks += 1,
                 LodLevel::Culled => self.culled_chunks += 1,
             }
         }
@@ -177,11 +182,11 @@ impl RuntimeChunkStats {
         let count = vertex_count as u64;
         self.total_vertices += count;
         match lod_level {
-            LodLevel::High => {
+            LodLevel::Lod0 => {
                 self.high_lod_vertices += count;
                 self.high_lod_mesh_count += 1;
             }
-            LodLevel::Low => {
+            LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 => {
                 self.low_lod_vertices += count;
                 self.low_lod_mesh_count += 1;
             }
@@ -304,12 +309,21 @@ impl Plugin for VoxelPlugin {
             force_regenerate: false,
             ..default()
         })
+        // Visibility optimization resources
+        .insert_resource(ChunkOctree::default())
+        .insert_resource(VisibleChunks::default())
+        .insert_resource(OcclusionConfig::default())
+        .insert_resource(OcclusionUpdateTimer::default())
         .add_systems(Startup, setup_voxel_world)
         .add_systems(
             Update,
             (
                 poll_chunk_generation_tasks,
+                update_chunk_face_visibility_system,
+                update_octree_system,
+                update_visible_chunks_system,
                 adjust_lod_for_integrated_gpu,
+                apply_visibility_culling_system,
                 update_chunk_lod_system,
                 mesh_dirty_chunks_system,
                 update_water_material_lod,
@@ -748,8 +762,8 @@ fn mesh_dirty_chunks_system(
 
         let (target_mode, lod_level, uniformity) = if let Some(chunk) = world.get_chunk(chunk_pos) {
             let target_mode = match chunk.lod_level() {
-                LodLevel::High => mesh_settings.mode,
-                LodLevel::Low => lod_settings.low_detail_mode,
+                LodLevel::Lod0 => mesh_settings.mode,
+                LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 => lod_settings.low_detail_mode,
                 LodLevel::Culled => lod_settings.low_detail_mode,
             };
 
@@ -1139,46 +1153,148 @@ fn adjust_lod_for_integrated_gpu(
 /// Calculates the target LOD level with hysteresis to prevent rapid switching.
 ///
 /// Hysteresis means the threshold to switch FROM a level is different than TO it:
-/// - To switch from High → Low: must exceed high_detail_distance + hysteresis
-/// - To switch from Low → High: must be within high_detail_distance - hysteresis
+/// - To switch from Lod0 → Lod1: must exceed high_detail_distance + hysteresis
+/// - To switch from Lod1 → Lod0: must be within high_detail_distance - hysteresis
 /// This prevents flip-flopping when camera hovers near a threshold.
 fn calculate_target_lod_with_hysteresis(
     distance: f32,
     current_lod: LodLevel,
     settings: &LodSettings,
 ) -> LodLevel {
+    // Distance thresholds for LOD transitions
+    // Lod0: 0 to high_detail_distance
+    // Lod1: high_detail_distance to lod1_distance (midpoint to cull)
+    // Lod2+: lod1_distance to cull_distance
+    let lod1_distance = (settings.high_detail_distance + settings.cull_distance) * 0.5;
+    // Fix: Ensure lod2_distance is between lod1 and cull (midpoint of the remaining range)
+    let lod2_distance = lod1_distance + (settings.cull_distance - lod1_distance) * 0.5;
+
     match current_lod {
-        LodLevel::High => {
-            // Currently high detail - need to go PAST threshold to switch to low
+        LodLevel::Lod0 => {
+            // Currently highest detail - need to go PAST threshold to switch to lower
             if distance > settings.high_detail_distance + LOD_HYSTERESIS {
-                LodLevel::Low
+                LodLevel::Lod1
             } else {
-                LodLevel::High
+                LodLevel::Lod0
             }
         }
-        LodLevel::Low => {
-            // Currently low detail - check both directions with hysteresis
+        LodLevel::Lod1 => {
+            // Check transitions in both directions
             if distance < settings.high_detail_distance - LOD_HYSTERESIS {
-                // Close enough to switch to high detail
-                LodLevel::High
+                LodLevel::Lod0
+            } else if distance > lod1_distance + LOD_HYSTERESIS {
+                LodLevel::Lod2
+            } else {
+                LodLevel::Lod1
+            }
+        }
+        LodLevel::Lod2 => {
+            if distance < lod1_distance - LOD_HYSTERESIS {
+                LodLevel::Lod1
+            } else if distance > lod2_distance + LOD_HYSTERESIS {
+                LodLevel::Lod3
+            } else {
+                LodLevel::Lod2
+            }
+        }
+        LodLevel::Lod3 => {
+            if distance < lod2_distance - LOD_HYSTERESIS {
+                LodLevel::Lod2
             } else if distance > settings.cull_distance + LOD_HYSTERESIS {
-                // Far enough to cull
                 LodLevel::Culled
             } else {
-                // Stay at low detail
-                LodLevel::Low
+                LodLevel::Lod3
             }
         }
         LodLevel::Culled => {
             // Currently culled - need to come INSIDE cull threshold to show
             if distance < settings.cull_distance - LOD_HYSTERESIS {
-                LodLevel::Low
+                LodLevel::Lod3
             } else {
                 LodLevel::Culled
             }
         }
     }
 }
+
+
+// =============================================================================
+// Visibility Optimization Systems
+// =============================================================================
+
+/// Updates face visibility for chunks that have been modified.
+///
+/// This computes the 15-bit connectivity mask indicating which chunk faces
+/// can see each other through air voxels. Used by the BFS occlusion system.
+fn update_chunk_face_visibility_system(mut world: ResMut<VoxelWorld>) {
+    // Collect positions of chunks needing visibility update
+    let dirty_positions: Vec<IVec3> = world
+        .chunk_entries()
+        .filter(|(_, chunk)| chunk.is_visibility_dirty())
+        .map(|(pos, _)| *pos)
+        .collect();
+
+    for pos in dirty_positions {
+        if let Some(chunk) = world.get_chunk_mut(pos) {
+            // Ensure uniformity is computed first (needed by visibility algorithm)
+            chunk.compute_uniformity();
+            let visibility = compute_face_visibility(chunk);
+            chunk.set_face_visibility(visibility);
+            chunk.clear_visibility_dirty();
+        }
+    }
+}
+
+/// Rebuilds the chunk octree when chunks have been added or removed.
+///
+/// The octree enables O(log N) frustum culling instead of checking every chunk.
+fn update_octree_system(
+    world: Res<VoxelWorld>,
+    mut octree: ResMut<ChunkOctree>,
+    gen_state: Res<ChunkGenerationState>,
+) {
+    // Don't rebuild during initial world generation
+    if !gen_state.is_complete {
+        return;
+    }
+
+    // Build octree if dirty or not yet built
+    if octree.is_dirty() || !octree.is_built() {
+        octree.build(&world);
+    }
+}
+
+/// Applies visibility culling to chunks based on octree frustum + BFS occlusion.
+///
+/// NOTE: Currently disabled - the BFS occlusion needs more work to avoid
+/// culling visible terrain in open areas. The infrastructure (face visibility,
+/// octree, BFS) is in place for future use in caves/enclosed areas.
+///
+/// Chunks that are:
+/// 1. Outside the camera frustum (octree test), OR
+/// 2. Occluded by solid geometry (BFS test)
+/// are marked as force-culled to skip rendering.
+#[allow(dead_code)]
+fn apply_visibility_culling_system(
+    _octree: Res<ChunkOctree>,
+    _visible_chunks: Res<VisibleChunks>,
+    _camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
+    _world: ResMut<VoxelWorld>,
+    _config: Res<OcclusionConfig>,
+    _gen_state: Res<ChunkGenerationState>,
+) {
+    // DISABLED: Occlusion culling is too aggressive for open terrain.
+    // It culls terrain chunks while leaving props visible, causing floating objects.
+    //
+    // TODO: Re-enable when:
+    // 1. BFS considers distance-based LOD thresholds
+    // 2. Props are properly tied to terrain chunk visibility
+    // 3. Occlusion is only applied in enclosed areas (caves, buildings)
+}
+
+// =============================================================================
+// LOD System
+// =============================================================================
 
 /// Updates the LOD level of each chunk based on distance from the camera.
 ///

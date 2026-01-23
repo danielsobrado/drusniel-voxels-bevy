@@ -300,6 +300,10 @@ pub fn find_grounded_position(start: IVec3, world: &VoxelWorld) -> Option<IVec3>
 }
 
 /// Mark a block and its neighbors as dirty for mesh regeneration.
+///
+/// This marks neighbor chunks when the modified voxel is within 1 position of a
+/// chunk boundary, since AO calculations sample neighbors up to 1 voxel away.
+/// This ensures cross-chunk AO is properly recalculated.
 pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
     // Mark the chunk containing this block
     let chunk_pos = VoxelWorld::world_to_chunk(pos);
@@ -307,20 +311,22 @@ pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
         chunk.mark_dirty();
     }
 
-    // Check if we're at a chunk boundary and mark neighbor chunks
+    // Check if we're near a chunk boundary and mark neighbor chunks
+    // We check within 1 voxel of the boundary because AO calculations
+    // sample neighbors that can cross chunk boundaries
     let local = VoxelWorld::world_to_local(pos);
 
     let offsets = [
-        (local.x == 0, IVec3::new(-1, 0, 0)),
-        (local.x == 15, IVec3::new(1, 0, 0)),
-        (local.y == 0, IVec3::new(0, -1, 0)),
-        (local.y == 15, IVec3::new(0, 1, 0)),
-        (local.z == 0, IVec3::new(0, 0, -1)),
-        (local.z == 15, IVec3::new(0, 0, 1)),
+        (local.x <= 1, IVec3::new(-1, 0, 0)),   // Near -X boundary
+        (local.x >= 14, IVec3::new(1, 0, 0)),   // Near +X boundary
+        (local.y <= 1, IVec3::new(0, -1, 0)),   // Near -Y boundary
+        (local.y >= 14, IVec3::new(0, 1, 0)),   // Near +Y boundary
+        (local.z <= 1, IVec3::new(0, 0, -1)),   // Near -Z boundary
+        (local.z >= 14, IVec3::new(0, 0, 1)),   // Near +Z boundary
     ];
 
-    for (at_edge, offset) in offsets {
-        if at_edge {
+    for (near_edge, offset) in offsets {
+        if near_edge {
             let neighbor_chunk = chunk_pos + offset;
             if let Some(chunk) = world.get_chunk_mut(neighbor_chunk) {
                 chunk.mark_dirty();

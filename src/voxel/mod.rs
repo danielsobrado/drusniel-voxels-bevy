@@ -11,14 +11,20 @@
 //! - [`gravity`] - Voxel gravity simulation
 //! - [`skirt`] - LOD boundary skirts for seamless transitions
 //! - [`baked_ao`] - Baked ambient occlusion for voxel lighting
+//! - [`visibility`] - Face visibility computation for occlusion culling
+//! - [`occlusion`] - Runtime BFS occlusion culling
+//! - [`octree`] - Hierarchical octree for frustum culling
 
 pub mod baked_ao;
 pub mod chunk;
 pub mod gravity;
 pub mod meshing;
+pub mod occlusion;
+pub mod octree;
 pub mod persistence;
 pub mod plugin;
 pub mod skirt;
 pub mod terrain;
 pub mod types;
+pub mod visibility;
 pub mod world;

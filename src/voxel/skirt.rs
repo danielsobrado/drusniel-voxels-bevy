@@ -31,14 +31,53 @@ impl BoundaryFlags {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(u8)]
 pub enum ChunkFace {
-    NegX,
-    PosX,
-    NegY,
-    PosY,
-    NegZ,
-    PosZ,
+    NegX = 0,
+    PosX = 1,
+    NegY = 2,
+    PosY = 3,
+    NegZ = 4,
+    PosZ = 5,
+}
+
+impl ChunkFace {
+    /// All six faces in index order.
+    pub const ALL: [ChunkFace; 6] = [
+        ChunkFace::NegX,
+        ChunkFace::PosX,
+        ChunkFace::NegY,
+        ChunkFace::PosY,
+        ChunkFace::NegZ,
+        ChunkFace::PosZ,
+    ];
+
+    /// Returns the opposite face.
+    #[inline]
+    pub fn opposite(self) -> ChunkFace {
+        match self {
+            ChunkFace::NegX => ChunkFace::PosX,
+            ChunkFace::PosX => ChunkFace::NegX,
+            ChunkFace::NegY => ChunkFace::PosY,
+            ChunkFace::PosY => ChunkFace::NegY,
+            ChunkFace::NegZ => ChunkFace::PosZ,
+            ChunkFace::PosZ => ChunkFace::NegZ,
+        }
+    }
+
+    /// Returns the direction vector for this face (pointing outward).
+    #[inline]
+    pub fn direction(self) -> bevy::prelude::IVec3 {
+        match self {
+            ChunkFace::NegX => bevy::prelude::IVec3::NEG_X,
+            ChunkFace::PosX => bevy::prelude::IVec3::X,
+            ChunkFace::NegY => bevy::prelude::IVec3::NEG_Y,
+            ChunkFace::PosY => bevy::prelude::IVec3::Y,
+            ChunkFace::NegZ => bevy::prelude::IVec3::NEG_Z,
+            ChunkFace::PosZ => bevy::prelude::IVec3::Z,
+        }
+    }
 }
 
 /// Determine boundary flags for a vertex position in chunk-local voxel units.
