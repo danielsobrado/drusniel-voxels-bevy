@@ -24,7 +24,8 @@ pub struct TriplanarUniforms {
 impl Default for TriplanarUniforms {
     fn default() -> Self {
         Self {
-            base_color: LinearRgba::WHITE,
+            // Warm tint for natural V0.3-like terrain colors (slightly golden/peachy)
+            base_color: LinearRgba::new(1.0, 0.97, 0.92, 1.0),
             tex_scale: 2.0,
             blend_sharpness: 4.0,
             normal_intensity: 1.0,
