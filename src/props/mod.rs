@@ -1,3 +1,4 @@
+pub mod billboard;
 pub mod foliage;
 pub mod instancing;
 pub mod loader;
@@ -51,9 +52,13 @@ impl Plugin for PropsPlugin {
             // Instancing resources
             .init_resource::<instancing::PropMeshCache>()
             .init_resource::<instancing::InstancingStats>()
+            // Billboard LOD resources
+            .init_resource::<billboard::BillboardLodSettings>()
+            .init_resource::<billboard::BillboardCache>()
+            .init_resource::<billboard::BillboardStats>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
-            .add_systems(Startup, loader::load_prop_config)
+            .add_systems(Startup, (loader::load_prop_config, billboard::initialize_billboard_cache))
             .add_systems(
                 Update,
                 (
@@ -92,6 +97,15 @@ impl Plugin for PropsPlugin {
             .add_systems(
                 Update,
                 update_prop_chunk_visibility.after(spawner::spawn_props_on_terrain),
+            )
+            // Billboard LOD systems
+            .add_systems(
+                Update,
+                (
+                    billboard::update_billboard_lod
+                        .after(update_prop_chunk_visibility),
+                    billboard::sync_billboard_time,
+                ),
             )
             // Merging systems (run after spawning and materials)
             .add_systems(
@@ -584,7 +598,8 @@ fn regenerate_chunk_props(
         let sink = scale * 0.15; // Default sink factor
         let position = Vec3::new(
             sample_result.position.x,
-            (sample_result.position.y + def.y_offset - sink).max(sample_result.position.y - 0.4),
+            // Removed arbitrary max(y-0.4) clamp that prevented proper sinking
+            sample_result.position.y + def.y_offset - sink,
             sample_result.position.z,
         );
 

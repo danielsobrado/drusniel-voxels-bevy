@@ -274,6 +274,13 @@ pub const LOD2_PADDED_SIZE: u32 = 6;
 pub const LOD2_STEP_SIZE: u32 = 4;
 pub const LOD2_GRID_VOLUME: usize = 216; // 6^3
 
+/// LOD 3 (Extreme Low Detail): Proxy sampling
+/// Grid: 4x4x4 ((16/8) + 2 padding), samples every 8th voxel
+/// Reduces vertex count by ~98%
+pub const LOD3_PADDED_SIZE: u32 = 4;
+pub const LOD3_STEP_SIZE: u32 = 8;
+pub const LOD3_GRID_VOLUME: usize = 64; // 4^3
+
 // =============================================================================
 // Interaction Constants
 // =============================================================================
@@ -361,22 +368,42 @@ pub const BEDROCK_BLEND: f32 = 2.0;
 
 /// Base view distance for props in world units.
 /// Props beyond this distance (multiplied by type multiplier) are culled.
-pub const PROP_VIEW_DISTANCE_BASE: f32 = 200.0;
+pub const PROP_VIEW_DISTANCE_BASE: f32 = 350.0;
 
 /// View distance multiplier for trees (tallest, most visible).
-pub const PROP_VIEW_DISTANCE_TREE_MULT: f32 = 1.0;
+pub const PROP_VIEW_DISTANCE_TREE_MULT: f32 = 1.2;
 
 /// View distance multiplier for rocks.
-pub const PROP_VIEW_DISTANCE_ROCK_MULT: f32 = 0.75;
+pub const PROP_VIEW_DISTANCE_ROCK_MULT: f32 = 0.85;
 
 /// View distance multiplier for bushes.
-pub const PROP_VIEW_DISTANCE_BUSH_MULT: f32 = 0.5;
+pub const PROP_VIEW_DISTANCE_BUSH_MULT: f32 = 0.6;
 
 /// View distance multiplier for flowers (smallest, least visible).
-pub const PROP_VIEW_DISTANCE_FLOWER_MULT: f32 = 0.25;
+pub const PROP_VIEW_DISTANCE_FLOWER_MULT: f32 = 0.35;
 
 /// Hysteresis buffer for prop visibility to prevent rapid toggling.
 pub const PROP_VIEW_DISTANCE_HYSTERESIS: f32 = 10.0;
 
 /// Interval in seconds between prop chunk visibility updates.
 pub const PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL: f32 = 0.25;
+
+// =============================================================================
+// Billboard LOD Settings
+// =============================================================================
+
+/// Distance at which to switch from 3D mesh to billboard.
+/// Set to ~60% of tree view distance (350 * 1.2 * 0.6 = 252) for smooth transition.
+pub const BILLBOARD_SWITCH_DISTANCE: f32 = 250.0;
+
+/// Hysteresis buffer for billboard LOD switching.
+pub const BILLBOARD_LOD_HYSTERESIS: f32 = 10.0;
+
+/// Interval in seconds between billboard LOD updates.
+pub const BILLBOARD_UPDATE_INTERVAL: f32 = 0.15;
+
+/// Default billboard alpha cutoff for masking.
+pub const BILLBOARD_ALPHA_CUTOFF: f32 = 0.5;
+
+/// Billboard wind sway strength (subtle movement).
+pub const BILLBOARD_WIND_STRENGTH: f32 = 0.02;

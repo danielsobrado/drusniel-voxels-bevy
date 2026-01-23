@@ -7,6 +7,7 @@ use super::placement::{
     TerrainAnalyzer,
 };
 use super::{
+    billboard::{get_billboard_config, should_use_billboard_lod, BillboardCache, BillboardLod},
     foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition,
     PropType,
 };
@@ -62,6 +63,7 @@ pub fn spawn_props_on_terrain(
     mut spawned: ResMut<PropsSpawned>,
     mut persistence_state: ResMut<PropPersistenceState>,
     mesh_cache: Res<PropMeshCache>,
+    billboard_cache: Res<BillboardCache>,
     mut instancing_stats: ResMut<InstancingStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -140,6 +142,7 @@ pub fn spawn_props_on_terrain(
                     &props,
                     &prop_assets,
                     &mesh_cache,
+                    &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
                 );
@@ -171,6 +174,7 @@ pub fn spawn_props_on_terrain(
                     &props,
                     &prop_assets,
                     &mesh_cache,
+                    &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
                 );
@@ -446,7 +450,8 @@ fn generate_category_props(
             let sink = prop_ground_sink(&def.id, prop_type, scale);
             let position = Vec3::new(
                 sample_result.position.x,
-                (sample_result.position.y + def.y_offset - sink).max(sample_result.position.y - 0.4),
+                // Removed arbitrary max(y-0.4) clamp that prevented proper sinking
+                sample_result.position.y + def.y_offset - sink,
                 sample_result.position.z,
             );
 
@@ -480,6 +485,7 @@ fn spawn_props_from_data(
     props: &[PropPlacementData],
     assets: &PropAssets,
     mesh_cache: &PropMeshCache,
+    billboard_cache: &BillboardCache,
     stats: &mut InstancingStats,
     chunk_pos: IVec2,
 ) -> Vec<Entity> {
@@ -514,6 +520,26 @@ fn spawn_props_from_data(
                     commands.entity(entity).insert(GrassPropWind::new(&transform, hash));
                 }
 
+                // Add billboard LOD for trees
+                if should_use_billboard_lod(prop_type, &prop.id) {
+                    if let Some((texture, size, y_offset)) = get_billboard_config(billboard_cache, &prop.id) {
+                        // Check if this is a single-mesh prop (cached.len() == 1)
+                        let is_single_mesh = mesh_cache
+                            .get_cached(&prop.id)
+                            .map(|c| c.len() == 1)
+                            .unwrap_or(true);
+
+                        commands.entity(entity).insert(BillboardLod {
+                            is_billboard: false,
+                            billboard_entity: None,
+                            is_single_mesh,
+                            billboard_texture: texture,
+                            billboard_size: size,
+                            y_offset,
+                        });
+                    }
+                }
+
                 stats.instanced_spawns += 1;
                 return Some(entity);
             }
@@ -537,6 +563,22 @@ fn spawn_props_from_data(
             if should_apply_grass_wind(&prop.id, prop_type) {
                 let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
                 entity.insert(GrassPropWind::new(&transform, hash));
+            }
+
+            // Add billboard LOD for trees (SceneRoot path)
+            if should_use_billboard_lod(prop_type, &prop.id) {
+                if let Some((texture, size, y_offset)) =
+                    get_billboard_config(billboard_cache, &prop.id)
+                {
+                    entity.insert(BillboardLod {
+                        is_billboard: false,
+                        billboard_entity: None,
+                        is_single_mesh: false, // SceneRoot props are typically multi-mesh
+                        billboard_texture: texture,
+                        billboard_size: size,
+                        y_offset,
+                    });
+                }
             }
 
             stats.scene_spawns += 1;
@@ -971,7 +1013,7 @@ fn prop_ground_sink(id: &str, prop_type: PropType, scale: f32) -> f32 {
         0.2 // Trees usually have roots/trunk base to hide
     } else {
         // Bushes, Flowers, Grass
-        0.15 // Sink 15% of height to ensure no floating
+        0.4 // Sink 40% of height to ensure no floating (prev 0.15)
     };
 
     scale * factor
