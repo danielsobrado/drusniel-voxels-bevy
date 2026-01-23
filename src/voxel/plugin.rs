@@ -1124,7 +1124,7 @@ fn compute_water_max_depth(world: &VoxelWorld, chunk_pos: IVec3) -> usize {
 fn adjust_lod_for_integrated_gpu(
     capabilities: Option<Res<GraphicsCapabilities>>,
     mut lod_settings: ResMut<LodSettings>,
-    mut mesh_settings: ResMut<MeshSettings>,
+    _mesh_settings: ResMut<MeshSettings>,
     mut applied: Local<bool>,
 ) {
     if *applied {

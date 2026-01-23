@@ -357,16 +357,19 @@ fn update_fog_from_atmosphere(
     mut fog_uniforms: ResMut<FogUniforms>,
     ambient: Res<AmbientLight>,
     world: Res<VoxelWorld>,
+    time: Res<Time>,
+    mut current_boost: Local<f32>,
     camera_query: Query<&Transform, With<FogCamera>>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
+    if *current_boost == 0.0 { *current_boost = 1.0; }
     let Some(atmo_settings) = atmosphere_settings else { return };
 
     // Get Mie settings from atmosphere (connected to menu settings)
     let mie_direction = atmo_settings.mie_direction;
-    let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
+    // let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
     
     // Calculate sun position from atmosphere settings
     let phase = atmo_settings.time / atmo_settings.day_length;
@@ -487,15 +490,19 @@ fn update_fog_from_atmosphere(
         volumetric.jitter = config.volumetric.jitter;
     }
     
-    let interior_boost = camera_query
+    let target_boost = camera_query
         .single()
         .map(|camera| indoor_density_boost(&world, camera.translation))
         .unwrap_or(1.0);
 
+    // Smoothly interpolate boost to avoid jarring pops when walking under trees
+    let interpolation_speed = 2.0;
+    *current_boost = lerp(*current_boost, target_boost, (time.delta_secs() * interpolation_speed).clamp(0.0, 1.0));
+
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
         // Use config density directly - lower values = more transparent fog
-        let density = config.volume.density.clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        let density = (config.volume.density * *current_boost).clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
         volume.density_factor = density;
         volume.absorption = config.volume.absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
@@ -506,7 +513,8 @@ fn update_fog_from_atmosphere(
             1.0,
         );
         // High light intensity for visible god rays (50-100 range for bright shafts)
-        let base_intensity = 50.0 * daylight + 10.0 * night;
+        // Boosted significantly to ensure visibility even with lower sun intensities
+        let base_intensity = 150.0 * daylight + 30.0 * night;
         volume.light_intensity = base_intensity * (1.0 + twilight * 1.5);
         // For testing: use config scattering directly without modifications
         volume.scattering = config.volume.scattering;
@@ -556,9 +564,26 @@ fn update_shadow_cascades_from_fog(
         }
 
         let scale = target / current_max;
-        for bound in cascade.bounds.iter_mut() {
-            *bound = (*bound * scale).max(min_dist + 0.01);
+        
+        // Clone bounds to avoid mutable borrow overlap in loop
+        let mut new_bounds = cascade.bounds.clone();
+        
+        for i in 0..new_bounds.len() {
+            let mut val = new_bounds[i] * scale;
+            if i == 0 {
+                val = val.max(15.0);
+            }
+            new_bounds[i] = val.max(min_dist + 0.01);
+            
+            if i > 0 {
+                let prev = new_bounds[i-1];
+                if new_bounds[i] <= prev {
+                    new_bounds[i] = prev + MIN_DISTANCE_SPAN;
+                }
+            }
         }
+        
+        cascade.bounds = new_bounds;
     }
 }
 
@@ -664,7 +689,9 @@ fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
         }
     }
     let ratio = blocked as f32 / offsets.len() as f32;
-    1.0 + ratio * 1.5
+    // Significantly boost density indoors to make light shafts visible against dark interior
+    // Multiplier increased to 400.0 to compensate for very low base density (0.0005)
+    1.0 + ratio * 400.0
 }
 
 fn column_blocked(world: &VoxelWorld, position: Vec3, max_height: i32) -> bool {

@@ -47,7 +47,7 @@ impl Plugin for DebugUiPlugin {
 
         app.init_resource::<DebugUiState>()
            .init_resource::<TerrainStyleSettings>()
-           .add_systems(Update, (toggle_debug_ui, debug_settings_ui, toggle_ao_style, toggle_ssao_key, apply_terrain_style_settings));
+           .add_systems(Update, (toggle_debug_ui, debug_settings_ui, toggle_ao_style, toggle_ssao_key, toggle_sun_shadows, apply_terrain_style_settings));
 
         #[cfg(debug_assertions)]
         app.add_systems(Update, toggle_scene_visibility);
@@ -76,6 +76,7 @@ fn debug_settings_ui(
     veg_config: Option<ResMut<VegetationConfig>>,
     prop_fade: Option<ResMut<FoliageFadeSettings>>,
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
+    mut sun_query: Query<&mut DirectionalLight>,
 ) {
     if !state.show_settings {
         return;
@@ -131,14 +132,35 @@ fn debug_settings_ui(
             ui.add(egui::Slider::new(&mut prop_wind.max_effect_distance, 2.0..=120.0).text("Max Distance"));
             ui.add(egui::Slider::new(&mut prop_wind.update_interval, 0.0..=0.3).text("Update Interval"));
         }
+
+        ui.separator();
+        ui.heading("Sun Shadows");
+        for mut light in sun_query.iter_mut() {
+            ui.checkbox(&mut light.shadows_enabled, "Enable Shadows");
+            ui.add(egui::Slider::new(&mut light.shadow_depth_bias, 0.0..=0.2).text("Depth Bias"));
+            ui.add(egui::Slider::new(&mut light.shadow_normal_bias, 0.0..=5.0).text("Normal Bias"));
+        }
         
         ui.separator();
         ui.label("Press F4 to toggle this window and Inspector");
         ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
+        ui.label("Press F9 to toggle SSAO/GTAO");
+        ui.label("Press F10 to toggle Sun Shadows");
     });
 }
 
-/// Toggle AO style with F8 key (quick toggle between V0.3 and full AO)
+/// Toggle Sun shadows with F10
+fn toggle_sun_shadows(
+    mut sun_query: Query<&mut DirectionalLight>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    if keys.just_pressed(KeyCode::F10) {
+        for mut light in sun_query.iter_mut() {
+            light.shadows_enabled = !light.shadows_enabled;
+            info!("Sun Shadows: {} (F10 to toggle)", if light.shadows_enabled { "ON" } else { "OFF" });
+        }
+    }
+}
 fn toggle_ao_style(
     keys: Res<ButtonInput<KeyCode>>,
     mut terrain_style: ResMut<TerrainStyleSettings>,

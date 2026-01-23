@@ -72,6 +72,7 @@
 *   **F7**: Toggle Grass Visibility (debug builds only)
 *   **F8**: Toggle Terrain AO Style (V0.3 soft ↔ Full baked AO)
 *   **F9**: Toggle Ambient Occlusion (SSAO & GTAO)
+*   **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 *   **F12**: Toggle Photo Mode (DoF, motion blur)
 *   **G**: Print Detailed Block Debug Info to Console
 

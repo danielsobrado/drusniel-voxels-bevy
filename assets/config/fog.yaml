@@ -16,7 +16,7 @@ fog:
   # WARNING: Very expensive! Drops FPS from 40-50 to ~10 FPS.
   # Only enable on high-end GPUs.
   volumetric:
-    enabled: false
+    enabled: true
     # Raymarching quality (16=minimum, 32=fast, 64=quality)
     step_count: 32
     # Jitter for TAA integration
@@ -29,7 +29,7 @@ fog:
     # Size in world units (cover area around camera)
     size: 256.0
     # Base density - VERY LOW for subtle god rays without darkening
-    density: 0.005
+    density: 0.0005
     # Light absorption - very low to avoid darkening
     absorption: 0.001
     # Light scattering - Bevy default is 0.3, higher for stronger shafts

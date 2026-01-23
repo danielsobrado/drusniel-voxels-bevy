@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::render::render_resource::{
-    Extent3d, TextureDataOrder, TextureDescriptor, TextureDimension, TextureViewDescriptor, TextureViewDimension, TextureUsages,
+    Extent3d, TextureDataOrder, TextureDescriptor, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension, TextureUsages,
 };
 
 use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
@@ -202,16 +202,7 @@ pub fn create_texture_array(
         let first = images.get(handles[0])?;
         let width = first.width();
         let height = first.height();
-        let original_format = first.texture_descriptor.format;
         let num_layers = handles.len() as u32;
-
-        // Determine if we need to convert from Rgba16 to Rgba8
-        use bevy::render::render_resource::TextureFormat;
-        let needs_conversion = matches!(
-            original_format,
-            TextureFormat::Rgba16Unorm | TextureFormat::Rgba16Float | TextureFormat::Rgba16Uint | TextureFormat::Rgba16Sint
-        );
-
         // Target format is always Rgba8UnormSrgb for our shaders
         let target_format = TextureFormat::Rgba8UnormSrgb;
 
@@ -228,11 +219,29 @@ pub fn create_texture_array(
                 return None;
             }
             let bytes = img.data.as_ref()?;
+            
+            // Check format PER IMAGE to handle mixing 16-bit assets with 8-bit generated textures
+            let is_16bit = matches!(
+                img.texture_descriptor.format,
+                TextureFormat::Rgba16Unorm | TextureFormat::Rgba16Float | TextureFormat::Rgba16Uint | TextureFormat::Rgba16Sint
+            );
 
-            if needs_conversion {
+            if is_16bit {
                 // Convert Rgba16 (8 bytes/pixel) to Rgba8 (4 bytes/pixel)
                 // Each channel: u16 (0-65535) -> u8 (0-255) by dividing by 257
                 let pixel_count = (width * height) as usize;
+                
+                // Safety check to ensure we don't read out of bounds if format lies
+                if bytes.len() < pixel_count * 8 {
+                    warn!("Texture claims 16-bit format but data is too small! Expected {}, got {}", pixel_count * 8, bytes.len());
+                    // Fallback to copy if size matches 8-bit
+                    if bytes.len() == pixel_count * 4 {
+                        layer_data.push(bytes.to_vec());
+                        continue;
+                    }
+                    return None;
+                }
+
                 let mut rgba8_data = Vec::with_capacity(pixel_count * 4);
 
                 for i in 0..pixel_count {
