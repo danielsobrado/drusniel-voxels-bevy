@@ -260,7 +260,7 @@ props:
 
     - id: building_fantasy_inn
       path: "models/Models/GLB format/Fantasy Inn.glb"
-      scale_range: [1.4, 1.4]
+      scale_range: [24.0, 28.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -270,7 +270,7 @@ props:
 
     - id: building_fantasy_stable
       path: "models/Models/GLB format/Fantasy Stable.glb"
-      scale_range: [1.4, 1.4]
+      scale_range: [24.0, 28.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -280,7 +280,7 @@ props:
 
     - id: building_house
       path: "models/Models/GLB format/House.glb"
-      scale_range: [12.0, 12.0]
+      scale_range: [24.0, 28.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -290,7 +290,7 @@ props:
 
     - id: building_hut
       path: "models/Models/GLB format/Hut.glb"
-      scale_range: [12.0, 12.0]
+      scale_range: [24.0, 28.0]
       y_offset: 0.0
       spawn_on: []
       density: 0.0
@@ -462,8 +462,8 @@ props:
 
     - id: usn_bush_small_flowers
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Bush_Small_Flowers.gltf"
-      scale_range: [6.0, 9.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.15
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -472,8 +472,8 @@ props:
 
     - id: usn_grass_large
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large.gltf"
-      scale_range: [10.0, 13.0]
-      y_offset: -0.2
+      scale_range: [3.0, 5.0]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.15
       min_slope: 0.0
@@ -482,8 +482,8 @@ props:
 
     - id: usn_grass_large_extruded
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Large_Extruded.gltf"
-      scale_range: [10.0, 13.0]
-      y_offset: -0.2
+      scale_range: [3.0, 5.0]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.15
       min_slope: 0.0
@@ -492,8 +492,8 @@ props:
 
     - id: usn_grass_small
       path: "models/vegetation/grass_bushes/ultimate_stylized_nature/Grass_Small.gltf"
-      scale_range: [8.0, 11.0]
-      y_offset: -0.2
+      scale_range: [2.5, 4.0]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.2
       min_slope: 0.0
@@ -514,8 +514,8 @@ props:
     # Ultimate Stylized Nature (May 2022)
     - id: usn_flower_1
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_1.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -524,8 +524,8 @@ props:
 
     - id: usn_flower_1_clump
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_1_Clump.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -534,8 +534,8 @@ props:
 
     - id: usn_flower_2
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_2.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -544,8 +544,8 @@ props:
 
     - id: usn_flower_2_clump
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_2_Clump.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -554,8 +554,8 @@ props:
 
     - id: usn_flower_3_clump
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_3_Clump.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -564,8 +564,8 @@ props:
 
     - id: usn_flower_4_clump
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_4_Clump.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -574,8 +574,8 @@ props:
 
     - id: usn_flower_5_clump
       path: "models/vegetation/plants_flowers/ultimate_stylized_nature/Flower_5_Clump.gltf"
-      scale_range: [5.0, 8.0]
-      y_offset: -0.2
+      scale_range: [1.5, 2.5]
+      y_offset: -0.1
       spawn_on: [TopSoil]
       density: 0.02
       min_slope: 0.0
@@ -584,8 +584,8 @@ props:
 
     - id: custom_celandine
       path: "models/plants/custom/celandine_01_1k.glb"
-      scale_range: [6.0, 9.0]
-      y_offset: -0.5
+      scale_range: [2.0, 3.5]
+      y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0025
       min_slope: 0.0
@@ -594,7 +594,7 @@ props:
 
     - id: custom_dandelion_a
       path: "models/plants/custom/dandelion_01_a.glb"
-      scale_range: [6.0, 9.0]
+      scale_range: [2.0, 3.5]
       y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0005
@@ -604,7 +604,7 @@ props:
 
     - id: custom_dandelion_b
       path: "models/plants/custom/dandelion_01_b.glb"
-      scale_range: [6.0, 9.0]
+      scale_range: [2.0, 3.5]
       y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0005
@@ -614,7 +614,7 @@ props:
 
     - id: custom_dandelion_c
       path: "models/plants/custom/dandelion_01_c.glb"
-      scale_range: [6.0, 9.0]
+      scale_range: [2.0, 3.5]
       y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0005
@@ -624,7 +624,7 @@ props:
 
     - id: custom_dandelion_d
       path: "models/plants/custom/dandelion_01_d.glb"
-      scale_range: [6.0, 9.0]
+      scale_range: [2.0, 3.5]
       y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0005
@@ -634,7 +634,7 @@ props:
 
     - id: custom_dandelion_e
       path: "models/plants/custom/dandelion_01_e.glb"
-      scale_range: [6.0, 9.0]
+      scale_range: [2.0, 3.5]
       y_offset: 0.0
       spawn_on: [TopSoil]
       density: 0.0005

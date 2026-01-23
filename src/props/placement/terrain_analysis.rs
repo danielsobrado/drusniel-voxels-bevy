@@ -85,6 +85,17 @@ impl<'a> TerrainAnalyzer<'a> {
             let pos = IVec3::new(x, y, z);
             if let Some(voxel) = self.world.get_voxel(pos) {
                 if voxel.is_solid() && !voxel.is_liquid() {
+                    // Verify this isn't a floating 1-voxel layer (noise artifact)
+                    // We require the voxel below to be solid or water
+                    let below = IVec3::new(x, y - 1, z);
+                    if let Some(below_voxel) = self.world.get_voxel(below) {
+                         // Treating water as "foundation" allows props on shorelines
+                         // Air below means it's floating -> skip it
+                        if !below_voxel.is_solid() && !below_voxel.is_liquid() {
+                            continue;
+                        }
+                    }
+
                     // Check that the voxel above is not liquid
                     let above = IVec3::new(x, y + 1, z);
                     if let Some(above_voxel) = self.world.get_voxel(above) {
