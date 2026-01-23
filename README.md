@@ -71,7 +71,7 @@
 *   **F6**: Toggle Water Visibility (debug builds only)
 *   **F7**: Toggle Grass Visibility (debug builds only)
 *   **F8**: Toggle Terrain AO Style (V0.3 soft ↔ Full baked AO)
-*   **F9**: Toggle SSAO (Screen-Space Ambient Occlusion)
+*   **F9**: Toggle Ambient Occlusion (SSAO & GTAO)
 *   **F12**: Toggle Photo Mode (DoF, motion blur)
 *   **G**: Print Detailed Block Debug Info to Console
 

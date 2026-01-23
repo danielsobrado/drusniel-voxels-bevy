@@ -152,21 +152,34 @@ fn toggle_ao_style(
 }
 
 /// Toggle SSAO with F9 key to identify if dark shadows come from screen-space AO
+/// Toggle SSAO/GTAO with F9 key to identify if dark shadows come from screen-space AO
 fn toggle_ssao_key(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    cameras: Query<(Entity, Option<&bevy::pbr::ScreenSpaceAmbientOcclusion>), With<Camera3d>>,
+    cameras: Query<(Entity, Option<&bevy::pbr::ScreenSpaceAmbientOcclusion>, Option<&crate::rendering::gtao::GtaoSettings>), With<Camera3d>>,
     mut ssao_enabled: Local<bool>,
 ) {
     if keys.just_pressed(KeyCode::F9) {
         *ssao_enabled = !*ssao_enabled;
-        for (entity, existing) in cameras.iter() {
-            if *ssao_enabled && existing.is_none() {
-                commands.entity(entity).insert(bevy::pbr::ScreenSpaceAmbientOcclusion::default());
-                info!("SSAO: ON (F9 to toggle)");
-            } else if !*ssao_enabled && existing.is_some() {
-                commands.entity(entity).remove::<bevy::pbr::ScreenSpaceAmbientOcclusion>();
-                info!("SSAO: OFF (F9 to toggle)");
+        for (entity, existing_ssao, existing_gtao) in cameras.iter() {
+            if *ssao_enabled {
+                // Re-enable SS AO features
+                if existing_ssao.is_none() {
+                    commands.entity(entity).insert(bevy::pbr::ScreenSpaceAmbientOcclusion::default());
+                }
+                if existing_gtao.is_none() {
+                    commands.entity(entity).insert(crate::rendering::gtao::GtaoSettings::default());
+                }
+                info!("SSAO/GTAO: ON (F9 to toggle)");
+            } else {
+                // Disable all SS AO features
+                if existing_ssao.is_some() {
+                    commands.entity(entity).remove::<bevy::pbr::ScreenSpaceAmbientOcclusion>();
+                }
+                if existing_gtao.is_some() {
+                    commands.entity(entity).remove::<crate::rendering::gtao::GtaoSettings>();
+                }
+                info!("SSAO/GTAO: OFF (F9 to toggle)");
             }
         }
     }
