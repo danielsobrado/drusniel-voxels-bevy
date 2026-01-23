@@ -1,4 +1,5 @@
 pub mod billboard;
+pub mod decimation;
 pub mod foliage;
 pub mod instancing;
 pub mod loader;
@@ -56,6 +57,11 @@ impl Plugin for PropsPlugin {
             .init_resource::<billboard::BillboardLodSettings>()
             .init_resource::<billboard::BillboardCache>()
             .init_resource::<billboard::BillboardStats>()
+            // Mesh decimation resources
+            .init_resource::<decimation::PropDecimationConfig>()
+            .init_resource::<decimation::DecimatedMeshCache>()
+            .init_resource::<decimation::DecimationStats>()
+            .init_resource::<decimation::MeshLodDistances>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
             .add_systems(Startup, (loader::load_prop_config, billboard::initialize_billboard_cache))
@@ -106,6 +112,12 @@ impl Plugin for PropsPlugin {
                         .after(update_prop_chunk_visibility),
                     billboard::sync_billboard_time,
                 ),
+            )
+            // Mesh decimation system (runs once after extraction)
+            .add_systems(
+                Update,
+                decimation::create_decimated_meshes
+                    .after(instancing::extract_prop_meshes),
             )
             // Merging systems (run after spawning and materials)
             .add_systems(
