@@ -13,6 +13,7 @@ use super::{
 };
 use bevy::diagnostic::FrameCount;
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
+use crate::interaction::mark_neighbors_dirty;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::player::Player;
 use crate::props::persistence::{
@@ -22,6 +23,8 @@ use crate::props::persistence::{
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use crate::voxel::persistence as voxel_persistence;
+use crate::voxel::persistence::WorldPersistence;
 use bevy::prelude::*;
 
 const DEFAULT_MAX_PER_TYPE: u32 = 500;
@@ -59,7 +62,8 @@ pub fn spawn_props_on_terrain(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
     config: Res<PropConfig>,
-    world: Res<VoxelWorld>,
+    mut world: ResMut<VoxelWorld>,
+    persistence_settings: Res<WorldPersistence>,
     mut spawned: ResMut<PropsSpawned>,
     mut persistence_state: ResMut<PropPersistenceState>,
     mesh_cache: Res<PropMeshCache>,
@@ -130,6 +134,8 @@ pub fn spawn_props_on_terrain(
     let num_chunks_x = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
     let num_chunks_z = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
 
+    let mut terrain_modified = false;
+
     // Process each prop chunk
     for chunk_x in 0..num_chunks_x {
         for chunk_z in 0..num_chunks_z {
@@ -155,10 +161,11 @@ pub fn spawn_props_on_terrain(
                 // Generate props for this chunk
                 let props = generate_chunk_props(
                     chunk_pos,
-                    &world,
+                    &mut world,
                     &generator,
                     &config,
                     &placement_config,
+                    &mut terrain_modified,
                 );
 
                 // Save to disk
@@ -195,6 +202,12 @@ pub fn spawn_props_on_terrain(
         }
     }
 
+    if terrain_modified && persistence_settings.auto_save {
+        if let Err(e) = voxel_persistence::save_world(&world) {
+            warn!("Failed to save world after prop terrain conform: {}", e);
+        }
+    }
+
     // Log instancing stats
     info!(
         "Spawned {} total props in {:?} ({} instanced, {} scene-based)",
@@ -208,13 +221,13 @@ pub fn spawn_props_on_terrain(
 /// Generate props for a specific chunk
 fn generate_chunk_props(
     chunk_pos: IVec2,
-    world: &VoxelWorld,
+    world: &mut VoxelWorld,
     generator: &TerrainGenerator<ValueNoise>,
     config: &PropConfig,
     placement_config: &PlacementConfig,
+    terrain_modified: &mut bool,
 ) -> Vec<PropPlacementData> {
     let mut props = Vec::new();
-    let analyzer = TerrainAnalyzer::new(world);
 
     let chunk_min_x = chunk_pos.x * PROP_CHUNK_SIZE;
     let chunk_min_z = chunk_pos.y * PROP_CHUNK_SIZE;
@@ -237,8 +250,8 @@ fn generate_chunk_props(
             chunk_max_z,
             world,
             generator,
-            &analyzer,
             placement_config,
+            terrain_modified,
         );
     }
     for def in &config.props.rocks {
@@ -253,8 +266,8 @@ fn generate_chunk_props(
             chunk_max_z,
             world,
             generator,
-            &analyzer,
             placement_config,
+            terrain_modified,
         );
     }
     for def in &config.props.bushes {
@@ -269,8 +282,8 @@ fn generate_chunk_props(
             chunk_max_z,
             world,
             generator,
-            &analyzer,
             placement_config,
+            terrain_modified,
         );
     }
     for def in &config.props.flowers {
@@ -285,8 +298,8 @@ fn generate_chunk_props(
             chunk_max_z,
             world,
             generator,
-            &analyzer,
             placement_config,
+            terrain_modified,
         );
     }
 
@@ -304,10 +317,10 @@ fn generate_category_props(
     min_z: i32,
     max_x: i32,
     max_z: i32,
-    _world: &VoxelWorld,
+    world: &mut VoxelWorld,
     generator: &TerrainGenerator<ValueNoise>,
-    analyzer: &TerrainAnalyzer,
     placement_config: &PlacementConfig,
+    terrain_modified: &mut bool,
 ) {
     let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
     let current_count = counts.get(&def.id).copied().unwrap_or(0);
@@ -349,7 +362,10 @@ fn generate_category_props(
                 let mut density = def.density;
                 if prop_type == PropType::Rock {
                     let biome = generator.get_biome(world_x, world_z);
-                    let surface_hint = analyzer.find_column_height(world_x, world_z);
+                    let surface_hint = {
+                        let analyzer = TerrainAnalyzer::new(world);
+                        analyzer.find_column_height(world_x, world_z)
+                    };
                     let near_water = surface_hint.map(|y| y <= WATER_LEVEL + 2).unwrap_or(false);
                     let (region_boost, palette_boost) =
                         rock_region_modifiers(world_x, world_z, biome, &def.id, near_water);
@@ -388,16 +404,29 @@ fn generate_category_props(
             let world_xf = world_x as f32 + 0.5 + offset_x * 0.8;
             let world_zf = world_z as f32 + 0.5 + offset_z * 0.8;
 
+            // Determine scale early so large assets can use a larger footprint
+            let scale = prop_scale(
+                def.scale_range[0],
+                def.scale_range[1],
+                def.scale_jitter,
+                &def.id,
+                prop_type,
+                hash,
+                world_x,
+                world_z,
+            );
+
             // Multi-sample terrain analysis
-            let footprint = prop_footprint(prop_type, &def.id);
-            let Some(sample_result) = analyzer.multi_sample_placement(
-                world_xf,
-                world_zf,
-                footprint.x * placement_config.footprint_scale,
-                footprint.y * placement_config.footprint_scale,
-            ) else {
-                continue;
-            };
+            let footprint = prop_placement_footprint(prop_type, &def.id, scale);
+            let Some(sample_result) = ({
+                let analyzer = TerrainAnalyzer::new(world);
+                analyzer.multi_sample_placement(
+                    world_xf,
+                    world_zf,
+                    footprint.x * placement_config.footprint_scale,
+                    footprint.y * placement_config.footprint_scale,
+                )
+            }) else { continue; };
 
             // Validate placement
             if sample_result.position.y <= WATER_LEVEL as f32 {
@@ -420,16 +449,6 @@ fn generate_category_props(
 
             // Calculate transform with proper slope alignment
             let placement_seed = hash_to_seed(world_x, world_z, &def.id);
-            let scale = prop_scale(
-                def.scale_range[0],
-                def.scale_range[1],
-                def.scale_jitter,
-                &def.id,
-                prop_type,
-                hash,
-                world_x,
-                world_z,
-            );
 
             let yaw = fract(hash * 13.0) * std::f32::consts::TAU;
             let tilt_x = (seeded_random(placement_seed, 1) - 0.5)
@@ -445,6 +464,20 @@ fn generate_category_props(
                 tilt_x,
                 tilt_z,
             );
+
+            // Optionally conform terrain to large/fixed assets to prevent floating
+            if let Some(conform) = prop_conform_settings(&def.id, prop_type, scale) {
+                let did_modify = conform_terrain_under_prop(
+                    world,
+                    Vec3::new(sample_result.position.x, sample_result.position.y, sample_result.position.z),
+                    sample_result.position.y,
+                    conform,
+                    sample_result.voxel_type,
+                );
+                if did_modify {
+                    *terrain_modified = true;
+                }
+            }
 
             // Apply ground sink
             let sink = prop_ground_sink(&def.id, prop_type, scale);
@@ -606,6 +639,145 @@ fn prop_footprint(prop_type: PropType, id: &str) -> Vec2 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TerrainConformSettings {
+    footprint: Vec2,
+    blend_radius: f32,
+}
+
+fn prop_placement_footprint(prop_type: PropType, id: &str, scale: f32) -> Vec2 {
+    let id_lower = id.to_lowercase();
+    if is_building_id(&id_lower) {
+        if let Some(conform) = prop_conform_settings(id, prop_type, scale) {
+            return conform.footprint;
+        }
+    }
+    prop_footprint(prop_type, id)
+}
+
+fn prop_conform_settings(id: &str, prop_type: PropType, scale: f32) -> Option<TerrainConformSettings> {
+    let id_lower = id.to_lowercase();
+    if is_building_id(&id_lower) {
+        let base = (scale * 0.5).clamp(6.0, 20.0);
+        let blend = (base * 0.25).clamp(1.5, 4.0);
+        return Some(TerrainConformSettings {
+            footprint: Vec2::splat(base),
+            blend_radius: blend,
+        });
+    }
+
+    if prop_type == PropType::Rock {
+        let base = prop_footprint(prop_type, id) * scale.max(0.1);
+        let max_dim = base.x.max(base.y);
+        if max_dim >= 1.6 || id_lower.contains("boulder") || id_lower.contains("large") {
+            let blend = (max_dim * 0.3).clamp(0.6, 2.0);
+            return Some(TerrainConformSettings {
+                footprint: base,
+                blend_radius: blend,
+            });
+        }
+    }
+
+    None
+}
+
+fn is_building_id(id_lower: &str) -> bool {
+    id_lower.contains("building")
+        || id_lower.contains("house")
+        || id_lower.contains("hut")
+        || id_lower.contains("inn")
+        || id_lower.contains("stable")
+}
+
+fn conform_terrain_under_prop(
+    world: &mut VoxelWorld,
+    center: Vec3,
+    target_height: f32,
+    settings: TerrainConformSettings,
+    fill_voxel: VoxelType,
+) -> bool {
+    let half_w = settings.footprint.x * 0.5;
+    let half_d = settings.footprint.y * 0.5;
+    let blend = settings.blend_radius.max(0.0);
+
+    let max_w = half_w + blend;
+    let max_d = half_d + blend;
+
+    let min_x = (center.x - max_w).floor() as i32;
+    let max_x = (center.x + max_w).ceil() as i32;
+    let min_z = (center.z - max_d).floor() as i32;
+    let max_z = (center.z + max_d).ceil() as i32;
+
+    let target_surface_y = target_height.floor();
+
+    let mut modified_any = false;
+
+    for x in min_x..=max_x {
+        for z in min_z..=max_z {
+            let dx = (x as f32 + 0.5 - center.x).abs();
+            let dz = (z as f32 + 0.5 - center.z).abs();
+            if dx > max_w || dz > max_d {
+                continue;
+            }
+
+            let blend_t = if dx <= half_w && dz <= half_d {
+                1.0
+            } else if blend <= 0.0 {
+                0.0
+            } else {
+                let fx = ((dx - half_w) / blend).clamp(0.0, 1.0);
+                let fz = ((dz - half_d) / blend).clamp(0.0, 1.0);
+                1.0 - fx.max(fz)
+            };
+
+            if blend_t <= 0.0 {
+                continue;
+            }
+
+            let current_y = {
+                let analyzer = TerrainAnalyzer::new(world);
+                analyzer.find_column_height(x, z)
+            };
+            let Some(current_y) = current_y else {
+                continue;
+            };
+
+            let target_y = lerp(current_y as f32, target_surface_y, blend_t).round() as i32;
+            if target_y == current_y {
+                continue;
+            }
+
+            if current_y < target_y {
+                for y in (current_y + 1)..=target_y {
+                    let pos = IVec3::new(x, y, z);
+                    if !world.in_bounds(pos) {
+                        continue;
+                    }
+                    world.set_voxel(pos, fill_voxel);
+                    mark_neighbors_dirty(world, pos);
+                    modified_any = true;
+                }
+            } else {
+                for y in (target_y + 1)..=current_y {
+                    let pos = IVec3::new(x, y, z);
+                    if !world.in_bounds(pos) {
+                        continue;
+                    }
+                    if let Some(existing) = world.get_voxel(pos) {
+                        if existing.is_solid() && existing != VoxelType::Bedrock {
+                            world.set_voxel(pos, VoxelType::Air);
+                            mark_neighbors_dirty(world, pos);
+                            modified_any = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    modified_any
+}
+
 /// Get slope alignment strength for a prop type
 fn prop_slope_align_strength(prop_type: PropType, id: &str) -> f32 {
     let id_lower = id.to_lowercase();
@@ -713,7 +885,8 @@ pub fn spawn_landmark_buildings(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
     config: Res<PropConfig>,
-    world: Res<VoxelWorld>,
+    mut world: ResMut<VoxelWorld>,
+    persistence_settings: Res<WorldPersistence>,
     mut landmarks: ResMut<LandmarkLocations>,
     mut spawned: ResMut<PropsLandmarksSpawned>,
 ) {
@@ -781,8 +954,8 @@ pub fn spawn_landmark_buildings(
         ));
     }
 
-    let analyzer = TerrainAnalyzer::new(&world);
     let mut spawned_count = 0;
+    let mut terrain_modified = false;
 
     landmarks.positions.clear();
 
@@ -809,9 +982,27 @@ pub fn spawn_landmark_buildings(
 
         let world_xf = world_x as f32 + 0.5;
         let world_zf = world_z as f32 + 0.5;
-        let surface_height = analyzer
-            .sample_smooth_height(world_xf, world_zf)
-            .unwrap_or(surface_y as f32 + 0.5);
+        let surface_height = {
+            let analyzer = TerrainAnalyzer::new(&world);
+            analyzer
+                .sample_smooth_height(world_xf, world_zf)
+                .unwrap_or(surface_y as f32 + 0.5)
+        };
+        if let Some(conform) = prop_conform_settings(id, PropType::Rock, scale) {
+            let voxel_type = world
+                .get_voxel(IVec3::new(world_x, surface_y, world_z))
+                .unwrap_or(VoxelType::TopSoil);
+            let did_modify = conform_terrain_under_prop(
+                &mut world,
+                Vec3::new(world_xf, surface_height, world_zf),
+                surface_height,
+                conform,
+                voxel_type,
+            );
+            if did_modify {
+                terrain_modified = true;
+            }
+        }
         let position = Vec3::new(world_xf, surface_height + y_offset, world_zf);
 
         commands.spawn((
@@ -831,6 +1022,12 @@ pub fn spawn_landmark_buildings(
 
     spawned.0 = true;
     info!("Spawned {} landmark buildings", spawned_count);
+
+    if terrain_modified && persistence_settings.auto_save {
+        if let Err(e) = voxel_persistence::save_world(&world) {
+            warn!("Failed to save world after landmark terrain conform: {}", e);
+        }
+    }
 }
 
 fn rotation_from_index(index: usize) -> f32 {
@@ -992,9 +1189,26 @@ fn can_spawn_on(voxel: VoxelType, allowed: &[String]) -> bool {
 fn prop_ground_sink(id: &str, prop_type: PropType, scale: f32) -> f32 {
     let id_lower = id.to_lowercase();
 
-    // Determine base sink factor based on type and id
-    let factor = if prop_type == PropType::Rock {
-        if id_lower.contains("pebble") {
+    // Known model native heights (from analysis script)
+    // These models have tiny native heights that get scaled up significantly
+    let (native_height, sink_factor) = if id_lower.contains("dandelion") {
+        (0.17, 0.40) // Native height ~0.17 units, sink 40%
+    } else if id_lower.contains("celandine") {
+        (0.19, 0.35) // Native height ~0.19 units, sink 35%
+    } else if id_lower.contains("grass_medium") {
+        (0.34, 0.30) // Native height ~0.34 units, sink 30%
+    } else if id_lower.contains("usn_grass") {
+        // USN grass models - also have small native heights scaled up
+        (0.15, 0.25) // Approximate, sink 25%
+    } else if id_lower.contains("usn_flower") {
+        // USN flower models
+        (0.12, 0.30) // Approximate, sink 30%
+    } else if id_lower.contains("usn_bush") {
+        // USN bush models (including bush_flowers)
+        (0.20, 0.25) // Approximate, sink 25%
+    } else if prop_type == PropType::Rock {
+        // Rocks use fixed sink factors based on size
+        let factor = if id_lower.contains("pebble") {
             0.18
         } else if id_lower.contains("large") || id_lower.contains("boulder") {
             0.55
@@ -1008,15 +1222,18 @@ fn prop_ground_sink(id: &str, prop_type: PropType, scale: f32) -> f32 {
             0.3
         } else {
             0.4
-        }
+        };
+        return scale * factor;
     } else if prop_type == PropType::Tree {
-        0.2 // Trees usually have roots/trunk base to hide
+        return scale * 0.2; // Trees sink 20% of their scale
     } else {
-        // Bushes, Flowers, Grass
-        0.4 // Sink 40% of height to ensure no floating (prev 0.15)
+        // Default for unknown bushes/flowers
+        (0.15, 0.25)
     };
 
-    scale * factor
+    // Calculate sink: scale * native_height * sink_factor
+    // This ensures the bottom portion of the scaled model is embedded in terrain
+    scale * native_height * sink_factor
 }
 
 fn prop_scale(
