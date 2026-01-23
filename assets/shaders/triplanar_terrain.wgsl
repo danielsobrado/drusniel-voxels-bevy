@@ -24,7 +24,7 @@ const DIRT_ROUGHNESS: f32 = 0.92;
 // Wet sand effect constants
 const WATER_LEVEL: f32 = 18.0;
 const WET_SAND_HEIGHT: f32 = 5.0;  // How far above water level gets wet
-const WET_SAND_DARKEN: f32 = 0.70; // Darken factor (lower = darker) - softened for natural look
+const WET_SAND_DARKEN: f32 = 0.85; // Subtle darkening only - closer to V0.3 look
 const WET_ROUGHNESS: f32 = 0.25;   // Wet surfaces are shinier
 
 const DEBUG_FORCE_ALBEDO: bool = false;
@@ -212,10 +212,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     albedo = albedo * uniforms.base_color;
     let blended_n = normalize(final_normal);
 
-    // Baked vertex AO - SSAO handles the rest screen-space
-    let baked_ao = clamp(in.uv.x, 0.0, 1.0);
-    let ao_strength = 0.35; // Softened to reduce harsh shadows
-    let ao_factor = 1.0 + (baked_ao - 1.0) * ao_strength;
+    // Baked vertex AO - DISABLED: was causing harsh shadows not present in V0.3
+    // SSAO handles ambient occlusion screen-space instead
+    let ao_factor = 1.0; // No baked AO - smooth V0.3 look
 
     // Calculate uniform roughness based on material blend
     var roughness = w.x * GRASS_ROUGHNESS +
