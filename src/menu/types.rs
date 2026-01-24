@@ -1,6 +1,7 @@
 //! Menu system types, components, and resources
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -167,7 +168,7 @@ impl Default for SettingsState {
             ozone: OzoneOption::Earth,
             ground_albedo: GroundAlbedoOption::Earth,
             sun_size: SunSizeOption::Earth,
-            fog_preset: FogPresetOption::Balanced,
+            fog_preset: FogPresetOption(FogPreset::Balanced),
             cycle_enabled: false,
             shadow_filtering: ShadowFiltering::Gaussian,
             walk_speed: WalkSpeedPreset::Standard,
@@ -178,7 +179,7 @@ impl Default for SettingsState {
     }
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ShadowFiltering {
     Gaussian,
     Hardware2x2,
@@ -211,10 +212,18 @@ pub(crate) enum SettingsTabButton {
     Atmosphere,
     Fog,
     Visual,
+    Controls,
+    Debug,
+    Textures,
 }
 
 #[derive(Component)]
 pub(crate) struct SettingsDialogRoot;
+
+#[derive(Resource, Default)]
+pub struct RebindState {
+    pub active_action: Option<crate::input::config::GameAction>,
+}
 
 #[derive(Resource, Clone, Copy)]
 pub struct SettingsDialogDrag {
@@ -264,7 +273,7 @@ pub(crate) struct ResolutionOption(pub UVec2);
 #[derive(Component)]
 pub(crate) struct CloseSettingsButton;
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SettingsTab {
     Graphics,
     Meshing,
@@ -272,10 +281,16 @@ pub enum SettingsTab {
     Atmosphere,
     Fog,
     Visual,
+    Controls,
+    Debug,
+    Textures,
 }
 
 #[derive(Component)]
 pub(crate) struct GraphicsTabContent;
+
+#[derive(Component)]
+pub(crate) struct ControlsTabContent;
 
 #[derive(Component)]
 pub(crate) struct MeshingTabContent;
@@ -292,14 +307,55 @@ pub(crate) struct FogTabContent;
 #[derive(Component)]
 pub(crate) struct VisualTabContent;
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component)]
+pub(crate) struct DebugTabContent;
+
+#[derive(Component)]
+pub(crate) struct TexturesTabContent;
+
+/// Marker for the atlas grid container
+#[derive(Component)]
+pub(crate) struct AtlasGridContainer;
+
+/// Marker for an atlas tile button, stores the tile index (0-15)
+#[derive(Component, Copy, Clone)]
+pub struct AtlasTileButton(pub u32);
+
+/// Which texture layer is currently being edited
+#[derive(Resource, Default, Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ActiveTextureLayer {
+    #[default]
+    GrassTop,
+    GrassSide,
+    Dirt,
+    Rock,
+    Sand,
+}
+
+/// Marker for the layer selection buttons
+#[derive(Component, Copy, Clone)]
+pub struct TextureLayerButton(pub ActiveTextureLayer);
+
+/// Marker for the cube preview faces
+#[derive(Component, Copy, Clone)]
+pub enum CubePreviewFace {
+    Top,
+    Side,
+    Bottom,
+}
+
+/// Marker for the current tile display for each layer
+#[derive(Component, Copy, Clone)]
+pub struct LayerTilePreview(pub ActiveTextureLayer);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum GraphicsQuality {
     Low,
     Medium,
     High,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AntiAliasing {
     None,
     Fxaa,
@@ -308,63 +364,63 @@ pub enum AntiAliasing {
     Taa,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DisplayMode {
     Bordered,
     Borderless,
     Fullscreen,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DayLengthOption {
     Short,
     Standard,
     Long,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TimeScaleOption {
     Slow,
     RealTime,
     Fast,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RayleighOption {
     Gentle,
     Balanced,
     Vivid,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum MieOption {
     Soft,
     Standard,
     Dense,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum MieDirectionOption {
     Broad,
     Standard,
     Forward,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExposureOption {
     Low,
     Neutral,
     High,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TwilightBandOption {
     Narrow,
     Medium,
     Wide,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum NightBrightnessOption {
     Dim,
     Balanced,
@@ -372,7 +428,7 @@ pub enum NightBrightnessOption {
 }
 
 // Bevy native atmosphere options
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SkyQualityOption {
     Low,
     Medium,
@@ -380,7 +436,7 @@ pub enum SkyQualityOption {
     Ultra,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OzoneOption {
     None,
     Subtle,
@@ -388,7 +444,7 @@ pub enum OzoneOption {
     Heavy,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum GroundAlbedoOption {
     Dark,
     Earth,
@@ -396,19 +452,17 @@ pub enum GroundAlbedoOption {
     Snow,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SunSizeOption {
     Small,
     Earth,
     Large,
 }
 
+use crate::atmosphere::FogPreset;
+
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
-pub enum FogPresetOption {
-    Clear,
-    Balanced,
-    Misty,
-}
+pub struct FogPresetOption(pub FogPreset);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct DistanceFogOption(pub bool);
@@ -416,7 +470,7 @@ pub(crate) struct DistanceFogOption(pub bool);
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct VolumetricFogOption(pub bool);
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum WalkSpeedPreset {
     Slow,
     Standard,
@@ -433,7 +487,7 @@ impl WalkSpeedPreset {
     }
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RunSpeedPreset {
     Slow,
     Standard,
@@ -450,7 +504,7 @@ impl RunSpeedPreset {
     }
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum JumpHeightPreset {
     Low,
     Standard,
@@ -467,7 +521,7 @@ impl JumpHeightPreset {
     }
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FloatHeightPreset {
     Low,
     Standard,
@@ -489,7 +543,7 @@ impl FloatHeightPreset {
 // ============================================================================
 
 /// Resource for visual/color grading settings that can be adjusted at runtime
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct VisualSettings {
     /// Color temperature (-0.5 to 0.5, 0 = neutral)
     pub temperature: f32,
@@ -598,7 +652,17 @@ pub struct SettingsInputState {
 pub enum SettingsInputField {
     Visual(VisualSlider),
     Fog(FogSlider),
+    AtmosphereTime,
 }
 
 #[derive(Component, Copy, Clone)]
 pub struct SettingsInputButton(pub SettingsInputField);
+
+#[derive(Component, Copy, Clone)]
+pub struct RebindButton(pub crate::input::config::GameAction);
+
+#[derive(Component)]
+pub(crate) struct SaveSettingsButton;
+
+#[derive(Component)]
+pub struct AtmosphereTimeValueText;

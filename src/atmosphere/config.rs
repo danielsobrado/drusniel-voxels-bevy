@@ -1,19 +1,69 @@
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Resource, Deserialize, Clone)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct FogConfig {
     pub distance: DistanceFogConfig,
     pub volumetric: VolumetricConfig,
     pub volume: FogVolumeConfig,
     pub colors: FogColorPresets,
-    /// Runtime color modifiers (not serialized, adjusted via settings UI)
-    #[serde(skip)]
+    /// Current active preset
+    #[serde(default)]
+    pub current_preset: FogPreset,
+    /// Configs for each preset
+    #[serde(default)]
+    pub presets: FogPresetConfig,
+    /// Runtime color modifiers (adjusted via settings UI, persisted in settings save)
+    #[serde(default)]
     pub color_modifiers: FogColorModifiers,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FogPreset {
+    Clear,
+    #[default]
+    Balanced,
+    Misty,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct FogPresetConfig {
+    pub clear: FogVolumeConfig,
+    pub balanced: FogVolumeConfig,
+    pub misty: FogVolumeConfig,
+}
+
+impl Default for FogPresetConfig {
+    fn default() -> Self {
+        Self {
+            clear: FogVolumeConfig {
+                size: 512.0,
+                density: 0.0005, // Very clear
+                absorption: 0.1,
+                scattering: 0.1,
+                scattering_asymmetry: 0.6,
+            },
+            balanced: FogVolumeConfig {
+                size: 512.0,
+                density: 0.04, // Default
+                absorption: 0.08,
+                scattering: 0.25,
+                scattering_asymmetry: 0.7,
+            },
+            misty: FogVolumeConfig {
+                size: 512.0,
+                density: 0.15, // Dense mist
+                absorption: 0.05, // Bright mist
+                scattering: 0.8, // High scattering
+                scattering_asymmetry: 0.8,
+            },
+        }
+    }
+}
+
 /// Runtime fog color modifiers for UI tweaking
-#[derive(Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct FogColorModifiers {
     /// Blue tint intensity (0.0 = neutral, 1.0 = full blue shift)
     pub blue_tint: f32,
@@ -33,7 +83,7 @@ impl Default for FogColorModifiers {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DistanceFogConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -46,7 +96,7 @@ pub struct DistanceFogConfig {
     pub falloff: FogFalloffMode,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum FogFalloffMode {
     Linear,
@@ -59,7 +109,7 @@ impl Default for FogFalloffMode {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct VolumetricConfig {
     pub enabled: bool,
     pub step_count: u32,
@@ -67,7 +117,7 @@ pub struct VolumetricConfig {
     pub ambient_intensity: f32,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FogVolumeConfig {
     pub size: f32,
     pub density: f32,
@@ -76,14 +126,14 @@ pub struct FogVolumeConfig {
     pub scattering_asymmetry: f32,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FogColorPresets {
     pub day: FogColors,
     pub twilight: FogColors,
     pub night: FogColors,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FogColors {
     pub fog: [f32; 4],
     pub extinction: [f32; 3],
@@ -114,6 +164,8 @@ impl Default for FogConfig {
                 scattering: 0.25,
                 scattering_asymmetry: 0.7,
             },
+            current_preset: FogPreset::Balanced,
+            presets: FogPresetConfig::default(),
             colors: FogColorPresets {
                 day: FogColors {
                     fog: [0.55, 0.65, 0.80, 1.0],

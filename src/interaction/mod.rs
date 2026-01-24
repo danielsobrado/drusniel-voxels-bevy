@@ -19,15 +19,18 @@ pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode, mark_neighbors_
 pub use error::{BreakError, CombatError, DragError, LastGameplayError, PlacementError};
 pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity, TargetedProp};
 
+use crate::atmosphere::{FogCamera, FogConfig, GlobalFogVolume};
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{ATTACK_DAMAGE, BEDROCK_DEPTH};
 use crate::entity::Health;
+use crate::environment::Sun;
 use crate::menu::PauseMenuState;
 use crate::particles::{ParticleType, SpawnParticleEvent};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
 use bevy::prelude::*;
 use palette::PlacementPaletteState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
@@ -370,6 +373,13 @@ pub fn debug_voxel_info_system(
     targeted: Res<TargetedBlock>,
     world: Res<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
+    time: Res<Time>,
+    fog_config: Res<FogConfig>,
+    debug_toggles: Res<DebugDetailToggles>,
+    fog_volume_query: Query<(&FogVolume, &Transform), With<GlobalFogVolume>>,
+    volumetric_fog_query: Query<&VolumetricFog, With<FogCamera>>,
+    volumetric_light_query: Query<(&VolumetricLight, &DirectionalLight), With<Sun>>,
+    fog_camera_query: Query<&Transform, With<FogCamera>>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyG) {
         return;
@@ -389,6 +399,17 @@ pub fn debug_voxel_info_system(
     print_neighbor_analysis(&world, pos);
     print_water_analysis(&world, pos);
     print_air_gap_analysis(&world, pos);
+    print_fog_debug(
+        &time,
+        &fog_config,
+        &debug_toggles,
+        fog_config.is_changed(),
+        debug_toggles.is_changed(),
+        &fog_volume_query,
+        &volumetric_fog_query,
+        &volumetric_light_query,
+        &fog_camera_query,
+    );
 
     info!("==================================================================");
 }
@@ -650,6 +671,64 @@ fn print_air_gap_analysis(world: &VoxelWorld, pos: IVec3) {
         info!("| FOUND {} air gaps between water and solid!", air_gaps);
     }
     info!("+---------------------------------------------------------------+");
+}
+
+fn print_fog_debug(
+    time: &Time,
+    fog_config: &FogConfig,
+    debug_toggles: &DebugDetailToggles,
+    config_changed: bool,
+    toggles_changed: bool,
+    fog_volume_query: &Query<(&FogVolume, &Transform), With<GlobalFogVolume>>,
+    volumetric_fog_query: &Query<&VolumetricFog, With<FogCamera>>,
+    volumetric_light_query: &Query<(&VolumetricLight, &DirectionalLight), With<Sun>>,
+    fog_camera_query: &Query<&Transform, With<FogCamera>>,
+) {
+    let has_fog_volume = fog_volume_query.iter().next().is_some();
+    let has_volumetric_fog = volumetric_fog_query.iter().next().is_some();
+    let has_volumetric_light = volumetric_light_query.iter().next().is_some();
+    let camera_count = fog_camera_query.iter().len();
+    let fps = 1.0 / time.delta_secs().max(0.001);
+
+    info!("+---------------------------------------------------------------+");
+    info!("| FOG STATE                                                     |");
+    info!("+---------------------------------------------------------------+");
+    info!(
+        "FOG STATE: config.enabled={}, toggle.enabled={}, FogVolume={}, CamVFog={}, toggle_changed={}, config_changed={}",
+        fog_config.volumetric.enabled,
+        debug_toggles.volumetric_fog_enabled,
+        has_fog_volume,
+        has_volumetric_fog,
+        toggles_changed,
+        config_changed
+    );
+
+    if has_fog_volume && has_volumetric_fog && has_volumetric_light {
+        if let (Ok((volume, vol_tf)), Ok(_), Ok(vfog), Ok(_)) = (
+            fog_volume_query.single(),
+            fog_camera_query.single(),
+            volumetric_fog_query.single(),
+            volumetric_light_query.single(),
+        ) {
+            info!(
+                "God rays ACTIVE (FPS={:.0}): density={:.4}, scattering={:.2}, absorption={:.5}, intensity={:.1}, scale={:.0}, steps={}",
+                fps,
+                volume.density_factor,
+                volume.scattering,
+                volume.absorption,
+                volume.light_intensity,
+                vol_tf.scale.x,
+                vfog.step_count,
+            );
+        } else {
+            info!("God rays ACTIVE (FPS={:.0})", fps);
+        }
+    } else {
+        info!(
+            "God rays MISSING (FPS={:.0}): FogVolume={}, VolumetricFog={}, VolumetricLight={}, CameraCount={}",
+            fps, has_fog_volume, has_volumetric_fog, has_volumetric_light, camera_count
+        );
+    }
 }
 
 fn find_air_gaps(world: &VoxelWorld, center: IVec3) -> usize {

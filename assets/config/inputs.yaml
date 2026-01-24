@@ -1,0 +1,26 @@
+bindings:
+  MoveBackward: KeyS
+  ToggleMenu: Escape
+  Map: KeyM
+  Hotbar9: Digit9
+  Hotbar4: Digit4
+  Sprint: ShiftLeft
+  Hotbar1: Digit1
+  Screenshot: F12
+  Hotbar2: Digit2
+  Crouch: ControlLeft
+  ToggleDebug: F3
+  Chat: Enter
+  Hotbar5: Digit5
+  Hotbar8: Digit8
+  Hotbar7: Digit7
+  ToggleFly: F1
+  MoveLeft: KeyA
+  ToggleInventory: KeyI
+  Hotbar6: Digit6
+  Interact: KeyE
+  ToggleFog: KeyP
+  MoveForward: KeyW
+  MoveRight: KeyD
+  Jump: Space
+  Hotbar3: Digit3

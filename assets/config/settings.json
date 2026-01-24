@@ -1,0 +1,164 @@
+{
+  "settings": {
+    "graphics_quality": "Medium",
+    "anti_aliasing": "Taa",
+    "ray_tracing": false,
+    "display_mode": "Bordered",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "greedy_meshing": true,
+    "day_length": "Standard",
+    "time_scale": "RealTime",
+    "rayleigh": "Balanced",
+    "mie": "Standard",
+    "mie_direction": "Standard",
+    "exposure": "Neutral",
+    "twilight_band": "Medium",
+    "night_brightness": "Balanced",
+    "sky_quality": "Medium",
+    "ozone": "Earth",
+    "ground_albedo": "Earth",
+    "sun_size": "Earth",
+    "cycle_enabled": false,
+    "shadow_filtering": "Gaussian",
+    "walk_speed": "Standard",
+    "run_speed": "Standard",
+    "jump_height": "Standard",
+    "float_height": "Standard"
+  },
+  "visual": {
+    "temperature": 0.0,
+    "saturation": 1.15,
+    "exposure": -0.2,
+    "gamma": 0.95,
+    "highlights_gain": 0.9,
+    "sun_warmth": 0.05,
+    "illuminance": 100000.0,
+    "skybox_brightness": 1000.0
+  },
+  "fog": {
+    "distance": {
+      "enabled": true,
+      "start": 80.0,
+      "end": 220.0,
+      "near_fade": 0.35,
+      "falloff": "atmospheric"
+    },
+    "volumetric": {
+      "enabled": false,
+      "step_count": 32,
+      "jitter": 0.5,
+      "ambient_intensity": 0.0
+    },
+    "volume": {
+      "size": 256.0,
+      "density": 0.00001,
+      "absorption": 0.001,
+      "scattering": 0.2,
+      "scattering_asymmetry": 0.6
+    },
+    "colors": {
+      "day": {
+        "fog": [
+          0.7,
+          0.78,
+          0.88,
+          1.0
+        ],
+        "extinction": [
+          0.4,
+          0.55,
+          0.7
+        ],
+        "inscattering": [
+          0.95,
+          0.95,
+          1.0
+        ],
+        "directional": [
+          1.0,
+          0.98,
+          0.95
+        ]
+      },
+      "twilight": {
+        "fog": [
+          0.65,
+          0.45,
+          0.4,
+          1.0
+        ],
+        "extinction": [
+          0.5,
+          0.35,
+          0.3
+        ],
+        "inscattering": [
+          1.0,
+          0.7,
+          0.5
+        ],
+        "directional": [
+          1.0,
+          0.6,
+          0.3
+        ]
+      },
+      "night": {
+        "fog": [
+          0.08,
+          0.1,
+          0.15,
+          1.0
+        ],
+        "extinction": [
+          0.05,
+          0.08,
+          0.12
+        ],
+        "inscattering": [
+          0.1,
+          0.15,
+          0.25
+        ],
+        "directional": [
+          0.6,
+          0.7,
+          0.9
+        ]
+      }
+    },
+    "current_preset": "balanced",
+    "presets": {
+      "clear": {
+        "size": 512.0,
+        "density": 0.0005,
+        "absorption": 0.1,
+        "scattering": 0.1,
+        "scattering_asymmetry": 0.6
+      },
+      "balanced": {
+        "size": 512.0,
+        "density": 0.04,
+        "absorption": 0.08,
+        "scattering": 0.25,
+        "scattering_asymmetry": 0.7
+      },
+      "misty": {
+        "size": 512.0,
+        "density": 0.15,
+        "absorption": 0.05,
+        "scattering": 0.8,
+        "scattering_asymmetry": 0.8
+      }
+    },
+    "color_modifiers": {
+      "blue_tint": 0.5,
+      "brightness": 1.0,
+      "aerial_strength": 1.0
+    }
+  },
+  "time_of_day_hours": 6.0
+}

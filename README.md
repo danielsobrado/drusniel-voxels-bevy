@@ -33,6 +33,15 @@ Examples of volumetric fog in this version (toggle with Alt+L; parameters are tu
 ![V0.4 Volumetric Fog 1](docs/images/V0.4-rays1.jpg)
 ![V0.4 Volumetric Fog 2](docs/images/V0.4-rays2.jpg)
 
+Debug overlay examples (toggle with F3; sub-toggles are listed in the Debug tab):
+
+![V0.4 Debug Overlay 1](docs/images/v0.4-debug1.jpg)
+![V0.4 Debug Overlay 2](docs/images/v0.4-debug2.jpg)
+
+Minimap example (toggle with M):
+
+![V0.4 Minimap](docs/images/v0.4-minimap.jpg)
+
 #### Known Issues (v0.4)
 *   **Volumetric Fog Performance**: Volumetric fog can cause significant frame drops, especially on mid-tier GPUs.
 *   **God Rays Missing**: God ray/volumetric light shaft effect is currently not implemented.

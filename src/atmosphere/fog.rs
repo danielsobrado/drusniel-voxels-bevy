@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::render::render_resource::ShaderType;
-use crate::atmosphere::config::{FogColorModifiers, FogConfig, FogFalloffMode};
+use crate::atmosphere::config::{FogColorModifiers, FogConfig, FogFalloffMode, FogPreset};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
@@ -10,9 +10,15 @@ use crate::voxel::world::VoxelWorld;
 
 pub struct FogPlugin;
 
+#[derive(Resource)]
+pub struct FogNoiseTexture(pub Handle<Image>);
+
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::asset::RenderAssetUsages;
+
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
 const VOLUME_DENSITY_SCALE: f32 = 1.0; // Volumetric density scale for visible god rays
-const MIN_VOLUME_DENSITY: f32 = 0.01; // Minimum to ensure shafts are visible
+const MIN_VOLUME_DENSITY: f32 = 0.0005; // Visible haze, avoids "invisible god rays" issue while keeping outdoors relatively clear
 const MAX_VOLUME_DENSITY: f32 = 2.0; // High cap for testing god rays
 const MIN_DISTANCE_SCALE: f32 = 0.25; // Prevents overly aggressive linear fog compression
 const MAX_DISTANCE_SCALE: f32 = 2.5; // Prevents excessively thin fog
@@ -33,71 +39,55 @@ impl Plugin for FogPlugin {
                 Update,
                 (
                     sync_fog_toggles,
+                    handle_fog_input,
                     update_fog_from_atmosphere,
                     update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
-                    debug_god_rays_status,
                 ).chain(),
             );
     }
 }
 
-/// Debug system to verify all god rays components exist
-fn debug_god_rays_status(
-    time: Res<Time>,
-    mut last_log: Local<f32>,
-    mut fps_samples: Local<Vec<f32>>,
-    fog_volume_query: Query<(&FogVolume, &Transform), With<GlobalFogVolume>>,
-    volumetric_fog_query: Query<&VolumetricFog, With<FogCamera>>,
-    volumetric_light_query: Query<(&VolumetricLight, &DirectionalLight), With<Sun>>,
-    camera_query: Query<&Transform, With<FogCamera>>,
+fn handle_fog_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut config: ResMut<FogConfig>,
 ) {
-    // Track FPS
-    let fps = 1.0 / time.delta_secs().max(0.001);
-    fps_samples.push(fps);
-    if fps_samples.len() > 60 {
-        fps_samples.remove(0);
-    }
-    let avg_fps = fps_samples.iter().sum::<f32>() / fps_samples.len() as f32;
-
-    // Only log every 5 seconds
-    *last_log += time.delta_secs();
-    if *last_log < 5.0 {
-        return;
-    }
-    *last_log = 0.0;
-
-    let has_fog_volume = fog_volume_query.iter().next().is_some();
-    let has_volumetric_fog = volumetric_fog_query.iter().next().is_some();
-    let has_volumetric_light = volumetric_light_query.iter().next().is_some();
-
-    if has_fog_volume && has_volumetric_fog && has_volumetric_light {
-        if let (Ok((volume, vol_tf)), Ok(cam_tf), Ok(vfog), Ok((_, sun))) = (
-            fog_volume_query.single(),
-            camera_query.single(),
-            volumetric_fog_query.single(),
-            volumetric_light_query.single(),
-        ) {
-            info!(
-                "God rays ACTIVE (FPS={:.0}): density={:.4}, scattering={:.2}, absorption={:.5}, intensity={:.1}, scale={:.0}, steps={}",
-                avg_fps,
-                volume.density_factor,
-                volume.scattering,
-                volume.absorption,
-                volume.light_intensity,
-                vol_tf.scale.x,
-                vfog.step_count,
-            );
-        }
-    } else {
-        let camera_count = camera_query.iter().len();
-        warn!(
-            "God rays MISSING (FPS={:.0}): FogVolume={}, VolumetricFog={}, VolumetricLight={}, CameraCount={}",
-            avg_fps, has_fog_volume, has_volumetric_fog, has_volumetric_light, camera_count
-        );
+    if keyboard.pressed(KeyCode::AltLeft) && keyboard.just_pressed(KeyCode::KeyP) {
+        config.current_preset = match config.current_preset {
+            FogPreset::Clear => FogPreset::Balanced,
+            FogPreset::Balanced => FogPreset::Misty,
+            FogPreset::Misty => FogPreset::Clear,
+        };
+        info!("Fog Preset Toggled: {:?}", config.current_preset);
     }
 }
 
+fn create_soft_noise_texture(images: &mut Assets<Image>) -> Handle<Image> {
+    let size = 32; // Low res for soft, cloud-like noise when filtered
+    let mut data = Vec::with_capacity(size * size * size * 4);
+    for _ in 0..size * size * size {
+        // Simple value noise: lighter means more dust
+        // We range from 100 to 255 to ensure it's never fully empty (just density variation)
+        let val = (100.0 + rand::random::<f32>() * 155.0) as u8;
+        data.extend_from_slice(&[val, val, val, 255]);
+    }
+    
+    let mut image = Image::new(
+        Extent3d {
+            width: size as u32,
+            height: size as u32,
+            depth_or_array_layers: size as u32,
+        },
+        TextureDimension::D3,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    // Linear sampler is default for Image, which gives us smooth interpolation (clouds)
+    images.add(image)
+}
+
+/// Debug system to verify all god rays components exist
 /// Marker for the global fog volume entity
 #[derive(Component)]
 pub struct GlobalFogVolume;
@@ -146,7 +136,7 @@ impl Default for FogUniforms {
     }
 }
 
-fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig) {
+fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig, texture: Option<Handle<Image>>) {
     // Use config values for proper god rays - low absorption for brightness
     let density = config.volume.density.max(MIN_VOLUME_DENSITY);
     let size = config.volume.size;
@@ -177,7 +167,12 @@ fn setup_fog(
     mut commands: Commands,
     config: Res<FogConfig>,
     mut debug_toggles: ResMut<crate::interaction::DebugDetailToggles>,
+    mut images: ResMut<Assets<Image>>,
 ) {
+    // Generate noise texture for dust effects
+    let noise_handle = create_soft_noise_texture(&mut images);
+    commands.insert_resource(FogNoiseTexture(noise_handle.clone()));
+
     // Sync debug toggle to match loaded config
     debug_toggles.volumetric_fog_enabled = config.volumetric.enabled;
 
@@ -192,7 +187,7 @@ fn setup_fog(
         // Spawn global fog volume centered at origin
         // Will be repositioned to follow camera
         info!("Spawning GlobalFogVolume for god rays");
-        spawn_global_fog_volume(&mut commands, &config);
+        spawn_global_fog_volume(&mut commands, &config, Some(noise_handle));
     } else {
         warn!("Volumetric fog disabled - no god rays will be visible");
     }
@@ -271,27 +266,13 @@ fn volumetric_fog_component(config: &FogConfig) -> VolumetricFog {
 }
 
 fn sync_fog_toggles(
-    time: Res<Time>,
     mut commands: Commands,
     mut config: ResMut<FogConfig>,
     debug_toggles: Res<crate::interaction::DebugDetailToggles>,
     camera_query: Query<(Entity, Option<&DistanceFog>, Option<&VolumetricFog>), With<FogCamera>>,
     volume_query: Query<Entity, With<GlobalFogVolume>>,
-    mut trace_timer: Local<f32>,
+    noise_texture: Option<Res<FogNoiseTexture>>,
 ) {
-    // Periodic state log for debugging (every 2 seconds)
-    *trace_timer += time.delta_secs();
-    if *trace_timer > 2.0 {
-        *trace_timer = 0.0;
-        let has_vol = volume_query.iter().next().is_some();
-        let cam_has_vfog = camera_query.iter().any(|(_, _, vf)| vf.is_some());
-        warn!(
-            "FOG STATE: config.enabled={}, toggle.enabled={}, FogVolume={}, CamVFog={}, toggle_changed={}, config_changed={}",
-            config.volumetric.enabled, debug_toggles.volumetric_fog_enabled, has_vol, cam_has_vfog,
-            debug_toggles.is_changed(), config.is_changed()
-        );
-    }
-
     // Sync debug toggle to config if changed
     if debug_toggles.is_changed() {
         if config.volumetric.enabled != debug_toggles.volumetric_fog_enabled {
@@ -337,7 +318,7 @@ fn sync_fog_toggles(
     if config.volumetric.enabled {
         if volume_query.iter().next().is_none() {
             info!("Spawning GlobalFogVolume for god rays (sync)");
-            spawn_global_fog_volume(&mut commands, &config);
+            spawn_global_fog_volume(&mut commands, &config, noise_texture.map(|n| n.0.clone()));
         }
     } else {
         for entity in volume_query.iter() {
@@ -358,16 +339,15 @@ fn update_fog_from_atmosphere(
     ambient: Res<AmbientLight>,
     world: Res<VoxelWorld>,
     time: Res<Time>,
-    mut current_boost: Local<f32>,
-    mut boost_timer: Local<f32>,
-    mut target_boost: Local<f32>,
+    // Smoothing for preset transitions and boost
+    mut smoothing: Local<FogSmoothingState>,
     camera_query: Query<&Transform, With<FogCamera>>,
     mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
-    if *current_boost == 0.0 { *current_boost = 1.0; }
-    if *target_boost == 0.0 { *target_boost = 1.0; }
+    if smoothing.current_boost == 0.0 { smoothing.current_boost = 1.0; }
+    if smoothing.target_boost == 0.0 { smoothing.target_boost = 1.0; }
     let Some(atmo_settings) = atmosphere_settings else { return };
 
     // Get Mie settings from atmosphere (connected to menu settings)
@@ -494,27 +474,51 @@ fn update_fog_from_atmosphere(
     }
     
     // Throttled check for indoor boost (10Hz is plenty)
-    *boost_timer += time.delta_secs();
-    if *boost_timer > 0.1 {
-        *boost_timer = 0.0;
-        *target_boost = camera_query
+    smoothing.boost_timer += time.delta_secs();
+    if smoothing.boost_timer > 0.1 {
+        smoothing.boost_timer = 0.0;
+        smoothing.target_boost = camera_query
             .single()
             .map(|camera| indoor_density_boost(&world, camera.translation))
             .unwrap_or(1.0);
     }
     
-    let target = *target_boost;
+    let target = smoothing.target_boost;
 
     // Smoothly interpolate boost to avoid jarring pops when walking under trees
     let interpolation_speed = 2.0;
-    *current_boost = lerp(*current_boost, target, (time.delta_secs() * interpolation_speed).clamp(0.0, 1.0));
+    let dt = time.delta_secs();
+    smoothing.current_boost = lerp(smoothing.current_boost, target, (dt * interpolation_speed).clamp(0.0, 1.0));
+
+    // Get target values from active preset
+    let target_config = match config.current_preset {
+        FogPreset::Clear => &config.presets.clear,
+        FogPreset::Balanced => &config.presets.balanced,
+        FogPreset::Misty => &config.presets.misty,
+    };
+
+    // Smoothly transition fog parameters when switching presets
+    let preset_speed = 1.0;
+    smoothing.current_density = lerp(smoothing.current_density, target_config.density, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_scattering = lerp(smoothing.current_scattering, target_config.scattering, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_absorption = lerp(smoothing.current_absorption, target_config.absorption, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_asymmetry = lerp(smoothing.current_asymmetry, target_config.scattering_asymmetry, (dt * preset_speed).clamp(0.0, 1.0));
+
+    // "Breathing" Turbulence Animation for Misty/Balanced presets
+    // Modulates density slightly to feel like moving air
+    let turbulence = if config.current_preset != FogPreset::Clear {
+        let wave = (time.elapsed_secs() * 0.5).sin() * 0.5 + 0.5; // 0.0 to 1.0 sine wave
+        1.0 + wave * 0.15 // +0% to +15% density
+    } else {
+        1.0
+    };
 
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
         // Use config density directly - lower values = more transparent fog
-        let density = (config.volume.density * *current_boost).clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        let density = (smoothing.current_density * smoothing.current_boost * turbulence).clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
         volume.density_factor = density;
-        volume.absorption = config.volume.absorption;
+        volume.absorption = smoothing.current_absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
         volume.light_tint = Color::srgba(
             directional_color[0],
@@ -524,13 +528,13 @@ fn update_fog_from_atmosphere(
         );
         // High light intensity for visible god rays (50-100 range for bright shafts)
         // Boosted significantly to ensure visibility even with lower sun intensities
-        let base_intensity = 300.0 * daylight + 60.0 * night;
+        let base_intensity = 1200.0 * daylight + 100.0 * night;
         volume.light_intensity = base_intensity * (1.0 + twilight * 1.5);
-        // For testing: use config scattering directly without modifications
-        volume.scattering = config.volume.scattering;
+        
+        volume.scattering = smoothing.current_scattering;
         // mie_direction controls forward scattering asymmetry
         // Lower = more visible from all angles, higher = only toward sun
-        volume.scattering_asymmetry = config.volume.scattering_asymmetry * mie_direction;
+        volume.scattering_asymmetry = smoothing.current_asymmetry * mie_direction;
     }
 
     // Update fog uniforms for custom shaders (building, props, grass)
@@ -540,6 +544,17 @@ fn update_fog_from_atmosphere(
     fog_uniforms.sun_dir = sun_dir;
     fog_uniforms.directional_exponent = 30.0 + twilight * 20.0;
     fog_uniforms.aerial_strength = mods.aerial_strength;
+}
+
+#[derive(Default)]
+struct FogSmoothingState {
+    current_density: f32,
+    current_scattering: f32,
+    current_absorption: f32,
+    current_asymmetry: f32,
+    current_boost: f32,
+    boost_timer: f32,
+    target_boost: f32,
 }
 
 fn update_shadow_cascades_from_fog(
@@ -685,23 +700,30 @@ fn apply_color_modifiers4(color: [f32; 4], mods: &FogColorModifiers) -> [f32; 4]
 }
 
 fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
+    // Sampling pattern optimized for trees (canopy) and buildings
+    // Radius ~3.0m (Widened): Aggressively detect trees/canopies to ensure god rays trigger
     let offsets = [
         Vec3::ZERO,
-        Vec3::X * 0.5,
-        Vec3::NEG_X * 0.5,
-        Vec3::Z * 0.5,
-        Vec3::NEG_Z * 0.5,
+        Vec3::X * 3.0,
+        Vec3::NEG_X * 3.0,
+        Vec3::Z * 3.0,
+        Vec3::NEG_Z * 3.0,
+        Vec3::new(2.0, 0.0, 2.0),
+        Vec3::new(-2.0, 0.0, -2.0),
+        Vec3::new(2.0, 0.0, -2.0),
+        Vec3::new(-2.0, 0.0, 2.0),
     ];
     let mut blocked = 0;
+    // Check higher up (up to 32 blocks) to catch very tall pine tree canopies
+    let check_height = 32;
+    
     for offset in offsets {
-        if column_blocked(world, position + offset, 8) {
+        if column_blocked(world, position + offset, check_height) {
             blocked += 1;
         }
     }
     let ratio = blocked as f32 / offsets.len() as f32;
-    // Significantly boost density indoors to make light shafts visible against dark interior
-    // Multiplier massively increased to 4000.0 to compensate for extremely low base density (0.0002)
-    // This ensures visible shafts indoors while outside is clear.
+    // Significant boost indoors/under trees for visible shafts
     1.0 + ratio * 4000.0
 }
 
