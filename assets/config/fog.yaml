@@ -11,7 +11,7 @@ fog:
     end: 220.0
     # Keep a fraction of the range clear before fog starts (0 = immediate).
     near_fade: 0.35
-    
+
   # Volumetric fog (god rays, local volumes)
   # WARNING: Very expensive! Drops FPS from 40-50 to ~10 FPS.
   # Only enable on high-end GPUs.
@@ -23,7 +23,7 @@ fog:
     jitter: 0.5
     # Ambient intensity (0 if using environment maps)
     ambient_intensity: 0.0
-    
+
   # Global fog volume parameters
   volume:
     # Size in world units (cover area around camera)
@@ -36,7 +36,72 @@ fog:
     scattering: 0.2
     # Scattering asymmetry (Bevy default is 0.5)
     scattering_asymmetry: 0.6
-    
+    # Dust animation for god ray movement
+    dust_animation:
+      enabled: true
+      speed: 0.3
+      scale: 8.0
+      intensity: 0.6
+      wind_direction: [0.7, 0.3]
+
+  # Active preset (clear, balanced, misty, god_rays)
+  current_preset: god_rays
+
+  # Preset configurations
+  presets:
+    clear:
+      size: 512.0
+      density: 0.0005
+      absorption: 0.1
+      scattering: 0.1
+      scattering_asymmetry: 0.6
+      dust_animation:
+        enabled: false
+        speed: 0.3
+        scale: 8.0
+        intensity: 0.6
+        wind_direction: [0.7, 0.3]
+    balanced:
+      size: 512.0
+      density: 0.04
+      absorption: 0.08
+      scattering: 0.25
+      scattering_asymmetry: 0.7
+      dust_animation:
+        enabled: true
+        speed: 0.2
+        scale: 10.0
+        intensity: 0.4
+        wind_direction: [0.7, 0.3]
+    misty:
+      size: 512.0
+      density: 0.15
+      absorption: 0.05
+      scattering: 0.8
+      scattering_asymmetry: 0.8
+      dust_animation:
+        enabled: true
+        speed: 0.15
+        scale: 16.0
+        intensity: 0.5
+        wind_direction: [0.5, 0.5]
+    god_rays:
+      size: 512.0
+      density: 0.0001        # Very low base fog
+      absorption: 0.15       # HIGHER absorption = rays fade out, don't wash everything
+      scattering: 0.25       # Moderate scattering - rays visible but focused
+      scattering_asymmetry: 0.85 # High forward scattering - rays visible toward sun
+      dust_animation:
+        enabled: true
+        speed: 0.4           # Noticeable dust movement
+        scale: 6.0           # Larger patterns for visible dust
+        intensity: 0.8       # High contrast
+        wind_direction: [0.7, 0.3]
+      # Volumetric overrides for god rays preset
+      step_count_override: 64       # Higher steps for sharp canopy shafts
+      ambient_intensity_override: 0.0  # Zero ambient = maximum ray contrast
+      light_intensity: 1.0          # Normal intensity
+
   # Day/night color presets
   colors:
     day:

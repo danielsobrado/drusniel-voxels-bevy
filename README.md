@@ -42,6 +42,20 @@ Minimap example (toggle with M):
 
 ![V0.4 Minimap](docs/images/v0.4-minimap.jpg)
 
+Terraforming tools in action (toggle with T):
+*   **Terrain Conform**: Props like buildings now automatically flatten the terrain beneath them for seamless integration.
+*   **Sculpting**: Improved brush controls for raising, lowering, leveling, and smoothing terrain.
+
+![V0.4 Terraforming](docs/images/V0.4-terraforming1.jpg)
+
+New Atlas Texture Mapping UI (Settings > Textures):
+*   **Live Editing**: Reassign block face mappings (Top/Side/Bottom) in real-time.
+*   **3D Preview**: Visualize changes instantly on a rotating 3D block preview.
+*   **Visual Picker**: Select atlas tiles directly from a visual grid instead of guessing indices.
+
+![V0.4 Texture Mapping](docs/images/V0.4-textureMapping.jpg)
+
+
 #### Known Issues (v0.4)
 *   **Volumetric Fog Performance**: Volumetric fog can cause significant frame drops, especially on mid-tier GPUs.
 *   **God Rays Missing**: God ray/volumetric light shaft effect is currently not implemented.

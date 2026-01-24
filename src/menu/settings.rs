@@ -508,6 +508,7 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 spawn_graphics_option(options, font, "Clear", FogPresetOption(FogPreset::Clear));
                 spawn_graphics_option(options, font, "Balanced", FogPresetOption(FogPreset::Balanced));
                 spawn_graphics_option(options, font, "Misty", FogPresetOption(FogPreset::Misty));
+                spawn_graphics_option(options, font, "God Rays", FogPresetOption(FogPreset::GodRays));
             });
 
             content
@@ -1028,13 +1029,6 @@ fn spawn_textures_tab(
                     
                     // Middle Column: Face Selection and 3D Cube
                     right.spawn((
-                        Text::new("2. Configure Block Faces:"),
-                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-
-                    // Face Selection
-                     right.spawn((
                         Text::new("2. Select Face:"),
                         TextFont { font: font.clone(), font_size: 14.0, ..default() },
                         TextColor(Color::WHITE),
@@ -1064,6 +1058,45 @@ fn spawn_textures_tab(
                         spawn_face_btn("Top", ActiveTextureFace::Top);
                         spawn_face_btn("Side", ActiveTextureFace::Side);
                         spawn_face_btn("Bottom", ActiveTextureFace::Bottom);
+                    });
+
+                     // Face Texture Previews (Under buttons)
+                     right.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(4.0),
+                        margin: UiRect::bottom(Val::Px(8.0)), // Add some spacing after faces
+                        ..default()
+                    }).with_children(|row| {
+                        let mut spawn_face_preview = |face: ActiveTextureFace| {
+                            row.spawn(Node {
+                                width: Val::Px(70.0), // Match button width
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            }).with_children(|container| {
+                                container.spawn((
+                                    Node {
+                                        width: Val::Px(32.0), height: Val::Px(32.0),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.5)),
+                                    FaceTilePreview(face),
+                                )).with_children(|preview| {
+                                    preview.spawn((
+                                        Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                                        ImageNode { 
+                                            image: atlas_texture.clone(),
+                                            rect: Some(bevy::math::Rect::new(0.0, 0.0, 16.0, 16.0)), // Default init
+                                            ..default() 
+                                        },
+                                        BackgroundColor(Color::WHITE),
+                                    ));
+                                });
+                            });
+                        };
+                        spawn_face_preview(ActiveTextureFace::Top);
+                        spawn_face_preview(ActiveTextureFace::Side);
+                        spawn_face_preview(ActiveTextureFace::Bottom);
                     });
 
                     // 3D Preview
@@ -2170,11 +2203,13 @@ pub fn handle_fog_settings(
                 FogPreset::Clear => Vec2::new(0.0006, 0.0014),
                 FogPreset::Balanced => Vec2::new(0.0009, 0.0022),
                 FogPreset::Misty => Vec2::new(0.0012, 0.003),
+                FogPreset::GodRays => Vec2::new(0.00001, 0.0001),
             };
             fog_config.volume.density = match option.0 {
                 FogPreset::Clear => 0.005,
                 FogPreset::Balanced => 0.015,
                 FogPreset::Misty => 0.04,
+                FogPreset::GodRays => 0.00001,
             };
             info!("Switched to Fog Preset: {:?}", option.0);
         }
@@ -2628,7 +2663,77 @@ pub fn update_texture_preview(
         }
     }
 }
+#[derive(Component)]
+pub struct FaceTilePreview(pub ActiveTextureFace);
 
+pub fn update_face_tile_previews(
+    active_layer: Res<ActiveTextureLayer>,
+    mapping: Option<Res<crate::rendering::array_loader::AtlasMapping>>,
+    mut query: Query<(&FaceTilePreview, &Children)>,
+    mut image_nodes: Query<&mut ImageNode>,
+) {
+    let Some(mapping) = mapping else { return };
+
+
+    // Get current material mapping
+    let map = match *active_layer {
+        ActiveTextureLayer::Grass => &mapping.grass,
+        ActiveTextureLayer::Dirt => &mapping.dirt,
+        ActiveTextureLayer::Rock => &mapping.rock,
+        ActiveTextureLayer::Sand => &mapping.sand,
+    };
+
+    for (preview, children) in query.iter_mut() {
+        let tile_index = match preview.0 {
+            ActiveTextureFace::Top => map.top,
+            ActiveTextureFace::Side => map.side,
+            ActiveTextureFace::Bottom => map.bottom,
+        };
+
+        // Calculate rect for this tile index
+        // Assume 256x256 texture, 4x4 grid -> 64x64 pixel tiles
+        // But the atlas might be any size, strictly we need UVs.
+        // The texture loaded is "textures/atlas.png".
+        // Let's assume standard V0.3 atlas layout 4 cols.
+        let row = tile_index / 4;
+        let col = tile_index % 4;
+        
+        // We can't know the exact pixel size without the texture dimensions if we don't hardcode.
+        // However, for UV rect in Bevy ImageNode, we normally use pixel coordinates.
+        // Let's assume 16x16 pixels per tile for low res, or just rely on standard UVs?
+        // Bevy's Rect is in pixels for ImageNode if using a texture atlas, but here we perform manual UV slicing on the full image.
+        // Actually, if we use `image.rect`, it expects pixel coordinates of the source image.
+        // Assuming the atlas is 128x128 or similar.
+        // Safest is to assume standard Minecraft-like 16px tiles * 4 cols = 64px width?
+        // Let's guess 16px per tile for now, if it's wrong it will just look zoomed/tiled.
+        // Wait, `AtlasScrollContent` uses it too.
+        
+        // CORRECTION: ImageNode rect is consistent with the texture size.
+        // If we don't know the texture size here easily (unless we check assets),
+        // we might just show the whole atlas if we can't slice it.
+        // BUT wait, we can just use a large enough assumption or check if we can get image dimensions.
+        // We can't get image dimensions easily in a simple system without `Assets<Image>`.
+        // Let's calculate proportional UVs if possible? No, `rect` is `Option<Rect>`.
+        
+        // Let's assume the atlas is 16x16 tiles? No, 4x4 tiles as per `spawn_atlas_tile_button`.
+        // If we assumed 4x4 tiles, we can just try to pick the "likely" resolution or dynamic.
+        // Actually, let's inject `Assets<Image>` and try to find the image size?
+        
+        // Standard V0.1 atlas is usually small.
+        // Let's use normalized UVs? Material uses UVs.
+        // For ImageNode, we must provide Pixel Rect.
+        // Hardcode assumption: 64x64 atlas (16px tiles).
+        let tile_size = 16.0;
+        let x = col as f32 * tile_size;
+        let y = row as f32 * tile_size;
+        
+        for child in children.iter() {
+           if let Ok(mut node) = image_nodes.get_mut(child) {
+               node.rect = Some(bevy::math::Rect::new(x, y, x + tile_size, y + tile_size));
+           }
+        }
+    }
+}
 /// Updates fog preset option backgrounds.
 pub fn update_fog_backgrounds(
     settings_state: Res<SettingsState>,
@@ -2641,6 +2746,7 @@ pub fn update_fog_backgrounds(
         *background = if settings_state.fog_preset == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
     }
 }
+
 
 /// Updates fog toggle option backgrounds.
 pub fn update_fog_toggle_backgrounds(
@@ -2942,6 +3048,7 @@ fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
         FogPreset::Clear => &config.presets.clear,
         FogPreset::Balanced => &config.presets.balanced,
         FogPreset::Misty => &config.presets.misty,
+        FogPreset::GodRays => &config.presets.god_rays,
     };
 
     match slider {

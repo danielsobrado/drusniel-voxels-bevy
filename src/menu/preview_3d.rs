@@ -129,15 +129,16 @@ pub fn spawn_preview_scene(
         ))
         .id();
 
-    // Camera
+    // Camera - unique order to avoid ambiguity warnings
     let camera = commands.spawn((
         Camera3d::default(),
         Camera {
             target: RenderTarget::Image(preview_image.0.clone().into()),
-            order: 10,
+            order: 100, // High unique order for block preview
+            clear_color: bevy::prelude::ClearColorConfig::Custom(Color::srgba(0.1, 0.1, 0.1, 1.0)),
             ..default()
         },
-        Transform::from_xyz(2.0, 2.5, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(1.2, 0.8, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
         // BLOCK_PREVIEW_LAYER,
     )).id();
 
@@ -259,9 +260,7 @@ fn update_preview_mesh_materials(
     atlas_mapping: Res<AtlasMapping>,
     active_layer: Res<ActiveTextureLayer>,
 ) {
-    if !atlas_mapping.is_changed() && !active_layer.is_changed() {
-        return;
-    }
+
 
     for mesh_handle in query.iter() {
         if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {

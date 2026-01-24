@@ -304,6 +304,7 @@ fn apply_atmosphere_settings(
         FogPreset::Clear => Vec2::new(0.0006, 0.0014),
         FogPreset::Balanced => Vec2::new(0.0009, 0.0022),
         FogPreset::Misty => Vec2::new(0.0012, 0.003),
+        FogPreset::GodRays => Vec2::new(0.00001, 0.0001),
     };
 
     for mut atmo in bevy_atmosphere_query.iter_mut() {

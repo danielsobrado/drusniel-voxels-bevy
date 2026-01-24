@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::render::render_resource::ShaderType;
-use crate::atmosphere::config::{FogColorModifiers, FogConfig, FogFalloffMode, FogPreset};
+use crate::atmosphere::config::{DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
@@ -32,8 +32,9 @@ impl Plugin for FogPlugin {
             warn!("Failed to load fog config: {}, using defaults", e);
             FogConfig::default()
         });
-        
+
         app.insert_resource(fog_config)
+            .init_resource::<DustAnimationState>()
             .add_systems(Startup, setup_fog)
             .add_systems(
                 Update,
@@ -43,9 +44,19 @@ impl Plugin for FogPlugin {
                     update_fog_from_atmosphere,
                     update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
+                    animate_dust_in_fog,
                 ).chain(),
             );
     }
+}
+
+/// State for dust animation in volumetric fog
+#[derive(Resource, Default)]
+pub struct DustAnimationState {
+    /// Current texture offset for dust movement
+    pub offset: Vec3,
+    /// Current dust animation config (from active preset)
+    pub config: DustAnimationConfig,
 }
 
 fn handle_fog_input(
@@ -56,7 +67,8 @@ fn handle_fog_input(
         config.current_preset = match config.current_preset {
             FogPreset::Clear => FogPreset::Balanced,
             FogPreset::Balanced => FogPreset::Misty,
-            FogPreset::Misty => FogPreset::Clear,
+            FogPreset::Misty => FogPreset::GodRays,
+            FogPreset::GodRays => FogPreset::Clear,
         };
         info!("Fog Preset Toggled: {:?}", config.current_preset);
     }
@@ -65,14 +77,32 @@ fn handle_fog_input(
 fn create_soft_noise_texture(images: &mut Assets<Image>) -> Handle<Image> {
     let size = 32; // Low res for soft, cloud-like noise when filtered
     let mut data = Vec::with_capacity(size * size * size * 4);
-    for _ in 0..size * size * size {
-        // Simple value noise: lighter means more dust
-        // We range from 100 to 255 to ensure it's never fully empty (just density variation)
-        let val = (100.0 + rand::random::<f32>() * 155.0) as u8;
-        data.extend_from_slice(&[val, val, val, 255]);
+
+    // Create coherent noise with visible dust/cloud patterns
+    // Using simple layered noise for more organic shapes
+    for z in 0..size {
+        for y in 0..size {
+            for x in 0..size {
+                // Base random value with wider range for more contrast
+                let base = rand::random::<f32>();
+
+                // Add low-frequency variation (big dust clouds)
+                let fx = x as f32 / size as f32 * 2.0 * std::f32::consts::PI;
+                let fy = y as f32 / size as f32 * 2.0 * std::f32::consts::PI;
+                let fz = z as f32 / size as f32 * 2.0 * std::f32::consts::PI;
+                let wave = (fx.sin() * fy.cos() * fz.sin() + 1.0) * 0.5; // 0 to 1
+
+                // Blend random with coherent pattern for dust-like appearance
+                let val = base * 0.4 + wave * 0.6;
+
+                // Full range 10-255 for high contrast dust patterns visible in god rays
+                let byte = (10.0 + val * 245.0) as u8;
+                data.extend_from_slice(&[byte, byte, byte, 255]);
+            }
+        }
     }
-    
-    let mut image = Image::new(
+
+    let image = Image::new(
         Extent3d {
             width: size as u32,
             height: size as u32,
@@ -143,22 +173,32 @@ fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig, texture:
     let scattering = config.volume.scattering;
     let absorption = config.volume.absorption;
     let asymmetry = config.volume.scattering_asymmetry;
-    
+    let dust_config = &config.volume.dust_animation;
+
     info!(
-        "Spawning FogVolume: density={:.4}, scattering={:.2}, absorption={:.4}, size={:.0}",
-        density, scattering, absorption, size
+        "Spawning FogVolume: density={:.6}, scattering={:.2}, absorption={:.4}, size={:.0}, dust={}",
+        density, scattering, absorption, size, dust_config.enabled
     );
+
+    let mut fog_volume = FogVolume {
+        density_factor: density,
+        scattering,
+        absorption,
+        scattering_asymmetry: asymmetry,
+        ..default()
+    };
+
+    // Apply density texture for animated dust movement in god rays
+    if dust_config.enabled {
+        if let Some(tex) = texture {
+            fog_volume.density_texture = Some(tex);
+        }
+    }
 
     commands.spawn((
         Name::new("GlobalFogVolume"),
         GlobalFogVolume,
-        FogVolume {
-            density_factor: density,
-            scattering,
-            absorption,
-            scattering_asymmetry: asymmetry,
-            ..default()
-        },
+        fog_volume,
         Transform::from_scale(Vec3::splat(size)),
     ));
 }
@@ -421,8 +461,20 @@ fn update_fog_from_atmosphere(
         fog_range.end = end;
     }
 
-    let ambient_intensity = (ambient.brightness / 16000.0).clamp(0.01, 0.12)
-        .max(config.volumetric.ambient_intensity);
+    // Get preset config early to check for volumetric overrides
+    let preset_config = match config.current_preset {
+        FogPreset::Clear => &config.presets.clear,
+        FogPreset::Balanced => &config.presets.balanced,
+        FogPreset::Misty => &config.presets.misty,
+        FogPreset::GodRays => &config.presets.god_rays,
+    };
+
+    // Use preset's ambient_intensity_override if set (allows 0 for max god ray contrast)
+    // Otherwise calculate from sky brightness with a floor
+    let ambient_intensity = preset_config.ambient_intensity_override.unwrap_or_else(|| {
+        (ambient.brightness / 16000.0).clamp(0.01, 0.12)
+            .max(config.volumetric.ambient_intensity)
+    });
 
     let mods = &config.color_modifiers;
     let fog_color = apply_color_modifiers4(fog_color, mods);
@@ -466,10 +518,12 @@ fn update_fog_from_atmosphere(
     }
 
     // Update volumetric fog camera settings so night/dim changes take effect.
+    // Use preset overrides when available for step_count (sharper rays)
+    let step_count = preset_config.step_count_override.unwrap_or(config.volumetric.step_count);
     for mut volumetric in volumetric_query.iter_mut() {
         volumetric.ambient_color = ambient.color;
         volumetric.ambient_intensity = ambient_intensity;
-        volumetric.step_count = config.volumetric.step_count;
+        volumetric.step_count = step_count;
         volumetric.jitter = config.volumetric.jitter;
     }
     
@@ -490,19 +544,12 @@ fn update_fog_from_atmosphere(
     let dt = time.delta_secs();
     smoothing.current_boost = lerp(smoothing.current_boost, target, (dt * interpolation_speed).clamp(0.0, 1.0));
 
-    // Get target values from active preset
-    let target_config = match config.current_preset {
-        FogPreset::Clear => &config.presets.clear,
-        FogPreset::Balanced => &config.presets.balanced,
-        FogPreset::Misty => &config.presets.misty,
-    };
-
-    // Smoothly transition fog parameters when switching presets
+    // Smoothly transition fog parameters when switching presets (preset_config already defined above)
     let preset_speed = 1.0;
-    smoothing.current_density = lerp(smoothing.current_density, target_config.density, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_scattering = lerp(smoothing.current_scattering, target_config.scattering, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_absorption = lerp(smoothing.current_absorption, target_config.absorption, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_asymmetry = lerp(smoothing.current_asymmetry, target_config.scattering_asymmetry, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_density = lerp(smoothing.current_density, preset_config.density, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_scattering = lerp(smoothing.current_scattering, preset_config.scattering, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_absorption = lerp(smoothing.current_absorption, preset_config.absorption, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_asymmetry = lerp(smoothing.current_asymmetry, preset_config.scattering_asymmetry, (dt * preset_speed).clamp(0.0, 1.0));
 
     // "Breathing" Turbulence Animation for Misty/Balanced presets
     // Modulates density slightly to feel like moving air
@@ -526,10 +573,12 @@ fn update_fog_from_atmosphere(
             directional_color[2],
             1.0,
         );
-        // High light intensity for visible god rays (50-100 range for bright shafts)
-        // Boosted significantly to ensure visibility even with lower sun intensities
+        // High light intensity for visible god rays
+        // Base intensity from time of day, then multiplied by preset's light_intensity
+        // God rays preset uses 50x multiplier for visible shafts in near-zero density fog
         let base_intensity = 1200.0 * daylight + 100.0 * night;
-        volume.light_intensity = base_intensity * (1.0 + twilight * 1.5);
+        let time_modifier = 1.0 + twilight * 1.5;
+        volume.light_intensity = base_intensity * time_modifier * preset_config.light_intensity;
         
         volume.scattering = smoothing.current_scattering;
         // mie_direction controls forward scattering asymmetry
@@ -750,8 +799,59 @@ fn load_fog_config() -> Result<FogConfig, Box<dyn std::error::Error>> {
     struct FogConfigFile {
         fog: FogConfig,
     }
-    
+
     let config_str = std::fs::read_to_string("assets/config/fog.yaml")?;
     let config_file: FogConfigFile = serde_yaml::from_str(&config_str)?;
     Ok(config_file.fog)
+}
+
+/// Animate the dust/density texture offset to create movement in god rays
+fn animate_dust_in_fog(
+    time: Res<Time>,
+    config: Res<FogConfig>,
+    mut dust_state: ResMut<DustAnimationState>,
+    mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
+) {
+    // Get dust config from active preset
+    let dust_config = match config.current_preset {
+        FogPreset::Clear => &config.presets.clear.dust_animation,
+        FogPreset::Balanced => &config.presets.balanced.dust_animation,
+        FogPreset::Misty => &config.presets.misty.dust_animation,
+        FogPreset::GodRays => &config.presets.god_rays.dust_animation,
+    };
+
+    if !dust_config.enabled {
+        return;
+    }
+
+    // Update dust animation state
+    dust_state.config = *dust_config;
+
+    let dt = time.delta_secs();
+    let speed = dust_config.speed;
+
+    // Calculate wind-based movement direction
+    let wind_dir = Vec2::new(
+        dust_config.wind_direction[0],
+        dust_config.wind_direction[1],
+    ).normalize_or_zero();
+
+    // Add subtle vertical drift and time-based variation for organic movement
+    let time_factor = time.elapsed_secs();
+    let vertical_drift = (time_factor * 0.3).sin() * 0.1; // Gentle up/down oscillation
+
+    // Update offset with wind direction and subtle turbulence
+    let turbulence_x = (time_factor * 0.7).sin() * 0.15;
+    let turbulence_z = (time_factor * 0.5).cos() * 0.15;
+
+    dust_state.offset += Vec3::new(
+        (wind_dir.x + turbulence_x) * speed * dt,
+        vertical_drift * speed * dt,
+        (wind_dir.y + turbulence_z) * speed * dt,
+    );
+
+    // Apply the animated offset to the fog volume's density texture
+    for mut volume in volume_query.iter_mut() {
+        volume.density_texture_offset = dust_state.offset;
+    }
 }

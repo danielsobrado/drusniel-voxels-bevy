@@ -162,6 +162,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::handle_save_atlas_mapping,
                     settings::handle_atlas_scroll,
                     settings::update_texture_preview,
+                    settings::update_face_tile_previews,
                 ),
             );
     }

@@ -9,8 +9,16 @@
 #   Rock:  Top=1, Side=1, Bottom=1
 #   Sand:  Top=4, Side=4, Bottom=4
 
+
+
+
+# Atlas tile mapping (editable via in-game UI)
+# Each block type has { top, side, bottom } atlas tile indices
+
+# Atlas tile mapping (editable via in-game UI)
+# Each block type has { top, side, bottom } atlas tile indices
 atlas_mapping:
-  grass: { top: 3, side: 7, bottom: 0 }
+  grass: { top: 0, side: 7, bottom: 7 }
   dirt: { top: 0, side: 0, bottom: 0 }
-  rock: { top: 1, side: 1, bottom: 1 }
-  sand: { top: 4, side: 4, bottom: 4 }
+  rock: { top: 0, side: 0, bottom: 0 }
+  sand: { top: 0, side: 0, bottom: 0 }

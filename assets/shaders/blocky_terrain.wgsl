@@ -17,13 +17,13 @@ struct TriplanarUniforms {
     parallax_scale: f32,
 }
 
-@group(2) @binding(0) var<uniform> uniforms: TriplanarUniforms;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
 
 // Texture Arrays
-@group(2) @binding(1) var t_diffuse: texture_2d_array<f32>;
-@group(2) @binding(2) var s_diffuse: sampler;
-@group(2) @binding(3) var t_normal: texture_2d_array<f32>;
-@group(2) @binding(4) var s_normal: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var t_diffuse: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var s_diffuse: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var t_normal: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var s_normal: sampler;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
