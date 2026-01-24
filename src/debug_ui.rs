@@ -7,6 +7,7 @@ use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::LodSettings;
 use crate::vegetation::VegetationConfig;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+use crate::rendering::array_loader::AtlasMapping;
 
 #[derive(Resource, Default)]
 pub struct DebugUiState {
@@ -68,15 +69,25 @@ fn toggle_debug_ui(
     }
 }
 
+/// Local state for atlas mapping save status
+#[derive(Default)]
+struct AtlasMappingSaveStatus {
+    last_save_result: Option<Result<(), String>>,
+    save_time: f32,
+}
+
 fn debug_settings_ui(
     mut contexts: EguiContexts,
     state: Res<DebugUiState>,
     mut lod_settings: ResMut<LodSettings>,
     mut terrain_style: ResMut<TerrainStyleSettings>,
+    atlas_mapping: Option<ResMut<AtlasMapping>>,
     veg_config: Option<ResMut<VegetationConfig>>,
     prop_fade: Option<ResMut<FoliageFadeSettings>>,
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
     mut sun_query: Query<&mut DirectionalLight>,
+    time: Res<Time>,
+    mut save_status: Local<AtlasMappingSaveStatus>,
 ) {
     if !state.show_settings {
         return;
@@ -86,12 +97,99 @@ fn debug_settings_ui(
         ui.heading("LOD Settings");
         ui.add(egui::Slider::new(&mut lod_settings.high_detail_distance, 32.0..=512.0).text("High Detail Dist"));
         ui.add(egui::Slider::new(&mut lod_settings.cull_distance, 64.0..=1024.0).text("Cull Dist"));
-        
+
         ui.separator();
         ui.heading("Terrain Style");
         ui.add(egui::Slider::new(&mut terrain_style.ao_strength, 0.0..=1.0).text("Baked AO Strength"));
         ui.label("0 = V0.3 soft look, 1 = full baked AO");
-        
+
+        // Atlas Mapping UI (for blocky/F5 mode)
+        if let Some(mut mapping) = atlas_mapping {
+            ui.separator();
+            ui.heading("Blocky Mode Atlas Mapping");
+            ui.label("Atlas: 4x4 grid (0-15), tile = row*4 + col");
+
+            let mut changed = false;
+
+            ui.horizontal(|ui| {
+                ui.label("Grass (layer 0):");
+                let mut grass = mapping.grass as i32;
+                if ui.add(egui::DragValue::new(&mut grass).range(0..=15).speed(0.1)).changed() {
+                    mapping.grass = grass.clamp(0, 15) as u32;
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Dirt (layer 1):");
+                let mut dirt = mapping.dirt as i32;
+                if ui.add(egui::DragValue::new(&mut dirt).range(0..=15).speed(0.1)).changed() {
+                    mapping.dirt = dirt.clamp(0, 15) as u32;
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Rock (layer 2):");
+                let mut rock = mapping.rock as i32;
+                if ui.add(egui::DragValue::new(&mut rock).range(0..=15).speed(0.1)).changed() {
+                    mapping.rock = rock.clamp(0, 15) as u32;
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Sand (layer 3):");
+                let mut sand = mapping.sand as i32;
+                if ui.add(egui::DragValue::new(&mut sand).range(0..=15).speed(0.1)).changed() {
+                    mapping.sand = sand.clamp(0, 15) as u32;
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Grass Side (layer 4):");
+                let mut grass_side = mapping.grass_side as i32;
+                if ui.add(egui::DragValue::new(&mut grass_side).range(0..=15).speed(0.1)).changed() {
+                    mapping.grass_side = grass_side.clamp(0, 15) as u32;
+                    changed = true;
+                }
+            });
+
+            if changed {
+                mapping.needs_rebuild = true;
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("Apply & Rebuild").clicked() {
+                    mapping.needs_rebuild = true;
+                    info!("Triggering texture array rebuild with new mapping");
+                }
+
+                if ui.button("Save to YAML").clicked() {
+                    save_status.last_save_result = Some(mapping.save_to_yaml());
+                    save_status.save_time = time.elapsed_secs();
+                }
+
+                if ui.button("Reset Defaults").clicked() {
+                    *mapping = AtlasMapping::default();
+                    mapping.needs_rebuild = true;
+                }
+            });
+
+            // Show save status for a few seconds
+            if let Some(ref result) = save_status.last_save_result {
+                if time.elapsed_secs() - save_status.save_time < 3.0 {
+                    match result {
+                        Ok(()) => ui.colored_label(egui::Color32::GREEN, "Saved!"),
+                        Err(e) => ui.colored_label(egui::Color32::RED, format!("Error: {}", e)),
+                    };
+                }
+            }
+
+            ui.label("Press F5 to toggle blocky mode");
+        }
+
         ui.separator();
         if let Some(mut veg) = veg_config {
             ui.heading("Vegetation");

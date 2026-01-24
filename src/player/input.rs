@@ -3,6 +3,8 @@ use bevy_tnua::prelude::*;
 
 use super::{Player, PlayerConfig};
 use crate::camera::controller::PlayerCamera;
+use crate::input::manager::ActionState;
+use crate::input::config::GameAction;
 
 /// Player input state.
 #[derive(Resource, Default)]
@@ -14,26 +16,26 @@ pub struct PlayerInput {
 
 /// Read keyboard input.
 pub fn read_player_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    action_state: Res<ActionState>,
     mut input: ResMut<PlayerInput>,
 ) {
     let mut movement = Vec2::ZERO;
-    if keyboard.pressed(KeyCode::KeyW) {
+    if action_state.pressed(GameAction::MoveForward) {
         movement.y += 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyS) {
+    if action_state.pressed(GameAction::MoveBackward) {
         movement.y -= 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyA) {
+    if action_state.pressed(GameAction::MoveLeft) {
         movement.x -= 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyD) {
+    if action_state.pressed(GameAction::MoveRight) {
         movement.x += 1.0;
     }
     input.movement = movement.normalize_or_zero();
 
-    input.jump = keyboard.just_pressed(KeyCode::Space);
-    input.sprint = keyboard.pressed(KeyCode::ShiftLeft);
+    input.jump = action_state.just_pressed(GameAction::Jump);
+    input.sprint = action_state.pressed(GameAction::Sprint);
 }
 
 /// Apply input to Tnua controller.

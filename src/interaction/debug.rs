@@ -21,7 +21,7 @@ use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace, stop_area_trace};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
-use crate::voxel::meshing::{ChunkMesh, MeshSettings};
+use crate::voxel::meshing::{ChunkMesh, MeshSettings, Face, get_blocky_material_index};
 use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
@@ -482,6 +482,18 @@ pub fn update_debug_overlay(
             ));
             if let Some(normal) = targeted.normal {
                 text_content.push_str(&format!("Target face normal: {:?}\n", normal));
+                // Show blocky texture layer for this face
+                let face = normal_to_face(normal);
+                let blocky_layer = get_blocky_material_index(voxel_type, face);
+                let layer_name = match blocky_layer {
+                    0 => "grass (atlas 3)",
+                    1 => "dirt (atlas 0)",
+                    2 => "rock (atlas 1)",
+                    3 => "sand (atlas 4)",
+                    4 => "grass_side (atlas 7)",
+                    _ => "unknown",
+                };
+                text_content.push_str(&format!("Blocky layer: {} = {}\n", blocky_layer, layer_name));
             }
         }
 
@@ -595,6 +607,23 @@ pub fn update_debug_overlay(
 
     for mut text in query.iter_mut() {
         **text = text_content.clone();
+    }
+}
+
+/// Convert a block face normal (IVec3) to a Face enum.
+fn normal_to_face(normal: IVec3) -> Face {
+    if normal.y > 0 {
+        Face::Top
+    } else if normal.y < 0 {
+        Face::Bottom
+    } else if normal.z > 0 {
+        Face::South
+    } else if normal.z < 0 {
+        Face::North
+    } else if normal.x > 0 {
+        Face::East
+    } else {
+        Face::West
     }
 }
 

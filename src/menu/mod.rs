@@ -232,10 +232,29 @@ fn close_menu(
     state.open = false;
     state.current_screen = MenuScreen::Main;
 }
-
 // ============================================================================
 // Menu Button Handling
 // ============================================================================
+
+use bevy::ecs::system::SystemParam;
+
+#[derive(SystemParam)]
+pub struct MultiplayerResources<'w> {
+    pub form_state: ResMut<'w, MultiplayerFormState>,
+    pub connect_tasks: ResMut<'w, ConnectTaskState>,
+    pub network: ResMut<'w, NetworkSession>,
+    pub chat: ResMut<'w, ChatState>,
+}
+
+#[derive(SystemParam)]
+pub struct PreviewResources<'w> {
+    pub image: Option<Res<'w, BlockPreviewImage>>,
+    pub triplanar_image: Option<Res<'w, crate::menu::preview_3d::TriplanarPreviewImage>>,
+    pub material: Option<Res<'w, crate::rendering::blocky_material::BlockyMaterialHandle>>,
+    pub triplanar_material: Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
+    pub mapping: Option<Res<'w, crate::rendering::array_loader::AtlasMapping>>,
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+}
 
 /// Handles menu button clicks.
 fn handle_menu_buttons(
@@ -248,10 +267,7 @@ fn handle_menu_buttons(
     mut state: ResMut<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
     mut drag_state: ResMut<SettingsDialogDrag>,
-    mut form_state: ResMut<MultiplayerFormState>,
-    mut connect_tasks: ResMut<ConnectTaskState>,
-    mut network: ResMut<NetworkSession>,
-    mut chat: ResMut<ChatState>,
+    mut multiplayer: MultiplayerResources,
     favorites_list: Query<Entity, With<FavoritesList>>,
     asset_server: Res<AssetServer>,
     mut commands: Commands,
@@ -260,10 +276,7 @@ fn handle_menu_buttons(
     visual_settings: Res<VisualSettings>,
     fog_config: Res<FogConfig>,
     atmosphere: Res<AtmosphereSettings>,
-    block_preview_image: Res<BlockPreviewImage>,
-    blocky_material_handle: Res<crate::rendering::blocky_material::BlockyMaterialHandle>,
-    atlas_mapping: Res<crate::rendering::array_loader::AtlasMapping>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    mut preview: PreviewResources,
 ) {
     for (interaction, action) in interaction_query.iter_mut() {
         if *interaction != Interaction::Pressed {
@@ -278,14 +291,14 @@ fn handle_menu_buttons(
                 handle_load_button(&mut commands, &chunk_meshes, &mut world);
             }
             PauseMenuButton::StartServer => {
-                multiplayer::handle_start_server(&form_state, &mut network, &mut chat);
+                multiplayer::handle_start_server(&multiplayer.form_state, &mut multiplayer.network, &mut multiplayer.chat);
             }
             PauseMenuButton::Connect => {
                 multiplayer::handle_connect_button(
-                    &form_state,
-                    &mut connect_tasks,
-                    &network,
-                    &mut chat,
+                    &multiplayer.form_state,
+                    &mut multiplayer.connect_tasks,
+                    &multiplayer.network,
+                    &mut multiplayer.chat,
                 );
             }
             PauseMenuButton::Settings => {
@@ -297,14 +310,11 @@ fn handle_menu_buttons(
                     &capabilities,
                     &drag_state,
                     &world_config,
-                    &block_preview_image,
-                    &blocky_material_handle,
-                    &atlas_mapping,
-                    &mut meshes,
+                    &mut preview,
                 );
             }
             PauseMenuButton::Multiplayer => {
-                handle_multiplayer_button(&mut commands, &asset_server, &mut state, &form_state);
+                handle_multiplayer_button(&mut commands, &asset_server, &mut state, &multiplayer.form_state);
             }
             PauseMenuButton::BackToMain => {
                 handle_back_to_main(&mut commands, &asset_server, &mut state);
@@ -313,12 +323,13 @@ fn handle_menu_buttons(
                 multiplayer::handle_save_favorite(
                     &mut commands,
                     &asset_server,
-                    &mut form_state,
+                    &mut multiplayer.form_state,
                     &favorites_list,
                 );
             }
             PauseMenuButton::Resume => {
-                close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state, &mut drag_state);
+                // close_menu requires mutable references which we have in multiplayer struct for form_state.
+                close_menu(&mut commands, &mut state, &mut multiplayer.form_state, &mut settings_state, &mut drag_state);
             }
         }
 
@@ -375,12 +386,16 @@ fn handle_settings_button(
     capabilities: &GraphicsCapabilities,
     drag_state: &SettingsDialogDrag,
     world_config: &WorldConfig,
-    block_preview_image: &Res<BlockPreviewImage>,
-    blocky_material: &Res<crate::rendering::blocky_material::BlockyMaterialHandle>,
-    atlas_mapping: &Res<crate::rendering::array_loader::AtlasMapping>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    preview: &mut PreviewResources,
 ) {
     if settings_state.dialog_root.is_none() {
+        // Check if all preview resources are available
+        let (Some(image), Some(trip_image), Some(material), Some(trip_material), Some(mapping)) = 
+            (preview.image.as_ref(), preview.triplanar_image.as_ref(), preview.material.as_ref(), preview.triplanar_material.as_ref(), preview.mapping.as_ref()) else {
+            warn!("Settings dialog opened but preview resources not ready yet");
+            return;
+        };
+        
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
         settings_state.active_tab = SettingsTab::Graphics;
         settings_state.greedy_meshing = world_config.greedy_meshing;
@@ -393,22 +408,24 @@ fn handle_settings_button(
             capabilities.ray_tracing_supported,
             drag_state.position,
             asset_server,
-            block_preview_image,
+            image,
+            trip_image,
         );
         settings_state.dialog_root = Some(dialog);
         
-        // Spawn the 3D preview scene separately (it's not part of the UI node tree directly)
-        // But we want it to be managed by the dialog lifecycle?
-        // Actually, let's pass the resources to spawn_settings_dialog and let it decide or call spawn_preview_scene there.
-        // Wait, spawn_settings_dialog needs to call spawn_preview_scene.
-        // Let's modify spawn_settings_dialog to take these args.
-        
         preview_3d::spawn_preview_scene(
             commands,
-            block_preview_image,
-            meshes,
-            blocky_material,
-            atlas_mapping,
+            image,
+            &mut preview.meshes,
+            material,
+            mapping,
+        );
+
+        preview_3d::spawn_triplanar_preview_scene(
+            commands,
+            trip_image,
+            &mut preview.meshes,
+            trip_material,
         );
     }
 }

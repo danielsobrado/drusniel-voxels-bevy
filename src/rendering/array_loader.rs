@@ -4,26 +4,18 @@ use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerD
 use bevy::render::render_resource::{
     Extent3d, TextureDataOrder, TextureDescriptor, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension, TextureUsages,
 };
+use std::fs;
+use std::path::Path;
 
 use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
 use crate::rendering::materials::VoxelMaterial;
 use crate::rendering::mipmaps::{calculate_mip_count, generate_array_mipmaps_rgba8};
+use crate::constants::{ATLAS_TILE_SIZE, ATLAS_COLUMNS};
 
+/// Resource to track atlas loading state
 #[derive(Resource)]
 pub struct TextureArraySource {
-    // Albedo handles (5 layers: grass, dirt, rock, sand, grass_side)
-    pub grass: Handle<Image>,
-    pub dirt: Handle<Image>,
-    pub rock: Handle<Image>,
-    pub sand: Handle<Image>,
-    // grass_side is generated procedurally from grass + dirt
-
-    // Normal handles
-    pub grass_n: Handle<Image>,
-    pub dirt_n: Handle<Image>,
-    pub rock_n: Handle<Image>,
-    pub sand_n: Handle<Image>,
-
+    pub atlas: Handle<Image>,
     pub loaded: bool,
 }
 
@@ -33,131 +25,271 @@ pub struct BlockyTextureArray {
     pub normal: Handle<Image>,
 }
 
-/// Generate a grass_side texture by blending grass (top portion) with dirt (bottom portion).
-/// This creates the classic Minecraft-style grass block side appearance.
-fn generate_grass_side_texture(
-    images: &Assets<Image>,
-    grass_handle: &Handle<Image>,
-    dirt_handle: &Handle<Image>,
-) -> Image {
-    use bevy::render::render_resource::TextureFormat;
+/// Atlas tile mapping configuration - maps texture array layers to atlas tile indices
+/// This can be modified at runtime via the settings UI and saved to YAML
+#[derive(Resource, Clone)]
+pub struct AtlasMapping {
+    /// Atlas tile index for grass texture (layer 0)
+    pub grass: u32,
+    /// Atlas tile index for dirt texture (layer 1)
+    pub dirt: u32,
+    /// Atlas tile index for rock texture (layer 2)
+    pub rock: u32,
+    /// Atlas tile index for sand texture (layer 3)
+    pub sand: u32,
+    /// Atlas tile index for grass_side texture (layer 4)
+    pub grass_side: u32,
+    /// Flag to trigger texture array rebuild
+    pub needs_rebuild: bool,
+}
 
-    let grass_img = images.get(grass_handle).expect("Grass texture not loaded");
-    let dirt_img = images.get(dirt_handle).expect("Dirt texture not loaded");
-
-    let width = grass_img.width();
-    let height = grass_img.height();
-
-    let grass_data = grass_img.data.as_ref().expect("Grass texture has no data");
-    let dirt_data = dirt_img.data.as_ref().expect("Dirt texture has no data");
-
-    // Get bytes per pixel from actual texture format
-    let grass_format = grass_img.texture_descriptor.format;
-    let dirt_format = dirt_img.texture_descriptor.format;
-
-    // Helper to read a pixel as RGBA8 from various formats
-    let read_pixel = |data: &[u8], pixel_idx: usize, format: TextureFormat| -> (u8, u8, u8, u8) {
-        match format {
-            TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => {
-                let offset = pixel_idx * 4;
-                (data[offset], data[offset + 1], data[offset + 2], data[offset + 3])
-            }
-            TextureFormat::Rgba16Unorm | TextureFormat::Rgba16Float | TextureFormat::Rgba16Uint | TextureFormat::Rgba16Sint => {
-                let offset = pixel_idx * 8;
-                let r16 = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                let g16 = u16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-                let b16 = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
-                let a16 = u16::from_le_bytes([data[offset + 6], data[offset + 7]]);
-                ((r16 / 257) as u8, (g16 / 257) as u8, (b16 / 257) as u8, (a16 / 257) as u8)
-            }
-            // Note: Rgb8Unorm doesn't exist in wgpu - RGB formats without alpha
-            // are not directly supported. The fallback below handles 3-byte formats.
-            TextureFormat::R8Unorm => {
-                // Single channel grayscale - expand to RGBA
-                let v = data[pixel_idx];
-                (v, v, v, 255)
-            }
-            _ => {
-                // Fallback: try to read as Rgba8, or return magenta for unknown
-                let bpp = data.len() / (width * height) as usize;
-                if bpp >= 4 {
-                    let offset = pixel_idx * bpp;
-                    (data[offset], data[offset + 1], data[offset + 2], data[offset + 3])
-                } else if bpp >= 3 {
-                    let offset = pixel_idx * bpp;
-                    (data[offset], data[offset + 1], data[offset + 2], 255)
-                } else {
-                    (255, 0, 255, 255) // Magenta for debug
-                }
-            }
+impl Default for AtlasMapping {
+    fn default() -> Self {
+        Self {
+            grass: 3,       // Atlas tile 3 = pure grass (green)
+            dirt: 0,        // Atlas tile 0 = dirt (brown)
+            rock: 1,        // Atlas tile 1 = rock/stone
+            sand: 4,        // Atlas tile 4 = sand
+            grass_side: 7,  // Atlas tile 7 = Minecraft-style grass side
+            needs_rebuild: false,
         }
-    };
+    }
+}
 
-    // Create output as Rgba8
-    let mut result_data = Vec::with_capacity((width * height * 4) as usize);
+impl AtlasMapping {
+    /// Load mapping from YAML config file
+    pub fn load_from_yaml() -> Self {
+        let config_path = Path::new("config/blocky_textures.yaml");
+        if !config_path.exists() {
+            info!("No blocky_textures.yaml found, using defaults");
+            return Self::default();
+        }
 
-    // Grass covers top ~20% of the texture, with a slight gradient blend
-    let grass_end_row = (height as f32 * 0.20) as u32;
-    let blend_rows = (height as f32 * 0.05) as u32; // 5% blend zone
+        match fs::read_to_string(config_path) {
+            Ok(contents) => {
+                // Simple YAML parsing for our specific format
+                let mut mapping = Self::default();
 
-    for y in 0..height {
-        for x in 0..width {
-            let pixel_idx = (y * width + x) as usize;
+                // Look for atlas_mapping section
+                if let Some(atlas_section) = contents.find("atlas_mapping:") {
+                    let section = &contents[atlas_section..];
 
-            let (gr, gg, gb, ga) = read_pixel(grass_data, pixel_idx, grass_format);
-            let (dr, dg, db, da) = read_pixel(dirt_data, pixel_idx, dirt_format);
+                    // Parse each line for layer mappings
+                    for line in section.lines().take(10) {
+                        let line = line.trim();
+                        if line.starts_with("grass:") && !line.contains("grass_side") {
+                            if let Some(val) = parse_yaml_u32(line) {
+                                mapping.grass = val;
+                            }
+                        } else if line.starts_with("dirt:") {
+                            if let Some(val) = parse_yaml_u32(line) {
+                                mapping.dirt = val;
+                            }
+                        } else if line.starts_with("rock:") {
+                            if let Some(val) = parse_yaml_u32(line) {
+                                mapping.rock = val;
+                            }
+                        } else if line.starts_with("sand:") {
+                            if let Some(val) = parse_yaml_u32(line) {
+                                mapping.sand = val;
+                            }
+                        } else if line.starts_with("grass_side:") {
+                            if let Some(val) = parse_yaml_u32(line) {
+                                mapping.grass_side = val;
+                            }
+                        }
+                    }
+                }
 
-            // Blend based on Y position (y=0 is top of texture)
-            let (r, g, b, a) = if y < grass_end_row {
-                // Pure grass zone
-                (gr, gg, gb, ga)
-            } else if y < grass_end_row + blend_rows {
-                // Blend zone - smooth transition from grass to dirt
-                let t = (y - grass_end_row) as f32 / blend_rows.max(1) as f32;
-                let blend = |g: u8, d: u8| -> u8 {
-                    (g as f32 * (1.0 - t) + d as f32 * t) as u8
-                };
-                (blend(gr, dr), blend(gg, dg), blend(gb, db), blend(ga, da))
-            } else {
-                // Pure dirt zone
-                (dr, dg, db, da)
-            };
-
-            result_data.push(r);
-            result_data.push(g);
-            result_data.push(b);
-            result_data.push(a);
+                info!("Loaded atlas mapping: grass={}, dirt={}, rock={}, sand={}, grass_side={}",
+                    mapping.grass, mapping.dirt, mapping.rock, mapping.sand, mapping.grass_side);
+                mapping
+            }
+            Err(e) => {
+                warn!("Failed to read blocky_textures.yaml: {}", e);
+                Self::default()
+            }
         }
     }
 
-    Image::new(
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        result_data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    )
+    /// Save mapping to YAML config file
+    pub fn save_to_yaml(&self) -> Result<(), String> {
+        let config_path = Path::new("config/blocky_textures.yaml");
+
+        // Read existing file or create new content
+        let mut contents = if config_path.exists() {
+            fs::read_to_string(config_path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // Remove existing atlas_mapping section if present
+        if let Some(start) = contents.find("# Atlas tile mapping") {
+            if let Some(end) = contents[start..].find("\n\n") {
+                contents = format!("{}{}", &contents[..start], &contents[start + end..]);
+            }
+        }
+        if let Some(start) = contents.find("atlas_mapping:") {
+            // Find the end of this section (next section or end of file)
+            let section_end = contents[start..]
+                .find("\n\n")
+                .map(|i| start + i)
+                .unwrap_or(contents.len());
+            contents = format!("{}{}", &contents[..start], &contents[section_end..]);
+        }
+
+        // Append our atlas_mapping section
+        let mapping_yaml = format!(
+r#"
+# Atlas tile mapping (editable via in-game UI)
+# Atlas layout: 4x4 grid, tiles numbered 0-15 left-to-right, top-to-bottom
+#   Row 0: 0=dirt, 1=stone, 2=clay, 3=grass
+#   Row 1: 4=sand, 5=water, 6=dirt_variant, 7=grass_side
+#   Row 2: 8=leaves, 9-11=other
+#   Row 3: 12-15=other
+atlas_mapping:
+  grass: {}       # Layer 0 - top of grass blocks, leaves
+  dirt: {}        # Layer 1 - underground, bottom of grass blocks
+  rock: {}        # Layer 2 - stone, bedrock, dungeon
+  sand: {}        # Layer 3 - sand/beach
+  grass_side: {}  # Layer 4 - sides of grass blocks (Minecraft style)
+"#,
+            self.grass, self.dirt, self.rock, self.sand, self.grass_side
+        );
+
+        contents.push_str(&mapping_yaml);
+
+        // Write back
+        fs::write(config_path, contents).map_err(|e| format!("Failed to write config: {}", e))?;
+
+        info!("Saved atlas mapping to config/blocky_textures.yaml");
+        Ok(())
+    }
+
+    /// Get tile indices as array for texture extraction
+    pub fn as_tile_indices(&self) -> [u32; 5] {
+        [self.grass, self.dirt, self.rock, self.sand, self.grass_side]
+    }
+}
+
+/// Helper to parse a u32 value from a YAML line like "grass: 3"
+fn parse_yaml_u32(line: &str) -> Option<u32> {
+    line.split(':')
+        .nth(1)?
+        .split('#')  // Remove comments
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Extract a single tile from the atlas as RGBA8 data
+fn extract_tile_from_atlas(
+    atlas_data: &[u8],
+    atlas_width: u32,
+    atlas_height: u32,
+    tile_idx: u32,
+    tile_size: u32,
+    columns: u32,
+    format: TextureFormat,
+) -> Vec<u8> {
+    let tile_col = tile_idx % columns;
+    let tile_row = tile_idx / columns;
+    let tile_x = tile_col * tile_size;
+    let tile_y = tile_row * tile_size;
+
+    // Determine bytes per pixel based on format
+    let (bpp, is_16bit) = match format {
+        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => (4, false),
+        TextureFormat::Rgba16Unorm | TextureFormat::Rgba16Float => (8, true),
+        _ => {
+            // Fallback: infer from data size
+            let total_pixels = (atlas_width * atlas_height) as usize;
+            let bpp = atlas_data.len() / total_pixels;
+            (bpp, bpp == 8)
+        }
+    };
+
+    let mut tile_data = Vec::with_capacity((tile_size * tile_size * 4) as usize);
+
+    for y in 0..tile_size {
+        for x in 0..tile_size {
+            let atlas_x = tile_x + x;
+            let atlas_y = tile_y + y;
+
+            // Bounds check
+            if atlas_x >= atlas_width || atlas_y >= atlas_height {
+                // Out of bounds - use magenta for debug
+                tile_data.extend_from_slice(&[255, 0, 255, 255]);
+                continue;
+            }
+
+            let pixel_idx = (atlas_y * atlas_width + atlas_x) as usize;
+            let byte_offset = pixel_idx * bpp;
+
+            if is_16bit {
+                // Convert Rgba16 to Rgba8
+                if byte_offset + 7 < atlas_data.len() {
+                    let r16 = u16::from_le_bytes([atlas_data[byte_offset], atlas_data[byte_offset + 1]]);
+                    let g16 = u16::from_le_bytes([atlas_data[byte_offset + 2], atlas_data[byte_offset + 3]]);
+                    let b16 = u16::from_le_bytes([atlas_data[byte_offset + 4], atlas_data[byte_offset + 5]]);
+                    let a16 = u16::from_le_bytes([atlas_data[byte_offset + 6], atlas_data[byte_offset + 7]]);
+                    tile_data.push((r16 / 257) as u8);
+                    tile_data.push((g16 / 257) as u8);
+                    tile_data.push((b16 / 257) as u8);
+                    tile_data.push((a16 / 257) as u8);
+                } else {
+                    tile_data.extend_from_slice(&[255, 0, 255, 255]);
+                }
+            } else {
+                // Copy Rgba8 directly
+                if byte_offset + 3 < atlas_data.len() {
+                    tile_data.push(atlas_data[byte_offset]);
+                    tile_data.push(atlas_data[byte_offset + 1]);
+                    tile_data.push(atlas_data[byte_offset + 2]);
+                    tile_data.push(atlas_data[byte_offset + 3]);
+                } else if byte_offset + 2 < atlas_data.len() {
+                    // RGB without alpha
+                    tile_data.push(atlas_data[byte_offset]);
+                    tile_data.push(atlas_data[byte_offset + 1]);
+                    tile_data.push(atlas_data[byte_offset + 2]);
+                    tile_data.push(255);
+                } else {
+                    tile_data.extend_from_slice(&[255, 0, 255, 255]);
+                }
+            }
+        }
+    }
+
+    tile_data
+}
+
+/// Generate a flat normal map tile (pointing straight up)
+fn generate_flat_normal_tile(tile_size: u32) -> Vec<u8> {
+    let pixel_count = (tile_size * tile_size) as usize;
+    let mut data = Vec::with_capacity(pixel_count * 4);
+
+    // Flat normal: (0.5, 0.5, 1.0) in normalized space = (128, 128, 255) in byte space
+    for _ in 0..pixel_count {
+        data.push(128); // R = X
+        data.push(128); // G = Y
+        data.push(255); // B = Z (pointing up)
+        data.push(255); // A
+    }
+
+    data
 }
 
 pub fn start_loading_texture_arrays(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
+    // Load atlas mapping from YAML config
+    let mapping = AtlasMapping::load_from_yaml();
+    commands.insert_resource(mapping);
+
     commands.insert_resource(TextureArraySource {
-        grass: asset_server.load("pbr/grass/albedo.png"),
-        dirt: asset_server.load("pbr/dirt/albedo.png"),
-        rock: asset_server.load("pbr/rock/albedo.png"),
-        sand: asset_server.load("pbr/sand/albedo.png"),
-        
-        grass_n: asset_server.load("pbr/grass/normal.png"),
-        dirt_n: asset_server.load("pbr/dirt/normal.png"),
-        rock_n: asset_server.load("pbr/rock/normal.png"),
-        sand_n: asset_server.load("pbr/sand/normal.png"),
-        
+        atlas: asset_server.load("textures/atlas.png"),
         loaded: false,
     });
 }
@@ -165,117 +297,87 @@ pub fn start_loading_texture_arrays(
 pub fn create_texture_array(
     mut commands: Commands,
     mut source: ResMut<TextureArraySource>,
+    mut mapping: ResMut<AtlasMapping>,
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<BlockyMaterial>>,
-    _mat_handle_res: Option<ResMut<BlockyMaterialHandle>>,
+    existing_handle: Option<ResMut<BlockyMaterialHandle>>,
 ) {
+    // Check if we need to rebuild due to mapping change
+    let needs_rebuild = mapping.needs_rebuild;
+    if needs_rebuild {
+        mapping.needs_rebuild = false;
+        source.loaded = false; // Force rebuild
+        info!("Rebuilding texture array due to mapping change...");
+    }
+
     if source.loaded {
         return;
     }
 
-    // Check if all textures are loaded
-    let handles = [
-        &source.grass, &source.dirt, &source.rock, &source.sand,
-        &source.grass_n, &source.dirt_n, &source.rock_n, &source.sand_n,
-    ];
-
-    for handle in handles {
-        if !asset_server.is_loaded(handle) {
-            return;
-        }
+    // Check if atlas is loaded
+    if !asset_server.is_loaded(&source.atlas) {
+        return;
     }
 
+    let Some(atlas_img) = images.get(&source.atlas) else {
+        return;
+    };
+
     // All loaded, create the arrays
-    info!("Creating Texture Arrays for Blocky Material with mipmaps...");
+    info!("Creating Texture Arrays for Blocky Material from atlas...");
 
-    // Generate grass_side textures FIRST (before the closure captures images mutably)
-    // This creates the classic Minecraft-style grass block side appearance
-    let grass_side_albedo = generate_grass_side_texture(&images, &source.grass, &source.dirt);
-    let grass_side_normal = generate_grass_side_texture(&images, &source.grass_n, &source.dirt_n);
+    let atlas_width = atlas_img.width();
+    let atlas_height = atlas_img.height();
+    let atlas_format = atlas_img.texture_descriptor.format;
+    let atlas_data = atlas_img.data.as_ref().expect("Atlas has no data");
 
-    let grass_side_albedo_handle = images.add(grass_side_albedo);
-    let grass_side_normal_handle = images.add(grass_side_normal);
+    let tile_size = ATLAS_TILE_SIZE;
+    let columns = ATLAS_COLUMNS;
 
-    // Helper to create array from list of handles with mipmap generation
-    let mut create_array = |handles: &[&Handle<Image>]| -> Option<Handle<Image>> {
-        let first = images.get(handles[0])?;
-        let width = first.width();
-        let height = first.height();
-        let num_layers = handles.len() as u32;
-        // Target format is always Rgba8UnormSrgb for our shaders
+    info!("Atlas: {}x{}, tile_size={}, format={:?}", atlas_width, atlas_height, tile_size, atlas_format);
+
+    // Extract tiles for each layer using the current mapping
+    // Texture array layers: 0=grass, 1=dirt, 2=rock, 3=sand, 4=grass_side
+    let tile_indices = mapping.as_tile_indices();
+
+    let mut albedo_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
+    let mut normal_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
+
+    for &tile_idx in &tile_indices {
+        let tile_data = extract_tile_from_atlas(
+            atlas_data,
+            atlas_width,
+            atlas_height,
+            tile_idx,
+            tile_size,
+            columns,
+            atlas_format,
+        );
+        albedo_layers.push(tile_data);
+
+        // Generate flat normals for now (atlas doesn't have normal maps)
+        normal_layers.push(generate_flat_normal_tile(tile_size));
+    }
+
+    // Helper to create texture array from layer data
+    let create_array_from_layers = |layer_data: &[Vec<u8>], images: &mut Assets<Image>| -> Option<Handle<Image>> {
+        let width = tile_size;
+        let height = tile_size;
+        let num_layers = layer_data.len() as u32;
         let target_format = TextureFormat::Rgba8UnormSrgb;
 
-        // Calculate mip count based on texture dimensions (stop at 8x8 minimum for quality)
+        // Calculate mip count based on texture dimensions
         let mip_count = calculate_mip_count(width, height).min(8);
-
-        // Collect layer data separately for mipmap generation
-        // Convert from Rgba16 to Rgba8 if necessary
-        let mut layer_data: Vec<Vec<u8>> = Vec::with_capacity(handles.len());
-        for h in handles {
-            let img = images.get(*h)?;
-            if img.width() != width || img.height() != height {
-                warn!("Texture array layer has mismatched dimensions, skipping mipmaps");
-                return None;
-            }
-            let bytes = img.data.as_ref()?;
-            
-            // Check format PER IMAGE to handle mixing 16-bit assets with 8-bit generated textures
-            let is_16bit = matches!(
-                img.texture_descriptor.format,
-                TextureFormat::Rgba16Unorm | TextureFormat::Rgba16Float | TextureFormat::Rgba16Uint | TextureFormat::Rgba16Sint
-            );
-
-            if is_16bit {
-                // Convert Rgba16 (8 bytes/pixel) to Rgba8 (4 bytes/pixel)
-                // Each channel: u16 (0-65535) -> u8 (0-255) by dividing by 257
-                let pixel_count = (width * height) as usize;
-                
-                // Safety check to ensure we don't read out of bounds if format lies
-                if bytes.len() < pixel_count * 8 {
-                    warn!("Texture claims 16-bit format but data is too small! Expected {}, got {}", pixel_count * 8, bytes.len());
-                    // Fallback to copy if size matches 8-bit
-                    if bytes.len() == pixel_count * 4 {
-                        layer_data.push(bytes.to_vec());
-                        continue;
-                    }
-                    return None;
-                }
-
-                let mut rgba8_data = Vec::with_capacity(pixel_count * 4);
-
-                for i in 0..pixel_count {
-                    let offset = i * 8;
-                    // Read u16 values (little endian)
-                    let r16 = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-                    let g16 = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]);
-                    let b16 = u16::from_le_bytes([bytes[offset + 4], bytes[offset + 5]]);
-                    let a16 = u16::from_le_bytes([bytes[offset + 6], bytes[offset + 7]]);
-
-                    // Convert to u8 (divide by 257 maps 0-65535 to 0-255 correctly)
-                    rgba8_data.push((r16 / 257) as u8);
-                    rgba8_data.push((g16 / 257) as u8);
-                    rgba8_data.push((b16 / 257) as u8);
-                    rgba8_data.push((a16 / 257) as u8);
-                }
-
-                layer_data.push(rgba8_data);
-            } else {
-                layer_data.push(bytes.to_vec());
-            }
-        }
 
         info!(
             "Creating {}x{} texture array with {} layers, {} mip levels",
             width, height, num_layers, mip_count
         );
 
-        // Generate mipmaps for all layers (LayerMajor format for GPU)
-        let data_with_mips = generate_array_mipmaps_rgba8(width, height, num_layers, &layer_data, mip_count);
+        // Generate mipmaps for all layers
+        let data_with_mips = generate_array_mipmaps_rgba8(width, height, num_layers, layer_data, mip_count);
 
-        // Construct Image directly to avoid size validation issues with mipmap data
-        // Image::new() only validates against base texture size, but we have full mip chain
-        // Using LayerMajor (default) because our data is laid out as [layer0_all_mips, layer1_all_mips, ...]
         let image = Image {
             data: Some(data_with_mips),
             data_order: TextureDataOrder::LayerMajor,
@@ -293,7 +395,6 @@ pub fn create_texture_array(
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                 view_formats: &[],
             },
-            // Configure sampler for array with trilinear filtering (uses mipmaps)
             sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
                 address_mode_u: ImageAddressMode::Repeat,
                 address_mode_v: ImageAddressMode::Repeat,
@@ -301,11 +402,9 @@ pub fn create_texture_array(
                 mag_filter: ImageFilterMode::Linear,
                 min_filter: ImageFilterMode::Linear,
                 mipmap_filter: ImageFilterMode::Linear,
-                // Enable anisotropic filtering for better quality at oblique angles
                 anisotropy_clamp: 16,
                 ..default()
             }),
-            // Critical: Set correct TextureView to 2D Array with all mip levels
             texture_view_descriptor: Some(TextureViewDescriptor {
                 dimension: Some(TextureViewDimension::D2Array),
                 mip_level_count: Some(mip_count),
@@ -318,15 +417,13 @@ pub fn create_texture_array(
         Some(images.add(image))
     };
 
-    // Create texture arrays with 5 layers: grass, dirt, rock, sand, grass_side
-    let Some(albedo_array) =
-        create_array(&[&source.grass, &source.dirt, &source.rock, &source.sand, &grass_side_albedo_handle])
-    else {
+    let Some(albedo_array) = create_array_from_layers(&albedo_layers, &mut images) else {
+        warn!("Failed to create albedo texture array");
         return;
     };
-    let Some(normal_array) =
-        create_array(&[&source.grass_n, &source.dirt_n, &source.rock_n, &source.sand_n, &grass_side_normal_handle])
-    else {
+
+    let Some(normal_array) = create_array_from_layers(&normal_layers, &mut images) else {
+        warn!("Failed to create normal texture array");
         return;
     };
 
@@ -335,21 +432,33 @@ pub fn create_texture_array(
         normal: normal_array.clone(),
     });
 
-    // Create the material
-    let material = BlockyMaterial {
-        uniforms: default(),
-        diffuse_texture: Some(albedo_array),
-        normal_texture: Some(normal_array),
-    };
+    // Create or update the material
+    if let Some(mut existing) = existing_handle {
+        // Update existing material with new textures
+        if let Some(mat) = materials.get_mut(&existing.handle) {
+            mat.diffuse_texture = Some(albedo_array);
+            mat.normal_texture = Some(normal_array);
+            info!("Updated existing BlockyMaterial with new textures");
+        }
+    } else {
+        // Create new material
+        let material = BlockyMaterial {
+            uniforms: default(),
+            diffuse_texture: Some(albedo_array),
+            normal_texture: Some(normal_array),
+        };
 
-    let handle = materials.add(material);
+        let handle = materials.add(material);
 
-    // Insert the handle so we can access it if needed
-    commands.insert_resource(BlockyMaterialHandle { handle: handle.clone() });
+        // Insert the handle so we can access it if needed
+        commands.insert_resource(BlockyMaterialHandle { handle: handle.clone() });
 
-    // CRITICAL: Insert VoxelMaterial resource so the rest of the app (meshing) can find it
-    commands.insert_resource(VoxelMaterial { handle });
-    
+        // CRITICAL: Insert VoxelMaterial resource so the rest of the app (meshing) can find it
+        commands.insert_resource(VoxelMaterial { handle });
+    }
+
     source.loaded = true;
-    info!("Blocky Texture Array created and material initialized.");
+    let indices = mapping.as_tile_indices();
+    info!("Blocky Texture Array created from atlas: grass({}), dirt({}), rock({}), sand({}), grass_side({})",
+        indices[0], indices[1], indices[2], indices[3], indices[4]);
 }

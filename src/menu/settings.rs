@@ -25,7 +25,7 @@ use super::ui::{ACTIVE_BG, BUTTON_BG, INACTIVE_BG, INPUT_ACTIVE_BG, INPUT_INACTI
 // ============================================================================
 
 /// Spawns the settings dialog as a child of the menu root.
-use crate::menu::preview_3d::BlockPreviewImage;
+use crate::menu::preview_3d::{BlockPreviewImage, TriplanarPreviewImage};
 
 // ...
 
@@ -38,13 +38,14 @@ pub fn spawn_settings_dialog(
     dialog_position: Vec2,
     asset_server: &AssetServer,
     preview_image: &Res<BlockPreviewImage>,
+    triplanar_preview_image: &Res<TriplanarPreviewImage>,
 ) -> Entity {
     let mut dialog_entity = commands.spawn((
         Node {
             width: Val::Auto,
             height: Val::Auto,
-            max_width: Val::Percent(72.0),
-            max_height: Val::Percent(82.0),
+            max_width: Val::Percent(78.0), // Slightly wider to fit both previews
+            max_height: Val::Percent(85.0),
             padding: UiRect::all(Val::Px(16.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
@@ -56,12 +57,21 @@ pub fn spawn_settings_dialog(
         },
         BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.95)),
         SettingsDialogRoot,
+        // SettingsDialogDrag is a Resource, not a Component
     ));
 
     dialog_entity.with_children(|dialog| {
         spawn_settings_header(dialog, font);
         spawn_settings_tabs(dialog, font);
-        spawn_settings_content(dialog, font, &settings_state, ray_tracing_supported, asset_server, preview_image);
+        spawn_settings_content(
+            dialog,
+            font,
+            &settings_state,
+            ray_tracing_supported,
+            asset_server,
+            preview_image,
+            triplanar_preview_image,
+        );
         spawn_settings_footer(dialog, font);
     });
 
@@ -73,7 +83,104 @@ pub fn spawn_settings_dialog(
     dialog_id
 }
 
-// ...
+fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+    dialog.spawn((
+        Button,
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            align_self: AlignSelf::Stretch,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.95)),
+        SettingsDragHandle,
+    ))
+    .with_children(|header| {
+        header.spawn((
+            Node {
+                width: Val::Px(4.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
+            SettingsDragHighlight,
+        ));
+        header.spawn((
+            Text::new("⋮⋮"),
+            TextFont {
+                font: font.clone(),
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
+        ));
+        header.spawn((
+            Text::new("Settings"),
+            TextFont {
+                font: font.clone(),
+                font_size: 28.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
+}
+
+fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+    dialog
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            row_gap: Val::Px(6.0),
+            flex_wrap: FlexWrap::Wrap,
+            ..default()
+        })
+        .with_children(|tabs| {
+            spawn_settings_tab_button(tabs, font, "Graphics", SettingsTabButton::Graphics);
+            spawn_settings_tab_button(tabs, font, "Meshing", SettingsTabButton::Meshing);
+            spawn_settings_tab_button(tabs, font, "Gameplay", SettingsTabButton::Gameplay);
+            spawn_settings_tab_button(tabs, font, "Atmosphere", SettingsTabButton::Atmosphere);
+            spawn_settings_tab_button(tabs, font, "Fog", SettingsTabButton::Fog);
+            spawn_settings_tab_button(tabs, font, "Visual", SettingsTabButton::Visual);
+            spawn_settings_tab_button(tabs, font, "Controls", SettingsTabButton::Controls);
+            spawn_settings_tab_button(tabs, font, "Debug", SettingsTabButton::Debug);
+            spawn_settings_tab_button(tabs, font, "Textures", SettingsTabButton::Textures);
+        });
+}
+
+fn spawn_settings_tab_button(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    tab: SettingsTabButton,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.9)),
+            tab,
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
 
 fn spawn_settings_content(
     dialog: &mut ChildSpawnerCommands,
@@ -82,6 +189,7 @@ fn spawn_settings_content(
     ray_tracing_supported: bool,
     asset_server: &AssetServer,
     preview_image: &Res<BlockPreviewImage>,
+    triplanar_preview_image: &Res<TriplanarPreviewImage>,
 ) {
     spawn_graphics_tab(dialog, font, ray_tracing_supported);
     spawn_meshing_tab(dialog, font);
@@ -91,7 +199,7 @@ fn spawn_settings_content(
     spawn_visual_tab(dialog, font);
     spawn_controls_tab(dialog, font);
     spawn_debug_tab(dialog, font);
-    spawn_textures_tab(dialog, font, asset_server, preview_image);
+    spawn_textures_tab(dialog, font, asset_server, preview_image, triplanar_preview_image);
 }
 
 fn spawn_settings_footer(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
@@ -818,6 +926,7 @@ fn spawn_textures_tab(
     font: &Handle<Font>, 
     asset_server: &AssetServer,
     preview_image: &Res<BlockPreviewImage>,
+    triplanar_preview_image: &Res<TriplanarPreviewImage>,
 ) {
     use crate::menu::types::TexturesTabContent;
 
@@ -911,35 +1020,19 @@ fn spawn_textures_tab(
                         TextColor(Color::WHITE),
                     ));
 
-                    // Layer buttons
+                    // Layer buttons (Block Faces)
                     right.spawn(Node {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(4.0),
                         ..default()
                     }).with_children(|layers| {
-                        spawn_layer_button(layers, font, "Grass Top", ActiveTextureLayer::GrassTop, &atlas_texture);
-                        spawn_layer_button(layers, font, "Grass Side", ActiveTextureLayer::GrassSide, &atlas_texture);
-                        spawn_layer_button(layers, font, "Dirt", ActiveTextureLayer::Dirt, &atlas_texture);
-                        spawn_layer_button(layers, font, "Rock", ActiveTextureLayer::Rock, &atlas_texture);
-                        spawn_layer_button(layers, font, "Sand", ActiveTextureLayer::Sand, &atlas_texture);
+                        // We simplify the interface to edit the "Grass Block" structure primarily
+                        spawn_layer_button(layers, font, "Top Face", ActiveTextureLayer::GrassTop, &atlas_texture);
+                        spawn_layer_button(layers, font, "Side Faces", ActiveTextureLayer::GrassSide, &atlas_texture);
+                        spawn_layer_button(layers, font, "Bottom Face", ActiveTextureLayer::Dirt, &atlas_texture);
                     });
 
-                    // Cube preview section
-                    right.spawn((
-                        Text::new("3D Block Preview:"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        Node {
-                            margin: UiRect::top(Val::Px(12.0)),
-                            ..default()
-                        },
-                    ));
-
-                    // 3D Preview Image
+                    // 3D Preview Image (Blocky)
                     right.spawn((
                         Node {
                             width: Val::Px(180.0),
@@ -948,8 +1041,8 @@ fn spawn_textures_tab(
                             border: UiRect::all(Val::Px(2.0)),
                             ..default()
                         },
-                        BorderColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
-                        BackgroundColor(Color::BLACK), // Background behind render texture
+                        BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                        BackgroundColor(Color::BLACK),
                     )).with_children(|frame| {
                         frame.spawn((
                             Node {
@@ -961,35 +1054,111 @@ fn spawn_textures_tab(
                                 image: preview_image.0.clone(),
                                 ..default()
                             },
-                            BackgroundColor(Color::WHITE), // Tint for image
+                            BackgroundColor(Color::WHITE),
                         ));
                     });
 
-                    // Save button
                     right.spawn((
                         Button,
                         Node {
                             width: Val::Px(160.0),
-                            height: Val::Px(32.0),
+                            padding: UiRect::all(Val::Px(8.0)),
+                            margin: UiRect::top(Val::Px(12.0)),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
-                            margin: UiRect::top(Val::Px(12.0)),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.2, 0.5, 0.3, 0.9)),
                         SaveAtlasMappingButton,
-                    )).with_children(|btn| {
-                        btn.spawn((
+                    ))
+                    .with_children(|button| {
+                        button.spawn((
                             Text::new("Save & Apply"),
                             TextFont {
                                 font: font.clone(),
-                                font_size: 14.0,
+                                font_size: 16.0,
                                 ..default()
                             },
                             TextColor(Color::WHITE),
                         ));
                     });
                 });
+
+                // Right Panel: Splatter / Smooth Preview
+                main_row.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(16.0),
+                    margin: UiRect::left(Val::Px(20.0)),
+                    min_width: Val::Px(220.0),
+                    ..default()
+                }).with_children(|right| {
+                    right.spawn((
+                        Text::new("Splatter Mode (F6)"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.8, 0.8, 0.9, 1.0)),
+                    ));
+
+                    // Triplanar Preview Frame (Plane)
+                    right.spawn((
+                        Node {
+                            width: Val::Px(200.0),
+                            height: Val::Px(200.0),
+                            border: UiRect::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                        BackgroundColor(Color::BLACK),
+                    )).with_children(|frame| {
+                        frame.spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                ..default()
+                            },
+                            ImageNode {
+                                image: triplanar_preview_image.0.clone(),
+                                ..default()
+                            },
+                            BackgroundColor(Color::WHITE),
+                        ));
+                    });
+
+                    // Available Splatter Textures List
+                    right.spawn((
+                        Text::new("Available Terrain Types:"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        Node { margin: UiRect::top(Val::Px(12.0)), ..default() },
+                    ));
+
+                    right.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    }).with_children(|list| {
+                        // Re-use spawn_layer_button but maybe with simpler styling or logic?
+                        // Actually, these trigger the preview too.
+                        // "Rock" maps to Layer 2
+                        // "Sand" maps to Layer 4 (wait, Types.rs says Sand is 4? Let's check ENUM)
+                        // Types: GrassTop, GrassSide, Dirt, Rock, Sand.
+                        // Order: 0, 1, 2, 3, 4.
+                        spawn_layer_button(list, font, "Grass Terrain", ActiveTextureLayer::GrassTop, &atlas_texture);
+                        spawn_layer_button(list, font, "Rock Terrain", ActiveTextureLayer::Rock, &atlas_texture);
+                        spawn_layer_button(list, font, "Sand Terrain", ActiveTextureLayer::Sand, &atlas_texture);
+                        spawn_layer_button(list, font, "Dirt Terrain", ActiveTextureLayer::Dirt, &atlas_texture);
+                    });
+                });
+
+                    // Save button
+// Save button moved to center column
             });
         });
 }

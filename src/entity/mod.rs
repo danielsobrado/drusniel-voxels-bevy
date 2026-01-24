@@ -1,21 +1,15 @@
 //! Game entities and AI.
 //!
 //! This module provides:
-//! - [`wolf`] - Wolf entity with wandering behavior
-//! - [`rabbit`] - Rabbit entity with hopping animation
 //! - [`inventory`] - Player inventory system
 //! - Entity health and death systems
 //! - Item drop and collection
 
 pub mod inventory;
-pub mod rabbit;
-pub mod wolf;
 
 use bevy::prelude::*;
 
 pub use inventory::{EquippedItem, Inventory, ItemDrop, ItemType};
-pub use rabbit::Rabbit;
-pub use wolf::Wolf;
 
 // ============================================================================
 // Shared Configuration
@@ -29,24 +23,6 @@ pub struct EntitySpawnConfig {
     pub world_scan_step: i32,
     pub world_size: i32,
     pub max_search_height: i32,
-
-    // Wolves
-    pub wolf_max_count: usize,
-    pub wolf_spawn_chance: f32,
-    pub wolf_health: f32,
-    pub wolf_wander_time_min: f32,
-    pub wolf_wander_time_variance: f32,
-    pub wolf_move_speed: f32,
-
-    // Rabbits
-    pub rabbit_max_count: usize,
-    pub rabbit_spawn_step: i32,
-    pub rabbit_health: f32,
-    pub rabbit_hop_speed: f32,
-    pub rabbit_hop_height: f32,
-    pub rabbit_hop_time_min: f32,
-    pub rabbit_hop_time_variance: f32,
-    pub rabbit_scale: f32,
 }
 
 impl Default for EntitySpawnConfig {
@@ -57,24 +33,6 @@ impl Default for EntitySpawnConfig {
             world_scan_step: 4,
             world_size: 512,
             max_search_height: 64,
-
-            // Wolves
-            wolf_max_count: 50,
-            wolf_spawn_chance: 0.50,
-            wolf_health: 30.0,
-            wolf_wander_time_min: 2.0,
-            wolf_wander_time_variance: 3.0,
-            wolf_move_speed: 0.5,
-
-            // Rabbits
-            rabbit_max_count: 20,
-            rabbit_spawn_step: 25,
-            rabbit_health: 10.0,
-            rabbit_hop_speed: 3.0,
-            rabbit_hop_height: 0.5,
-            rabbit_hop_time_min: 0.5,
-            rabbit_hop_time_variance: 2.0,
-            rabbit_scale: 0.5,
         }
     }
 }
@@ -86,10 +44,7 @@ impl Default for EntitySpawnConfig {
 /// Consolidated spawn state for all entity types
 #[derive(Resource, Default)]
 pub struct EntitySpawnState {
-    pub wolves_spawned: bool,
-    pub wolves_frame_counter: u32,
-    pub rabbits_spawned: bool,
-    pub rabbits_frame_counter: u32,
+    // Placeholder if needed for other entities, currently empty as NPCs are removed
 }
 
 
@@ -193,7 +148,6 @@ impl Plugin for EntityPlugin {
             .init_resource::<EquippedItem>()
             .init_resource::<EntitySpawnState>()
             .init_resource::<EntitySpawnConfig>()
-            // NPCs (wolves, rabbits) removed
             .add_systems(
                 Update,
                 (

@@ -774,12 +774,12 @@ fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
 
 /// Map voxel/face to blocky texture array layer.
 /// Texture array layout:
-///   0: grass (top of grass blocks, leaves)
-///   1: dirt (underground, sides/bottom of grass blocks)
-///   2: rock (stone, bedrock, dungeon)
-///   3: sand
-///   4: grass_side (sides of grass blocks - grass-to-dirt transition)
-fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
+///   0: grass (top of grass blocks, leaves) - atlas tile 3
+///   1: dirt (underground, sides/bottom of grass blocks) - atlas tile 0
+///   2: rock (stone, bedrock, dungeon) - atlas tile 1
+///   3: sand - atlas tile 4
+///   4: grass_side (sides of grass blocks - grass-to-dirt transition) - atlas tile 7
+pub fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
     match voxel {
         VoxelType::TopSoil => match face {
             Face::Top => 0,    // Grass on top

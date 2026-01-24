@@ -1,0 +1,393 @@
+use bevy::prelude::*;
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::RenderTarget;
+use bevy::render::render_resource::{
+    Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+};
+// use bevy::render::view::visibility::RenderLayers;
+// RenderLayers API is unstable in this version, using position offset instead
+use bevy_mesh::{Indices, PrimitiveTopology};
+
+use crate::rendering::array_loader::AtlasMapping;
+use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
+use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+use crate::menu::types::ActiveTextureLayer;
+
+// Layer 1 for Blocky, Layer 2 for Triplanar (Layer 0 is Main World)
+// pub const BLOCK_PREVIEW_LAYER: RenderLayers = RenderLayers::layer(1);
+// pub const TRIPLANAR_PREVIEW_LAYER: RenderLayers = RenderLayers::layer(2);
+pub const PREVIEW_IMAGE_SIZE: u32 = 256;
+
+// Move previews far away to avoid rendering main world objects
+pub const BLOCK_PREVIEW_ORIGIN: Vec3 = Vec3::new(5000.0, 5000.0, 5000.0);
+pub const TRIPLANAR_PREVIEW_ORIGIN: Vec3 = Vec3::new(5200.0, 5000.0, 5000.0);
+
+#[derive(Component)]
+pub struct BlockPreviewScene;
+
+#[derive(Component)]
+pub struct BlockPreviewRotate;
+
+#[derive(Component)]
+pub struct BlockPreviewMesh;
+
+#[derive(Resource)]
+pub struct BlockPreviewImage(pub Handle<Image>);
+
+#[derive(Component)]
+pub struct TriplanarPreviewScene;
+
+#[derive(Component)]
+pub struct TriplanarPreviewMesh;
+
+#[derive(Resource)]
+pub struct TriplanarPreviewImage(pub Handle<Image>);
+
+pub struct BlockPreviewPlugin;
+
+impl Plugin for BlockPreviewPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_preview_resources);
+        app.add_systems(Update, (
+            rotate_preview_mesh,
+            update_preview_mesh_materials,
+            update_triplanar_preview_mesh,
+        ));
+    }
+}
+
+fn setup_preview_resources(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let size = Extent3d {
+        width: PREVIEW_IMAGE_SIZE,
+        height: PREVIEW_IMAGE_SIZE,
+        ..default()
+    };
+
+    // Blocky Preview Image
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some("Block Preview Image"),
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        },
+        ..default()
+    };
+    image.resize(size);
+    let image_handle = images.add(image);
+    commands.insert_resource(BlockPreviewImage(image_handle));
+
+    // Triplanar Preview Image
+    let mut trip_image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some("Triplanar Preview Image"),
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        },
+        ..default()
+    };
+    trip_image.resize(size);
+    let trip_handle = images.add(trip_image);
+    commands.insert_resource(TriplanarPreviewImage(trip_handle));
+}
+
+// Spawns the 3D scene (Blocky Cube)
+pub fn spawn_preview_scene(
+    commands: &mut Commands,
+    preview_image: &Res<BlockPreviewImage>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    blocky_material: &Res<BlockyMaterialHandle>,
+    atlas_mapping: &Res<AtlasMapping>,
+) -> Entity {
+    let root = commands
+        .spawn((
+            Transform::from_translation(BLOCK_PREVIEW_ORIGIN),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            BlockPreviewScene,
+            // BLOCK_PREVIEW_LAYER, // Layer 1
+        ))
+        .id();
+
+    // Camera
+    let camera = commands.spawn((
+        Camera3d::default(),
+        Camera {
+            target: RenderTarget::Image(preview_image.0.clone().into()),
+            order: 10,
+            ..default()
+        },
+        Transform::from_xyz(2.0, 2.5, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // BLOCK_PREVIEW_LAYER,
+    )).id();
+
+    // Light
+    let light = commands.spawn((
+        PointLight {
+            intensity: 1500.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(4.0, 8.0, 4.0),
+        GlobalTransform::default(),
+        // BLOCK_PREVIEW_LAYER,
+    )).id();
+
+    // Cube
+    let mesh_handle = meshes.add(create_preview_cube_mesh(atlas_mapping));
+
+    let cube = commands.spawn((
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(blocky_material.handle.clone()),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        BlockPreviewRotate,
+        BlockPreviewMesh,
+        // BLOCK_PREVIEW_LAYER,
+    )).id();
+
+    commands.entity(root).add_child(camera).add_child(light).add_child(cube);
+
+    root
+}
+
+// Spawns the Triplanar scene (Ground Plane)
+pub fn spawn_triplanar_preview_scene(
+    commands: &mut Commands,
+    preview_image: &Res<TriplanarPreviewImage>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    triplanar_material: &Res<TriplanarMaterialHandle>,
+) -> Entity {
+    let root = commands
+        .spawn((
+            Transform::from_translation(TRIPLANAR_PREVIEW_ORIGIN),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            TriplanarPreviewScene,
+            // TRIPLANAR_PREVIEW_LAYER, // Layer 2
+        ))
+        .id();
+
+    // Camera - Isometric Top-Down
+    let camera = commands.spawn((
+        Camera3d::default(),
+        Camera {
+            target: RenderTarget::Image(preview_image.0.clone().into()),
+            order: 11,
+            ..default()
+        },
+        Transform::from_xyz(3.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // TRIPLANAR_PREVIEW_LAYER,
+    )).id();
+
+    // Light
+    let light = commands.spawn((
+        PointLight {
+            intensity: 2000.0,
+            shadows_enabled: true,
+            range: 20.0,
+            ..default()
+        },
+        Transform::from_xyz(2.0, 6.0, 2.0),
+        GlobalTransform::default(),
+        // TRIPLANAR_PREVIEW_LAYER,
+    )).id();
+
+    // Plane Mesh
+    let mesh_handle = meshes.add(create_triplanar_plane_mesh(0)); // Default to Grass
+
+    let plane = commands.spawn((
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(triplanar_material.handle.clone()),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        // No rotation for ground plane
+        TriplanarPreviewMesh,
+        // TRIPLANAR_PREVIEW_LAYER,
+    )).id();
+
+    commands.entity(root).add_child(camera).add_child(light).add_child(plane);
+
+    root
+}
+
+fn rotate_preview_mesh(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<BlockPreviewRotate>>,
+) {
+    for mut transform in query.iter_mut() {
+        transform.rotate_y(0.5 * time.delta().as_secs_f32());
+    }
+}
+
+fn update_preview_mesh_materials(
+    mut meshes: ResMut<Assets<Mesh>>,
+    query: Query<&Mesh3d, With<BlockPreviewMesh>>,
+    atlas_mapping: Res<AtlasMapping>,
+) {
+    if !atlas_mapping.is_changed() {
+        return;
+    }
+
+    for mesh_handle in query.iter() {
+        if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+            *mesh = create_preview_cube_mesh(&atlas_mapping);
+        }
+    }
+}
+
+fn update_triplanar_preview_mesh(
+    mut meshes: ResMut<Assets<Mesh>>,
+    query: Query<&Mesh3d, With<TriplanarPreviewMesh>>,
+    active_layer: Res<ActiveTextureLayer>,
+) {
+    if !active_layer.is_changed() {
+        return;
+    }
+
+    // Map active layer to Triplanar Material Index
+    let mat_idx = match *active_layer {
+        ActiveTextureLayer::GrassTop => 0, // Grass
+        ActiveTextureLayer::Dirt => 3,     // Dirt
+        ActiveTextureLayer::Rock => 1,     // Rock
+        ActiveTextureLayer::Sand => 2,     // Sand
+        ActiveTextureLayer::GrassSide => 3, // Grass Side -> Dirt (usually terrain base)
+    };
+
+    for mesh_handle in query.iter() {
+        if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+            *mesh = create_triplanar_plane_mesh(mat_idx);
+        }
+    }
+}
+
+fn create_triplanar_plane_mesh(mat_idx: u32) -> Mesh {
+    // 2x2 Plane
+    let size = 2.0;
+    let half = size / 2.0;
+    
+    let positions = vec![
+        [-half, 0.0, -half], [ half, 0.0, -half], [ half, 0.0,  half], [-half, 0.0,  half],
+    ];
+    let normals = vec![[0.0, 1.0, 0.0]; 4];
+    let uvs = vec![
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]
+    ];
+    let indices = vec![0, 3, 1, 1, 3, 2];
+    
+    // Colors for material weights
+    // R=Mat0(Grass), G=Mat1(Rock), B=Mat2(Sand), A=Mat3(Dirt)
+    let color = match mat_idx {
+        0 => [1.0, 0.0, 0.0, 0.0], // Grass
+        1 => [0.0, 1.0, 0.0, 0.0], // Rock
+        2 => [0.0, 0.0, 1.0, 0.0], // Sand
+        3 => [0.0, 0.0, 0.0, 1.0], // Dirt
+        _ => [1.0, 0.0, 0.0, 0.0],
+    };
+    let colors = vec![color; 4];
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    
+    mesh
+}
+
+fn create_preview_cube_mesh(_mapping: &AtlasMapping) -> Mesh {
+    let size = 1.0;
+    let half = size / 2.0;
+    
+    // 24 vertices (4 per face)
+    let positions = vec![
+        // Top (+Y)
+        [-half, half, -half], [ half, half, -half], [ half, half,  half], [-half, half,  half],
+        // Bottom (-Y)
+        [-half,-half,  half], [ half,-half,  half], [ half,-half, -half], [-half,-half, -half],
+        // Right (+X)
+        [ half, half, -half], [ half,-half, -half], [ half,-half,  half], [ half, half,  half],
+        // Left (-X)
+        [-half, half,  half], [-half,-half,  half], [-half,-half, -half], [-half, half, -half],
+        // Front (+Z)
+        [-half, half,  half], [ half, half,  half], [ half,-half,  half], [-half,-half,  half],
+        // Back (-Z)
+        [ half, half, -half], [-half, half, -half], [-half,-half, -half], [ half,-half, -half],
+    ];
+
+    let normals = vec![
+        // Top
+        [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+        // Bottom
+        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        // Right
+        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        // Left
+        [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+        // Front
+        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        // Back
+        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+    ];
+    
+    let uvs = vec![
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Top
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Bottom
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Right
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Left
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Front
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Back
+    ];
+
+    let indices = vec![
+        0, 3, 1, 1, 3, 2,      // Top
+        4, 7, 5, 5, 7, 6,      // Bottom
+        8, 11, 9, 9, 11, 10,   // Right
+        12, 15, 13, 13, 15, 14,// Left
+        16, 19, 17, 17, 19, 18,// Front
+        20, 23, 21, 21, 23, 22 // Back
+    ];
+
+    // Standard Grass Block Mapping for Preview
+    // Top=0, Bottom=1, Side=4
+    let top_idx = 0u32;
+    let bottom_idx = 1u32;
+    let side_idx = 4u32;
+    
+    let color_top = [1.0, 1.0, 1.0, top_idx as f32 / 255.0];
+    let color_bottom = [1.0, 1.0, 1.0, bottom_idx as f32 / 255.0];
+    let color_side = [1.0, 1.0, 1.0, side_idx as f32 / 255.0];
+    
+    let mut colors = Vec::with_capacity(24);
+    for _ in 0..4 { colors.push(color_top); }
+    for _ in 0..4 { colors.push(color_bottom); }
+    for _ in 0..16 { colors.push(color_side); }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    
+    mesh
+}

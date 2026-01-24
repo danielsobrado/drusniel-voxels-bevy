@@ -82,3 +82,16 @@ shader:
   blend_sharpness: 1.0    # Not used in blocky mode
   normal_intensity: 1.0   # Normal map strength
   use_ambient_occlusion: true  # Enable per-vertex AO
+
+# Atlas tile mapping (editable via in-game UI)
+# Atlas layout: 4x4 grid, tiles numbered 0-15 left-to-right, top-to-bottom
+#   Row 0: 0=dirt, 1=stone, 2=clay, 3=grass
+#   Row 1: 4=sand, 5=water, 6=dirt_variant, 7=grass_side
+#   Row 2: 8=leaves, 9-11=other
+#   Row 3: 12-15=other
+atlas_mapping:
+  grass: 0       # Layer 0 - top of grass blocks, leaves
+  dirt: 1        # Layer 1 - underground, bottom of grass blocks
+  rock: 2        # Layer 2 - stone, bedrock, dungeon
+  sand: 4        # Layer 3 - sand/beach
+  grass_side: 7  # Layer 4 - sides of grass blocks (Minecraft style)

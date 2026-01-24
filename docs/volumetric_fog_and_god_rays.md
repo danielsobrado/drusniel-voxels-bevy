@@ -59,3 +59,20 @@ Volumetric fog is expensive. We applied several optimizations:
 *   **"I want stronger God Rays"**: Increase `base_intensity` in `src/atmosphere/fog.rs` (lines ~517) or increase `scattering_asymmetry` in yaml.
 *   **"The outdoors looks too foggy"**: Decrease `density` in `fog.yaml` (currently `0.00001`). You may need to increase the Indoor Multiplier code to compensate.
 *   **"The transition is too slow"**: Increase `interpolation_speed` in `src/atmosphere/fog.rs`.
+
+## Tuning History (What worked & What failed)
+To achieve the current "Clear Outdoor / Visible Indoor Godrays" look, we iterated through several values. Use this as a guide if you need to retune.
+
+| Parameter | Value | Visual Result | Verdict |
+| :--- | :--- | :--- | :--- |
+| `MIN_VOLUME_DENSITY` | `0.01` | **Whiteout**: The entire outdoors was covered in thick fog. God rays were visible but the clear view was lost. | ❌ Too High |
+| `MIN_VOLUME_DENSITY` | `0.000001` | **Invisible**: Outdoors was crystal clear, but God Rays disappeared because the base density was too low for the boost to catch. | ❌ Too Low |
+| `MIN_VOLUME_DENSITY` | `0.0002` | **Weak**: Better, but still felt like "no god rays" in some lighting conditions. | ⚠️ Marginal |
+| `MIN_VOLUME_DENSITY` | `0.0005` | **Balanced**: Provides a very subtle atmospheric haze that allows god rays to form without obscuring the view. | ✅ Current |
+| `Boost Radius` | `0.5m` | **Strict**: Only triggered when directly under a solid block. Missed tree canopies. | ❌ Too Tight |
+| `Boost Radius` | `1.25m` | **Better**: Caught most trees but still missed sparse canopies. | ⚠️ Okay |
+| `Boost Radius` | `3.0m` | **Robust**: Reliably triggers god rays when near trees or under overhangs. | ✅ Current |
+| `Light Intensity` | `300.0` | **Weak**: Rays were too faint against the sky. | ❌ Too Low |
+| `Light Intensity` | `1200.0` | **Bright**: Light shafts punch through the subtle fog (`0.0005`) clearly. | ✅ Current |
+| `Noise Texture` | `3D Noise` | **Failed**: Caused compilation errors due to Bevy version mismatches (missing `FogVolume` fields). Reverted. | ❌ Reverted |
+

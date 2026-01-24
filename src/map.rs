@@ -62,6 +62,17 @@ fn toggle_map_overlay(
     pause_menu: Res<PauseMenuState>,
     landmarks: Res<LandmarkLocations>,
 ) {
+    // ESC closes the map
+    if state.open && keys.just_pressed(KeyCode::Escape) {
+        if let Some(entity) = state.root_entity.take() {
+            commands.entity(entity).despawn();
+        }
+        state.map_container = None;
+        state.open = false;
+        return;
+    }
+
+    // M opens the map (only when not already open)
     if !keys.just_pressed(KeyCode::KeyM) {
         return;
     }
@@ -71,12 +82,7 @@ fn toggle_map_overlay(
     }
 
     if state.open {
-        if let Some(entity) = state.root_entity.take() {
-            commands.entity(entity).despawn();
-        }
-        state.map_container = None;
-        state.open = false;
-        return;
+        return; // Already open, use ESC to close
     }
 
     if pause_menu.open {
@@ -132,7 +138,7 @@ fn toggle_map_overlay(
                 ))
                 .with_children(|parent| {
                     parent.spawn((
-                        Text::new("World Map (Press M to close)"),
+                        Text::new("World Map (Press ESC to close)"),
                         TextFont {
                             font: asset_server.load("fonts/FiraSans-Bold.ttf"),
                             font_size: 22.0,

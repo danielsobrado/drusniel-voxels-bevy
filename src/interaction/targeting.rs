@@ -5,7 +5,6 @@
 
 use bevy::prelude::*;
 use crate::constants::{INTERACTION_RANGE, RAY_STEP, ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS};
-use crate::entity::Wolf;
 use crate::props::Prop;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
@@ -117,44 +116,12 @@ pub fn update_targeted_block(
 }
 
 /// System to update the targeted entity based on camera look direction.
+/// (Empty now as NPCs are removed)
 pub fn update_targeted_entity(
-    camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
-    entity_query: Query<(Entity, &Transform), With<Wolf>>,
     mut targeted: ResMut<TargetedEntity>,
 ) {
     targeted.entity = None;
     targeted.distance = f32::MAX;
-
-    if let Ok(camera_transform) = camera_query.single() {
-        let origin = camera_transform.translation;
-        let direction = camera_transform.forward().as_vec3();
-
-        // Check all entities for intersection
-        for (entity, entity_transform) in entity_query.iter() {
-            let to_entity = entity_transform.translation - origin;
-            let distance = to_entity.length();
-
-            // Skip if too far
-            if distance > INTERACTION_RANGE {
-                continue;
-            }
-
-            // Check if entity is in front of camera (within cone)
-            let dot = to_entity.normalize().dot(direction);
-            if dot < ENTITY_TARGET_CONE {
-                continue;
-            }
-
-            // Simple sphere collision
-            let closest_point = origin + direction * dot * distance;
-            let dist_to_ray = (entity_transform.translation - closest_point).length();
-
-            if dist_to_ray < ENTITY_TARGET_RADIUS && distance < targeted.distance {
-                targeted.entity = Some(entity);
-                targeted.distance = distance;
-            }
-        }
-    }
 }
 
 /// System to update the targeted prop based on camera look direction.
