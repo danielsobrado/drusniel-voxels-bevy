@@ -1,97 +1,16 @@
 # Blocky Terrain Texture Configuration
-# Maps voxel types to texture layers for the blocky (V0.1) rendering mode
+# Maps voxel types to atlas tile indices for the blocky (V0.1) rendering mode.
+# Each block type has { top, side, bottom } atlas tile indices.
+# Atlas layout: 4x4 grid, tiles numbered 0-15 left-to-right, top-to-bottom.
 #
-# The texture array has 4 layers (indices 0-3):
-#   Layer 0: Grass (TopSoil top faces, Leaves)
-#   Layer 1: Dirt (SubSoil, Clay, Wood, TopSoil bottom)
-#   Layer 2: Rock (Rock, Bedrock, Dungeon blocks)
-#   Layer 3: Sand
+# Defaults (approximate):
+#   Grass: Top=3, Side=7, Bottom=0
+#   Dirt:  Top=0, Side=0, Bottom=0
+#   Rock:  Top=1, Side=1, Bottom=1
+#   Sand:  Top=4, Side=4, Bottom=4
 
-# Texture source configuration
-# Set use_atlas: true to extract textures from atlas.png (V0.1 style)
-# Set use_atlas: false to use individual texture files (current PBR style)
-use_atlas: false
-
-# Atlas configuration (used when use_atlas: true)
-atlas:
-  path: "textures/atlas.png"
-  tile_size: 64  # Each tile in the atlas is 64x64 pixels
-  # Grid layout: 4 columns x 3 rows
-  tiles:
-    grass_top: { row: 0, col: 0 }
-    dirt: { row: 0, col: 1 }
-    stone: { row: 0, col: 2 }
-    coal: { row: 0, col: 3 }
-    sand: { row: 1, col: 0 }
-    clay: { row: 1, col: 1 }
-    water: { row: 1, col: 2 }
-    grass_side: { row: 1, col: 3 }
-    wood: { row: 2, col: 0 }
-    leaves: { row: 2, col: 1 }
-
-# Individual texture files (used when use_atlas: false)
-# These are loaded into a texture array with 4 layers
-textures:
-  # Layer 0: Grass
-  grass:
-    albedo: "pbr/grass/albedo.png"
-    normal: "pbr/grass/normal.png"
-  # Layer 1: Dirt
-  dirt:
-    albedo: "pbr/dirt/albedo.png"
-    normal: "pbr/dirt/normal.png"
-  # Layer 2: Rock
-  rock:
-    albedo: "pbr/rock/albedo.png"
-    normal: "pbr/rock/normal.png"
-  # Layer 3: Sand
-  sand:
-    albedo: "pbr/sand/albedo.png"
-    normal: "pbr/sand/normal.png"
-
-# Voxel type to texture layer mapping
-# This maps each VoxelType to a texture array layer index (0-3)
-# and optionally specifies different textures for different faces
-voxel_mapping:
-  TopSoil:
-    top: 0      # grass
-    side: 7     # grass (could use grass_side from atlas for V0.1 look)
-    bottom: 1   # dirt
-  SubSoil:
-    all: 0      # dirt
-  Clay:
-    all: 1      # dirt (or could map to clay texture)
-  Rock:
-    all: 2      # rock/stone
-  Bedrock:
-    all: 2      # rock
-  Sand:
-    all: 3      # sand
-  Wood:
-    all: 1      # dirt (bark-like)
-  Leaves:
-    all: 0      # grass (green)
-  DungeonWall:
-    all: 2      # rock
-  DungeonFloor:
-    all: 2      # rock
-
-# Shader settings for blocky mode
-shader:
-  tex_scale: 1.0          # Texture scale (1.0 = 1 tile per voxel)
-  blend_sharpness: 1.0    # Not used in blocky mode
-  normal_intensity: 1.0   # Normal map strength
-  use_ambient_occlusion: true  # Enable per-vertex AO
-
-# Atlas tile mapping (editable via in-game UI)
-# Atlas layout: 4x4 grid, tiles numbered 0-15 left-to-right, top-to-bottom
-#   Row 0: 0=dirt, 1=stone, 2=clay, 3=grass
-#   Row 1: 4=sand, 5=water, 6=dirt_variant, 7=grass_side
-#   Row 2: 8=leaves, 9-11=other
-#   Row 3: 12-15=other
 atlas_mapping:
-  grass: 0       # Layer 0 - top of grass blocks, leaves
-  dirt: 1        # Layer 1 - underground, bottom of grass blocks
-  rock: 2        # Layer 2 - stone, bedrock, dungeon
-  sand: 4        # Layer 3 - sand/beach
-  grass_side: 7  # Layer 4 - sides of grass blocks (Minecraft style)
+  grass: { top: 3, side: 7, bottom: 0 }
+  dirt: { top: 0, side: 0, bottom: 0 }
+  rock: { top: 1, side: 1, bottom: 1 }
+  sand: { top: 4, side: 4, bottom: 4 }

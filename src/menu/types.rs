@@ -325,12 +325,23 @@ pub struct AtlasTileButton(pub u32);
 #[derive(Resource, Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ActiveTextureLayer {
     #[default]
-    GrassTop,
-    GrassSide,
+    Grass,
     Dirt,
     Rock,
     Sand,
 }
+
+#[derive(Resource, Default, Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ActiveTextureFace {
+    #[default]
+    Top,
+    Side,
+    Bottom,
+}
+
+/// Marker for face selection buttons
+#[derive(Component, Copy, Clone)]
+pub struct TextureFaceButton(pub ActiveTextureFace);
 
 /// Marker for the layer selection buttons
 #[derive(Component, Copy, Clone)]

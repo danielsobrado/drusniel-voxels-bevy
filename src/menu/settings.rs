@@ -980,25 +980,41 @@ fn spawn_textures_tab(
                         TextColor(Color::WHITE),
                     ));
 
-                    // Atlas grid container (4x4 grid of tiles)
-                    left.spawn(Node {
-                        width: Val::Px(260.0),
-                        height: Val::Px(260.0),
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    }).with_children(|grid_container| {
-                        // Create 4x4 grid of clickable tiles
-                        for row in 0..4 {
-                            grid_container.spawn(Node {
-                                flex_direction: FlexDirection::Row,
+                    // Atlas Viewport (Scrollable)
+                    left.spawn((
+                        Node {
+                            width: Val::Px(280.0),
+                            height: Val::Px(260.0), // Visible area
+                            overflow: Overflow::clip(),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.5)),
+                    )).with_children(|viewport| {
+                        // Atlas Content (The long list)
+                        viewport.spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                // Allow height to expand
                                 ..default()
-                            }).with_children(|grid_row| {
-                                for col in 0..4 {
-                                    let tile_index = row * 4 + col;
-                                    spawn_atlas_tile_button(grid_row, &atlas_texture, tile_index, font);
-                                }
-                            });
-                        }
+                            },
+                            AtlasScrollContent, // Marker for scrolling system
+                        )).with_children(|content| {
+                            // Create grid of clickable tiles (Extendable)
+                            // Example: 8 rows instead of 4 to show scrolling potential (or just 4 for now)
+                            let total_rows = 6; // Increased from 4 to demonstrate scrolling if tile count increases
+                            for row in 0..total_rows {
+                                content.spawn(Node {
+                                    flex_direction: FlexDirection::Row,
+                                    ..default()
+                                }).with_children(|grid_row| {
+                                    for col in 0..4 {
+                                        let tile_index = row * 4 + col;
+                                        spawn_atlas_tile_button(grid_row, &atlas_texture, tile_index, font);
+                                    }
+                                });
+                            }
+                        });
                     });
                 });
 
@@ -1006,38 +1022,55 @@ fn spawn_textures_tab(
                 main_row.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(12.0),
-                    min_width: Val::Px(200.0),
+                    min_width: Val::Px(240.0),
                     ..default()
                 }).with_children(|right| {
-                    // Layer selection header
+                    
+                    // Middle Column: Face Selection and 3D Cube
                     right.spawn((
-                        Text::new("Select Layer to Edit:"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
+                        Text::new("2. Configure Block Faces:"),
+                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
                         TextColor(Color::WHITE),
                     ));
 
-                    // Layer buttons (Block Faces)
+                    // Face Selection
+                     right.spawn((
+                        Text::new("2. Select Face:"),
+                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                        TextColor(Color::WHITE),
+                    ));
+
                     right.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(4.0),
                         ..default()
-                    }).with_children(|layers| {
-                        // We simplify the interface to edit the "Grass Block" structure primarily
-                        spawn_layer_button(layers, font, "Top Face", ActiveTextureLayer::GrassTop, &atlas_texture);
-                        spawn_layer_button(layers, font, "Side Faces", ActiveTextureLayer::GrassSide, &atlas_texture);
-                        spawn_layer_button(layers, font, "Bottom Face", ActiveTextureLayer::Dirt, &atlas_texture);
+                    }).with_children(|row| {
+                        let mut spawn_face_btn = |label: &str, face: ActiveTextureFace| {
+                            row.spawn((
+                                Button,
+                                Node {
+                                    width: Val::Px(70.0), height: Val::Px(28.0),
+                                    justify_content: JustifyContent::Center, align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(INACTIVE_BG),
+                                BorderColor::all(Color::BLACK),
+                                TextureFaceButton(face),
+                            )).with_children(|btn| {
+                                btn.spawn((Text::new(label), TextFont { font: font.clone(), font_size: 12.0, ..default() }, TextColor(Color::WHITE)));
+                            });
+                        };
+                        spawn_face_btn("Top", ActiveTextureFace::Top);
+                        spawn_face_btn("Side", ActiveTextureFace::Side);
+                        spawn_face_btn("Bottom", ActiveTextureFace::Bottom);
                     });
 
-                    // 3D Preview Image (Blocky)
+                    // 3D Preview
                     right.spawn((
                         Node {
-                            width: Val::Px(180.0),
-                            height: Val::Px(180.0),
-                            // Border
+                            width: Val::Px(180.0), height: Val::Px(180.0),
+                            margin: UiRect::top(Val::Px(10.0)),
                             border: UiRect::all(Val::Px(2.0)),
                             ..default()
                         },
@@ -1045,19 +1078,13 @@ fn spawn_textures_tab(
                         BackgroundColor(Color::BLACK),
                     )).with_children(|frame| {
                         frame.spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            ImageNode {
-                                image: preview_image.0.clone(),
-                                ..default()
-                            },
+                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                            ImageNode { image: preview_image.0.clone(), ..default() },
                             BackgroundColor(Color::WHITE),
                         ));
                     });
 
+                    // Save settings button
                     right.spawn((
                         Button,
                         Node {
@@ -1074,86 +1101,82 @@ fn spawn_textures_tab(
                     .with_children(|button| {
                         button.spawn((
                             Text::new("Save & Apply"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 16.0,
-                                ..default()
-                            },
+                            TextFont { font: font.clone(), font_size: 16.0, ..default() },
                             TextColor(Color::WHITE),
                         ));
                     });
                 });
 
-                // Right Panel: Splatter / Smooth Preview
+                // Right Panel: Material List & Big Preview
                 main_row.spawn(Node {
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(16.0),
+                    row_gap: Val::Px(12.0),
+                    min_width: Val::Px(240.0),
                     margin: UiRect::left(Val::Px(20.0)),
-                    min_width: Val::Px(220.0),
                     ..default()
-                }).with_children(|right| {
-                    right.spawn((
-                        Text::new("Splatter Mode (F6)"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgba(0.8, 0.8, 0.9, 1.0)),
+                }).with_children(|right_col| {
+                     right_col.spawn((
+                        Text::new("3. Select Material:"),
+                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                        TextColor(Color::WHITE),
                     ));
 
-                    // Triplanar Preview Frame (Plane)
-                    right.spawn((
+                    // Material List (Vertical)
+                    right_col.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(4.0),
+                        width: Val::Percent(100.0),
+                        ..default()
+                    }).with_children(|list| {
+                        let mut spawn_list_btn = |label: &str, layer: ActiveTextureLayer| {
+                            list.spawn((
+                                Button,
+                                Node {
+                                    width: Val::Percent(100.0), 
+                                    height: Val::Px(32.0),
+                                    justify_content: JustifyContent::Start, 
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::left(Val::Px(10.0)),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(INACTIVE_BG),
+                                BorderColor::all(Color::BLACK),
+                                TextureLayerButton(layer),
+                            )).with_children(|btn| {
+                                btn.spawn((Text::new(label), TextFont { font: font.clone(), font_size: 14.0, ..default() }, TextColor(Color::WHITE)));
+                            });
+                        };
+                        
+                        spawn_list_btn("Grass", ActiveTextureLayer::Grass);
+                        spawn_list_btn("Dirt", ActiveTextureLayer::Dirt);
+                        spawn_list_btn("Rock", ActiveTextureLayer::Rock);
+                        spawn_list_btn("Sand", ActiveTextureLayer::Sand);
+                    });
+
+                    // Large Texture Preview
+                    right_col.spawn((
+                        Text::new("Selected Texture Preview:"),
+                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                        TextColor(Color::WHITE),
+                    ));
+
+                    right_col.spawn((
                         Node {
-                            width: Val::Px(200.0),
-                            height: Val::Px(200.0),
+                            width: Val::Px(200.0), height: Val::Px(200.0),
                             border: UiRect::all(Val::Px(2.0)),
                             ..default()
                         },
-                        BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                        BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 1.0)),
                         BackgroundColor(Color::BLACK),
                     )).with_children(|frame| {
-                        frame.spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            ImageNode {
-                                image: triplanar_preview_image.0.clone(),
-                                ..default()
-                            },
+                        // We use a dedicated component or tag to update this image based on selection
+                         frame.spawn((
+                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                            ImageNode { image: triplanar_preview_image.0.clone(), ..default() }, // Default to triplanar preview for now
                             BackgroundColor(Color::WHITE),
+                            LargeTexturePreviewImage,
                         ));
-                    });
-
-                    // Available Splatter Textures List
-                    right.spawn((
-                        Text::new("Available Terrain Types:"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        Node { margin: UiRect::top(Val::Px(12.0)), ..default() },
-                    ));
-
-                    right.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(6.0),
-                        ..default()
-                    }).with_children(|list| {
-                        // Re-use spawn_layer_button but maybe with simpler styling or logic?
-                        // Actually, these trigger the preview too.
-                        // "Rock" maps to Layer 2
-                        // "Sand" maps to Layer 4 (wait, Types.rs says Sand is 4? Let's check ENUM)
-                        // Types: GrassTop, GrassSide, Dirt, Rock, Sand.
-                        // Order: 0, 1, 2, 3, 4.
-                        spawn_layer_button(list, font, "Grass Terrain", ActiveTextureLayer::GrassTop, &atlas_texture);
-                        spawn_layer_button(list, font, "Rock Terrain", ActiveTextureLayer::Rock, &atlas_texture);
-                        spawn_layer_button(list, font, "Sand Terrain", ActiveTextureLayer::Sand, &atlas_texture);
-                        spawn_layer_button(list, font, "Dirt Terrain", ActiveTextureLayer::Dirt, &atlas_texture);
                     });
                 });
 
@@ -2577,6 +2600,35 @@ pub fn update_night_backgrounds(
     }
 }
 
+#[derive(Component)]
+pub struct LargeTexturePreviewImage;
+
+pub fn update_texture_preview(
+    triplanar_material: Res<crate::rendering::triplanar_material::TriplanarMaterialHandle>,
+    materials: Res<Assets<crate::rendering::triplanar_material::TriplanarMaterial>>,
+    active_layer: Res<ActiveTextureLayer>,
+    mut query: Query<&mut ImageNode, With<LargeTexturePreviewImage>>,
+) {
+    if !active_layer.is_changed() {
+        return;
+    }
+
+    if let Some(mat) = materials.get(&triplanar_material.handle) {
+        for mut image_node in query.iter_mut() {
+            let texture = match *active_layer {
+                ActiveTextureLayer::Grass => &mat.grass_albedo,
+                ActiveTextureLayer::Dirt => &mat.dirt_albedo,
+                ActiveTextureLayer::Rock => &mat.rock_albedo,
+                ActiveTextureLayer::Sand => &mat.sand_albedo,
+            };
+
+            if let Some(tex) = texture {
+                image_node.image = tex.clone();
+            }
+        }
+    }
+}
+
 /// Updates fog preset option backgrounds.
 pub fn update_fog_backgrounds(
     settings_state: Res<SettingsState>,
@@ -3315,11 +3367,30 @@ pub fn handle_texture_layer_buttons(
     }
 }
 
+pub fn handle_texture_face_buttons(
+    state: Res<PauseMenuState>,
+    settings_state: Res<SettingsState>,
+    mut active_face: ResMut<ActiveTextureFace>,
+    query: Query<(&Interaction, &TextureFaceButton), (Changed<Interaction>, With<Button>)>,
+) {
+    if !state.open || settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (interaction, face_button) in query.iter() {
+        if *interaction == Interaction::Pressed {
+            *active_face = face_button.0;
+            info!("Selected texture face: {:?}", face_button.0);
+        }
+    }
+}
+
 /// Handles atlas tile button clicks to assign tile to the active layer
 pub fn handle_atlas_tile_clicks(
     state: Res<PauseMenuState>,
     settings_state: Res<SettingsState>,
     active_layer: Res<ActiveTextureLayer>,
+    active_face: Res<ActiveTextureFace>,
     mut atlas_mapping: ResMut<crate::rendering::array_loader::AtlasMapping>,
     query: Query<(&Interaction, &AtlasTileButton), (Changed<Interaction>, With<Button>)>,
 ) {
@@ -3330,19 +3401,43 @@ pub fn handle_atlas_tile_clicks(
     for (interaction, tile_button) in query.iter() {
         if *interaction == Interaction::Pressed {
             let tile_index = tile_button.0;
-            match *active_layer {
-                ActiveTextureLayer::GrassTop => atlas_mapping.grass = tile_index,
-                ActiveTextureLayer::GrassSide => atlas_mapping.grass_side = tile_index,
-                ActiveTextureLayer::Dirt => atlas_mapping.dirt = tile_index,
-                ActiveTextureLayer::Rock => atlas_mapping.rock = tile_index,
-                ActiveTextureLayer::Sand => atlas_mapping.sand = tile_index,
+            
+            let target_map = match *active_layer {
+                ActiveTextureLayer::Grass => &mut atlas_mapping.grass,
+                ActiveTextureLayer::Dirt => &mut atlas_mapping.dirt,
+                ActiveTextureLayer::Rock => &mut atlas_mapping.rock,
+                ActiveTextureLayer::Sand => &mut atlas_mapping.sand,
+            };
+
+            match *active_face {
+                ActiveTextureFace::Top => target_map.top = tile_index,
+                ActiveTextureFace::Side => target_map.side = tile_index,
+                ActiveTextureFace::Bottom => target_map.bottom = tile_index,
             }
-            info!("Assigned atlas tile {} to layer {:?}", tile_index, *active_layer);
+            
+            info!("Assigned atlas tile {} to {:?} {:?}", tile_index, *active_layer, *active_face);
         }
     }
 }
 
-/// Updates layer button backgrounds based on active selection
+pub fn update_texture_face_backgrounds(
+    settings_state: Res<SettingsState>,
+    active_face: Res<ActiveTextureFace>,
+    mut query: Query<(&TextureFaceButton, &mut BackgroundColor)>,
+) {
+     if settings_state.dialog_root.is_none() {
+        return;
+    }
+    for (face_button, mut bg) in query.iter_mut() {
+        if face_button.0 == *active_face {
+            *bg = ACTIVE_BG.into();
+        } else {
+            *bg = INACTIVE_BG.into();
+        }
+    }
+}
+
+/// Updates layer button styles based on active selection
 pub fn update_texture_layer_backgrounds(
     settings_state: Res<SettingsState>,
     active_layer: Res<ActiveTextureLayer>,
@@ -3353,7 +3448,9 @@ pub fn update_texture_layer_backgrounds(
     }
 
     for (layer_button, mut bg) in query.iter_mut() {
-        *bg = if layer_button.0 == *active_layer {
+        let is_active = layer_button.0 == *active_layer;
+        // Simplified: only text buttons now
+        *bg = if is_active {
             ACTIVE_BG.into()
         } else {
             INACTIVE_BG.into()
@@ -3361,57 +3458,19 @@ pub fn update_texture_layer_backgrounds(
     }
 }
 
-/// Updates layer tile previews to show currently assigned atlas tiles
+/// Updates layer tile previews (NOT USED in new layout currently, but kept for compatibility or cleanup)
 pub fn update_layer_tile_previews(
-    settings_state: Res<SettingsState>,
-    atlas_mapping: Res<crate::rendering::array_loader::AtlasMapping>,
-    preview_query: Query<(&LayerTilePreview, &Children)>,
-    mut image_query: Query<&mut ImageNode>,
-    mut text_query: Query<(&LayerTileIndexText, &mut Text)>,
-) {
-    if settings_state.dialog_root.is_none() {
-        return;
-    }
-
-    for (preview, children) in preview_query.iter() {
-        let tile_index = match preview.0 {
-            ActiveTextureLayer::GrassTop => atlas_mapping.grass,
-            ActiveTextureLayer::GrassSide => atlas_mapping.grass_side,
-            ActiveTextureLayer::Dirt => atlas_mapping.dirt,
-            ActiveTextureLayer::Rock => atlas_mapping.rock,
-            ActiveTextureLayer::Sand => atlas_mapping.sand,
-        };
-
-        let row = tile_index / 4;
-        let col = tile_index % 4;
-
-        // Update the child ImageNode
-        for child in children.iter() {
-            if let Ok(mut image_node) = image_query.get_mut(child) {
-                image_node.rect = Some(bevy::math::Rect {
-                    min: bevy::math::Vec2::new(col as f32 * 256.0, row as f32 * 256.0),
-                    max: bevy::math::Vec2::new((col + 1) as f32 * 256.0, (row + 1) as f32 * 256.0),
-                });
-            }
-        }
-    }
-
-    for (text_marker, mut text) in text_query.iter_mut() {
-        let tile_index = match text_marker.0 {
-            ActiveTextureLayer::GrassTop => atlas_mapping.grass,
-            ActiveTextureLayer::GrassSide => atlas_mapping.grass_side,
-            ActiveTextureLayer::Dirt => atlas_mapping.dirt,
-            ActiveTextureLayer::Rock => atlas_mapping.rock,
-            ActiveTextureLayer::Sand => atlas_mapping.sand,
-        };
-        **text = format!("= {}", tile_index);
-    }
-}
+    // Empty implementation or removed system? 
+    // Just keeping it empty to satisfy mod.rs registration if I don't remove it there.
+    // Or I can update it to show the current tile index in a text somewhere?
+    _settings_state: Res<SettingsState>,
+) {}
 
 /// Updates cube preview faces to show current texture assignments
 pub fn update_cube_preview_faces(
     settings_state: Res<SettingsState>,
     atlas_mapping: Res<crate::rendering::array_loader::AtlasMapping>,
+    active_layer: Res<ActiveTextureLayer>,
     face_query: Query<(&CubePreviewFace, &Children)>,
     mut image_query: Query<&mut ImageNode>,
 ) {
@@ -3419,11 +3478,18 @@ pub fn update_cube_preview_faces(
         return;
     }
 
+    let map = match *active_layer {
+        ActiveTextureLayer::Grass => &atlas_mapping.grass,
+        ActiveTextureLayer::Dirt => &atlas_mapping.dirt,
+        ActiveTextureLayer::Rock => &atlas_mapping.rock,
+        ActiveTextureLayer::Sand => &atlas_mapping.sand,
+    };
+
     for (face, children) in face_query.iter() {
         let tile_index = match face {
-            CubePreviewFace::Top => atlas_mapping.grass,      // Top = grass
-            CubePreviewFace::Side => atlas_mapping.grass_side, // Side = grass_side
-            CubePreviewFace::Bottom => atlas_mapping.dirt,     // Bottom = dirt
+            CubePreviewFace::Top => map.top,
+            CubePreviewFace::Side => map.side,
+            CubePreviewFace::Bottom => map.bottom,
         };
 
         let row = tile_index / 4;
@@ -3463,5 +3529,38 @@ pub fn handle_save_atlas_mapping(
                 Err(e) => error!("Failed to save atlas mapping: {}", e),
             }
         }
+    }
+}
+
+#[derive(Component)]
+pub struct AtlasScrollContent;
+
+/// Handles mouse wheel scrolling for the Atlas Grid
+pub fn handle_atlas_scroll(
+    mut events: EventReader<bevy::input::mouse::MouseWheel>,
+    mut query: Query<&mut Node, With<AtlasScrollContent>>,
+    settings_state: Res<SettingsState>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    let scroll_delta: f32 = events.read().map(|e| e.y).sum();
+    if scroll_delta == 0.0 {
+        return;
+    }
+
+    for mut style in query.iter_mut() {
+        // Current top value (default 0.0)
+        let current_top = match style.top {
+            Val::Px(v) => v,
+            _ => 0.0,
+        };
+
+        // Scroll Speed
+        let speed = 20.0;
+        let new_top = (current_top + scroll_delta * speed).min(0.0).max(-1000.0);
+
+        style.top = Val::Px(new_top);
     }
 }

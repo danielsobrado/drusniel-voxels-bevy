@@ -27,18 +27,28 @@ pub struct BlockyTextureArray {
 
 /// Atlas tile mapping configuration - maps texture array layers to atlas tile indices
 /// This can be modified at runtime via the settings UI and saved to YAML
+/// Mapping for a single block type (Top, Side, Bottom)
+#[derive(Clone, Copy, Debug)]
+pub struct BlockAtlasMap {
+    pub top: u32,
+    pub side: u32,
+    pub bottom: u32,
+}
+
+impl Default for BlockAtlasMap {
+    fn default() -> Self {
+        Self { top: 0, side: 0, bottom: 0 }
+    }
+}
+
+/// Atlas tile mapping configuration - maps texture array layers to atlas tile indices
+/// This can be modified at runtime via the settings UI and saved to YAML
 #[derive(Resource, Clone)]
 pub struct AtlasMapping {
-    /// Atlas tile index for grass texture (layer 0)
-    pub grass: u32,
-    /// Atlas tile index for dirt texture (layer 1)
-    pub dirt: u32,
-    /// Atlas tile index for rock texture (layer 2)
-    pub rock: u32,
-    /// Atlas tile index for sand texture (layer 3)
-    pub sand: u32,
-    /// Atlas tile index for grass_side texture (layer 4)
-    pub grass_side: u32,
+    pub grass: BlockAtlasMap,
+    pub dirt: BlockAtlasMap,
+    pub rock: BlockAtlasMap,
+    pub sand: BlockAtlasMap,
     /// Flag to trigger texture array rebuild
     pub needs_rebuild: bool,
 }
@@ -46,11 +56,10 @@ pub struct AtlasMapping {
 impl Default for AtlasMapping {
     fn default() -> Self {
         Self {
-            grass: 3,       // Atlas tile 3 = pure grass (green)
-            dirt: 0,        // Atlas tile 0 = dirt (brown)
-            rock: 1,        // Atlas tile 1 = rock/stone
-            sand: 4,        // Atlas tile 4 = sand
-            grass_side: 7,  // Atlas tile 7 = Minecraft-style grass side
+            grass: BlockAtlasMap { top: 3, side: 7, bottom: 0 },
+            dirt: BlockAtlasMap { top: 0, side: 0, bottom: 0 },
+            rock: BlockAtlasMap { top: 1, side: 1, bottom: 1 },
+            sand: BlockAtlasMap { top: 4, side: 4, bottom: 4 },
             needs_rebuild: false,
         }
     }
@@ -67,42 +76,25 @@ impl AtlasMapping {
 
         match fs::read_to_string(config_path) {
             Ok(contents) => {
-                // Simple YAML parsing for our specific format
                 let mut mapping = Self::default();
 
-                // Look for atlas_mapping section
                 if let Some(atlas_section) = contents.find("atlas_mapping:") {
                     let section = &contents[atlas_section..];
-
-                    // Parse each line for layer mappings
-                    for line in section.lines().take(10) {
+                    
+                    // Helper to parse line "  grass: { top: 3, side: 7, bottom: 0 }"
+                    for line in section.lines().skip(1) {
                         let line = line.trim();
-                        if line.starts_with("grass:") && !line.contains("grass_side") {
-                            if let Some(val) = parse_yaml_u32(line) {
-                                mapping.grass = val;
-                            }
+                        if line.starts_with("grass:") {
+                            if let Some(map) = parse_block_map(line) { mapping.grass = map; }
                         } else if line.starts_with("dirt:") {
-                            if let Some(val) = parse_yaml_u32(line) {
-                                mapping.dirt = val;
-                            }
+                            if let Some(map) = parse_block_map(line) { mapping.dirt = map; }
                         } else if line.starts_with("rock:") {
-                            if let Some(val) = parse_yaml_u32(line) {
-                                mapping.rock = val;
-                            }
+                            if let Some(map) = parse_block_map(line) { mapping.rock = map; }
                         } else if line.starts_with("sand:") {
-                            if let Some(val) = parse_yaml_u32(line) {
-                                mapping.sand = val;
-                            }
-                        } else if line.starts_with("grass_side:") {
-                            if let Some(val) = parse_yaml_u32(line) {
-                                mapping.grass_side = val;
-                            }
+                            if let Some(map) = parse_block_map(line) { mapping.sand = map; }
                         }
                     }
                 }
-
-                info!("Loaded atlas mapping: grass={}, dirt={}, rock={}, sand={}, grass_side={}",
-                    mapping.grass, mapping.dirt, mapping.rock, mapping.sand, mapping.grass_side);
                 mapping
             }
             Err(e) => {
@@ -142,19 +134,17 @@ impl AtlasMapping {
         let mapping_yaml = format!(
 r#"
 # Atlas tile mapping (editable via in-game UI)
-# Atlas layout: 4x4 grid, tiles numbered 0-15 left-to-right, top-to-bottom
-#   Row 0: 0=dirt, 1=stone, 2=clay, 3=grass
-#   Row 1: 4=sand, 5=water, 6=dirt_variant, 7=grass_side
-#   Row 2: 8=leaves, 9-11=other
-#   Row 3: 12-15=other
+# Each block type has {{ top, side, bottom }} atlas tile indices
 atlas_mapping:
-  grass: {}       # Layer 0 - top of grass blocks, leaves
-  dirt: {}        # Layer 1 - underground, bottom of grass blocks
-  rock: {}        # Layer 2 - stone, bedrock, dungeon
-  sand: {}        # Layer 3 - sand/beach
-  grass_side: {}  # Layer 4 - sides of grass blocks (Minecraft style)
+  grass: {{ top: {}, side: {}, bottom: {} }}
+  dirt: {{ top: {}, side: {}, bottom: {} }}
+  rock: {{ top: {}, side: {}, bottom: {} }}
+  sand: {{ top: {}, side: {}, bottom: {} }}
 "#,
-            self.grass, self.dirt, self.rock, self.sand, self.grass_side
+            self.grass.top, self.grass.side, self.grass.bottom,
+            self.dirt.top, self.dirt.side, self.dirt.bottom,
+            self.rock.top, self.rock.side, self.rock.bottom,
+            self.sand.top, self.sand.side, self.sand.bottom,
         );
 
         contents.push_str(&mapping_yaml);
@@ -167,20 +157,38 @@ atlas_mapping:
     }
 
     /// Get tile indices as array for texture extraction
-    pub fn as_tile_indices(&self) -> [u32; 5] {
-        [self.grass, self.dirt, self.rock, self.sand, self.grass_side]
+    pub fn as_tile_indices(&self) -> [u32; 12] {
+        [
+            self.grass.top, self.grass.side, self.grass.bottom,
+            self.dirt.top, self.dirt.side, self.dirt.bottom,
+            self.rock.top, self.rock.side, self.rock.bottom,
+            self.sand.top, self.sand.side, self.sand.bottom,
+        ]
     }
 }
 
-/// Helper to parse a u32 value from a YAML line like "grass: 3"
-fn parse_yaml_u32(line: &str) -> Option<u32> {
-    line.split(':')
-        .nth(1)?
-        .split('#')  // Remove comments
-        .next()?
-        .trim()
-        .parse()
-        .ok()
+fn parse_block_map(line: &str) -> Option<BlockAtlasMap> {
+    let content = line.split(':').nth(1)?.trim();
+    // primitive parsing of "{ top: 3, side: 7, bottom: 0 }"
+    let content = content.trim_matches(|c| c == '{' || c == '}');
+    
+    let mut map = BlockAtlasMap::default();
+    
+    for part in content.split(',') {
+        let part = part.trim();
+        if let Some(idx) = part.find(':') {
+            let key = part[..idx].trim();
+            let val = part[idx+1..].trim().parse::<u32>().ok()?;
+            
+            match key {
+                "top" => map.top = val,
+                "side" => map.side = val,
+                "bottom" => map.bottom = val,
+                _ => {}
+            }
+        }
+    }
+    Some(map)
 }
 
 /// Extract a single tile from the atlas as RGBA8 data
@@ -433,7 +441,7 @@ pub fn create_texture_array(
     });
 
     // Create or update the material
-    if let Some(mut existing) = existing_handle {
+    if let Some(existing) = existing_handle {
         // Update existing material with new textures
         if let Some(mat) = materials.get_mut(&existing.handle) {
             mat.diffuse_texture = Some(albedo_array);
@@ -458,7 +466,6 @@ pub fn create_texture_array(
     }
 
     source.loaded = true;
-    let indices = mapping.as_tile_indices();
-    info!("Blocky Texture Array created from atlas: grass({}), dirt({}), rock({}), sand({}), grass_side({})",
-        indices[0], indices[1], indices[2], indices[3], indices[4]);
+    source.loaded = true;
+    info!("Blocky Texture Array created with 12 layers (4 materials * 3 faces)");
 }

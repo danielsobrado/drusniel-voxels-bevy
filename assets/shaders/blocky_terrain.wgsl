@@ -79,8 +79,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let ao = 1.0;
 #endif
 
-    // Texture array layers: 0=grass, 1=dirt, 2=rock, 3=sand, 4=grass_side
-    let layer = clamp(material_index, 0, 4);
+    // Texture array layers:
+    // Grass: 0=Top, 1=Side, 2=Bottom
+    // Dirt:  3=Top, 4=Side, 5=Bottom
+    // Rock:  6=Top, 7=Side, 8=Bottom
+    // Sand:  9=Top, 10=Side, 11=Bottom
+    let layer = clamp(material_index, 0, 11);
     let diffuse = textureSample(t_diffuse, s_diffuse, in.uv, layer) * uniforms.base_color;
 
     pbr_input.material.base_color = diffuse;

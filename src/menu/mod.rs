@@ -57,6 +57,7 @@ impl Plugin for PauseMenuPlugin {
             .init_resource::<types::RebindState>()
             .init_resource::<types::SettingsDialogDrag>()
             .init_resource::<types::ActiveTextureLayer>()
+            .init_resource::<types::ActiveTextureFace>()
             // Core menu systems
             .add_systems(Update, toggle_pause_menu)
             .add_systems(Update, handle_menu_buttons)
@@ -152,11 +153,15 @@ impl Plugin for PauseMenuPlugin {
                 Update,
                 (
                     settings::handle_texture_layer_buttons,
+                    settings::handle_texture_face_buttons,
                     settings::handle_atlas_tile_clicks,
                     settings::update_texture_layer_backgrounds,
+                    settings::update_texture_face_backgrounds,
                     settings::update_layer_tile_previews,
                     settings::update_cube_preview_faces,
                     settings::handle_save_atlas_mapping,
+                    settings::handle_atlas_scroll,
+                    settings::update_texture_preview,
                 ),
             );
     }
@@ -256,6 +261,13 @@ pub struct PreviewResources<'w> {
     pub meshes: ResMut<'w, Assets<Mesh>>,
 }
 
+#[derive(SystemParam)]
+pub struct SettingsResources<'w> {
+    pub settings_state: ResMut<'w, SettingsState>,
+    pub drag_state: ResMut<'w, SettingsDialogDrag>,
+    pub active_layer: Res<'w, types::ActiveTextureLayer>,
+}
+
 /// Handles menu button clicks.
 fn handle_menu_buttons(
     mut interaction_query: Query<
@@ -265,8 +277,7 @@ fn handle_menu_buttons(
     mut world: ResMut<VoxelWorld>,
     chunk_meshes: Query<Entity, With<ChunkMesh>>,
     mut state: ResMut<PauseMenuState>,
-    mut settings_state: ResMut<SettingsState>,
-    mut drag_state: ResMut<SettingsDialogDrag>,
+    mut settings_res: SettingsResources,
     mut multiplayer: MultiplayerResources,
     favorites_list: Query<Entity, With<FavoritesList>>,
     asset_server: Res<AssetServer>,
@@ -285,7 +296,7 @@ fn handle_menu_buttons(
 
         match action {
             PauseMenuButton::Save => {
-                handle_save_button(&world, &settings_state, &visual_settings, &fog_config, &atmosphere);
+                handle_save_button(&world, &settings_res.settings_state, &visual_settings, &fog_config, &atmosphere);
             }
             PauseMenuButton::Load => {
                 handle_load_button(&mut commands, &chunk_meshes, &mut world);
@@ -306,9 +317,8 @@ fn handle_menu_buttons(
                     &mut commands,
                     &asset_server,
                     &state,
-                    &mut settings_state,
+                    &mut settings_res,
                     &capabilities,
-                    &drag_state,
                     &world_config,
                     &mut preview,
                 );
@@ -329,7 +339,7 @@ fn handle_menu_buttons(
             }
             PauseMenuButton::Resume => {
                 // close_menu requires mutable references which we have in multiplayer struct for form_state.
-                close_menu(&mut commands, &mut state, &mut multiplayer.form_state, &mut settings_state, &mut drag_state);
+                close_menu(&mut commands, &mut state, &mut multiplayer.form_state, &mut settings_res.settings_state, &mut settings_res.drag_state);
             }
         }
 
@@ -382,13 +392,12 @@ fn handle_settings_button(
     commands: &mut Commands,
     asset_server: &AssetServer,
     state: &PauseMenuState,
-    settings_state: &mut SettingsState,
+    settings_res: &mut SettingsResources,
     capabilities: &GraphicsCapabilities,
-    drag_state: &SettingsDialogDrag,
     world_config: &WorldConfig,
     preview: &mut PreviewResources,
 ) {
-    if settings_state.dialog_root.is_none() {
+    if settings_res.settings_state.dialog_root.is_none() {
         // Check if all preview resources are available
         let (Some(image), Some(trip_image), Some(material), Some(trip_material), Some(mapping)) = 
             (preview.image.as_ref(), preview.triplanar_image.as_ref(), preview.material.as_ref(), preview.triplanar_material.as_ref(), preview.mapping.as_ref()) else {
@@ -397,21 +406,21 @@ fn handle_settings_button(
         };
         
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
-        settings_state.active_tab = SettingsTab::Graphics;
-        settings_state.greedy_meshing = world_config.greedy_meshing;
+        settings_res.settings_state.active_tab = SettingsTab::Graphics;
+        settings_res.settings_state.greedy_meshing = world_config.greedy_meshing;
         
         let dialog = settings::spawn_settings_dialog(
             commands,
             state.root_entity,
             &font,
-            settings_state.clone(),
+            settings_res.settings_state.clone(),
             capabilities.ray_tracing_supported,
-            drag_state.position,
+            settings_res.drag_state.position,
             asset_server,
             image,
             trip_image,
         );
-        settings_state.dialog_root = Some(dialog);
+        settings_res.settings_state.dialog_root = Some(dialog);
         
         preview_3d::spawn_preview_scene(
             commands,
@@ -419,6 +428,7 @@ fn handle_settings_button(
             &mut preview.meshes,
             material,
             mapping,
+            *settings_res.active_layer,
         );
 
         preview_3d::spawn_triplanar_preview_scene(

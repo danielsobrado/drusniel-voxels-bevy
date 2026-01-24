@@ -773,25 +773,27 @@ fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
 }
 
 /// Map voxel/face to blocky texture array layer.
-/// Texture array layout:
-///   0: grass (top of grass blocks, leaves) - atlas tile 3
-///   1: dirt (underground, sides/bottom of grass blocks) - atlas tile 0
-///   2: rock (stone, bedrock, dungeon) - atlas tile 1
-///   3: sand - atlas tile 4
-///   4: grass_side (sides of grass blocks - grass-to-dirt transition) - atlas tile 7
+/// Texture array layout (3 layers per material):
+///   Grass: 0=Top, 1=Side, 2=Bottom
+///   Dirt:  3=Top, 4=Side, 5=Bottom
+///   Rock:  6=Top, 7=Side, 8=Bottom
+///   Sand:  9=Top, 10=Side, 11=Bottom
 pub fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
-    match voxel {
-        VoxelType::TopSoil => match face {
-            Face::Top => 0,    // Grass on top
-            Face::Bottom => 1, // Dirt on bottom
-            _ => 4,            // Grass-side on sides (North, South, East, West)
-        },
-        VoxelType::Leaves => 0, // Leaves use grass (green) on all faces
-        VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood => 1, // Dirt
-        VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => 2, // Rock
-        VoxelType::Sand => 3, // Sand
-        _ => 0, // Default to grass for unsupported/air/water
-    }
+    let base_index = match voxel {
+        VoxelType::TopSoil | VoxelType::Leaves => 0, // Grass
+        VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood => 3, // Dirt
+        VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => 6, // Rock
+        VoxelType::Sand => 9, // Sand
+        _ => 0, // Default to grass
+    };
+
+    let face_offset = match face {
+        Face::Top => 0,
+        Face::Bottom => 2,
+        _ => 1, // Sides (North, South, East, West)
+    };
+
+    base_index + face_offset
 }
 
 /// Legacy per-voxel face generation with AO (replaced by add_greedy_quad).

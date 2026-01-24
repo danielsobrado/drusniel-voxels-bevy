@@ -11,6 +11,7 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use crate::rendering::array_loader::AtlasMapping;
 use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+
 use crate::menu::types::ActiveTextureLayer;
 
 // Layer 1 for Blocky, Layer 2 for Triplanar (Layer 0 is Main World)
@@ -114,6 +115,7 @@ pub fn spawn_preview_scene(
     meshes: &mut ResMut<Assets<Mesh>>,
     blocky_material: &Res<BlockyMaterialHandle>,
     atlas_mapping: &Res<AtlasMapping>,
+    active_layer: ActiveTextureLayer,
 ) -> Entity {
     let root = commands
         .spawn((
@@ -152,7 +154,7 @@ pub fn spawn_preview_scene(
     )).id();
 
     // Cube
-    let mesh_handle = meshes.add(create_preview_cube_mesh(atlas_mapping));
+    let mesh_handle = meshes.add(create_preview_cube_mesh(atlas_mapping, active_layer));
 
     let cube = commands.spawn((
         Mesh3d(mesh_handle),
@@ -187,16 +189,29 @@ pub fn spawn_triplanar_preview_scene(
         ))
         .id();
 
-    // Camera - Isometric Top-Down
+    // Camera - Orthographic Top-Down (2D Look)
     let camera = commands.spawn((
         Camera3d::default(),
+        Projection::Orthographic(OrthographicProjection {
+            scale: 1.0,
+            near: -100.0,
+            far: 100.0,
+            scaling_mode: Default::default(),
+            viewport_origin: Vec2::new(0.5, 0.5),
+            area: Rect::default(),
+        }),
         Camera {
             target: RenderTarget::Image(preview_image.0.clone().into()),
             order: 11,
             ..default()
         },
-        Transform::from_xyz(3.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        // TRIPLANAR_PREVIEW_LAYER,
+        Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z), // Look down -Y, Up is +Z? 
+                             // Wait, Plane is XZ plane. Looking down Y. Up vector usually -Z or +Z.
+                             // Default 3D look_at uses Y as up. If looking down Y, need distinct up.
+                             // Let's use look_at(ZERO, Vec3::X) to orient correctly?
+                             // Plane geometry: [-1, -1] to [1, 1] in XZ? 
+                             // create_triplanar_plane_mesh uses XZ plane.
+                             // So we want to look from +Y down to 0.
     )).id();
 
     // Light
@@ -242,14 +257,15 @@ fn update_preview_mesh_materials(
     mut meshes: ResMut<Assets<Mesh>>,
     query: Query<&Mesh3d, With<BlockPreviewMesh>>,
     atlas_mapping: Res<AtlasMapping>,
+    active_layer: Res<ActiveTextureLayer>,
 ) {
-    if !atlas_mapping.is_changed() {
+    if !atlas_mapping.is_changed() && !active_layer.is_changed() {
         return;
     }
 
     for mesh_handle in query.iter() {
         if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
-            *mesh = create_preview_cube_mesh(&atlas_mapping);
+            *mesh = create_preview_cube_mesh(&atlas_mapping, *active_layer);
         }
     }
 }
@@ -265,11 +281,10 @@ fn update_triplanar_preview_mesh(
 
     // Map active layer to Triplanar Material Index
     let mat_idx = match *active_layer {
-        ActiveTextureLayer::GrassTop => 0, // Grass
-        ActiveTextureLayer::Dirt => 3,     // Dirt
-        ActiveTextureLayer::Rock => 1,     // Rock
-        ActiveTextureLayer::Sand => 2,     // Sand
-        ActiveTextureLayer::GrassSide => 3, // Grass Side -> Dirt (usually terrain base)
+        ActiveTextureLayer::Grass => 0,
+        ActiveTextureLayer::Dirt => 3,
+        ActiveTextureLayer::Rock => 1,
+        ActiveTextureLayer::Sand => 2,
     };
 
     for mesh_handle in query.iter() {
@@ -314,7 +329,7 @@ fn create_triplanar_plane_mesh(mat_idx: u32) -> Mesh {
     mesh
 }
 
-fn create_preview_cube_mesh(_mapping: &AtlasMapping) -> Mesh {
+fn create_preview_cube_mesh(_mapping: &AtlasMapping, layer: ActiveTextureLayer) -> Mesh {
     let size = 1.0;
     let half = size / 2.0;
     
@@ -367,11 +382,22 @@ fn create_preview_cube_mesh(_mapping: &AtlasMapping) -> Mesh {
         20, 23, 21, 21, 23, 22 // Back
     ];
 
-    // Standard Grass Block Mapping for Preview
-    // Top=0, Bottom=1, Side=4
-    let top_idx = 0u32;
-    let bottom_idx = 1u32;
-    let side_idx = 4u32;
+    // Determine base index for this material
+    // Layer mapping:
+    // Grass: 0=Top, 1=Side, 2=Bottom
+    // Dirt:  3=Top, 4=Side, 5=Bottom
+    // Rock:  6=Top, 7=Side, 8=Bottom
+    // Sand:  9=Top, 10=Side, 11=Bottom
+    let base_idx = match layer {
+        ActiveTextureLayer::Grass => 0,
+        ActiveTextureLayer::Dirt => 3,
+        ActiveTextureLayer::Rock => 6,
+        ActiveTextureLayer::Sand => 9,
+    };
+
+    let top_idx = base_idx + 0;
+    let side_idx = base_idx + 1;
+    let bottom_idx = base_idx + 2;
     
     let color_top = [1.0, 1.0, 1.0, top_idx as f32 / 255.0];
     let color_bottom = [1.0, 1.0, 1.0, bottom_idx as f32 / 255.0];
