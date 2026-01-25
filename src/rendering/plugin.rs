@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::rendering::array_loader::{create_texture_array, start_loading_texture_arrays};
+use crate::rendering::atlas::load_texture_atlas;
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::BuildingMaterial;
 use crate::rendering::capabilities::{
@@ -62,6 +63,7 @@ impl Plugin for RenderingPlugin {
             .add_systems(
                 Startup,
                 (
+                    load_texture_atlas,
                     start_loading_texture_arrays,
                     setup_water_material,
                     setup_triplanar_material,

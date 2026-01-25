@@ -47,7 +47,7 @@
       "falloff": "atmospheric"
     },
     "volumetric": {
-      "enabled": false,
+      "enabled": true,
       "step_count": 32,
       "jitter": 0.5,
       "ambient_intensity": 0.0
@@ -57,7 +57,20 @@
       "density": 0.00001,
       "absorption": 0.001,
       "scattering": 0.2,
-      "scattering_asymmetry": 0.6
+      "scattering_asymmetry": 0.6,
+      "dust_animation": {
+        "enabled": true,
+        "speed": 0.3,
+        "scale": 8.0,
+        "intensity": 0.6,
+        "wind_direction": [
+          0.7,
+          0.3
+        ]
+      },
+      "step_count_override": null,
+      "ambient_intensity_override": null,
+      "light_intensity": 1.0
     },
     "colors": {
       "day": {
@@ -137,21 +150,80 @@
         "density": 0.0005,
         "absorption": 0.1,
         "scattering": 0.1,
-        "scattering_asymmetry": 0.6
+        "scattering_asymmetry": 0.6,
+        "dust_animation": {
+          "enabled": true,
+          "speed": 0.3,
+          "scale": 8.0,
+          "intensity": 0.6,
+          "wind_direction": [
+            0.7,
+            0.3
+          ]
+        },
+        "step_count_override": null,
+        "ambient_intensity_override": null,
+        "light_intensity": 1.0
       },
       "balanced": {
         "size": 512.0,
         "density": 0.04,
         "absorption": 0.08,
         "scattering": 0.25,
-        "scattering_asymmetry": 0.7
+        "scattering_asymmetry": 0.7,
+        "dust_animation": {
+          "enabled": true,
+          "speed": 0.3,
+          "scale": 8.0,
+          "intensity": 0.6,
+          "wind_direction": [
+            0.7,
+            0.3
+          ]
+        },
+        "step_count_override": null,
+        "ambient_intensity_override": null,
+        "light_intensity": 1.0
       },
       "misty": {
         "size": 512.0,
         "density": 0.15,
         "absorption": 0.05,
         "scattering": 0.8,
-        "scattering_asymmetry": 0.8
+        "scattering_asymmetry": 0.8,
+        "dust_animation": {
+          "enabled": true,
+          "speed": 0.3,
+          "scale": 8.0,
+          "intensity": 0.6,
+          "wind_direction": [
+            0.7,
+            0.3
+          ]
+        },
+        "step_count_override": null,
+        "ambient_intensity_override": null,
+        "light_intensity": 1.0
+      },
+      "god_rays": {
+        "size": 512.0,
+        "density": 0.0001,
+        "absorption": 0.15,
+        "scattering": 0.25,
+        "scattering_asymmetry": 0.85,
+        "dust_animation": {
+          "enabled": true,
+          "speed": 0.4,
+          "scale": 6.0,
+          "intensity": 0.8,
+          "wind_direction": [
+            0.7,
+            0.3
+          ]
+        },
+        "step_count_override": 64,
+        "ambient_intensity_override": 0.0,
+        "light_intensity": 1.0
       }
     },
     "color_modifiers": {
