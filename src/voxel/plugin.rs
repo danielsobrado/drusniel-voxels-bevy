@@ -870,9 +870,25 @@ fn mesh_dirty_chunks_system(
                 let mesh_handle = meshes.add(mesh);
 
                 if let Some(entity) = chunk.mesh_entity() {
-                    commands
-                        .entity(entity)
-                        .insert((Mesh3d(mesh_handle), NeedsCollider));
+                    // Update existing entity with new mesh AND correct material for current mode
+                    match mesh_settings.mode {
+                        MeshMode::Blocky => {
+                            if let Some(blocky_mat) = blocky_material.as_ref() {
+                                commands.entity(entity).insert((
+                                    Mesh3d(mesh_handle),
+                                    MeshMaterial3d(blocky_mat.handle.clone()),
+                                    NeedsCollider,
+                                ));
+                            }
+                        }
+                        MeshMode::SurfaceNets => {
+                            commands.entity(entity).insert((
+                                Mesh3d(mesh_handle),
+                                MeshMaterial3d(triplanar_material.handle.clone()),
+                                NeedsCollider,
+                            ));
+                        }
+                    }
                 } else {
                     // Spawn with appropriate material based on mesh mode
                     let entity = match mesh_settings.mode {
