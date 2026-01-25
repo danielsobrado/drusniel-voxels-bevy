@@ -55,19 +55,21 @@ New Atlas Texture Mapping UI (Settings > Textures):
 
 ![V0.4 Texture Mapping](docs/images/V0.4-textureMapping.jpg)
 
-Props and vegetation with LOD optimizations:
-
-![V0.4 Props and Vegetation](docs/images/v0.4-props1.jpg)
 
 #### Known Issues (v0.4)
 *   **Volumetric Fog Performance**: Volumetric fog can cause significant frame drops, especially on mid-tier GPUs.
-*   **God Rays Missing**: God ray/volumetric light shaft effect is currently not implemented.
+*   **God Rays With fog**: God ray/volumetric light shaft effect is only happening with fog around, we don't want to have that always.
+*   **Mesh gaps**: Small gaps happening sometimes.
+*   **Culling on close distance**: When digging and there are close distance polygons, culling and visibility has issues.
+*   **Shallow water**: Shallow water effects need to be improved.
+*   **LODS**: Small gaps and errors can be seen far away in the LODs.
 
 ### V0.3
 *   **PBR Materials & Parallax Mapping**: Implemented PBR material blending and parallax occlusion mapping, specifically enhancing rock textures.
 *   **Texture Splatting**: Added smooth triplanar material blending (texture splatting) using vertex weights for seamless terrain transitions.
 *   **Surface Nets Improvements**: Addressed chunk seams and fixed UV mapping/repeat samplers for surface nets.
 *   **Material & Mesh Updates**: Ongoing updates to materials and mesh generation.
+
 *   **Smooth Slope Movement**: Enhanced character controller with bilinear terrain height detection and step-up logic for fluid movement over terrain.
 
 ![V0.3 Preview](docs/images/V0.3.jpg)
