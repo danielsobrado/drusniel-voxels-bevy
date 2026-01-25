@@ -36,10 +36,8 @@ pub struct BlockyMaterial {
     #[texture(1, dimension = "2d_array")]
     #[sampler(2)]
     pub diffuse_texture: Option<Handle<Image>>,
-
-    #[texture(3, dimension = "2d_array")]
-    #[sampler(4)]
-    pub normal_texture: Option<Handle<Image>>,
+    // Normal texture removed to fix binding conflict with Bevy's default vertex shader
+    // Binding slot 3 conflicts with Bevy's internal PBR bindings
 }
 
 impl Material for BlockyMaterial {

@@ -17,11 +17,10 @@ struct BlockyUniforms {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: BlockyUniforms;
 
-// Texture Arrays (12 layers: 4 materials * 3 faces each)
+// Texture Array (12 layers: 4 materials * 3 faces each)
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var t_diffuse: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var s_diffuse: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var t_normal: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var s_normal: sampler;
+// Normal texture bindings removed to fix conflict with Bevy's default vertex shader
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
