@@ -1,15 +1,13 @@
-#import bevy_pbr::{
-    mesh_functions,
-    forward_io::{Vertex, VertexOutput},
-    pbr_fragment,
-    pbr_functions,
-    pbr_types,
-}
+// Blocky terrain shader - uses texture array for material sampling
+// Uses Bevy's standard vertex shader to avoid binding conflicts
+
+#import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::{pbr_fragment, pbr_functions, pbr_types}
 
 const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(1.0, 0.0, 1.0, 1.0);
 
-struct TriplanarUniforms {
+struct BlockyUniforms {
     base_color: vec4<f32>,
     tex_scale: f32,
     blend_sharpness: f32,
@@ -17,55 +15,13 @@ struct TriplanarUniforms {
     parallax_scale: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: BlockyUniforms;
 
-// Texture Arrays
+// Texture Arrays (12 layers: 4 materials * 3 faces each)
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var t_diffuse: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var s_diffuse: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var t_normal: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var s_normal: sampler;
-
-@vertex
-fn vertex(vertex: Vertex) -> VertexOutput {
-    var out: VertexOutput;
-    let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
-
-#ifdef VERTEX_NORMALS
-    out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
-#endif
-
-#ifdef VERTEX_POSITIONS
-    out.world_position = mesh_functions::mesh_position_local_to_world(
-        world_from_local,
-        vec4<f32>(vertex.position, 1.0)
-    );
-    out.position = mesh_functions::mesh_position_local_to_clip(
-        world_from_local,
-        vec4<f32>(vertex.position, 1.0)
-    );
-#endif
-
-#ifdef VERTEX_UVS_A
-    out.uv = vertex.uv;
-#endif
-
-#ifdef VERTEX_COLORS
-    out.color = vertex.color;
-#endif
-
-#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
-    out.instance_index = vertex.instance_index;
-#endif
-
-#ifdef VISIBILITY_RANGE_DITHER
-    out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(
-        vertex.instance_index,
-        world_from_local[3]
-    );
-#endif
-
-    return out;
-}
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
