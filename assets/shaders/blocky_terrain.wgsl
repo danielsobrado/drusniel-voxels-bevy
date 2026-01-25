@@ -13,6 +13,10 @@ const BLOCKY_ROUGHNESS: f32 = 0.9;
 const AO_STRENGTH: f32 = 0.15;
 // Minimum brightness floor to prevent overly dark areas (Minecraft-style)
 const MIN_BRIGHTNESS: f32 = 0.5;
+// Minecraft-style directional face shading (top=brightest, sides=darker, bottom=darkest)
+const FACE_SHADE_TOP: f32 = 1.0;
+const FACE_SHADE_SIDE: f32 = 0.8;
+const FACE_SHADE_BOTTOM: f32 = 0.6;
 
 struct BlockyUniforms {
     base_color: vec4<f32>,
@@ -44,6 +48,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     // Apply AO with controllable strength (0.0 = bright, 1.0 = full shadows)
     let ao = mix(1.0, vertex_ao, AO_STRENGTH);
 
+    // Minecraft-style face shading based on normal direction
+    let normal = normalize(pbr_input.world_normal);
+    let up_factor = max(normal.y, 0.0);           // How much face points up (0-1)
+    let down_factor = max(-normal.y, 0.0);        // How much face points down (0-1)
+    let side_factor = 1.0 - abs(normal.y);        // How much face is vertical (0-1)
+    let face_shade = up_factor * FACE_SHADE_TOP + side_factor * FACE_SHADE_SIDE + down_factor * FACE_SHADE_BOTTOM;
+
     // Texture array layers:
     // Grass: 0=Top, 1=Side, 2=Bottom
     // Dirt:  3=Top, 4=Side, 5=Bottom
@@ -52,7 +63,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let layer = clamp(material_index, 0, 11);
     let diffuse = textureSample(t_diffuse, s_diffuse, in.uv, layer) * uniforms.base_color;
 
-    pbr_input.material.base_color = diffuse;
+    // Apply face shading to diffuse color (Minecraft-style directional lighting)
+    let shaded_diffuse = vec4<f32>(diffuse.rgb * face_shade, diffuse.a);
+    pbr_input.material.base_color = shaded_diffuse;
     pbr_input.material.perceptual_roughness = BLOCKY_ROUGHNESS;
     pbr_input.material.metallic = 0.0;
     pbr_input.N = normalize(pbr_input.world_normal);
