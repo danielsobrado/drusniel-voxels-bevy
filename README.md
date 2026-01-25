@@ -55,6 +55,9 @@ New Atlas Texture Mapping UI (Settings > Textures):
 
 ![V0.4 Texture Mapping](docs/images/V0.4-textureMapping.jpg)
 
+Props and vegetation with LOD optimizations:
+
+![V0.4 Props and Vegetation](docs/images/v0.4-props1.jpg)
 
 #### Known Issues (v0.4)
 *   **Volumetric Fog Performance**: Volumetric fog can cause significant frame drops, especially on mid-tier GPUs.

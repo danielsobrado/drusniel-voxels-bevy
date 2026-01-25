@@ -43,6 +43,12 @@ const BUSH_CLUSTER_PEAK: f32 = 1.8;
 const MAX_BUILDING_SLOPE: f32 = 0.45;
 const BUILDING_SEARCH_RADIUS: i32 = 20;
 
+const DENSE_ZONE_MIN: IVec2 = IVec2::new(60, 60);
+const DENSE_ZONE_MAX: IVec2 = IVec2::new(180, 180);
+
+const ROCKY_ZONE_MIN: IVec2 = IVec2::new(-120, -120);
+const ROCKY_ZONE_MAX: IVec2 = IVec2::new(-40, -40);
+
 /// Size of a "prop chunk" in world units (for persistence)
 const PROP_CHUNK_SIZE: i32 = 64;
 
@@ -322,7 +328,21 @@ fn generate_category_props(
     placement_config: &PlacementConfig,
     terrain_modified: &mut bool,
 ) {
-    let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
+    let mut max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
+
+    // Apply zone-based limits
+    let chunk_intersects_dense = min_x < DENSE_ZONE_MAX.x && max_x > DENSE_ZONE_MIN.x && 
+                               min_z < DENSE_ZONE_MAX.y && max_z > DENSE_ZONE_MIN.y;
+    let chunk_intersects_rocky = min_x < ROCKY_ZONE_MAX.x && max_x > ROCKY_ZONE_MIN.x && 
+                               min_z < ROCKY_ZONE_MAX.y && max_z > ROCKY_ZONE_MIN.y;
+
+    if chunk_intersects_dense && (prop_type == PropType::Bush || prop_type == PropType::Flower) {
+        max_count *= 10;
+    }
+    if chunk_intersects_rocky && prop_type == PropType::Rock {
+        max_count *= 5;
+    }
+
     let current_count = counts.get(&def.id).copied().unwrap_or(0);
     if current_count >= max_count {
         return;
@@ -360,6 +380,21 @@ fn generate_category_props(
                 }
             } else {
                 let mut density = def.density;
+
+                // Apply dense vegetation zone boost
+                if (prop_type == PropType::Bush || prop_type == PropType::Flower) &&
+                   world_x >= DENSE_ZONE_MIN.x && world_x <= DENSE_ZONE_MAX.x &&
+                   world_z >= DENSE_ZONE_MIN.y && world_z <= DENSE_ZONE_MAX.y {
+                    density *= 15.0;
+                }
+
+                // Apply rocky zone boost
+                if prop_type == PropType::Rock &&
+                   world_x >= ROCKY_ZONE_MIN.x && world_x <= ROCKY_ZONE_MAX.x &&
+                   world_z >= ROCKY_ZONE_MIN.y && world_z <= ROCKY_ZONE_MAX.y {
+                    density *= 8.0;
+                }
+
                 if prop_type == PropType::Rock {
                     let biome = generator.get_biome(world_x, world_z);
                     let surface_hint = {
