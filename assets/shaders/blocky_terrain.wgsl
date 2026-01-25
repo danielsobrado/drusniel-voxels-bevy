@@ -7,6 +7,11 @@
 const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(1.0, 0.0, 1.0, 1.0);
 
+// Material roughness - lower = shinier, brighter appearance
+const BLOCKY_ROUGHNESS: f32 = 0.75;
+// AO strength - 0.0 = ignore vertex AO (brighter), 1.0 = full vertex AO (darker shadows)
+const AO_STRENGTH: f32 = 0.3;
+
 struct BlockyUniforms {
     base_color: vec4<f32>,
     tex_scale: f32,
@@ -28,11 +33,14 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 
 #ifdef VERTEX_COLORS
     let material_index = i32(in.color.a * 255.0 + 0.5);
-    let ao = clamp(in.color.r, 0.0, 1.0);
+    let vertex_ao = clamp(in.color.r, 0.0, 1.0);
 #else
     let material_index = 0;
-    let ao = 1.0;
+    let vertex_ao = 1.0;
 #endif
+
+    // Apply AO with controllable strength (0.0 = bright, 1.0 = full shadows)
+    let ao = mix(1.0, vertex_ao, AO_STRENGTH);
 
     // Texture array layers:
     // Grass: 0=Top, 1=Side, 2=Bottom
@@ -43,7 +51,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let diffuse = textureSample(t_diffuse, s_diffuse, in.uv, layer) * uniforms.base_color;
 
     pbr_input.material.base_color = diffuse;
-    pbr_input.material.perceptual_roughness = 0.9;
+    pbr_input.material.perceptual_roughness = BLOCKY_ROUGHNESS;
     pbr_input.material.metallic = 0.0;
     pbr_input.N = normalize(pbr_input.world_normal);
     pbr_input.diffuse_occlusion = vec3<f32>(ao);
