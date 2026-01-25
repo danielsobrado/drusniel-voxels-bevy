@@ -2643,8 +2643,10 @@ pub fn update_texture_preview(
     materials: Res<Assets<crate::rendering::triplanar_material::TriplanarMaterial>>,
     active_layer: Res<ActiveTextureLayer>,
     mut query: Query<&mut ImageNode, With<LargeTexturePreviewImage>>,
+    added_query: Query<Entity, Added<LargeTexturePreviewImage>>,
 ) {
-    if !active_layer.is_changed() {
+    // Run when active layer changes OR when a new LargeTexturePreviewImage is spawned
+    if !active_layer.is_changed() && added_query.is_empty() {
         return;
     }
 

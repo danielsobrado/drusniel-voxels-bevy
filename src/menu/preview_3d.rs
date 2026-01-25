@@ -430,13 +430,27 @@ fn create_preview_cube_mesh(mapping: &AtlasMapping, layer: ActiveTextureLayer) -
     ];
 
     // UVs mapped to atlas tile positions
+    // side_uvs: [0]=top-left, [1]=top-right, [2]=bottom-right, [3]=bottom-left
+    // For side faces, we need to map UV corners to match vertex positions where:
+    // - "top" in UV space (v_min) corresponds to +Y in world space
+    // - "bottom" in UV space (v_max) corresponds to -Y in world space
     let uvs = vec![
-        top_uvs[0], top_uvs[1], top_uvs[2], top_uvs[3],       // Top face
-        bottom_uvs[0], bottom_uvs[1], bottom_uvs[2], bottom_uvs[3], // Bottom face
-        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Right face
-        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Left face
-        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Front face
-        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Back face
+        // Top face (+Y): vertices go around XZ plane at Y=half
+        top_uvs[0], top_uvs[1], top_uvs[2], top_uvs[3],
+        // Bottom face (-Y): vertices go around XZ plane at Y=-half
+        bottom_uvs[0], bottom_uvs[1], bottom_uvs[2], bottom_uvs[3],
+        // Right face (+X): verts [top-back, bottom-back, bottom-front, top-front]
+        // Map: top-back->TL, bottom-back->BL, bottom-front->BR, top-front->TR
+        side_uvs[0], side_uvs[3], side_uvs[2], side_uvs[1],
+        // Left face (-X): verts [top-front, bottom-front, bottom-back, top-back]
+        // Map: top-front->TR, bottom-front->BR, bottom-back->BL, top-back->TL
+        side_uvs[1], side_uvs[2], side_uvs[3], side_uvs[0],
+        // Front face (+Z): verts [top-left, top-right, bottom-right, bottom-left]
+        // Map: top-left->TL, top-right->TR, bottom-right->BR, bottom-left->BL
+        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],
+        // Back face (-Z): verts [top-right, top-left, bottom-left, bottom-right]
+        // Map: top-right->TR, top-left->TL, bottom-left->BL, bottom-right->BR
+        side_uvs[1], side_uvs[0], side_uvs[3], side_uvs[2],
     ];
 
     let indices = vec![
