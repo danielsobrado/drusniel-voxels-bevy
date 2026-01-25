@@ -22,7 +22,7 @@ pub struct TextureArraySource {
 #[derive(Resource)]
 pub struct BlockyTextureArray {
     pub albedo: Handle<Image>,
-    pub normal: Handle<Image>,
+    pub normal: Option<Handle<Image>>, // Optional - disabled due to binding conflict with Bevy's PBR
 }
 
 /// Atlas tile mapping configuration - maps texture array layers to atlas tile indices
@@ -282,6 +282,8 @@ fn extract_tile_from_atlas(
 }
 
 /// Generate a flat normal map tile (pointing straight up)
+/// Currently unused due to binding slot conflict with Bevy's default vertex shader
+#[allow(dead_code)]
 fn generate_flat_normal_tile(tile_size: u32) -> Vec<u8> {
     let pixel_count = (tile_size * tile_size) as usize;
     let mut data = Vec::with_capacity(pixel_count * 4);
@@ -366,7 +368,6 @@ pub fn create_texture_array(
     );
 
     let mut albedo_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
-    let mut normal_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
 
     for &tile_idx in &tile_indices {
         let tile_data = extract_tile_from_atlas(
@@ -379,9 +380,7 @@ pub fn create_texture_array(
             atlas_format,
         );
         albedo_layers.push(tile_data);
-
-        // Generate flat normals for now (atlas doesn't have normal maps)
-        normal_layers.push(generate_flat_normal_tile(tile_size));
+        // Normal textures disabled - binding slot 3 conflicts with Bevy's default vertex shader
     }
 
     // Helper to create texture array from layer data
@@ -446,14 +445,12 @@ pub fn create_texture_array(
         return;
     };
 
-    let Some(normal_array) = create_array_from_layers(&normal_layers, &mut images) else {
-        warn!("Failed to create normal texture array");
-        return;
-    };
+    // Normal texture array creation removed - binding slot 3 conflicts with Bevy's default vertex shader
+    // We'll use the world normal from the PBR input instead
 
     commands.insert_resource(BlockyTextureArray {
         albedo: albedo_array.clone(),
-        normal: normal_array.clone(),
+        normal: None, // Normal textures disabled due to binding conflict
     });
 
     // Create or update the material
@@ -461,7 +458,6 @@ pub fn create_texture_array(
         // Update existing material with new textures
         if let Some(mat) = materials.get_mut(&existing.handle) {
             mat.diffuse_texture = Some(albedo_array);
-            mat.normal_texture = Some(normal_array);
             info!("Updated existing BlockyMaterial with new textures");
         }
     } else {
@@ -469,7 +465,6 @@ pub fn create_texture_array(
         let material = BlockyMaterial {
             uniforms: default(),
             diffuse_texture: Some(albedo_array),
-            normal_texture: Some(normal_array),
         };
 
         let handle = materials.add(material);
