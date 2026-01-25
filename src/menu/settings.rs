@@ -1075,7 +1075,7 @@ fn spawn_textures_tab(
                             }).with_children(|container| {
                                 container.spawn((
                                     Node {
-                                        width: Val::Px(32.0), height: Val::Px(32.0),
+                                        width: Val::Px(50.0), height: Val::Px(50.0),
                                         border: UiRect::all(Val::Px(1.0)),
                                         ..default()
                                     },
@@ -1084,10 +1084,10 @@ fn spawn_textures_tab(
                                 )).with_children(|preview| {
                                     preview.spawn((
                                         Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
-                                        ImageNode { 
+                                        ImageNode {
                                             image: atlas_texture.clone(),
-                                            rect: Some(bevy::math::Rect::new(0.0, 0.0, 16.0, 16.0)), // Default init
-                                            ..default() 
+                                            rect: Some(bevy::math::Rect::new(0.0, 0.0, 256.0, 256.0)), // Will be updated by system
+                                            ..default()
                                         },
                                         BackgroundColor(Color::WHITE),
                                     ));
@@ -2676,8 +2676,7 @@ pub fn update_face_tile_previews(
 ) {
     let Some(mapping) = mapping else { return };
 
-
-    // Get current material mapping
+    // Get current material mapping based on selected layer
     let map = match *active_layer {
         ActiveTextureLayer::Grass => &mapping.grass,
         ActiveTextureLayer::Dirt => &mapping.dirt,
@@ -2692,43 +2691,15 @@ pub fn update_face_tile_previews(
             ActiveTextureFace::Bottom => map.bottom,
         };
 
-        // Calculate rect for this tile index
-        // Assume 256x256 texture, 4x4 grid -> 64x64 pixel tiles
-        // But the atlas might be any size, strictly we need UVs.
-        // The texture loaded is "textures/atlas.png".
-        // Let's assume standard V0.3 atlas layout 4 cols.
-        let row = tile_index / 4;
-        let col = tile_index % 4;
-        
-        // We can't know the exact pixel size without the texture dimensions if we don't hardcode.
-        // However, for UV rect in Bevy ImageNode, we normally use pixel coordinates.
-        // Let's assume 16x16 pixels per tile for low res, or just rely on standard UVs?
-        // Bevy's Rect is in pixels for ImageNode if using a texture atlas, but here we perform manual UV slicing on the full image.
-        // Actually, if we use `image.rect`, it expects pixel coordinates of the source image.
-        // Assuming the atlas is 128x128 or similar.
-        // Safest is to assume standard Minecraft-like 16px tiles * 4 cols = 64px width?
-        // Let's guess 16px per tile for now, if it's wrong it will just look zoomed/tiled.
-        // Wait, `AtlasScrollContent` uses it too.
-        
-        // CORRECTION: ImageNode rect is consistent with the texture size.
-        // If we don't know the texture size here easily (unless we check assets),
-        // we might just show the whole atlas if we can't slice it.
-        // BUT wait, we can just use a large enough assumption or check if we can get image dimensions.
-        // We can't get image dimensions easily in a simple system without `Assets<Image>`.
-        // Let's calculate proportional UVs if possible? No, `rect` is `Option<Rect>`.
-        
-        // Let's assume the atlas is 16x16 tiles? No, 4x4 tiles as per `spawn_atlas_tile_button`.
-        // If we assumed 4x4 tiles, we can just try to pick the "likely" resolution or dynamic.
-        // Actually, let's inject `Assets<Image>` and try to find the image size?
-        
-        // Standard V0.1 atlas is usually small.
-        // Let's use normalized UVs? Material uses UVs.
-        // For ImageNode, we must provide Pixel Rect.
-        // Hardcode assumption: 64x64 atlas (16px tiles).
-        let tile_size = 16.0;
+        // Atlas is 1024x1024 with 4x4 grid = 256px per tile
+        let tile_size = crate::constants::ATLAS_TILE_SIZE as f32;
+        let cols = crate::constants::ATLAS_COLUMNS;
+        let row = tile_index / cols;
+        let col = tile_index % cols;
+
         let x = col as f32 * tile_size;
         let y = row as f32 * tile_size;
-        
+
         for child in children.iter() {
            if let Ok(mut node) = image_nodes.get_mut(child) {
                node.rect = Some(bevy::math::Rect::new(x, y, x + tile_size, y + tile_size));

@@ -47,9 +47,8 @@ impl Material for BlockyMaterial {
         "shaders/blocky_terrain.wgsl".into()
     }
 
-    fn vertex_shader() -> ShaderRef {
-        "shaders/blocky_terrain.wgsl".into()
-    }
+    // Use Bevy's default vertex shader to avoid binding conflicts
+    // The custom vertex shader was causing "Bindings for [3] conflict" errors
 
     fn prepass_fragment_shader() -> ShaderRef {
         ShaderRef::Default

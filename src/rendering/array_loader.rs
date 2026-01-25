@@ -175,18 +175,20 @@ atlas_mapping:
 }
 
 fn parse_block_map(line: &str) -> Option<BlockAtlasMap> {
-    let content = line.split(':').nth(1)?.trim();
-    // primitive parsing of "{ top: 3, side: 7, bottom: 0 }"
-    let content = content.trim_matches(|c| c == '{' || c == '}');
-    
+    // Line format: "grass: { top: 0, side: 7, bottom: 0 }"
+    // Find the opening brace and extract everything between { and }
+    let start = line.find('{')?;
+    let end = line.find('}')?;
+    let content = &line[start + 1..end];
+
     let mut map = BlockAtlasMap::default();
-    
+
     for part in content.split(',') {
         let part = part.trim();
         if let Some(idx) = part.find(':') {
             let key = part[..idx].trim();
-            let val = part[idx+1..].trim().parse::<u32>().ok()?;
-            
+            let val = part[idx + 1..].trim().parse::<u32>().ok()?;
+
             match key {
                 "top" => map.top = val,
                 "side" => map.side = val,
