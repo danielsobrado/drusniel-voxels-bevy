@@ -8,9 +8,9 @@ const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(1.0, 0.0, 1.0, 1.0);
 
 // Material roughness - lower = shinier, brighter appearance
-const BLOCKY_ROUGHNESS: f32 = 0.75;
+const BLOCKY_ROUGHNESS: f32 = 0.55;
 // AO strength - 0.0 = ignore vertex AO (brighter), 1.0 = full vertex AO (darker shadows)
-const AO_STRENGTH: f32 = 0.3;
+const AO_STRENGTH: f32 = 0.1;
 
 struct BlockyUniforms {
     base_color: vec4<f32>,
