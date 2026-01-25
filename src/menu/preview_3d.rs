@@ -8,9 +8,10 @@ use bevy::render::render_resource::{
 // RenderLayers API is unstable in this version, using position offset instead
 use bevy_mesh::{Indices, PrimitiveTopology};
 
+use crate::constants::{ATLAS_COLUMNS, ATLAS_ROWS};
 use crate::rendering::array_loader::AtlasMapping;
-use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
-use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+use crate::rendering::atlas::TextureAtlas;
+use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 
 use crate::menu::types::ActiveTextureLayer;
 
@@ -35,6 +36,9 @@ pub struct BlockPreviewMesh;
 #[derive(Resource)]
 pub struct BlockPreviewImage(pub Handle<Image>);
 
+#[derive(Resource)]
+pub struct BlockPreviewMaterial(pub Handle<StandardMaterial>);
+
 #[derive(Component)]
 pub struct TriplanarPreviewScene;
 
@@ -50,11 +54,36 @@ impl Plugin for BlockPreviewPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_preview_resources);
         app.add_systems(Update, (
+            setup_preview_material,
             rotate_preview_mesh,
             update_preview_mesh_materials,
             update_triplanar_preview_mesh,
         ));
     }
+}
+
+/// Creates the StandardMaterial for the preview cube using the atlas texture
+fn setup_preview_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    atlas: Option<Res<TextureAtlas>>,
+    existing: Option<Res<BlockPreviewMaterial>>,
+) {
+    // Only run once when atlas is available and material doesn't exist yet
+    if existing.is_some() {
+        return;
+    }
+    let Some(atlas) = atlas else {
+        return;
+    };
+
+    let material = materials.add(StandardMaterial {
+        base_color_texture: Some(atlas.handle.clone()),
+        unlit: true,
+        alpha_mode: AlphaMode::Opaque,
+        ..default()
+    });
+    commands.insert_resource(BlockPreviewMaterial(material));
 }
 
 fn setup_preview_resources(
@@ -113,7 +142,7 @@ pub fn spawn_preview_scene(
     commands: &mut Commands,
     preview_image: &Res<BlockPreviewImage>,
     meshes: &mut ResMut<Assets<Mesh>>,
-    blocky_material: &Res<BlockyMaterialHandle>,
+    preview_material: &Res<BlockPreviewMaterial>,
     atlas_mapping: &Res<AtlasMapping>,
     active_layer: ActiveTextureLayer,
 ) -> Entity {
@@ -154,12 +183,12 @@ pub fn spawn_preview_scene(
         // BLOCK_PREVIEW_LAYER,
     )).id();
 
-    // Cube
+    // Cube - uses StandardMaterial with atlas texture and atlas-based UVs
     let mesh_handle = meshes.add(create_preview_cube_mesh(atlas_mapping, active_layer));
 
     let cube = commands.spawn((
         Mesh3d(mesh_handle),
-        MeshMaterial3d(blocky_material.handle.clone()),
+        MeshMaterial3d(preview_material.0.clone()),
         Transform::from_xyz(0.0, 0.0, 0.0),
         BlockPreviewRotate,
         BlockPreviewMesh,
@@ -260,8 +289,6 @@ fn update_preview_mesh_materials(
     atlas_mapping: Res<AtlasMapping>,
     active_layer: Res<ActiveTextureLayer>,
 ) {
-
-
     for mesh_handle in query.iter() {
         if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
             *mesh = create_preview_cube_mesh(&atlas_mapping, *active_layer);
@@ -328,10 +355,49 @@ fn create_triplanar_plane_mesh(mat_idx: u32) -> Mesh {
     mesh
 }
 
-fn create_preview_cube_mesh(_mapping: &AtlasMapping, layer: ActiveTextureLayer) -> Mesh {
+/// Compute atlas UVs for a tile index
+/// Atlas is ATLAS_COLUMNS x ATLAS_ROWS grid, each tile takes 1/cols width and 1/rows height
+fn tile_uvs(tile_idx: u32) -> [[f32; 2]; 4] {
+    let cols = ATLAS_COLUMNS as f32;
+    let rows = ATLAS_ROWS as f32;
+    let col = (tile_idx % ATLAS_COLUMNS) as f32;
+    let row = (tile_idx / ATLAS_COLUMNS) as f32;
+
+    let u_min = col / cols;
+    let u_max = (col + 1.0) / cols;
+    let v_min = row / rows;
+    let v_max = (row + 1.0) / rows;
+
+    // UV corners: top-left, top-right, bottom-right, bottom-left
+    [
+        [u_min, v_min],
+        [u_max, v_min],
+        [u_max, v_max],
+        [u_min, v_max],
+    ]
+}
+
+fn create_preview_cube_mesh(mapping: &AtlasMapping, layer: ActiveTextureLayer) -> Mesh {
     let size = 1.0;
     let half = size / 2.0;
-    
+
+    // Get tile indices from atlas mapping for the active layer
+    let block_map = match layer {
+        ActiveTextureLayer::Grass => &mapping.grass,
+        ActiveTextureLayer::Dirt => &mapping.dirt,
+        ActiveTextureLayer::Rock => &mapping.rock,
+        ActiveTextureLayer::Sand => &mapping.sand,
+    };
+
+    let top_tile = block_map.top;
+    let side_tile = block_map.side;
+    let bottom_tile = block_map.bottom;
+
+    // Compute atlas UVs for each face
+    let top_uvs = tile_uvs(top_tile);
+    let bottom_uvs = tile_uvs(bottom_tile);
+    let side_uvs = tile_uvs(side_tile);
+
     // 24 vertices (4 per face)
     let positions = vec![
         // Top (+Y)
@@ -362,14 +428,15 @@ fn create_preview_cube_mesh(_mapping: &AtlasMapping, layer: ActiveTextureLayer) 
         // Back
         [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
     ];
-    
+
+    // UVs mapped to atlas tile positions
     let uvs = vec![
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Top
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Bottom
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Right
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Left
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Front
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], // Back
+        top_uvs[0], top_uvs[1], top_uvs[2], top_uvs[3],       // Top face
+        bottom_uvs[0], bottom_uvs[1], bottom_uvs[2], bottom_uvs[3], // Bottom face
+        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Right face
+        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Left face
+        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Front face
+        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],   // Back face
     ];
 
     let indices = vec![
@@ -381,38 +448,11 @@ fn create_preview_cube_mesh(_mapping: &AtlasMapping, layer: ActiveTextureLayer) 
         20, 23, 21, 21, 23, 22 // Back
     ];
 
-    // Determine base index for this material
-    // Layer mapping:
-    // Grass: 0=Top, 1=Side, 2=Bottom
-    // Dirt:  3=Top, 4=Side, 5=Bottom
-    // Rock:  6=Top, 7=Side, 8=Bottom
-    // Sand:  9=Top, 10=Side, 11=Bottom
-    let base_idx = match layer {
-        ActiveTextureLayer::Grass => 0,
-        ActiveTextureLayer::Dirt => 3,
-        ActiveTextureLayer::Rock => 6,
-        ActiveTextureLayer::Sand => 9,
-    };
-
-    let top_idx = base_idx + 0;
-    let side_idx = base_idx + 1;
-    let bottom_idx = base_idx + 2;
-    
-    let color_top = [1.0, 1.0, 1.0, top_idx as f32 / 255.0];
-    let color_bottom = [1.0, 1.0, 1.0, bottom_idx as f32 / 255.0];
-    let color_side = [1.0, 1.0, 1.0, side_idx as f32 / 255.0];
-    
-    let mut colors = Vec::with_capacity(24);
-    for _ in 0..4 { colors.push(color_top); }
-    for _ in 0..4 { colors.push(color_bottom); }
-    for _ in 0..16 { colors.push(color_side); }
-
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
-    
+
     mesh
 }

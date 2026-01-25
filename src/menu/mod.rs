@@ -256,7 +256,7 @@ pub struct MultiplayerResources<'w> {
 pub struct PreviewResources<'w> {
     pub image: Option<Res<'w, BlockPreviewImage>>,
     pub triplanar_image: Option<Res<'w, crate::menu::preview_3d::TriplanarPreviewImage>>,
-    pub material: Option<Res<'w, crate::rendering::blocky_material::BlockyMaterialHandle>>,
+    pub preview_material: Option<Res<'w, crate::menu::preview_3d::BlockPreviewMaterial>>,
     pub triplanar_material: Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
     pub mapping: Option<Res<'w, crate::rendering::array_loader::AtlasMapping>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
@@ -400,16 +400,16 @@ fn handle_settings_button(
 ) {
     if settings_res.settings_state.dialog_root.is_none() {
         // Check if all preview resources are available
-        let (Some(image), Some(trip_image), Some(material), Some(trip_material), Some(mapping)) = 
-            (preview.image.as_ref(), preview.triplanar_image.as_ref(), preview.material.as_ref(), preview.triplanar_material.as_ref(), preview.mapping.as_ref()) else {
+        let (Some(image), Some(trip_image), Some(preview_material), Some(trip_material), Some(mapping)) =
+            (preview.image.as_ref(), preview.triplanar_image.as_ref(), preview.preview_material.as_ref(), preview.triplanar_material.as_ref(), preview.mapping.as_ref()) else {
             warn!("Settings dialog opened but preview resources not ready yet");
             return;
         };
-        
+
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");
         settings_res.settings_state.active_tab = SettingsTab::Graphics;
         settings_res.settings_state.greedy_meshing = world_config.greedy_meshing;
-        
+
         let dialog = settings::spawn_settings_dialog(
             commands,
             state.root_entity,
@@ -422,12 +422,12 @@ fn handle_settings_button(
             trip_image,
         );
         settings_res.settings_state.dialog_root = Some(dialog);
-        
+
         preview_3d::spawn_preview_scene(
             commands,
             image,
             &mut preview.meshes,
-            material,
+            preview_material,
             mapping,
             *settings_res.active_layer,
         );
