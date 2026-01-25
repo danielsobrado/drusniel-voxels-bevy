@@ -17,8 +17,11 @@
 
 # Atlas tile mapping (editable via in-game UI)
 # Each block type has { top, side, bottom } atlas tile indices
+
+# Atlas tile mapping (editable via in-game UI)
+# Each block type has { top, side, bottom } atlas tile indices
 atlas_mapping:
-  grass: { top: 0, side: 7, bottom: 7 }
+  grass: { top: 0, side: 7, bottom: 0 }
   dirt: { top: 0, side: 0, bottom: 0 }
   rock: { top: 0, side: 0, bottom: 0 }
   sand: { top: 0, side: 0, bottom: 0 }

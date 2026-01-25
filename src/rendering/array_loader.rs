@@ -80,7 +80,7 @@ impl AtlasMapping {
 
                 if let Some(atlas_section) = contents.find("atlas_mapping:") {
                     let section = &contents[atlas_section..];
-                    
+
                     // Helper to parse line "  grass: { top: 3, side: 7, bottom: 0 }"
                     for line in section.lines().skip(1) {
                         let line = line.trim();
@@ -95,6 +95,13 @@ impl AtlasMapping {
                         }
                     }
                 }
+                info!(
+                    "Loaded AtlasMapping from YAML: grass({},{},{}), dirt({},{},{}), rock({},{},{}), sand({},{},{})",
+                    mapping.grass.top, mapping.grass.side, mapping.grass.bottom,
+                    mapping.dirt.top, mapping.dirt.side, mapping.dirt.bottom,
+                    mapping.rock.top, mapping.rock.side, mapping.rock.bottom,
+                    mapping.sand.top, mapping.sand.side, mapping.sand.bottom
+                );
                 mapping
             }
             Err(e) => {
@@ -348,6 +355,13 @@ pub fn create_texture_array(
     // Extract tiles for each layer using the current mapping
     // Texture array layers: 0=grass, 1=dirt, 2=rock, 3=sand, 4=grass_side
     let tile_indices = mapping.as_tile_indices();
+    info!(
+        "Using tile indices from AtlasMapping: grass({},{},{}), dirt({},{},{}), rock({},{},{}), sand({},{},{})",
+        tile_indices[0], tile_indices[1], tile_indices[2],
+        tile_indices[3], tile_indices[4], tile_indices[5],
+        tile_indices[6], tile_indices[7], tile_indices[8],
+        tile_indices[9], tile_indices[10], tile_indices[11]
+    );
 
     let mut albedo_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
     let mut normal_layers: Vec<Vec<u8>> = Vec::with_capacity(tile_indices.len());
