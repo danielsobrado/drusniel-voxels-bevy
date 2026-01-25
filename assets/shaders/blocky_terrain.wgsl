@@ -8,9 +8,11 @@ const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(1.0, 0.0, 1.0, 1.0);
 
 // Material roughness - lower = shinier, brighter appearance
-const BLOCKY_ROUGHNESS: f32 = 0.55;
+const BLOCKY_ROUGHNESS: f32 = 0.45;
 // AO strength - 0.0 = ignore vertex AO (brighter), 1.0 = full vertex AO (darker shadows)
-const AO_STRENGTH: f32 = 0.1;
+const AO_STRENGTH: f32 = 0.0;
+// Brightness boost for blocky terrain to match classic Minecraft look
+const BRIGHTNESS_BOOST: f32 = 1.4;
 
 struct BlockyUniforms {
     base_color: vec4<f32>,
@@ -67,6 +69,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     var color: vec4<f32>;
     if ((pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
         color = pbr_functions::apply_pbr_lighting(pbr_input);
+        // Apply brightness boost after PBR lighting to match classic Minecraft sunny look
+        color = vec4<f32>(color.rgb * BRIGHTNESS_BOOST, color.a);
     } else {
         color = pbr_input.material.base_color;
     }
