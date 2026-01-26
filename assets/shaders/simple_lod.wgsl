@@ -13,9 +13,9 @@ struct SimpleLodUniforms {
     fog_color: vec4<f32>,
 };
 
-@group(2) @binding(0) var<uniform> uniforms: SimpleLodUniforms;
-@group(2) @binding(1) var albedo_texture: texture_2d<f32>;
-@group(2) @binding(2) var albedo_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: SimpleLodUniforms;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var albedo_sampler: sampler;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
