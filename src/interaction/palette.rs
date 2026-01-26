@@ -1,3 +1,4 @@
+use crate::building::{BuildingPieceRegistry, BuildingState, PieceTypeId};
 use crate::camera::controller::PlayerCamera;
 use crate::chat::ChatState;
 use crate::menu::PauseMenuState;
@@ -21,6 +22,8 @@ use crate::voxel::world::VoxelWorld;
 pub enum PlacementSelection {
     Voxel(VoxelType),
     Prop { id: String, prop_type: PropType },
+    /// Building piece from the snap-based building system.
+    BuildingPiece { piece_id: PieceTypeId, name: String },
 }
 
 #[derive(Clone)]
@@ -149,6 +152,7 @@ pub fn initialize_palette_items(
     mut items: ResMut<PaletteItems>,
     mut palette: ResMut<PlacementPaletteState>,
     config: Res<PropConfig>,
+    building_registry: Res<BuildingPieceRegistry>,
 ) {
     if palette.items_initialized {
         return;
@@ -156,6 +160,20 @@ pub fn initialize_palette_items(
 
     let mut all_items = Vec::new();
 
+    // Add building pieces from the registry
+    for (piece_id, piece_def) in building_registry.pieces.iter() {
+        let category_tag = format!("{:?}", piece_def.category).to_lowercase();
+        all_items.push(PaletteItem {
+            label: piece_def.name.clone(),
+            tags: vec![category_tag, "building".to_string(), "snap".to_string()],
+            selection: PlacementSelection::BuildingPiece {
+                piece_id: *piece_id,
+                name: piece_def.name.clone(),
+            },
+        });
+    }
+
+    // Add props
     for (category, list) in [
         (PropType::Tree, config.props.trees.as_slice()),
         (PropType::Rock, config.props.rocks.as_slice()),
@@ -328,8 +346,14 @@ pub fn handle_palette_input(
         if let Some(index) = palette.selected_index {
             if let Some(item) = items.0.get(index).cloned() {
                 palette.active_selection = Some(item.selection.clone());
-                if let PlacementSelection::Voxel(voxel) = item.selection {
-                    held.block_type = voxel;
+                match item.selection {
+                    PlacementSelection::Voxel(voxel) => {
+                        held.block_type = voxel;
+                    }
+                    PlacementSelection::BuildingPiece { piece_id, .. } => {
+                        // Handled by sync_building_state_from_palette system
+                    }
+                    PlacementSelection::Prop { .. } => {}
                 }
                 changed = true;
             }
@@ -459,6 +483,9 @@ pub fn refresh_palette_ui(
             Some(PlacementSelection::Voxel(v)) => format!("Selected: {:?}", v),
             Some(PlacementSelection::Prop { id, prop_type }) => {
                 format!("Selected: {} ({:?})", id, prop_type)
+            }
+            Some(PlacementSelection::BuildingPiece { name, .. }) => {
+                format!("Selected: {} (Building)", name)
             }
             None => "Selected: (none)".to_string(),
         };
@@ -988,6 +1015,31 @@ pub fn persist_bookmarks(mut store: ResMut<BookmarkStore>) {
             Err(err) => warn!("Failed to write bookmarks: {err}"),
         },
         Err(err) => warn!("Failed to serialize bookmarks: {err}"),
+    }
+}
+
+/// Sync the BuildingState with the palette's active selection.
+/// This enables/disables building mode and sets the selected piece.
+pub fn sync_building_state_from_palette(
+    palette: Res<PlacementPaletteState>,
+    mut building_state: ResMut<BuildingState>,
+) {
+    match &palette.active_selection {
+        Some(PlacementSelection::BuildingPiece { piece_id, .. }) => {
+            // Activate building mode with the selected piece
+            if !building_state.active || building_state.selected_piece != Some(*piece_id) {
+                building_state.active = true;
+                building_state.selected_piece = Some(*piece_id);
+            }
+        }
+        _ => {
+            // Deactivate building mode when not selecting a building piece
+            if building_state.active {
+                building_state.active = false;
+                building_state.selected_piece = None;
+                building_state.current_snap = None;
+            }
+        }
     }
 }
 

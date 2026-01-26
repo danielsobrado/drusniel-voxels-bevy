@@ -36,6 +36,7 @@ use voxel_builder::debug_ui::DebugUiPlugin;
 use voxel_builder::particles::ParticlePlugin;
 use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::input::InputPlugin;
+use voxel_builder::building::BuildingPlugin;
 
 mod input;
 
@@ -320,5 +321,6 @@ fn main() {
         .add_plugins(ParticlePlugin)
         .add_plugins(TerrainToolsPlugin)
         .add_plugins(InputPlugin)
+        .add_plugins(BuildingPlugin)
         .run();
 }

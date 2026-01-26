@@ -846,6 +846,7 @@ impl Plugin for InteractionPlugin {
                     editing::update_drag_rotation,
                     palette::update_ghost_preview,
                     palette::sync_ghost_materials,
+                    palette::sync_building_state_from_palette,
                 )
                     .run_if(|state: Res<PauseMenuState>| !state.open),
             )

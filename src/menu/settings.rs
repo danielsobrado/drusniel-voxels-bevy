@@ -645,6 +645,10 @@ fn spawn_controls_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 ("Hotbar 7", GameAction::Hotbar7),
                 ("Hotbar 8", GameAction::Hotbar8),
                 ("Hotbar 9", GameAction::Hotbar9),
+                // Building
+                ("Building Mode", GameAction::ToggleBuildingMode),
+                ("Snap Mode", GameAction::ToggleSnapMode),
+                ("Rotate Piece", GameAction::RotatePiece),
             ];
 
             content

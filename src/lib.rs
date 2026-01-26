@@ -1,4 +1,5 @@
 pub mod atmosphere;
+pub mod building;
 pub mod camera;
 pub mod chat;
 pub mod config;

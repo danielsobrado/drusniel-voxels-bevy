@@ -5,7 +5,7 @@
 ### Current (v0.4-dev)
 *   **Bevy 0.17 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
 *   **Radiance Cascades GI**: Screen-space global illumination using voxel SDF data for efficient ray marching, providing realistic indirect lighting with multi-cascade probe system and temporal reprojection.
-*   **Adaptive GI Enhancements**: Stochastic one-from-eight probe selection (~8x GI performance gain at Low quality), SDF-based terrain shadows leveraging voxel data, and screen-space contact shadows for vegetation micro-detail. Quality presets (Low/Medium/High/Ultra) with ~15% performance range. Toggle with Alt+1/2/3/4, debug with Alt+P.
+*   **Adaptive GI Enhancements**: Stochastic one-from-eight probe selection (~8x GI performance gain at Low quality), SDF-based terrain shadows leveraging voxel data, and screen-screen contact shadows for vegetation micro-detail. Quality presets (Low/Medium/High/Ultra) with ~15% performance range. Toggle with Alt+1/2/3/4, debug with Alt+P.
 *   **Aerial Perspective**: Custom shaders (buildings, props, grass) now blend toward fog color at distance, matching terrain fog behavior for consistent atmospheric depth.
 *   **Environment Map Lighting**: Skybox-based IBL (Image-Based Lighting) for improved PBR reflections and ambient lighting that tracks time-of-day.
 *   **Ambient + Atmospheric Effects**: GTAO (Ground Truth Ambient Occlusion via XeGTAO port), PCSS soft shadows, distance + volumetric fog with atmospheric falloff, and time-of-day color blending.
@@ -21,6 +21,12 @@
     *   **Billboard LOD**: Distant trees rendered as axial (Y-axis rotation) billboards for ~95% vertex reduction. Distance-based switching with hysteresis to prevent flickering.
     *   **Mesh Decimation**: Vertex clustering algorithm creates LOD1 (50%) and LOD2 (75%) decimated mesh variants at load time for mid-distance props.
     *   **Extended View Distance**: Props now visible up to 350-420 units (trees furthest) to reduce pop-in.
+*   **Snap Point Building System**: Enshrouded-style modular construction with automatic piece alignment:
+    *   **Snap Point Detection**: Spatial hash index for O(1) queries finds compatible connection points within 0.75m radius.
+    *   **Snap Groups**: Compatibility rules (FloorEdge↔WallBottom, WallSide↔WallSide, etc.) ensure pieces connect logically.
+    *   **Ghost Preview**: Color-coded placement preview (green=valid, red=invalid, blue=snapped) with gizmo visualization.
+    *   **Piece Registry**: Extensible registry with predefined pieces (floors, walls, fences, pillars) and configurable snap points.
+    *   **Snap Toggle**: Press X to toggle snap mode on/off for free placement when needed.
 *   **Meshing Settings**: Greedy meshing toggle in Settings > Meshing (runtime flag; algorithm integration pending).
 *   **Config-Driven Tuning**: YAML configs for fog, AO, terrain generation, props, camera exposure, clouds, water, wind, weather, and GI.
 *   **World + Tools**: Save/load persistence, minimap, and debug overlays.
@@ -154,6 +160,21 @@ Props and vegetation with LOD optimizations:
 *   **Q / E** or **Mouse Wheel**: Rotate Dragged Block
 *   **Delete**: Toggle Delete Mode
     *   **Left Click**: Delete Block (while in Delete Mode)
+
+### Building Mode (Toggle with B to open Palette)
+*   **B**: Open/Close Placement Palette
+*   **Arrow Up/Down**: Navigate palette items
+*   **Enter**: Select highlighted item
+*   **X**: Toggle Snap Mode (snap to existing pieces vs free placement)
+*   **R**: Rotate piece 90° (when placing)
+*   **Right Click**: Place building piece
+*   **Escape**: Close palette
+
+Building pieces available in palette:
+*   Wood Floor 2x2 (Foundation)
+*   Wood Wall (2m × 2m)
+*   Wood Fence (2m × 1m)
+*   Wood Pillar (support column)
 
 ### Photo Mode (Toggle with F12)
 *   **Mouse Wheel**: Adjust Focus Distance

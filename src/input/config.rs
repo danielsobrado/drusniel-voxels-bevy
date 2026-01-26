@@ -33,6 +33,10 @@ pub enum GameAction {
     Chat,
     Map,
     Screenshot,
+    // Building
+    ToggleBuildingMode,
+    ToggleSnapMode,
+    RotatePiece,
 }
 
 #[derive(Resource, Serialize, Deserialize, Debug, Clone)]
@@ -70,6 +74,11 @@ impl Default for InputConfig {
         bindings.insert(GameAction::Hotbar7, KeyCode::Digit7);
         bindings.insert(GameAction::Hotbar8, KeyCode::Digit8);
         bindings.insert(GameAction::Hotbar9, KeyCode::Digit9);
+
+        // Building
+        bindings.insert(GameAction::ToggleBuildingMode, KeyCode::KeyB);
+        bindings.insert(GameAction::ToggleSnapMode, KeyCode::KeyX);
+        bindings.insert(GameAction::RotatePiece, KeyCode::KeyR);
 
         Self { bindings }
     }
