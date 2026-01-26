@@ -53,13 +53,13 @@ struct CloudParams {
     prev_view_proj: mat4x4<f32>,
 }
 
-@group(2) @binding(0) var<uniform> cloud_params: CloudParams;
-@group(2) @binding(1) var noise_texture: texture_3d<f32>;
-@group(2) @binding(2) var detail_noise_texture: texture_3d<f32>;
-@group(2) @binding(3) var weather_texture: texture_2d<f32>;
-@group(2) @binding(4) var blue_noise_texture: texture_2d<f32>;
-@group(2) @binding(5) var cloud_sampler: sampler;
-@group(2) @binding(6) var history_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> cloud_params: CloudParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var noise_texture: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var detail_noise_texture: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var weather_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var blue_noise_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var cloud_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var history_texture: texture_2d<f32>;
 
 // Constants
 const PI: f32 = 3.14159265359;

@@ -16,9 +16,9 @@ struct BillboardUniforms {
     fog_color: vec4<f32>,
 };
 
-@group(2) @binding(0) var<uniform> uniforms: BillboardUniforms;
-@group(2) @binding(1) var billboard_texture: texture_2d<f32>;
-@group(2) @binding(2) var billboard_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: BillboardUniforms;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var billboard_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var billboard_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
