@@ -9,6 +9,10 @@ use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::{VoxelType, Voxel};
 use crate::voxel::meshing::ChunkMesh;
 use crate::camera::controller::PlayerCamera;
+use crate::constants::{
+    CHUNK_SIZE_F32, GRASS_CULL_DISTANCE, GRASS_CULL_HYSTERESIS,
+    GRASS_CULL_UPDATE_INTERVAL, GRASS_FULL_DISTANCE, GRASS_HALF_DISTANCE,
+};
 
 pub use grass_material::{GrassMaterial, GrassMaterialPlugin, GrassMaterialHandles};
 pub use wind::{WindPlugin, WindConfig, WindState, WindAffected, WindAnimationType};
@@ -120,6 +124,7 @@ pub fn attach_procedural_grass_to_chunks(
     assets: Res<GrassPatchAssets>,
     veg_config: Res<VegetationConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
     // Query chunks with StandardMaterial (blocky mode)
     blocky_chunk_query: Query<(
         Entity,
@@ -136,11 +141,30 @@ pub fn attach_procedural_grass_to_chunks(
         &Transform,
     ), Without<ChunkGrassAttached>>,
 ) {
-    let density = veg_config.grass_density;
-    let max_count = veg_config.max_blades_per_chunk;
+    let base_density = veg_config.grass_density;
+    let base_max_count = veg_config.max_blades_per_chunk;
+
+    let camera_pos = camera_query.single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
 
     // Process blocky chunks
     for (entity, chunk, chunk_mesh, transform) in blocky_chunk_query.iter() {
+        let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let distance = camera_pos.distance(chunk_center);
+
+        // Skip chunks beyond grass cull distance
+        if distance > GRASS_CULL_DISTANCE {
+            continue;
+        }
+
+        // Reduce density for medium-distance chunks
+        let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
+            (base_density.max(1) / 2, base_max_count / 2)
+        } else if distance > GRASS_FULL_DISTANCE {
+            (base_density, (base_max_count * 3) / 4)
+        } else {
+            (base_density, base_max_count)
+        };
+
         process_chunk_for_grass(
             &mut commands,
             &assets,
@@ -156,6 +180,21 @@ pub fn attach_procedural_grass_to_chunks(
 
     // Process triplanar chunks (surface nets mode)
     for (entity, chunk, chunk_mesh, _material, transform) in triplanar_chunk_query.iter() {
+        let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let distance = camera_pos.distance(chunk_center);
+
+        if distance > GRASS_CULL_DISTANCE {
+            continue;
+        }
+
+        let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
+            (base_density.max(1) / 2, base_max_count / 2)
+        } else if distance > GRASS_FULL_DISTANCE {
+            (base_density, (base_max_count * 3) / 4)
+        } else {
+            (base_density, base_max_count)
+        };
+
         process_chunk_for_grass(&mut commands, &assets, &mut meshes, entity, chunk, chunk_mesh, transform, density, max_count);
     }
 }
@@ -931,6 +970,46 @@ pub fn sync_grass_wind_config(
 }
 
 /// Plugin for vegetation and props
+/// System: despawn grass patches that are now too far from the camera.
+/// Removes `ChunkGrassAttached` from the parent chunk so grass can re-spawn when approached.
+pub fn cull_distant_grass(
+    mut commands: Commands,
+    time: Res<Time>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    grass_query: Query<(Entity, &ChildOf), With<ProceduralGrassPatch>>,
+    chunk_query: Query<&Transform, With<ChunkMesh>>,
+    mut last_update: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last_update < GRASS_CULL_UPDATE_INTERVAL {
+        return;
+    }
+    *last_update = now;
+
+    let Ok(camera_tf) = camera_query.single() else {
+        return;
+    };
+    let camera_pos = camera_tf.translation;
+
+    // Use hysteresis: despawn only beyond cull + hysteresis
+    let cull_threshold = GRASS_CULL_DISTANCE + GRASS_CULL_HYSTERESIS;
+
+    for (grass_entity, child_of) in grass_query.iter() {
+        let parent_entity = child_of.0;
+        let Ok(chunk_tf) = chunk_query.get(parent_entity) else {
+            continue;
+        };
+        let chunk_center = chunk_tf.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let distance = camera_pos.distance(chunk_center);
+
+        if distance > cull_threshold {
+            commands.entity(grass_entity).despawn();
+            // Remove marker so grass can be re-spawned when player returns
+            commands.entity(parent_entity).remove::<ChunkGrassAttached>();
+        }
+    }
+}
+
 pub struct VegetationPlugin;
 
 impl Plugin for VegetationPlugin {
@@ -948,6 +1027,7 @@ impl Plugin for VegetationPlugin {
                 Update,
                 (
                     attach_procedural_grass_to_chunks, // Mixed with assets
+                    cull_distant_grass,
                     sync_grass_wind_config,
                     // spawn_rock_props, // Disabled in favor of asset props
                     spawn_floating_particles,

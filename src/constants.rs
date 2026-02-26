@@ -199,13 +199,12 @@ pub const BEACH_HEIGHT_OFFSET: i32 = 2;
 // =============================================================================
 
 /// Default distance in world units for high detail meshing.
-/// Increased from 96 to 160 for smoother LOD transitions.
-pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 160.0;
+/// Tuned to align with shadow cull distance (192m) for coherent quality falloff.
+pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 128.0;
 
 /// Default distance in world units at which chunks are culled entirely.
-/// Increased from 192 to 400 to cover more of the 512x512 world and
-/// prevent props from appearing without terrain.
-pub const DEFAULT_CULL_DISTANCE: f32 = 400.0;
+/// Fog hides terrain beyond ~220m; tightened from 400 to reduce draw calls.
+pub const DEFAULT_CULL_DISTANCE: f32 = 320.0;
 
 /// High detail distance for integrated GPUs (more aggressive culling).
 pub const INTEGRATED_GPU_HIGH_DETAIL_DISTANCE: f32 = 64.0;
@@ -369,7 +368,7 @@ pub const BEDROCK_BLEND: f32 = 2.0;
 
 /// Base view distance for props in world units.
 /// Props beyond this distance (multiplied by type multiplier) are culled.
-pub const PROP_VIEW_DISTANCE_BASE: f32 = 350.0;
+pub const PROP_VIEW_DISTANCE_BASE: f32 = 280.0;
 
 /// View distance multiplier for trees (tallest, most visible).
 pub const PROP_VIEW_DISTANCE_TREE_MULT: f32 = 1.2;
@@ -381,7 +380,7 @@ pub const PROP_VIEW_DISTANCE_ROCK_MULT: f32 = 0.85;
 pub const PROP_VIEW_DISTANCE_BUSH_MULT: f32 = 0.6;
 
 /// View distance multiplier for flowers (smallest, least visible).
-pub const PROP_VIEW_DISTANCE_FLOWER_MULT: f32 = 0.35;
+pub const PROP_VIEW_DISTANCE_FLOWER_MULT: f32 = 0.25;
 
 /// Hysteresis buffer for prop visibility to prevent rapid toggling.
 pub const PROP_VIEW_DISTANCE_HYSTERESIS: f32 = 10.0;
@@ -394,8 +393,8 @@ pub const PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL: f32 = 0.25;
 // =============================================================================
 
 /// Distance at which to switch from 3D mesh to billboard.
-/// Set to ~60% of tree view distance (350 * 1.2 * 0.6 = 252) for smooth transition.
-pub const BILLBOARD_SWITCH_DISTANCE: f32 = 250.0;
+/// Tightened from 250 for fewer draw calls at distance.
+pub const BILLBOARD_SWITCH_DISTANCE: f32 = 180.0;
 
 /// Hysteresis buffer for billboard LOD switching.
 pub const BILLBOARD_LOD_HYSTERESIS: f32 = 10.0;
@@ -409,13 +408,26 @@ pub const BILLBOARD_ALPHA_CUTOFF: f32 = 0.5;
 /// Billboard wind sway strength (subtle movement).
 pub const BILLBOARD_WIND_STRENGTH: f32 = 0.02;
 
+/// Number of vertical segments used for billboard bending.
+/// Higher values produce smoother curvature but add a few more vertices.
+pub const BILLBOARD_BEND_SEGMENTS: usize = 10;
+
+/// Additional multiplier for segmented billboard bend.
+pub const BILLBOARD_BEND_STRENGTH: f32 = 0.55;
+
+/// Small high-frequency flutter applied near leaf/card tips.
+pub const BILLBOARD_LEAF_FLUTTER_STRENGTH: f32 = 0.2;
+
+/// Leaf flutter speed multiplier.
+pub const BILLBOARD_LEAF_FLUTTER_SPEED: f32 = 7.5;
+
 // =============================================================================
 // Prop Shadow and Material LOD Settings
 // =============================================================================
 
 /// Distance beyond which props stop casting shadows.
 /// Shadow maps are expensive - culling distant shadow casters saves GPU time.
-pub const PROP_SHADOW_CULL_DISTANCE: f32 = 80.0;
+pub const PROP_SHADOW_CULL_DISTANCE: f32 = 64.0;
 
 /// Distance beyond which props use simplified (unlit) material.
 /// Saves fragment shader cost by skipping normal maps and PBR calculations.
@@ -423,3 +435,47 @@ pub const PROP_SIMPLE_MATERIAL_DISTANCE: f32 = 120.0;
 
 /// Hysteresis for shadow/material LOD to prevent flickering.
 pub const PROP_LOD_MATERIAL_HYSTERESIS: f32 = 8.0;
+
+// =============================================================================
+// Terrain Shadow Culling Settings
+// =============================================================================
+
+/// Distance beyond which terrain chunks stop casting shadows.
+/// Chunks beyond this distance get `NotShadowCaster` component added.
+/// Set to match the cascade shadow max distance with margin.
+pub const TERRAIN_SHADOW_DISTANCE: f32 = 192.0;
+
+/// Hysteresis for terrain shadow culling to prevent flickering.
+pub const TERRAIN_SHADOW_HYSTERESIS: f32 = 16.0;
+
+/// Update interval for terrain shadow culling checks (seconds).
+pub const TERRAIN_SHADOW_UPDATE_INTERVAL: f32 = 0.2;
+
+/// Maximum number of point lights with shadows enabled simultaneously.
+pub const MAX_SHADOW_POINT_LIGHTS: usize = 4;
+
+/// Distance beyond which point light shadows are force-disabled.
+pub const POINT_LIGHT_SHADOW_DISTANCE: f32 = 80.0;
+
+/// Hysteresis for point light shadow budget switching.
+pub const POINT_LIGHT_SHADOW_HYSTERESIS: f32 = 5.0;
+
+// =============================================================================
+// Grass Distance Culling Settings
+// =============================================================================
+
+/// Distance within which grass renders at full density.
+pub const GRASS_FULL_DISTANCE: f32 = 64.0;
+
+/// Distance within which grass renders at half density.
+/// Between GRASS_FULL_DISTANCE and this, blade count is halved.
+pub const GRASS_HALF_DISTANCE: f32 = 96.0;
+
+/// Distance beyond which grass is not spawned at all.
+pub const GRASS_CULL_DISTANCE: f32 = 128.0;
+
+/// Hysteresis for grass distance culling to prevent flickering.
+pub const GRASS_CULL_HYSTERESIS: f32 = 8.0;
+
+/// Update interval for grass distance culling checks (seconds).
+pub const GRASS_CULL_UPDATE_INTERVAL: f32 = 0.3;

@@ -150,6 +150,25 @@ impl Material for GrassMaterial {
         "shaders/grass.wgsl".into()
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        "shaders/grass_prepass.wgsl".into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        "shaders/grass_prepass.wgsl".into()
+    }
+
+    fn enable_prepass() -> bool {
+        // Bevy 0.18 prepass variants currently mismatch this custom alpha-cutout pipeline.
+        // Keep prepass disabled until the shader IO is fully migrated.
+        false
+    }
+
+    fn enable_shadows() -> bool {
+        // Matches the temporary prepass disable above to avoid shadow-prepass specialization panics.
+        false
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         // Use Mask with cutoff for hard edges - avoids see-through grass
         // Grass has procedural alpha masking in fragment shader
@@ -214,11 +233,7 @@ pub struct GrassMaterialPlugin;
 
 impl Plugin for GrassMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<GrassMaterial> {
-            prepass_enabled: false, // Keep prepass disabled to avoid texture limit issues
-            shadows_enabled: false, // Grass shadows are too expensive
-            ..default()
-        })
+        app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .init_resource::<GrassMaterialHandles>()
             .add_systems(Update, (update_grass_time, sync_grass_with_gi));
     }

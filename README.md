@@ -2,17 +2,66 @@
 
 ## Version History
 
+Current development version: **v0.5**.
+
+### Current (v0.5)
+
+*   **Valheim-Style Water Rendering Overhaul**: Complete rewrite of the water shader pipeline with physically-based wave physics, multi-layer foam, caustics, Fresnel reflections, refraction, and interactive displacement.
+
+    *   **Gerstner Wave Normals**: Replaced the old finite-difference normal approximation with analytical Gerstner wave normals (`gerstner_waves.wgsl`). Four-layer Gerstner summation produces physically accurate wave crests, troughs, and foam buildup — foam accumulates on wave peaks and propagates to shorelines.
+
+    *   **Multi-Scale Voronoi Foam** (`water_foam.wgsl`): Three-scale foam noise (large/medium/small Voronoi) with animated sparkle highlights. Combines depth-based shoreline foam with wave-crest foam driven by the Gerstner `foam` output. Fully replaces the old inline foam constants.
+
+    *   **Detail Normal Maps** (`water_detail_normals.wgsl`): Two independently-scrolling tiling normal map layers blended via UDN (Unreal-style Derivative Normal blending) for fine-scale ripple texture. Distance fade at 40–80m prevents aliasing. Guarded by `#ifdef WATER_DETAIL_NORMALS` and disabled on integrated GPUs.
+
+    *   **Underwater Caustics** (`water_caustics.wgsl`): Sine-wave + Voronoi caustic patterns projected onto terrain below `WATER_LEVEL`. Active in both triplanar (smooth terrain) and blocky (voxel) shaders. Depth-attenuated so caustics fade out in deep water.
+
+    *   **Planar Reflection Camera** (`water_reflection.rs`): A dedicated half-resolution (`960×540`) camera renders the scene mirrored across the water plane (`Y = WATER_LEVEL`). Mirror transform flips both position and pitch. Temporal amortization support (render every N frames). Disabled automatically on integrated GPUs. **RenderLayers-based culling** excludes below-water terrain chunks from the reflection camera — only chunks whose top face is above `WATER_LEVEL` are visible, preventing underwater geometry from appearing in reflections.
+
+    *   **Reflection Compositor** (`water_reflection_compositor.rs`): A custom post-process render graph node inserted between `EndMainPass` and `Bloom`. Reconstructs world-Y from the depth prepass to identify water-surface pixels, then blends the planar reflection texture using Schlick Fresnel (power 5.0) with wave-driven UV distortion. Bypasses the `bevy_water` material binding limitation by compositing reflections after the main pass. No-op when reflections are disabled.
+
+    *   **Fresnel Reflection Blending**: Schlick Fresnel drives view-angle dependent reflection strength — at glancing angles the water surface becomes a mirror; at steep angles it's transparent. Includes an approximated sun specular highlight in the reflected direction. Alpha also increases at glancing angles (physically correct — water becomes opaque when viewed at a shallow angle).
+
+    *   **Screen-Space Refraction**: Enabled Bevy's built-in `specular_transmission = 0.2`, `ior = 1.33` (water's physical IOR), and `thickness = 0.5` on the water `StandardMaterial`. The Gerstner wave normals drive the transmission distortion direction, creating the characteristic underwater wobble of light refracted through a moving surface.
+
+    *   **Interactive Displacement System** (`water_displacement.rs`): CPU-driven 256×256 wave physics simulation using the discrete 2D wave equation (height + velocity fields, ~0.3 ms/frame). Objects with a `WaterImpulseSource` component (e.g. the player) inject circular impulses when moving through water; the wave equation propagates them outward with configurable speed and damping. The result is uploaded to a `WaterDisplacementTexture` each frame. Also exposes `sample_water_displacement()` for accurate buoyancy height queries from physics code.
+
+    *   **Config-Driven**: All parameters tunable in `assets/config/water.yaml` — wave speed/damping, reflection resolution scale, detail normal intensity, caustic strength, Fresnel power, foam scale, etc.
+
+    *   **GPU Fallback**: Planar reflections, detail normals, and displacement are all automatically disabled on integrated GPUs via the existing `GraphicsCapabilities::integrated_gpu` flag.
+
+*   **Performance Optimization Sweep**: Systematic GPU/CPU cost reduction across all major rendering and simulation systems, using distance-based culling, budget limiting, and quality scaling.
+
+    *   **Shadow Budget System** (`rendering/shadow_budget.rs`): New distance-based shadow culling for terrain chunks — chunks beyond 192m get `NotShadowCaster` added (with 16m hysteresis). Point light shadow budget limits concurrent shadow-casting lights to the 4 closest within 80m. Water meshes permanently marked `NotShadowCaster` (translucent surfaces shouldn't cast opaque shadows). Shadow stats shown in F3 debug overlay.
+
+    *   **Cascade Shadow Tightening**: Directional light cascade max distance reduced from 1024m to 256m — 4× better shadow texel density at the same 4096² resolution. Integrated GPUs get further reduction (2 cascades, 96m range).
+
+    *   **Grass Distance Culling**: New distance-aware grass system — grass patches cull entirely beyond 128m, density reduces at 64–96m, with hysteresis to prevent pop-in. A periodic `cull_distant_grass` system despawns patches on chunks the player moves away from, reclaiming draw calls.
+
+    *   **Water Reflection Optimization**: Reflection camera now renders every 2nd frame (temporal amortization). Resolution reduced from 0.5× to 0.35× (672×378). Render distance tightened from 200m to 150m. Reflections are inherently distorted so the quality impact is minimal.
+
+    *   **Water Displacement Throttle**: CPU wave simulation (`256×256` grid) now runs every 2nd frame instead of every frame. Adds a "settled" check that skips simulation entirely when no active impulses and all energy has damped below threshold — saves ~0.15ms/frame when idle.
+
+    *   **Volumetric Fog / God Rays**: Default step counts halved from 64 to 32 for both volumetric fog raymarching and screen-space god ray radial blur samples. Barely visible quality difference outdoors.
+
+    *   **Volumetric Cloud Optimization**: Primary raymarching steps reduced from 64 to 32, render scale from 0.5× to 0.25× (quarter resolution). Temporal reprojection compensates for the lower sample count.
+
+    *   **Prop LOD Improvements**: Material LOD now enabled by default (distant props skip PBR normal maps). Shadow cull distance tightened from 80m to 64m. Base view distance reduced from 350m to 280m. Billboard switch distance tightened from 250m to 180m. Flower visibility multiplier reduced (0.35→0.25).
+
+    *   **Terrain Cull Distance**: High-detail distance reduced from 160m to 128m (aligned with shadow cull). Overall cull distance tightened from 400m to 320m (fog hides terrain beyond ~220m).
+
 ### Current (v0.4-dev)
-*   **Bevy 0.17 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
+*   **Bevy 0.18 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
 *   **Radiance Cascades GI**: Screen-space global illumination using voxel SDF data for efficient ray marching, providing realistic indirect lighting with multi-cascade probe system and temporal reprojection.
 *   **Adaptive GI Enhancements**: Stochastic one-from-eight probe selection (~8x GI performance gain at Low quality), SDF-based terrain shadows leveraging voxel data, and screen-screen contact shadows for vegetation micro-detail. Quality presets (Low/Medium/High/Ultra) with ~15% performance range. Toggle with Alt+1/2/3/4, debug with Alt+P.
 *   **Aerial Perspective**: Custom shaders (buildings, props, grass) now blend toward fog color at distance, matching terrain fog behavior for consistent atmospheric depth.
 *   **Environment Map Lighting**: Skybox-based IBL (Image-Based Lighting) for improved PBR reflections and ambient lighting that tracks time-of-day.
 *   **Ambient + Atmospheric Effects**: GTAO (Ground Truth Ambient Occlusion via XeGTAO port), PCSS soft shadows, distance + volumetric fog with atmospheric falloff, and time-of-day color blending.
 *   **Volumetric Clouds**: Raymarched volumetric clouds with temporal reprojection, Henyey-Greenstein scattering, and configurable cloud types (stratus/stratocumulus/cumulus).
-*   **Enhanced Water**: Gerstner wave simulation with foam generation and caustic effects.
+*   **Enhanced Water** *(superseded by v0.5 water overhaul)*: Initial Gerstner wave simulation with foam generation and caustic effects.
 *   **Weather Particles**: GPU-accelerated weather system (rain/snow/dust) via bevy_hanabi with camera-following emitters.
 *   **Vegetation Wind**: Multi-layer wind animation for vegetation (trunk sway, branch movement, leaf flutter) with configurable presets. Enhanced grass shader with SSS (subsurface scattering) and contact shadows for realistic foliage rendering.
+*   **Wind + Foliage Notes**: Detailed write-up on segmented tree bending, UV-based leaf flutter, and depth pre-pass optimization for alpha-cutout foliage in [docs/wind-foliage-depth-prepass.md](docs/wind-foliage-depth-prepass.md).
 *   **Vegetation Alpha Fade**: Grass-like props fade to a configurable minimum alpha near the camera to keep visibility through dense foliage. Tuned in the F4 settings.
 *   **Shadow + LOD Alignment**: Cascade shadows tuned to fog visibility and chunk LOD cull distances to avoid dark banding.
 *   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
@@ -70,7 +119,7 @@ Props and vegetation with LOD optimizations:
 *   **God Rays With fog**: God ray/volumetric light shaft effect is only happening with fog around, we don't want to have that always.
 *   **Mesh gaps**: Small gaps happening sometimes.
 *   **Culling on close distance**: When digging and there are close distance polygons, culling and visibility has issues.
-*   **Shallow water**: Shallow water effects need to be improved.
+*   **Shallow water**: Shore foam, edge coloring, and caustics improved in v0.5.
 *   **LODS**: Small gaps and errors can be seen far away in the LODs.
 
 ### V0.3

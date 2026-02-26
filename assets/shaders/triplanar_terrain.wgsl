@@ -6,6 +6,8 @@
 
 #import bevy_pbr::forward_io::VertexOutput
 #import bevy_pbr::{pbr_fragment, pbr_functions, pbr_types}
+#import bevy_pbr::mesh_view_bindings::globals
+#import water_caustics
 
 struct TriplanarUniforms {
     base_color: vec4<f32>,
@@ -259,6 +261,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
         color = pbr_functions::apply_pbr_lighting(pbr_input);
     } else {
         color = pbr_input.material.base_color;
+    }
+
+    // Underwater caustics: add animated light patterns to terrain below water level
+    if (world_pos.y < WATER_LEVEL) {
+        let caustic = water_caustics::calculate_caustics(
+            world_pos, WATER_LEVEL, globals.time,
+            0.85,   // caustic_intensity (from water.yaml default)
+            1.2     // caustic_scale (from water.yaml default)
+        );
+        color = vec4<f32>(color.rgb + water_caustics::caustic_color(caustic), color.a);
     }
 
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);

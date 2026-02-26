@@ -1,9 +1,12 @@
-use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, VolumetricLight};
+use bevy::light::{
+    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight, VolumetricLight,
+};
 use bevy::prelude::*;
 use bevy_water::*;
 
 use crate::atmosphere::AtmosphereConfig;
 use crate::constants::WATER_LEVEL;
+use crate::rendering::capabilities::GraphicsCapabilities;
 
 /// Settings that drive the sky and sun animation
 #[derive(Resource)]
@@ -91,9 +94,9 @@ impl Plugin for AtmospherePlugin {
             .add_plugins((WaterPlugin, ImageUtilsPlugin))
             .add_systems(
                 Startup,
-                (setup_atmosphere, seed_atmosphere.after(setup_atmosphere)),
+                (setup_atmosphere, seed_atmosphere).chain(),
             )
-            .add_systems(Update, (animate_atmosphere, apply_visual_settings_to_sun));
+            .add_systems(Update, (animate_atmosphere, apply_visual_settings_to_sun, adjust_shadows_for_integrated_gpu));
     }
 }
 
@@ -115,9 +118,9 @@ fn setup_atmosphere(mut commands: Commands) {
         CascadeShadowConfigBuilder {
             num_cascades: 4,
             minimum_distance: 0.5,
-            maximum_distance: 1024.0,
-            first_cascade_far_bound: 24.0,
-            overlap_proportion: 0.35,
+            maximum_distance: 256.0,     // Was 1024 — matches terrain shadow cull distance + margin
+            first_cascade_far_bound: 16.0,
+            overlap_proportion: 0.3,
             ..default()
         }
         .build(),
@@ -130,7 +133,7 @@ fn seed_atmosphere(
     settings: Res<AtmosphereSettings>,
     atmo_config: Option<Res<AtmosphereConfig>>,
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
     mut clear_color: ResMut<ClearColor>,
 ) {
     // Check if Bevy's native atmosphere is handling sky rendering
@@ -152,7 +155,7 @@ fn animate_atmosphere(
     mut settings: ResMut<AtmosphereSettings>,
     atmo_config: Option<Res<AtmosphereConfig>>,
     mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
     mut clear_color: ResMut<ClearColor>,
 ) {
     // Check if Bevy's native atmosphere is handling sky rendering
@@ -251,7 +254,7 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
 fn apply_atmosphere_sample(
     sample: AtmosphereSample,
     sun_query: &mut Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
-    ambient: &mut ResMut<AmbientLight>,
+    ambient: &mut ResMut<GlobalAmbientLight>,
     clear_color: &mut ResMut<ClearColor>,
     native_atmosphere_active: bool,
 ) {
@@ -314,5 +317,29 @@ pub fn apply_visual_settings_to_sun(
         
         // Apply illuminance
         light.illuminance = visual_settings.illuminance;
+    }
+}
+
+fn adjust_shadows_for_integrated_gpu(
+    capabilities: Res<GraphicsCapabilities>,
+    mut sun_query: Query<&mut CascadeShadowConfig, With<Sun>>,
+    mut ran: Local<bool>,
+) {
+    if *ran || !capabilities.integrated_gpu {
+        return;
+    }
+    *ran = true;
+
+    for mut cascade_config in sun_query.iter_mut() {
+        // Reduce to 2 cascades, shorter distance on integrated GPU
+        *cascade_config = CascadeShadowConfigBuilder {
+            num_cascades: 2,
+            minimum_distance: 0.5,
+            maximum_distance: 96.0,
+            first_cascade_far_bound: 12.0,
+            overlap_proportion: 0.25,
+            ..default()
+        }
+        .build();
     }
 }

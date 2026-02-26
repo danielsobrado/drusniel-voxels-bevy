@@ -1,8 +1,10 @@
 //! Ghost preview and placement systems for building.
 
 use bevy::prelude::*;
+use bevy::math::{Isometry3d, primitives::Cuboid};
 
 use crate::interaction::TargetedBlock;
+use crate::rendering::building_material::{BuildingMaterialHandle, BuildingMesh};
 use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::{Voxel, VoxelType};
 
@@ -134,10 +136,10 @@ pub fn update_building_ghost(
     };
 
     let half_size = piece_def.dimensions * 0.5;
-    gizmos.cuboid(
-        Transform::from_translation(ghost_pos)
-            .with_rotation(ghost_rot)
-            .with_scale(half_size * 2.0),
+    let cuboid = Cuboid::new(half_size.x * 2.0, half_size.y * 2.0, half_size.z * 2.0);
+    gizmos.primitive_3d(
+        &cuboid,
+        Isometry3d::new(ghost_pos, ghost_rot),
         color,
     );
 
@@ -223,7 +225,8 @@ pub fn place_building_piece(
     mut grid: ResMut<BuildingGrid>,
     ghost_query: Query<(&Transform, &BuildingGhost)>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    building_mat_handle: Option<Res<BuildingMaterialHandle>>,
+    mut standard_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if !state.active || !mouse.just_pressed(MouseButton::Right) {
         return;
@@ -257,30 +260,68 @@ pub fn place_building_piece(
         piece_def.dimensions.z,
     ));
 
-    let material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.6, 0.4, 0.2), // Wood color
-        ..default()
-    });
+    // Use BuildingMaterial if available, otherwise fall back to StandardMaterial
+    let entity = if let Some(ref mat_handle) = building_mat_handle {
+        commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(mat_handle.handle.clone()),
+                Transform::from_translation(position)
+                    .with_rotation(state.rotation_quat()),
+                BuildingPiece {
+                    piece_type,
+                    grid_position: grid_pos,
+                    rotation,
+                    material: piece_def.material,
+                },
+                BuildingMesh {
+                    material_type: piece_def.material,
+                },
+            ))
+            .id()
+    } else {
+        // Fallback to StandardMaterial with color based on material type
+        let base_color = match piece_def.material {
+            crate::rendering::building_material::BuildingMaterialType::WoodPlank => {
+                Color::srgb(0.6, 0.4, 0.2)
+            }
+            crate::rendering::building_material::BuildingMaterialType::StoneBrick => {
+                Color::srgb(0.5, 0.5, 0.5)
+            }
+            crate::rendering::building_material::BuildingMaterialType::MetalPlate => {
+                Color::srgb(0.4, 0.4, 0.45)
+            }
+            crate::rendering::building_material::BuildingMaterialType::Thatch => {
+                Color::srgb(0.7, 0.6, 0.3)
+            }
+        };
 
-    let entity = commands
-        .spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(position)
-                .with_rotation(state.rotation_quat()),
-            BuildingPiece {
-                piece_type,
-                grid_position: grid_pos,
-                rotation,
-            },
-        ))
-        .id();
+        let material = standard_materials.add(StandardMaterial {
+            base_color,
+            ..default()
+        });
+
+        commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(position)
+                    .with_rotation(state.rotation_quat()),
+                BuildingPiece {
+                    piece_type,
+                    grid_position: grid_pos,
+                    rotation,
+                    material: piece_def.material,
+                },
+            ))
+            .id()
+    };
 
     // Add to grid
     grid.insert(grid_pos, entity);
 
     info!(
-        "Placed {} at {:?} (grid: {:?})",
-        piece_def.name, position, grid_pos
+        "Placed {} ({:?}) at {:?} (grid: {:?})",
+        piece_def.name, piece_def.material, position, grid_pos
     );
 }

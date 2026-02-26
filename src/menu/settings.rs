@@ -1973,7 +1973,6 @@ pub fn handle_atmosphere_settings(
     twilight_query: Query<(&Interaction, &TwilightBandOption), (Changed<Interaction>, With<Button>)>,
     night_query: Query<(&Interaction, &NightBrightnessOption), (Changed<Interaction>, With<Button>)>,
     mut atmosphere: ResMut<AtmosphereSettings>,
-    mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -2022,14 +2021,6 @@ pub fn handle_atmosphere_settings(
                 RayleighOption::Balanced => base_rayleigh,
                 RayleighOption::Vivid => base_rayleigh * 1.4,
             };
-            // Also update Bevy's native atmosphere
-            for mut atmo in bevy_atmosphere_query.iter_mut() {
-                atmo.rayleigh_scattering = match option {
-                    RayleighOption::Gentle => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 0.7,
-                    RayleighOption::Balanced => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6),
-                    RayleighOption::Vivid => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 1.4,
-                };
-            }
         }
     }
 
@@ -2041,14 +2032,6 @@ pub fn handle_atmosphere_settings(
                 MieOption::Standard => base_mie,
                 MieOption::Dense => Vec3::splat(0.0075),
             };
-            // Also update Bevy's native atmosphere
-            for mut atmo in bevy_atmosphere_query.iter_mut() {
-                atmo.mie_scattering = match option {
-                    MieOption::Soft => 1.0e-5,
-                    MieOption::Standard => 2.0e-5,
-                    MieOption::Dense => 4.0e-5,
-                };
-            }
         }
     }
 
@@ -2060,14 +2043,6 @@ pub fn handle_atmosphere_settings(
                 MieDirectionOption::Standard => 0.7,
                 MieDirectionOption::Forward => 0.85,
             };
-            // Also update Bevy's native atmosphere
-            for mut atmo in bevy_atmosphere_query.iter_mut() {
-                atmo.mie_asymmetry = match option {
-                    MieDirectionOption::Broad => 0.5,
-                    MieDirectionOption::Standard => 0.758,
-                    MieDirectionOption::Forward => 0.9,
-                };
-            }
         }
     }
 
@@ -2138,14 +2113,6 @@ pub fn handle_bevy_atmosphere_settings(
     for (interaction, option) in ozone_query.iter() {
         if *interaction == Interaction::Pressed {
             settings_state.ozone = *option;
-            for mut atmo in bevy_atmosphere_query.iter_mut() {
-                atmo.ozone_absorption = match option {
-                    OzoneOption::None => Vec3::ZERO,
-                    OzoneOption::Subtle => Vec3::new(0.32e-6, 0.94e-6, 0.04e-6),
-                    OzoneOption::Earth => Vec3::new(0.65e-6, 1.881e-6, 0.085e-6),
-                    OzoneOption::Heavy => Vec3::new(1.3e-6, 3.76e-6, 0.17e-6),
-                };
-            }
         }
     }
 
@@ -3381,7 +3348,7 @@ pub fn handle_save_settings_interaction(
 }
 
 pub fn process_rebind_input(
-    mut events: EventReader<KeyboardInput>,
+    mut events: MessageReader<KeyboardInput>,
     mut rebind_state: ResMut<RebindState>,
     mut input_config: ResMut<crate::input::config::InputConfig>,
 ) {
@@ -3621,7 +3588,7 @@ pub struct AtlasScrollContent;
 
 /// Handles mouse wheel scrolling for the Atlas Grid
 pub fn handle_atlas_scroll(
-    mut events: EventReader<bevy::input::mouse::MouseWheel>,
+    mut events: MessageReader<bevy::input::mouse::MouseWheel>,
     mut query: Query<&mut Node, With<AtlasScrollContent>>,
     settings_state: Res<SettingsState>,
 ) {

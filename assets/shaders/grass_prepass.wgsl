@@ -2,7 +2,8 @@
 // Must apply same wind animation as main grass.wgsl shader
 
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
-#import bevy_pbr::prepass_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
+#import bevy_pbr::prepass_io::{Vertex, VertexOutput}
 
 struct GrassMaterial {
     base_color: vec4<f32>,
@@ -63,12 +64,10 @@ fn fbm(p: vec2<f32>) -> f32 {
     return value;
 }
 
-struct Vertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-};
+fn interleaved_gradient_noise(pixel: vec2<f32>) -> f32 {
+    let magic = vec3<f32>(0.06711056, 0.00583715, 52.9829189);
+    return fract(magic.z * fract(dot(pixel, magic.xy)));
+}
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -105,9 +104,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Transform to clip space
     out.position = mesh_position_local_to_clip(model, local_pos);
 
-    // Output world position and normal for prepass
+    // Output world position for prepass.
     out.world_position = model * local_pos;
+#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+    // Only write normal when the normal/deferred prepass variant is active.
     out.world_normal = normalize((model * vec4<f32>(vertex.normal, 0.0)).xyz);
+#endif
     out.uv = vertex.uv;
 
     return out;
@@ -126,9 +128,27 @@ fn blade_alpha(uv: vec2<f32>) -> f32 {
 @fragment
 fn fragment(input: VertexOutput) {
     let alpha = blade_alpha(input.uv);
-    // Discard fragments below alpha threshold (matches AlphaMode::Mask(0.5))
-    if alpha < 0.5 {
+
+    // Match near-fade + dither discard in grass.wgsl so prepass depth coverage stays in sync.
+    let distance = length(view.world_position - input.world_position.xyz);
+    var near_fade = 1.0;
+    if material.near_fade_end > material.near_fade_start + 0.001 {
+        near_fade = smoothstep(material.near_fade_start, material.near_fade_end, distance);
+    }
+    let min_alpha = clamp(material.near_fade_min_alpha, 0.0, 1.0);
+    let fade_alpha = mix(min_alpha, 1.0, near_fade);
+    let final_alpha = alpha * fade_alpha;
+
+    // Keep hard alpha cutout parity with mask mode.
+    if final_alpha < 0.5 {
         discard;
+    }
+
+    if fade_alpha < 0.999 {
+        let dither = interleaved_gradient_noise(input.position.xy);
+        if final_alpha < dither {
+            discard;
+        }
     }
     // Prepass doesn't need to output color, just depth (implicit via position)
 }

@@ -14,11 +14,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use crate::interaction::{DeleteMode, DragState, EditMode, TargetedBlock};
+use crate::interaction::radial_menu::{RadialMenuRoot, RadialMenuState, PaletteDisplayMode};
 use crate::voxel::types::Voxel;
 use bevy::ecs::hierarchy::ChildOf;
 use crate::voxel::world::VoxelWorld;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum PlacementSelection {
     Voxel(VoxelType),
     Prop { id: String, prop_type: PropType },
@@ -48,6 +49,8 @@ pub struct PlacementPaletteState {
     pub selected_index: Option<usize>,
     pub root: Option<Entity>,
     pub prev_edit_mode: Option<bool>,
+    /// Display mode (linear list vs radial wheel).
+    pub display_mode: PaletteDisplayMode,
 }
 
 #[derive(Resource, Default)]
@@ -224,11 +227,15 @@ pub fn toggle_palette(
     chat_state: Option<Res<ChatState>>,
     mut palette: ResMut<PlacementPaletteState>,
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     mut edit_mode: ResMut<EditMode>,
     mut delete_mode: ResMut<DeleteMode>,
     mut drag_state: ResMut<DragState>,
     mut world: ResMut<VoxelWorld>,
+    mut radial_state: ResMut<RadialMenuState>,
+    registry: Res<BuildingPieceRegistry>,
+    windows: Query<&Window>,
+    radial_root_query: Query<Entity, With<RadialMenuRoot>>,
 ) {
     if pause_state.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) {
         return;
@@ -252,10 +259,20 @@ pub fn toggle_palette(
         if palette.selected_index.is_none() {
             palette.selected_index = Some(0);
         }
-        spawn_palette_ui(&mut commands, &asset_server, &mut palette);
-        palette.needs_redraw = true;
+
+        // Use radial menu by default for building
+        palette.display_mode = PaletteDisplayMode::Radial;
+        super::radial_menu::spawn_radial_menu(
+            &mut commands,
+            &mut radial_state,
+            &registry,
+            &windows,
+        );
     } else {
+        // Despawn both linear and radial UI
         despawn_palette_ui(&mut commands, &mut palette);
+        super::radial_menu::despawn_radial_menu(&mut commands, &radial_root_query);
+
         if let Some(prev) = palette.prev_edit_mode.take() {
             set_edit_mode_state(
                 &mut edit_mode,

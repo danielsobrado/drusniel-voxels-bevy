@@ -62,6 +62,11 @@ pub fn setup_water_material(
             double_sided: true,
             cull_mode: None,
             depth_bias: 4.0,
+            // Refraction via Bevy's specular transmission:
+            // Objects below the water surface appear with IOR-based distortion
+            specular_transmission: 0.2,
+            ior: 1.33,     // Water IOR (physically correct)
+            thickness: 0.5, // Non-zero thickness enables lens-like distortion
             ..default()
         },
         extension: BevyWaterMaterial {
@@ -122,6 +127,9 @@ pub fn sync_voxel_water_material_overrides(
         mat.base.double_sided = true;
         mat.base.cull_mode = None;
         mat.base.depth_bias = 4.0;
+        mat.base.specular_transmission = 0.2;
+        mat.base.ior = 1.33;
+        mat.base.thickness = 0.5;
 
         mat.extension.amplitude = settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT;
         mat.extension.clarity = settings.clarity * VOXEL_WATER_CLARITY_MULT;
@@ -387,10 +395,26 @@ pub fn setup_building_material(
                 ..default()
             },
             // Wood plank textures
-            wood_albedo: load_image_if_exists(&asset_server, "pbr/building/wood/albedo.png"),
-            wood_normal: load_image_if_exists(&asset_server, "pbr/building/wood/normal.png"),
-            wood_roughness: load_image_if_exists(&asset_server, "pbr/building/wood/roughness.png"),
-            wood_ao: load_image_if_exists(&asset_server, "pbr/building/wood/ao.png"),
+            wood_albedo: load_image_if_exists(&asset_server, "textures/building/wood/albedo.png"),
+            wood_normal: load_image_if_exists(&asset_server, "textures/building/wood/normal.png"),
+            wood_roughness: load_image_if_exists(&asset_server, "textures/building/wood/roughness.png"),
+            wood_ao: load_image_if_exists(&asset_server, "textures/building/wood/ao.png"),
+            // Stone brick textures
+            stone_albedo: load_image_if_exists(&asset_server, "textures/building/stone/albedo.png"),
+            stone_normal: load_image_if_exists(&asset_server, "textures/building/stone/normal.png"),
+            stone_roughness: load_image_if_exists(&asset_server, "textures/building/stone/roughness.png"),
+            stone_ao: load_image_if_exists(&asset_server, "textures/building/stone/ao.png"),
+            // Metal plate textures
+            metal_albedo: load_image_if_exists(&asset_server, "textures/building/metal/albedo.png"),
+            metal_normal: load_image_if_exists(&asset_server, "textures/building/metal/normal.png"),
+            metal_roughness: load_image_if_exists(&asset_server, "textures/building/metal/roughness.png"),
+            metal_ao: load_image_if_exists(&asset_server, "textures/building/metal/ao.png"),
+            metal_metallic: load_image_if_exists(&asset_server, "textures/building/metal/metallic.png"),
+            // Thatch textures
+            thatch_albedo: load_image_if_exists(&asset_server, "textures/building/thatch/albedo.png"),
+            thatch_normal: load_image_if_exists(&asset_server, "textures/building/thatch/normal.png"),
+            thatch_roughness: load_image_if_exists(&asset_server, "textures/building/thatch/roughness.png"),
+            thatch_ao: load_image_if_exists(&asset_server, "textures/building/thatch/ao.png"),
         }
     });
 

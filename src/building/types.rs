@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::rendering::building_material::BuildingMaterialType;
+
 // ============================================================================
 // Snap Result Types (needed by BuildingState)
 // ============================================================================
@@ -148,11 +150,13 @@ pub struct PieceDefinition {
     pub mesh_path: Option<String>,
     /// Whether this piece can be placed on terrain (grounded).
     pub can_ground: bool,
+    /// Material type for this piece.
+    pub material: BuildingMaterialType,
 }
 
 impl PieceDefinition {
     /// Create a basic wall piece (2m wide x 2m tall x 0.2m thick).
-    pub fn wall(id: u32, name: &str) -> Self {
+    pub fn wall(id: u32, name: &str, material: BuildingMaterialType) -> Self {
         let piece_id = PieceTypeId(id);
         Self {
             id: piece_id,
@@ -171,11 +175,12 @@ impl PieceDefinition {
             ],
             mesh_path: None,
             can_ground: false,
+            material,
         }
     }
 
     /// Create a floor/foundation piece (2m x 2m).
-    pub fn floor(id: u32, name: &str) -> Self {
+    pub fn floor(id: u32, name: &str, material: BuildingMaterialType) -> Self {
         let piece_id = PieceTypeId(id);
         Self {
             id: piece_id,
@@ -196,11 +201,12 @@ impl PieceDefinition {
             ],
             mesh_path: None,
             can_ground: true,
+            material,
         }
     }
 
     /// Create a fence piece (2m wide x 1m tall).
-    pub fn fence(id: u32, name: &str) -> Self {
+    pub fn fence(id: u32, name: &str, material: BuildingMaterialType) -> Self {
         let piece_id = PieceTypeId(id);
         Self {
             id: piece_id,
@@ -217,11 +223,12 @@ impl PieceDefinition {
             ],
             mesh_path: None,
             can_ground: true,
+            material,
         }
     }
 
     /// Create a pillar piece (0.4m x 0.4m x 2m tall).
-    pub fn pillar(id: u32, name: &str) -> Self {
+    pub fn pillar(id: u32, name: &str, material: BuildingMaterialType) -> Self {
         let piece_id = PieceTypeId(id);
         Self {
             id: piece_id,
@@ -236,6 +243,7 @@ impl PieceDefinition {
             ],
             mesh_path: None,
             can_ground: true,
+            material,
         }
     }
 }
@@ -317,6 +325,8 @@ pub struct BuildingPiece {
     pub grid_position: IVec3,
     /// Rotation index (0-3).
     pub rotation: u8,
+    /// Material type of this piece.
+    pub material: BuildingMaterialType,
 }
 
 /// Component marking an entity as a building ghost preview.
@@ -330,11 +340,25 @@ pub struct BuildingGhost {
 
 /// Setup the building piece registry with default pieces.
 pub fn setup_building_piece_registry(mut registry: ResMut<BuildingPieceRegistry>) {
-    // Register basic building pieces
-    registry.register(PieceDefinition::floor(1, "Wood Floor 2x2"));
-    registry.register(PieceDefinition::wall(2, "Wood Wall"));
-    registry.register(PieceDefinition::fence(3, "Wood Fence"));
-    registry.register(PieceDefinition::pillar(4, "Wood Pillar"));
+    use BuildingMaterialType::*;
+
+    // Wood pieces
+    registry.register(PieceDefinition::floor(1, "Wood Floor", WoodPlank));
+    registry.register(PieceDefinition::wall(2, "Wood Wall", WoodPlank));
+    registry.register(PieceDefinition::fence(3, "Wood Fence", WoodPlank));
+    registry.register(PieceDefinition::pillar(4, "Wood Pillar", WoodPlank));
+
+    // Stone pieces
+    registry.register(PieceDefinition::floor(10, "Stone Floor", StoneBrick));
+    registry.register(PieceDefinition::wall(11, "Stone Wall", StoneBrick));
+    registry.register(PieceDefinition::pillar(12, "Stone Pillar", StoneBrick));
+
+    // Metal pieces
+    registry.register(PieceDefinition::floor(20, "Metal Floor", MetalPlate));
+    registry.register(PieceDefinition::wall(21, "Metal Wall", MetalPlate));
+
+    // Thatch pieces
+    registry.register(PieceDefinition::wall(30, "Thatch Wall", Thatch));
 
     info!(
         "Building piece registry initialized with {} pieces",

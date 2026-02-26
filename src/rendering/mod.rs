@@ -39,7 +39,12 @@ pub mod ray_tracing;
 pub mod ssao;
 pub mod triplanar_material;
 pub mod volumetric_clouds;
+pub mod god_rays;
 pub mod water;
+pub mod water_displacement;
+pub mod water_reflection;
+pub mod shadow_budget;
+pub mod water_reflection_compositor;
 
 
 pub use ao_config::AmbientOcclusionConfig;

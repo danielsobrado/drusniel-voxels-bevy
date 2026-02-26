@@ -16,6 +16,9 @@ pub struct FogConfig {
     /// Runtime color modifiers (adjusted via settings UI, persisted in settings save)
     #[serde(default)]
     pub color_modifiers: FogColorModifiers,
+    /// Screen-space god rays (radial blur post-process, independent of volumetric fog)
+    #[serde(default)]
+    pub screen_god_rays: ScreenGodRaysConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -237,6 +240,33 @@ pub struct FogColors {
     pub directional: [f32; 3],
 }
 
+/// Configuration for the screen-space god rays post-process effect.
+/// Works independently of Bevy's built-in VolumetricFog.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ScreenGodRaysConfig {
+    pub enabled: bool,
+    pub intensity: f32,
+    pub decay: f32,
+    pub density: f32,
+    pub weight: f32,
+    pub num_samples: u32,
+    pub threshold: f32,
+}
+
+impl Default for ScreenGodRaysConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            intensity: 0.35,
+            decay: 0.97,
+            density: 0.8,
+            weight: 0.04,
+            num_samples: 32,
+            threshold: 2.0,
+        }
+    }
+}
+
 impl Default for FogConfig {
     fn default() -> Self {
         Self {
@@ -249,7 +279,7 @@ impl Default for FogConfig {
             },
             volumetric: VolumetricConfig {
                 enabled: true,
-                step_count: 64,
+                step_count: 32,
                 jitter: 0.5,
                 ambient_intensity: 0.0,
             },
@@ -287,6 +317,7 @@ impl Default for FogConfig {
                 },
             },
             color_modifiers: FogColorModifiers::default(),
+            screen_god_rays: ScreenGodRaysConfig::default(),
         }
     }
 }

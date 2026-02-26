@@ -46,7 +46,7 @@ impl Default for PropLodConfig {
             hysteresis: PROP_LOD_MATERIAL_HYSTERESIS,
             update_interval: 0.2,
             shadow_culling_enabled: true,
-            material_lod_enabled: false, // Disabled by default until shader is tested
+            material_lod_enabled: true, // Skip PBR on distant props for performance
         }
     }
 }

@@ -158,6 +158,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 struct FragmentInput {
+    @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(3) world_normal: vec3<f32>,
     @location(1) color: vec4<f32>,
@@ -222,7 +223,7 @@ fn compute_grass_ao(
 }
 
 @fragment
-fn fragment(input: FragmentInput, @builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
+fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = blade_alpha(input.uv);
     
     // Get sun direction from material uniform
@@ -263,7 +264,7 @@ fn fragment(input: FragmentInput, @builtin(position) frag_coord: vec4<f32>) -> @
     let final_alpha = alpha * fade_alpha;
 
     if fade_alpha < 0.999 {
-        let dither = interleaved_gradient_noise(frag_coord.xy);
+        let dither = interleaved_gradient_noise(input.clip_position.xy);
         if final_alpha < dither {
             discard;
         }

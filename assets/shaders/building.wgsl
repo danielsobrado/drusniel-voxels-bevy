@@ -30,23 +30,23 @@ struct BuildingUniforms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var wood_ao: texture_2d<f32>;
 
 // Stone brick textures (material 1)
-// @group(#{MATERIAL_BIND_GROUP}) @binding(6) var stone_albedo: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(7) var stone_normal: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(8) var stone_roughness: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(9) var stone_ao: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var stone_albedo: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var stone_normal: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var stone_roughness: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var stone_ao: texture_2d<f32>;
 
 // Metal plate textures (material 2) - includes metallic
-// @group(#{MATERIAL_BIND_GROUP}) @binding(10) var metal_albedo: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(11) var metal_normal: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(12) var metal_roughness: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(13) var metal_ao: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(14) var metal_metallic: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var metal_albedo: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var metal_normal: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var metal_roughness: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(13) var metal_ao: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(14) var metal_metallic: texture_2d<f32>;
 
 // Thatch textures (material 3)
-// @group(#{MATERIAL_BIND_GROUP}) @binding(15) var thatch_albedo: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(16) var thatch_normal: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(17) var thatch_roughness: texture_2d<f32>;
-// @group(#{MATERIAL_BIND_GROUP}) @binding(18) var thatch_ao: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(15) var thatch_albedo: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(16) var thatch_normal: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(17) var thatch_roughness: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(18) var thatch_ao: texture_2d<f32>;
 
 // PBR sample result
 struct PbrSample {

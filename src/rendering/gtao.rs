@@ -321,73 +321,78 @@ pub struct GtaoPipelines {
     pub linear_sampler: Sampler,
 }
 
+fn gtao_main_bind_group_layout_entries() -> Vec<BindGroupLayoutEntry> {
+    vec![
+        // Depth-normal texture
+        BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Float { filterable: true },
+                view_dimension: TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        // Depth-normal sampler
+        BindGroupLayoutEntry {
+            binding: 1,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Sampler(SamplerBindingType::Filtering),
+            count: None,
+        },
+        // Noise texture
+        BindGroupLayoutEntry {
+            binding: 2,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Float { filterable: true },
+                view_dimension: TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        // Noise sampler
+        BindGroupLayoutEntry {
+            binding: 3,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Sampler(SamplerBindingType::Filtering),
+            count: None,
+        },
+        // GTAO settings uniform
+        BindGroupLayoutEntry {
+            binding: 4,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: Some(GtaoSettingsUniform::min_size()),
+            },
+            count: None,
+        },
+        // View uniforms
+        BindGroupLayoutEntry {
+            binding: 5,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: true,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+    ]
+}
+
 impl FromWorld for GtaoPipelines {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
 
         // Main GTAO pass bind group layout
+        let main_layout_entries = gtao_main_bind_group_layout_entries();
         let main_layout = render_device.create_bind_group_layout(
             "gtao_main_bind_group_layout",
-            &[
-                // Depth-normal texture
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Depth-normal sampler
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Noise texture
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Noise sampler
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // GTAO settings uniform
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GtaoSettingsUniform::min_size()),
-                    },
-                    count: None,
-                },
-                // View uniforms
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: None, // View uniform size varies by implementation
-                    },
-                    count: None,
-                },
-            ],
+            &main_layout_entries,
         );
 
         // Denoise pass bind group layout
@@ -499,16 +504,16 @@ pub struct GtaoMainPipelineKey {
 /// Main GTAO pipeline definition
 #[derive(Resource)]
 pub struct GtaoMainPipeline {
-    pub layout: BindGroupLayout,
+    pub layout: BindGroupLayoutDescriptor,
     pub shader: Handle<Shader>,
 }
 
 impl FromWorld for GtaoMainPipeline {
     fn from_world(world: &mut World) -> Self {
-        let pipelines = world.resource::<GtaoPipelines>();
         let shaders = world.resource::<GtaoShaders>();
+        let layout_entries = gtao_main_bind_group_layout_entries();
         Self {
-            layout: pipelines.main_layout.clone(),
+            layout: BindGroupLayoutDescriptor::new("gtao_main_bind_group_layout", &layout_entries),
             shader: shaders.main_shader.clone(),
         }
     }

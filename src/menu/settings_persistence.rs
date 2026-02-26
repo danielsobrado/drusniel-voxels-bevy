@@ -308,27 +308,6 @@ fn apply_atmosphere_settings(
     };
 
     for mut atmo in bevy_atmosphere_query.iter_mut() {
-        atmo.rayleigh_scattering = match settings_state.rayleigh {
-            RayleighOption::Gentle => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 0.7,
-            RayleighOption::Balanced => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6),
-            RayleighOption::Vivid => Vec3::new(5.5e-6, 13.0e-6, 22.4e-6) * 1.4,
-        };
-        atmo.mie_scattering = match settings_state.mie {
-            MieOption::Soft => 1.0e-5,
-            MieOption::Standard => 2.0e-5,
-            MieOption::Dense => 4.0e-5,
-        };
-        atmo.mie_asymmetry = match settings_state.mie_direction {
-            MieDirectionOption::Broad => 0.5,
-            MieDirectionOption::Standard => 0.758,
-            MieDirectionOption::Forward => 0.9,
-        };
-        atmo.ozone_absorption = match settings_state.ozone {
-            OzoneOption::None => Vec3::ZERO,
-            OzoneOption::Subtle => Vec3::new(0.32e-6, 0.94e-6, 0.04e-6),
-            OzoneOption::Earth => Vec3::new(0.65e-6, 1.881e-6, 0.085e-6),
-            OzoneOption::Heavy => Vec3::new(1.3e-6, 3.76e-6, 0.17e-6),
-        };
         atmo.ground_albedo = match settings_state.ground_albedo {
             GroundAlbedoOption::Dark => Vec3::splat(0.1),
             GroundAlbedoOption::Earth => Vec3::new(0.3, 0.3, 0.3),

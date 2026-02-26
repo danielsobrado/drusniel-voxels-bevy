@@ -9,6 +9,12 @@ use crate::constants::{
 };
 use crate::physics::PhysicsLayer;
 
+#[derive(TnuaScheme)]
+#[scheme(basis = TnuaBuiltinWalk)]
+pub enum PlayerMovementScheme {
+    Jump(TnuaBuiltinJump),
+}
+
 /// Player marker component.
 #[derive(Component)]
 pub struct Player;
@@ -118,12 +124,17 @@ pub struct PlayerBundle {
     pub collider: Collider,
     pub locked_axes: LockedAxes,
     pub collision_layers: CollisionLayers,
-    pub tnua_controller: TnuaController,
+    pub tnua_controller: TnuaController<PlayerMovementScheme>,
+    pub tnua_config: TnuaConfig<PlayerMovementScheme>,
     pub tnua_sensor: TnuaAvian3dSensorShape,
 }
 
 impl PlayerBundle {
-    pub fn new(position: Vec3, config: PlayerConfig) -> Self {
+    pub fn new(
+        position: Vec3,
+        config: PlayerConfig,
+        movement_config: Handle<PlayerMovementSchemeConfig>,
+    ) -> Self {
         let half_height = (config.capsule_height - config.capsule_radius * 2.0) / 2.0;
 
         Self {
@@ -139,6 +150,7 @@ impl PlayerBundle {
                 PhysicsLayer::player_mask(),
             ),
             tnua_controller: TnuaController::default(),
+            tnua_config: TnuaConfig(movement_config),
             tnua_sensor: TnuaAvian3dSensorShape(Collider::capsule(
                 config.capsule_radius * 0.9,
                 half_height * 1.8,

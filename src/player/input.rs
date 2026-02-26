@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
-use super::{Player, PlayerConfig};
+use super::{Player, PlayerConfig, PlayerMovementScheme, PlayerMovementSchemeConfig};
 use crate::camera::controller::PlayerCamera;
 use crate::input::manager::ActionState;
 use crate::input::config::GameAction;
@@ -34,7 +34,7 @@ pub fn read_player_input(
     }
     input.movement = movement.normalize_or_zero();
 
-    input.jump = action_state.just_pressed(GameAction::Jump);
+    input.jump = action_state.pressed(GameAction::Jump);
     input.sprint = action_state.pressed(GameAction::Sprint);
 }
 
@@ -42,13 +42,21 @@ pub fn read_player_input(
 pub fn apply_player_movement(
     input: Res<PlayerInput>,
     camera_query: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
-    mut player_query: Query<(&mut TnuaController, &PlayerConfig), With<Player>>,
+    mut player_query: Query<
+        (
+            &mut TnuaController<PlayerMovementScheme>,
+            &PlayerConfig,
+            &TnuaConfig<PlayerMovementScheme>,
+        ),
+        With<Player>,
+    >,
+    mut movement_configs: ResMut<Assets<PlayerMovementSchemeConfig>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
 
-    let Ok((mut controller, config)) = player_query.single_mut() else {
+    let Ok((mut controller, config, movement_config)) = player_query.single_mut() else {
         return;
     };
 
@@ -64,19 +72,21 @@ pub fn apply_player_movement(
         config.walk_speed
     };
 
-    controller.basis(TnuaBuiltinWalk {
-        desired_velocity: direction * speed,
-        float_height: config.float_height,
-        cling_distance: 1.0,
-        max_slope: std::f32::consts::FRAC_PI_3,
-        ..default()
-    });
+    if let Some(config_asset) = movement_configs.get_mut(&movement_config.0) {
+        config_asset.basis.float_height = config.float_height;
+        config_asset.basis.max_slope = std::f32::consts::FRAC_PI_3;
+        config_asset.jump.height = config.jump_height;
+    }
+
+    controller.basis = TnuaBuiltinWalk {
+        desired_motion: direction * speed,
+        desired_forward: Dir3::new(direction).ok(),
+    };
+
+    controller.initiate_action_feeding();
 
     if input.jump {
-        controller.action(TnuaBuiltinJump {
-            height: config.jump_height,
-            ..default()
-        });
+        controller.action(PlayerMovementScheme::Jump(TnuaBuiltinJump::default()));
     }
 
 }

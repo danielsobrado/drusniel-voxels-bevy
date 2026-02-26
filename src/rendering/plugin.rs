@@ -23,6 +23,12 @@ use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::ssao::SsaoPlugin;
 use crate::rendering::triplanar_material::TriplanarMaterial;
+use crate::rendering::water::EnhancedWaterPlugin;
+use crate::rendering::water_displacement::WaterDisplacementPlugin;
+use crate::rendering::water_reflection::WaterReflectionPlugin;
+use crate::rendering::god_rays::GodRayPlugin;
+use crate::rendering::shadow_budget::ShadowBudgetPlugin;
+use crate::rendering::water_reflection_compositor::WaterReflectionCompositorPlugin;
 
 pub struct RenderingPlugin;
 
@@ -47,6 +53,18 @@ impl Plugin for RenderingPlugin {
             .add_plugins(SsaoPlugin)
             .add_plugins(CinematicPlugin)
             .add_plugins(PhotoModePlugin)
+            // Enhanced water shader modules (Gerstner, foam, caustics)
+            .add_plugins(EnhancedWaterPlugin)
+            // Planar water reflections (Valheim-style mirrored camera)
+            .add_plugins(WaterReflectionPlugin)
+            // Post-process compositor: blends the reflection texture onto water pixels
+            .add_plugins(WaterReflectionCompositorPlugin)
+            // Interactive water displacement (CPU wave physics + GPU texture)
+            .add_plugins(WaterDisplacementPlugin)
+            // Screen-space god rays (radial blur toward sun, independent of volumetric fog)
+            .add_plugins(GodRayPlugin)
+            // Shadow budget: terrain shadow culling + point light shadow limits
+            .add_plugins(ShadowBudgetPlugin)
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
             // Register TriplanarMaterial as a custom material type
             .add_plugins(MaterialPlugin::<TriplanarMaterial>::default())
@@ -56,7 +74,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<BuildingMaterial>::default())
             // Register PropsMaterial (Medium PBR)
             .add_plugins(MaterialPlugin::<PropsMaterial>::default())
-            // Register BillboardMaterial for tree LOD
+            // Register BillboardMaterial for tree LOD.
+            // Keep prepass disabled for this custom alpha-cutout shader path to avoid pipeline mismatch panics.
             .add_plugins(MaterialPlugin::<BillboardMaterial>::default())
             // Register SimpleLodMaterial for distant props (no PBR)
             .add_plugins(MaterialPlugin::<SimpleLodMaterial>::default())

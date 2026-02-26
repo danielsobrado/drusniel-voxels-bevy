@@ -2,7 +2,7 @@
 
 use bevy::math::{IVec3, UVec3};
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_VOLUME};
-use voxel_builder::voxel::chunk::{Chunk, ChunkData, LodLevel};
+use voxel_builder::voxel::chunk::{Chunk, ChunkData, FaceVisibility, LodLevel};
 use voxel_builder::voxel::types::VoxelType;
 
 #[test]
@@ -181,6 +181,7 @@ fn chunk_data_serializable() {
     let data = ChunkData {
         voxels: vec![VoxelType::Air; CHUNK_VOLUME],
         position: IVec3::new(10, 20, 30),
+        face_visibility: FaceVisibility::default(),
     };
 
     // Serialize with bincode

@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_snap_group_compatibility() {
-        use SnapGroup::*;
+        use crate::building::SnapGroup::*;
 
         // Floor edges connect to each other
         assert!(FloorEdge.is_compatible_with(&FloorEdge));

@@ -1,26 +1,29 @@
-use bevy::prelude::*;
-use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::{ClearColorConfig, RenderTarget};
+use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::ui::{AlignItems, FlexDirection, FlexWrap, JustifyContent, PositionType, Val};
 use std::collections::HashMap;
 
 use crate::chat::ChatState;
-use crate::entity::{EquippedItem, Inventory, ItemType};
+use crate::entity::{
+    EquippedItem, Inventory, InventorySlot, ItemType, INVENTORY_COLUMNS, INVENTORY_SLOTS,
+};
 use crate::menu::PauseMenuState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
 pub struct InventoryUiPlugin;
 
-const INVENTORY_COLUMNS: usize = 4;
-const INVENTORY_ROWS: usize = 3;
-const INVENTORY_SLOTS: usize = INVENTORY_COLUMNS * INVENTORY_ROWS;
-const SLOT_SIZE: f32 = 80.0;
-const SLOT_GAP: f32 = 8.0;
-const PANEL_PADDING: f32 = 18.0;
+// Inventory UI constants (6x4 grid)
+const SLOT_SIZE: f32 = 64.0;
+const SLOT_GAP: f32 = 4.0;
+const PANEL_PADDING: f32 = 12.0;
 const GRID_WIDTH: f32 =
     SLOT_SIZE * INVENTORY_COLUMNS as f32 + SLOT_GAP * (INVENTORY_COLUMNS as f32 - 1.0);
 const PANEL_WIDTH: f32 = GRID_WIDTH + PANEL_PADDING * 2.0;
+
+// Hotbar constants (keep 3D rendered icons)
+const HOTBAR_SLOTS: usize = 8;
 const HOTBAR_ICON_SIZE: u32 = 96;
 const HOTBAR_ICON_UI_SIZE: f32 = 40.0;
 const HOTBAR_ICON_SCENE_ORIGIN: Vec3 = Vec3::new(10000.0, 10000.0, 10000.0);
@@ -30,17 +33,18 @@ const HOTBAR_ICON_SPACING: f32 = 6.0;
 pub struct InventoryUiState {
     pub open: bool,
     pub root_entity: Option<Entity>,
+    pub selected_slot: Option<usize>,
 }
 
 #[derive(Resource, Debug)]
 pub struct HotbarState {
-    pub slots: [Option<ItemType>; INVENTORY_COLUMNS * 2],
+    pub slots: [Option<ItemType>; HOTBAR_SLOTS],
     pub selected: usize,
 }
 
 impl Default for HotbarState {
     fn default() -> Self {
-        let mut slots = [None; INVENTORY_COLUMNS * 2];
+        let mut slots = [None; HOTBAR_SLOTS];
         slots[0] = Some(ItemType::Pickaxe);
         slots[1] = Some(ItemType::Torch);
         slots[2] = Some(ItemType::Axe);
@@ -65,20 +69,28 @@ pub struct HotbarIconAssets {
 
 #[derive(Resource, Default)]
 pub struct DraggedItem {
+    pub slot_index: Option<usize>,
     pub item: Option<ItemType>,
+    pub quantity: u32,
 }
 
 #[derive(Component)]
 struct InventoryRoot;
 
 #[derive(Component)]
-struct InventoryList;
+struct InventoryGrid;
 
 #[derive(Component)]
 struct InventoryHeldText;
 
 #[derive(Component)]
-struct InventoryItemButton(ItemType);
+struct InventorySlotButton(usize);
+
+#[derive(Component)]
+struct InventorySlotIcon(usize);
+
+#[derive(Component)]
+struct InventorySlotQuantity(usize);
 
 #[derive(Component)]
 struct HotbarRoot;
@@ -107,7 +119,8 @@ impl Plugin for InventoryUiPlugin {
                 Update,
                 (
                     handle_hotbar_input,
-                    handle_inventory_item_buttons,
+                    handle_inventory_slot_click,
+                    handle_inventory_slot_right_click,
                     handle_hotbar_slot_buttons,
                     sync_equipped_from_hotbar,
                     refresh_hotbar_ui,
@@ -141,7 +154,10 @@ fn toggle_inventory_ui(
             commands.entity(root).despawn();
         }
         state.open = false;
+        state.selected_slot = None;
         dragged.item = None;
+        dragged.slot_index = None;
+        dragged.quantity = 0;
         return;
     }
 
@@ -236,21 +252,102 @@ fn spawn_hotbar_ui(
     ui_state.root_entity = Some(root);
 }
 
-fn handle_inventory_item_buttons(
-    mut interactions: Query<(&Interaction, &InventoryItemButton), Changed<Interaction>>,
-    inventory: Res<Inventory>,
+fn handle_inventory_slot_click(
+    mut interactions: Query<(&Interaction, &InventorySlotButton), Changed<Interaction>>,
+    mut inventory: ResMut<Inventory>,
     mut dragged: ResMut<DraggedItem>,
+    mut state: ResMut<InventoryUiState>,
+    mouse: Res<ButtonInput<MouseButton>>,
 ) {
+    // Only handle left click
+    if !mouse.pressed(MouseButton::Left) {
+        return;
+    }
+
     for (interaction, button) in interactions.iter_mut() {
         if *interaction != Interaction::Pressed {
             continue;
         }
 
-        if inventory.get_count(button.0) == 0 {
+        let slot_idx = button.0;
+        let slot = inventory.slots[slot_idx];
+
+        if let Some(dragged_item) = dragged.item {
+            // Placing item
+            if slot.item.is_none() {
+                // Place in empty slot
+                inventory.slots[slot_idx] = InventorySlot {
+                    item: Some(dragged_item),
+                    quantity: dragged.quantity,
+                };
+                dragged.item = None;
+                dragged.slot_index = None;
+                dragged.quantity = 0;
+            } else if slot.item == Some(dragged_item) && dragged_item.is_stackable() {
+                // Stack with same item type
+                let max_stack = dragged_item.max_stack();
+                let can_add = (max_stack - slot.quantity).min(dragged.quantity);
+                inventory.slots[slot_idx].quantity += can_add;
+                dragged.quantity -= can_add;
+                if dragged.quantity == 0 {
+                    dragged.item = None;
+                    dragged.slot_index = None;
+                }
+            } else {
+                // Swap items
+                let old_slot = inventory.slots[slot_idx];
+                inventory.slots[slot_idx] = InventorySlot {
+                    item: Some(dragged_item),
+                    quantity: dragged.quantity,
+                };
+                dragged.item = old_slot.item;
+                dragged.quantity = old_slot.quantity;
+            }
+        } else if slot.item.is_some() {
+            // Pick up item
+            dragged.item = slot.item;
+            dragged.quantity = slot.quantity;
+            dragged.slot_index = Some(slot_idx);
+            inventory.slots[slot_idx] = InventorySlot::default();
+        }
+
+        state.selected_slot = Some(slot_idx);
+    }
+}
+
+fn handle_inventory_slot_right_click(
+    interactions: Query<(&Interaction, &InventorySlotButton)>,
+    mut inventory: ResMut<Inventory>,
+    mut dragged: ResMut<DraggedItem>,
+    mouse: Res<ButtonInput<MouseButton>>,
+) {
+    // Only handle right click for stack splitting
+    if !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    for (interaction, button) in interactions.iter() {
+        if *interaction != Interaction::Hovered && *interaction != Interaction::Pressed {
             continue;
         }
 
-        dragged.item = Some(button.0);
+        let slot_idx = button.0;
+        let slot = &inventory.slots[slot_idx];
+
+        // Can only split if we're not already dragging and slot has stackable items > 1
+        if dragged.item.is_some() {
+            continue;
+        }
+
+        if let Some(item) = slot.item {
+            if item.is_stackable() && slot.quantity > 1 {
+                let split_amount = slot.quantity / 2;
+                inventory.slots[slot_idx].quantity -= split_amount;
+                dragged.item = Some(item);
+                dragged.quantity = split_amount;
+                dragged.slot_index = None;
+            }
+        }
     }
 }
 
@@ -261,7 +358,10 @@ fn handle_hotbar_input(
     chat_state: Option<Res<ChatState>>,
     terrain_state: Res<TerrainToolState>,
 ) {
-    if pause_menu.open || chat_state.as_ref().map(|c| c.active).unwrap_or(false) || terrain_state.terraforming_mode {
+    if pause_menu.open
+        || chat_state.as_ref().map(|c| c.active).unwrap_or(false)
+        || terrain_state.terraforming_mode
+    {
         return;
     }
 
@@ -297,6 +397,8 @@ fn handle_hotbar_slot_buttons(
         if let Some(item) = dragged.item.take() {
             hotbar.slots[slot.0] = Some(item);
             hotbar.selected = slot.0;
+            dragged.quantity = 0;
+            dragged.slot_index = None;
         } else {
             hotbar.selected = slot.0;
         }
@@ -313,7 +415,7 @@ fn sync_equipped_from_hotbar(
     }
 
     let selected_item = hotbar.slots.get(hotbar.selected).copied().flatten();
-    
+
     // Sync terrain tool state
     terrain_state.active_tool = match selected_item {
         Some(ItemType::TerrainRaise) => TerrainTool::Raise,
@@ -322,14 +424,14 @@ fn sync_equipped_from_hotbar(
         Some(ItemType::TerrainSmooth) => TerrainTool::Smooth,
         _ => TerrainTool::None,
     };
-    
+
     // Sync equipped item (only for non-terrain tools)
     let equip_item = if selected_item.map(|i| i.is_terrain_tool()).unwrap_or(false) {
         None
     } else {
         selected_item
     };
-    
+
     if equipped.item != equip_item {
         equipped.item = equip_item;
     }
@@ -339,28 +441,31 @@ fn refresh_inventory_ui(
     inventory: Res<Inventory>,
     equipped: Res<EquippedItem>,
     state: Res<InventoryUiState>,
-    list_query: Query<Entity, With<InventoryList>>,
+    dragged: Res<DraggedItem>,
+    grid_query: Query<Entity, With<InventoryGrid>>,
     mut held_query: Query<&mut Text, With<InventoryHeldText>>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
-    if !state.open || (!inventory.is_changed() && !equipped.is_changed()) {
+    if !state.open
+        || (!inventory.is_changed() && !equipped.is_changed() && !dragged.is_changed())
+    {
         return;
     }
 
     if let Ok(mut text) = held_query.single_mut() {
-        text.0 = held_label(&equipped);
+        text.0 = held_label(&equipped, &dragged);
     }
 
-    let Ok(list_entity) = list_query.single() else {
+    let Ok(grid_entity) = grid_query.single() else {
         return;
     };
 
-    commands.entity(list_entity).despawn_children();
+    commands.entity(grid_entity).despawn_children();
 
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
-    commands.entity(list_entity).with_children(|list| {
-        spawn_inventory_items(list, &inventory, equipped.item, &font);
+    commands.entity(grid_entity).with_children(|grid| {
+        spawn_inventory_slots(grid, &inventory, &state, &asset_server, &font);
     });
 }
 
@@ -410,6 +515,7 @@ fn spawn_inventory_ui(
     equipped: &EquippedItem,
 ) -> Entity {
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
+    let dragged = DraggedItem::default();
 
     commands
         .spawn((
@@ -434,30 +540,53 @@ fn spawn_inventory_ui(
                         flex_direction: FlexDirection::Column,
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.08, 0.1, 0.14, 0.92)),
+                    BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.85)),
                 ))
                 .with_children(|panel| {
-                    panel.spawn((
-                        Text::new("Inventory (Press I or Esc to close)"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
+                    // Title bar with close hint
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
+                            width: Val::Percent(100.0),
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|title_bar| {
+                            title_bar.spawn((
+                                Text::new("INVENTORY"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
 
+                            title_bar.spawn((
+                                Text::new("X"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgba(0.8, 0.3, 0.3, 1.0)),
+                            ));
+                        });
+
+                    // Held/dragging status
                     panel.spawn((
-                        Text::new(held_label(equipped)),
+                        Text::new(held_label(equipped, &dragged)),
                         TextFont {
                             font: font.clone(),
-                            font_size: 14.0,
+                            font_size: 12.0,
                             ..default()
                         },
                         TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
                         InventoryHeldText,
                     ));
 
+                    // Inventory grid (6x4)
                     panel
                         .spawn((
                             Node {
@@ -470,95 +599,132 @@ fn spawn_inventory_ui(
                                 justify_content: JustifyContent::FlexStart,
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.1, 0.1, 0.12, 0.85)),
-                            InventoryList,
+                            InventoryGrid,
                         ))
-                        .with_children(|list| {
-                            spawn_inventory_items(
-                                list,
-                                inventory,
-                                equipped.item,
-                                &font,
-                            );
+                        .with_children(|grid| {
+                            let state = InventoryUiState::default();
+                            spawn_inventory_slots(grid, inventory, &state, asset_server, &font);
                         });
+
+                    // Instructions
+                    panel.spawn((
+                        Text::new("Left-click: pick up/place | Right-click: split stack"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
+                    ));
                 });
         })
         .id()
 }
 
-fn held_label(equipped: &EquippedItem) -> String {
-    match equipped.item {
-        Some(item) => format!("Held: {}", item.display_name()),
-        None => "Held: (none)".to_string(),
+fn held_label(equipped: &EquippedItem, dragged: &DraggedItem) -> String {
+    if let Some(item) = dragged.item {
+        if dragged.quantity > 1 {
+            format!("Dragging: {} x{}", item.display_name(), dragged.quantity)
+        } else {
+            format!("Dragging: {}", item.display_name())
+        }
+    } else {
+        match equipped.item {
+            Some(item) => format!("Equipped: {}", item.display_name()),
+            None => "Equipped: (none)".to_string(),
+        }
     }
 }
 
-fn spawn_inventory_items(
-    list: &mut ChildSpawnerCommands,
+fn spawn_inventory_slots(
+    grid: &mut ChildSpawnerCommands,
     inventory: &Inventory,
-    selected: Option<ItemType>,
+    state: &InventoryUiState,
+    asset_server: &AssetServer,
     font: &Handle<Font>,
 ) {
-    let mut items: Vec<_> = inventory
-        .items
-        .iter()
-        .map(|(item, count)| (*item, *count))
-        .filter(|(_, count)| *count > 0)
-        .collect();
-    items.sort_by_key(|(item, _)| item.sort_key());
+    for slot_idx in 0..INVENTORY_SLOTS {
+        let slot = &inventory.slots[slot_idx];
+        let is_selected = state.selected_slot == Some(slot_idx);
 
-    let mut iter = items.into_iter();
-    for _ in 0..INVENTORY_SLOTS {
-        if let Some((item, count)) = iter.next() {
-            let is_selected = selected == Some(item);
-            list.spawn((
-                Button,
-                Node {
-                    width: Val::Px(SLOT_SIZE),
-                    height: Val::Px(SLOT_SIZE),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-                BackgroundColor(if is_selected {
-                    Color::srgba(0.25, 0.4, 0.7, 0.85)
-                } else {
-                    Color::srgba(0.15, 0.15, 0.18, 0.85)
-                }),
-                InventoryItemButton(item),
-            ))
-            .with_children(|button| {
-                button.spawn((
-                    Text::new(item.display_name()),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
+        // Slot container (button)
+        grid.spawn((
+            Button,
+            Node {
+                width: Val::Px(SLOT_SIZE),
+                height: Val::Px(SLOT_SIZE),
+                position_type: PositionType::Relative,
+                ..default()
+            },
+            BackgroundColor(if is_selected {
+                Color::srgba(0.32, 0.42, 0.35, 0.95) // Green highlight
+            } else {
+                Color::srgba(0.2, 0.2, 0.2, 0.9)
+            }),
+            InventorySlotButton(slot_idx),
+        ))
+        .with_children(|slot_node| {
+            if let Some(item) = slot.item {
+                // Item icon (2D image)
+                slot_node.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    ImageNode::new(asset_server.load(item.icon_path())),
+                    InventorySlotIcon(slot_idx),
                 ));
-                button.spawn((
-                    Text::new(format!("x{}", count)),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgba(0.85, 0.85, 0.85, 0.9)),
-                ));
-            });
-        } else {
-            list.spawn((
-                Node {
-                    width: Val::Px(SLOT_SIZE),
-                    height: Val::Px(SLOT_SIZE),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.1, 0.1, 0.12, 0.75)),
-            ));
-        }
+
+                // Quantity text (bottom-right corner, only if > 1)
+                if slot.quantity > 1 {
+                    slot_node
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            justify_content: JustifyContent::FlexEnd,
+                            align_items: AlignItems::FlexEnd,
+                            padding: UiRect::all(Val::Px(2.0)),
+                            ..default()
+                        })
+                        .with_children(|qty_container| {
+                            // Shadow text
+                            qty_container.spawn((
+                                Text::new(format!("{}", slot.quantity)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    right: Val::Px(1.0),
+                                    bottom: Val::Px(1.0),
+                                    ..default()
+                                },
+                            ));
+                            // Main text
+                            qty_container.spawn((
+                                Text::new(format!("{}", slot.quantity)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                InventorySlotQuantity(slot_idx),
+                            ));
+                        });
+                }
+            }
+        });
     }
 }
 
@@ -602,7 +768,7 @@ fn spawn_hotbar_slots(
                     Color::srgba(0.12, 0.12, 0.15, 0.85)
                 }),
                 // Use a dummy index for hotbar slot component since we don't want these to be clickable/swappable like normal inventory
-                HotbarSlot(100 + index), 
+                HotbarSlot(100 + index),
             ))
             .with_children(|button| {
                 button.spawn((
@@ -734,11 +900,11 @@ fn setup_hotbar_icons(
         commands.spawn((
             Camera3d::default(),
             Camera {
-                target: RenderTarget::Image(image_handle.clone().into()),
                 order: -10,
                 clear_color: ClearColorConfig::Custom(Color::srgba(0.0, 0.0, 0.0, 0.0)),
                 ..default()
             },
+            RenderTarget::Image(image_handle.clone().into()),
             Projection::Perspective(PerspectiveProjection {
                 fov: std::f32::consts::FRAC_PI_4,
                 near: 0.1,
@@ -838,7 +1004,13 @@ fn hotbar_icon_specs() -> Vec<HotbarIconSpec> {
 
 fn drag_label(dragged: &DraggedItem) -> String {
     match dragged.item {
-        Some(item) => format!("Dragging: {}", item.display_name()),
+        Some(item) => {
+            if dragged.quantity > 1 {
+                format!("Dragging: {} x{}", item.display_name(), dragged.quantity)
+            } else {
+                format!("Dragging: {}", item.display_name())
+            }
+        }
         None => "Drag an item from the inventory".to_string(),
     }
 }

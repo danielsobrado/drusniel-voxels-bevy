@@ -20,6 +20,7 @@ use crate::props::{Prop, PropChunkCullState};
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace, stop_area_trace};
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::shadow_budget::ShadowCullingStats;
 use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
 use crate::voxel::meshing::{ChunkMesh, MeshSettings, Face, get_blocky_material_index};
 use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
@@ -60,6 +61,7 @@ pub struct DebugOverlayParams<'w> {
     pub graphics: Option<Res<'w, GraphicsCapabilities>>,
     pub timing_recorder: Res<'w, AreaTimingRecorder>,
     pub timing_capture: Res<'w, AreaTimingCapture>,
+    pub shadow_stats: Res<'w, ShadowCullingStats>,
 }
 
 #[derive(SystemParam)]
@@ -447,6 +449,15 @@ pub fn update_debug_overlay(
         chunk_stats.low_lod_chunks,
         chunk_stats.culled_chunks,
         chunk_stats.mesh_entities
+    ));
+
+    // Shadow budget
+    text_content.push_str(&format!(
+        "Shadows: terrain {}/{} lights {}/{}\n",
+        debug.shadow_stats.terrain_with_shadows,
+        debug.shadow_stats.terrain_with_shadows + debug.shadow_stats.terrain_without_shadows,
+        debug.shadow_stats.point_lights_with_shadows,
+        debug.shadow_stats.point_lights_total,
     ));
 
     // Show generation progress if generating

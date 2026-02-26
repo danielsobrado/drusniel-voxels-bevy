@@ -5,7 +5,7 @@
 //! - LookupTexture (default): Faster, ideal for ground-level outdoor scenes
 
 use bevy::prelude::*;
-use bevy::pbr::{Atmosphere, AtmosphereSettings};
+use bevy::pbr::{Atmosphere, AtmosphereMode, AtmosphereSettings, ScatteringMedium};
 use serde::Deserialize;
 
 /// Configuration for atmospheric rendering
@@ -101,40 +101,15 @@ pub fn load_atmosphere_config() -> Result<AtmosphereConfig, Box<dyn std::error::
 fn configure_atmosphere_cameras(
     mut commands: Commands,
     config: Res<AtmosphereConfig>,
+    mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
     cameras: Query<Entity, (With<Camera3d>, Without<AtmosphereCamera>)>,
 ) {
     for entity in cameras.iter() {
         let mut entity_commands = commands.entity(entity);
 
-        // Build atmosphere from config
-        let mut atmosphere = Atmosphere::EARTH;
-        
-        if let Some(rayleigh) = config.rayleigh_scattering {
-            atmosphere.rayleigh_scattering = Vec3::from_array(rayleigh);
-        }
-        if let Some(scale) = config.rayleigh_scale_height {
-            // Convert scale height to density exp scale (1/scale_height in km^-1)
-            atmosphere.rayleigh_density_exp_scale = -1.0 / (scale / 1000.0);
-        }
-        if let Some(mie) = config.mie_scattering {
-            atmosphere.mie_scattering = mie;
-        }
-        if let Some(scale) = config.mie_scale_height {
-            // Convert scale height to density exp scale
-            atmosphere.mie_density_exp_scale = -1.0 / (scale / 1000.0);
-        }
-        if let Some(asymmetry) = config.mie_asymmetry {
-            atmosphere.mie_asymmetry = asymmetry;
-        }
-        if let Some(ozone) = config.ozone_absorption {
-            atmosphere.ozone_absorption = Vec3::from_array(ozone);
-        }
-        if let Some(altitude) = config.ozone_center_altitude {
-            atmosphere.ozone_layer_altitude = altitude / 1000.0; // Convert to km
-        }
-        if let Some(width) = config.ozone_width {
-            atmosphere.ozone_layer_width = width / 1000.0; // Convert to km
-        }
+        // Build an earthlike atmosphere using a configurable scattering medium asset.
+        let medium = scattering_mediums.add(ScatteringMedium::earthlike(256, 256));
+        let mut atmosphere = Atmosphere::earthlike(medium);
         if let Some(albedo) = config.ground_albedo {
             atmosphere.ground_albedo = Vec3::from_array(albedo);
         }
@@ -146,14 +121,17 @@ fn configure_atmosphere_cameras(
         }
 
         // Add atmosphere component
-        entity_commands.insert((
-            AtmosphereCamera,
-            atmosphere,
-        ));
+        entity_commands.insert((AtmosphereCamera, atmosphere));
 
         // Add atmosphere settings based on config
+        let rendering_method = if config.rendering_mode.eq_ignore_ascii_case("raymarched") {
+            AtmosphereMode::Raymarched
+        } else {
+            AtmosphereMode::LookupTexture
+        };
         let settings = AtmosphereSettings {
             sky_max_samples: config.sky_max_samples,
+            rendering_method,
             ..default()
         };
         entity_commands.insert(settings);

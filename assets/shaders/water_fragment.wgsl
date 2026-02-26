@@ -24,12 +24,15 @@
 
 #import bevy_water::water_bindings
 #import bevy_water::water_functions as water_fn
+#import gerstner_waves
+#import water_foam
+#ifdef WATER_DETAIL_NORMALS
+#import water_detail_normals
+#endif
 
-// Shore foam constants
-const FOAM_COLOR: vec3<f32> = vec3<f32>(0.9, 0.95, 1.0);   // White with slight blue tint
+// Shore foam edge detection thresholds
 const FOAM_EDGE_START: f32 = 0.0;   // Start foam at water edge
 const FOAM_EDGE_END: f32 = 2.0;     // Foam fades out at this depth
-const FOAM_STRENGTH: f32 = 0.8;     // Maximum foam intensity
 
 @fragment
 fn fragment(
@@ -48,20 +51,34 @@ fn fragment(
   var in = p_in;
   var world_position: vec4<f32> = in.world_position;
   let w_pos = water_fn::uv_to_coord(in.uv);
-  // Calculate normal.
+
+  // Wave height for vertex displacement (driven by bevy_water functions)
   let height = water_fn::get_wave_height(w_pos);
+
+  // Compute normals and foam using Gerstner waves (analytical, much better than finite differences)
+  var foam_from_waves = 0.0;
 #ifdef DYN_WATER
-  let delta = 0.5;
-  let height_dx = water_fn::get_wave_height(w_pos + vec2<f32>(delta, 0.0));
-  let height_dz = water_fn::get_wave_height(w_pos + vec2<f32>(0.0, delta));
-  in.world_normal = normalize(vec3<f32>(height - height_dx, delta, height - height_dz));
+  let gerstner = gerstner_waves::sum_gerstner_waves(
+    w_pos, globals.time, water_bindings::material.amplitude, 1.0
+  );
+  in.world_normal = gerstner.normal;
+  foam_from_waves = gerstner.foam;
+
+  // Blend in detail normal maps for fine-scale ripple texture
+#ifdef WATER_DETAIL_NORMALS
+  let cam_dist = length(view.world_position.xyz - world_position.xyz);
+  in.world_normal = water_detail_normals::blend_detail_normals(
+    in.world_normal, world_position.xyz, globals.time,
+    0.3, 0.17, 0.04, 0.8, cam_dist
+  );
+#endif
 #else
   let pos = world_position.xyz + (in.world_normal * height);
   let pos_dx = dpdx(pos);
   let pos_dy = dpdy(pos);
   in.world_normal = normalize(cross(pos_dy, pos_dx));
 #endif
- 
+
   // If we're in the crossfade section of a visibility range, conditionally
   // discard the fragment according to the visibility pattern.
 #ifdef VISIBILITY_RANGE_DITHER
@@ -74,6 +91,7 @@ fn fragment(
   let deep_color = water_bindings::material.deep_color;
   let shallow_color = water_bindings::material.shallow_color;
   var water_color = deep_color;
+  var depth_diff_view = 0.0;
 #ifdef DEPTH_PREPASS
 #ifndef PREPASS_PIPELINE
 #ifndef WEBGL2
@@ -89,14 +107,22 @@ fn fragment(
   let is_voxel_water = water_bindings::material.coord_scale.x < 8.0;
   // For voxel water, enforce minimum depth to prevent striping in shallow areas
   let min_depth = select(0.0, 0.3, is_voxel_water);
-  let depth_diff_view = max(raw_depth_diff, min_depth);
+  depth_diff_view = max(raw_depth_diff, min_depth);
   let beers_law = clamp(exp(-depth_diff_view * water_clarity), 0.0, 1.0);
   let depth_color = vec4<f32>(mix(deep_color.xyz, shallow_color.xyz, beers_law), 1.0 - beers_law);
   water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
 
-  // Shore foam effect: add foam at shallow water edges
-  let foam_factor = (1.0 - smoothstep(FOAM_EDGE_START, FOAM_EDGE_END, depth_diff_view)) * FOAM_STRENGTH;
-  water_color = vec4<f32>(mix(water_color.rgb, FOAM_COLOR, foam_factor), water_color.a);
+  // Foam: combine depth-based shore foam with Gerstner wave crest foam
+  let shore_foam_amount = 1.0 - smoothstep(FOAM_EDGE_START, FOAM_EDGE_END, depth_diff_view);
+  let total_foam_amount = max(shore_foam_amount, foam_from_waves);
+  var foam_params: water_foam::FoamParams;
+  foam_params.color = vec3<f32>(0.9, 0.95, 1.0);
+  foam_params.intensity = 1.3;
+  foam_params.scale = 1.2;
+  foam_params.persistence = 0.9;
+  foam_params.edge_sharpness = 0.3;
+  let foam = water_foam::calculate_foam_texture(w_pos, globals.time, total_foam_amount, foam_params);
+  water_color = vec4<f32>(mix(water_color.rgb, foam.rgb, foam.a), water_color.a);
 #endif
 #endif
 #endif
@@ -111,9 +137,6 @@ fn fragment(
   } else {
     pbr_input.material.base_color *= water_color;
   }
-
-  //let foam_color = water_bindings::material.edge_color;
-  //let foam = mix(foam_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
 
   // alpha discard
   pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
@@ -131,14 +154,48 @@ fn fragment(
     out.color = pbr_input.material.base_color;
   }
 
+  // Fresnel-based reflection blending (Valheim-style planar reflection approximation)
+  // At glancing angles: strong sky/environment reflections (water looks like a mirror)
+  // At steep angles: see through water to the depths below
+  // NOTE: Uses reflected-direction sky gradient. Will be replaced with actual
+  // planar reflection texture sampling when custom water material bindings are ready
+  // (WaterReflectionTexture is already rendering via water_reflection.rs).
+  {
+    let view_dir = normalize(view.world_position.xyz - world_position.xyz);
+    let water_normal = normalize(in.world_normal);
+    let NdotV = max(dot(water_normal, view_dir), 0.0);
+
+    // Schlick Fresnel — power 5.0 is physically plausible for water (IOR ~1.33)
+    let fresnel = pow(1.0 - NdotV, 5.0);
+
+    // Compute reflected direction for sky color lookup
+    let reflected_dir = reflect(-view_dir, water_normal);
+
+    // Sky gradient: horizon is warm/bright, zenith is cool/deep
+    let sky_up = clamp(reflected_dir.y, 0.0, 1.0);
+    let horizon_color = vec3<f32>(0.55, 0.65, 0.80);
+    let zenith_color = vec3<f32>(0.25, 0.45, 0.85);
+
+    // Approximate sun specular highlight in reflection
+    let sun_dir = normalize(vec3<f32>(-0.3, 0.7, -0.2));
+    let sun_contrib = max(dot(reflected_dir, sun_dir), 0.0);
+    let sun_highlight = pow(sun_contrib, 64.0) * vec3<f32>(1.0, 0.92, 0.75) * 0.6;
+
+    let reflection_color = mix(horizon_color, zenith_color, sky_up) + sun_highlight;
+
+    // Blend reflection into lit water color
+    let reflectivity = 0.88;
+    let reflection_strength = fresnel * reflectivity;
+    out.color = vec4<f32>(
+      mix(out.color.rgb, reflection_color, reflection_strength),
+      // At glancing angles water becomes more opaque (reflecting surface, not transparent)
+      mix(out.color.a, 1.0, reflection_strength * 0.6)
+    );
+  }
+
   // apply in-shader post processing (fog, alpha-premultiply, and also tonemapping, debanding if the camera is non-hdr)
   // note this does not include fullscreen postprocessing effects like bloom.
   out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-
-  // show grid
-  //let f_pos = step(fract((w_pos / 10.06274)), vec2<f32>(0.995));
-  //let grid = step(f_pos.x + f_pos.y, 1.00);
-  //out.color += vec4<f32>(grid, grid, grid, 0.00);
 #endif
 
   return out;

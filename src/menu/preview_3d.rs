@@ -162,11 +162,11 @@ pub fn spawn_preview_scene(
     let camera = commands.spawn((
         Camera3d::default(),
         Camera {
-            target: RenderTarget::Image(preview_image.0.clone().into()),
             order: 100, // High unique order for block preview
             clear_color: bevy::prelude::ClearColorConfig::Custom(Color::srgba(0.1, 0.1, 0.1, 1.0)),
             ..default()
         },
+        RenderTarget::Image(preview_image.0.clone().into()),
         Transform::from_xyz(1.2, 0.8, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
         // BLOCK_PREVIEW_LAYER,
     )).id();
@@ -231,10 +231,10 @@ pub fn spawn_triplanar_preview_scene(
             area: Rect::default(),
         }),
         Camera {
-            target: RenderTarget::Image(preview_image.0.clone().into()),
             order: 11,
             ..default()
         },
+        RenderTarget::Image(preview_image.0.clone().into()),
         Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z), // Look down -Y, Up is +Z? 
                              // Wait, Plane is XZ plane. Looking down Y. Up vector usually -Z or +Z.
                              // Default 3D look_at uses Y as up. If looking down Y, need distinct up.

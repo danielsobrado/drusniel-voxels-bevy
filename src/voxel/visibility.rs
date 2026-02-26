@@ -177,7 +177,7 @@ mod tests {
         for x in 0..CHUNK_SIZE_U32 {
             for y in 0..CHUNK_SIZE_U32 {
                 for z in 0..CHUNK_SIZE_U32 {
-                    chunk.set(UVec3::new(x, y, z), VoxelType::Stone);
+                    chunk.set(UVec3::new(x, y, z), VoxelType::Rock);
                 }
             }
         }
@@ -193,7 +193,7 @@ mod tests {
         for x in 0..CHUNK_SIZE_U32 {
             for y in 0..CHUNK_SIZE_U32 {
                 for z in 0..CHUNK_SIZE_U32 {
-                    chunk.set(UVec3::new(x, y, z), VoxelType::Stone);
+                    chunk.set(UVec3::new(x, y, z), VoxelType::Rock);
                 }
             }
         }

@@ -9,7 +9,10 @@ pub mod inventory;
 
 use bevy::prelude::*;
 
-pub use inventory::{EquippedItem, Inventory, ItemDrop, ItemType};
+pub use inventory::{
+    EquippedItem, Inventory, InventorySlot, ItemDrop, ItemType, INVENTORY_COLUMNS, INVENTORY_ROWS,
+    INVENTORY_SLOTS,
+};
 
 // ============================================================================
 // Shared Configuration

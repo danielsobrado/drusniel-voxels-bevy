@@ -3,6 +3,8 @@ use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 use bevy_tnua_avian3d::*;
 
+use crate::player::PlayerMovementScheme;
+
 use super::terrain_collider::{generate_chunk_colliders, handle_chunk_modification};
 
 pub struct PhysicsPlugin;
@@ -12,7 +14,7 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(PhysicsPlugins::default());
 
         app.add_plugins(TnuaAvian3dPlugin::new(PhysicsSchedule));
-        app.add_plugins(TnuaControllerPlugin::new(PhysicsSchedule));
+        app.add_plugins(TnuaControllerPlugin::<PlayerMovementScheme>::new(PhysicsSchedule));
 
         #[cfg(debug_assertions)]
         if std::env::var("VOXEL_PHYSICS_DEBUG").is_ok() {

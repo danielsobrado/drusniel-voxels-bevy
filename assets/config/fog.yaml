@@ -98,9 +98,19 @@ fog:
         intensity: 0.8       # High contrast
         wind_direction: [0.7, 0.3]
       # Volumetric overrides for god rays preset
-      step_count_override: 64       # Higher steps for sharp canopy shafts
+      step_count_override: 32       # Higher steps for sharp canopy shafts
       ambient_intensity_override: 0.0  # Zero ambient = maximum ray contrast
       light_intensity: 1.0          # Normal intensity
+
+  # Screen-space god rays (radial blur post-process, independent of volumetric fog)
+  screen_god_rays:
+    enabled: true
+    intensity: 0.35          # Overall brightness of the light shafts
+    decay: 0.97              # Exponential decay along each ray (0.9–1.0)
+    density: 0.8             # How far each ray marches across screen (0.5–1.5)
+    weight: 0.04             # Per-sample contribution weight
+    num_samples: 32          # Radial blur samples per pixel (32=fast, 64=quality, 128=ultra)
+    threshold: 2.0           # HDR luminance threshold — only bright pixels create shafts
 
   # Day/night color presets
   colors:

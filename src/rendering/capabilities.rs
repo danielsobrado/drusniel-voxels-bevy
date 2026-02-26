@@ -45,9 +45,7 @@ pub fn detect_graphics_capabilities(
         capabilities.integrated_gpu = matches!(adapter_info.device_type, DeviceType::IntegratedGpu);
         capabilities.taa_supported = hdr_filterable && sdr_filterable;
         capabilities.ray_tracing_supported = features
-            .contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_QUERY)
-            && features
-                .contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE);
+            .contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_QUERY);
 
         info!(
             adapter = %adapter_info.name,

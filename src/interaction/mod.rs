@@ -11,6 +11,7 @@ mod debug;
 mod editing;
 pub mod error;
 pub mod palette;
+pub mod radial_menu;
 mod targeting;
 
 // Re-export public types and functions from sub-modules
@@ -30,6 +31,7 @@ use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::math::{Isometry3d, primitives::Cuboid};
 use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
 use bevy::prelude::*;
 use palette::PlacementPaletteState;
@@ -316,9 +318,11 @@ pub fn render_block_highlight(
 
     let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
     let half_size = Vec3::splat(0.505);
+    let cuboid = Cuboid::new(half_size.x * 2.0, half_size.y * 2.0, half_size.z * 2.0);
 
-    gizmos.cuboid(
-        Transform::from_translation(center).with_scale(half_size * 2.0),
+    gizmos.primitive_3d(
+        &cuboid,
+        Isometry3d::from_translation(center),
         Color::srgba(1.0, 1.0, 1.0, 0.8),
     );
 
@@ -821,6 +825,7 @@ impl Plugin for InteractionPlugin {
             .init_resource::<PlacementPaletteState>()
             .init_resource::<palette::BookmarkStore>()
             .init_resource::<palette::GhostPreviewState>()
+            .init_resource::<radial_menu::RadialMenuState>()
             .add_systems(Startup, debug::setup_debug_overlay)
             .add_systems(Startup, palette::load_bookmarks)
             .add_systems(Startup, palette::setup_ghost_materials)
@@ -847,6 +852,8 @@ impl Plugin for InteractionPlugin {
                     palette::update_ghost_preview,
                     palette::sync_ghost_materials,
                     palette::sync_building_state_from_palette,
+                    radial_menu::handle_radial_menu_interaction,
+                    radial_menu::handle_radial_escape,
                 )
                     .run_if(|state: Res<PauseMenuState>| !state.open),
             )

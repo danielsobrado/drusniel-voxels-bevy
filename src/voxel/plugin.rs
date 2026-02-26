@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bevy::diagnostic::FrameCount;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, poll_once, AsyncComputeTaskPool, Task};
 
@@ -28,9 +29,12 @@ use crate::constants::{
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 16;
+use bevy::camera::visibility::RenderLayers;
+use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
+use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
@@ -874,22 +878,40 @@ fn mesh_dirty_chunks_system(
                     match mesh_settings.mode {
                         MeshMode::Blocky => {
                             if let Some(blocky_mat) = blocky_material.as_ref() {
-                                commands.entity(entity).insert((
+                                commands
+                                    .entity(entity)
+                                    .insert((
                                     Mesh3d(mesh_handle),
                                     MeshMaterial3d(blocky_mat.handle.clone()),
                                     NeedsCollider,
-                                ));
+                                    ))
+                                    .remove::<MeshMaterial3d<
+                                        crate::rendering::triplanar_material::TriplanarMaterial,
+                                    >>();
                             }
                         }
                         MeshMode::SurfaceNets => {
-                            commands.entity(entity).insert((
-                                Mesh3d(mesh_handle),
-                                MeshMaterial3d(triplanar_material.handle.clone()),
-                                NeedsCollider,
-                            ));
+                            commands
+                                .entity(entity)
+                                .insert((
+                                    Mesh3d(mesh_handle),
+                                    MeshMaterial3d(triplanar_material.handle.clone()),
+                                    NeedsCollider,
+                                ))
+                                .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
                         }
                     }
                 } else {
+                    // Chunks whose top Y exceeds the water line are visible from above
+                    // (or straddle the surface) and must appear in the reflection pass.
+                    // Fully underwater chunks stay in layer 0 only.
+                    let chunk_top_y = (chunk_pos.y + 1) * CHUNK_SIZE_I32;
+                    let terrain_layers = if chunk_top_y > WATER_LEVEL {
+                        RenderLayers::default().with(REFLECTION_RENDER_LAYER)
+                    } else {
+                        RenderLayers::default()
+                    };
+
                     // Spawn with appropriate material based on mesh mode
                     let entity = match mesh_settings.mode {
                         MeshMode::Blocky => {
@@ -909,6 +931,7 @@ fn mesh_dirty_chunks_system(
                                         chunk_position: chunk_pos,
                                     },
                                     NeedsCollider,
+                                    terrain_layers,
                                 ))
                                 .id()
                         }
@@ -925,6 +948,7 @@ fn mesh_dirty_chunks_system(
                                     chunk_position: chunk_pos,
                                 },
                                 NeedsCollider,
+                                terrain_layers,
                             ))
                             .id(),
                     };
@@ -958,6 +982,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
+                        NotShadowCaster,  // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
                         entity_cmd
@@ -984,6 +1009,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
+                        NotShadowCaster,  // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
                         entity_cmd.insert(MeshMaterial3d(water_material.near_handle.clone()));

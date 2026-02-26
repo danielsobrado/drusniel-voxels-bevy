@@ -50,6 +50,54 @@ visual:
   # Fresnel effect power (higher = more edge reflection)
   fresnel_power: 5.6
 
+detail_normals:
+  enabled: true
+  # UV scale for primary ripple normal map
+  scale_a: 0.3
+  # UV scale for secondary ripple normal map
+  scale_b: 0.17
+  # Normal map influence strength (0-1)
+  intensity: 0.8
+  # Scroll speed for animated ripples
+  scroll_speed: 0.04
+
+reflections:
+  enabled: true
+  # Render resolution as fraction of main camera (0.35 = ~672x378)
+  resolution_scale: 0.35
+  # Disable shadows in reflection camera for performance
+  disable_shadows: true
+  # Max distance for reflection camera rendering
+  max_render_distance: 150.0
+  # How much wave normals distort the reflection image
+  distortion_strength: 0.02
+  # Render reflection every N frames (2 = every other frame)
+  update_every_n_frames: 2
+
+refraction:
+  enabled: true
+  # UV offset strength for underwater distortion
+  strength: 0.03
+  # Index of refraction for water
+  ior: 1.33
+  # Separate R/G/B channels for rainbow edge effect
+  chromatic_aberration: false
+
+displacement:
+  enabled: true
+  # Compute shader texture resolution (NxN pixels)
+  resolution: 1024
+  # World area covered by the displacement texture (meters)
+  world_size: 128.0
+  # Wave propagation speed factor
+  wave_speed: 0.98
+  # Energy damping per frame (0.99 = slow decay)
+  damping: 0.995
+  # Radius of player water interaction impulse
+  player_impulse_radius: 1.5
+  # Strength of player water interaction
+  player_impulse_strength: -0.3
+
 # Quality presets
 quality_presets:
   low:

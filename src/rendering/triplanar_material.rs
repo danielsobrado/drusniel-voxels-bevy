@@ -97,6 +97,10 @@ impl Material for TriplanarMaterial {
         ShaderRef::Default
     }
 
+    fn enable_prepass() -> bool {
+        false
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Opaque
     }

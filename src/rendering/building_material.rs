@@ -80,6 +80,7 @@ impl BuildingMaterialType {
 
 /// Full PBR building material - 5 texture maps + parallax
 /// Texture samples per fragment: 15-18 (RTX 40xx handles this trivially)
+/// Note: All textures share a single sampler at binding 2
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct BuildingMaterial {
     #[uniform(0)]
@@ -97,36 +98,36 @@ pub struct BuildingMaterial {
     pub wood_ao: Option<Handle<Image>>,
 
     // Stone brick textures (material 1) - Full PBR
-    // #[texture(6)]
-    // pub stone_albedo: Option<Handle<Image>>,
-    // #[texture(7)]
-    // pub stone_normal: Option<Handle<Image>>,
-    // #[texture(8)]
-    // pub stone_roughness: Option<Handle<Image>>,
-    // #[texture(9)]
-    // pub stone_ao: Option<Handle<Image>>,
+    #[texture(6)]
+    pub stone_albedo: Option<Handle<Image>>,
+    #[texture(7)]
+    pub stone_normal: Option<Handle<Image>>,
+    #[texture(8)]
+    pub stone_roughness: Option<Handle<Image>>,
+    #[texture(9)]
+    pub stone_ao: Option<Handle<Image>>,
 
     // Metal plate textures (material 2) - Full PBR + Metallic
-    // #[texture(10)]
-    // pub metal_albedo: Option<Handle<Image>>,
-    // #[texture(11)]
-    // pub metal_normal: Option<Handle<Image>>,
-    // #[texture(12)]
-    // pub metal_roughness: Option<Handle<Image>>,
-    // #[texture(13)]
-    // pub metal_ao: Option<Handle<Image>>,
-    // #[texture(14)]
-    // pub metal_metallic: Option<Handle<Image>>,
+    #[texture(10)]
+    pub metal_albedo: Option<Handle<Image>>,
+    #[texture(11)]
+    pub metal_normal: Option<Handle<Image>>,
+    #[texture(12)]
+    pub metal_roughness: Option<Handle<Image>>,
+    #[texture(13)]
+    pub metal_ao: Option<Handle<Image>>,
+    #[texture(14)]
+    pub metal_metallic: Option<Handle<Image>>,
 
     // Thatch textures (material 3) - Full PBR
-    // #[texture(15)]
-    // pub thatch_albedo: Option<Handle<Image>>,
-    // #[texture(16)]
-    // pub thatch_normal: Option<Handle<Image>>,
-    // #[texture(17)]
-    // pub thatch_roughness: Option<Handle<Image>>,
-    // #[texture(18)]
-    // pub thatch_ao: Option<Handle<Image>>,
+    #[texture(15)]
+    pub thatch_albedo: Option<Handle<Image>>,
+    #[texture(16)]
+    pub thatch_normal: Option<Handle<Image>>,
+    #[texture(17)]
+    pub thatch_roughness: Option<Handle<Image>>,
+    #[texture(18)]
+    pub thatch_ao: Option<Handle<Image>>,
 }
 
 impl Default for BuildingMaterial {
@@ -137,19 +138,49 @@ impl Default for BuildingMaterial {
             wood_normal: None,
             wood_roughness: None,
             wood_ao: None,
-            // stone_albedo: None,
-            // stone_normal: None,
-            // stone_roughness: None,
-            // stone_ao: None,
-            // metal_albedo: None,
-            // metal_normal: None,
-            // metal_roughness: None,
-            // metal_ao: None,
-            // metal_metallic: None,
-            // thatch_albedo: None,
-            // thatch_normal: None,
-            // thatch_roughness: None,
-            // thatch_ao: None,
+            stone_albedo: None,
+            stone_normal: None,
+            stone_roughness: None,
+            stone_ao: None,
+            metal_albedo: None,
+            metal_normal: None,
+            metal_roughness: None,
+            metal_ao: None,
+            metal_metallic: None,
+            thatch_albedo: None,
+            thatch_normal: None,
+            thatch_roughness: None,
+            thatch_ao: None,
+        }
+    }
+}
+
+impl BuildingMaterial {
+    /// Load all building material textures from the standard folder structure.
+    pub fn load_all_textures(asset_server: &AssetServer) -> Self {
+        Self {
+            uniforms: BuildingUniforms::default(),
+            // Wood textures
+            wood_albedo: Some(asset_server.load("textures/building/wood/albedo.png")),
+            wood_normal: Some(asset_server.load("textures/building/wood/normal.png")),
+            wood_roughness: Some(asset_server.load("textures/building/wood/roughness.png")),
+            wood_ao: Some(asset_server.load("textures/building/wood/ao.png")),
+            // Stone textures
+            stone_albedo: Some(asset_server.load("textures/building/stone/albedo.png")),
+            stone_normal: Some(asset_server.load("textures/building/stone/normal.png")),
+            stone_roughness: Some(asset_server.load("textures/building/stone/roughness.png")),
+            stone_ao: Some(asset_server.load("textures/building/stone/ao.png")),
+            // Metal textures
+            metal_albedo: Some(asset_server.load("textures/building/metal/albedo.png")),
+            metal_normal: Some(asset_server.load("textures/building/metal/normal.png")),
+            metal_roughness: Some(asset_server.load("textures/building/metal/roughness.png")),
+            metal_ao: Some(asset_server.load("textures/building/metal/ao.png")),
+            metal_metallic: Some(asset_server.load("textures/building/metal/metallic.png")),
+            // Thatch textures
+            thatch_albedo: Some(asset_server.load("textures/building/thatch/albedo.png")),
+            thatch_normal: Some(asset_server.load("textures/building/thatch/normal.png")),
+            thatch_roughness: Some(asset_server.load("textures/building/thatch/roughness.png")),
+            thatch_ao: Some(asset_server.load("textures/building/thatch/ao.png")),
         }
     }
 }

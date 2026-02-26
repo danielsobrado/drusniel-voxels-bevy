@@ -3,16 +3,16 @@
 // Uses alpha-cutoff for clean tree edges
 
 #import bevy_pbr::mesh_view_bindings::view
-#import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
+#import bevy_pbr::mesh_functions::get_world_from_local
 
 struct BillboardUniforms {
     size: vec2<f32>,
     alpha_cutoff: f32,
-    wind_strength: f32,
-    time: f32,
-    fog_start: f32,
-    fog_end: f32,
-    _padding: f32,
+    _padding0: f32,
+    // x = wind strength, y = bend strength, z = leaf flutter strength, w = leaf flutter speed
+    wind_params: vec4<f32>,
+    // x = time, y = fog start, z = fog end, w = reserved
+    scene_params: vec4<f32>,
     fog_color: vec4<f32>,
 };
 
@@ -39,6 +39,9 @@ fn hash(p: vec2<f32>) -> f32 {
     let h = dot(p, vec2<f32>(127.1, 311.7));
     return fract(sin(h) * 43758.5453123);
 }
+
+const SEGMENTS: u32 = 10u;
+const INV_SEGMENTS: f32 = 1.0 / 10.0;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -75,10 +78,39 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     local_pos.x *= scale_x;
     local_pos.y *= scale_y;
 
-    // Subtle wind sway at top of billboard
+    let wind_strength = uniforms.wind_params.x;
+    let bend_strength = uniforms.wind_params.y;
+    let leaf_flutter_strength = uniforms.wind_params.z;
+    let leaf_flutter_speed = uniforms.wind_params.w;
+    let time = uniforms.scene_params.x;
+
+    // Segmented bending: each vertical slice rotates slightly more than the previous one.
     let phase = hash(billboard_center.xz * 7.3) * 6.28;
-    let sway = sin(uniforms.time * 1.5 + phase) * uniforms.wind_strength * vertex.position.y;
-    local_pos.x += sway;
+    let height01 = clamp(vertex.position.y, 0.0, 1.0);
+    for (var i: u32 = 0u; i < SEGMENTS; i = i + 1u) {
+        let seg_start = f32(i) * INV_SEGMENTS;
+        let seg_end = f32(i + 1u) * INV_SEGMENTS;
+        if (height01 <= seg_start) {
+            break;
+        }
+
+        let seg_t = clamp((height01 - seg_start) / max(seg_end - seg_start, 0.0001), 0.0, 1.0);
+        let seg_weight = f32(i + 1u) * INV_SEGMENTS;
+        let seg_phase = time * 1.35 + phase + f32(i) * 0.35;
+        let seg_angle = sin(seg_phase) * wind_strength * bend_strength * seg_weight;
+        let seg_len = (seg_end - seg_start) * scale_y * seg_t;
+
+        local_pos.x += sin(seg_angle) * seg_len;
+        local_pos.y -= (1.0 - cos(seg_angle)) * seg_len;
+    }
+
+    // UV-weighted leaf/card flutter: keeps the lower UV region more stable.
+    let uv_len = clamp(length(vertex.uv) * 0.70710677, 0.0, 1.0);
+    let leaf_weight = uv_len * uv_len * height01;
+    let flutter_phase = time * leaf_flutter_speed + phase * 1.9 + dot(vertex.uv, vec2<f32>(21.7, 14.3));
+    let flutter = sin(flutter_phase) * cos(flutter_phase * 1.37);
+    local_pos.x += flutter * wind_strength * leaf_flutter_strength * leaf_weight * scale_x;
+    local_pos.z += flutter * wind_strength * leaf_flutter_strength * leaf_weight * 0.05;
 
     // Transform to world space using billboard orientation
     let world_pos = billboard_center +
@@ -92,8 +124,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     // Pre-calculate fog factor for aerial perspective
     let distance = length(view.world_position - world_pos);
-    let fog_range = max(uniforms.fog_end - uniforms.fog_start, 1.0);
-    out.fog_factor = clamp((distance - uniforms.fog_start) / fog_range, 0.0, 1.0);
+    let fog_start = uniforms.scene_params.y;
+    let fog_end = uniforms.scene_params.z;
+    let fog_range = max(fog_end - fog_start, 1.0);
+    out.fog_factor = clamp((distance - fog_start) / fog_range, 0.0, 1.0);
 
     return out;
 }

@@ -14,8 +14,9 @@ use std::collections::HashMap;
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
-    BILLBOARD_ALPHA_CUTOFF, BILLBOARD_LOD_HYSTERESIS, BILLBOARD_SWITCH_DISTANCE,
-    BILLBOARD_UPDATE_INTERVAL, BILLBOARD_WIND_STRENGTH,
+    BILLBOARD_ALPHA_CUTOFF, BILLBOARD_BEND_SEGMENTS, BILLBOARD_BEND_STRENGTH,
+    BILLBOARD_LEAF_FLUTTER_SPEED, BILLBOARD_LEAF_FLUTTER_STRENGTH, BILLBOARD_LOD_HYSTERESIS,
+    BILLBOARD_SWITCH_DISTANCE, BILLBOARD_UPDATE_INTERVAL, BILLBOARD_WIND_STRENGTH,
 };
 
 use super::PropType;
@@ -132,20 +133,14 @@ pub struct BillboardUniforms {
     /// Alpha cutoff threshold for alpha testing.
     pub alpha_cutoff: f32,
 
-    /// Wind sway strength (subtle billboard movement).
-    pub wind_strength: f32,
-
-    /// Current time for wind animation.
-    pub time: f32,
-
-    /// Fog start distance for aerial perspective.
-    pub fog_start: f32,
-
-    /// Fog end distance for aerial perspective.
-    pub fog_end: f32,
-
     /// Padding for alignment.
-    pub _padding: f32,
+    pub _padding0: f32,
+
+    /// x = wind strength, y = bend strength, z = leaf flutter strength, w = leaf flutter speed.
+    pub wind_params: Vec4,
+
+    /// x = time, y = fog start, z = fog end, w = reserved.
+    pub scene_params: Vec4,
 
     /// Fog color for aerial perspective.
     pub fog_color: LinearRgba,
@@ -156,11 +151,14 @@ impl Default for BillboardUniforms {
         Self {
             size: Vec2::new(4.0, 8.0),
             alpha_cutoff: BILLBOARD_ALPHA_CUTOFF,
-            wind_strength: BILLBOARD_WIND_STRENGTH,
-            time: 0.0,
-            fog_start: 80.0,
-            fog_end: 220.0,
-            _padding: 0.0,
+            _padding0: 0.0,
+            wind_params: Vec4::new(
+                BILLBOARD_WIND_STRENGTH,
+                BILLBOARD_BEND_STRENGTH,
+                BILLBOARD_LEAF_FLUTTER_STRENGTH,
+                BILLBOARD_LEAF_FLUTTER_SPEED,
+            ),
+            scene_params: Vec4::new(0.0, 80.0, 220.0, 0.0),
             fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
         }
     }
@@ -195,6 +193,24 @@ impl Material for BillboardMaterial {
         "shaders/billboard.wgsl".into()
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        "shaders/billboard_prepass.wgsl".into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        "shaders/billboard_prepass.wgsl".into()
+    }
+
+    fn enable_prepass() -> bool {
+        // Temporarily disabled for Bevy 0.18 runtime stability.
+        false
+    }
+
+    fn enable_shadows() -> bool {
+        // Prevent shadow-prepass specialization from compiling unstable alpha-cutout prepass variants.
+        false
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Mask(self.uniforms.alpha_cutoff)
     }
@@ -218,32 +234,40 @@ pub struct BillboardMaterialHandle {
 /// The quad is centered on the X axis, with the bottom at Y=0.
 /// This allows natural ground anchoring for trees.
 pub fn create_billboard_quad_mesh() -> Mesh {
-    // Unit quad: width=1, height=1, centered horizontally, bottom at origin
-    let positions = vec![
-        [-0.5, 0.0, 0.0], // bottom-left
-        [0.5, 0.0, 0.0],  // bottom-right
-        [0.5, 1.0, 0.0],  // top-right
-        [-0.5, 1.0, 0.0], // top-left
-    ];
+    let segments = BILLBOARD_BEND_SEGMENTS.max(1);
 
-    // Billboard normals point toward camera (will be overridden in shader)
-    let normals = vec![
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-    ];
+    let mut positions = Vec::with_capacity((segments + 1) * 2);
+    let mut normals = Vec::with_capacity((segments + 1) * 2);
+    let mut uvs = Vec::with_capacity((segments + 1) * 2);
 
-    // Standard UV mapping
-    let uvs = vec![
-        [0.0, 1.0], // bottom-left
-        [1.0, 1.0], // bottom-right
-        [1.0, 0.0], // top-right
-        [0.0, 0.0], // top-left
-    ];
+    for i in 0..=segments {
+        let t = i as f32 / segments as f32;
+        let y = t;
 
-    // Two triangles forming the quad
-    let indices = Indices::U16(vec![0, 1, 2, 0, 2, 3]);
+        positions.push([-0.5, y, 0.0]);
+        positions.push([0.5, y, 0.0]);
+
+        normals.push([0.0, 0.0, 1.0]);
+        normals.push([0.0, 0.0, 1.0]);
+
+        // Keep bottom at V=1 and top at V=0.
+        let v = 1.0 - t;
+        uvs.push([0.0, v]);
+        uvs.push([1.0, v]);
+    }
+
+    let mut indices = Vec::with_capacity(segments * 6);
+    for i in 0..segments {
+        let base = (i * 2) as u16;
+        let bl = base;
+        let br = base + 1;
+        let tl = base + 2;
+        let tr = base + 3;
+
+        indices.extend_from_slice(&[bl, br, tr, bl, tr, tl]);
+    }
+
+    let indices = Indices::U16(indices);
 
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
@@ -321,7 +345,7 @@ pub fn sync_billboard_time(
     };
 
     if let Some(material) = materials.get_mut(&handle.handle) {
-        material.uniforms.time = time.elapsed_secs();
+        material.uniforms.scene_params.x = time.elapsed_secs();
     }
 }
 

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::light::{CascadeShadowConfig, FogVolume, VolumetricFog, VolumetricLight};
+use bevy::light::{CascadeShadowConfig, FogVolume, GlobalAmbientLight, VolumetricFog, VolumetricLight};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::render::render_resource::ShaderType;
 use crate::atmosphere::config::{DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset};
@@ -376,7 +376,7 @@ fn update_fog_from_atmosphere(
     mut atmosphere_sample: ResMut<AtmosphereSample>,
     mut fog_range: ResMut<FogDistanceState>,
     mut fog_uniforms: ResMut<FogUniforms>,
-    ambient: Res<AmbientLight>,
+    ambient: Res<GlobalAmbientLight>,
     world: Res<VoxelWorld>,
     time: Res<Time>,
     // Smoothing for preset transitions and boost
