@@ -42,6 +42,8 @@ Current development version: **v0.5**.
 
     *   **Water Displacement Throttle**: CPU wave simulation (`256×256` grid) now runs every 2nd frame instead of every frame. Adds a "settled" check that skips simulation entirely when no active impulses and all energy has damped below threshold — saves ~0.15ms/frame when idle.
 
+    *   **Screen-Space God Rays** (`rendering/god_rays.rs`): New post-process render graph node performs GPU Gems 3-style radial blur toward the sun's screen-space position, producing volumetric light shafts independently of Bevy's built-in `VolumetricFog`. Sky pixels contribute fully; geometry above a luminance threshold creates shafts. Configurable via `fog.yaml` (intensity, decay, density, samples). Fixes the v0.4 issue where god rays only appeared when volumetric fog was active.
+
     *   **Volumetric Fog / God Rays**: Default step counts halved from 64 to 32 for both volumetric fog raymarching and screen-space god ray radial blur samples. Barely visible quality difference outdoors.
 
     *   **Volumetric Cloud Optimization**: Primary raymarching steps reduced from 64 to 32, render scale from 0.5× to 0.25× (quarter resolution). Temporal reprojection compensates for the lower sample count.
@@ -116,7 +118,7 @@ Props and vegetation with LOD optimizations:
 
 #### Known Issues (v0.4)
 *   **Volumetric Fog Performance**: Volumetric fog can cause significant frame drops, especially on mid-tier GPUs.
-*   **God Rays With fog**: God ray/volumetric light shaft effect is only happening with fog around, we don't want to have that always.
+*   **God Rays With fog**: ~~Fixed in v0.5~~ — screen-space god rays now work independently of volumetric fog.
 *   **Mesh gaps**: Small gaps happening sometimes.
 *   **Culling on close distance**: When digging and there are close distance polygons, culling and visibility has issues.
 *   **Shallow water**: Shore foam, edge coloring, and caustics improved in v0.5.
