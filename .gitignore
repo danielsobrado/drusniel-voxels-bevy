@@ -1,5 +1,6 @@
 /target
 /temp
+/perf-dumps
 .history/src/voxel/*
 log.txt
 log.err

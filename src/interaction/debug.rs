@@ -5,27 +5,29 @@
 //! - G key for detailed block logging
 //! - Various toggle keys for specific debug information
 
+use crate::interaction::TargetedProp;
+use crate::interaction::editing::{DeleteMode, DragState, EditMode};
+use crate::interaction::targeting::TargetedBlock;
+use crate::network::NetworkSession;
+use crate::performance::{
+    AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
+};
+use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
+use crate::props::{Prop, PropChunkCullState};
+use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::shadow_budget::ShadowCullingStats;
+use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
+use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
+use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::VoxelWorld;
 use bevy::diagnostic::{
     DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
     SystemInformationDiagnosticsPlugin,
 };
-use std::time::Instant;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use crate::interaction::editing::{EditMode, DeleteMode, DragState};
-use crate::interaction::targeting::TargetedBlock;
-use crate::interaction::TargetedProp;
-use crate::network::NetworkSession;
-use crate::props::{Prop, PropChunkCullState};
-use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
-use crate::performance::{AreaTimingCapture, AreaTimingRecorder, start_area_trace, stop_area_trace};
-use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::shadow_budget::ShadowCullingStats;
-use crate::vegetation::{ProceduralGrassPatch, FloatingParticle};
-use crate::voxel::meshing::{ChunkMesh, MeshSettings, Face, get_blocky_material_index};
-use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
-use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use std::time::Instant;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 /// System parameter bundling entity breakdown queries for debug overlay.
@@ -173,10 +175,7 @@ impl PerformanceMetrics {
 
     /// Get max frame time from history
     pub fn max_frame_time(&self) -> f64 {
-        self.frame_times_ms
-            .iter()
-            .copied()
-            .fold(0.0, f64::max)
+        self.frame_times_ms.iter().copied().fold(0.0, f64::max)
     }
 
     /// Get average frame time from history
@@ -232,7 +231,17 @@ impl Default for SystemPerformanceMonitor {
 }
 
 /// Periodically refresh CPU/RAM stats for debug overlay fallback.
-pub fn update_system_monitor(mut monitor: ResMut<SystemPerformanceMonitor>, time: Res<Time>) {
+/// Gated behind overlay visibility to avoid 1-5ms sysinfo syscalls when F3 is off.
+pub fn update_system_monitor(
+    mut monitor: ResMut<SystemPerformanceMonitor>,
+    time: Res<Time>,
+    overlay_state: Res<DebugOverlayState>,
+) {
+    // Skip expensive sysinfo refresh when overlay is hidden
+    if !overlay_state.visible {
+        return;
+    }
+
     let now = time.elapsed_secs_f64();
     if now - monitor.last_refresh < 0.5 {
         return;
@@ -276,6 +285,9 @@ pub fn setup_debug_overlay(mut commands: Commands) {
 pub fn toggle_debug_overlay(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<DebugOverlayState>,
+    toggles: Res<DebugDetailToggles>,
+    timing_capture: Res<AreaTimingCapture>,
+    mut timing_recorder: ResMut<AreaTimingRecorder>,
     mut query: Query<&mut Visibility, With<DebugOverlay>>,
 ) {
     if keyboard.just_pressed(KeyCode::F3) {
@@ -287,12 +299,15 @@ pub fn toggle_debug_overlay(
                 Visibility::Hidden
             };
         }
+        timing_recorder
+            .set_enabled(state.visible || toggles.show_timing_breakdown || timing_capture.active);
     }
 }
 
 /// Toggle optional debug detail sections (all use Alt+ prefix).
 pub fn toggle_debug_details(
     keyboard: Res<ButtonInput<KeyCode>>,
+    overlay_state: Res<DebugOverlayState>,
     mut toggles: ResMut<DebugDetailToggles>,
     mut timing_recorder: ResMut<AreaTimingRecorder>,
     mut timing_capture: ResMut<AreaTimingCapture>,
@@ -326,7 +341,9 @@ pub fn toggle_debug_details(
 
     if alt_held && shift_held && keyboard.just_pressed(KeyCode::KeyT) {
         toggles.show_timing_breakdown = !toggles.show_timing_breakdown;
-        timing_recorder.set_enabled(toggles.show_timing_breakdown || timing_capture.active);
+        timing_recorder.set_enabled(
+            overlay_state.visible || toggles.show_timing_breakdown || timing_capture.active,
+        );
     }
 
     if alt_held && shift_held && keyboard.just_pressed(KeyCode::KeyR) {
@@ -335,14 +352,29 @@ pub fn toggle_debug_details(
         } else {
             start_area_trace(&mut timing_capture);
         }
-        timing_recorder.set_enabled(toggles.show_timing_breakdown || timing_capture.active);
+        timing_recorder.set_enabled(
+            overlay_state.visible || toggles.show_timing_breakdown || timing_capture.active,
+        );
     }
 
-    
+    if keyboard.just_pressed(KeyCode::F2) {
+        match dump_area_timing_csv(&timing_recorder) {
+            Ok(path) => info!("Performance timing CSV written to {}", path.display()),
+            Err(err) => warn!("Failed to write performance timing CSV: {}", err),
+        }
+    }
+
     // Volumetric fog toggle (Alt+L "Light")
     if alt_held && keyboard.just_pressed(KeyCode::KeyL) {
         toggles.volumetric_fog_enabled = !toggles.volumetric_fog_enabled;
-        info!("Debug toggle: Volumetric Fog = {}", if toggles.volumetric_fog_enabled { "ON" } else { "OFF" });
+        info!(
+            "Debug toggle: Volumetric Fog = {}",
+            if toggles.volumetric_fog_enabled {
+                "ON"
+            } else {
+                "OFF"
+            }
+        );
     }
 }
 
@@ -368,7 +400,10 @@ pub fn toggle_mesh_mode(
                 chunk.mark_dirty();
             }
         }
-        info!("Mesh mode: {:?} (all LODs) (F5 to toggle)", mesh_settings.mode);
+        info!(
+            "Mesh mode: {:?} (all LODs) (F5 to toggle)",
+            mesh_settings.mode
+        );
     }
 }
 
@@ -402,7 +437,7 @@ pub fn update_debug_overlay(
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(|d| d.smoothed())
     {
-        debug.perf_metrics.record_frame_time(frame_time * 1000.0); // Convert to ms
+        debug.perf_metrics.record_frame_time(frame_time);
     }
 
     let mut text_content = String::new();
@@ -431,15 +466,27 @@ pub fn update_debug_overlay(
         .map(|value| format!("{value:.1}"))
         .unwrap_or_else(|| "N/A".to_string());
     text_content.push_str(&format!("FPS: {}\n", fps));
+    append_area_timing_table(&mut text_content, &diagnostics, &debug.timing_recorder);
 
     // Entity count with breakdown
     let entity_count = all_entities.iter().count();
     let counts = entity_breakdown.counts();
-    let tracked = counts.chunk_meshes + counts.grass_patches + counts.props + counts.particles + counts.ui_nodes;
+    let tracked = counts.chunk_meshes
+        + counts.grass_patches
+        + counts.props
+        + counts.particles
+        + counts.ui_nodes;
     let other_count = entity_count.saturating_sub(tracked);
 
-    text_content.push_str(&format!("Entities: {} (mesh:{} grass:{} prop:{} ui:{} other:{})\n",
-        entity_count, counts.chunk_meshes, counts.grass_patches, counts.props, counts.ui_nodes, other_count));
+    text_content.push_str(&format!(
+        "Entities: {} (mesh:{} grass:{} prop:{} ui:{} other:{})\n",
+        entity_count,
+        counts.chunk_meshes,
+        counts.grass_patches,
+        counts.props,
+        counts.ui_nodes,
+        other_count
+    ));
 
     // Chunk stats summary (always show basic info with LOD breakdown)
     text_content.push_str(&format!(
@@ -504,7 +551,10 @@ pub fn update_debug_overlay(
                     4 => "grass_side (atlas 7)",
                     _ => "unknown",
                 };
-                text_content.push_str(&format!("Blocky layer: {} = {}\n", blocky_layer, layer_name));
+                text_content.push_str(&format!(
+                    "Blocky layer: {} = {}\n",
+                    blocky_layer, layer_name
+                ));
             }
         }
 
@@ -544,7 +594,11 @@ pub fn update_debug_overlay(
                 text_content.push_str(&format!("Distance: {:.2}\n", targeted_prop.distance));
                 text_content.push_str(&format!(
                     "Grass-like: {}\n",
-                    if is_grass_like_prop(&prop.id) { "YES" } else { "NO" }
+                    if is_grass_like_prop(&prop.id) {
+                        "YES"
+                    } else {
+                        "NO"
+                    }
                 ));
                 text_content.push_str(&format!(
                     "Wind: {}\n",
@@ -816,7 +870,6 @@ fn append_performance_debug(
     let frame_time = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(|d| d.smoothed())
-        .map(|v| v * 1000.0) // Convert to ms
         .unwrap_or(0.0);
 
     let fps = diagnostics
@@ -824,10 +877,7 @@ fn append_performance_debug(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
 
-    text_content.push_str(&format!(
-        "Frame: {:.2}ms ({:.0} FPS)\n",
-        frame_time, fps
-    ));
+    text_content.push_str(&format!("Frame: {:.2}ms ({:.0} FPS)\n", frame_time, fps));
 
     // Frame time range from history
     let min_time = perf.min_frame_time();
@@ -861,11 +911,7 @@ fn append_performance_debug(
         .get(&SystemInformationDiagnosticsPlugin::SYSTEM_CPU_USAGE)
         .and_then(|d| d.value())
         .map(|v| format!("{:.1}%", v))
-        .or_else(|| {
-            system_monitor
-                .cpu_usage
-                .map(|v| format!("{:.1}%", v))
-        })
+        .or_else(|| system_monitor.cpu_usage.map(|v| format!("{:.1}%", v)))
         .unwrap_or_else(|| "N/A".to_string());
 
     let mem_usage = diagnostics
@@ -979,11 +1025,15 @@ fn append_performance_debug(
 
     if show_timing_breakdown {
         text_content.push_str("\n[Area Timings]\n");
-        if timing_recorder.areas().is_empty() {
+        let summaries = timing_recorder.rolling_summaries();
+        if summaries.is_empty() {
             text_content.push_str("  (no data)\n");
         } else {
-            for (area, us) in timing_recorder.areas() {
-                text_content.push_str(&format!("  {}: {:.2}ms\n", area, *us as f64 / 1000.0));
+            for summary in summaries.iter().take(12) {
+                text_content.push_str(&format!(
+                    "  {}: avg {:.2}ms max {:.2}ms calls {:.1}\n",
+                    summary.area, summary.avg_ms, summary.max_ms, summary.calls_per_frame,
+                ));
             }
         }
     }
@@ -1000,6 +1050,37 @@ fn append_performance_debug(
             "  ! Likely CPU bound (ECS/draw calls)\n"
         };
         text_content.push_str(gpu_bound_hint);
+    }
+}
+
+fn append_area_timing_table(
+    text_content: &mut String,
+    diagnostics: &DiagnosticsStore,
+    timing_recorder: &AreaTimingRecorder,
+) {
+    let cpu_frame_ms = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+
+    text_content.push_str(&format!(
+        "CPU frame: {:.2}ms  GPU frame: N/A\n",
+        cpu_frame_ms
+    ));
+    text_content.push_str("\n[Frame Areas - 60f avg]\n");
+    text_content.push_str("Area                 Avg ms  Max ms  Calls\n");
+
+    let summaries = timing_recorder.rolling_summaries();
+    if summaries.is_empty() {
+        text_content.push_str("(collecting)\n");
+        return;
+    }
+
+    for summary in summaries.iter().take(12) {
+        text_content.push_str(&format!(
+            "{:<20} {:>6.2} {:>7.2} {:>6.1}\n",
+            summary.area, summary.avg_ms, summary.max_ms, summary.calls_per_frame,
+        ));
     }
 }
 
@@ -1049,6 +1130,7 @@ fn append_control_hints(
     timing_capture: &AreaTimingCapture,
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
+    text_content.push_str("\n[F2] Dump performance CSV");
     text_content.push_str("\n[G] Detailed log");
     text_content.push_str(&format!(
         "\n[Shift+M] Edit mode: {}",

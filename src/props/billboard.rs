@@ -4,11 +4,12 @@
 //! suitable for trees and tall vegetation. Integrates with existing prop
 //! spawning and culling systems.
 
+use bevy::asset::RenderAssetUsages;
+use bevy::diagnostic::FrameCount;
 use bevy::pbr::OpaqueRendererMethod;
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy_mesh::{Indices, PrimitiveTopology};
-use bevy::asset::RenderAssetUsages;
 use bevy_shader::ShaderRef;
 use std::collections::HashMap;
 
@@ -18,6 +19,7 @@ use crate::constants::{
     BILLBOARD_LEAF_FLUTTER_SPEED, BILLBOARD_LEAF_FLUTTER_STRENGTH, BILLBOARD_LOD_HYSTERESIS,
     BILLBOARD_SWITCH_DISTANCE, BILLBOARD_UPDATE_INTERVAL, BILLBOARD_WIND_STRENGTH,
 };
+use crate::performance::{AreaTimingRecorder, area_timer};
 
 use super::PropType;
 
@@ -296,7 +298,8 @@ pub fn initialize_billboard_cache(
     cache.quad_mesh = Some(meshes.add(create_billboard_quad_mesh()));
 
     // Load placeholder billboard texture
-    let placeholder_texture: Handle<Image> = asset_server.load("textures/billboards/placeholder.png");
+    let placeholder_texture: Handle<Image> =
+        asset_server.load("textures/billboards/placeholder.png");
 
     // Create billboard material with placeholder
     let material = materials.add(BillboardMaterial {
@@ -314,20 +317,30 @@ pub fn initialize_billboard_cache(
         y_offset: 0.0,
     };
 
-    cache.sizes.insert("tree_oak".to_string(), default_tree_size.clone());
-    cache.sizes.insert("tree_pine".to_string(), BillboardSize {
-        width: 4.0,
-        height: 14.0,
-        y_offset: 0.0,
-    });
-    cache.sizes.insert("tree_birch".to_string(), BillboardSize {
-        width: 5.0,
-        height: 16.0,
-        y_offset: 0.0,
-    });
+    cache
+        .sizes
+        .insert("tree_oak".to_string(), default_tree_size.clone());
+    cache.sizes.insert(
+        "tree_pine".to_string(),
+        BillboardSize {
+            width: 4.0,
+            height: 14.0,
+            y_offset: 0.0,
+        },
+    );
+    cache.sizes.insert(
+        "tree_birch".to_string(),
+        BillboardSize {
+            width: 5.0,
+            height: 16.0,
+            y_offset: 0.0,
+        },
+    );
 
     // Store placeholder texture for all tree types initially
-    cache.textures.insert("default".to_string(), placeholder_texture);
+    cache
+        .textures
+        .insert("default".to_string(), placeholder_texture);
 
     cache.initialized = true;
 
@@ -359,8 +372,11 @@ pub fn update_billboard_lod(
     mut commands: Commands,
     mut lod_query: Query<(Entity, &GlobalTransform, &mut BillboardLod)>,
     mut stats: ResMut<BillboardStats>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
     mut last_update: Local<f32>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Billboard LOD");
     if !settings.enabled || !cache.initialized {
         return;
     }
@@ -489,7 +505,10 @@ pub fn should_use_billboard_lod(prop_type: PropType, _prop_id: &str) -> bool {
 }
 
 /// Get billboard configuration for a prop ID.
-pub fn get_billboard_config(cache: &BillboardCache, prop_id: &str) -> Option<(Handle<Image>, Vec2, f32)> {
+pub fn get_billboard_config(
+    cache: &BillboardCache,
+    prop_id: &str,
+) -> Option<(Handle<Image>, Vec2, f32)> {
     // Try prop-specific texture first, fall back to default
     let texture = cache
         .textures

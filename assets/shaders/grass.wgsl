@@ -66,7 +66,9 @@ fn fbm(p: vec2<f32>) -> f32 {
     var frequency = 1.0;
     var pos = p;
 
-    for (var i = 0; i < 3; i++) {
+    // 2 octaves is sufficient for wind turbulence — the 3rd octave
+    // adds sub-blade detail that is invisible at grass rendering scale.
+    for (var i = 0; i < 2; i++) {
         value += amplitude * noise(pos * frequency);
         amplitude *= 0.5;
         frequency *= 2.0;

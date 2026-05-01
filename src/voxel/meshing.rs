@@ -6,28 +6,41 @@
 //!
 //! Both modes support ambient occlusion and proper chunk boundary handling.
 
+use crate::constants::{
+    ATLAS_COLUMNS,
+    ATLAS_ROWS,
+    CHUNK_BOUNDARY_SCALE,
+    CHUNK_SIZE,
+    CHUNK_SIZE_I32,
+    LOD0_GRID_VOLUME,
+    // LOD grid configurations
+    LOD0_PADDED_SIZE,
+    LOD0_STEP_SIZE,
+    LOD1_GRID_VOLUME,
+    LOD1_PADDED_SIZE,
+    LOD1_STEP_SIZE,
+    LOD2_GRID_VOLUME,
+    LOD2_PADDED_SIZE,
+    LOD2_STEP_SIZE,
+    LOD3_GRID_VOLUME,
+    LOD3_PADDED_SIZE,
+    LOD3_STEP_SIZE,
+    PADDED_CHUNK_SIZE_U32,
+    UV_PADDING,
+    VOXEL_SIZE,
+};
+use crate::rendering::ao_config::BakedAoConfig;
+use crate::voxel::baked_ao::compute_surface_nets_ao;
+use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::skirt::{NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts};
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
-use crate::constants::{
-    CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE,
-    PADDED_CHUNK_SIZE_U32, UV_PADDING, CHUNK_BOUNDARY_SCALE,
-    ATLAS_COLUMNS, ATLAS_ROWS,
-    // LOD grid configurations
-    LOD0_PADDED_SIZE, LOD0_STEP_SIZE, LOD0_GRID_VOLUME,
-    LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD1_GRID_VOLUME,
-    LOD2_PADDED_SIZE, LOD2_STEP_SIZE, LOD2_GRID_VOLUME,
-    LOD3_PADDED_SIZE, LOD3_STEP_SIZE, LOD3_GRID_VOLUME,
-};
-use crate::rendering::ao_config::BakedAoConfig;
-use crate::voxel::chunk::{Chunk, LodLevel};
-use crate::voxel::baked_ao::compute_surface_nets_ao;
-use crate::voxel::skirt::{extract_boundary_edges, generate_skirts, NeighborLods, SkirtConfig};
-use crate::voxel::types::{VoxelType, Voxel};
-use crate::voxel::world::VoxelWorld;
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
 #[derive(Component)]
@@ -73,12 +86,26 @@ impl MeshData {
         }
     }
 
+    /// Pre-allocate with expected capacities to avoid repeated reallocations.
+    pub fn with_capacity(vertex_cap: usize, index_cap: usize) -> Self {
+        Self {
+            positions: Vec::with_capacity(vertex_cap),
+            normals: Vec::with_capacity(vertex_cap),
+            uvs: Vec::with_capacity(vertex_cap),
+            colors: Vec::with_capacity(vertex_cap),
+            indices: Vec::with_capacity(index_cap),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
 
     pub fn into_mesh(self) -> Mesh {
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
@@ -162,12 +189,14 @@ fn build_face_mask(
 }
 
 /// Greedy meshing: find maximal rectangles in a 2D face mask.
-/// Returns a list of merged quads for this slice.
+/// Appends merged quads into the caller-provided buffer (cleared first).
+/// This avoids 96 heap allocations per chunk (6 faces × 16 depths).
 fn greedy_mesh_slice(
     mask: &mut [[FaceInfo; CHUNK_SIZE]; CHUNK_SIZE],
     depth: u32,
-) -> Vec<GreedyQuad> {
-    let mut quads = Vec::new();
+    quads: &mut Vec<GreedyQuad>,
+) {
+    quads.clear();
 
     for start_u in 0..CHUNK_SIZE {
         for start_v in 0..CHUNK_SIZE {
@@ -218,8 +247,6 @@ fn greedy_mesh_slice(
             });
         }
     }
-
-    quads
 }
 
 /// Add a greedy quad to the mesh data with proper AO calculation.
@@ -245,8 +272,11 @@ fn add_greedy_quad(
             let z0 = v_start as f32 * s;
             let z1 = (v_start + v_size) as f32 * s;
             (
-                [x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0],
-                [0.0, 1.0, 0.0]
+                [x0, y, z1],
+                [x1, y, z1],
+                [x1, y, z0],
+                [x0, y, z0],
+                [0.0, 1.0, 0.0],
             )
         }
         Face::Bottom => {
@@ -256,8 +286,11 @@ fn add_greedy_quad(
             let z0 = v_start as f32 * s;
             let z1 = (v_start + v_size) as f32 * s;
             (
-                [x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1],
-                [0.0, -1.0, 0.0]
+                [x0, y, z0],
+                [x1, y, z0],
+                [x1, y, z1],
+                [x0, y, z1],
+                [0.0, -1.0, 0.0],
             )
         }
         Face::North => {
@@ -267,8 +300,11 @@ fn add_greedy_quad(
             let y0 = v_start as f32 * s;
             let y1 = (v_start + v_size) as f32 * s;
             (
-                [x1, y0, z], [x0, y0, z], [x0, y1, z], [x1, y1, z],
-                [0.0, 0.0, -1.0]
+                [x1, y0, z],
+                [x0, y0, z],
+                [x0, y1, z],
+                [x1, y1, z],
+                [0.0, 0.0, -1.0],
             )
         }
         Face::South => {
@@ -278,8 +314,11 @@ fn add_greedy_quad(
             let y0 = v_start as f32 * s;
             let y1 = (v_start + v_size) as f32 * s;
             (
-                [x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z],
-                [0.0, 0.0, 1.0]
+                [x0, y0, z],
+                [x1, y0, z],
+                [x1, y1, z],
+                [x0, y1, z],
+                [0.0, 0.0, 1.0],
             )
         }
         Face::East => {
@@ -289,8 +328,11 @@ fn add_greedy_quad(
             let y0 = v_start as f32 * s;
             let y1 = (v_start + v_size) as f32 * s;
             (
-                [x, y0, z1], [x, y0, z0], [x, y1, z0], [x, y1, z1],
-                [1.0, 0.0, 0.0]
+                [x, y0, z1],
+                [x, y0, z0],
+                [x, y1, z0],
+                [x, y1, z1],
+                [1.0, 0.0, 0.0],
             )
         }
         Face::West => {
@@ -300,8 +342,11 @@ fn add_greedy_quad(
             let y0 = v_start as f32 * s;
             let y1 = (v_start + v_size) as f32 * s;
             (
-                [x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0],
-                [-1.0, 0.0, 0.0]
+                [x, y0, z0],
+                [x, y0, z1],
+                [x, y1, z1],
+                [x, y1, z0],
+                [-1.0, 0.0, 0.0],
             )
         }
     };
@@ -458,11 +503,21 @@ pub fn generate_chunk_mesh(
     world: &VoxelWorld,
     ao_config: &BakedAoConfig,
 ) -> ChunkMeshResult {
-    let mut solid_mesh = MeshData::new();
-    let mut water_mesh = MeshData::new();
+    let mut solid_mesh = MeshData::with_capacity(1024, 1536);
+    let mut water_mesh = MeshData::with_capacity(256, 384);
 
     // Greedy meshing for solid blocks - process each face direction
-    let faces = [Face::Top, Face::Bottom, Face::North, Face::South, Face::East, Face::West];
+    let faces = [
+        Face::Top,
+        Face::Bottom,
+        Face::North,
+        Face::South,
+        Face::East,
+        Face::West,
+    ];
+
+    // Reusable buffer for greedy quads — avoids 96 heap allocations per chunk
+    let mut quads = Vec::with_capacity(64);
 
     for face in faces {
         // Process each slice perpendicular to the face direction
@@ -471,7 +526,7 @@ pub fn generate_chunk_mesh(
             let mut mask = build_face_mask(chunk, world, face, depth);
 
             // Find and emit greedy quads
-            let quads = greedy_mesh_slice(&mut mask, depth);
+            greedy_mesh_slice(&mut mask, depth, &mut quads);
 
             for quad in &quads {
                 add_greedy_quad(&mut solid_mesh, chunk, world, quad, face, ao_config);
@@ -479,21 +534,14 @@ pub fn generate_chunk_mesh(
         }
     }
 
-    // Water still uses per-face generation (typically few water faces, and they need special handling)
-    for x in 0..16 {
-        for y in 0..16 {
-            for z in 0..16 {
-                let local = UVec3::new(x, y, z);
-                let voxel = chunk.get(local);
-
-                if voxel.is_liquid() {
-                    check_water_face(chunk, world, local, Face::Top, &mut water_mesh, voxel);
-                    check_water_face(chunk, world, local, Face::Bottom, &mut water_mesh, voxel);
-                    check_water_face(chunk, world, local, Face::North, &mut water_mesh, voxel);
-                    check_water_face(chunk, world, local, Face::South, &mut water_mesh, voxel);
-                    check_water_face(chunk, world, local, Face::East, &mut water_mesh, voxel);
-                    check_water_face(chunk, world, local, Face::West, &mut water_mesh, voxel);
-                }
+    // Greedy meshing for water faces — merges ocean surfaces into large quads
+    let mut water_quads: Vec<GreedyQuad> = Vec::with_capacity(32);
+    for face in faces {
+        for depth in 0..CHUNK_SIZE as u32 {
+            let mut mask = build_water_face_mask(chunk, world, face, depth);
+            greedy_mesh_slice(&mut mask, depth, &mut water_quads);
+            for quad in &water_quads {
+                add_greedy_water_face(&mut water_mesh, quad, face);
             }
         }
     }
@@ -550,9 +598,12 @@ fn face_offset(face: Face) -> IVec3 {
 /// Checks if a neighbor position is within chunk bounds.
 #[inline]
 fn is_in_chunk_bounds(pos: IVec3) -> bool {
-    pos.x >= 0 && pos.x < CHUNK_SIZE_I32 &&
-    pos.y >= 0 && pos.y < CHUNK_SIZE_I32 &&
-    pos.z >= 0 && pos.z < CHUNK_SIZE_I32
+    pos.x >= 0
+        && pos.x < CHUNK_SIZE_I32
+        && pos.y >= 0
+        && pos.y < CHUNK_SIZE_I32
+        && pos.z >= 0
+        && pos.z < CHUNK_SIZE_I32
 }
 
 /// Gets the neighboring voxel for a face, checking chunk first then world.
@@ -574,7 +625,8 @@ fn get_neighbor_voxel(
     } else {
         // Neighbor is outside chunk - check world
         let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-        let world_pos = chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
+        let world_pos =
+            chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
         world.get_voxel(world_pos)
     }
 }
@@ -606,12 +658,7 @@ where
 }
 
 /// Solid face is visible when neighbor is transparent (air or water).
-fn is_face_visible(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-) -> bool {
+fn is_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
     is_face_visible_with(
         chunk,
         world,
@@ -623,12 +670,7 @@ fn is_face_visible(
 }
 
 /// Water face is visible only when neighbor is air.
-fn is_water_face_visible(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-) -> bool {
+fn is_water_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
     is_face_visible_with(
         chunk,
         world,
@@ -637,6 +679,155 @@ fn is_water_face_visible(
         |neighbor| neighbor == VoxelType::Air,
         true, // Show water at world edges
     )
+}
+
+/// Build a 2D mask for water faces on a given slice (analogous to build_face_mask).
+/// All water voxels share the same type, so greedy meshing merges them aggressively.
+fn build_water_face_mask(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    face: Face,
+    depth: u32,
+) -> [[FaceInfo; CHUNK_SIZE]; CHUNK_SIZE] {
+    let mut mask = [[FaceInfo::default(); CHUNK_SIZE]; CHUNK_SIZE];
+
+    for u in 0..CHUNK_SIZE {
+        for v in 0..CHUNK_SIZE {
+            let local = match face {
+                Face::Top | Face::Bottom => UVec3::new(u as u32, depth, v as u32),
+                Face::North | Face::South => UVec3::new(u as u32, v as u32, depth),
+                Face::East | Face::West => UVec3::new(depth, v as u32, u as u32),
+            };
+
+            let voxel = chunk.get(local);
+            if !voxel.is_liquid() {
+                continue;
+            }
+
+            if is_water_face_visible(chunk, world, local, face) {
+                mask[u][v] = FaceInfo {
+                    voxel,
+                    visible: true,
+                };
+            }
+        }
+    }
+
+    mask
+}
+
+/// Emit a greedy-merged water quad. Produces the same geometry as `add_water_face`
+/// but covers `quad.size` voxels, drastically reducing triangle count for oceans.
+fn add_greedy_water_face(mesh_data: &mut MeshData, quad: &GreedyQuad, face: Face) {
+    // Reconstruct local-space position and size from quad
+    let (x, y, z, sx, sy, sz) = match face {
+        Face::Top | Face::Bottom => (
+            quad.start.0 as f32 * VOXEL_SIZE,
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE, // single voxel depth in normal dir
+            quad.size.1 as f32 * VOXEL_SIZE,
+        ),
+        Face::North | Face::South => (
+            quad.start.0 as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+            quad.size.1 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE,
+        ),
+        Face::East | Face::West => (
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.start.0 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE,
+            quad.size.1 as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+        ),
+    };
+
+    let s = VOXEL_SIZE; // single-voxel edge length
+    let (v0, v1, v2, v3, normal) = match face {
+        Face::Top => (
+            [x, y + s, z + sz],
+            [x + sx, y + s, z + sz],
+            [x + sx, y + s, z],
+            [x, y + s, z],
+            [0.0, 1.0, 0.0],
+        ),
+        Face::Bottom => (
+            [x, y, z],
+            [x + sx, y, z],
+            [x + sx, y, z + sz],
+            [x, y, z + sz],
+            [0.0, -1.0, 0.0],
+        ),
+        Face::North => (
+            [x + sx, y, z],
+            [x, y, z],
+            [x, y + sy, z],
+            [x + sx, y + sy, z],
+            [0.0, 0.0, -1.0],
+        ),
+        Face::South => (
+            [x, y, z + s],
+            [x + sx, y, z + s],
+            [x + sx, y + sy, z + s],
+            [x, y + sy, z + s],
+            [0.0, 0.0, 1.0],
+        ),
+        Face::East => (
+            [x + s, y, z + sz],
+            [x + s, y, z],
+            [x + s, y + sy, z],
+            [x + s, y + sy, z + sz],
+            [1.0, 0.0, 0.0],
+        ),
+        Face::West => (
+            [x, y, z],
+            [x, y, z + sz],
+            [x, y + sy, z + sz],
+            [x, y + sy, z],
+            [-1.0, 0.0, 0.0],
+        ),
+    };
+
+    let start_idx = mesh_data.positions.len() as u32;
+
+    mesh_data.positions.push(v0);
+    mesh_data.positions.push(v1);
+    mesh_data.positions.push(v2);
+    mesh_data.positions.push(v3);
+
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+
+    // UVs: use local-space coords (water shader uses coord_offset + uv * coord_scale)
+    let (uv0, uv1, uv2, uv3) = match face {
+        Face::Top | Face::Bottom => ([x, z + sz], [x + sx, z + sz], [x + sx, z], [x, z]),
+        Face::North | Face::South => ([x, y], [x + sx, y], [x + sx, y + sy], [x, y + sy]),
+        Face::East | Face::West => ([z, y], [z + sz, y], [z + sz, y + sy], [z, y + sy]),
+    };
+
+    mesh_data.uvs.push(uv0);
+    mesh_data.uvs.push(uv1);
+    mesh_data.uvs.push(uv2);
+    mesh_data.uvs.push(uv3);
+
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 2);
+    mesh_data.indices.push(start_idx + 1);
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 3);
+    mesh_data.indices.push(start_idx + 2);
 }
 
 /// Calculate vertex ambient occlusion (0-1 scale, 0 = fully occluded, 1 = not occluded).
@@ -662,20 +853,28 @@ fn calculate_vertex_ao(side1: bool, side2: bool, corner: bool, ao_config: &Baked
 /// Check if a world position contains a solid block (for AO calculation)
 fn is_solid_at_offset(chunk: &Chunk, world: &VoxelWorld, local: UVec3, offset: IVec3) -> bool {
     let local_pos = IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
-    
+
     // Check within chunk first
-    if local_pos.x >= 0 && local_pos.x < CHUNK_SIZE_I32 &&
-       local_pos.y >= 0 && local_pos.y < CHUNK_SIZE_I32 &&
-       local_pos.z >= 0 && local_pos.z < CHUNK_SIZE_I32 {
-        let v = chunk.get(UVec3::new(local_pos.x as u32, local_pos.y as u32, local_pos.z as u32));
+    if local_pos.x >= 0
+        && local_pos.x < CHUNK_SIZE_I32
+        && local_pos.y >= 0
+        && local_pos.y < CHUNK_SIZE_I32
+        && local_pos.z >= 0
+        && local_pos.z < CHUNK_SIZE_I32
+    {
+        let v = chunk.get(UVec3::new(
+            local_pos.x as u32,
+            local_pos.y as u32,
+            local_pos.z as u32,
+        ));
         return v.is_solid();
     }
-    
+
     // Check world
     let chunk_pos = chunk.position();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
     let world_pos = chunk_origin + local_pos;
-    
+
     if let Some(v) = world.get_voxel(world_pos) {
         v.is_solid()
     } else {
@@ -693,59 +892,145 @@ fn get_face_ao(
 ) -> [f32; 4] {
     // For each face, we need to check the 8 neighbors in the plane of the face
     // and calculate AO for each of the 4 vertices
-    
+
     let offsets = match face {
         Face::Top => {
             // Vertices: v0(0,1,1), v1(1,1,1), v2(1,1,0), v3(0,1,0)
             [
-                (IVec3::new(-1, 1, 0), IVec3::new(0, 1, 1), IVec3::new(-1, 1, 1)),   // v0
-                (IVec3::new(1, 1, 0), IVec3::new(0, 1, 1), IVec3::new(1, 1, 1)),     // v1
-                (IVec3::new(1, 1, 0), IVec3::new(0, 1, -1), IVec3::new(1, 1, -1)),   // v2
-                (IVec3::new(-1, 1, 0), IVec3::new(0, 1, -1), IVec3::new(-1, 1, -1)), // v3
+                (
+                    IVec3::new(-1, 1, 0),
+                    IVec3::new(0, 1, 1),
+                    IVec3::new(-1, 1, 1),
+                ), // v0
+                (
+                    IVec3::new(1, 1, 0),
+                    IVec3::new(0, 1, 1),
+                    IVec3::new(1, 1, 1),
+                ), // v1
+                (
+                    IVec3::new(1, 1, 0),
+                    IVec3::new(0, 1, -1),
+                    IVec3::new(1, 1, -1),
+                ), // v2
+                (
+                    IVec3::new(-1, 1, 0),
+                    IVec3::new(0, 1, -1),
+                    IVec3::new(-1, 1, -1),
+                ), // v3
             ]
         }
-        Face::Bottom => {
-            [
-                (IVec3::new(-1, -1, 0), IVec3::new(0, -1, -1), IVec3::new(-1, -1, -1)),
-                (IVec3::new(1, -1, 0), IVec3::new(0, -1, -1), IVec3::new(1, -1, -1)),
-                (IVec3::new(1, -1, 0), IVec3::new(0, -1, 1), IVec3::new(1, -1, 1)),
-                (IVec3::new(-1, -1, 0), IVec3::new(0, -1, 1), IVec3::new(-1, -1, 1)),
-            ]
-        }
-        Face::North => {
-            [
-                (IVec3::new(1, 0, -1), IVec3::new(0, -1, -1), IVec3::new(1, -1, -1)),
-                (IVec3::new(-1, 0, -1), IVec3::new(0, -1, -1), IVec3::new(-1, -1, -1)),
-                (IVec3::new(-1, 0, -1), IVec3::new(0, 1, -1), IVec3::new(-1, 1, -1)),
-                (IVec3::new(1, 0, -1), IVec3::new(0, 1, -1), IVec3::new(1, 1, -1)),
-            ]
-        }
-        Face::South => {
-            [
-                (IVec3::new(-1, 0, 1), IVec3::new(0, -1, 1), IVec3::new(-1, -1, 1)),
-                (IVec3::new(1, 0, 1), IVec3::new(0, -1, 1), IVec3::new(1, -1, 1)),
-                (IVec3::new(1, 0, 1), IVec3::new(0, 1, 1), IVec3::new(1, 1, 1)),
-                (IVec3::new(-1, 0, 1), IVec3::new(0, 1, 1), IVec3::new(-1, 1, 1)),
-            ]
-        }
-        Face::East => {
-            [
-                (IVec3::new(1, 0, 1), IVec3::new(1, -1, 0), IVec3::new(1, -1, 1)),
-                (IVec3::new(1, 0, -1), IVec3::new(1, -1, 0), IVec3::new(1, -1, -1)),
-                (IVec3::new(1, 0, -1), IVec3::new(1, 1, 0), IVec3::new(1, 1, -1)),
-                (IVec3::new(1, 0, 1), IVec3::new(1, 1, 0), IVec3::new(1, 1, 1)),
-            ]
-        }
-        Face::West => {
-            [
-                (IVec3::new(-1, 0, -1), IVec3::new(-1, -1, 0), IVec3::new(-1, -1, -1)),
-                (IVec3::new(-1, 0, 1), IVec3::new(-1, -1, 0), IVec3::new(-1, -1, 1)),
-                (IVec3::new(-1, 0, 1), IVec3::new(-1, 1, 0), IVec3::new(-1, 1, 1)),
-                (IVec3::new(-1, 0, -1), IVec3::new(-1, 1, 0), IVec3::new(-1, 1, -1)),
-            ]
-        }
+        Face::Bottom => [
+            (
+                IVec3::new(-1, -1, 0),
+                IVec3::new(0, -1, -1),
+                IVec3::new(-1, -1, -1),
+            ),
+            (
+                IVec3::new(1, -1, 0),
+                IVec3::new(0, -1, -1),
+                IVec3::new(1, -1, -1),
+            ),
+            (
+                IVec3::new(1, -1, 0),
+                IVec3::new(0, -1, 1),
+                IVec3::new(1, -1, 1),
+            ),
+            (
+                IVec3::new(-1, -1, 0),
+                IVec3::new(0, -1, 1),
+                IVec3::new(-1, -1, 1),
+            ),
+        ],
+        Face::North => [
+            (
+                IVec3::new(1, 0, -1),
+                IVec3::new(0, -1, -1),
+                IVec3::new(1, -1, -1),
+            ),
+            (
+                IVec3::new(-1, 0, -1),
+                IVec3::new(0, -1, -1),
+                IVec3::new(-1, -1, -1),
+            ),
+            (
+                IVec3::new(-1, 0, -1),
+                IVec3::new(0, 1, -1),
+                IVec3::new(-1, 1, -1),
+            ),
+            (
+                IVec3::new(1, 0, -1),
+                IVec3::new(0, 1, -1),
+                IVec3::new(1, 1, -1),
+            ),
+        ],
+        Face::South => [
+            (
+                IVec3::new(-1, 0, 1),
+                IVec3::new(0, -1, 1),
+                IVec3::new(-1, -1, 1),
+            ),
+            (
+                IVec3::new(1, 0, 1),
+                IVec3::new(0, -1, 1),
+                IVec3::new(1, -1, 1),
+            ),
+            (
+                IVec3::new(1, 0, 1),
+                IVec3::new(0, 1, 1),
+                IVec3::new(1, 1, 1),
+            ),
+            (
+                IVec3::new(-1, 0, 1),
+                IVec3::new(0, 1, 1),
+                IVec3::new(-1, 1, 1),
+            ),
+        ],
+        Face::East => [
+            (
+                IVec3::new(1, 0, 1),
+                IVec3::new(1, -1, 0),
+                IVec3::new(1, -1, 1),
+            ),
+            (
+                IVec3::new(1, 0, -1),
+                IVec3::new(1, -1, 0),
+                IVec3::new(1, -1, -1),
+            ),
+            (
+                IVec3::new(1, 0, -1),
+                IVec3::new(1, 1, 0),
+                IVec3::new(1, 1, -1),
+            ),
+            (
+                IVec3::new(1, 0, 1),
+                IVec3::new(1, 1, 0),
+                IVec3::new(1, 1, 1),
+            ),
+        ],
+        Face::West => [
+            (
+                IVec3::new(-1, 0, -1),
+                IVec3::new(-1, -1, 0),
+                IVec3::new(-1, -1, -1),
+            ),
+            (
+                IVec3::new(-1, 0, 1),
+                IVec3::new(-1, -1, 0),
+                IVec3::new(-1, -1, 1),
+            ),
+            (
+                IVec3::new(-1, 0, 1),
+                IVec3::new(-1, 1, 0),
+                IVec3::new(-1, 1, 1),
+            ),
+            (
+                IVec3::new(-1, 0, -1),
+                IVec3::new(-1, 1, 0),
+                IVec3::new(-1, 1, -1),
+            ),
+        ],
     };
-    
+
     let mut ao = [1.0; 4];
     for (i, (side1_off, side2_off, corner_off)) in offsets.iter().enumerate() {
         let side1 = is_solid_at_offset(chunk, world, local, *side1_off);
@@ -782,9 +1067,11 @@ pub fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
     let base_index = match voxel {
         VoxelType::TopSoil | VoxelType::Leaves => 0, // Grass
         VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood => 3, // Dirt
-        VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => 6, // Rock
-        VoxelType::Sand => 9, // Sand
-        _ => 0, // Default to grass
+        VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => {
+            6
+        } // Rock
+        VoxelType::Sand => 9,                        // Sand
+        _ => 0,                                      // Default to grass
     };
 
     let face_offset = match face {
@@ -814,28 +1101,46 @@ fn add_face_with_ao(
 
     let (v0, v1, v2, v3, normal) = match face {
         Face::Top => (
-            [x, y + s, z + s], [x + s, y + s, z + s], [x + s, y + s, z], [x, y + s, z],
-            [0.0, 1.0, 0.0]
+            [x, y + s, z + s],
+            [x + s, y + s, z + s],
+            [x + s, y + s, z],
+            [x, y + s, z],
+            [0.0, 1.0, 0.0],
         ),
         Face::Bottom => (
-            [x, y, z], [x + s, y, z], [x + s, y, z + s], [x, y, z + s],
-            [0.0, -1.0, 0.0]
+            [x, y, z],
+            [x + s, y, z],
+            [x + s, y, z + s],
+            [x, y, z + s],
+            [0.0, -1.0, 0.0],
         ),
         Face::North => (
-            [x + s, y, z], [x, y, z], [x, y + s, z], [x + s, y + s, z],
-            [0.0, 0.0, -1.0]
+            [x + s, y, z],
+            [x, y, z],
+            [x, y + s, z],
+            [x + s, y + s, z],
+            [0.0, 0.0, -1.0],
         ),
         Face::South => (
-            [x, y, z + s], [x + s, y, z + s], [x + s, y + s, z + s], [x, y + s, z + s],
-            [0.0, 0.0, 1.0]
+            [x, y, z + s],
+            [x + s, y, z + s],
+            [x + s, y + s, z + s],
+            [x, y + s, z + s],
+            [0.0, 0.0, 1.0],
         ),
         Face::East => (
-            [x + s, y, z + s], [x + s, y, z], [x + s, y + s, z], [x + s, y + s, z + s],
-            [1.0, 0.0, 0.0]
+            [x + s, y, z + s],
+            [x + s, y, z],
+            [x + s, y + s, z],
+            [x + s, y + s, z + s],
+            [1.0, 0.0, 0.0],
         ),
         Face::West => (
-            [x, y, z], [x, y, z + s], [x, y + s, z + s], [x, y + s, z],
-            [-1.0, 0.0, 0.0]
+            [x, y, z],
+            [x, y, z + s],
+            [x, y + s, z + s],
+            [x, y + s, z],
+            [-1.0, 0.0, 0.0],
         ),
     };
 
@@ -843,17 +1148,17 @@ fn add_face_with_ao(
     let ao = get_face_ao(chunk, world, local, face, ao_config);
 
     let start_idx = mesh_data.positions.len() as u32;
-    
+
     mesh_data.positions.push(v0);
     mesh_data.positions.push(v1);
     mesh_data.positions.push(v2);
     mesh_data.positions.push(v3);
-    
+
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
-    
+
     let material_index = get_blocky_material_index(voxel, face) as f32 / 255.0;
     // Add vertex colors for AO (grayscale) + material index in alpha
     mesh_data.colors.push([ao[0], ao[0], ao[0], material_index]);
@@ -862,17 +1167,17 @@ fn add_face_with_ao(
     mesh_data.colors.push([ao[3], ao[3], ao[3], material_index]);
 
     // For Texture Arrays, we use full 0..1 UVs as each layer is a complete texture
-    
+
     let u_min = 0.0;
     let u_max = 1.0;
     let v_min = 0.0;
     let v_max = 1.0;
-    
+
     mesh_data.uvs.push([u_min, v_max]);
     mesh_data.uvs.push([u_max, v_max]);
     mesh_data.uvs.push([u_max, v_min]);
     mesh_data.uvs.push([u_min, v_min]);
-    
+
     // Use flipped winding for proper AO interpolation when needed
     // Check if we should flip the quad diagonal based on AO values
     if !ao_config.fix_anisotropy || ao[0] + ao[2] > ao[1] + ao[3] {
@@ -880,7 +1185,7 @@ fn add_face_with_ao(
         mesh_data.indices.push(start_idx);
         mesh_data.indices.push(start_idx + 2);
         mesh_data.indices.push(start_idx + 1);
-        
+
         mesh_data.indices.push(start_idx);
         mesh_data.indices.push(start_idx + 3);
         mesh_data.indices.push(start_idx + 2);
@@ -890,7 +1195,7 @@ fn add_face_with_ao(
         mesh_data.indices.push(start_idx + 1);
         mesh_data.indices.push(start_idx);
         mesh_data.indices.push(start_idx + 3);
-        
+
         // Triangle 2: v1, v3, v2 (CCW)
         mesh_data.indices.push(start_idx + 1);
         mesh_data.indices.push(start_idx + 3);
@@ -898,12 +1203,7 @@ fn add_face_with_ao(
     }
 }
 
-fn add_face_no_ao(
-    mesh_data: &mut MeshData,
-    local: UVec3,
-    face: Face,
-    voxel: VoxelType,
-) {
+fn add_face_no_ao(mesh_data: &mut MeshData, local: UVec3, face: Face, voxel: VoxelType) {
     let x = local.x as f32 * VOXEL_SIZE;
     let y = local.y as f32 * VOXEL_SIZE;
     let z = local.z as f32 * VOXEL_SIZE;
@@ -916,56 +1216,68 @@ fn add_face_no_ao(
 
     let (v0, v1, v2, v3, normal) = match face {
         Face::Top => (
-            [x + inset, y + s - inset, z + s - inset], [x + s - inset, y + s - inset, z + s - inset],
-            [x + s - inset, y + s - inset, z + inset], [x + inset, y + s - inset, z + inset],
-            [0.0, 1.0, 0.0]
+            [x + inset, y + s - inset, z + s - inset],
+            [x + s - inset, y + s - inset, z + s - inset],
+            [x + s - inset, y + s - inset, z + inset],
+            [x + inset, y + s - inset, z + inset],
+            [0.0, 1.0, 0.0],
         ),
         Face::Bottom => (
-            [x + inset, y + inset, z + inset], [x + s - inset, y + inset, z + inset],
-            [x + s - inset, y + inset, z + s - inset], [x + inset, y + inset, z + s - inset],
-            [0.0, -1.0, 0.0]
+            [x + inset, y + inset, z + inset],
+            [x + s - inset, y + inset, z + inset],
+            [x + s - inset, y + inset, z + s - inset],
+            [x + inset, y + inset, z + s - inset],
+            [0.0, -1.0, 0.0],
         ),
         Face::North => (
-            [x + s - inset, y + inset, z + inset], [x + inset, y + inset, z + inset],
-            [x + inset, y + s - inset, z + inset], [x + s - inset, y + s - inset, z + inset],
-            [0.0, 0.0, -1.0]
+            [x + s - inset, y + inset, z + inset],
+            [x + inset, y + inset, z + inset],
+            [x + inset, y + s - inset, z + inset],
+            [x + s - inset, y + s - inset, z + inset],
+            [0.0, 0.0, -1.0],
         ),
         Face::South => (
-            [x + inset, y + inset, z + s - inset], [x + s - inset, y + inset, z + s - inset],
-            [x + s - inset, y + s - inset, z + s - inset], [x + inset, y + s - inset, z + s - inset],
-            [0.0, 0.0, 1.0]
+            [x + inset, y + inset, z + s - inset],
+            [x + s - inset, y + inset, z + s - inset],
+            [x + s - inset, y + s - inset, z + s - inset],
+            [x + inset, y + s - inset, z + s - inset],
+            [0.0, 0.0, 1.0],
         ),
         Face::East => (
-            [x + s - inset, y + inset, z + s - inset], [x + s - inset, y + inset, z + inset],
-            [x + s - inset, y + s - inset, z + inset], [x + s - inset, y + s - inset, z + s - inset],
-            [1.0, 0.0, 0.0]
+            [x + s - inset, y + inset, z + s - inset],
+            [x + s - inset, y + inset, z + inset],
+            [x + s - inset, y + s - inset, z + inset],
+            [x + s - inset, y + s - inset, z + s - inset],
+            [1.0, 0.0, 0.0],
         ),
         Face::West => (
-            [x + inset, y + inset, z + inset], [x + inset, y + inset, z + s - inset],
-            [x + inset, y + s - inset, z + s - inset], [x + inset, y + s - inset, z + inset],
-            [-1.0, 0.0, 0.0]
+            [x + inset, y + inset, z + inset],
+            [x + inset, y + inset, z + s - inset],
+            [x + inset, y + s - inset, z + s - inset],
+            [x + inset, y + s - inset, z + inset],
+            [-1.0, 0.0, 0.0],
         ),
     };
 
     let start_idx = mesh_data.positions.len() as u32;
-    
+
     mesh_data.positions.push(v0);
     mesh_data.positions.push(v1);
     mesh_data.positions.push(v2);
     mesh_data.positions.push(v3);
-    
+
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
-    
+
     let material_index = get_blocky_material_index(voxel, face) as f32 / 255.0;
     // Full brightness for water; keep material index in alpha for blocky shader safety.
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
     mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
-    
+
     // Calculate UV coordinates from atlas position
     let atlas_idx = voxel.atlas_index();
     let cols = ATLAS_COLUMNS as f32;
@@ -977,12 +1289,12 @@ fn add_face_no_ao(
     let u_max = (col + 1.0) / cols - UV_PADDING;
     let v_min = row / rows + UV_PADDING;
     let v_max = (row + 1.0) / rows - UV_PADDING;
-    
+
     mesh_data.uvs.push([u_min, v_max]);
     mesh_data.uvs.push([u_max, v_max]);
     mesh_data.uvs.push([u_max, v_min]);
     mesh_data.uvs.push([u_min, v_min]);
-    
+
     mesh_data.indices.push(start_idx);
     mesh_data.indices.push(start_idx + 2);
     mesh_data.indices.push(start_idx + 1);
@@ -995,12 +1307,7 @@ fn add_face_no_ao(
 /// Add a water face with world-space UVs for proper wave calculation.
 /// Unlike solid terrain which uses atlas UVs, water needs world XZ coordinates
 /// so the wave shader can compute spatially-varying wave heights.
-fn add_water_face(
-    mesh_data: &mut MeshData,
-    local: UVec3,
-    face: Face,
-    chunk_origin: IVec3,
-) {
+fn add_water_face(mesh_data: &mut MeshData, local: UVec3, face: Face, chunk_origin: IVec3) {
     let x = local.x as f32 * VOXEL_SIZE;
     let y = local.y as f32 * VOXEL_SIZE;
     let z = local.z as f32 * VOXEL_SIZE;
@@ -1008,34 +1315,46 @@ fn add_water_face(
 
     let (v0, v1, v2, v3, normal) = match face {
         Face::Top => (
-            [x, y + s, z + s], [x + s, y + s, z + s],
-            [x + s, y + s, z], [x, y + s, z],
-            [0.0, 1.0, 0.0]
+            [x, y + s, z + s],
+            [x + s, y + s, z + s],
+            [x + s, y + s, z],
+            [x, y + s, z],
+            [0.0, 1.0, 0.0],
         ),
         Face::Bottom => (
-            [x, y, z], [x + s, y, z],
-            [x + s, y, z + s], [x, y, z + s],
-            [0.0, -1.0, 0.0]
+            [x, y, z],
+            [x + s, y, z],
+            [x + s, y, z + s],
+            [x, y, z + s],
+            [0.0, -1.0, 0.0],
         ),
         Face::North => (
-            [x + s, y, z], [x, y, z],
-            [x, y + s, z], [x + s, y + s, z],
-            [0.0, 0.0, -1.0]
+            [x + s, y, z],
+            [x, y, z],
+            [x, y + s, z],
+            [x + s, y + s, z],
+            [0.0, 0.0, -1.0],
         ),
         Face::South => (
-            [x, y, z + s], [x + s, y, z + s],
-            [x + s, y + s, z + s], [x, y + s, z + s],
-            [0.0, 0.0, 1.0]
+            [x, y, z + s],
+            [x + s, y, z + s],
+            [x + s, y + s, z + s],
+            [x, y + s, z + s],
+            [0.0, 0.0, 1.0],
         ),
         Face::East => (
-            [x + s, y, z + s], [x + s, y, z],
-            [x + s, y + s, z], [x + s, y + s, z + s],
-            [1.0, 0.0, 0.0]
+            [x + s, y, z + s],
+            [x + s, y, z],
+            [x + s, y + s, z],
+            [x + s, y + s, z + s],
+            [1.0, 0.0, 0.0],
         ),
         Face::West => (
-            [x, y, z], [x, y, z + s],
-            [x, y + s, z + s], [x, y + s, z],
-            [-1.0, 0.0, 0.0]
+            [x, y, z],
+            [x, y, z + s],
+            [x, y + s, z + s],
+            [x, y + s, z],
+            [-1.0, 0.0, 0.0],
         ),
     };
 
@@ -1099,6 +1418,141 @@ fn add_water_face(
     mesh_data.indices.push(start_idx + 2);
 }
 
+/// Greedy-merged water quad with world-space UVs (for surface nets water path).
+/// Like `add_water_face` but covers `quad.size` voxels.
+fn add_greedy_water_face_world(
+    mesh_data: &mut MeshData,
+    quad: &GreedyQuad,
+    face: Face,
+    chunk_origin: IVec3,
+) {
+    let (x, y, z, sx, sy, sz) = match face {
+        Face::Top | Face::Bottom => (
+            quad.start.0 as f32 * VOXEL_SIZE,
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE,
+            quad.size.1 as f32 * VOXEL_SIZE,
+        ),
+        Face::North | Face::South => (
+            quad.start.0 as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+            quad.size.1 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE,
+        ),
+        Face::East | Face::West => (
+            quad.depth as f32 * VOXEL_SIZE,
+            quad.start.1 as f32 * VOXEL_SIZE,
+            quad.start.0 as f32 * VOXEL_SIZE,
+            VOXEL_SIZE,
+            quad.size.1 as f32 * VOXEL_SIZE,
+            quad.size.0 as f32 * VOXEL_SIZE,
+        ),
+    };
+
+    let s = VOXEL_SIZE;
+    let (v0, v1, v2, v3, normal) = match face {
+        Face::Top => (
+            [x, y + s, z + sz],
+            [x + sx, y + s, z + sz],
+            [x + sx, y + s, z],
+            [x, y + s, z],
+            [0.0, 1.0, 0.0],
+        ),
+        Face::Bottom => (
+            [x, y, z],
+            [x + sx, y, z],
+            [x + sx, y, z + sz],
+            [x, y, z + sz],
+            [0.0, -1.0, 0.0],
+        ),
+        Face::North => (
+            [x + sx, y, z],
+            [x, y, z],
+            [x, y + sy, z],
+            [x + sx, y + sy, z],
+            [0.0, 0.0, -1.0],
+        ),
+        Face::South => (
+            [x, y, z + s],
+            [x + sx, y, z + s],
+            [x + sx, y + sy, z + s],
+            [x, y + sy, z + s],
+            [0.0, 0.0, 1.0],
+        ),
+        Face::East => (
+            [x + s, y, z + sz],
+            [x + s, y, z],
+            [x + s, y + sy, z],
+            [x + s, y + sy, z + sz],
+            [1.0, 0.0, 0.0],
+        ),
+        Face::West => (
+            [x, y, z],
+            [x, y, z + sz],
+            [x, y + sy, z + sz],
+            [x, y + sy, z],
+            [-1.0, 0.0, 0.0],
+        ),
+    };
+
+    let start_idx = mesh_data.positions.len() as u32;
+
+    mesh_data.positions.push(v0);
+    mesh_data.positions.push(v1);
+    mesh_data.positions.push(v2);
+    mesh_data.positions.push(v3);
+
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+    mesh_data.normals.push(normal);
+
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+
+    let world_x = chunk_origin.x as f32 + x;
+    let world_z = chunk_origin.z as f32 + z;
+
+    let (uv0, uv1, uv2, uv3) = match face {
+        Face::Top | Face::Bottom => (
+            [world_x, world_z + sz],
+            [world_x + sx, world_z + sz],
+            [world_x + sx, world_z],
+            [world_x, world_z],
+        ),
+        Face::North | Face::South => (
+            [world_x, y],
+            [world_x + sx, y],
+            [world_x + sx, y + sy],
+            [world_x, y + sy],
+        ),
+        Face::East | Face::West => (
+            [world_z, y],
+            [world_z + sz, y],
+            [world_z + sz, y + sy],
+            [world_z, y + sy],
+        ),
+    };
+
+    mesh_data.uvs.push(uv0);
+    mesh_data.uvs.push(uv1);
+    mesh_data.uvs.push(uv2);
+    mesh_data.uvs.push(uv3);
+
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 2);
+    mesh_data.indices.push(start_idx + 1);
+    mesh_data.indices.push(start_idx);
+    mesh_data.indices.push(start_idx + 3);
+    mesh_data.indices.push(start_idx + 2);
+}
+
 // =============================================================================
 // Surface Nets Smooth Meshing
 // =============================================================================
@@ -1106,7 +1560,8 @@ fn add_water_face(
 /// Padded chunk shape for surface nets.
 /// Surface Nets needs +1 padding on each side to sample neighboring voxels,
 /// resulting in an 18x18x18 sample grid for a 16x16x16 chunk.
-type PaddedChunkShape = ConstShape3u32<PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32>;
+type PaddedChunkShape =
+    ConstShape3u32<PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32, PADDED_CHUNK_SIZE_U32>;
 
 // =============================================================================
 // LOD Shape Types - Compile-time grid shapes for different detail levels
@@ -1176,11 +1631,17 @@ impl LodMeshConfig {
     }
 }
 
-
 /// Sample voxel from world or chunk, returns true if solid OR water
 /// Water is treated as solid for SDF purposes to prevent surface nets from generating
 /// surfaces at solid-water boundaries (which would create visible seams with the blocky water mesh)
-fn sample_voxel_solid(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: u32, py: u32, pz: u32) -> bool {
+fn sample_voxel_solid(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    px: u32,
+    py: u32,
+    pz: u32,
+) -> bool {
     let world_pos = chunk_origin + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
 
     let voxel = if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
@@ -1242,7 +1703,8 @@ fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] 
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
 /// This is the LOD0 (high detail) version - samples every voxel.
-fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] { // 18^3 = 5832
+fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
+    // 18^3 = 5832
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
@@ -1276,7 +1738,8 @@ fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
 /// Instead of sampling a single voxel per cell, this samples all voxels in the
 /// 2x2x2 region covered by each LOD cell and computes a weighted density.
 /// This creates smoother SDF gradients that reduce stair-stepping on slopes.
-fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3 = 1000
+fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] {
+    // 10^3 = 1000
     let mut sdf = [1.0f32; LodShape1::USIZE];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let step = LOD1_STEP_SIZE as i32;
@@ -1298,11 +1761,7 @@ fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3
                 for dz in 0..step {
                     for dy in 0..step {
                         for dx in 0..step {
-                            let world_pos = IVec3::new(
-                                base_x + dx,
-                                base_y + dy,
-                                base_z + dz,
-                            );
+                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
                             if sample_voxel_at_world_pos(world, world_pos) {
                                 solid_count += 1;
                             }
@@ -1327,7 +1786,8 @@ fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] { // 10^3
 /// Generate an SDF array at LOD2 (quarter resolution).
 /// Returns a 6x6x6 grid (216 elements).
 /// Vertex positions must be scaled by step_size (4) after mesh generation.
-fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] { // 6^3 = 216
+fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] {
+    // 6^3 = 216
     let mut sdf = [1.0f32; LodShape2::USIZE];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let step = LOD2_STEP_SIZE as i32;
@@ -1349,11 +1809,7 @@ fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] { // 6^3 =
                 for dz in 0..step {
                     for dy in 0..step {
                         for dx in 0..step {
-                            let world_pos = IVec3::new(
-                                base_x + dx,
-                                base_y + dy,
-                                base_z + dz,
-                            );
+                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
                             if sample_voxel_at_world_pos(world, world_pos) {
                                 solid_count += 1;
                             }
@@ -1374,7 +1830,8 @@ fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] { // 6^3 =
 /// Generate an SDF array at LOD3 (eighth resolution).
 /// Returns a 4x4x4 grid (64 elements).
 /// Vertex positions must be scaled by step_size (8) after mesh generation.
-fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; 64] { // 4^3 = 64
+fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; 64] {
+    // 4^3 = 64
     let mut sdf = [1.0f32; LodShape3::USIZE];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let step = LOD3_STEP_SIZE as i32;
@@ -1396,11 +1853,7 @@ fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; 64] { // 4^3 = 
                 for dz in 0..step {
                     for dy in 0..step {
                         for dx in 0..step {
-                            let world_pos = IVec3::new(
-                                base_x + dx,
-                                base_y + dy,
-                                base_z + dz,
-                            );
+                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
                             if sample_voxel_at_world_pos(world, world_pos) {
                                 solid_count += 1;
                             }
@@ -1419,11 +1872,22 @@ fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; 64] { // 4^3 = 
 }
 
 /// Get voxel type at padded coordinates for water SDF generation.
-fn get_voxel_for_water_sdf(chunk: &Chunk, world: &VoxelWorld, chunk_origin: IVec3, px: i32, py: i32, pz: i32) -> VoxelType {
+fn get_voxel_for_water_sdf(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    px: i32,
+    py: i32,
+    pz: i32,
+) -> VoxelType {
     let world_pos = chunk_origin + IVec3::new(px - 1, py - 1, pz - 1);
 
     if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
-        chunk.get(UVec3::new((px - 1) as u32, (py - 1) as u32, (pz - 1) as u32))
+        chunk.get(UVec3::new(
+            (px - 1) as u32,
+            (py - 1) as u32,
+            (pz - 1) as u32,
+        ))
     } else {
         world.get_voxel(world_pos).unwrap_or(VoxelType::Air)
     }
@@ -1487,7 +1951,11 @@ fn get_normalized_normal(normals: &[[f32; 3]], index: usize) -> [f32; 3] {
 /// Scales a vertex position outward from chunk center to close seams.
 #[inline]
 fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
-    let pos = Vec3::new(local.x * VOXEL_SIZE, local.y * VOXEL_SIZE, local.z * VOXEL_SIZE);
+    let pos = Vec3::new(
+        local.x * VOXEL_SIZE,
+        local.y * VOXEL_SIZE,
+        local.z * VOXEL_SIZE,
+    );
     let scaled = chunk_center + (pos - chunk_center) * CHUNK_BOUNDARY_SCALE;
     [scaled.x, scaled.y, scaled.z]
 }
@@ -1519,14 +1987,18 @@ fn compute_vertex_material_weights(
                     let wx = chunk_origin.x + lx;
                     let wy = chunk_origin.y + ly;
                     let wz = chunk_origin.z + lz;
-                    world.get_voxel(IVec3::new(wx, wy, wz)).unwrap_or(VoxelType::Air)
+                    world
+                        .get_voxel(IVec3::new(wx, wy, wz))
+                        .unwrap_or(VoxelType::Air)
                 };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
                     let mat_idx = match voxel {
                         VoxelType::TopSoil | VoxelType::Leaves => 0,
-                        VoxelType::Rock | VoxelType::Bedrock |
-                        VoxelType::DungeonWall | VoxelType::DungeonFloor => 1,
+                        VoxelType::Rock
+                        | VoxelType::Bedrock
+                        | VoxelType::DungeonWall
+                        | VoxelType::DungeonFloor => 1,
                         VoxelType::Sand => 2,
                         _ => 3,
                     };
@@ -1581,14 +2053,18 @@ fn compute_vertex_material_weights_lod(
                     let wx = chunk_origin.x + lx;
                     let wy = chunk_origin.y + ly;
                     let wz = chunk_origin.z + lz;
-                    world.get_voxel(IVec3::new(wx, wy, wz)).unwrap_or(VoxelType::Air)
+                    world
+                        .get_voxel(IVec3::new(wx, wy, wz))
+                        .unwrap_or(VoxelType::Air)
                 };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
                     let mat_idx = match voxel {
                         VoxelType::TopSoil | VoxelType::Leaves => 0,
-                        VoxelType::Rock | VoxelType::Bedrock |
-                        VoxelType::DungeonWall | VoxelType::DungeonFloor => 1,
+                        VoxelType::Rock
+                        | VoxelType::Bedrock
+                        | VoxelType::DungeonWall
+                        | VoxelType::DungeonFloor => 1,
                         VoxelType::Sand => 2,
                         _ => 3,
                     };
@@ -1619,36 +2095,24 @@ fn generate_water_mesh(
     _chunk_center: Vec3,
     chunk_origin: IVec3,
 ) -> MeshData {
-    let mut water_mesh = MeshData::new();
+    let mut water_mesh = MeshData::with_capacity(256, 384);
+    let faces = [
+        Face::Top,
+        Face::Bottom,
+        Face::North,
+        Face::South,
+        Face::East,
+        Face::West,
+    ];
 
-    // Use blocky face generation for clean water edges
-    for x in 0..16u32 {
-        for y in 0..16u32 {
-            for z in 0..16u32 {
-                let local = UVec3::new(x, y, z);
-                let voxel = chunk.get(local);
-
-                if voxel.is_liquid() {
-                    // Generate water mesh faces (only visible against air)
-                    if is_water_face_visible(chunk, world, local, Face::Top) {
-                        add_water_face(&mut water_mesh, local, Face::Top, chunk_origin);
-                    }
-                    if is_water_face_visible(chunk, world, local, Face::Bottom) {
-                        add_water_face(&mut water_mesh, local, Face::Bottom, chunk_origin);
-                    }
-                    if is_water_face_visible(chunk, world, local, Face::North) {
-                        add_water_face(&mut water_mesh, local, Face::North, chunk_origin);
-                    }
-                    if is_water_face_visible(chunk, world, local, Face::South) {
-                        add_water_face(&mut water_mesh, local, Face::South, chunk_origin);
-                    }
-                    if is_water_face_visible(chunk, world, local, Face::East) {
-                        add_water_face(&mut water_mesh, local, Face::East, chunk_origin);
-                    }
-                    if is_water_face_visible(chunk, world, local, Face::West) {
-                        add_water_face(&mut water_mesh, local, Face::West, chunk_origin);
-                    }
-                }
+    // Greedy meshing for water — merges ocean surfaces into large quads
+    let mut water_quads: Vec<GreedyQuad> = Vec::with_capacity(32);
+    for face in faces {
+        for depth in 0..CHUNK_SIZE as u32 {
+            let mut mask = build_water_face_mask(chunk, world, face, depth);
+            greedy_mesh_slice(&mut mask, depth, &mut water_quads);
+            for quad in &water_quads {
+                add_greedy_water_face_world(&mut water_mesh, quad, face, chunk_origin);
             }
         }
     }
@@ -1664,7 +2128,7 @@ fn generate_water_mesh_surface_nets(
     chunk_center: Vec3,
     chunk_origin: IVec3,
 ) -> MeshData {
-    let mut water_mesh = MeshData::new();
+    let mut water_mesh = MeshData::with_capacity(256, 384);
 
     let water_sdf = generate_water_sdf(chunk, world);
     let mut water_buffer = SurfaceNetsBuffer::default();
@@ -1712,9 +2176,15 @@ fn generate_water_mesh_surface_nets(
         let start_idx = water_mesh.positions.len() as u32;
 
         let offset = Vec3::Y * crate::constants::WATER_SURFACE_OFFSET;
-        water_mesh.positions.push(scale_vertex_from_center(local0 + offset, chunk_center));
-        water_mesh.positions.push(scale_vertex_from_center(local1 + offset, chunk_center));
-        water_mesh.positions.push(scale_vertex_from_center(local2 + offset, chunk_center));
+        water_mesh
+            .positions
+            .push(scale_vertex_from_center(local0 + offset, chunk_center));
+        water_mesh
+            .positions
+            .push(scale_vertex_from_center(local1 + offset, chunk_center));
+        water_mesh
+            .positions
+            .push(scale_vertex_from_center(local2 + offset, chunk_center));
 
         water_mesh.normals.push(final_normal);
         water_mesh.normals.push(final_normal);
@@ -1750,7 +2220,7 @@ pub fn generate_chunk_mesh_surface_nets(
     skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
 ) -> ChunkMeshResult {
-    let mut solid_mesh = MeshData::new();
+    let mut solid_mesh = MeshData::with_capacity(2048, 3072);
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let chunk_origin_vec = chunk_origin.as_vec3();
@@ -1832,21 +2302,27 @@ pub fn generate_chunk_mesh_surface_nets(
             let base_idx = solid_mesh.positions.len() as u32;
 
             // Vertex 0
-            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local0, chunk_center));
             solid_mesh.normals.push(normal0);
             solid_mesh.uvs.push([ao0, 0.0]);
             solid_mesh.colors.push(weights0);
             local_positions.push(local0);
 
             // Vertex 1
-            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local1, chunk_center));
             solid_mesh.normals.push(normal1);
             solid_mesh.uvs.push([ao1, 0.0]);
             solid_mesh.colors.push(weights1);
             local_positions.push(local1);
 
             // Vertex 2
-            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local2, chunk_center));
             solid_mesh.normals.push(normal2);
             solid_mesh.uvs.push([ao2, 0.0]);
             solid_mesh.colors.push(weights2);
@@ -1911,7 +2387,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
 ) -> ChunkMeshResult {
-    let mut solid_mesh = MeshData::new();
+    let mut solid_mesh = MeshData::with_capacity(512, 768);
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -1971,9 +2447,27 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             let normal2 = get_normalized_normal(&buffer.normals, i2);
 
             // Calculate material weights with larger sampling radius for LOD1
-            let weights0 = compute_vertex_material_weights_lod(local0, chunk, world, chunk_origin, LOD1_STEP_SIZE);
-            let weights1 = compute_vertex_material_weights_lod(local1, chunk, world, chunk_origin, LOD1_STEP_SIZE);
-            let weights2 = compute_vertex_material_weights_lod(local2, chunk, world, chunk_origin, LOD1_STEP_SIZE);
+            let weights0 = compute_vertex_material_weights_lod(
+                local0,
+                chunk,
+                world,
+                chunk_origin,
+                LOD1_STEP_SIZE,
+            );
+            let weights1 = compute_vertex_material_weights_lod(
+                local1,
+                chunk,
+                world,
+                chunk_origin,
+                LOD1_STEP_SIZE,
+            );
+            let weights2 = compute_vertex_material_weights_lod(
+                local2,
+                chunk,
+                world,
+                chunk_origin,
+                LOD1_STEP_SIZE,
+            );
 
             // Skip AO for low LOD - distance makes it imperceptible
             // Use full brightness (1.0)
@@ -1983,21 +2477,27 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             let base_idx = solid_mesh.positions.len() as u32;
 
             // Vertex 0
-            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local0, chunk_center));
             solid_mesh.normals.push(normal0);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights0);
             local_positions.push(local0);
 
             // Vertex 1
-            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local1, chunk_center));
             solid_mesh.normals.push(normal1);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights1);
             local_positions.push(local1);
 
             // Vertex 2
-            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local2, chunk_center));
             solid_mesh.normals.push(normal2);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights2);
@@ -2064,7 +2564,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
 ) -> ChunkMeshResult {
-    let mut solid_mesh = MeshData::new();
+    let mut solid_mesh = MeshData::with_capacity(256, 384);
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -2124,9 +2624,27 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             let normal2 = get_normalized_normal(&buffer.normals, i2);
 
             // Calculate material weights with larger sampling radius for LOD2
-            let weights0 = compute_vertex_material_weights_lod(local0, chunk, world, chunk_origin, LOD2_STEP_SIZE);
-            let weights1 = compute_vertex_material_weights_lod(local1, chunk, world, chunk_origin, LOD2_STEP_SIZE);
-            let weights2 = compute_vertex_material_weights_lod(local2, chunk, world, chunk_origin, LOD2_STEP_SIZE);
+            let weights0 = compute_vertex_material_weights_lod(
+                local0,
+                chunk,
+                world,
+                chunk_origin,
+                LOD2_STEP_SIZE,
+            );
+            let weights1 = compute_vertex_material_weights_lod(
+                local1,
+                chunk,
+                world,
+                chunk_origin,
+                LOD2_STEP_SIZE,
+            );
+            let weights2 = compute_vertex_material_weights_lod(
+                local2,
+                chunk,
+                world,
+                chunk_origin,
+                LOD2_STEP_SIZE,
+            );
 
             // Skip AO for low LOD - distance makes it imperceptible
             // Use full brightness (1.0)
@@ -2136,21 +2654,27 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             let base_idx = solid_mesh.positions.len() as u32;
 
             // Vertex 0
-            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local0, chunk_center));
             solid_mesh.normals.push(normal0);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights0);
             local_positions.push(local0);
 
             // Vertex 1
-            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local1, chunk_center));
             solid_mesh.normals.push(normal1);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights1);
             local_positions.push(local1);
 
             // Vertex 2
-            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local2, chunk_center));
             solid_mesh.normals.push(normal2);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights2);
@@ -2217,7 +2741,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
 ) -> ChunkMeshResult {
-    let mut solid_mesh = MeshData::new();
+    let mut solid_mesh = MeshData::with_capacity(128, 192);
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -2277,9 +2801,27 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             let normal2 = get_normalized_normal(&buffer.normals, i2);
 
             // Calculate material weights with larger sampling radius for LOD3
-            let weights0 = compute_vertex_material_weights_lod(local0, chunk, world, chunk_origin, LOD3_STEP_SIZE);
-            let weights1 = compute_vertex_material_weights_lod(local1, chunk, world, chunk_origin, LOD3_STEP_SIZE);
-            let weights2 = compute_vertex_material_weights_lod(local2, chunk, world, chunk_origin, LOD3_STEP_SIZE);
+            let weights0 = compute_vertex_material_weights_lod(
+                local0,
+                chunk,
+                world,
+                chunk_origin,
+                LOD3_STEP_SIZE,
+            );
+            let weights1 = compute_vertex_material_weights_lod(
+                local1,
+                chunk,
+                world,
+                chunk_origin,
+                LOD3_STEP_SIZE,
+            );
+            let weights2 = compute_vertex_material_weights_lod(
+                local2,
+                chunk,
+                world,
+                chunk_origin,
+                LOD3_STEP_SIZE,
+            );
 
             // Skip AO for low LOD - distance makes it imperceptible
             // Use full brightness (1.0)
@@ -2289,21 +2831,27 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             let base_idx = solid_mesh.positions.len() as u32;
 
             // Vertex 0
-            solid_mesh.positions.push(scale_vertex_from_center(local0, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local0, chunk_center));
             solid_mesh.normals.push(normal0);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights0);
             local_positions.push(local0);
 
             // Vertex 1
-            solid_mesh.positions.push(scale_vertex_from_center(local1, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local1, chunk_center));
             solid_mesh.normals.push(normal1);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights1);
             local_positions.push(local1);
 
             // Vertex 2
-            solid_mesh.positions.push(scale_vertex_from_center(local2, chunk_center));
+            solid_mesh
+                .positions
+                .push(scale_vertex_from_center(local2, chunk_center));
             solid_mesh.normals.push(normal2);
             solid_mesh.uvs.push([ao, 0.0]);
             solid_mesh.colors.push(weights2);
@@ -2469,5 +3017,3 @@ pub fn generate_chunk_mesh_with_mode(
         }
     }
 }
-
-

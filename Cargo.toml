@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 default-run = "voxel_builder"
 
+[features]
+# cargo run --release --features tracy then connect with Tracy 0.11.x.
+tracy = ["bevy/trace_tracy"]
+
 [dependencies]
 bevy = { version = "0.18", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures", "sysinfo_plugin"] }
 bevy_mesh = "0.18"

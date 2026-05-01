@@ -158,6 +158,7 @@ Props and vegetation with LOD optimizations:
 
 ### Debug & Development
 *   **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
+*   **F2**: Dump current performance timing window to `perf-dumps/`
 *   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
 *   **F5**: Toggle Mesh Mode (Blocky ↔ SurfaceNets)
 *   **F6**: Toggle Water Visibility (debug builds only)
@@ -174,6 +175,12 @@ Props and vegetation with LOD optimizations:
 *   **Alt+N**: Toggle Multiplayer Debug Info
 *   **Alt+C**: Toggle Chunk Statistics (uniformity, LOD, mesh counts)
 *   **Alt+P**: Toggle Prop Debug (targeted prop, alpha/fade info)
+
+## Profiling
+
+*   **F3**: Show the in-game 60-frame CPU area timing table.
+*   **F2**: Dump the current timing window as CSV to `perf-dumps/frame-<timestamp>.csv` (`F4` is already used by the inspector/settings window).
+*   **Tracy**: Run `cargo run --release --features tracy`, then connect with Tracy 0.11.x.
 
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)

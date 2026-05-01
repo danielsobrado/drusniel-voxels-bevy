@@ -12,45 +12,53 @@ use std::time::Instant;
 use bevy::diagnostic::FrameCount;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy::tasks::{block_on, poll_once, AsyncComputeTaskPool, Task};
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
 use crate::camera::controller::PlayerCamera;
-use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::constants::{
-    BEDROCK_DEPTH, CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32,
+    BEDROCK_DEPTH,
+    CHUNK_SIZE,
+    CHUNK_SIZE_F32,
+    CHUNK_SIZE_I32,
+    DEFAULT_CULL_DISTANCE,
     // LOD
-    DEFAULT_HIGH_DETAIL_DISTANCE, DEFAULT_CULL_DISTANCE,
-    INTEGRATED_GPU_HIGH_DETAIL_DISTANCE, INTEGRATED_GPU_CULL_DISTANCE,
+    DEFAULT_HIGH_DETAIL_DISTANCE,
+    INTEGRATED_GPU_CULL_DISTANCE,
+    INTEGRATED_GPU_HIGH_DETAIL_DISTANCE,
     LOD_HYSTERESIS,
-    WATER_FANCY_DISTANCE, WATER_FANCY_HYSTERESIS, WATER_MATERIAL_UPDATE_INTERVAL,
-    WATER_FANCY_MIN_TRIANGLES, WATER_FANCY_MIN_DEPTH,
+    WATER_FANCY_DISTANCE,
+    WATER_FANCY_HYSTERESIS,
+    WATER_FANCY_MIN_DEPTH,
+    WATER_FANCY_MIN_TRIANGLES,
+    WATER_MATERIAL_UPDATE_INTERVAL,
 };
+use crate::performance::{AreaTimingRecorder, area_timer};
 
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 16;
-use bevy::camera::visibility::RenderLayers;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
+use crate::rendering::AmbientOcclusionConfig;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
-use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
-use crate::rendering::AmbientOcclusionConfig;
+use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
 use crate::voxel::meshing::{
-    generate_chunk_mesh_with_mode, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
+    MeshMode, MeshSettings, WaterMesh, WaterMeshDetail, generate_chunk_mesh_with_mode,
 };
 use crate::voxel::occlusion::{
-    update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks,
+    OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
 use crate::voxel::octree::ChunkOctree;
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::terrain::TerrainGenerator;
-use crate::voxel::types::{VoxelType, Voxel};
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
 use crate::voxel::world::VoxelWorld;
+use bevy::camera::visibility::RenderLayers;
 use bevy_water::water::material::StandardWaterMaterial;
 
 pub struct VoxelPlugin;
@@ -316,23 +324,38 @@ impl Plugin for VoxelPlugin {
         // Visibility optimization resources
         .insert_resource(ChunkOctree::default())
         .insert_resource(VisibleChunks::default())
-        .insert_resource(OcclusionConfig::default())
+        // Occlusion culling disabled by default — BFS + octree are not yet consumed
+        // by apply_visibility_culling_system (see TODO there). Disable to avoid
+        // wasting ~1-2ms every 100ms on BFS traversal with no effect.
+        .insert_resource(OcclusionConfig {
+            enabled: false,
+            ..default()
+        })
         .insert_resource(OcclusionUpdateTimer::default())
         .add_systems(Startup, setup_voxel_world)
         .add_systems(
             Update,
             (
+                // Stage 1: Pull newly-generated chunks into VoxelWorld
                 poll_chunk_generation_tasks,
-                update_chunk_face_visibility_system,
-                update_octree_system,
-                update_visible_chunks_system,
-                adjust_lod_for_integrated_gpu,
-                apply_visibility_culling_system,
-                update_chunk_lod_system,
-                mesh_dirty_chunks_system,
-                update_water_material_lod,
-            )
-                .chain(),
+                // Stage 2: Face visibility + GPU detection (independent resources, can be parallel)
+                update_chunk_face_visibility_system.after(poll_chunk_generation_tasks),
+                adjust_lod_for_integrated_gpu.after(poll_chunk_generation_tasks),
+                // Stage 3: Octree + BFS (both Res<VoxelWorld>, can be parallel)
+                update_octree_system.after(update_chunk_face_visibility_system),
+                update_visible_chunks_system.after(update_chunk_face_visibility_system),
+                apply_visibility_culling_system
+                    .after(update_octree_system)
+                    .after(update_visible_chunks_system),
+                // Stage 4: LOD per chunk (needs LodSettings from adjust + culling results)
+                update_chunk_lod_system
+                    .after(apply_visibility_culling_system)
+                    .after(adjust_lod_for_integrated_gpu),
+                // Stage 5: Meshing (needs LOD from stage 4)
+                mesh_dirty_chunks_system.after(update_chunk_lod_system),
+                // Stage 5b: Water material LOD (independent of meshing, can be parallel)
+                update_water_material_lod.after(update_chunk_lod_system),
+            ),
         );
         // .add_plugins(GravityPlugin); // Deactivated due to performance impact
     }
@@ -556,10 +579,7 @@ fn setup_voxel_world(
         commands.spawn(ChunkGenerationTask { task, chunk_pos });
     }
 
-    info!(
-        "Spawned {} async chunk generation tasks",
-        total_chunks
-    );
+    info!("Spawned {} async chunk generation tasks", total_chunks);
 }
 
 /// Generates a single chunk using the terrain generator (for async execution).
@@ -663,8 +683,9 @@ fn poll_chunk_generation_tasks(
     // Log progress periodically (every 10%)
     if completed_count > 0 {
         let progress_pct = (gen_state.progress() * 100.0) as u32;
-        let prev_progress_pct =
-            ((gen_state.chunks_completed - completed_count) as f32 / gen_state.total_chunks as f32 * 100.0) as u32;
+        let prev_progress_pct = ((gen_state.chunks_completed - completed_count) as f32
+            / gen_state.total_chunks as f32
+            * 100.0) as u32;
 
         // Log at 10% intervals
         if progress_pct / 10 > prev_progress_pct / 10 {
@@ -710,7 +731,7 @@ fn mesh_dirty_chunks_system(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Chunk Meshing");
+    let _timer = area_timer(&mut timing, frame.0, "Mesh Dirty");
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
 
@@ -734,17 +755,24 @@ fn mesh_dirty_chunks_system(
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
     let had_dirty_chunks = !dirty_chunks.is_empty();
-    let camera_pos = camera_query.single().ok().map(|transform| transform.translation);
+    let camera_pos = camera_query
+        .single()
+        .ok()
+        .map(|transform| transform.translation);
     let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
 
     // Sort by distance to camera if available
     if let Some(camera_pos) = camera_pos {
         dirty_chunks.sort_by(|a, b| {
-            let world_a = VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
-            let world_b = VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            let world_a =
+                VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            let world_b =
+                VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
             let dist_a = world_a.distance_squared(camera_pos);
             let dist_b = world_b.distance_squared(camera_pos);
-            dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+            dist_a
+                .partial_cmp(&dist_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
     let mut chunks_meshed = 0u32;
@@ -881,9 +909,9 @@ fn mesh_dirty_chunks_system(
                                 commands
                                     .entity(entity)
                                     .insert((
-                                    Mesh3d(mesh_handle),
-                                    MeshMaterial3d(blocky_mat.handle.clone()),
-                                    NeedsCollider,
+                                        Mesh3d(mesh_handle),
+                                        MeshMaterial3d(blocky_mat.handle.clone()),
+                                        NeedsCollider,
                                     ))
                                     .remove::<MeshMaterial3d<
                                         crate::rendering::triplanar_material::TriplanarMaterial,
@@ -982,7 +1010,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
-                        NotShadowCaster,  // Water is translucent — never cast opaque shadows
+                        NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
                         entity_cmd
@@ -1009,7 +1037,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
-                        NotShadowCaster,  // Water is translucent — never cast opaque shadows
+                        NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
                         entity_cmd.insert(MeshMaterial3d(water_material.near_handle.clone()));
@@ -1029,8 +1057,9 @@ fn mesh_dirty_chunks_system(
     chunk_stats.chunks_meshed_this_frame = chunks_meshed;
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
 
-    // Recompute full stats from world (only if there were dirty chunks to process)
-    if had_dirty_chunks {
+    // Throttle full stats recompute to ~every 0.5s at 60fps (was O(N) over all chunks every dirty frame).
+    // Per-frame counters (meshed/skipped/vertices) are still updated immediately above.
+    if had_dirty_chunks && frame.0 % 30 == 0 {
         chunk_stats.recompute_from_world(&world);
     }
 }
@@ -1187,7 +1216,9 @@ fn adjust_lod_for_integrated_gpu(
         lod_settings.low_detail_mode = MeshMode::Blocky;
         // Keep mesh_settings.mode as SurfaceNets for nearby chunks (V0.3 triplanar PBR look)
         // Only distant LOD chunks use Blocky mode for performance
-        info!("Integrated GPU detected; using more aggressive LOD distances, keeping SurfaceNets for nearby terrain.");
+        info!(
+            "Integrated GPU detected; using more aggressive LOD distances, keeping SurfaceNets for nearby terrain."
+        );
     }
 
     *applied = true;
@@ -1260,7 +1291,6 @@ fn calculate_target_lod_with_hysteresis(
     }
 }
 
-
 // =============================================================================
 // Visibility Optimization Systems
 // =============================================================================
@@ -1269,7 +1299,18 @@ fn calculate_target_lod_with_hysteresis(
 ///
 /// This computes the 15-bit connectivity mask indicating which chunk faces
 /// can see each other through air voxels. Used by the BFS occlusion system.
-fn update_chunk_face_visibility_system(mut world: ResMut<VoxelWorld>) {
+fn update_chunk_face_visibility_system(
+    mut world: ResMut<VoxelWorld>,
+    config: Res<OcclusionConfig>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let _timer = area_timer(&mut timing, frame.0, "Face Visibility");
+    // Skip when occlusion culling is disabled — results are not consumed
+    if !config.enabled {
+        return;
+    }
+
     // Collect positions of chunks needing visibility update
     let dirty_positions: Vec<IVec3> = world
         .chunk_entries()
@@ -1295,7 +1336,16 @@ fn update_octree_system(
     world: Res<VoxelWorld>,
     mut octree: ResMut<ChunkOctree>,
     gen_state: Res<ChunkGenerationState>,
+    config: Res<OcclusionConfig>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Octree Update");
+    // Skip when occlusion culling is disabled — octree is only used by culling
+    if !config.enabled {
+        return;
+    }
+
     // Don't rebuild during initial world generation
     if !gen_state.is_complete {
         return;
@@ -1322,7 +1372,7 @@ fn apply_visibility_culling_system(
     _octree: Res<ChunkOctree>,
     _visible_chunks: Res<VisibleChunks>,
     _camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
-    _world: ResMut<VoxelWorld>,
+    _world: Res<VoxelWorld>,
     _config: Res<OcclusionConfig>,
     _gen_state: Res<ChunkGenerationState>,
 ) {
@@ -1347,16 +1397,39 @@ fn apply_visibility_culling_system(
 /// - `Culled`: Far away, not rendered at all
 ///
 /// Uses hysteresis to prevent rapid LOD switching when camera is near thresholds.
+/// Throttled to every 0.25s and skipped when camera hasn't moved significantly.
 fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
+    time: Res<Time>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+    mut last_update: Local<f32>,
+    mut last_camera_pos: Local<Option<Vec3>>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "LOD Update");
+    // Throttle to ~4Hz (every 0.25s)
+    let now = time.elapsed_secs();
+    if now - *last_update < 0.25 {
+        return;
+    }
+
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
 
     let camera_pos = camera_transform.translation;
+
+    // Skip if camera hasn't moved more than 2 world units since last update
+    if let Some(prev) = *last_camera_pos {
+        if camera_pos.distance_squared(prev) < 4.0 {
+            return;
+        }
+    }
+
+    *last_update = now;
+    *last_camera_pos = Some(camera_pos);
 
     let mut lod_changed: Vec<IVec3> = Vec::new();
 

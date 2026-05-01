@@ -5,9 +5,11 @@
 //! be reached through connected faces are occluded and can be culled.
 
 use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::chunk::FaceVisibility;
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashSet, VecDeque};
 
@@ -50,7 +52,7 @@ impl Default for OcclusionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_depth: 50, // Covers ~800 units at chunk size 16
+            max_depth: 50,        // Covers ~800 units at chunk size 16
             update_interval: 0.1, // 10Hz update
         }
     }
@@ -77,8 +79,11 @@ pub fn update_visible_chunks_system(
     mut visible: ResMut<VisibleChunks>,
     config: Res<OcclusionConfig>,
     time: Res<Time>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
     mut timer: ResMut<OcclusionUpdateTimer>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Visible Chunks");
     if !config.enabled {
         return;
     }

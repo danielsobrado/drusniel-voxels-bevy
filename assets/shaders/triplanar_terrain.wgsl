@@ -184,33 +184,65 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     var albedo = vec4<f32>(0.0);
     var final_normal = vec3<f32>(0.0);
 
-    // Optimization: Only sample materials with significant weight?
-    // Note: Branching on non-uniform values with textureSample can cause artifacts.
-    // Ideally we'd use textureSampleGrad, but for now we'll sample all active materials.
-    // Modern GPUs handle this reasonable well.
+    // ── Fast path: single-material dominance ────────────────────────
+    // Most terrain fragments are purely one material.  When the dominant
+    // weight > 0.95 we skip the other 3 material branches entirely,
+    // cutting texture reads from 24 → 6 (or 3 when distant).
+    let w_max = max(max(w.x, w.y), max(w.z, w.w));
+    // Distance check: skip expensive normal maps on distant terrain
+    let frag_dist = length(pbr_input.world_position.xyz);
+    let skip_normals = frag_dist > 120.0; // normal maps invisible past 120 u
 
-    // Material 0: Grass
-    if (w.x > 0.001) {
-        albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 0, view_dir) * w.x;
-        final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 0, view_dir) * w.x;
-    }
+    if (w_max > 0.95) {
+        // Determine which single material dominates
+        var mat_idx = 0;
+        if (w.y == w_max) { mat_idx = 1; }
+        else if (w.z == w_max) { mat_idx = 2; }
+        else if (w.w == w_max) { mat_idx = 3; }
 
-    // Material 1: Rock
-    if (w.y > 0.001) {
-        albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 1, view_dir) * w.y;
-        final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 1, view_dir) * w.y;
-    }
+        albedo = sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, mat_idx, view_dir);
+        if (skip_normals) {
+            final_normal = world_normal;
+        } else {
+            final_normal = sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, mat_idx, view_dir);
+        }
+    } else {
+        // ── Blend path: sample only materials with significant weight ──
+        // Material 0: Grass
+        if (w.x > 0.001) {
+            albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 0, view_dir) * w.x;
+            if (!skip_normals) {
+                final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 0, view_dir) * w.x;
+            }
+        }
 
-    // Material 2: Sand
-    if (w.z > 0.001) {
-        albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 2, view_dir) * w.z;
-        final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 2, view_dir) * w.z;
-    }
+        // Material 1: Rock
+        if (w.y > 0.001) {
+            albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 1, view_dir) * w.y;
+            if (!skip_normals) {
+                final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 1, view_dir) * w.y;
+            }
+        }
 
-    // Material 3: Dirt
-    if (w.w > 0.001) {
-        albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 3, view_dir) * w.w;
-        final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 3, view_dir) * w.w;
+        // Material 2: Sand
+        if (w.z > 0.001) {
+            albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 2, view_dir) * w.z;
+            if (!skip_normals) {
+                final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 2, view_dir) * w.z;
+            }
+        }
+
+        // Material 3: Dirt
+        if (w.w > 0.001) {
+            albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 3, view_dir) * w.w;
+            if (!skip_normals) {
+                final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 3, view_dir) * w.w;
+            }
+        }
+
+        if (skip_normals) {
+            final_normal = world_normal;
+        }
     }
     
     albedo = albedo * uniforms.base_color;

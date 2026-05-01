@@ -1,15 +1,17 @@
 use bevy::camera::ClearColorConfig;
-use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::prelude::*;
 use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::diagnostic::FrameCount;
+use bevy::prelude::*;
 use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
-use bevy::camera::visibility::RenderLayers;
 use bevy::render::view::Hdr;
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::WATER_LEVEL;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
 
 /// The render layer used exclusively by the reflection camera.
@@ -39,13 +41,7 @@ impl Plugin for WaterReflectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ReflectionFrameCounter>()
             .add_systems(Startup, setup_reflection_camera)
-            .add_systems(
-                Update,
-                (
-                    update_reflection_camera,
-                    toggle_reflection_camera,
-                ),
-            );
+            .add_systems(Update, (update_reflection_camera, toggle_reflection_camera));
     }
 }
 
@@ -129,7 +125,8 @@ fn setup_reflection_camera(
             ..default()
         }),
         // Initial transform — updated each frame to mirror main camera
-        Transform::from_xyz(0.0, water_y, 0.0).looking_at(Vec3::new(0.0, water_y + 1.0, -1.0), Vec3::Y),
+        Transform::from_xyz(0.0, water_y, 0.0)
+            .looking_at(Vec3::new(0.0, water_y + 1.0, -1.0), Vec3::Y),
         RenderLayers::layer(REFLECTION_RENDER_LAYER),
         Hdr,
         Tonemapping::AcesFitted,
@@ -151,7 +148,10 @@ fn update_reflection_camera(
         (&mut Transform, &mut Camera),
         (With<WaterReflectionCamera>, Without<PlayerCamera>),
     >,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Reflection Camera");
     let Ok(main_transform) = main_camera.single() else {
         return;
     };
@@ -196,7 +196,10 @@ fn toggle_reflection_camera(
     water_config: Option<Res<crate::rendering::water::WaterConfig>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     mut reflection_camera: Query<&mut Camera, With<WaterReflectionCamera>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Reflection Toggle");
     let Some(config) = water_config else { return };
     if !config.is_changed() {
         return;

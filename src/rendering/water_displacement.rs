@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameCount;
 /// Water Displacement System — Valheim-style interactive ripples
 ///
 /// Simulates a 2D wave equation on a `GRID_SIZE × GRID_SIZE` CPU buffer and uploads
@@ -16,6 +17,7 @@ use bevy::render::render_resource::{
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::WATER_LEVEL;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::water::WaterConfig;
 
@@ -39,6 +41,9 @@ pub struct WaterDisplacementTexture {
 struct DisplacementState {
     height: Vec<f32>,
     velocity: Vec<f32>,
+    /// Back-buffers for double-buffered simulation (avoids 512KB clone per step).
+    height_back: Vec<f32>,
+    velocity_back: Vec<f32>,
     /// World-space XZ centre of the simulation (follows the camera each frame).
     center: Vec2,
     /// Pending impulses: (grid_x, grid_y, strength, radius_cells).
@@ -50,6 +55,8 @@ impl Default for DisplacementState {
         Self {
             height: vec![0.0; GRID_SIZE * GRID_SIZE],
             velocity: vec![0.0; GRID_SIZE * GRID_SIZE],
+            height_back: vec![0.0; GRID_SIZE * GRID_SIZE],
+            velocity_back: vec![0.0; GRID_SIZE * GRID_SIZE],
             center: Vec2::ZERO,
             impulses: Vec::new(),
         }
@@ -130,33 +137,32 @@ impl DisplacementState {
     }
 
     /// Advance the wave simulation by one step.
+    /// Uses double-buffering (swap) instead of cloning 512KB per frame.
     fn step(&mut self, wave_speed: f32, damping: f32) {
         let n = GRID_SIZE;
         self.flush_impulses();
 
-        let mut new_height = self.height.clone();
-        let mut new_velocity = self.velocity.clone();
-
+        // Write results into the back-buffers, then swap
         for y in 0..n {
             for x in 0..n {
                 let idx = y * n + x;
                 let h = self.height[idx];
                 let v = self.velocity[idx];
 
-                let left  = if x > 0 { self.height[idx - 1] } else { h };
+                let left = if x > 0 { self.height[idx - 1] } else { h };
                 let right = if x < n - 1 { self.height[idx + 1] } else { h };
-                let up    = if y > 0 { self.height[idx - n] } else { h };
-                let down  = if y < n - 1 { self.height[idx + n] } else { h };
+                let up = if y > 0 { self.height[idx - n] } else { h };
+                let down = if y < n - 1 { self.height[idx + n] } else { h };
 
                 let laplacian = (left + right + up + down) * 0.25 - h;
                 let nv = (v + laplacian * wave_speed) * damping;
                 let nh = (h + nv).clamp(-2.0, 2.0);
-                new_velocity[idx] = nv;
-                new_height[idx] = nh;
+                self.velocity_back[idx] = nv;
+                self.height_back[idx] = nh;
             }
         }
-        self.height = new_height;
-        self.velocity = new_velocity;
+        std::mem::swap(&mut self.height, &mut self.height_back);
+        std::mem::swap(&mut self.velocity, &mut self.velocity_back);
     }
 
     /// Write the height field into a flat RGBA8 pixel buffer (R=height encoded, GB=0, A=255).
@@ -168,9 +174,9 @@ impl DisplacementState {
             // Encode [-2, 2] -> [0, 255]
             let encoded = ((h / 4.0 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
             buf.push(encoded); // R: height
-            buf.push(0);       // G: unused
-            buf.push(0);       // B: unused
-            buf.push(255);     // A: opaque
+            buf.push(0); // G: unused
+            buf.push(0); // B: unused
+            buf.push(255); // A: opaque
         }
     }
 }
@@ -208,10 +214,7 @@ pub struct WaterDisplacementPlugin;
 impl Plugin for WaterDisplacementPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DisplacementState>()
-            .add_systems(
-                Startup,
-                setup_displacement_texture,
-            )
+            .add_systems(Startup, setup_displacement_texture)
             .add_systems(
                 Update,
                 (
@@ -234,7 +237,10 @@ fn setup_displacement_texture(
     water_config: Option<Res<WaterConfig>>,
 ) {
     // Skip on integrated GPU
-    let integrated = capabilities.as_ref().map(|c| c.integrated_gpu).unwrap_or(false);
+    let integrated = capabilities
+        .as_ref()
+        .map(|c| c.integrated_gpu)
+        .unwrap_or(false);
     let enabled = water_config
         .as_ref()
         .map(|c| c.displacement.enabled)
@@ -246,7 +252,11 @@ fn setup_displacement_texture(
     }
 
     let n = GRID_SIZE as u32;
-    let size = Extent3d { width: n, height: n, depth_or_array_layers: 1 };
+    let size = Extent3d {
+        width: n,
+        height: n,
+        depth_or_array_layers: 1,
+    };
 
     let mut image = Image {
         texture_descriptor: TextureDescriptor {
@@ -323,16 +333,23 @@ fn step_and_upload_displacement(
     displacement_tex: Res<WaterDisplacementTexture>,
     mut state: ResMut<DisplacementState>,
     mut images: ResMut<Assets<Image>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
     mut frame_counter: Local<u32>,
     mut settled: Local<bool>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Water Displace");
     *frame_counter = frame_counter.wrapping_add(1);
 
     // Check if simulation has settled (no impulses and max height < threshold)
     let has_impulses = !state.impulses.is_empty();
     if !has_impulses {
         let max_energy = state.height.iter().map(|h| h.abs()).fold(0.0f32, f32::max)
-            + state.velocity.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+            + state
+                .velocity
+                .iter()
+                .map(|v| v.abs())
+                .fold(0.0f32, f32::max);
         if max_energy < 0.001 {
             if !*settled {
                 *settled = true;
