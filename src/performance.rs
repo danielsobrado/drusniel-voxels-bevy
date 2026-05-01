@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::{File, create_dir_all};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const AREA_TIMING_WINDOW_FRAMES: usize = 60;
@@ -172,6 +172,14 @@ impl AreaTimingRecorder {
         })
     }
 
+    pub fn clear_window(&mut self) {
+        self.frame_initialized = false;
+        self.current_frame_total_us = None;
+        self.area_us.clear();
+        self.area_calls.clear();
+        self.history.clear();
+    }
+
     fn push_current_frame(&mut self) {
         let mut areas = BTreeMap::new();
         for (area, total_us) in &self.area_us {
@@ -324,7 +332,17 @@ pub fn dump_area_timing_csv(recorder: &AreaTimingRecorder) -> std::io::Result<Pa
     create_dir_all(&path)?;
     let timestamp = utc_timestamp_for_filename(SystemTime::now());
     path.push(format!("frame-{}.csv", timestamp));
+    write_area_timing_csv(recorder, &path)
+}
 
+pub fn write_area_timing_csv(
+    recorder: &AreaTimingRecorder,
+    path: impl AsRef<Path>,
+) -> std::io::Result<PathBuf> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        create_dir_all(parent)?;
+    }
     let mut file = File::create(&path)?;
     writeln!(file, "area,avg_ms,max_ms,p99_ms,calls_per_frame")?;
     let frame_total = recorder.frame_total_summary().unwrap_or(AreaTimingSummary {
@@ -338,7 +356,7 @@ pub fn dump_area_timing_csv(recorder: &AreaTimingRecorder) -> std::io::Result<Pa
     for summary in recorder.rolling_summaries() {
         write_csv_row(&mut file, &summary)?;
     }
-    Ok(path.canonicalize().unwrap_or(path))
+    Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
 
 fn write_csv_row(file: &mut File, summary: &AreaTimingSummary) -> std::io::Result<()> {

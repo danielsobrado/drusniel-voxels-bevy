@@ -182,6 +182,14 @@ Props and vegetation with LOD optimizations:
 *   **F4**: Dump the current timing window as CSV to `perf-dumps/frame-<UTC>.csv`, including `__frame_total`.
 *   **Tracy**: Run `cargo run --release --features tracy`, then connect with Tracy 0.11.x.
 
+### Benchmarking
+
+```powershell
+cargo run --release -- --bench bench/scenes/default.toml
+```
+
+Output: `bench-runs/<timestamp>/summary.json` plus per-checkpoint CSV files and screenshots.
+
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)
 *   **Alt+2**: Medium Quality

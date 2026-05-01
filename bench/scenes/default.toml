@@ -1,0 +1,20 @@
+seed = 12345
+duration_warmup_secs = 3.0
+median_runs = 3
+chunk_load_radius = 6
+
+[[checkpoint]]
+name = "spawn-noon"
+position = [256.0, 30.0, 256.0]
+look_at = [266.0, 25.0, 266.0]
+time_of_day = 0.5
+hold_frames = 240
+screenshot = true
+
+[[checkpoint]]
+name = "forest-sunset"
+position = [128.0, 28.0, 64.0]
+look_at = [148.0, 26.0, 84.0]
+time_of_day = 0.85
+hold_frames = 240
+screenshot = true

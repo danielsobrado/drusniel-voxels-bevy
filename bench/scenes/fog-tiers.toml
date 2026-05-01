@@ -1,0 +1,40 @@
+seed = 12345
+duration_warmup_secs = 3.0
+median_runs = 3
+chunk_load_radius = 6
+
+[[checkpoint]]
+name = "fog-high"
+position = [128.0, 28.0, 64.0]
+look_at = [148.0, 26.0, 84.0]
+time_of_day = 0.85
+hold_frames = 240
+screenshot = true
+fog_tier = "high"
+
+[[checkpoint]]
+name = "fog-medium"
+position = [128.0, 28.0, 64.0]
+look_at = [148.0, 26.0, 84.0]
+time_of_day = 0.85
+hold_frames = 240
+screenshot = true
+fog_tier = "medium"
+
+[[checkpoint]]
+name = "fog-low"
+position = [128.0, 28.0, 64.0]
+look_at = [148.0, 26.0, 84.0]
+time_of_day = 0.85
+hold_frames = 240
+screenshot = true
+fog_tier = "low"
+
+[[checkpoint]]
+name = "fog-off"
+position = [128.0, 28.0, 64.0]
+look_at = [148.0, 26.0, 84.0]
+time_of_day = 0.85
+hold_frames = 240
+screenshot = true
+fog_tier = "off"

@@ -1,0 +1,21 @@
+area,avg_ms,max_ms,p99_ms,calls_per_frame
+__frame_total,111.765,140.407,140.407,1.000
+Grass Collect,1.726,2.800,2.800,1.000
+Prop Culling,0.139,0.469,0.469,1.000
+Grass Wind,0.040,0.051,0.051,1.000
+Face Visibility,0.034,0.056,0.056,1.000
+Mesh Dirty,0.015,0.054,0.054,1.000
+Fog Submit,0.002,0.007,0.007,1.000
+Grass Cull,0.002,0.013,0.013,1.000
+Reflection Render,0.002,0.003,0.003,1.000
+Grass Animate,0.001,0.004,0.004,1.000
+Prop Billboard,0.001,0.002,0.002,1.000
+Visible Chunks,0.000,0.001,0.001,1.000
+Collider Build,0.000,0.000,0.000,0.000
+Foliage Fade,0.000,0.000,0.000,1.000
+God Rays,0.000,0.000,0.000,0.000
+LOD Update,0.000,0.000,0.000,1.000
+Octree Rebuild,0.000,0.000,0.000,1.000
+Prop Spawn,0.000,0.000,0.000,1.000
+Water Sim,0.000,0.000,0.000,0.000
+Water Upload,0.000,0.000,0.000,0.000

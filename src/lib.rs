@@ -1,4 +1,5 @@
 pub mod atmosphere;
+pub mod bench;
 pub mod building;
 pub mod camera;
 pub mod chat;

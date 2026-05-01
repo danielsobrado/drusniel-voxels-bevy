@@ -1,0 +1,254 @@
+{
+  "schema_version": 1,
+  "scene": "default.toml",
+  "seed": 12345,
+  "git_sha": "261ba8c2e2548cb9ba57f1a5b77af04369e5ecce",
+  "git_dirty": true,
+  "build_profile": "release",
+  "platform": "windows",
+  "bevy_version": "0.18.x",
+  "run_started_utc": "2026-05-01T15:16:03Z",
+  "duration_secs": 239.8517447,
+  "checkpoints": [
+    {
+      "name": "spawn-noon",
+      "fog_tier": null,
+      "median_frame_ms": 105.55030000000001,
+      "p99_frame_ms": 110.435,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.037200000000000004,
+          "p99_ms": 0.132,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.0025833333333333333,
+          "p99_ms": 0.006,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.00155,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 2.440533333333333,
+          "p99_ms": 4.159,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.002116666666666667,
+          "p99_ms": 0.017,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.006966666666666667,
+          "p99_ms": 0.013,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.015883333333333333,
+          "p99_ms": 0.049,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.00055,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.14206666666666667,
+          "p99_ms": 0.575,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0013333333333333333,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.00008333333333333333,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 106.79821666666666,
+          "csv": "default-spawn-noon-run0.csv",
+          "screenshot": "default-spawn-noon-run0.png"
+        },
+        {
+          "frame_ms_median": 105.1863,
+          "csv": "default-spawn-noon-run1.csv",
+          "screenshot": "default-spawn-noon-run1.png"
+        },
+        {
+          "frame_ms_median": 105.55030000000001,
+          "csv": "default-spawn-noon-run2.csv",
+          "screenshot": "default-spawn-noon-run2.png"
+        }
+      ]
+    },
+    {
+      "name": "forest-sunset",
+      "fog_tier": null,
+      "median_frame_ms": 109.44283333333333,
+      "p99_frame_ms": 119.011,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.033549999999999996,
+          "p99_ms": 0.053,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.0028666666666666667,
+          "p99_ms": 0.021,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.0015,
+          "p99_ms": 0.004,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 1.6879833333333334,
+          "p99_ms": 2.847,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.0020666666666666667,
+          "p99_ms": 0.01,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.03991666666666666,
+          "p99_ms": 0.07,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.0156,
+          "p99_ms": 0.025,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.0005166666666666667,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.14463333333333334,
+          "p99_ms": 0.799,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0015333333333333334,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0001,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 109.44283333333333,
+          "csv": "default-forest-sunset-run0.csv",
+          "screenshot": "default-forest-sunset-run0.png"
+        },
+        {
+          "frame_ms_median": 108.29555,
+          "csv": "default-forest-sunset-run1.csv",
+          "screenshot": "default-forest-sunset-run1.png"
+        },
+        {
+          "frame_ms_median": 110.49348333333333,
+          "csv": "default-forest-sunset-run2.csv",
+          "screenshot": "default-forest-sunset-run2.png"
+        }
+      ]
+    }
+  ]
+}

@@ -9,9 +9,11 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, RenderCreation, WgpuLimits, WgpuSettings};
-use bevy::window::{Window, WindowPlugin, WindowResolution};
+use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
+use clap::Parser;
 use std::collections::HashMap;
 use voxel_builder::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
+use voxel_builder::bench::{BenchCli, BenchConfig, BenchPlugin};
 use voxel_builder::building::BuildingPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
@@ -288,6 +290,12 @@ fn load_logging_config() -> String {
 }
 
 fn main() {
+    let cli = BenchCli::parse();
+    let bench_config = BenchConfig::from_cli(&cli);
+    if cli.bench_headless {
+        eprintln!("--bench-headless requested; this build falls back to windowed rendering");
+    }
+
     // Load logging configuration from YAML
     let log_filter = load_logging_config();
 
@@ -314,6 +322,11 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     resolution: WindowResolution::new(1920, 1080),
+                    present_mode: if bench_config.is_some() {
+                        PresentMode::AutoNoVsync
+                    } else {
+                        PresentMode::AutoVsync
+                    },
                     ..default()
                 }),
                 ..default()
@@ -324,35 +337,45 @@ fn main() {
             })
     };
 
-    App::new()
-        .add_plugins(plugins)
+    let mut app = App::new();
+    if let Some(config) = bench_config.clone() {
+        app.insert_resource(config);
+    }
+
+    app.add_plugins(plugins)
         .add_plugins((
             FrameTimeDiagnosticsPlugin::default(),
             EntityCountDiagnosticsPlugin::default(),
             SystemInformationDiagnosticsPlugin::default(),
         ))
-        .add_plugins(PhysicsPlugin)
-        .add_plugins(PlayerPlugin)
         .add_plugins(VoxelPlugin)
         .add_plugins(RenderingPlugin)
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
-        .add_plugins(InteractionPlugin)
-        .add_plugins(PickaxePlugin)
-        .add_plugins(MapPlugin)
-        .add_plugins(InventoryUiPlugin)
         .add_plugins(VegetationPlugin)
-        .add_plugins(ChatPlugin)
-        .add_plugins(PauseMenuPlugin)
         .add_plugins(PropsPlugin)
         .add_plugins(AtmospherePlugin)
         .add_plugins(AtmosphereIntegrationPlugin) // Physical sky rendering
         .add_plugins(FogPlugin)
         .add_plugins(EntityPlugin)
-        .add_plugins(DebugUiPlugin)
-        .add_plugins(ParticlePlugin)
-        .add_plugins(TerrainToolsPlugin)
-        .add_plugins(InputPlugin)
-        .add_plugins(BuildingPlugin)
-        .run();
+        .add_plugins(ParticlePlugin);
+
+    if bench_config.is_some() {
+        app.add_plugins(BenchPlugin);
+    } else {
+        app.add_plugins(PhysicsPlugin)
+            .add_plugins(PlayerPlugin)
+            .add_plugins(InteractionPlugin)
+            .add_plugins(PickaxePlugin)
+            .add_plugins(MapPlugin)
+            .add_plugins(InventoryUiPlugin)
+            .add_plugins(ChatPlugin)
+            .add_plugins(PauseMenuPlugin)
+            .add_plugins(DebugUiPlugin)
+            .add_plugins(TerrainToolsPlugin)
+            .add_plugins(InputPlugin)
+            .add_plugins(BuildingPlugin);
+    }
+
+    app.run();
 }
