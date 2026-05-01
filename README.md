@@ -186,9 +186,11 @@ Props and vegetation with LOD optimizations:
 
 ```powershell
 cargo run --release -- --bench bench/scenes/default.toml
+cargo run --release -- --bench bench/scenes/visual-regression.toml
 ```
 
 Output: `bench-runs/<timestamp>/summary.json` plus per-checkpoint CSV files and screenshots.
+`visual-regression.toml` runs deterministic camera movement paths for run, jump, and look-sweep coverage, with named screenshots captured at fixed frames for visual comparison.
 
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)

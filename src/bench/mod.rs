@@ -62,6 +62,9 @@ struct BenchState {
     settle_frames_left: u32,
     hold_frames_left: u32,
     screenshot_wait_left: u32,
+    hold_elapsed_frames: u32,
+    next_screenshot_point: usize,
+    current_screenshots: Vec<ScreenshotRecord>,
     current_run: Option<RunRecord>,
     checkpoints: Vec<CheckpointSummary>,
     started: Instant,
@@ -102,7 +105,27 @@ struct BenchCheckpoint {
     hold_frames: u32,
     #[serde(default)]
     screenshot: bool,
+    #[serde(default)]
+    screenshot_points: Vec<ScreenshotPoint>,
     fog_tier: Option<String>,
+    motion: Option<BenchMotion>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ScreenshotPoint {
+    name: String,
+    frame: u32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchMotion {
+    #[serde(default = "default_motion_kind")]
+    kind: String,
+    end_position: Option<[f32; 3]>,
+    end_look_at: Option<[f32; 3]>,
+    jump_height: Option<f32>,
+    bob_amplitude: Option<f32>,
+    look_sway_degrees: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -135,6 +158,14 @@ struct RunRecord {
     frame_ms_median: f64,
     csv: String,
     screenshot: Option<String>,
+    screenshots: Vec<ScreenshotRecord>,
+}
+
+#[derive(Serialize, Clone)]
+struct ScreenshotRecord {
+    name: String,
+    frame: u32,
+    path: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -176,6 +207,9 @@ impl Plugin for BenchPlugin {
                 settle_frames_left: 0,
                 hold_frames_left: 0,
                 screenshot_wait_left: 0,
+                hold_elapsed_frames: 0,
+                next_screenshot_point: 0,
+                current_screenshots: Vec::new(),
                 current_run: None,
                 checkpoints: Vec::new(),
                 started: Instant::now(),
@@ -253,6 +287,9 @@ fn run_bench_state_machine(
             );
             state.settle_frames_left = SETTLE_FRAMES;
             state.hold_frames_left = checkpoint.hold_frames;
+            state.hold_elapsed_frames = 0;
+            state.next_screenshot_point = 0;
+            state.current_screenshots.clear();
             state.current_run = None;
             state.phase = BenchPhase::WaitChunks;
         }
@@ -274,7 +311,7 @@ fn run_bench_state_machine(
             if state.hold_frames_left == 0 {
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
                 let csv_name =
-                    run_file_name(&config.scene_path, checkpoint, state.run_index, "csv");
+                    run_file_name(&config.scene_path, checkpoint, None, state.run_index, "csv");
                 let csv_path = config.output_dir.join(&csv_name);
                 if let Err(err) = write_area_timing_csv(&timing, &csv_path) {
                     warn!("failed to write bench CSV {}: {}", csv_path.display(), err);
@@ -283,26 +320,46 @@ fn run_bench_state_machine(
                     .frame_total_summary()
                     .map(|s| s.avg_ms)
                     .unwrap_or_default();
-                let screenshot = if checkpoint.screenshot {
-                    let png_name =
-                        run_file_name(&config.scene_path, checkpoint, state.run_index, "png");
-                    let png_path = config.output_dir.join(&png_name);
-                    commands
-                        .spawn(Screenshot::primary_window())
-                        .observe(save_to_disk(png_path.clone()));
-                    state.screenshot_wait_left = 60;
+                let screenshot = if checkpoint.screenshot && checkpoint.screenshot_points.is_empty()
+                {
+                    let png_name = capture_bench_screenshot(
+                        &mut commands,
+                        &config,
+                        checkpoint,
+                        "end",
+                        state.run_index,
+                    );
+                    state.current_screenshots.push(ScreenshotRecord {
+                        name: "end".to_string(),
+                        frame: checkpoint.hold_frames,
+                        path: png_name.clone(),
+                    });
                     Some(png_name)
                 } else {
-                    state.screenshot_wait_left = 0;
-                    None
+                    state
+                        .current_screenshots
+                        .last()
+                        .map(|screenshot| screenshot.path.clone())
+                };
+                state.screenshot_wait_left = if state.current_screenshots.is_empty() {
+                    0
+                } else {
+                    60
                 };
                 state.current_run = Some(RunRecord {
                     frame_ms_median: frame_ms,
                     csv: csv_name,
                     screenshot,
+                    screenshots: state.current_screenshots.clone(),
                 });
                 state.phase = BenchPhase::Screenshot;
             } else {
+                let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                if let Ok((mut transform, _player_camera)) = camera.single_mut() {
+                    *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
+                }
+                capture_due_screenshots(&mut commands, &config, checkpoint, &mut state);
+                state.hold_elapsed_frames += 1;
                 state.hold_frames_left -= 1;
             }
         }
@@ -340,6 +397,7 @@ fn finish_run(
         frame_ms_median: 0.0,
         csv: String::new(),
         screenshot: None,
+        screenshots: Vec::new(),
     });
     if let Some(screenshot) = run.screenshot.as_deref() {
         if !config.output_dir.join(screenshot).exists() {
@@ -449,6 +507,128 @@ fn finish_bench(
     exit.write(AppExit::Success);
 }
 
+fn capture_due_screenshots(
+    commands: &mut Commands,
+    config: &BenchConfig,
+    checkpoint: &BenchCheckpoint,
+    state: &mut BenchState,
+) {
+    while let Some(point) = checkpoint
+        .screenshot_points
+        .get(state.next_screenshot_point)
+        .filter(|point| point.frame <= state.hold_elapsed_frames)
+    {
+        let path =
+            capture_bench_screenshot(commands, config, checkpoint, &point.name, state.run_index);
+        state.current_screenshots.push(ScreenshotRecord {
+            name: point.name.clone(),
+            frame: point.frame,
+            path,
+        });
+        state.next_screenshot_point += 1;
+        state.screenshot_wait_left = 60;
+    }
+}
+
+fn capture_bench_screenshot(
+    commands: &mut Commands,
+    config: &BenchConfig,
+    checkpoint: &BenchCheckpoint,
+    marker: &str,
+    run_index: u32,
+) -> String {
+    let png_name = run_file_name(
+        &config.scene_path,
+        checkpoint,
+        Some(marker),
+        run_index,
+        "png",
+    );
+    let png_path = config.output_dir.join(&png_name);
+    if let Err(err) = std::fs::create_dir_all(&config.output_dir) {
+        warn!(
+            "failed to create bench output directory {}: {}",
+            config.output_dir.display(),
+            err
+        );
+    }
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(png_path));
+    png_name
+}
+
+fn transform_for_checkpoint(checkpoint: &BenchCheckpoint, frame: u32) -> Transform {
+    let hold_frames = checkpoint.hold_frames.max(1);
+    let progress = if hold_frames <= 1 {
+        1.0
+    } else {
+        (frame.min(hold_frames - 1) as f32) / ((hold_frames - 1) as f32)
+    };
+    let start_position = vec3(checkpoint.position);
+    let end_position = checkpoint
+        .motion
+        .as_ref()
+        .and_then(|motion| motion.end_position)
+        .map(vec3)
+        .unwrap_or(start_position);
+    let start_look_at = vec3(checkpoint.look_at);
+    let end_look_at = checkpoint
+        .motion
+        .as_ref()
+        .and_then(|motion| motion.end_look_at)
+        .map(vec3)
+        .unwrap_or(start_look_at);
+
+    let motion = checkpoint.motion.as_ref();
+    let kind = motion
+        .map(|motion| motion.kind.as_str())
+        .unwrap_or("static")
+        .to_ascii_lowercase();
+    let moves = matches!(kind.as_str(), "run" | "run_jump" | "run_jump_look");
+
+    let mut position = if moves {
+        start_position.lerp(end_position, smoothstep(progress))
+    } else {
+        start_position
+    };
+    if matches!(kind.as_str(), "run_jump" | "run_jump_look") {
+        let jump_height = motion.and_then(|motion| motion.jump_height).unwrap_or(3.0);
+        let bob_amplitude = motion
+            .and_then(|motion| motion.bob_amplitude)
+            .unwrap_or(0.08);
+        position.y += (std::f32::consts::PI * progress).sin() * jump_height;
+        position.y += (std::f32::consts::TAU * progress * 8.0).sin() * bob_amplitude;
+    }
+
+    let mut look_at = if matches!(kind.as_str(), "look_sweep" | "run_jump_look") {
+        start_look_at.lerp(end_look_at, smoothstep(progress))
+    } else if moves {
+        end_look_at
+    } else {
+        start_look_at
+    };
+
+    let sway_degrees = motion
+        .and_then(|motion| motion.look_sway_degrees)
+        .unwrap_or(0.0);
+    if sway_degrees.abs() > f32::EPSILON {
+        let direction = (look_at - position).normalize_or_zero();
+        if direction.length_squared() > 0.0 {
+            let yaw = sway_degrees.to_radians() * (std::f32::consts::TAU * progress).sin();
+            let distance = position.distance(look_at).max(1.0);
+            look_at = position + Quat::from_rotation_y(yaw) * direction * distance;
+        }
+    }
+
+    Transform::from_translation(position).looking_at(look_at, Vec3::Y)
+}
+
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn chunks_ready(world: &VoxelWorld, position: Vec3, radius: i32) -> bool {
     let center = VoxelWorld::world_to_chunk(position.floor().as_ivec3());
     let world_size = world.world_size_chunks();
@@ -525,6 +705,7 @@ fn load_scene(path: &Path) -> Result<BenchScene, Box<dyn std::error::Error>> {
 fn run_file_name(
     scene_path: &Path,
     checkpoint: &BenchCheckpoint,
+    marker: Option<&str>,
     run_index: u32,
     ext: &str,
 ) -> String {
@@ -532,13 +713,23 @@ fn run_file_name(
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| "scene".to_string());
-    format!(
-        "{}-{}-run{}.{}",
-        sanitize(&scene),
-        sanitize(&checkpoint.name),
-        run_index,
-        ext
-    )
+    match marker {
+        Some(marker) => format!(
+            "{}-{}-{}-run{}.{}",
+            sanitize(&scene),
+            sanitize(&checkpoint.name),
+            sanitize(marker),
+            run_index,
+            ext
+        ),
+        None => format!(
+            "{}-{}-run{}.{}",
+            sanitize(&scene),
+            sanitize(&checkpoint.name),
+            run_index,
+            ext
+        ),
+    }
 }
 
 fn sanitize(value: &str) -> String {
@@ -556,6 +747,10 @@ fn sanitize(value: &str) -> String {
 
 fn vec3(value: [f32; 3]) -> Vec3 {
     Vec3::new(value[0], value[1], value[2])
+}
+
+fn default_motion_kind() -> String {
+    "static".to_string()
 }
 
 fn median(mut values: Vec<f64>) -> f64 {
