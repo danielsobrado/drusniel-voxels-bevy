@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::props::billboard::BillboardMaterial;
+use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::array_loader::{create_texture_array, start_loading_texture_arrays};
 use crate::rendering::atlas::load_texture_atlas;
 use crate::rendering::blocky_material::BlockyMaterial;
@@ -8,26 +10,24 @@ use crate::rendering::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
 };
 use crate::rendering::cinematic::CinematicPlugin;
+use crate::rendering::god_rays::GodRayPlugin;
 use crate::rendering::gtao::GtaoPlugin;
 use crate::rendering::gtao_noise::GtaoNoisePlugin;
-use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
-    setup_triplanar_material, setup_water_material, setup_building_material, setup_props_material,
+    setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
     sync_fog_to_materials, sync_voxel_water_material_overrides,
 };
+use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
-use crate::props::billboard::BillboardMaterial;
-use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::ssao::SsaoPlugin;
 use crate::rendering::triplanar_material::TriplanarMaterial;
 use crate::rendering::water::EnhancedWaterPlugin;
 use crate::rendering::water_displacement::WaterDisplacementPlugin;
 use crate::rendering::water_reflection::WaterReflectionPlugin;
-use crate::rendering::god_rays::GodRayPlugin;
-use crate::rendering::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorPlugin;
 
 pub struct RenderingPlugin;

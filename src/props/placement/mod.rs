@@ -83,7 +83,9 @@ pub fn calculate_prop_rotation(
     }
 
     // Blend between upright and fully aligned to surface
-    let blended_up = Vec3::Y.lerp(surface_normal, slope_align_strength).normalize();
+    let blended_up = Vec3::Y
+        .lerp(surface_normal, slope_align_strength)
+        .normalize();
 
     // Calculate rotation that aligns the object's up vector to the blended normal
     let forward = Vec3::new(random_yaw.cos(), 0.0, random_yaw.sin());
@@ -100,9 +102,7 @@ pub fn calculate_prop_rotation(
     };
 
     // Apply small random tilt for natural variation
-    aligned_rotation
-        * Quat::from_rotation_x(random_tilt_x)
-        * Quat::from_rotation_z(random_tilt_z)
+    aligned_rotation * Quat::from_rotation_x(random_tilt_x) * Quat::from_rotation_z(random_tilt_z)
 }
 
 /// Convert a rotation quaternion to Euler angles in degrees
@@ -113,7 +113,8 @@ pub fn quat_to_euler_degrees(rotation: Quat) -> Vec3 {
 
 /// Simple deterministic random number generator based on seed
 pub fn seeded_random(seed: u64, offset: u64) -> f32 {
-    let n = seed.wrapping_mul(374761393)
+    let n = seed
+        .wrapping_mul(374761393)
         .wrapping_add(offset.wrapping_mul(668265263));
     let n = (n ^ (n >> 13)).wrapping_mul(1274126177);
     let n = n ^ (n >> 16);

@@ -173,7 +173,12 @@ pub fn update_prop_shadow_lod(
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut commands: Commands,
     mut prop_query: Query<
-        (Entity, &GlobalTransform, Option<&mut PropLodState>, Option<&NotShadowCaster>),
+        (
+            Entity,
+            &GlobalTransform,
+            Option<&mut PropLodState>,
+            Option<&NotShadowCaster>,
+        ),
         With<Prop>,
     >,
     mut stats: ResMut<PropLodStats>,

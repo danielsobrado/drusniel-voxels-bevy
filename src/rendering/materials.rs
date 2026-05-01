@@ -1,19 +1,23 @@
-use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::prelude::*;
-use bevy_water::water::material::{StandardWaterMaterial, WaterMaterial as BevyWaterMaterial};
-use bevy_water::WaterSettings;
-use std::path::Path;
 use crate::atmosphere::FogUniforms;
 use crate::constants::{
-    VOXEL_WATER_WAVE_AMPLITUDE_MULT, VOXEL_WATER_WAVE_UV_SCALE,
-    VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT,
+    VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT, VOXEL_WATER_WAVE_AMPLITUDE_MULT,
+    VOXEL_WATER_WAVE_UV_SCALE,
 };
 use crate::rendering::blocky_material::BlockyMaterial;
-use crate::rendering::building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingUniforms};
+use crate::rendering::building_material::{
+    BuildingMaterial, BuildingMaterialHandle, BuildingUniforms,
+};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
-use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms};
+use crate::rendering::triplanar_material::{
+    TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
+};
 use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::prelude::*;
+use bevy_water::WaterSettings;
+use bevy_water::water::material::{StandardWaterMaterial, WaterMaterial as BevyWaterMaterial};
+use std::path::Path;
 
 #[derive(Resource)]
 pub struct VoxelMaterial {
@@ -65,7 +69,7 @@ pub fn setup_water_material(
             // Refraction via Bevy's specular transmission:
             // Objects below the water surface appear with IOR-based distortion
             specular_transmission: 0.2,
-            ior: 1.33,     // Water IOR (physically correct)
+            ior: 1.33,      // Water IOR (physically correct)
             thickness: 0.5, // Non-zero thickness enables lens-like distortion
             ..default()
         },
@@ -145,7 +149,6 @@ pub fn sync_voxel_water_material_overrides(
 
 /// Ensure the atlas uses a repeat/mipmapped sampler so tiled terrain does not clamp or alias
 
-
 /// Setup triplanar terrain material for surface nets meshes with PBR textures
 /// Loads grass, rock, sand, and dirt texture sets for multi-material terrain
 pub fn setup_triplanar_material(
@@ -183,11 +186,11 @@ pub fn setup_triplanar_material(
         TriplanarMaterial {
             uniforms: TriplanarUniforms {
                 base_color: LinearRgba::WHITE,
-                tex_scale: 2.0,         // Higher resolution (1 tile per 2 world units)
-                blend_sharpness: 4.0,   // Moderate blend between projections
-                normal_intensity: 1.0,  // Full normal map strength
-                parallax_scale: 0.04,   // Subtle parallax depth
-                ao_strength: 0.0,       // V0.3 soft shadow look
+                tex_scale: 2.0,        // Higher resolution (1 tile per 2 world units)
+                blend_sharpness: 4.0,  // Moderate blend between projections
+                normal_intensity: 1.0, // Full normal map strength
+                parallax_scale: 0.04,  // Subtle parallax depth
+                ao_strength: 0.0,      // V0.3 soft shadow look
                 _padding: 0.0,
             },
             // Grass textures (for TopSoil top faces)
@@ -224,10 +227,14 @@ pub fn configure_triplanar_textures(
     if let Some(handle) = mat_handle {
         if let Some(material) = materials.get(&handle.handle) {
             let textures = [
-                &material.grass_albedo, &material.grass_normal,
-                &material.rock_albedo, &material.rock_normal,
-                &material.sand_albedo, &material.sand_normal,
-                &material.dirt_albedo, &material.dirt_normal,
+                &material.grass_albedo,
+                &material.grass_normal,
+                &material.rock_albedo,
+                &material.rock_normal,
+                &material.sand_albedo,
+                &material.sand_normal,
+                &material.dirt_albedo,
+                &material.dirt_normal,
             ];
 
             let mut all_loaded = true;
@@ -277,7 +284,9 @@ pub fn configure_building_textures(
     if let Some(handle) = mat_handle {
         if let Some(material) = materials.get(&handle.handle) {
             let textures = [
-                &material.wood_albedo, &material.wood_normal, &material.wood_roughness,
+                &material.wood_albedo,
+                &material.wood_normal,
+                &material.wood_roughness,
                 &material.wood_ao,
             ];
 
@@ -323,7 +332,9 @@ pub fn configure_props_textures(
     if let Some(handle) = mat_handle {
         if let Some(material) = materials.get(&handle.handle) {
             let textures = [
-                &material.rock_albedo, &material.rock_normal, &material.rock_roughness,
+                &material.rock_albedo,
+                &material.rock_normal,
+                &material.rock_roughness,
                 &material.rock_ao,
             ];
 
@@ -387,33 +398,54 @@ pub fn setup_building_material(
         BuildingMaterial {
             uniforms: BuildingUniforms {
                 base_color: LinearRgba::WHITE,
-                tex_scale: 1.0,          // 1 tile per world unit for building detail
-                blend_sharpness: 8.0,    // Sharp transitions for buildings
+                tex_scale: 1.0,       // 1 tile per world unit for building detail
+                blend_sharpness: 8.0, // Sharp transitions for buildings
                 normal_intensity: 1.0,
-                parallax_scale: 0.04,    // Subtle parallax depth
-                parallax_steps: 6,       // Balanced quality/performance
+                parallax_scale: 0.04, // Subtle parallax depth
+                parallax_steps: 6,    // Balanced quality/performance
                 ..default()
             },
             // Wood plank textures
             wood_albedo: load_image_if_exists(&asset_server, "textures/building/wood/albedo.png"),
             wood_normal: load_image_if_exists(&asset_server, "textures/building/wood/normal.png"),
-            wood_roughness: load_image_if_exists(&asset_server, "textures/building/wood/roughness.png"),
+            wood_roughness: load_image_if_exists(
+                &asset_server,
+                "textures/building/wood/roughness.png",
+            ),
             wood_ao: load_image_if_exists(&asset_server, "textures/building/wood/ao.png"),
             // Stone brick textures
             stone_albedo: load_image_if_exists(&asset_server, "textures/building/stone/albedo.png"),
             stone_normal: load_image_if_exists(&asset_server, "textures/building/stone/normal.png"),
-            stone_roughness: load_image_if_exists(&asset_server, "textures/building/stone/roughness.png"),
+            stone_roughness: load_image_if_exists(
+                &asset_server,
+                "textures/building/stone/roughness.png",
+            ),
             stone_ao: load_image_if_exists(&asset_server, "textures/building/stone/ao.png"),
             // Metal plate textures
             metal_albedo: load_image_if_exists(&asset_server, "textures/building/metal/albedo.png"),
             metal_normal: load_image_if_exists(&asset_server, "textures/building/metal/normal.png"),
-            metal_roughness: load_image_if_exists(&asset_server, "textures/building/metal/roughness.png"),
+            metal_roughness: load_image_if_exists(
+                &asset_server,
+                "textures/building/metal/roughness.png",
+            ),
             metal_ao: load_image_if_exists(&asset_server, "textures/building/metal/ao.png"),
-            metal_metallic: load_image_if_exists(&asset_server, "textures/building/metal/metallic.png"),
+            metal_metallic: load_image_if_exists(
+                &asset_server,
+                "textures/building/metal/metallic.png",
+            ),
             // Thatch textures
-            thatch_albedo: load_image_if_exists(&asset_server, "textures/building/thatch/albedo.png"),
-            thatch_normal: load_image_if_exists(&asset_server, "textures/building/thatch/normal.png"),
-            thatch_roughness: load_image_if_exists(&asset_server, "textures/building/thatch/roughness.png"),
+            thatch_albedo: load_image_if_exists(
+                &asset_server,
+                "textures/building/thatch/albedo.png",
+            ),
+            thatch_normal: load_image_if_exists(
+                &asset_server,
+                "textures/building/thatch/normal.png",
+            ),
+            thatch_roughness: load_image_if_exists(
+                &asset_server,
+                "textures/building/thatch/roughness.png",
+            ),
             thatch_ao: load_image_if_exists(&asset_server, "textures/building/thatch/ao.png"),
         }
     });

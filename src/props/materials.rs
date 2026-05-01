@@ -29,7 +29,10 @@ pub fn apply_style_overrides(
             &prop.id,
         );
 
-        let has_children = children.get(entity).map(|kids| !kids.is_empty()).unwrap_or(false);
+        let has_children = children
+            .get(entity)
+            .map(|kids| !kids.is_empty())
+            .unwrap_or(false);
         if processed || has_children {
             commands.entity(entity).insert(StyledProp);
         }
@@ -57,7 +60,8 @@ fn apply_to_hierarchy(
 
             let force_blend = should_force_blend(prop_type, prop_id);
             let should_fade = is_foliage_prop(prop_type)
-                && (force_blend || matches!(original_alpha_mode, AlphaMode::Mask(_) | AlphaMode::Blend));
+                && (force_blend
+                    || matches!(original_alpha_mode, AlphaMode::Mask(_) | AlphaMode::Blend));
 
             if should_fade {
                 let base_alpha = mat.base_color.alpha();
@@ -104,7 +108,10 @@ fn apply_to_hierarchy(
 }
 
 fn is_foliage_prop(prop_type: PropType) -> bool {
-    matches!(prop_type, PropType::Tree | PropType::Bush | PropType::Flower)
+    matches!(
+        prop_type,
+        PropType::Tree | PropType::Bush | PropType::Flower
+    )
 }
 
 fn should_force_blend(prop_type: PropType, prop_id: &str) -> bool {
@@ -184,7 +191,6 @@ fn tweak_material(
     }
 }
 
-
 fn apply_common_style(mat: &mut StandardMaterial, style: &super::StyleConfig) {
     mat.base_color = boost_saturation(mat.base_color, style.saturation_boost);
     mat.perceptual_roughness = mat.perceptual_roughness.max(style.roughness_min);
@@ -242,7 +248,12 @@ fn adjust_brightness(color: Color, amount: f32) -> Color {
         )
     };
 
-    Color::linear_rgba(red.clamp(0.0, 1.0), green.clamp(0.0, 1.0), blue.clamp(0.0, 1.0), linear.alpha)
+    Color::linear_rgba(
+        red.clamp(0.0, 1.0),
+        green.clamp(0.0, 1.0),
+        blue.clamp(0.0, 1.0),
+        linear.alpha,
+    )
 }
 
 fn clamp_luminance(color: Color, max_luma: f32) -> Color {

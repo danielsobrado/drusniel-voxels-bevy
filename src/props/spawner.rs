@@ -1,17 +1,20 @@
-use super::instancing::{PropMeshCache, spawn_instanced_prop, InstancingStats};
+#[cfg(not(feature = "legacy_prop_spawn"))]
+use super::instanced_render;
+use super::instanced_render::PropInstanceGroups;
+#[cfg(feature = "legacy_prop_spawn")]
+use super::instancing::spawn_instanced_prop;
+use super::instancing::{InstancingStats, PropMeshCache};
 use super::persistence::{
     GroundContactData, PersistedProp, PropManifest, PropPersistenceState, PropPlacementData,
 };
 use super::placement::{
-    calculate_prop_rotation, quat_to_euler_degrees, seeded_random, PlacementConfig,
-    TerrainAnalyzer,
+    PlacementConfig, TerrainAnalyzer, calculate_prop_rotation, quat_to_euler_degrees, seeded_random,
 };
 use super::{
-    billboard::{get_billboard_config, should_use_billboard_lod, BillboardCache, BillboardLod},
-    foliage::GrassPropWind, LandmarkLocations, Prop, PropAssets, PropConfig, PropDefinition,
-    PropType,
+    LandmarkLocations, Prop, PropAssets, PropChunkOwner, PropConfig, PropDefinition, PropType,
+    billboard::{BillboardCache, BillboardLod, get_billboard_config, should_use_billboard_lod},
+    foliage::GrassPropWind,
 };
-use bevy::diagnostic::FrameCount;
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::interaction::mark_neighbors_dirty;
 use crate::performance::{AreaTimingRecorder, area_timer};
@@ -20,11 +23,13 @@ use crate::props::persistence::{
     load_chunk_props_if_exists, load_manifest, save_chunk_and_update_manifest, save_manifest,
     saved_props_exist,
 };
+use crate::rendering::props_material::PropsMaterialHandle;
+use crate::voxel::persistence as voxel_persistence;
+use crate::voxel::persistence::WorldPersistence;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
-use crate::voxel::persistence as voxel_persistence;
-use crate::voxel::persistence::WorldPersistence;
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 
 const DEFAULT_MAX_PER_TYPE: u32 = 500;
@@ -52,6 +57,12 @@ const ROCKY_ZONE_MAX: IVec2 = IVec2::new(-40, -40);
 /// Size of a "prop chunk" in world units (for persistence)
 const PROP_CHUNK_SIZE: i32 = 64;
 
+fn prop_chunk_owner(transform: &Transform) -> PropChunkOwner {
+    PropChunkOwner(VoxelWorld::world_to_chunk(
+        transform.translation.floor().as_ivec3(),
+    ))
+}
+
 #[derive(Resource, Default)]
 pub struct PropsSpawned(pub bool);
 
@@ -73,6 +84,8 @@ pub fn spawn_props_on_terrain(
     mut spawned: ResMut<PropsSpawned>,
     mut persistence_state: ResMut<PropPersistenceState>,
     mesh_cache: Res<PropMeshCache>,
+    prop_material: Option<Res<PropsMaterialHandle>>,
+    mut prop_groups: ResMut<PropInstanceGroups>,
     billboard_cache: Res<BillboardCache>,
     mut instancing_stats: ResMut<InstancingStats>,
     frame: Res<FrameCount>,
@@ -98,6 +111,14 @@ pub fn spawn_props_on_terrain(
                 mesh_cache.pending_gltfs.len(),
                 mesh_cache.meshes.len()
             );
+        }
+        return;
+    }
+
+    #[cfg(not(feature = "legacy_prop_spawn"))]
+    if prop_material.is_none() {
+        if frame.0 % 60 == 0 {
+            info!("Waiting for prop material before instanced prop spawning");
         }
         return;
     }
@@ -129,11 +150,18 @@ pub fn spawn_props_on_terrain(
     let start_time = std::time::Instant::now();
 
     // Check if instancing is ready
-    let use_instancing = mesh_cache.is_ready();
-    if use_instancing {
-        info!("Using GPU instancing for prop spawning ({} cached types)", mesh_cache.meshes.len());
+    if mesh_cache.is_ready() {
+        info!(
+            "Using GPU instancing for prop spawning ({} cached types)",
+            mesh_cache.meshes.len()
+        );
     } else {
-        info!("Mesh cache not ready, using SceneRoot spawning (instancing will be used after cache is ready)");
+        #[cfg(feature = "legacy_prop_spawn")]
+        info!(
+            "Mesh cache not ready, using SceneRoot spawning (instancing will be used after cache is ready)"
+        );
+        #[cfg(not(feature = "legacy_prop_spawn"))]
+        info!("Mesh cache not ready; prop spawning is waiting for instanced meshes");
     }
 
     // Calculate how many prop chunks cover the world
@@ -154,15 +182,15 @@ pub fn spawn_props_on_terrain(
                     &props,
                     &prop_assets,
                     &mesh_cache,
+                    prop_material.as_deref(),
+                    &mut prop_groups,
                     &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
                 );
                 total += entities.len() as u32;
                 persistence_state.loaded_chunks.insert(chunk_pos, entities);
-                persistence_state
-                    .chunk_prop_data
-                    .insert(chunk_pos, props);
+                persistence_state.chunk_prop_data.insert(chunk_pos, props);
             } else {
                 // Generate props for this chunk
                 let props = generate_chunk_props(
@@ -187,6 +215,8 @@ pub fn spawn_props_on_terrain(
                     &props,
                     &prop_assets,
                     &mesh_cache,
+                    prop_material.as_deref(),
+                    &mut prop_groups,
                     &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
@@ -331,10 +361,14 @@ fn generate_category_props(
     let mut max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
 
     // Apply zone-based limits
-    let chunk_intersects_dense = min_x < DENSE_ZONE_MAX.x && max_x > DENSE_ZONE_MIN.x && 
-                               min_z < DENSE_ZONE_MAX.y && max_z > DENSE_ZONE_MIN.y;
-    let chunk_intersects_rocky = min_x < ROCKY_ZONE_MAX.x && max_x > ROCKY_ZONE_MIN.x && 
-                               min_z < ROCKY_ZONE_MAX.y && max_z > ROCKY_ZONE_MIN.y;
+    let chunk_intersects_dense = min_x < DENSE_ZONE_MAX.x
+        && max_x > DENSE_ZONE_MIN.x
+        && min_z < DENSE_ZONE_MAX.y
+        && max_z > DENSE_ZONE_MIN.y;
+    let chunk_intersects_rocky = min_x < ROCKY_ZONE_MAX.x
+        && max_x > ROCKY_ZONE_MIN.x
+        && min_z < ROCKY_ZONE_MAX.y
+        && max_z > ROCKY_ZONE_MIN.y;
 
     if chunk_intersects_dense && (prop_type == PropType::Bush || prop_type == PropType::Flower) {
         max_count *= 10;
@@ -382,16 +416,22 @@ fn generate_category_props(
                 let mut density = def.density;
 
                 // Apply dense vegetation zone boost
-                if (prop_type == PropType::Bush || prop_type == PropType::Flower) &&
-                   world_x >= DENSE_ZONE_MIN.x && world_x <= DENSE_ZONE_MAX.x &&
-                   world_z >= DENSE_ZONE_MIN.y && world_z <= DENSE_ZONE_MAX.y {
+                if (prop_type == PropType::Bush || prop_type == PropType::Flower)
+                    && world_x >= DENSE_ZONE_MIN.x
+                    && world_x <= DENSE_ZONE_MAX.x
+                    && world_z >= DENSE_ZONE_MIN.y
+                    && world_z <= DENSE_ZONE_MAX.y
+                {
                     density *= 15.0;
                 }
 
                 // Apply rocky zone boost
-                if prop_type == PropType::Rock &&
-                   world_x >= ROCKY_ZONE_MIN.x && world_x <= ROCKY_ZONE_MAX.x &&
-                   world_z >= ROCKY_ZONE_MIN.y && world_z <= ROCKY_ZONE_MAX.y {
+                if prop_type == PropType::Rock
+                    && world_x >= ROCKY_ZONE_MIN.x
+                    && world_x <= ROCKY_ZONE_MAX.x
+                    && world_z >= ROCKY_ZONE_MIN.y
+                    && world_z <= ROCKY_ZONE_MAX.y
+                {
                     density *= 8.0;
                 }
 
@@ -461,7 +501,9 @@ fn generate_category_props(
                     footprint.x * placement_config.footprint_scale,
                     footprint.y * placement_config.footprint_scale,
                 )
-            }) else { continue; };
+            }) else {
+                continue;
+            };
 
             // Validate placement
             if sample_result.position.y <= WATER_LEVEL as f32 {
@@ -492,19 +534,18 @@ fn generate_category_props(
                 * placement_config.max_random_tilt.to_radians();
 
             let slope_strength = prop_slope_align_strength(prop_type, &def.id);
-            let rotation = calculate_prop_rotation(
-                sample_result.normal,
-                slope_strength,
-                yaw,
-                tilt_x,
-                tilt_z,
-            );
+            let rotation =
+                calculate_prop_rotation(sample_result.normal, slope_strength, yaw, tilt_x, tilt_z);
 
             // Optionally conform terrain to large/fixed assets to prevent floating
             if let Some(conform) = prop_conform_settings(&def.id, prop_type, scale) {
                 let did_modify = conform_terrain_under_prop(
                     world,
-                    Vec3::new(sample_result.position.x, sample_result.position.y, sample_result.position.z),
+                    Vec3::new(
+                        sample_result.position.x,
+                        sample_result.position.y,
+                        sample_result.position.z,
+                    ),
                     sample_result.position.y,
                     conform,
                     sample_result.voxel_type,
@@ -547,12 +588,15 @@ fn generate_category_props(
 }
 
 /// Spawn entities from persisted prop data.
-/// Uses instanced rendering when the mesh cache is ready, otherwise falls back to SceneRoot.
+/// Uses instanced rendering when the mesh cache is ready.
+#[cfg_attr(feature = "legacy_prop_spawn", allow(unused_variables))]
 fn spawn_props_from_data(
     commands: &mut Commands,
     props: &[PropPlacementData],
-    assets: &PropAssets,
+    _assets: &PropAssets,
     mesh_cache: &PropMeshCache,
+    prop_material: Option<&PropsMaterialHandle>,
+    prop_groups: &mut PropInstanceGroups,
     billboard_cache: &BillboardCache,
     stats: &mut InstancingStats,
     chunk_pos: IVec2,
@@ -563,20 +607,16 @@ fn spawn_props_from_data(
             let transform = prop.to_transform();
             let prop_type: PropType = prop.prop_type.into();
 
-            // Try instanced spawning first (uses cached mesh handles for GPU batching)
-            if let Some(entity) = spawn_instanced_prop(
-                commands,
-                mesh_cache,
-                &prop.id,
-                transform.clone(),
-                prop_type,
-            ) {
-                // Add common components to the instanced entity
+            #[cfg(feature = "legacy_prop_spawn")]
+            if let Some(entity) =
+                spawn_instanced_prop(commands, mesh_cache, &prop.id, transform.clone(), prop_type)
+            {
                 commands.entity(entity).insert((
                     Prop {
                         id: prop.id.clone(),
                         prop_type,
                     },
+                    prop_chunk_owner(&transform),
                     PersistedProp {
                         chunk_pos,
                         placement_seed: prop.placement_seed,
@@ -585,22 +625,108 @@ fn spawn_props_from_data(
 
                 if should_apply_grass_wind(&prop.id, prop_type) {
                     let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
-                    commands.entity(entity).insert(GrassPropWind::new(&transform, hash));
+                    commands
+                        .entity(entity)
+                        .insert(GrassPropWind::new(&transform, hash));
                 }
 
-                // Add billboard LOD for trees
-                if should_use_billboard_lod(prop_type, &prop.id) {
-                    if let Some((texture, size, y_offset)) = get_billboard_config(billboard_cache, &prop.id) {
-                        // Check if this is a single-mesh prop (cached.len() == 1)
-                        let is_single_mesh = mesh_cache
-                            .get_cached(&prop.id)
-                            .map(|c| c.len() == 1)
-                            .unwrap_or(true);
+                stats.instanced_spawns += 1;
+                return Some(entity);
+            }
 
-                        commands.entity(entity).insert(BillboardLod {
+            #[cfg(not(feature = "legacy_prop_spawn"))]
+            if let (Some(cached), Some(prop_material)) =
+                (mesh_cache.get_cached(&prop.id), prop_material)
+            {
+                if let Some(entity) = instanced_render::spawn_instanced_prop(
+                    commands,
+                    prop_groups,
+                    prop_material,
+                    cached,
+                    &prop.id,
+                    transform.clone(),
+                    prop_type,
+                    chunk_pos,
+                    prop_tint(&prop.id, prop_type),
+                ) {
+                    // Add common components to the instanced entity
+                    commands.entity(entity).insert((
+                        Prop {
+                            id: prop.id.clone(),
+                            prop_type,
+                        },
+                        prop_chunk_owner(&transform),
+                        PersistedProp {
+                            chunk_pos,
+                            placement_seed: prop.placement_seed,
+                        },
+                    ));
+
+                    if should_apply_grass_wind(&prop.id, prop_type) {
+                        let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                        commands
+                            .entity(entity)
+                            .insert(GrassPropWind::new(&transform, hash));
+                    }
+
+                    // Add billboard LOD for trees
+                    if should_use_billboard_lod(prop_type, &prop.id) {
+                        if let Some((texture, size, y_offset)) =
+                            get_billboard_config(billboard_cache, &prop.id)
+                        {
+                            // Check if this is a single-mesh prop (cached.len() == 1)
+                            let is_single_mesh = mesh_cache
+                                .get_cached(&prop.id)
+                                .map(|c| c.len() == 1)
+                                .unwrap_or(true);
+
+                            commands.entity(entity).insert(BillboardLod {
+                                is_billboard: false,
+                                billboard_entity: None,
+                                is_single_mesh,
+                                billboard_texture: texture,
+                                billboard_size: size,
+                                y_offset,
+                            });
+                        }
+                    }
+
+                    stats.instanced_spawns += 1;
+                    return Some(entity);
+                }
+            }
+
+            #[cfg(feature = "legacy_prop_spawn")]
+            {
+                let scene_handle = _assets.scenes.get(&prop.id)?;
+
+                let mut entity = commands.spawn((
+                    SceneRoot(scene_handle.clone()),
+                    transform.clone(),
+                    Prop {
+                        id: prop.id.clone(),
+                        prop_type,
+                    },
+                    prop_chunk_owner(&transform),
+                    PersistedProp {
+                        chunk_pos,
+                        placement_seed: prop.placement_seed,
+                    },
+                ));
+
+                if should_apply_grass_wind(&prop.id, prop_type) {
+                    let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                    entity.insert(GrassPropWind::new(&transform, hash));
+                }
+
+                if should_use_billboard_lod(prop_type, &prop.id) {
+                    if let Some((texture, size, y_offset)) =
+                        get_billboard_config(billboard_cache, &prop.id)
+                    {
+                        entity.insert(BillboardLod {
                             is_billboard: false,
                             billboard_entity: None,
-                            is_single_mesh,
+                            is_single_mesh: false,
                             billboard_texture: texture,
                             billboard_size: size,
                             y_offset,
@@ -608,49 +734,18 @@ fn spawn_props_from_data(
                     }
                 }
 
-                stats.instanced_spawns += 1;
-                return Some(entity);
+                stats.scene_spawns += 1;
+                Some(entity.id())
             }
 
-            // Fallback to SceneRoot spawning
-            let scene_handle = assets.scenes.get(&prop.id)?;
-
-            let mut entity = commands.spawn((
-                SceneRoot(scene_handle.clone()),
-                transform.clone(),
-                Prop {
-                    id: prop.id.clone(),
-                    prop_type,
-                },
-                PersistedProp {
-                    chunk_pos,
-                    placement_seed: prop.placement_seed,
-                },
-            ));
-
-            if should_apply_grass_wind(&prop.id, prop_type) {
-                let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
-                entity.insert(GrassPropWind::new(&transform, hash));
+            #[cfg(not(feature = "legacy_prop_spawn"))]
+            {
+                debug!(
+                    "Skipping prop '{}' because no instanced mesh/material is available",
+                    prop.id
+                );
+                None
             }
-
-            // Add billboard LOD for trees (SceneRoot path)
-            if should_use_billboard_lod(prop_type, &prop.id) {
-                if let Some((texture, size, y_offset)) =
-                    get_billboard_config(billboard_cache, &prop.id)
-                {
-                    entity.insert(BillboardLod {
-                        is_billboard: false,
-                        billboard_entity: None,
-                        is_single_mesh: false, // SceneRoot props are typically multi-mesh
-                        billboard_texture: texture,
-                        billboard_size: size,
-                        y_offset,
-                    });
-                }
-            }
-
-            stats.scene_spawns += 1;
-            Some(entity.id())
         })
         .collect()
 }
@@ -690,7 +785,11 @@ fn prop_placement_footprint(prop_type: PropType, id: &str, scale: f32) -> Vec2 {
     prop_footprint(prop_type, id)
 }
 
-fn prop_conform_settings(id: &str, prop_type: PropType, scale: f32) -> Option<TerrainConformSettings> {
+fn prop_conform_settings(
+    id: &str,
+    prop_type: PropType,
+    scale: f32,
+) -> Option<TerrainConformSettings> {
     let id_lower = id.to_lowercase();
     if is_building_id(&id_lower) {
         let base = (scale * 0.5).clamp(6.0, 20.0);
@@ -817,8 +916,8 @@ fn conform_terrain_under_prop(
 fn prop_slope_align_strength(prop_type: PropType, id: &str) -> f32 {
     let id_lower = id.to_lowercase();
     match prop_type {
-        PropType::Tree => 0.0,   // Trees stay upright
-        PropType::Rock => 0.7,  // Rocks follow terrain somewhat
+        PropType::Tree => 0.0, // Trees stay upright
+        PropType::Rock => 0.7, // Rocks follow terrain somewhat
         PropType::Bush => {
             if id_lower.contains("grass") {
                 0.3 // Grass follows terrain slightly
@@ -831,9 +930,13 @@ fn prop_slope_align_strength(prop_type: PropType, id: &str) -> f32 {
 }
 
 /// Spawn a small ring of custom props near the player for quick verification.
+#[cfg_attr(feature = "legacy_prop_spawn", allow(unused_variables, unused_mut))]
 pub fn spawn_debug_custom_props_near_player(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
+    mesh_cache: Res<PropMeshCache>,
+    prop_material: Option<Res<PropsMaterialHandle>>,
+    mut prop_groups: ResMut<PropInstanceGroups>,
     config: Res<PropConfig>,
     world: Res<VoxelWorld>,
     player_query: Query<&Transform, With<Player>>,
@@ -868,10 +971,16 @@ pub fn spawn_debug_custom_props_near_player(
     let analyzer = TerrainAnalyzer::new(&world);
 
     for (id, prop_type, offset) in placements {
+        #[cfg(feature = "legacy_prop_spawn")]
         let Some(scene_handle) = prop_assets.scenes.get(id) else {
             warn!("Prop asset '{}' not found in registry (debug spawn)", id);
             continue;
         };
+        #[cfg(not(feature = "legacy_prop_spawn"))]
+        if !prop_assets.scenes.contains_key(id) {
+            warn!("Prop asset '{}' not found in registry (debug spawn)", id);
+            continue;
+        }
 
         let world_xf = center.x + offset.x;
         let world_zf = center.z + offset.y;
@@ -881,16 +990,31 @@ pub fn spawn_debug_custom_props_near_player(
             continue;
         }
 
-        let (scale_min, scale_max, scale_jitter, y_offset) = if let Some(def) = find_def(config.as_ref(), id) {
-            (def.scale_range[0], def.scale_range[1], def.scale_jitter, def.y_offset)
-        } else {
-            (0.8, 1.2, 0.0, 0.0)
-        };
+        let (scale_min, scale_max, scale_jitter, y_offset) =
+            if let Some(def) = find_def(config.as_ref(), id) {
+                (
+                    def.scale_range[0],
+                    def.scale_range[1],
+                    def.scale_jitter,
+                    def.y_offset,
+                )
+            } else {
+                (0.8, 1.2, 0.0, 0.0)
+            };
 
         let world_x = world_xf.round() as i32;
         let world_z = world_zf.round() as i32;
         let hash = deterministic_hash(world_x, world_z, id);
-        let scale = prop_scale(scale_min, scale_max, scale_jitter, id, prop_type, hash, world_x, world_z);
+        let scale = prop_scale(
+            scale_min,
+            scale_max,
+            scale_jitter,
+            id,
+            prop_type,
+            hash,
+            world_x,
+            world_z,
+        );
         let rotation = fract(hash * 13.0) * std::f32::consts::TAU;
 
         let position = Vec3::new(world_xf, analysis.height + y_offset, world_zf);
@@ -898,17 +1022,86 @@ pub fn spawn_debug_custom_props_near_player(
         let transform = Transform::from_translation(position)
             .with_rotation(Quat::from_rotation_y(rotation))
             .with_scale(Vec3::splat(scale));
-        let mut entity = commands.spawn((
-            SceneRoot(scene_handle.clone()),
-            transform.clone(),
-            Prop {
-                id: id.to_string(),
-                prop_type,
-            },
-        ));
 
-        if should_apply_grass_wind(id, prop_type) {
-            entity.insert(GrassPropWind::new(&transform, hash));
+        #[cfg(feature = "legacy_prop_spawn")]
+        if let Some(entity) =
+            spawn_instanced_prop(&mut commands, &mesh_cache, id, transform.clone(), prop_type)
+        {
+            commands.entity(entity).insert((
+                Prop {
+                    id: id.to_string(),
+                    prop_type,
+                },
+                prop_chunk_owner(&transform),
+            ));
+
+            if should_apply_grass_wind(id, prop_type) {
+                commands
+                    .entity(entity)
+                    .insert(GrassPropWind::new(&transform, hash));
+            }
+            continue;
+        }
+
+        #[cfg(not(feature = "legacy_prop_spawn"))]
+        if let (Some(cached), Some(prop_material)) =
+            (mesh_cache.get_cached(id), prop_material.as_deref())
+        {
+            let chunk_pos = IVec2::new(
+                (position.x.floor() as i32).div_euclid(PROP_CHUNK_SIZE),
+                (position.z.floor() as i32).div_euclid(PROP_CHUNK_SIZE),
+            );
+            if let Some(entity) = instanced_render::spawn_instanced_prop(
+                &mut commands,
+                &mut prop_groups,
+                prop_material,
+                cached,
+                id,
+                transform.clone(),
+                prop_type,
+                chunk_pos,
+                prop_tint(id, prop_type),
+            ) {
+                commands.entity(entity).insert((
+                    Prop {
+                        id: id.to_string(),
+                        prop_type,
+                    },
+                    prop_chunk_owner(&transform),
+                ));
+
+                if should_apply_grass_wind(id, prop_type) {
+                    commands
+                        .entity(entity)
+                        .insert(GrassPropWind::new(&transform, hash));
+                }
+                continue;
+            }
+        }
+
+        #[cfg(feature = "legacy_prop_spawn")]
+        {
+            let mut entity = commands.spawn((
+                SceneRoot(scene_handle.clone()),
+                transform.clone(),
+                Prop {
+                    id: id.to_string(),
+                    prop_type,
+                },
+                prop_chunk_owner(&transform),
+            ));
+
+            if should_apply_grass_wind(id, prop_type) {
+                entity.insert(GrassPropWind::new(&transform, hash));
+            }
+        }
+
+        #[cfg(not(feature = "legacy_prop_spawn"))]
+        {
+            debug!(
+                "Skipping debug prop '{}' because no instanced mesh/material is available",
+                id
+            );
         }
     }
 
@@ -1002,9 +1195,13 @@ pub fn spawn_landmark_buildings(
 
         let target_x = target.x.round() as i32;
         let target_z = target.y.round() as i32;
-        let Some((world_x, world_z, surface_y)) =
-            find_surface_near(&world, target_x, target_z, BUILDING_SEARCH_RADIUS, MAX_BUILDING_SLOPE)
-        else {
+        let Some((world_x, world_z, surface_y)) = find_surface_near(
+            &world,
+            target_x,
+            target_z,
+            BUILDING_SEARCH_RADIUS,
+            MAX_BUILDING_SLOPE,
+        ) else {
             warn!("No suitable surface found for landmark '{}'", id);
             continue;
         };
@@ -1040,15 +1237,19 @@ pub fn spawn_landmark_buildings(
         }
         let position = Vec3::new(world_xf, surface_height + y_offset, world_zf);
 
+        let transform = Transform::from_translation(position)
+            .with_rotation(Quat::from_rotation_y(yaw))
+            .with_scale(Vec3::splat(scale));
+        let owner = prop_chunk_owner(&transform);
+
         commands.spawn((
             SceneRoot(scene_handle.clone()),
-            Transform::from_translation(position)
-                .with_rotation(Quat::from_rotation_y(yaw))
-                .with_scale(Vec3::splat(scale)),
+            transform,
             Prop {
                 id: id.to_string(),
                 prop_type: PropType::Rock,
             },
+            owner,
         ));
 
         landmarks.positions.push(position);
@@ -1186,7 +1387,8 @@ fn find_surface_near(
                 }
                 let world_x = start_x + dx;
                 let world_z = start_z + dz;
-                let Some((surface_y, _voxel_type, slope)) = find_surface(world, world_x, world_z) else {
+                let Some((surface_y, _voxel_type, slope)) = find_surface(world, world_x, world_z)
+                else {
                     continue;
                 };
                 if slope <= max_slope {
@@ -1302,6 +1504,18 @@ fn should_apply_grass_wind(id: &str, prop_type: PropType) -> bool {
     }
     let id_lower = id.to_lowercase();
     id_lower.contains("grass")
+}
+
+#[cfg(not(feature = "legacy_prop_spawn"))]
+fn prop_tint(id: &str, prop_type: PropType) -> Vec4 {
+    let id_lower = id.to_lowercase();
+    match prop_type {
+        PropType::Tree => Vec4::new(0.7, 0.85, 0.65, 1.0),
+        PropType::Rock => Vec4::new(0.62, 0.6, 0.56, 1.0),
+        PropType::Bush if id_lower.contains("grass") => Vec4::new(0.55, 0.78, 0.42, 1.0),
+        PropType::Bush => Vec4::new(0.6, 0.82, 0.48, 1.0),
+        PropType::Flower => Vec4::new(0.95, 0.9, 0.72, 1.0),
+    }
 }
 
 /// Deterministic hash for consistent prop placement

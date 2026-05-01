@@ -4,8 +4,8 @@
 //! of prop meshes. Uses vertex clustering algorithm for fast decimation
 //! that preserves overall shape and silhouette.
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use std::collections::HashMap;
 
@@ -99,7 +99,10 @@ impl MeshData {
 
     /// Convert back to a Bevy Mesh.
     pub fn into_mesh(self) -> Mesh {
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
@@ -393,28 +396,28 @@ pub fn create_decimated_meshes(
             total_original += original_verts;
 
             // Create LOD1 (50% decimation)
-            let (lod1_handle, lod1_verts) =
-                if let Some(lod1_data) = decimate_mesh(&mesh_data, config.target_ratio_lod1, &config)
-                {
-                    let verts = lod1_data.vertex_count();
-                    total_lod1 += verts;
-                    (Some(meshes.add(lod1_data.into_mesh())), verts)
-                } else {
-                    total_lod1 += original_verts;
-                    (None, 0)
-                };
+            let (lod1_handle, lod1_verts) = if let Some(lod1_data) =
+                decimate_mesh(&mesh_data, config.target_ratio_lod1, &config)
+            {
+                let verts = lod1_data.vertex_count();
+                total_lod1 += verts;
+                (Some(meshes.add(lod1_data.into_mesh())), verts)
+            } else {
+                total_lod1 += original_verts;
+                (None, 0)
+            };
 
             // Create LOD2 (75% decimation)
-            let (lod2_handle, lod2_verts) =
-                if let Some(lod2_data) = decimate_mesh(&mesh_data, config.target_ratio_lod2, &config)
-                {
-                    let verts = lod2_data.vertex_count();
-                    total_lod2 += verts;
-                    (Some(meshes.add(lod2_data.into_mesh())), verts)
-                } else {
-                    total_lod2 += original_verts;
-                    (None, 0)
-                };
+            let (lod2_handle, lod2_verts) = if let Some(lod2_data) =
+                decimate_mesh(&mesh_data, config.target_ratio_lod2, &config)
+            {
+                let verts = lod2_data.vertex_count();
+                total_lod2 += verts;
+                (Some(meshes.add(lod2_data.into_mesh())), verts)
+            } else {
+                total_lod2 += original_verts;
+                (None, 0)
+            };
 
             decimated_variants.push(DecimatedPropMesh {
                 full_detail: cached.mesh.clone(),
@@ -431,7 +434,9 @@ pub fn create_decimated_meshes(
         }
 
         if !decimated_variants.is_empty() {
-            decimated_cache.meshes.insert(prop_id.clone(), decimated_variants);
+            decimated_cache
+                .meshes
+                .insert(prop_id.clone(), decimated_variants);
         }
     }
 

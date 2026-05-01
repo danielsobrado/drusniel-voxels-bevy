@@ -6374,6 +6374,7 @@ dependencies = [
  "bevy_tweening",
  "bevy_water",
  "bincode",
+ "bytemuck",
  "criterion",
  "fast-surface-nets",
  "iyes_progress",

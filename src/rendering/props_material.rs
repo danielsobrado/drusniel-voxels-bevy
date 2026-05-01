@@ -1,6 +1,6 @@
 use bevy::{
-    prelude::*,
     pbr::OpaqueRendererMethod,
+    prelude::*,
     render::render_resource::{AsBindGroup, ShaderType},
 };
 use bevy_shader::ShaderRef;
@@ -62,8 +62,8 @@ impl PropsMaterialType {
     /// Get default roughness for this prop type
     pub fn default_roughness(&self) -> f32 {
         match self {
-            Self::Rock => 0.95,        // Very rough rock surface
-            Self::Furniture => 0.75,   // Slightly polished wood
+            Self::Rock => 0.95,         // Very rough rock surface
+            Self::Furniture => 0.75,    // Slightly polished wood
             Self::BarrelsCrates => 0.8, // Uniform rough wood
         }
     }
@@ -93,7 +93,6 @@ pub struct PropsMaterial {
     pub rock_roughness: Option<Handle<Image>>,
     #[texture(5)]
     pub rock_ao: Option<Handle<Image>>,
-
     // Furniture textures - standard PBR (vertex AO baked)
     // #[texture(6)]
     // pub furniture_albedo: Option<Handle<Image>>,

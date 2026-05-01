@@ -4,11 +4,13 @@
 //! using Mesh3d instead of SceneRoot, allowing Bevy's automatic instancing
 //! to batch identical meshes together.
 
-use bevy::prelude::*;
 use bevy::gltf::{GltfMesh, GltfNode};
+use bevy::prelude::*;
 use std::collections::HashMap;
 
-use super::{PropAssets, PropType};
+use super::PropAssets;
+#[cfg(feature = "legacy_prop_spawn")]
+use super::PropType;
 
 /// Cached mesh data extracted from a GLTF prop.
 #[derive(Clone)]
@@ -113,7 +115,11 @@ pub fn extract_prop_meshes(
 
         // Extract base path (remove #Scene0 suffix)
         let gltf_path_str = gltf_path.path().to_string_lossy().to_string();
-        let base_path: String = gltf_path_str.split('#').next().unwrap_or(&gltf_path_str).to_string();
+        let base_path: String = gltf_path_str
+            .split('#')
+            .next()
+            .unwrap_or(&gltf_path_str)
+            .to_string();
 
         // Load the GLTF asset
         let gltf_handle: Handle<Gltf> = asset_server.load(&base_path);
@@ -157,7 +163,10 @@ pub fn extract_prop_meshes(
                             continue;
                         }
 
-                        let material = primitive.material.clone().unwrap_or_else(|| default_mat.clone());
+                        let material = primitive
+                            .material
+                            .clone()
+                            .unwrap_or_else(|| default_mat.clone());
 
                         cached_meshes.push(CachedPropMesh {
                             mesh: primitive.mesh.clone(),
@@ -177,7 +186,10 @@ pub fn extract_prop_meshes(
             );
             cache.meshes.insert(prop_id, cached_meshes);
         } else {
-            warn!("No meshes extracted for prop '{}', will use SceneRoot fallback", prop_id);
+            warn!(
+                "No meshes extracted for prop '{}', will use SceneRoot fallback",
+                prop_id
+            );
         }
     }
 
@@ -216,7 +228,10 @@ fn extract_meshes_from_node(
                     continue;
                 }
 
-                let material = primitive.material.clone().unwrap_or_else(|| default_material.clone());
+                let material = primitive
+                    .material
+                    .clone()
+                    .unwrap_or_else(|| default_material.clone());
 
                 results.push(CachedPropMesh {
                     mesh: primitive.mesh.clone(),
@@ -249,6 +264,7 @@ fn extract_meshes_from_node(
 /// The root entity will have the Prop component and contain child entities for each mesh.
 /// This enables Bevy's automatic GPU instancing since all instances of the same prop
 /// share the same mesh and material handles.
+#[cfg(feature = "legacy_prop_spawn")]
 pub fn spawn_instanced_prop(
     commands: &mut Commands,
     cache: &PropMeshCache,
@@ -339,10 +355,7 @@ impl InstancingStats {
 }
 
 /// System to log instancing statistics periodically.
-pub fn log_instancing_stats(
-    cache: Res<PropMeshCache>,
-    stats: Res<InstancingStats>,
-) {
+pub fn log_instancing_stats(cache: Res<PropMeshCache>, stats: Res<InstancingStats>) {
     if cache.is_changed() && cache.extraction_complete {
         info!(
             "Instancing stats: {} cached types, {} instanced / {} scene spawns ({:.1}% instanced)",

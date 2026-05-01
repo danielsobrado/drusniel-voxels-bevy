@@ -7,6 +7,7 @@ default-run = "voxel_builder"
 [features]
 # cargo run --release --features tracy then connect with Tracy 0.11.x.
 tracy = ["bevy/trace_tracy"]
+legacy_prop_spawn = []
 
 [dependencies]
 bevy = { version = "0.18", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures", "sysinfo_plugin"] }
@@ -21,6 +22,7 @@ thiserror = "2.0"
 fast-surface-nets = "0.2"
 ndshape = "0.3"
 bincode = "1.3"
+bytemuck = { version = "1.20", features = ["derive"] }
 bevy_egui = "0.39.1"
 bevy-inspector-egui = "0.36.0"
 bevy_hanabi = "0.18.0"

@@ -1,6 +1,7 @@
 pub mod billboard;
 pub mod decimation;
 pub mod foliage;
+pub mod instanced_render;
 pub mod instancing;
 pub mod loader;
 pub mod lod_material;
@@ -17,13 +18,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
-    PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL, PROP_VIEW_DISTANCE_BASE,
-    PROP_VIEW_DISTANCE_BUSH_MULT, PROP_VIEW_DISTANCE_FLOWER_MULT,
-    PROP_VIEW_DISTANCE_HYSTERESIS, PROP_VIEW_DISTANCE_ROCK_MULT, PROP_VIEW_DISTANCE_TREE_MULT,
+    PROP_CHUNK_VISIBILITY_UPDATE_INTERVAL, PROP_VIEW_DISTANCE_BASE, PROP_VIEW_DISTANCE_BUSH_MULT,
+    PROP_VIEW_DISTANCE_FLOWER_MULT, PROP_VIEW_DISTANCE_HYSTERESIS, PROP_VIEW_DISTANCE_ROCK_MULT,
+    PROP_VIEW_DISTANCE_TREE_MULT,
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
+use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
+use crate::voxel::world::VoxelWorld;
 use persistence::{
-    delete_all_props, save_chunk_and_update_manifest, PropEditState, PropPersistenceState,
+    PropEditState, PropPersistenceState, delete_all_props, save_chunk_and_update_manifest,
 };
 use placement::TerrainAnalyzer;
 
@@ -31,7 +35,8 @@ pub struct PropsPlugin;
 
 impl Plugin for PropsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PropAssets>()
+        app.add_plugins(instanced_render::PropInstancingPlugin)
+            .init_resource::<PropAssets>()
             .init_resource::<PropConfig>()
             .init_resource::<spawner::PropsSpawned>()
             .init_resource::<spawner::PropsDebugSpawned>()
@@ -68,11 +73,14 @@ impl Plugin for PropsPlugin {
             .init_resource::<lod_material::PropLodStats>()
             .add_message::<RegenerateDirtyChunksEvent>()
             .add_message::<ClearPropCacheEvent>()
-            .add_systems(Startup, (
-                loader::load_prop_config,
-                billboard::initialize_billboard_cache,
-                lod_material::setup_simple_lod_material,
-            ))
+            .add_systems(
+                Startup,
+                (
+                    loader::load_prop_config,
+                    billboard::initialize_billboard_cache,
+                    lod_material::setup_simple_lod_material,
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -89,64 +97,57 @@ impl Plugin for PropsPlugin {
             .add_systems(
                 Update,
                 (
-                    foliage::index_foliage_fade_entities
-                        .after(materials::apply_style_overrides),
-                    foliage::index_grass_prop_wind_entities
-                        .after(materials::apply_style_overrides),
-                    foliage::update_foliage_fade
-                        .after(foliage::index_foliage_fade_entities),
-                    foliage::update_grass_prop_wind
-                        .after(foliage::index_grass_prop_wind_entities),
+                    foliage::index_foliage_fade_entities.after(materials::apply_style_overrides),
+                    foliage::index_grass_prop_wind_entities.after(materials::apply_style_overrides),
+                    foliage::update_foliage_fade.after(foliage::index_foliage_fade_entities),
+                    foliage::update_grass_prop_wind.after(foliage::index_grass_prop_wind_entities),
                 ),
             )
             // Persistence systems
-            .add_systems(
-                Update,
-                (
-                    regenerate_dirty_chunks,
-                    handle_clear_prop_cache,
-                ),
-            )
+            .add_systems(Update, (regenerate_dirty_chunks, handle_clear_prop_cache))
             // Culling system
             .add_systems(
                 Update,
                 update_prop_chunk_visibility.after(spawner::spawn_props_on_terrain),
             )
+            .add_systems(
+                Update,
+                apply_prop_visibility_from_chunks
+                    .after(crate::voxel::plugin::apply_visibility_culling_system)
+                    .after(update_prop_chunk_visibility),
+            )
             // Billboard LOD systems
             .add_systems(
                 Update,
                 (
-                    billboard::update_billboard_lod
-                        .after(update_prop_chunk_visibility),
+                    billboard::update_billboard_lod.after(update_prop_chunk_visibility),
                     billboard::sync_billboard_time,
                 ),
             )
             // Mesh decimation system (runs once after extraction)
             .add_systems(
                 Update,
-                decimation::create_decimated_meshes
-                    .after(instancing::extract_prop_meshes),
+                decimation::create_decimated_meshes.after(instancing::extract_prop_meshes),
             )
             // Shadow distance culling system
             .add_systems(
                 Update,
-                lod_material::update_prop_shadow_lod
-                    .after(update_prop_chunk_visibility),
-            )
+                lod_material::update_prop_shadow_lod.after(update_prop_chunk_visibility),
+            );
+
+        #[cfg(feature = "legacy_prop_spawn")]
+        app.add_systems(
             // Merging systems (run after spawning and materials)
-            .add_systems(
-                Update,
-                (
-                    merging::mark_merge_candidates
-                        .after(materials::apply_style_overrides),
-                    merging::check_scene_ready
-                        .after(merging::mark_merge_candidates),
-                    merging::process_chunk_merges
-                        .after(merging::check_scene_ready),
-                    merging::cleanup_merged_meshes,
-                ),
-            )
-;
+            Update,
+            (
+                merging::mark_merge_candidates.after(materials::apply_style_overrides),
+                merging::check_scene_ready.after(merging::mark_merge_candidates),
+                merging::process_chunk_merges.after(merging::check_scene_ready),
+                merging::cleanup_merged_meshes,
+            ),
+        );
+        #[cfg(not(feature = "legacy_prop_spawn"))]
+        app.add_systems(Update, merging::cleanup_merged_meshes);
     }
 }
 
@@ -156,6 +157,9 @@ pub struct Prop {
     pub id: String,
     pub prop_type: PropType,
 }
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PropChunkOwner(pub IVec3);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PropType {
@@ -175,6 +179,12 @@ impl PropType {
             PropType::Flower => PROP_VIEW_DISTANCE_FLOWER_MULT,
         }
     }
+}
+
+fn prop_chunk_owner(transform: &Transform) -> PropChunkOwner {
+    PropChunkOwner(VoxelWorld::world_to_chunk(
+        transform.translation.floor().as_ivec3(),
+    ))
 }
 
 // =============================================================================
@@ -466,6 +476,8 @@ fn regenerate_dirty_chunks(
     config: Res<PropConfig>,
     assets: Res<PropAssets>,
     mesh_cache: Res<instancing::PropMeshCache>,
+    prop_material: Option<Res<crate::rendering::props_material::PropsMaterialHandle>>,
+    mut prop_groups: ResMut<instanced_render::PropInstanceGroups>,
     mut instancing_stats: ResMut<instancing::InstancingStats>,
 ) {
     // Check if we have any events
@@ -489,7 +501,8 @@ fn regenerate_dirty_chunks(
     let dirty: Vec<IVec2> = state.take_dirty_chunks();
     info!("Regenerating {} dirty prop chunks", dirty.len());
 
-    let generator = crate::voxel::terrain::TerrainGenerator::<crate::voxel::terrain::ValueNoise>::default();
+    let generator =
+        crate::voxel::terrain::TerrainGenerator::<crate::voxel::terrain::ValueNoise>::default();
     let placement_config = placement::PlacementConfig::default();
 
     for chunk_pos in dirty {
@@ -499,15 +512,13 @@ fn regenerate_dirty_chunks(
                 commands.entity(entity).despawn();
             }
         }
+        for entity in prop_groups.remove_chunk(chunk_pos) {
+            commands.entity(entity).despawn();
+        }
 
         // Regenerate props for this chunk
-        let props = regenerate_chunk_props(
-            chunk_pos,
-            &world,
-            &generator,
-            &config,
-            &placement_config,
-        );
+        let props =
+            regenerate_chunk_props(chunk_pos, &world, &generator, &config, &placement_config);
 
         // Save to disk
         if let Some(ref mut manifest) = state.manifest {
@@ -522,6 +533,8 @@ fn regenerate_dirty_chunks(
             &props,
             &assets,
             &mesh_cache,
+            prop_material.as_deref(),
+            &mut prop_groups,
             &mut instancing_stats,
             chunk_pos,
         );
@@ -555,7 +568,11 @@ fn regenerate_chunk_props(
     let mut counts: HashMap<String, u32> = HashMap::new();
 
     // Helper to check spawn conditions
-    let mut try_spawn = |def: &PropDefinition, prop_type: PropType, x: i32, z: i32| -> Option<persistence::PropPlacementData> {
+    let mut try_spawn = |def: &PropDefinition,
+                         prop_type: PropType,
+                         x: i32,
+                         z: i32|
+     -> Option<persistence::PropPlacementData> {
         let count = counts.get(&def.id).copied().unwrap_or(0);
         let max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
         if count >= max_count {
@@ -610,8 +627,10 @@ fn regenerate_chunk_props(
             PropType::Flower => 0.2,
         };
 
-        let tilt_x = (placement::seeded_random(placement_seed, 1) - 0.5) * placement_config.max_random_tilt.to_radians();
-        let tilt_z = (placement::seeded_random(placement_seed, 2) - 0.5) * placement_config.max_random_tilt.to_radians();
+        let tilt_x = (placement::seeded_random(placement_seed, 1) - 0.5)
+            * placement_config.max_random_tilt.to_radians();
+        let tilt_z = (placement::seeded_random(placement_seed, 2) - 0.5)
+            * placement_config.max_random_tilt.to_radians();
 
         let rotation = placement::calculate_prop_rotation(
             sample_result.normal,
@@ -691,12 +710,15 @@ fn regenerate_chunk_props(
 }
 
 /// Spawn entities from placement data.
-/// Uses instanced rendering when the mesh cache is ready, otherwise falls back to SceneRoot.
+/// Uses instanced rendering when the mesh cache is ready.
+#[cfg_attr(feature = "legacy_prop_spawn", allow(unused_variables))]
 fn spawn_props_from_placement_data(
     commands: &mut Commands,
     props: &[persistence::PropPlacementData],
-    assets: &PropAssets,
+    _assets: &PropAssets,
     mesh_cache: &instancing::PropMeshCache,
+    prop_material: Option<&crate::rendering::props_material::PropsMaterialHandle>,
+    prop_groups: &mut instanced_render::PropInstanceGroups,
     stats: &mut instancing::InstancingStats,
     chunk_pos: IVec2,
 ) -> Vec<Entity> {
@@ -706,7 +728,7 @@ fn spawn_props_from_placement_data(
             let transform = prop.to_transform();
             let prop_type: PropType = prop.prop_type.into();
 
-            // Try instanced spawning first (uses cached mesh handles for GPU batching)
+            #[cfg(feature = "legacy_prop_spawn")]
             if let Some(entity) = instancing::spawn_instanced_prop(
                 commands,
                 mesh_cache,
@@ -720,6 +742,7 @@ fn spawn_props_from_placement_data(
                         id: prop.id.clone(),
                         prop_type,
                     },
+                    prop_chunk_owner(&transform),
                     persistence::PersistedProp {
                         chunk_pos,
                         placement_seed: prop.placement_seed,
@@ -728,36 +751,89 @@ fn spawn_props_from_placement_data(
 
                 if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
                     let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
-                    commands.entity(entity).insert(foliage::GrassPropWind::new(&transform, hash));
+                    commands
+                        .entity(entity)
+                        .insert(foliage::GrassPropWind::new(&transform, hash));
                 }
 
                 stats.instanced_spawns += 1;
                 return Some(entity);
             }
 
-            // Fallback to SceneRoot spawning
-            let scene_handle = assets.scenes.get(&prop.id)?;
-
-            let mut entity = commands.spawn((
-                SceneRoot(scene_handle.clone()),
-                transform.clone(),
-                Prop {
-                    id: prop.id.clone(),
+            #[cfg(not(feature = "legacy_prop_spawn"))]
+            if let (Some(cached), Some(prop_material)) =
+                (mesh_cache.get_cached(&prop.id), prop_material)
+            {
+                if let Some(entity) = instanced_render::spawn_instanced_prop(
+                    commands,
+                    prop_groups,
+                    prop_material,
+                    cached,
+                    &prop.id,
+                    transform.clone(),
                     prop_type,
-                },
-                persistence::PersistedProp {
                     chunk_pos,
-                    placement_seed: prop.placement_seed,
-                },
-            ));
+                    Vec4::ONE,
+                ) {
+                    commands.entity(entity).insert((
+                        Prop {
+                            id: prop.id.clone(),
+                            prop_type,
+                        },
+                        prop_chunk_owner(&transform),
+                        persistence::PersistedProp {
+                            chunk_pos,
+                            placement_seed: prop.placement_seed,
+                        },
+                    ));
 
-            if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
-                let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
-                entity.insert(foliage::GrassPropWind::new(&transform, hash));
+                    if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
+                        let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                        commands
+                            .entity(entity)
+                            .insert(foliage::GrassPropWind::new(&transform, hash));
+                    }
+
+                    stats.instanced_spawns += 1;
+                    return Some(entity);
+                }
             }
 
-            stats.scene_spawns += 1;
-            Some(entity.id())
+            #[cfg(feature = "legacy_prop_spawn")]
+            {
+                let scene_handle = _assets.scenes.get(&prop.id)?;
+
+                let mut entity = commands.spawn((
+                    SceneRoot(scene_handle.clone()),
+                    transform.clone(),
+                    Prop {
+                        id: prop.id.clone(),
+                        prop_type,
+                    },
+                    prop_chunk_owner(&transform),
+                    persistence::PersistedProp {
+                        chunk_pos,
+                        placement_seed: prop.placement_seed,
+                    },
+                ));
+
+                if prop_type == PropType::Bush && prop.id.to_lowercase().contains("grass") {
+                    let hash = (prop.placement_seed as f32) / (u64::MAX as f32);
+                    entity.insert(foliage::GrassPropWind::new(&transform, hash));
+                }
+
+                stats.scene_spawns += 1;
+                Some(entity.id())
+            }
+
+            #[cfg(not(feature = "legacy_prop_spawn"))]
+            {
+                debug!(
+                    "Skipping prop '{}' because no instanced mesh/material is available",
+                    prop.id
+                );
+                None
+            }
         })
         .collect()
 }
@@ -804,7 +880,12 @@ fn update_prop_chunk_visibility(
     mut cull_state: ResMut<PropChunkCullState>,
     persistence_state: Res<PropPersistenceState>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut prop_query: Query<(&Prop, &GlobalTransform, &mut Visibility, &persistence::PersistedProp)>,
+    mut prop_query: Query<(
+        &Prop,
+        &GlobalTransform,
+        &mut Visibility,
+        &persistence::PersistedProp,
+    )>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -905,6 +986,86 @@ fn update_prop_chunk_visibility(
     cull_state.last_camera_chunk = camera_chunk;
     cull_state.visible_count = visible_count;
     cull_state.culled_count = culled_count;
+}
+
+fn apply_prop_visibility_from_chunks(
+    enclosure: Res<EnclosureState>,
+    config: Res<OcclusionConfig>,
+    visible_chunks: Res<VisibleChunks>,
+    mut stats: ResMut<EnclosureOcclusionStats>,
+    mut visibility_queries: ParamSet<(
+        Query<
+            (
+                &PropChunkOwner,
+                &mut Visibility,
+                Option<&instanced_render::PropVisualRefs>,
+            ),
+            With<Prop>,
+        >,
+        Query<(Entity, &mut Visibility), With<instanced_render::InstancedPropGroup>>,
+    )>,
+    mut was_enclosed: Local<bool>,
+) {
+    if enclosure.mode != EnclosureMode::Enclosed || !config.enabled {
+        if *was_enclosed {
+            let mut groups_to_reset = HashSet::new();
+            for (_, mut visibility, refs) in &mut visibility_queries.p0() {
+                if *visibility == Visibility::Hidden {
+                    *visibility = Visibility::Inherited;
+                }
+                if let Some(refs) = refs {
+                    for visual in &refs.refs {
+                        groups_to_reset.insert(visual.group);
+                    }
+                }
+            }
+            for (entity, mut group_visibility) in &mut visibility_queries.p1() {
+                if groups_to_reset.contains(&entity) && *group_visibility == Visibility::Hidden {
+                    *group_visibility = Visibility::Inherited;
+                }
+            }
+            stats.hidden_props = 0;
+            stats.total_props = 0;
+            *was_enclosed = false;
+        }
+        return;
+    }
+
+    *was_enclosed = true;
+    stats.hidden_props = 0;
+    stats.total_props = 0;
+    let mut visible_groups = HashSet::new();
+
+    for (owner, mut visibility, refs) in &mut visibility_queries.p0() {
+        let is_visible = visible_chunks.is_visible(owner.0);
+        let target = if is_visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != target {
+            *visibility = target;
+        }
+        if is_visible {
+            if let Some(refs) = refs {
+                visible_groups.extend(refs.refs.iter().map(|visual| visual.group));
+            }
+        } else {
+            stats.hidden_props += 1;
+        }
+        stats.total_props += 1;
+    }
+
+    for (entity, mut visibility) in &mut visibility_queries.p1() {
+        let target = if visible_groups.contains(&entity) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != target {
+            *visibility = target;
+        }
+    }
 }
 
 // Helper functions for regeneration

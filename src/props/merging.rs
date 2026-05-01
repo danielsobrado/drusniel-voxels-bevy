@@ -95,11 +95,7 @@ impl CombinedMeshData {
     }
 
     /// Append mesh data transformed to world space
-    fn append_transformed(
-        &mut self,
-        mesh: &Mesh,
-        transform: &GlobalTransform,
-    ) {
+    fn append_transformed(&mut self, mesh: &Mesh, transform: &GlobalTransform) {
         let Some(VertexAttributeValues::Float32x3(positions)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
@@ -154,7 +150,10 @@ impl CombinedMeshData {
     }
 
     fn into_mesh(self) -> Mesh {
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
@@ -176,7 +175,10 @@ pub fn should_merge_prop_type(prop_type: PropType) -> bool {
 pub fn mark_merge_candidates(
     mut commands: Commands,
     mut merge_state: ResMut<PropMergeState>,
-    new_props: Query<(Entity, &Prop, &PersistedProp), (Without<MergeCandidate>, Without<InstancedProp>)>,
+    new_props: Query<
+        (Entity, &Prop, &PersistedProp),
+        (Without<MergeCandidate>, Without<InstancedProp>),
+    >,
 ) {
     if !merge_state.enabled {
         return;
@@ -329,14 +331,19 @@ pub fn process_chunk_merges(
     }
 
     // Find a chunk that has no pending props (all scenes loaded)
-    let chunk_to_process = merge_state.pending_chunks.iter().find(|chunk_pos| {
-        // Check if any pending prop belongs to this chunk
-        !merge_state.pending_props.iter().any(|&prop_entity| {
-            candidates.get(prop_entity)
-                .map(|(_, _, _, persisted, _)| persisted.chunk_pos == **chunk_pos)
-                .unwrap_or(false)
+    let chunk_to_process = merge_state
+        .pending_chunks
+        .iter()
+        .find(|chunk_pos| {
+            // Check if any pending prop belongs to this chunk
+            !merge_state.pending_props.iter().any(|&prop_entity| {
+                candidates
+                    .get(prop_entity)
+                    .map(|(_, _, _, persisted, _)| persisted.chunk_pos == **chunk_pos)
+                    .unwrap_or(false)
+            })
         })
-    }).copied();
+        .copied();
 
     let Some(chunk_pos) = chunk_to_process else {
         return;
@@ -452,10 +459,7 @@ pub fn cleanup_merged_meshes(
     merged_meshes: Query<(Entity, &MergedPropMesh)>,
 ) {
     // Remove entries for chunks whose merged meshes no longer exist
-    let existing_chunks: HashSet<IVec2> = merged_meshes
-        .iter()
-        .map(|(_, m)| m.chunk_pos)
-        .collect();
+    let existing_chunks: HashSet<IVec2> = merged_meshes.iter().map(|(_, m)| m.chunk_pos).collect();
 
     merge_state.merged_chunks.retain(|chunk_pos, entities| {
         if existing_chunks.contains(chunk_pos) {

@@ -304,11 +304,7 @@ impl PropManifest {
         );
 
         // Update total count
-        self.metadata.total_props = self
-            .chunk_files
-            .values()
-            .map(|e| e.prop_count)
-            .sum();
+        self.metadata.total_props = self.chunk_files.values().map(|e| e.prop_count).sum();
     }
 
     /// Check if a chunk exists in the manifest

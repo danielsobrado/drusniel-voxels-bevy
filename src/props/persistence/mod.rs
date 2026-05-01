@@ -80,18 +80,9 @@ pub struct PropEditState {
 /// Types of manual prop modifications
 #[derive(Clone, Debug)]
 pub enum PropModification {
-    Moved {
-        old_pos: Vec3,
-        new_pos: Vec3,
-    },
-    Rotated {
-        old_rot: Vec3,
-        new_rot: Vec3,
-    },
-    Scaled {
-        old_scale: Vec3,
-        new_scale: Vec3,
-    },
+    Moved { old_pos: Vec3, new_pos: Vec3 },
+    Rotated { old_rot: Vec3, new_rot: Vec3 },
+    Scaled { old_scale: Vec3, new_scale: Vec3 },
     Deleted,
 }
 

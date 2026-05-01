@@ -89,8 +89,8 @@ impl<'a> TerrainAnalyzer<'a> {
                     // We require the voxel below to be solid or water
                     let below = IVec3::new(x, y - 1, z);
                     if let Some(below_voxel) = self.world.get_voxel(below) {
-                         // Treating water as "foundation" allows props on shorelines
-                         // Air below means it's floating -> skip it
+                        // Treating water as "foundation" allows props on shorelines
+                        // Air below means it's floating -> skip it
                         if !below_voxel.is_solid() && !below_voxel.is_liquid() {
                             continue;
                         }
@@ -309,7 +309,10 @@ mod tests {
         ];
 
         let normal = fit_plane_normal(&points);
-        assert!((normal.y - 1.0).abs() < 0.01, "Expected upward normal for flat surface");
+        assert!(
+            (normal.y - 1.0).abs() < 0.01,
+            "Expected upward normal for flat surface"
+        );
     }
 
     #[test]
