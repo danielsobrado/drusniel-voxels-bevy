@@ -6,7 +6,7 @@
 use crate::voxel::chunk::ChunkData;
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
@@ -70,7 +70,11 @@ pub fn save_world(world: &VoxelWorld) -> Result<(), PersistenceError> {
 
     bincode::serialize_into(writer, &data)?;
 
-    info!("World saved to {} ({} chunks)", WORLD_SAVE_PATH, data.chunks.len());
+    info!(
+        "World saved to {} ({} chunks)",
+        WORLD_SAVE_PATH,
+        data.chunks.len()
+    );
     Ok(())
 }
 
@@ -93,7 +97,11 @@ pub fn load_world() -> Result<VoxelWorld, PersistenceError> {
 
     let data: WorldData = bincode::deserialize_from(reader)?;
 
-    info!("World loaded from {} ({} chunks)", WORLD_SAVE_PATH, data.chunks.len());
+    info!(
+        "World loaded from {} ({} chunks)",
+        WORLD_SAVE_PATH,
+        data.chunks.len()
+    );
 
     Ok(VoxelWorld::from_data(data))
 }

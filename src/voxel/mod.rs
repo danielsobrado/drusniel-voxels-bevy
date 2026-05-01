@@ -17,6 +17,7 @@
 
 pub mod baked_ao;
 pub mod chunk;
+pub mod enclosure;
 pub mod gravity;
 pub mod meshing;
 pub mod occlusion;

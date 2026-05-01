@@ -43,9 +43,21 @@ impl OctreeAabb {
         for plane in &frustum.planes {
             // Find the AABB vertex furthest in the direction of the plane normal
             let p = Vec3::new(
-                if plane.x >= 0.0 { self.max.x } else { self.min.x },
-                if plane.y >= 0.0 { self.max.y } else { self.min.y },
-                if plane.z >= 0.0 { self.max.z } else { self.min.z },
+                if plane.x >= 0.0 {
+                    self.max.x
+                } else {
+                    self.min.x
+                },
+                if plane.y >= 0.0 {
+                    self.max.y
+                } else {
+                    self.min.y
+                },
+                if plane.z >= 0.0 {
+                    self.max.z
+                } else {
+                    self.min.z
+                },
             );
 
             // If the furthest point is behind the plane, AABB is outside frustum
@@ -286,8 +298,7 @@ fn build_node(bounds: OctreeAabb, chunks: Vec<IVec3>) -> OctreeNode {
 
     // Sort chunks into octants based on their center position
     for chunk_pos in chunks {
-        let chunk_center =
-            chunk_pos.as_vec3() * CHUNK_SIZE_F32 + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let chunk_center = chunk_pos.as_vec3() * CHUNK_SIZE_F32 + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let octant = get_octant(chunk_center, center);
         child_chunks[octant].push(chunk_pos);
     }
@@ -327,14 +338,38 @@ fn get_octant(point: Vec3, center: Vec3) -> usize {
 fn get_octant_bounds(parent: &OctreeAabb, octant: usize) -> OctreeAabb {
     let center = parent.center();
     let min = Vec3::new(
-        if octant & 1 != 0 { center.x } else { parent.min.x },
-        if octant & 2 != 0 { center.y } else { parent.min.y },
-        if octant & 4 != 0 { center.z } else { parent.min.z },
+        if octant & 1 != 0 {
+            center.x
+        } else {
+            parent.min.x
+        },
+        if octant & 2 != 0 {
+            center.y
+        } else {
+            parent.min.y
+        },
+        if octant & 4 != 0 {
+            center.z
+        } else {
+            parent.min.z
+        },
     );
     let max = Vec3::new(
-        if octant & 1 != 0 { parent.max.x } else { center.x },
-        if octant & 2 != 0 { parent.max.y } else { center.y },
-        if octant & 4 != 0 { parent.max.z } else { center.z },
+        if octant & 1 != 0 {
+            parent.max.x
+        } else {
+            center.x
+        },
+        if octant & 2 != 0 {
+            parent.max.y
+        } else {
+            center.y
+        },
+        if octant & 4 != 0 {
+            parent.max.z
+        } else {
+            center.z
+        },
     );
     OctreeAabb::new(min, max)
 }

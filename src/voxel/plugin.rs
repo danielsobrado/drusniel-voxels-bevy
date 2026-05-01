@@ -45,8 +45,12 @@ use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
+use crate::voxel::enclosure::{
+    EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
+    toggle_enclosure_culling, update_enclosure_state,
+};
 use crate::voxel::meshing::{
-    MeshMode, MeshSettings, WaterMesh, WaterMeshDetail, generate_chunk_mesh_with_mode,
+    ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail, generate_chunk_mesh_with_mode,
 };
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
@@ -324,9 +328,9 @@ impl Plugin for VoxelPlugin {
         // Visibility optimization resources
         .insert_resource(ChunkOctree::default())
         .insert_resource(VisibleChunks::default())
-        // Occlusion culling disabled by default — BFS + octree are not yet consumed
-        // by apply_visibility_culling_system (see TODO there). Disable to avoid
-        // wasting ~1-2ms every 100ms on BFS traversal with no effect.
+        .insert_resource(EnclosureState::default())
+        .insert_resource(EnclosureOcclusionStats::default())
+        // Enclosure detection enables this at runtime only when the player is indoors or underground.
         .insert_resource(OcclusionConfig {
             enabled: false,
             ..default()
@@ -338,8 +342,11 @@ impl Plugin for VoxelPlugin {
             (
                 // Stage 1: Pull newly-generated chunks into VoxelWorld
                 poll_chunk_generation_tasks,
+                update_enclosure_state.after(poll_chunk_generation_tasks),
+                sync_occlusion_config_from_enclosure.after(update_enclosure_state),
+                toggle_enclosure_culling,
                 // Stage 2: Face visibility + GPU detection (independent resources, can be parallel)
-                update_chunk_face_visibility_system.after(poll_chunk_generation_tasks),
+                update_chunk_face_visibility_system.after(sync_occlusion_config_from_enclosure),
                 adjust_lod_for_integrated_gpu.after(poll_chunk_generation_tasks),
                 // Stage 3: Octree + BFS (both Res<VoxelWorld>, can be parallel)
                 update_octree_system.after(update_chunk_face_visibility_system),
@@ -1357,32 +1364,47 @@ fn update_octree_system(
     }
 }
 
-/// Applies visibility culling to chunks based on octree frustum + BFS occlusion.
-///
-/// NOTE: Currently disabled - the BFS occlusion needs more work to avoid
-/// culling visible terrain in open areas. The infrastructure (face visibility,
-/// octree, BFS) is in place for future use in caves/enclosed areas.
-///
-/// Chunks that are:
-/// 1. Outside the camera frustum (octree test), OR
-/// 2. Occluded by solid geometry (BFS test)
-/// are marked as force-culled to skip rendering.
-#[allow(dead_code)]
-fn apply_visibility_culling_system(
-    _octree: Res<ChunkOctree>,
-    _visible_chunks: Res<VisibleChunks>,
-    _camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
-    _world: Res<VoxelWorld>,
-    _config: Res<OcclusionConfig>,
-    _gen_state: Res<ChunkGenerationState>,
+/// Applies enclosure-only visibility culling to terrain chunk meshes.
+pub fn apply_visibility_culling_system(
+    config: Res<OcclusionConfig>,
+    visible_chunks: Res<VisibleChunks>,
+    mut stats: ResMut<EnclosureOcclusionStats>,
+    mut chunk_meshes: Query<(&ChunkMesh, &mut Visibility)>,
+    mut was_enabled: Local<bool>,
 ) {
-    // DISABLED: Occlusion culling is too aggressive for open terrain.
-    // It culls terrain chunks while leaving props visible, causing floating objects.
-    //
-    // TODO: Re-enable when:
-    // 1. BFS considers distance-based LOD thresholds
-    // 2. Props are properly tied to terrain chunk visibility
-    // 3. Occlusion is only applied in enclosed areas (caves, buildings)
+    if !config.enabled {
+        if *was_enabled {
+            for (_, mut visibility) in &mut chunk_meshes {
+                if *visibility == Visibility::Hidden {
+                    *visibility = Visibility::Inherited;
+                }
+            }
+            stats.hidden_chunks = 0;
+            stats.total_chunks = 0;
+            *was_enabled = false;
+        }
+        return;
+    }
+
+    *was_enabled = true;
+    stats.hidden_chunks = 0;
+    stats.total_chunks = 0;
+
+    for (chunk_mesh, mut visibility) in &mut chunk_meshes {
+        let is_visible = visible_chunks.is_visible(chunk_mesh.chunk_position);
+        let target = if is_visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != target {
+            *visibility = target;
+        }
+        stats.total_chunks += 1;
+        if !is_visible {
+            stats.hidden_chunks += 1;
+        }
+    }
 }
 
 // =============================================================================

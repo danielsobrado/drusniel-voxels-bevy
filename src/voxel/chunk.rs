@@ -187,7 +187,6 @@ impl LodLevel {
     }
 }
 
-
 pub struct Chunk {
     voxels: [VoxelType; CHUNK_VOLUME],
     dirty: bool,

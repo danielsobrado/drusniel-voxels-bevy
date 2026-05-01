@@ -9,18 +9,31 @@
 //! - Dungeon structure generation
 
 use crate::constants::{
-    // Terrain generation (fallbacks for biomes/caves/trees)
-    TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
-    WATER_LEVEL, BEACH_HEIGHT_OFFSET,
-    // Biomes
-    BIOME_SANDY_THRESHOLD, BIOME_ROCKY_THRESHOLD, BIOME_ROCKY_DETAIL_THRESHOLD,
-    BIOME_CLAY_MIN, BIOME_CLAY_MAX, BIOME_CLAY_DETAIL_THRESHOLD,
-    // Trees
-    TREE_SPAWN_THRESHOLD, TREE_MIN_HEIGHT, TREE_HEIGHT_VARIANCE, TREE_LEAF_CHECK_RADIUS, TREE_LEAF_RADIUS,
-    // Caves
-    CAVE_MIN_Y, CAVE_MAX_Y, CAVE_SURFACE_OFFSET, MOUNTAIN_THRESHOLD,
+    BEACH_HEIGHT_OFFSET,
     // Bedrock
     BEDROCK_DEPTH,
+    BIOME_CLAY_DETAIL_THRESHOLD,
+    BIOME_CLAY_MAX,
+    BIOME_CLAY_MIN,
+    BIOME_ROCKY_DETAIL_THRESHOLD,
+    BIOME_ROCKY_THRESHOLD,
+    // Biomes
+    BIOME_SANDY_THRESHOLD,
+    CAVE_MAX_Y,
+    // Caves
+    CAVE_MIN_Y,
+    CAVE_SURFACE_OFFSET,
+    MOUNTAIN_THRESHOLD,
+    // Terrain generation (fallbacks for biomes/caves/trees)
+    TERRAIN_BIOME_FREQUENCY,
+    TERRAIN_CAVE_FREQUENCY,
+    TREE_HEIGHT_VARIANCE,
+    TREE_LEAF_CHECK_RADIUS,
+    TREE_LEAF_RADIUS,
+    TREE_MIN_HEIGHT,
+    // Trees
+    TREE_SPAWN_THRESHOLD,
+    WATER_LEVEL,
 };
 use crate::terrain::generation::config::TerrainConfig;
 use crate::voxel::types::VoxelType;
@@ -249,7 +262,15 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     }
 
     /// Configurable fBm noise using NoiseLayer parameters.
-    fn fbm_configurable(&self, x: f32, z: f32, scale: f32, octaves: u32, persistence: f32, lacunarity: f32) -> f32 {
+    fn fbm_configurable(
+        &self,
+        x: f32,
+        z: f32,
+        scale: f32,
+        octaves: u32,
+        persistence: f32,
+        lacunarity: f32,
+    ) -> f32 {
         let mut value = 0.0;
         let mut amplitude = 1.0;
         let mut frequency = scale;
@@ -275,7 +296,10 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         for i in 0..cfg.octaves {
             // Offset each octave slightly for variation
-            let sample = self.noise.sample_2d(x * frequency + i as f32 * 100.0, z * frequency + i as f32 * 100.0);
+            let sample = self.noise.sample_2d(
+                x * frequency + i as f32 * 100.0,
+                z * frequency + i as f32 * 100.0,
+            );
 
             // Ridge transformation: 1.0 - |noise * 2 - 1|, then power for sharpness
             let centered = sample * 2.0 - 1.0; // Convert [0,1] to [-1,1]
@@ -308,26 +332,16 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let warped_z = z + warp_z;
 
         // Main river pattern using sine-based channel
-        let river_noise = self.fbm_configurable(
-            warped_x, warped_z,
-            cfg.scale,
-            cfg.octaves,
-            0.5,
-            2.0,
-        );
+        let river_noise =
+            self.fbm_configurable(warped_x, warped_z, cfg.scale, cfg.octaves, 0.5, 2.0);
 
         // Convert to river presence: values near 0.5 are river centers
         let river_dist = (river_noise - 0.5).abs() * 2.0; // Distance from river center [0,1]
         let main_river = (1.0 - river_dist / (cfg.width * 0.01)).max(0.0);
 
         // Tributary rivers (smaller, more frequent)
-        let trib_noise = self.fbm_configurable(
-            x + 1000.0, z + 1000.0,
-            cfg.tributary_scale,
-            2,
-            0.5,
-            2.0,
-        );
+        let trib_noise =
+            self.fbm_configurable(x + 1000.0, z + 1000.0, cfg.tributary_scale, 2, 0.5, 2.0);
         let trib_dist = (trib_noise - 0.5).abs() * 2.0;
         let tributary = (1.0 - trib_dist / (cfg.tributary_width * 0.01)).max(0.0);
 
@@ -354,7 +368,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Large-scale continent shape
         let continent = self.fbm_configurable(
-            x, z,
+            x,
+            z,
             cfg.continent.scale,
             cfg.continent.octaves,
             cfg.continent.persistence,
@@ -363,7 +378,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Mountain mask - determines where mountains appear (using lower frequency)
         let mountain_mask = self.fbm_configurable(
-            x, z,
+            x,
+            z,
             cfg.mountains.scale * 0.25, // Lower frequency for mountain regions
             2,
             0.5,
@@ -376,7 +392,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Hills everywhere
         let hills = self.fbm_configurable(
-            x, z,
+            x,
+            z,
             cfg.hills.scale,
             cfg.hills.octaves,
             cfg.hills.persistence,
@@ -385,7 +402,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Fine detail
         let detail = self.fbm_configurable(
-            x, z,
+            x,
+            z,
             cfg.detail.scale,
             cfg.detail.octaves,
             cfg.detail.persistence,
@@ -415,14 +433,22 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let x = world_x as f32;
         let z = world_z as f32;
 
-        let biome_noise = self.noise.fbm_2d(x * TERRAIN_BIOME_FREQUENCY, z * TERRAIN_BIOME_FREQUENCY, 2);
-        let detail_noise = self.noise.fbm_2d(x * TERRAIN_CAVE_FREQUENCY, z * TERRAIN_CAVE_FREQUENCY, 2);
+        let biome_noise =
+            self.noise
+                .fbm_2d(x * TERRAIN_BIOME_FREQUENCY, z * TERRAIN_BIOME_FREQUENCY, 2);
+        let detail_noise =
+            self.noise
+                .fbm_2d(x * TERRAIN_CAVE_FREQUENCY, z * TERRAIN_CAVE_FREQUENCY, 2);
 
         if biome_noise < BIOME_SANDY_THRESHOLD {
             Biome::Sandy
-        } else if biome_noise > BIOME_ROCKY_THRESHOLD && detail_noise > BIOME_ROCKY_DETAIL_THRESHOLD {
+        } else if biome_noise > BIOME_ROCKY_THRESHOLD && detail_noise > BIOME_ROCKY_DETAIL_THRESHOLD
+        {
             Biome::Rocky
-        } else if biome_noise > BIOME_CLAY_MIN && biome_noise < BIOME_CLAY_MAX && detail_noise > BIOME_CLAY_DETAIL_THRESHOLD {
+        } else if biome_noise > BIOME_CLAY_MIN
+            && biome_noise < BIOME_CLAY_MAX
+            && detail_noise > BIOME_CLAY_DETAIL_THRESHOLD
+        {
             Biome::Clay
         } else {
             Biome::Grassland
@@ -478,7 +504,13 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     }
 
     /// Checks if a position is part of a tree trunk.
-    pub fn is_tree_trunk(&self, world_x: i32, world_y: i32, world_z: i32, terrain_height: i32) -> bool {
+    pub fn is_tree_trunk(
+        &self,
+        world_x: i32,
+        world_y: i32,
+        world_z: i32,
+        terrain_height: i32,
+    ) -> bool {
         if !self.should_spawn_tree(world_x, world_z, terrain_height) {
             return false;
         }
@@ -639,7 +671,6 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     }
 }
 
-
 // =============================================================================
 // Utility Functions
 // =============================================================================
@@ -665,7 +696,11 @@ mod tests {
         for x in -10..10 {
             for z in -10..10 {
                 let value = noise.sample_2d(x as f32, z as f32);
-                assert!(value >= 0.0 && value <= 1.0, "Noise value {} out of range", value);
+                assert!(
+                    value >= 0.0 && value <= 1.0,
+                    "Noise value {} out of range",
+                    value
+                );
             }
         }
     }
@@ -705,5 +740,4 @@ mod tests {
             assert!(count > 0, "Biome {} never appeared in test area", i);
         }
     }
-
 }

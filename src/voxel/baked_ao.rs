@@ -94,9 +94,7 @@ where
     for i in 0..samples {
         let angle = (i as f32 / samples as f32) * std::f32::consts::TAU;
         let (tangent, bitangent) = arbitrary_tangent_basis(normal);
-        let sample_dir = (normal
-            + tangent * angle.cos() * 0.7
-            + bitangent * angle.sin() * 0.7)
+        let sample_dir = (normal + tangent * angle.cos() * 0.7 + bitangent * angle.sin() * 0.7)
             .normalize_or_zero();
 
         let sample_pos = vertex_pos + sample_dir * sample_radius;
@@ -112,7 +110,11 @@ where
 }
 
 fn arbitrary_tangent_basis(normal: Vec3) -> (Vec3, Vec3) {
-    let up = if normal.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+    let up = if normal.y.abs() < 0.9 {
+        Vec3::Y
+    } else {
+        Vec3::X
+    };
     let tangent = normal.cross(up).normalize_or_zero();
     let bitangent = normal.cross(tangent);
     (tangent, bitangent)

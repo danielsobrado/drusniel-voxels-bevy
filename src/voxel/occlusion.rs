@@ -42,8 +42,14 @@ impl VisibleChunks {
 pub struct OcclusionConfig {
     /// Enable/disable occlusion culling.
     pub enabled: bool,
+    /// Keep occlusion restricted to detected enclosed spaces.
+    pub enclosure_gating_enabled: bool,
+    /// Force-disable enclosure culling for debug comparisons.
+    pub force_disabled: bool,
     /// Maximum BFS depth (limits computation per frame).
     pub max_depth: u32,
+    /// Maximum chunk Manhattan distance from the camera chunk.
+    pub max_chunk_distance: i32,
     /// How often to update visibility (in seconds).
     pub update_interval: f32,
 }
@@ -52,7 +58,10 @@ impl Default for OcclusionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_depth: 50,        // Covers ~800 units at chunk size 16
+            enclosure_gating_enabled: true,
+            force_disabled: false,
+            max_depth: 50, // Covers ~800 units at chunk size 16
+            max_chunk_distance: 8,
             update_interval: 0.1, // 10Hz update
         }
     }
@@ -111,6 +120,9 @@ pub fn update_visible_chunks_system(
         visible.dirty = true;
         visible.camera_chunk = camera_chunk;
     }
+    if visible.chunks.is_empty() {
+        visible.dirty = true;
+    }
 
     if !visible.dirty {
         return;
@@ -118,11 +130,21 @@ pub fn update_visible_chunks_system(
     visible.dirty = false;
 
     // Perform BFS from camera chunk
-    visible.chunks = bfs_visible_chunks(&world, camera_chunk, config.max_depth);
+    visible.chunks = bfs_visible_chunks(
+        &world,
+        camera_chunk,
+        config.max_depth,
+        config.max_chunk_distance,
+    );
 }
 
 /// BFS traversal through chunk face connectivity graph.
-fn bfs_visible_chunks(world: &VoxelWorld, start: IVec3, max_depth: u32) -> HashSet<IVec3> {
+fn bfs_visible_chunks(
+    world: &VoxelWorld,
+    start: IVec3,
+    max_depth: u32,
+    max_chunk_distance: i32,
+) -> HashSet<IVec3> {
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
 
@@ -159,6 +181,10 @@ fn bfs_visible_chunks(world: &VoxelWorld, start: IVec3, max_depth: u32) -> HashS
             if visited.contains(&neighbor_pos) {
                 continue;
             }
+            // BFS terminates at N chunks to keep cost bounded; enclosure gating matches cave draw-distance.
+            if chunk_manhattan(neighbor_pos, start) > max_chunk_distance {
+                continue;
+            }
 
             // Check if we can see through from entry face to exit face
             let can_propagate = match entry.entry_face {
@@ -177,6 +203,11 @@ fn bfs_visible_chunks(world: &VoxelWorld, start: IVec3, max_depth: u32) -> HashS
     }
 
     visited
+}
+
+fn chunk_manhattan(a: IVec3, b: IVec3) -> i32 {
+    let delta = (a - b).abs();
+    delta.x + delta.y + delta.z
 }
 
 /// Direction vector, exit face from current chunk, entry face into neighbor chunk.

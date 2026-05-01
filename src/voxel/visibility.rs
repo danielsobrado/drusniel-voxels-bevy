@@ -112,13 +112,26 @@ fn flood_fill_reachable_faces(
         }
 
         // Expand to 6-connected neighbors
-        for (dx, dy, dz) in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)] {
+        for (dx, dy, dz) in [
+            (-1, 0, 0),
+            (1, 0, 0),
+            (0, -1, 0),
+            (0, 1, 0),
+            (0, 0, -1),
+            (0, 0, 1),
+        ] {
             let nx = pos.x as i32 + dx;
             let ny = pos.y as i32 + dy;
             let nz = pos.z as i32 + dz;
 
             // Bounds check
-            if nx < 0 || nx >= CHUNK_SIZE_I32 || ny < 0 || ny >= CHUNK_SIZE_I32 || nz < 0 || nz >= CHUNK_SIZE_I32 {
+            if nx < 0
+                || nx >= CHUNK_SIZE_I32
+                || ny < 0
+                || ny >= CHUNK_SIZE_I32
+                || nz < 0
+                || nz >= CHUNK_SIZE_I32
+            {
                 continue;
             }
 

@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::hash::Hash;
-use serde::{Serialize, Deserialize};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Default, Debug, Serialize, Deserialize)]
 #[repr(u8)]
@@ -60,4 +60,3 @@ impl Voxel for VoxelType {
         }
     }
 }
-

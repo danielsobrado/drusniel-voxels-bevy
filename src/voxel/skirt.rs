@@ -192,8 +192,10 @@ pub fn extract_boundary_edges(
 
                 let v0_pos = Vec3::from_array(positions.get(i0).copied().unwrap_or([0.0; 3]));
                 let v1_pos = Vec3::from_array(positions.get(i1).copied().unwrap_or([0.0; 3]));
-                let v0_normal = Vec3::from_array(normals.get(i0).copied().unwrap_or([0.0, 1.0, 0.0]));
-                let v1_normal = Vec3::from_array(normals.get(i1).copied().unwrap_or([0.0, 1.0, 0.0]));
+                let v0_normal =
+                    Vec3::from_array(normals.get(i0).copied().unwrap_or([0.0, 1.0, 0.0]));
+                let v1_normal =
+                    Vec3::from_array(normals.get(i1).copied().unwrap_or([0.0, 1.0, 0.0]));
                 let v0_weights = *material_weights.get(i0).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
                 let v1_weights = *material_weights.get(i1).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
 
@@ -297,8 +299,10 @@ pub fn generate_skirts(
         let bot1 = top1 + drop;
 
         let blend_factor = 0.3;
-        let blended_normal0 = (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
-        let blended_normal1 = (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
+        let blended_normal0 =
+            (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
+        let blended_normal1 =
+            (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
 
         positions.push(top0.to_array());
         normals.push(blended_normal0.to_array());

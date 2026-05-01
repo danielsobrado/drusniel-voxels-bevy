@@ -16,8 +16,11 @@ use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
+use crate::rendering::water_reflection::WaterReflectionStatus;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
+use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
+use crate::voxel::occlusion::OcclusionConfig;
 use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
@@ -64,6 +67,10 @@ pub struct DebugOverlayParams<'w> {
     pub timing_recorder: Res<'w, AreaTimingRecorder>,
     pub timing_capture: Res<'w, AreaTimingCapture>,
     pub shadow_stats: Res<'w, ShadowCullingStats>,
+    pub reflection_status: Option<Res<'w, WaterReflectionStatus>>,
+    pub enclosure: Res<'w, EnclosureState>,
+    pub occlusion_config: Res<'w, OcclusionConfig>,
+    pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
 }
 
 #[derive(SystemParam)]
@@ -467,6 +474,13 @@ pub fn update_debug_overlay(
         .unwrap_or_else(|| "N/A".to_string());
     text_content.push_str(&format!("FPS: {}\n", fps));
     append_area_timing_table(&mut text_content, &diagnostics, &debug.timing_recorder);
+    append_reflection_status(&mut text_content, debug.reflection_status.as_deref());
+    append_enclosure_status(
+        &mut text_content,
+        &debug.enclosure,
+        &debug.occlusion_config,
+        &debug.enclosure_stats,
+    );
 
     // Entity count with breakdown
     let entity_count = all_entities.iter().count();
@@ -1084,6 +1098,49 @@ fn append_area_timing_table(
     }
 }
 
+fn append_reflection_status(text_content: &mut String, status: Option<&WaterReflectionStatus>) {
+    let Some(status) = status else {
+        text_content.push_str("Reflection: OFF (disabled) scale 0.00 hz 0\n");
+        return;
+    };
+    text_content.push_str(&format!(
+        "Reflection: {} ({}) scale {:.2} hz {:.0}\n",
+        if status.active { "ON" } else { "OFF" },
+        status.reason.as_str(),
+        status.resolution_scale,
+        status.effective_hz,
+    ));
+}
+
+fn append_enclosure_status(
+    text_content: &mut String,
+    enclosure: &EnclosureState,
+    config: &OcclusionConfig,
+    stats: &EnclosureOcclusionStats,
+) {
+    let mode = match enclosure.mode {
+        EnclosureMode::Open => "Open",
+        EnclosureMode::Enclosed => "Enclosed",
+    };
+    let suffix = if config.force_disabled {
+        " force-off"
+    } else {
+        ""
+    };
+    text_content.push_str(&format!(
+        "Enclosure: {} ({:.1}s{})\n",
+        mode, enclosure.held_secs, suffix
+    ));
+    text_content.push_str(&format!(
+        "Culled chunks: {} / {}\n",
+        stats.hidden_chunks, stats.total_chunks
+    ));
+    text_content.push_str(&format!(
+        "Culled props: {} / {}\n",
+        stats.hidden_props, stats.total_props
+    ));
+}
+
 /// Append multiplayer debug info to text content.
 fn append_multiplayer_debug(text_content: &mut String, network: &NetworkSession) {
     text_content.push_str("\n[Multiplayer]\n");
@@ -1131,6 +1188,7 @@ fn append_control_hints(
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[F2] Dump performance CSV");
+    text_content.push_str("\n[F11] Toggle enclosure culling");
     text_content.push_str("\n[G] Detailed log");
     text_content.push_str(&format!(
         "\n[Shift+M] Edit mode: {}",
