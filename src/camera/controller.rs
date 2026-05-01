@@ -1,4 +1,4 @@
-use crate::atmosphere::{fog_camera_components, AtmosphereConfig, FogConfig};
+use crate::atmosphere::{AtmosphereConfig, FogConfig, fog_camera_components};
 use crate::camera::config::{CameraConfig, CameraExposureConfig};
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
@@ -127,7 +127,7 @@ pub fn spawn_camera(
     if !native_atmosphere_enabled {
         camera.insert(Skybox {
             image: skybox_image,
-            brightness: 800.0,  // Lower skybox brightness
+            brightness: 800.0, // Lower skybox brightness
             rotation: Quat::IDENTITY,
         });
     } else {
@@ -138,15 +138,15 @@ pub fn spawn_camera(
     // end up looking dark due to missing exposure/tonemapping.
     camera.insert((
         Hdr,
-        Tonemapping::AcesFitted,  // v0.3 tonemapping for natural colors
+        Tonemapping::AcesFitted, // v0.3 tonemapping for natural colors
         DebandDither::Enabled,
         ColorGrading {
             global: ColorGradingGlobal {
-                exposure: 0.0,           // Neutral exposure (v0.3 style)
-                temperature: 0.0,        // Neutral temperature
-                tint: 0.0,               // Neutral tint
+                exposure: 0.0,    // Neutral exposure (v0.3 style)
+                temperature: 0.0, // Neutral temperature
+                tint: 0.0,        // Neutral tint
                 hue: 0.0,
-                post_saturation: 1.0,    // Neutral saturation
+                post_saturation: 1.0, // Neutral saturation
                 ..default()
             },
             shadows: ColorGradingSection {
@@ -319,9 +319,7 @@ pub fn update_ray_tracing_on_camera(
         match (should_enable, current.is_some()) {
             (true, false) => {}
             (false, true) => {
-                commands
-                    .entity(entity)
-                    .remove::<ScreenSpaceReflections>();
+                commands.entity(entity).remove::<ScreenSpaceReflections>();
             }
             _ => {}
         }
@@ -419,9 +417,10 @@ pub fn player_camera_system(
         for ev in mouse_motion.read() {
             camera.yaw -= ev.delta.x * camera.sensitivity;
             camera.pitch -= ev.delta.y * camera.sensitivity;
-            camera.pitch = camera
-                .pitch
-                .clamp(camera_config.movement.pitch_min, camera_config.movement.pitch_max);
+            camera.pitch = camera.pitch.clamp(
+                camera_config.movement.pitch_min,
+                camera_config.movement.pitch_max,
+            );
         }
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, 0.0);
@@ -553,10 +552,10 @@ pub fn apply_visual_settings(
         color_grading.global.exposure = visual_settings.exposure;
         color_grading.global.temperature = visual_settings.temperature;
         color_grading.global.post_saturation = visual_settings.saturation;
-        
+
         color_grading.midtones.gamma = visual_settings.gamma;
         color_grading.highlights.gain = visual_settings.highlights_gain;
-        
+
         // Apply skybox brightness
         skybox.brightness = visual_settings.skybox_brightness;
     }

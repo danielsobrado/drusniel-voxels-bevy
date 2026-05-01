@@ -1,30 +1,33 @@
 use crate::building::{BuildingPieceRegistry, BuildingState, PieceTypeId};
 use crate::camera::controller::PlayerCamera;
 use crate::chat::ChatState;
+use crate::interaction::radial_menu::{PaletteDisplayMode, RadialMenuRoot, RadialMenuState};
+use crate::interaction::{DeleteMode, DragState, EditMode, TargetedBlock};
 use crate::menu::PauseMenuState;
 use crate::props::{Prop, PropAssets, PropConfig, PropType};
+use crate::voxel::types::Voxel;
 use crate::voxel::types::VoxelType;
-use bevy::prelude::*;
+use crate::voxel::world::VoxelWorld;
+use bevy::ecs::hierarchy::ChildOf;
 use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::ui::{
-    AlignItems, FlexDirection, JustifyContent, Overflow,
-    PositionType, Val,
-};
+use bevy::prelude::*;
+use bevy::ui::{AlignItems, FlexDirection, JustifyContent, Overflow, PositionType, Val};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use crate::interaction::{DeleteMode, DragState, EditMode, TargetedBlock};
-use crate::interaction::radial_menu::{RadialMenuRoot, RadialMenuState, PaletteDisplayMode};
-use crate::voxel::types::Voxel;
-use bevy::ecs::hierarchy::ChildOf;
-use crate::voxel::world::VoxelWorld;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum PlacementSelection {
     Voxel(VoxelType),
-    Prop { id: String, prop_type: PropType },
+    Prop {
+        id: String,
+        prop_type: PropType,
+    },
     /// Building piece from the snap-based building system.
-    BuildingPiece { piece_id: PieceTypeId, name: String },
+    BuildingPiece {
+        piece_id: PieceTypeId,
+        name: String,
+    },
 }
 
 #[derive(Clone)]
@@ -142,10 +145,7 @@ fn set_edit_mode_state(
     if !enabled {
         if let Some(dragged) = drag_state.dragged_block.take() {
             world.set_voxel(dragged.original_position, dragged.block_type);
-            crate::interaction::editing::mark_neighbors_dirty(
-                world,
-                dragged.original_position,
-            );
+            crate::interaction::editing::mark_neighbors_dirty(world, dragged.original_position);
         }
         drag_state.rotation_degrees = 0.0;
     }
@@ -1059,4 +1059,3 @@ pub fn sync_building_state_from_palette(
         }
     }
 }
-

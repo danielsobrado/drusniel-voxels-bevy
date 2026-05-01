@@ -3,11 +3,11 @@
 //! This module handles raycasting from the camera to determine which
 //! block or entity the player is looking at.
 
-use bevy::prelude::*;
-use crate::constants::{INTERACTION_RANGE, RAY_STEP, ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS};
+use crate::constants::{ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS, INTERACTION_RANGE, RAY_STEP};
 use crate::props::Prop;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use bevy::prelude::*;
 
 /// Resource tracking the currently targeted block.
 #[derive(Resource, Default)]
@@ -117,9 +117,7 @@ pub fn update_targeted_block(
 
 /// System to update the targeted entity based on camera look direction.
 /// (Empty now as NPCs are removed)
-pub fn update_targeted_entity(
-    mut targeted: ResMut<TargetedEntity>,
-) {
+pub fn update_targeted_entity(mut targeted: ResMut<TargetedEntity>) {
     targeted.entity = None;
     targeted.distance = f32::MAX;
 }

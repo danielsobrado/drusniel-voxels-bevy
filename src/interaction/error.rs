@@ -11,28 +11,19 @@ use thiserror::Error;
 pub enum PlacementError {
     /// Attempted to place a block in an invalid position.
     #[error("Cannot place block at {position:?}: {reason}")]
-    InvalidPosition {
-        position: IVec3,
-        reason: String,
-    },
+    InvalidPosition { position: IVec3, reason: String },
 
     /// Attempted to place a block where the player is standing.
     #[error("Cannot place block at player position {position:?}")]
-    PlayerBlocking {
-        position: IVec3,
-    },
+    PlayerBlocking { position: IVec3 },
 
     /// Attempted to place a block in a solid space.
     #[error("Position {position:?} is already occupied by a solid block")]
-    PositionOccupied {
-        position: IVec3,
-    },
+    PositionOccupied { position: IVec3 },
 
     /// Attempted to place a block outside world bounds.
     #[error("Position {position:?} is outside world bounds")]
-    OutOfBounds {
-        position: IVec3,
-    },
+    OutOfBounds { position: IVec3 },
 
     /// No valid target surface to place on.
     #[error("No valid placement surface found")]
@@ -44,9 +35,7 @@ pub enum PlacementError {
 pub enum BreakError {
     /// Attempted to break an unbreakable block (bedrock).
     #[error("Cannot break bedrock at {position:?}")]
-    Unbreakable {
-        position: IVec3,
-    },
+    Unbreakable { position: IVec3 },
 
     /// No block targeted for breaking.
     #[error("No block targeted")]
@@ -54,9 +43,7 @@ pub enum BreakError {
 
     /// Block is out of interaction range.
     #[error("Block at {position:?} is out of range")]
-    OutOfRange {
-        position: IVec3,
-    },
+    OutOfRange { position: IVec3 },
 }
 
 /// Errors that can occur during entity combat operations.
@@ -88,16 +75,11 @@ pub enum DragError {
 
     /// Invalid drop position.
     #[error("Cannot drop block at {position:?}: {reason}")]
-    InvalidDropPosition {
-        position: IVec3,
-        reason: String,
-    },
+    InvalidDropPosition { position: IVec3, reason: String },
 
     /// Block fell through the world.
     #[error("Block would fall through the world at {position:?}")]
-    NoGround {
-        position: IVec3,
-    },
+    NoGround { position: IVec3 },
 }
 
 /// Resource to track the last gameplay error for UI display.
@@ -157,7 +139,10 @@ mod tests {
     #[test]
     fn combat_error_variants() {
         assert_eq!(CombatError::EntityNotFound.to_string(), "Entity not found");
-        assert_eq!(CombatError::AlreadyDead.to_string(), "Entity is already dead");
+        assert_eq!(
+            CombatError::AlreadyDead.to_string(),
+            "Entity is already dead"
+        );
     }
 
     #[test]

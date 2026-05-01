@@ -1,6 +1,6 @@
-use bevy::prelude::*;
+use super::types::{TerrainTool, TerrainToolConfig, TerrainToolState};
 use bevy::input::mouse::MouseWheel;
-use super::types::{TerrainTool, TerrainToolState, TerrainToolConfig};
+use bevy::prelude::*;
 
 pub fn handle_tool_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -18,24 +18,20 @@ pub fn handle_tool_input(
     if keys.pressed(KeyCode::ShiftLeft) {
         for event in scroll.read() {
             let delta = event.y.signum() * config.radius_step;
-            state.radius = (state.radius + delta)
-                .clamp(config.min_radius, config.max_radius);
+            state.radius = (state.radius + delta).clamp(config.min_radius, config.max_radius);
         }
     }
     // Adjust strength with scroll + ctrl
     else if keys.pressed(KeyCode::ControlLeft) {
         for event in scroll.read() {
             let delta = event.y.signum() * config.strength_step;
-            state.strength = (state.strength + delta)
-                .clamp(config.min_strength, config.max_strength);
+            state.strength =
+                (state.strength + delta).clamp(config.min_strength, config.max_strength);
         }
     }
 }
 
-pub fn select_terrain_tool(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<TerrainToolState>,
-) {
+pub fn select_terrain_tool(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<TerrainToolState>) {
     // T key toggles terraforming mode
     if keys.just_pressed(KeyCode::KeyT) {
         state.terraforming_mode = !state.terraforming_mode;

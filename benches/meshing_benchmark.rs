@@ -1,11 +1,11 @@
 //! Benchmarks for chunk meshing performance.
 
 use bevy::math::{IVec3, UVec3};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use voxel_builder::constants::CHUNK_SIZE;
 use voxel_builder::voxel::chunk::Chunk;
-use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::meshing::MeshData;
+use voxel_builder::voxel::types::VoxelType;
 
 /// Create a chunk with a checkerboard pattern for stress testing.
 fn create_checkerboard_chunk() -> Chunk {
@@ -14,7 +14,11 @@ fn create_checkerboard_chunk() -> Chunk {
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 let is_solid = (x + y + z) % 2 == 0;
-                let voxel = if is_solid { VoxelType::Rock } else { VoxelType::Air };
+                let voxel = if is_solid {
+                    VoxelType::Rock
+                } else {
+                    VoxelType::Air
+                };
                 chunk.set(UVec3::new(x as u32, y as u32, z as u32), voxel);
             }
         }
@@ -67,27 +71,19 @@ fn benchmark_chunk_creation(c: &mut Criterion) {
     let mut group = c.benchmark_group("chunk_creation");
 
     group.bench_function("empty_chunk", |b| {
-        b.iter(|| {
-            black_box(Chunk::new(IVec3::ZERO))
-        })
+        b.iter(|| black_box(Chunk::new(IVec3::ZERO)))
     });
 
     group.bench_function("solid_chunk", |b| {
-        b.iter(|| {
-            black_box(create_solid_chunk())
-        })
+        b.iter(|| black_box(create_solid_chunk()))
     });
 
     group.bench_function("terrain_chunk", |b| {
-        b.iter(|| {
-            black_box(create_terrain_chunk())
-        })
+        b.iter(|| black_box(create_terrain_chunk()))
     });
 
     group.bench_function("checkerboard_chunk", |b| {
-        b.iter(|| {
-            black_box(create_checkerboard_chunk())
-        })
+        b.iter(|| black_box(create_checkerboard_chunk()))
     });
 
     group.finish();
@@ -99,9 +95,7 @@ fn benchmark_voxel_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("voxel_access");
 
     group.bench_function("single_get", |b| {
-        b.iter(|| {
-            black_box(chunk.get(UVec3::new(8, 8, 8)))
-        })
+        b.iter(|| black_box(chunk.get(UVec3::new(8, 8, 8))))
     });
 
     group.bench_function("iterate_all", |b| {
@@ -157,11 +151,7 @@ fn benchmark_serialization(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("serialization");
 
-    group.bench_function("chunk_to_data", |b| {
-        b.iter(|| {
-            black_box(chunk.to_data())
-        })
-    });
+    group.bench_function("chunk_to_data", |b| b.iter(|| black_box(chunk.to_data())));
 
     group.bench_function("chunk_from_data", |b| {
         b.iter(|| {
@@ -171,9 +161,7 @@ fn benchmark_serialization(c: &mut Criterion) {
     });
 
     group.bench_function("bincode_serialize", |b| {
-        b.iter(|| {
-            black_box(bincode::serialize(&data).unwrap())
-        })
+        b.iter(|| black_box(bincode::serialize(&data).unwrap()))
     });
 
     let bytes = bincode::serialize(&data).unwrap();
@@ -191,17 +179,11 @@ fn benchmark_serialization(c: &mut Criterion) {
 fn benchmark_mesh_data(c: &mut Criterion) {
     let mut group = c.benchmark_group("mesh_data");
 
-    group.bench_function("create_empty", |b| {
-        b.iter(|| {
-            black_box(MeshData::new())
-        })
-    });
+    group.bench_function("create_empty", |b| b.iter(|| black_box(MeshData::new())));
 
     group.bench_function("is_empty_check", |b| {
         let mesh = MeshData::new();
-        b.iter(|| {
-            black_box(mesh.is_empty())
-        })
+        b.iter(|| black_box(mesh.is_empty()))
     });
 
     group.finish();

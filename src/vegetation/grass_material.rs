@@ -1,7 +1,9 @@
 use bevy::{
-    prelude::*,
     pbr::{Material, MaterialPipeline, MaterialPipelineKey},
-    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
+    prelude::*,
+    render::render_resource::{
+        AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    },
 };
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
@@ -15,7 +17,7 @@ pub struct GrassMaterialUniform {
     pub tip_color: LinearRgba,
     pub fog_color: LinearRgba,
     pub sun_direction: Vec4,
-    
+
     pub wind_strength: f32,
     pub wind_speed: f32,
     pub wind_scale: f32,
@@ -42,14 +44,20 @@ pub struct GrassMaterial {
 }
 
 impl GrassMaterial {
-    pub fn new(base_color: LinearRgba, tip_color: LinearRgba, wind_strength: f32, wind_speed: f32, wind_scale: f32) -> Self {
+    pub fn new(
+        base_color: LinearRgba,
+        tip_color: LinearRgba,
+        wind_strength: f32,
+        wind_speed: f32,
+        wind_scale: f32,
+    ) -> Self {
         Self {
             uniform_data: GrassMaterialUniform {
                 base_color,
                 tip_color,
                 fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
                 sun_direction: Vec4::new(0.3, 0.8, 0.4, 1.0),
-                
+
                 wind_strength,
                 wind_speed,
                 wind_scale,
@@ -69,7 +77,7 @@ impl GrassMaterial {
             },
         }
     }
-    
+
     /// Create a grass material with full customization
     pub fn with_settings(
         base_color: LinearRgba,
@@ -87,7 +95,7 @@ impl GrassMaterial {
                 tip_color,
                 fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
                 sun_direction: Vec4::new(0.3, 0.8, 0.4, 1.0),
-                
+
                 wind_strength,
                 wind_speed,
                 wind_scale,
@@ -119,7 +127,7 @@ impl Default for GrassMaterial {
                 tip_color: LinearRgba::new(0.95, 0.85, 0.45, 1.0),
                 fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0),
                 sun_direction: Vec4::new(0.3, 0.8, 0.4, 1.0),
-                
+
                 wind_strength: 0.3,
                 wind_speed: 1.5,
                 wind_scale: 0.1,

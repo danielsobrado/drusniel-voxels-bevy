@@ -9,9 +9,9 @@ pub mod atmosphere_integration;
 mod config;
 mod fog;
 
+pub use atmosphere_integration::{AtmosphereConfig, AtmosphereIntegrationPlugin};
 pub use config::{FogColorModifiers, FogConfig, FogPreset, ScreenGodRaysConfig};
 pub use fog::{
-    fog_camera_components, sun_volumetric_components, FogCamera, FogPlugin, FogUniforms,
-    GlobalFogVolume,
+    FogCamera, FogPlugin, FogUniforms, GlobalFogVolume, fog_camera_components,
+    sun_volumetric_components,
 };
-pub use atmosphere_integration::{AtmosphereIntegrationPlugin, AtmosphereConfig};

@@ -62,22 +62,40 @@ fn fully_solid_chunk_has_external_faces_only() {
                 // Check if this solid voxel has any air neighbors inside the chunk
                 if voxel == VoxelType::Rock {
                     // Check each neighbor direction, computing position only when in bounds
-                    if x > 0 && chunk.get(UVec3::new((x - 1) as u32, y as u32, z as u32)) == VoxelType::Air {
+                    if x > 0
+                        && chunk.get(UVec3::new((x - 1) as u32, y as u32, z as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
-                    if x < CHUNK_SIZE - 1 && chunk.get(UVec3::new((x + 1) as u32, y as u32, z as u32)) == VoxelType::Air {
+                    if x < CHUNK_SIZE - 1
+                        && chunk.get(UVec3::new((x + 1) as u32, y as u32, z as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
-                    if y > 0 && chunk.get(UVec3::new(x as u32, (y - 1) as u32, z as u32)) == VoxelType::Air {
+                    if y > 0
+                        && chunk.get(UVec3::new(x as u32, (y - 1) as u32, z as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
-                    if y < CHUNK_SIZE - 1 && chunk.get(UVec3::new(x as u32, (y + 1) as u32, z as u32)) == VoxelType::Air {
+                    if y < CHUNK_SIZE - 1
+                        && chunk.get(UVec3::new(x as u32, (y + 1) as u32, z as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
-                    if z > 0 && chunk.get(UVec3::new(x as u32, y as u32, (z - 1) as u32)) == VoxelType::Air {
+                    if z > 0
+                        && chunk.get(UVec3::new(x as u32, y as u32, (z - 1) as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
-                    if z < CHUNK_SIZE - 1 && chunk.get(UVec3::new(x as u32, y as u32, (z + 1) as u32)) == VoxelType::Air {
+                    if z < CHUNK_SIZE - 1
+                        && chunk.get(UVec3::new(x as u32, y as u32, (z + 1) as u32))
+                            == VoxelType::Air
+                    {
                         internal_air_neighbors += 1;
                     }
                 }
@@ -162,12 +180,12 @@ fn chunk_boundary_voxels_accessible() {
     // Set voxels at all boundaries
     let boundary_positions = [
         // Faces
-        UVec3::new(0, 8, 8),      // -X face
-        UVec3::new(max, 8, 8),    // +X face
-        UVec3::new(8, 0, 8),      // -Y face
-        UVec3::new(8, max, 8),    // +Y face
-        UVec3::new(8, 8, 0),      // -Z face
-        UVec3::new(8, 8, max),    // +Z face
+        UVec3::new(0, 8, 8),   // -X face
+        UVec3::new(max, 8, 8), // +X face
+        UVec3::new(8, 0, 8),   // -Y face
+        UVec3::new(8, max, 8), // +Y face
+        UVec3::new(8, 8, 0),   // -Z face
+        UVec3::new(8, 8, max), // +Z face
     ];
 
     for pos in boundary_positions {
@@ -211,10 +229,22 @@ fn different_voxel_types_have_different_atlas_indices() {
     let topsoil_index = VoxelType::TopSoil.atlas_index();
 
     // All solid types should have unique atlas indices
-    assert_ne!(rock_index, sand_index, "Rock and Sand should have different atlas indices");
-    assert_ne!(rock_index, subsoil_index, "Rock and SubSoil should have different atlas indices");
-    assert_ne!(sand_index, subsoil_index, "Sand and SubSoil should have different atlas indices");
-    assert_ne!(rock_index, topsoil_index, "Rock and TopSoil should have different atlas indices");
+    assert_ne!(
+        rock_index, sand_index,
+        "Rock and Sand should have different atlas indices"
+    );
+    assert_ne!(
+        rock_index, subsoil_index,
+        "Rock and SubSoil should have different atlas indices"
+    );
+    assert_ne!(
+        sand_index, subsoil_index,
+        "Sand and SubSoil should have different atlas indices"
+    );
+    assert_ne!(
+        rock_index, topsoil_index,
+        "Rock and TopSoil should have different atlas indices"
+    );
 }
 
 #[test]
@@ -250,4 +280,3 @@ fn lod_level_ordering() {
     assert!(LodLevel::Culled.is_lower_detail_than(LodLevel::Lod0));
     assert!(LodLevel::Lod1.is_lower_detail_than(LodLevel::Lod0));
 }
-

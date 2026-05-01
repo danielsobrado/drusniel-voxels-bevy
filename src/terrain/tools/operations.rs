@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::terrain::constants::BEDROCK_DEPTH;
+use bevy::prelude::*;
 
 /// Raise terrain within radius
 pub fn raise_terrain(

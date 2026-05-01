@@ -63,7 +63,7 @@ impl Default for InputConfig {
         bindings.insert(GameAction::Chat, KeyCode::Enter);
         bindings.insert(GameAction::Map, KeyCode::KeyM);
         bindings.insert(GameAction::Screenshot, KeyCode::F12);
-        
+
         // Hotbar
         bindings.insert(GameAction::Hotbar1, KeyCode::Digit1);
         bindings.insert(GameAction::Hotbar2, KeyCode::Digit2);
@@ -88,12 +88,10 @@ pub fn load_inputs(mut config: ResMut<InputConfig>) {
     let path = Path::new("assets/config/inputs.yaml");
     if path.exists() {
         match fs::read_to_string(path) {
-            Ok(content) => {
-                match serde_yaml::from_str(&content) {
-                    Ok(loaded) => *config = loaded,
-                    Err(e) => warn!("Failed to parse input config: {}", e),
-                }
-            }
+            Ok(content) => match serde_yaml::from_str(&content) {
+                Ok(loaded) => *config = loaded,
+                Err(e) => warn!("Failed to parse input config: {}", e),
+            },
             Err(e) => warn!("Failed to read input config: {}", e),
         }
     } else {
@@ -113,7 +111,7 @@ pub fn save_inputs(config: &InputConfig) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    
+
     match serde_yaml::to_string(config) {
         Ok(yaml) => {
             if let Err(e) = fs::write(path, yaml) {
@@ -121,7 +119,7 @@ pub fn save_inputs(config: &InputConfig) {
             } else {
                 info!("Input config saved to {:?}", path);
             }
-        },
+        }
         Err(e) => error!("Failed to serialize input config: {}", e),
     }
 }

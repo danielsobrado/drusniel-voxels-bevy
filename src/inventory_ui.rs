@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::chat::ChatState;
 use crate::entity::{
-    EquippedItem, Inventory, InventorySlot, ItemType, INVENTORY_COLUMNS, INVENTORY_SLOTS,
+    EquippedItem, INVENTORY_COLUMNS, INVENTORY_SLOTS, Inventory, InventorySlot, ItemType,
 };
 use crate::menu::PauseMenuState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
@@ -447,9 +447,7 @@ fn refresh_inventory_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
-    if !state.open
-        || (!inventory.is_changed() && !equipped.is_changed() && !dragged.is_changed())
-    {
+    if !state.open || (!inventory.is_changed() && !equipped.is_changed() && !dragged.is_changed()) {
         return;
     }
 
@@ -966,38 +964,62 @@ fn hotbar_icon_specs() -> Vec<HotbarIconSpec> {
         HotbarIconSpec {
             item: ItemType::Axe,
             scene_path: "models/Models/GLB format/MedievalAxe.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(0.9))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.1, 0.8, 0.0)),
+            transform: Transform::from_scale(Vec3::splat(0.9)).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.1,
+                0.8,
+                0.0,
+            )),
         },
         HotbarIconSpec {
             item: ItemType::Torch,
             scene_path: "models/Models/GLB format/MedievalTorch.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(0.85))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.8, 0.0)),
+            transform: Transform::from_scale(Vec3::splat(0.85)).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.2,
+                0.8,
+                0.0,
+            )),
         },
         HotbarIconSpec {
             item: ItemType::TerrainRaise,
             scene_path: "models/Models/GLB format/Shovel.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(1.1))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -0.4)),
+            transform: Transform::from_scale(Vec3::splat(1.1)).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.0,
+                0.0,
+                -0.4,
+            )),
         },
         HotbarIconSpec {
             item: ItemType::TerrainLower,
             scene_path: "models/Models/GLB format/Pickaxe.glb#Scene0",
-            transform: Transform::from_scale(base_scale)
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 3.14, -0.4)),
+            transform: Transform::from_scale(base_scale).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.0,
+                3.14,
+                -0.4,
+            )),
         },
         HotbarIconSpec {
             item: ItemType::TerrainLevel,
             scene_path: "models/Models/GLB format/Hand Rake.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(1.2))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 1.5, 0.0)),
+            transform: Transform::from_scale(Vec3::splat(1.2)).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.5,
+                1.5,
+                0.0,
+            )),
         },
         HotbarIconSpec {
             item: ItemType::TerrainSmooth,
             scene_path: "models/Models/GLB format/Hand Rake.glb#Scene0",
-            transform: Transform::from_scale(Vec3::splat(1.2))
-                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -0.4)),
+            transform: Transform::from_scale(Vec3::splat(1.2)).with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                0.0,
+                0.0,
+                -0.4,
+            )),
         },
     ]
 }

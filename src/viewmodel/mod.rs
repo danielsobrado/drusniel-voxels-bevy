@@ -54,7 +54,6 @@ pub struct ShovelViewModel;
 #[derive(Component)]
 pub struct RakeViewModel;
 
-
 /// Resource to track swing state
 #[derive(Resource, Default)]
 pub struct PickaxeState {
@@ -96,8 +95,12 @@ pub fn spawn_pickaxe(
             .with_children(|pickaxe| {
                 pickaxe.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(0.9))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.6, 0.0)),
+                    Transform::from_scale(Vec3::splat(0.9)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.2,
+                        0.6,
+                        0.0,
+                    )),
                 ));
             });
     });
@@ -212,22 +215,31 @@ pub fn spawn_axe(
         return;
     };
 
-    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/MedievalAxe.glb#Scene0");
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/MedievalAxe.glb#Scene0");
 
     commands.entity(camera_entity).with_children(|parent| {
         parent
             .spawn((
                 // Position similar to pickaxe
-                Transform::from_xyz(0.45, -0.35, -0.9)
-                    .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.3, -0.5, 0.2)),
+                Transform::from_xyz(0.45, -0.35, -0.9).with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    0.3,
+                    -0.5,
+                    0.2,
+                )),
                 Visibility::Hidden,
                 AxeViewModel,
             ))
             .with_children(|axe| {
                 axe.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(0.35))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, std::f32::consts::PI, 0.0)),
+                    Transform::from_scale(Vec3::splat(0.35)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.0,
+                        std::f32::consts::PI,
+                        0.0,
+                    )),
                 ));
             });
     });
@@ -244,7 +256,8 @@ pub fn spawn_sword(
         return;
     };
 
-    let scene_handle: Handle<Scene> = asset_server.load("models/Models/GLB format/Sword.glb#Scene0");
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/Models/GLB format/Sword.glb#Scene0");
 
     commands.entity(camera_entity).with_children(|parent| {
         parent
@@ -266,8 +279,12 @@ pub fn spawn_sword(
             .with_children(|sword| {
                 sword.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(1.0))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 1.8, 0.0)),
+                    Transform::from_scale(Vec3::splat(1.0)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.5,
+                        1.8,
+                        0.0,
+                    )),
                 ));
             });
     });
@@ -295,8 +312,12 @@ pub fn spawn_torch(
         parent
             .spawn((
                 // Position torch closer and lower, like holding it at your side
-                Transform::from_xyz(0.5, -0.7, -1.2)
-                    .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, -0.3, 0.1)),
+                Transform::from_xyz(0.5, -0.7, -1.2).with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    0.2,
+                    -0.3,
+                    0.1,
+                )),
                 Visibility::Hidden,
                 TorchViewModel,
             ))
@@ -304,8 +325,12 @@ pub fn spawn_torch(
                 // The actual torch model
                 torch.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(0.5))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0)),
+                    Transform::from_scale(Vec3::splat(0.5)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )),
                 ));
 
                 // Add a point light for the torch flame effect
@@ -330,13 +355,11 @@ pub fn spawn_torch(
                 torch.spawn((
                     ParticleEffect::new(fire_handle),
                     // Position at the tip of the torch
-                    Transform::from_xyz(0.0, 0.45, 0.1), 
+                    Transform::from_xyz(0.0, 0.45, 0.1),
                 ));
             });
     });
 }
-
-
 
 /// Spawn the shovel viewmodel as a child of the camera
 pub fn spawn_shovel(
@@ -372,8 +395,12 @@ pub fn spawn_shovel(
             .with_children(|shovel| {
                 shovel.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(1.1))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.2, 0.0, -0.2)),
+                    Transform::from_scale(Vec3::splat(1.1)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.2,
+                        0.0,
+                        -0.2,
+                    )),
                 ));
             });
     });
@@ -413,13 +440,16 @@ pub fn spawn_rake(
             .with_children(|rake| {
                 rake.spawn((
                     SceneRoot(scene_handle),
-                    Transform::from_scale(Vec3::splat(1.1))
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.4, 1.5, 0.0)),
+                    Transform::from_scale(Vec3::splat(1.1)).with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        0.4,
+                        1.5,
+                        0.0,
+                    )),
                 ));
             });
     });
 }
-
 
 pub fn update_pickaxe_visibility(
     equipped: Res<EquippedItem>,
@@ -429,7 +459,10 @@ pub fn update_pickaxe_visibility(
         return;
     }
 
-    let visible = matches!(equipped.item, Some(ItemType::Pickaxe) | Some(ItemType::TerrainLower));
+    let visible = matches!(
+        equipped.item,
+        Some(ItemType::Pickaxe) | Some(ItemType::TerrainLower)
+    );
     let visibility = if visible {
         Visibility::Visible
     } else {
@@ -525,7 +558,10 @@ pub fn update_rake_visibility(
         return;
     }
 
-    let visibility = if matches!(equipped.item, Some(ItemType::TerrainLevel) | Some(ItemType::TerrainSmooth)) {
+    let visibility = if matches!(
+        equipped.item,
+        Some(ItemType::TerrainLevel) | Some(ItemType::TerrainSmooth)
+    ) {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -545,11 +581,24 @@ impl Plugin for PickaxePlugin {
             .init_resource::<ViewmodelConfig>()
             .add_systems(
                 PostStartup,
-                (spawn_pickaxe, spawn_axe, spawn_sword, spawn_torch, spawn_shovel, spawn_rake),
+                (
+                    spawn_pickaxe,
+                    spawn_axe,
+                    spawn_sword,
+                    spawn_torch,
+                    spawn_shovel,
+                    spawn_rake,
+                ),
             )
             .add_systems(
                 Update,
-                (trigger_swing_system, animate_pickaxe_system, idle_bob_system, animate_torch_light).chain(),
+                (
+                    trigger_swing_system,
+                    animate_pickaxe_system,
+                    idle_bob_system,
+                    animate_torch_light,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -565,17 +614,14 @@ impl Plugin for PickaxePlugin {
     }
 }
 
-fn animate_torch_light(
-    time: Res<Time>,
-    mut query: Query<(&mut PointLight, &TorchFlicker)>,
-) {
+fn animate_torch_light(time: Res<Time>, mut query: Query<(&mut PointLight, &TorchFlicker)>) {
     let t = time.elapsed_secs();
     for (mut light, flicker) in query.iter_mut() {
         // Multi-layered sine waves for organic flickering
-        let noise = (t * flicker.speed).sin() 
-            + (t * flicker.speed * 2.3).sin() * 0.5 
+        let noise = (t * flicker.speed).sin()
+            + (t * flicker.speed * 2.3).sin() * 0.5
             + (t * flicker.speed * 5.7).sin() * 0.25;
-        
+
         light.intensity = flicker.base_intensity + noise * flicker.amplitude;
     }
 }
@@ -583,7 +629,7 @@ fn animate_torch_light(
 fn create_torch_fire_effect(effects: &mut Assets<EffectAsset>) -> Handle<EffectAsset> {
     let mut color_gradient = bevy_hanabi::Gradient::new();
     // Bright yellow/white core (HDR)
-    color_gradient.add_key(0.0, Vec4::new(4.0, 3.0, 1.0, 1.0)); 
+    color_gradient.add_key(0.0, Vec4::new(4.0, 3.0, 1.0, 1.0));
     // Orange body
     color_gradient.add_key(0.3, Vec4::new(4.0, 1.0, 0.1, 1.0));
     // Red/Dark Orange tip
@@ -601,29 +647,26 @@ fn create_torch_fire_effect(effects: &mut Assets<EffectAsset>) -> Handle<EffectA
     let writer = ExprWriter::new();
 
     // Lifetime
-    let init_lifetime = SetAttributeModifier::new(
-        Attribute::LIFETIME,
-        writer.lit(0.7).expr(), 
-    );
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, writer.lit(0.7).expr());
 
     // Initial Position (Small tight sphere at emitter)
     let init_pos = SetPositionSphereModifier {
         center: writer.lit(Vec3::ZERO).expr(),
-        radius: writer.lit(0.02).expr(), 
+        radius: writer.lit(0.02).expr(),
         dimension: ShapeDimension::Volume,
     };
 
     // Initial Velocity (Upwards + random noise)
     let init_vel = SetVelocitySphereModifier {
         center: writer.lit(Vec3::Y * 0.5).expr(), // Bias up
-        speed: writer.lit(0.2).expr(), // Random spread
+        speed: writer.lit(0.2).expr(),            // Random spread
     };
-    
+
     // Expressions for modifiers
     let accel_expr = writer.lit(Vec3::new(0.0, 2.0, 0.0)).expr();
     let drag_expr = writer.lit(0.5f32).expr();
 
-    let spawner = SpawnerSettings::rate(60.0.into()); 
+    let spawner = SpawnerSettings::rate(60.0.into());
 
     let effect = EffectAsset::new(512, spawner, writer.finish())
         .with_name("torch_fire")
@@ -634,7 +677,10 @@ fn create_torch_fire_effect(effects: &mut Assets<EffectAsset>) -> Handle<EffectA
         .update(AccelModifier::new(accel_expr)) // Heat rises
         .update(LinearDragModifier::new(drag_expr)) // Drag
         .render(ColorOverLifetimeModifier::new(color_gradient))
-        .render(SizeOverLifetimeModifier { gradient: size_gradient, screen_space_size: false })
+        .render(SizeOverLifetimeModifier {
+            gradient: size_gradient,
+            screen_space_size: false,
+        })
         .render(OrientModifier::new(OrientMode::FaceCameraPosition));
 
     effects.add(effect)

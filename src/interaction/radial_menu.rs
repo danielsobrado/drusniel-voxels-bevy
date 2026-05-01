@@ -81,11 +81,7 @@ pub fn spawn_radial_menu(
     radial_state.radius = 160.0;
 
     // Build category list
-    let categories: Vec<PieceCategory> = registry
-        .by_category
-        .keys()
-        .copied()
-        .collect();
+    let categories: Vec<PieceCategory> = registry.by_category.keys().copied().collect();
 
     radial_state.current_items = categories
         .iter()
@@ -120,31 +116,32 @@ pub fn spawn_radial_menu(
         ))
         .with_children(|parent| {
             // Center indicator
-            parent.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(center.x - 30.0),
-                    top: Val::Px(center.y - 30.0),
-                    width: Val::Px(60.0),
-                    height: Val::Px(60.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(30.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.95)),
-                RadialCenter,
-            ))
-            .with_children(|center_node| {
-                center_node.spawn((
-                    Text::new("Build"),
-                    TextFont {
-                        font_size: 12.0,
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(center.x - 30.0),
+                        top: Val::Px(center.y - 30.0),
+                        width: Val::Px(60.0),
+                        height: Val::Px(60.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(30.0)),
                         ..default()
                     },
-                    TextColor(Color::WHITE),
-                ));
-            });
+                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.95)),
+                    RadialCenter,
+                ))
+                .with_children(|center_node| {
+                    center_node.spawn((
+                        Text::new("Build"),
+                        TextFont {
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
 
             // Spawn segment buttons
             for (i, item) in radial_state.current_items.iter().enumerate() {
@@ -240,25 +237,24 @@ pub fn handle_radial_menu_interaction(
 
                         // Rebuild the menu
                         despawn_radial_menu(&mut commands, &radial_root);
-                        spawn_radial_pieces_menu(
-                            &mut commands,
-                            &radial_state,
-                            &windows,
-                        );
+                        spawn_radial_pieces_menu(&mut commands, &radial_state, &windows);
                     } else if let Some(ref selection) = item.selection {
                         // Select this piece
                         palette.active_selection = Some(selection.clone());
 
                         // Find index in palette items for compatibility
-                        if let Some(idx) = items.0.iter().position(|p| {
-                            match (&p.selection, selection) {
-                                (
-                                    PlacementSelection::BuildingPiece { piece_id: a, .. },
-                                    PlacementSelection::BuildingPiece { piece_id: b, .. },
-                                ) => a == b,
-                                _ => false,
-                            }
-                        }) {
+                        if let Some(idx) =
+                            items
+                                .0
+                                .iter()
+                                .position(|p| match (&p.selection, selection) {
+                                    (
+                                        PlacementSelection::BuildingPiece { piece_id: a, .. },
+                                        PlacementSelection::BuildingPiece { piece_id: b, .. },
+                                    ) => a == b,
+                                    _ => false,
+                                })
+                        {
                             palette.selected_index = Some(idx);
                         }
 

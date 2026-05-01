@@ -2,7 +2,7 @@
 
 use bevy::math::{IVec3, UVec3};
 use voxel_builder::constants::{
-    CHUNK_SIZE, WATER_LEVEL, TERRAIN_BASE_HEIGHT, TERRAIN_MIN_HEIGHT, TERRAIN_MAX_HEIGHT,
+    CHUNK_SIZE, TERRAIN_BASE_HEIGHT, TERRAIN_MAX_HEIGHT, TERRAIN_MIN_HEIGHT, WATER_LEVEL,
 };
 use voxel_builder::voxel::chunk::Chunk;
 use voxel_builder::voxel::types::{Voxel, VoxelType};
@@ -105,7 +105,10 @@ fn voxel_type_classification() {
 
     // Water is liquid and transparent
     assert!(VoxelType::Water.is_liquid(), "Water should be liquid");
-    assert!(VoxelType::Water.is_transparent(), "Water should be transparent");
+    assert!(
+        VoxelType::Water.is_transparent(),
+        "Water should be transparent"
+    );
     assert!(!VoxelType::Water.is_solid(), "Water should not be solid");
 }
 
@@ -144,17 +147,44 @@ fn world_bounds_check() {
     let world = VoxelWorld::new(IVec3::new(4, 4, 4));
 
     // Positions inside the world
-    assert!(world.in_bounds(IVec3::new(0, 0, 0)), "Origin should be in bounds");
-    assert!(world.in_bounds(IVec3::new(32, 32, 32)), "Middle should be in bounds");
-    assert!(world.in_bounds(IVec3::new(63, 63, 63)), "Near edge should be in bounds");
+    assert!(
+        world.in_bounds(IVec3::new(0, 0, 0)),
+        "Origin should be in bounds"
+    );
+    assert!(
+        world.in_bounds(IVec3::new(32, 32, 32)),
+        "Middle should be in bounds"
+    );
+    assert!(
+        world.in_bounds(IVec3::new(63, 63, 63)),
+        "Near edge should be in bounds"
+    );
 
     // Positions outside the world
-    assert!(!world.in_bounds(IVec3::new(-1, 0, 0)), "Negative X should be out of bounds");
-    assert!(!world.in_bounds(IVec3::new(0, -1, 0)), "Negative Y should be out of bounds");
-    assert!(!world.in_bounds(IVec3::new(0, 0, -1)), "Negative Z should be out of bounds");
-    assert!(!world.in_bounds(IVec3::new(64, 0, 0)), "Beyond X should be out of bounds");
-    assert!(!world.in_bounds(IVec3::new(0, 64, 0)), "Beyond Y should be out of bounds");
-    assert!(!world.in_bounds(IVec3::new(0, 0, 64)), "Beyond Z should be out of bounds");
+    assert!(
+        !world.in_bounds(IVec3::new(-1, 0, 0)),
+        "Negative X should be out of bounds"
+    );
+    assert!(
+        !world.in_bounds(IVec3::new(0, -1, 0)),
+        "Negative Y should be out of bounds"
+    );
+    assert!(
+        !world.in_bounds(IVec3::new(0, 0, -1)),
+        "Negative Z should be out of bounds"
+    );
+    assert!(
+        !world.in_bounds(IVec3::new(64, 0, 0)),
+        "Beyond X should be out of bounds"
+    );
+    assert!(
+        !world.in_bounds(IVec3::new(0, 64, 0)),
+        "Beyond Y should be out of bounds"
+    );
+    assert!(
+        !world.in_bounds(IVec3::new(0, 0, 64)),
+        "Beyond Z should be out of bounds"
+    );
 }
 
 #[test]
@@ -199,11 +229,19 @@ fn world_to_chunk_handles_negatives() {
     let chunk_pos = VoxelWorld::world_to_chunk(neg_pos);
 
     // -1 in a chunk of size 16 should be in chunk -1
-    assert_eq!(chunk_pos, IVec3::new(-1, -1, -1), "Negative position should be in chunk -1");
+    assert_eq!(
+        chunk_pos,
+        IVec3::new(-1, -1, -1),
+        "Negative position should be in chunk -1"
+    );
 
     let neg_pos_2 = IVec3::new(-17, -17, -17);
     let chunk_pos_2 = VoxelWorld::world_to_chunk(neg_pos_2);
-    assert_eq!(chunk_pos_2, IVec3::new(-2, -2, -2), "-17 should be in chunk -2");
+    assert_eq!(
+        chunk_pos_2,
+        IVec3::new(-2, -2, -2),
+        "-17 should be in chunk -2"
+    );
 }
 
 #[test]

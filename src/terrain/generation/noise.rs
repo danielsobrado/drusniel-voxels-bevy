@@ -44,7 +44,12 @@ pub fn ridged_fbm(x: f32, z: f32, config: &MountainConfig, seed: u32) -> f32 {
 }
 
 /// Combined terrain height at world position
-pub fn sample_terrain_height(x: f32, z: f32, config: &super::config::TerrainConfig, seed: u32) -> f32 {
+pub fn sample_terrain_height(
+    x: f32,
+    z: f32,
+    config: &super::config::TerrainConfig,
+    seed: u32,
+) -> f32 {
     // Large scale continent shape
     let continent = fbm(x, z, &config.continent, seed);
 

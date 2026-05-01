@@ -1,16 +1,13 @@
-use bevy::prelude::*;
-use crate::rendering::cinematic::{CinematicEvent, CinematicCamera};
+use crate::rendering::cinematic::{CinematicCamera, CinematicEvent};
 use crate::rendering::cinematic_config::CinematicConfig;
+use bevy::prelude::*;
 
 pub struct PhotoModePlugin;
 
 impl Plugin for PhotoModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PhotoModeState>()
-            .add_systems(Update, (
-                toggle_photo_mode,
-                photo_mode_controls,
-            ));
+            .add_systems(Update, (toggle_photo_mode, photo_mode_controls));
     }
 }
 
@@ -34,7 +31,7 @@ fn toggle_photo_mode(
     // F12 to toggle photo mode
     if input.just_pressed(KeyCode::F12) {
         state.active = !state.active;
-        
+
         if state.active {
             state.focal_distance = config.depth_of_field.focal_distance;
             state.aperture = config.depth_of_field.aperture_f_stops;
@@ -58,15 +55,15 @@ fn photo_mode_controls(
     if !state.active {
         return;
     }
-    
+
     let mut focal_delta = 0.0;
     let mut aperture_delta = 0.0;
-    
+
     // Scroll to adjust focus
     for ev in scroll.read() {
         focal_delta += ev.y * 2.0;
     }
-    
+
     // Q/E to adjust aperture
     if input.pressed(KeyCode::KeyQ) {
         aperture_delta -= 0.1;
@@ -74,16 +71,18 @@ fn photo_mode_controls(
     if input.pressed(KeyCode::KeyE) {
         aperture_delta += 0.1;
     }
-    
+
     // Apply changes
     for mut dof in dof_query.iter_mut() {
         dof.focal_distance = (dof.focal_distance + focal_delta).max(0.5);
         dof.aperture_f_stops = (dof.aperture_f_stops + aperture_delta).clamp(0.5, 16.0);
     }
-    
+
     if focal_delta != 0.0 {
         if let Ok(dof) = dof_query.single() {
-            events.write(CinematicEvent::SetFocus { distance: dof.focal_distance });
+            events.write(CinematicEvent::SetFocus {
+                distance: dof.focal_distance,
+            });
         }
     }
 }

@@ -9,25 +9,25 @@
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::{
+    FullscreenShader,
     core_3d::graph::{Core3d, Node3d},
     prepass::ViewPrepassTextures,
-    FullscreenShader,
 };
 use bevy::prelude::*;
 use bevy::render::{
+    ExtractSchedule, RenderApp, RenderStartup,
     render_graph::{
         NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
     },
     render_resource::{
-        binding_types, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-        BufferInitDescriptor, BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites,
-        FragmentState, Operations, PipelineCache, RenderPassColorAttachment,
-        RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType,
-        SamplerDescriptor, ShaderStages, ShaderType, TextureSampleType,
+        BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BufferInitDescriptor,
+        BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
+        Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
+        RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
+        ShaderType, TextureSampleType, binding_types,
     },
     renderer::{RenderContext, RenderDevice},
     view::{ViewTarget, ViewUniformOffset, ViewUniforms},
-    ExtractSchedule, RenderApp, RenderStartup,
 };
 use bevy::shader::Shader;
 
@@ -36,8 +36,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::environment::Sun;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
 
-const GOD_RAYS_SHADER_HANDLE: Handle<Shader> =
-    uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
+const GOD_RAYS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
 
 /// Configuration for the screen-space god rays effect.
 #[derive(Resource, Clone)]
@@ -102,10 +101,7 @@ pub struct GodRayFrameData {
 }
 
 /// Sync GodRayConfig from the FogConfig YAML values when it changes.
-fn sync_god_ray_config(
-    fog_config: Option<Res<FogConfig>>,
-    mut config: ResMut<GodRayConfig>,
-) {
+fn sync_god_ray_config(fog_config: Option<Res<FogConfig>>, mut config: ResMut<GodRayConfig>) {
     let Some(fog_config) = fog_config else { return };
     if !fog_config.is_changed() {
         return;
@@ -331,28 +327,27 @@ impl ViewNode for GodRayNode {
             "god_rays_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
             &BindGroupEntries::sequential((
-                post_process.source,        // 0: scene colour
-                &pipeline_res.sampler,      // 1: sampler
-                depth_view,                 // 2: depth
+                post_process.source,                // 0: scene colour
+                &pipeline_res.sampler,              // 1: sampler
+                depth_view,                         // 2: depth
                 uniform_buffer.as_entire_binding(), // 3: GodRayUniforms
-                view_binding.clone(),       // 4: View uniform
+                view_binding.clone(),               // 4: View uniform
             )),
         );
 
         // ── Render pass ────────────────────────────────────────────────────
-        let mut render_pass =
-            render_context.begin_tracked_render_pass(RenderPassDescriptor {
-                label: Some("god_rays_pass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: post_process.destination,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: Operations::default(),
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("god_rays_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: post_process.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
         render_pass.set_render_pipeline(pipeline);
         render_pass.set_bind_group(0, &bind_group, &[view_offset.offset]);
@@ -371,10 +366,7 @@ impl Plugin for GodRayPlugin {
         load_internal_asset!(
             app,
             GOD_RAYS_SHADER_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/god_rays.wgsl"
-            ),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/god_rays.wgsl"),
             Shader::from_wgsl
         );
 
@@ -384,7 +376,10 @@ impl Plugin for GodRayPlugin {
         }
 
         // Main-world systems
-        app.add_systems(Update, (sync_god_ray_config, compute_god_ray_frame_data).chain());
+        app.add_systems(
+            Update,
+            (sync_god_ray_config, compute_god_ray_frame_data).chain(),
+        );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -393,17 +388,12 @@ impl Plugin for GodRayPlugin {
         render_app.add_systems(ExtractSchedule, extract_god_ray_data);
         render_app.add_systems(RenderStartup, init_god_ray_pipeline);
 
-        render_app
-            .add_render_graph_node::<ViewNodeRunner<GodRayNode>>(Core3d, GodRaysLabel);
+        render_app.add_render_graph_node::<ViewNodeRunner<GodRayNode>>(Core3d, GodRaysLabel);
 
         // Wire: WaterReflectionCompositor → GodRays → Bloom
         render_app.add_render_graph_edges(
             Core3d,
-            (
-                WaterReflectionCompositorLabel,
-                GodRaysLabel,
-                Node3d::Bloom,
-            ),
+            (WaterReflectionCompositorLabel, GodRaysLabel, Node3d::Bloom),
         );
     }
 }

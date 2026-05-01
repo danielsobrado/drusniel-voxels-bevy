@@ -5,12 +5,12 @@
 //! - Drag mode: Click and drag blocks to move them
 //! - Delete mode: Toggle with Delete key in edit mode to remove blocks
 
-use bevy::input::mouse::MouseWheel;
-use bevy::prelude::*;
 use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::interaction::targeting::TargetedBlock;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use bevy::input::mouse::MouseWheel;
+use bevy::prelude::*;
 
 /// Resource that enables edit mode for dragging blocks.
 #[derive(Resource, Default)]
@@ -317,12 +317,12 @@ pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
     let local = VoxelWorld::world_to_local(pos);
 
     let offsets = [
-        (local.x <= 1, IVec3::new(-1, 0, 0)),   // Near -X boundary
-        (local.x >= 14, IVec3::new(1, 0, 0)),   // Near +X boundary
-        (local.y <= 1, IVec3::new(0, -1, 0)),   // Near -Y boundary
-        (local.y >= 14, IVec3::new(0, 1, 0)),   // Near +Y boundary
-        (local.z <= 1, IVec3::new(0, 0, -1)),   // Near -Z boundary
-        (local.z >= 14, IVec3::new(0, 0, 1)),   // Near +Z boundary
+        (local.x <= 1, IVec3::new(-1, 0, 0)), // Near -X boundary
+        (local.x >= 14, IVec3::new(1, 0, 0)), // Near +X boundary
+        (local.y <= 1, IVec3::new(0, -1, 0)), // Near -Y boundary
+        (local.y >= 14, IVec3::new(0, 1, 0)), // Near +Y boundary
+        (local.z <= 1, IVec3::new(0, 0, -1)), // Near -Z boundary
+        (local.z >= 14, IVec3::new(0, 0, 1)), // Near +Z boundary
     ];
 
     for (near_edge, offset) in offsets {

@@ -14,7 +14,9 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(PhysicsPlugins::default());
 
         app.add_plugins(TnuaAvian3dPlugin::new(PhysicsSchedule));
-        app.add_plugins(TnuaControllerPlugin::<PlayerMovementScheme>::new(PhysicsSchedule));
+        app.add_plugins(TnuaControllerPlugin::<PlayerMovementScheme>::new(
+            PhysicsSchedule,
+        ));
 
         #[cfg(debug_assertions)]
         if std::env::var("VOXEL_PHYSICS_DEBUG").is_ok() {

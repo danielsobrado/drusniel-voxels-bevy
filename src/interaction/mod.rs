@@ -18,7 +18,7 @@ mod targeting;
 pub use debug::{DebugDetailToggles, DebugOverlay, DebugOverlayState};
 pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode, mark_neighbors_dirty};
 pub use error::{BreakError, CombatError, DragError, LastGameplayError, PlacementError};
-pub use targeting::{raycast_blocks, TargetedBlock, TargetedEntity, TargetedProp};
+pub use targeting::{TargetedBlock, TargetedEntity, TargetedProp, raycast_blocks};
 
 use crate::atmosphere::{FogCamera, FogConfig, GlobalFogVolume};
 use crate::camera::controller::PlayerCamera;
@@ -28,14 +28,14 @@ use crate::environment::Sun;
 use crate::menu::PauseMenuState;
 use crate::particles::{ParticleType, SpawnParticleEvent};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
+use crate::terrain::tools::{TerrainTool, TerrainToolState};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::ecs::schedule::IntoScheduleConfigs;
-use bevy::math::{Isometry3d, primitives::Cuboid};
 use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
+use bevy::math::{Isometry3d, primitives::Cuboid};
 use bevy::prelude::*;
 use palette::PlacementPaletteState;
-use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
 /// Duration in seconds before gameplay errors are automatically cleared.
 const ERROR_DISPLAY_DURATION: f64 = 3.0;
@@ -255,16 +255,22 @@ fn try_place_block(
 
     // Check if player is blocking the position
     if is_player_blocking_position(camera_query, place_pos) {
-        return Err(PlacementError::PlayerBlocking { position: place_pos });
+        return Err(PlacementError::PlayerBlocking {
+            position: place_pos,
+        });
     }
 
     // Check if position is valid for placement
-    let existing = world.get_voxel(place_pos).ok_or(PlacementError::OutOfBounds {
-        position: place_pos,
-    })?;
+    let existing = world
+        .get_voxel(place_pos)
+        .ok_or(PlacementError::OutOfBounds {
+            position: place_pos,
+        })?;
 
     if existing != VoxelType::Air && existing != VoxelType::Water {
-        return Err(PlacementError::PositionOccupied { position: place_pos });
+        return Err(PlacementError::PositionOccupied {
+            position: place_pos,
+        });
     }
 
     // Place the block
@@ -881,7 +887,7 @@ impl Plugin for InteractionPlugin {
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     clear_expired_errors.run_if(|state: Res<PauseMenuState>| !state.open),
-                )
+                ),
             );
         app.add_systems(PreUpdate, crate::performance::reset_area_timing_frame);
         app.add_systems(PostUpdate, crate::performance::capture_area_timings);

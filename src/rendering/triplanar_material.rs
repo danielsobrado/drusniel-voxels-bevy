@@ -1,7 +1,9 @@
 use bevy::{
-    prelude::*,
     pbr::{MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod},
-    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
+    prelude::*,
+    render::render_resource::{
+        AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    },
 };
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;

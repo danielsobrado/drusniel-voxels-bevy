@@ -48,21 +48,21 @@ fn default_light_intensity() -> f32 {
 fn default_god_rays_preset() -> FogVolumeConfig {
     FogVolumeConfig {
         size: 512.0,
-        density: 0.0001,         // Very low base fog
-        absorption: 0.15,        // HIGHER absorption = rays fade out, don't wash everything
-        scattering: 0.25,        // Moderate scattering - rays visible but focused
+        density: 0.0001,            // Very low base fog
+        absorption: 0.15,           // HIGHER absorption = rays fade out, don't wash everything
+        scattering: 0.25,           // Moderate scattering - rays visible but focused
         scattering_asymmetry: 0.85, // High forward scattering - rays visible toward sun
         dust_animation: DustAnimationConfig {
             enabled: true,
             speed: 0.4,
-            scale: 6.0,          // Slightly larger patterns for visible dust
-            intensity: 0.8,      // Higher contrast for dramatic effect
+            scale: 6.0,     // Slightly larger patterns for visible dust
+            intensity: 0.8, // Higher contrast for dramatic effect
             wind_direction: [0.7, 0.3],
         },
         // God rays specific volumetric overrides
-        step_count_override: Some(64),   // Higher steps for sharp canopy shafts
+        step_count_override: Some(64), // Higher steps for sharp canopy shafts
         ambient_intensity_override: Some(0.0), // Zero ambient = maximum shaft contrast
-        light_intensity: 1.0,            // Normal intensity
+        light_intensity: 1.0,          // Normal intensity
     }
 }
 
@@ -102,14 +102,14 @@ impl Default for FogPresetConfig {
             },
             misty: FogVolumeConfig {
                 size: 512.0,
-                density: 0.15, // Dense mist
+                density: 0.15,    // Dense mist
                 absorption: 0.05, // Bright mist
-                scattering: 0.8, // High scattering
+                scattering: 0.8,  // High scattering
                 scattering_asymmetry: 0.8,
                 dust_animation: DustAnimationConfig {
                     enabled: true,
-                    speed: 0.15,      // Slower, drifting mist
-                    scale: 16.0,      // Larger swirling patterns
+                    speed: 0.15, // Slower, drifting mist
+                    scale: 16.0, // Larger swirling patterns
                     intensity: 0.5,
                     wind_direction: [0.5, 0.5],
                 },
@@ -136,8 +136,8 @@ pub struct FogColorModifiers {
 impl Default for FogColorModifiers {
     fn default() -> Self {
         Self {
-            blue_tint: 0.5,      // Neutral starting point
-            brightness: 1.0,    // No brightness change
+            blue_tint: 0.5,       // Neutral starting point
+            brightness: 1.0,      // No brightness change
             aerial_strength: 1.0, // Normal aerial perspective
         }
     }

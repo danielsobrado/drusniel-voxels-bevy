@@ -1,9 +1,9 @@
-use bevy::prelude::*;
 use super::types::{TerrainTool, TerrainToolState};
 use crate::camera::controller::PlayerCamera;
 use crate::constants::INTERACTION_RANGE;
 use crate::interaction::raycast_blocks;
 use crate::voxel::world::VoxelWorld;
+use bevy::prelude::*;
 
 #[derive(Component)]
 pub struct TerrainToolPreview {
@@ -42,9 +42,9 @@ pub fn spawn_preview(
 
     // Create multiple concentric rings for better visibility
     let ring_configs = [
-        (0.95, 1.0, 0.8),   // Outer ring - brightest
-        (0.65, 0.70, 0.5),  // Middle ring
-        (0.35, 0.40, 0.3),  // Inner ring - subtle
+        (0.95, 1.0, 0.8),  // Outer ring - brightest
+        (0.65, 0.70, 0.5), // Middle ring
+        (0.35, 0.40, 0.3), // Inner ring - subtle
     ];
 
     for (inner, outer, alpha) in ring_configs {
@@ -61,7 +61,9 @@ pub fn spawn_preview(
             MeshMaterial3d(material),
             Transform::default(),
             Visibility::Hidden,
-            TerrainToolPreview { radius_factor: outer },
+            TerrainToolPreview {
+                radius_factor: outer,
+            },
         ));
     }
 }
@@ -89,7 +91,8 @@ pub fn update_terrain_raycast(
     let origin = transform.translation;
     let direction = transform.forward().as_vec3();
 
-    if let Some((block_pos, normal)) = raycast_blocks(origin, direction, &world, INTERACTION_RANGE) {
+    if let Some((block_pos, normal)) = raycast_blocks(origin, direction, &world, INTERACTION_RANGE)
+    {
         // Convert block position to world position (center of the hit face)
         let world_pos = block_pos.as_vec3() + Vec3::splat(0.5) + normal.as_vec3() * 0.5;
         let world_normal = normal.as_vec3().normalize();

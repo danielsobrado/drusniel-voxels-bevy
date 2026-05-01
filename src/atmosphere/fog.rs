@@ -1,20 +1,24 @@
-use bevy::prelude::*;
-use bevy::light::{CascadeShadowConfig, FogVolume, GlobalAmbientLight, VolumetricFog, VolumetricLight};
-use bevy::pbr::{DistanceFog, FogFalloff};
-use bevy::render::render_resource::ShaderType;
-use crate::atmosphere::config::{DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset};
+use crate::atmosphere::config::{
+    DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset,
+};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
+use bevy::light::{
+    CascadeShadowConfig, FogVolume, GlobalAmbientLight, VolumetricFog, VolumetricLight,
+};
+use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::prelude::*;
+use bevy::render::render_resource::ShaderType;
 
 pub struct FogPlugin;
 
 #[derive(Resource)]
 pub struct FogNoiseTexture(pub Handle<Image>);
 
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
 const VOLUME_DENSITY_SCALE: f32 = 1.0; // Volumetric density scale for visible god rays
@@ -45,7 +49,8 @@ impl Plugin for FogPlugin {
                     update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
                     animate_dust_in_fog,
-                ).chain(),
+                )
+                    .chain(),
             );
     }
 }
@@ -59,10 +64,7 @@ pub struct DustAnimationState {
     pub config: DustAnimationConfig,
 }
 
-fn handle_fog_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut config: ResMut<FogConfig>,
-) {
+fn handle_fog_input(keyboard: Res<ButtonInput<KeyCode>>, mut config: ResMut<FogConfig>) {
     if keyboard.pressed(KeyCode::AltLeft) && keyboard.just_pressed(KeyCode::KeyP) {
         config.current_preset = match config.current_preset {
             FogPreset::Clear => FogPreset::Balanced,
@@ -166,7 +168,11 @@ impl Default for FogUniforms {
     }
 }
 
-fn spawn_global_fog_volume(commands: &mut Commands, config: &FogConfig, texture: Option<Handle<Image>>) {
+fn spawn_global_fog_volume(
+    commands: &mut Commands,
+    config: &FogConfig,
+    texture: Option<Handle<Image>>,
+) {
     // Use config values for proper god rays - low absorption for brightness
     let density = config.volume.density.max(MIN_VOLUME_DENSITY);
     let size = config.volume.size;
@@ -218,9 +224,7 @@ fn setup_fog(
 
     info!(
         "Fog setup: volumetric.enabled={}, volume.density={}, volume.size={}",
-        config.volumetric.enabled,
-        config.volume.density,
-        config.volume.size
+        config.volumetric.enabled, config.volume.density, config.volume.size
     );
 
     if config.volumetric.enabled {
@@ -231,7 +235,7 @@ fn setup_fog(
     } else {
         warn!("Volumetric fog disabled - no god rays will be visible");
     }
-    
+
     // Initialize atmosphere sample and fog range resources
     commands.insert_resource(AtmosphereSample::default());
     commands.insert_resource(FogDistanceState {
@@ -268,7 +272,11 @@ fn distance_fog_component(config: &FogConfig) -> DistanceFog {
         FogFalloffMode::Linear => FogFalloff::Linear { start, end },
         FogFalloffMode::Atmospheric => FogFalloff::from_visibility_colors(
             end.max(1.0),
-            Color::srgb(extinction_color[0], extinction_color[1], extinction_color[2]),
+            Color::srgb(
+                extinction_color[0],
+                extinction_color[1],
+                extinction_color[2],
+            ),
             Color::srgb(
                 inscattering_color[0],
                 inscattering_color[1],
@@ -287,7 +295,11 @@ fn distance_fog_component(config: &FogConfig) -> DistanceFog {
             0.5,
         ),
         directional_light_exponent: 30.0,
-        falloff: if use_linear { FogFalloff::Linear { start, end } } else { falloff },
+        falloff: if use_linear {
+            FogFalloff::Linear { start, end }
+        } else {
+            falloff
+        },
     }
 }
 
@@ -316,7 +328,10 @@ fn sync_fog_toggles(
     // Sync debug toggle to config if changed
     if debug_toggles.is_changed() {
         if config.volumetric.enabled != debug_toggles.volumetric_fog_enabled {
-            info!("Syncing fog toggle: Volumetric Fog -> {}", debug_toggles.volumetric_fog_enabled);
+            info!(
+                "Syncing fog toggle: Volumetric Fog -> {}",
+                debug_toggles.volumetric_fog_enabled
+            );
             config.volumetric.enabled = debug_toggles.volumetric_fog_enabled;
         }
     }
@@ -327,7 +342,7 @@ fn sync_fog_toggles(
             return;
         }
     }
-    
+
     if camera_query.iter().len() == 0 {
         warn!("sync_fog_toggles: No FogCamera found! Cannot apply fog components.");
     }
@@ -386,25 +401,31 @@ fn update_fog_from_atmosphere(
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
-    if smoothing.current_boost == 0.0 { smoothing.current_boost = 1.0; }
-    if smoothing.target_boost == 0.0 { smoothing.target_boost = 1.0; }
-    let Some(atmo_settings) = atmosphere_settings else { return };
+    if smoothing.current_boost == 0.0 {
+        smoothing.current_boost = 1.0;
+    }
+    if smoothing.target_boost == 0.0 {
+        smoothing.target_boost = 1.0;
+    }
+    let Some(atmo_settings) = atmosphere_settings else {
+        return;
+    };
 
     // Get Mie settings from atmosphere (connected to menu settings)
     let mie_direction = atmo_settings.mie_direction;
     // let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
-    
+
     // Calculate sun position from atmosphere settings
     let phase = atmo_settings.time / atmo_settings.day_length;
     let theta = phase * std::f32::consts::TAU;
     let altitude = theta.sin(); // 1 at noon, -1 at midnight
     let azimuth = theta.cos();
     let sun_dir = Vec3::new(azimuth * 0.45, altitude, 0.35).normalize_or_zero();
-    
+
     // Update atmosphere sample
     atmosphere_sample.sun_dir = sun_dir;
     atmosphere_sample.sun_altitude = altitude;
-    
+
     // Compute blend factors from sun altitude
     let (daylight, twilight, night) = if atmo_settings.cycle_enabled {
         let daylight = smoothstep(-0.1, 0.25, altitude);
@@ -415,21 +436,21 @@ fn update_fog_from_atmosphere(
         (1.0, 0.0, 0.0)
     };
 
-    let preset_density = lerp(atmo_settings.fog_density.y, atmo_settings.fog_density.x, daylight)
-        .max(0.0001);
+    let preset_density = lerp(
+        atmo_settings.fog_density.y,
+        atmo_settings.fog_density.x,
+        daylight,
+    )
+    .max(0.0001);
 
     // Blend between presets
     let day = &config.colors.day;
     let twi = &config.colors.twilight;
     let ngt = &config.colors.night;
-    
+
     // Interpolate fog color
-    let fog_color = lerp_color4(
-        lerp_color4(ngt.fog, day.fog, daylight),
-        twi.fog,
-        twilight,
-    );
-    
+    let fog_color = lerp_color4(lerp_color4(ngt.fog, day.fog, daylight), twi.fog, twilight);
+
     let directional_color = lerp_color3(
         lerp_color3(ngt.directional, day.directional, daylight),
         twi.directional,
@@ -447,12 +468,12 @@ fn update_fog_from_atmosphere(
         twi.inscattering,
         twilight,
     );
-    
+
     // Density increases at night/twilight
     let density_mult = 1.0 + twilight * 0.5 + night * 0.3;
     let preset_scale = (preset_density / BASE_PRESET_DENSITY).clamp(0.5, 2.5);
-    let distance_scale = (1.0 / (preset_scale * density_mult))
-        .clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
+    let distance_scale =
+        (1.0 / (preset_scale * density_mult)).clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
     let min_end = lod_settings.as_ref().map(|lod| lod.cull_distance);
     let (start, end) = linear_fog_range(&config, distance_scale, min_end);
 
@@ -472,7 +493,8 @@ fn update_fog_from_atmosphere(
     // Use preset's ambient_intensity_override if set (allows 0 for max god ray contrast)
     // Otherwise calculate from sky brightness with a floor
     let ambient_intensity = preset_config.ambient_intensity_override.unwrap_or_else(|| {
-        (ambient.brightness / 16000.0).clamp(0.01, 0.12)
+        (ambient.brightness / 16000.0)
+            .clamp(0.01, 0.12)
             .max(config.volumetric.ambient_intensity)
     });
 
@@ -519,14 +541,16 @@ fn update_fog_from_atmosphere(
 
     // Update volumetric fog camera settings so night/dim changes take effect.
     // Use preset overrides when available for step_count (sharper rays)
-    let step_count = preset_config.step_count_override.unwrap_or(config.volumetric.step_count);
+    let step_count = preset_config
+        .step_count_override
+        .unwrap_or(config.volumetric.step_count);
     for mut volumetric in volumetric_query.iter_mut() {
         volumetric.ambient_color = ambient.color;
         volumetric.ambient_intensity = ambient_intensity;
         volumetric.step_count = step_count;
         volumetric.jitter = config.volumetric.jitter;
     }
-    
+
     // Throttled check for indoor boost (10Hz is plenty)
     smoothing.boost_timer += time.delta_secs();
     if smoothing.boost_timer > 0.1 {
@@ -536,20 +560,40 @@ fn update_fog_from_atmosphere(
             .map(|camera| indoor_density_boost(&world, camera.translation))
             .unwrap_or(1.0);
     }
-    
+
     let target = smoothing.target_boost;
 
     // Smoothly interpolate boost to avoid jarring pops when walking under trees
     let interpolation_speed = 2.0;
     let dt = time.delta_secs();
-    smoothing.current_boost = lerp(smoothing.current_boost, target, (dt * interpolation_speed).clamp(0.0, 1.0));
+    smoothing.current_boost = lerp(
+        smoothing.current_boost,
+        target,
+        (dt * interpolation_speed).clamp(0.0, 1.0),
+    );
 
     // Smoothly transition fog parameters when switching presets (preset_config already defined above)
     let preset_speed = 1.0;
-    smoothing.current_density = lerp(smoothing.current_density, preset_config.density, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_scattering = lerp(smoothing.current_scattering, preset_config.scattering, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_absorption = lerp(smoothing.current_absorption, preset_config.absorption, (dt * preset_speed).clamp(0.0, 1.0));
-    smoothing.current_asymmetry = lerp(smoothing.current_asymmetry, preset_config.scattering_asymmetry, (dt * preset_speed).clamp(0.0, 1.0));
+    smoothing.current_density = lerp(
+        smoothing.current_density,
+        preset_config.density,
+        (dt * preset_speed).clamp(0.0, 1.0),
+    );
+    smoothing.current_scattering = lerp(
+        smoothing.current_scattering,
+        preset_config.scattering,
+        (dt * preset_speed).clamp(0.0, 1.0),
+    );
+    smoothing.current_absorption = lerp(
+        smoothing.current_absorption,
+        preset_config.absorption,
+        (dt * preset_speed).clamp(0.0, 1.0),
+    );
+    smoothing.current_asymmetry = lerp(
+        smoothing.current_asymmetry,
+        preset_config.scattering_asymmetry,
+        (dt * preset_speed).clamp(0.0, 1.0),
+    );
 
     // "Breathing" Turbulence Animation for Misty/Balanced presets
     // Modulates density slightly to feel like moving air
@@ -563,7 +607,8 @@ fn update_fog_from_atmosphere(
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
         // Use config density directly - lower values = more transparent fog
-        let density = (smoothing.current_density * smoothing.current_boost * turbulence).clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        let density = (smoothing.current_density * smoothing.current_boost * turbulence)
+            .clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
         volume.density_factor = density;
         volume.absorption = smoothing.current_absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
@@ -579,7 +624,7 @@ fn update_fog_from_atmosphere(
         let base_intensity = 1200.0 * daylight + 100.0 * night;
         let time_modifier = 1.0 + twilight * 1.5;
         volume.light_intensity = base_intensity * time_modifier * preset_config.light_intensity;
-        
+
         volume.scattering = smoothing.current_scattering;
         // mie_direction controls forward scattering asymmetry
         // Lower = more visible from all angles, higher = only toward sun
@@ -587,7 +632,8 @@ fn update_fog_from_atmosphere(
     }
 
     // Update fog uniforms for custom shaders (building, props, grass)
-    fog_uniforms.fog_color = LinearRgba::new(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
+    fog_uniforms.fog_color =
+        LinearRgba::new(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
     fog_uniforms.fog_start = start;
     fog_uniforms.fog_end = end;
     fog_uniforms.sun_dir = sun_dir;
@@ -638,25 +684,25 @@ fn update_shadow_cascades_from_fog(
         }
 
         let scale = target / current_max;
-        
+
         // Clone bounds to avoid mutable borrow overlap in loop
         let mut new_bounds = cascade.bounds.clone();
-        
+
         for i in 0..new_bounds.len() {
             let mut val = new_bounds[i] * scale;
             if i == 0 {
                 val = val.max(15.0);
             }
             new_bounds[i] = val.max(min_dist + 0.01);
-            
+
             if i > 0 {
-                let prev = new_bounds[i-1];
+                let prev = new_bounds[i - 1];
                 if new_bounds[i] <= prev {
                     new_bounds[i] = prev + MIN_DISTANCE_SPAN;
                 }
             }
         }
-        
+
         cascade.bounds = new_bounds;
     }
 }
@@ -667,8 +713,10 @@ fn follow_camera_fog_volume(
     camera_query: Query<&Transform, With<FogCamera>>,
     mut volume_query: Query<&mut Transform, (With<GlobalFogVolume>, Without<FogCamera>)>,
 ) {
-    let Ok(camera_tf) = camera_query.single() else { return };
-    
+    let Ok(camera_tf) = camera_query.single() else {
+        return;
+    };
+
     for mut tf in volume_query.iter_mut() {
         // Center volume on the camera so we're always inside the fog.
         tf.translation.x = camera_tf.translation.x;
@@ -765,7 +813,7 @@ fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
     let mut blocked = 0;
     // Check higher up (up to 32 blocks) to catch very tall pine tree canopies
     let check_height = 32;
-    
+
     for offset in offsets {
         if column_blocked(world, position + offset, check_height) {
             blocked += 1;
@@ -831,10 +879,8 @@ fn animate_dust_in_fog(
     let speed = dust_config.speed;
 
     // Calculate wind-based movement direction
-    let wind_dir = Vec2::new(
-        dust_config.wind_direction[0],
-        dust_config.wind_direction[1],
-    ).normalize_or_zero();
+    let wind_dir =
+        Vec2::new(dust_config.wind_direction[0], dust_config.wind_direction[1]).normalize_or_zero();
 
     // Add subtle vertical drift and time-based variation for organic movement
     let time_factor = time.elapsed_secs();

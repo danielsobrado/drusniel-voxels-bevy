@@ -143,11 +143,7 @@ impl ItemType {
 
     /// Maximum stack size for this item type
     pub fn max_stack(&self) -> u32 {
-        if self.is_stackable() {
-            99
-        } else {
-            1
-        }
+        if self.is_stackable() { 99 } else { 1 }
     }
 
     /// Path to the 2D icon for this item type

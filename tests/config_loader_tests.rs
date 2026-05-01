@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use voxel_builder::config::loader::{load_config, ConfigError};
+use voxel_builder::config::loader::{ConfigError, load_config};
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct AppConfig {

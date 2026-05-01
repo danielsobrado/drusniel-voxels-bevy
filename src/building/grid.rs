@@ -177,11 +177,8 @@ impl SnapPointIndex {
         for dx in -cell_radius..=cell_radius {
             for dy in -cell_radius..=cell_radius {
                 for dz in -cell_radius..=cell_radius {
-                    let cell = IVec3::new(
-                        center_cell.x + dx,
-                        center_cell.y + dy,
-                        center_cell.z + dz,
-                    );
+                    let cell =
+                        IVec3::new(center_cell.x + dx, center_cell.y + dy, center_cell.z + dz);
 
                     if let Some(points) = self.cells.get(&cell) {
                         for point in points {

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
+use bevy::prelude::*;
 use bevy::render::renderer::RenderAdapterInfo;
 use wgpu::DeviceType;
 
@@ -108,7 +108,9 @@ pub fn toggle_ssao(
                 commands.entity(entity).insert(ssao);
             }
         } else if !enable && existing.is_some() {
-            commands.entity(entity).remove::<ScreenSpaceAmbientOcclusion>();
+            commands
+                .entity(entity)
+                .remove::<ScreenSpaceAmbientOcclusion>();
         }
     }
 }

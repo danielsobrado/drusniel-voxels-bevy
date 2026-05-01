@@ -280,7 +280,9 @@ fn spawn_landmark_marker(parent: &mut ChildSpawnerCommands, world: &VoxelWorld, 
             ..default()
         },
         BackgroundColor(Color::srgb(0.98, 0.82, 0.24)),
-        MapLandmarkMarker { world_pos: position },
+        MapLandmarkMarker {
+            world_pos: position,
+        },
     ));
 }
 
@@ -388,7 +390,7 @@ fn build_map_data(world: &VoxelWorld, width: u32, height: u32) -> Vec<u8> {
     for _ in 0..(width * height) {
         data.extend_from_slice(&[18, 24, 34, 255]);
     }
-    
+
     // Not strictly needed, we scan chunks.
 
     for cx in 0..world_size_chunks.x {
@@ -426,18 +428,18 @@ fn build_map_data(world: &VoxelWorld, width: u32, height: u32) -> Vec<u8> {
                         // Calculate texture coordinates
                         // map_x is standard Left-to-Right
                         let map_x = (cx as usize * CHUNK_SIZE) + lx;
-                        
+
                         let world_z = (cz as usize * CHUNK_SIZE) + lz;
                         if world_z < height as usize {
-                             let map_y = (height as usize - 1) - world_z;
-                             
-                             if map_x < width as usize && map_y < height as usize {
+                            let map_y = (height as usize - 1) - world_z;
+
+                            if map_x < width as usize && map_y < height as usize {
                                 let idx = (map_y * width as usize + map_x) * 4;
                                 data[idx] = r;
-                                data[idx+1] = g;
-                                data[idx+2] = b;
-                                data[idx+3] = a;
-                             }
+                                data[idx + 1] = g;
+                                data[idx + 2] = b;
+                                data[idx + 3] = a;
+                            }
                         }
                     }
                 }
@@ -449,15 +451,15 @@ fn build_map_data(world: &VoxelWorld, width: u32, height: u32) -> Vec<u8> {
 
 fn get_voxel_color(voxel: VoxelType) -> [u8; 4] {
     match voxel {
-        VoxelType::Leaves => [50, 205, 50, 255],     // Lime Green / Bright Green for Trees 
-        VoxelType::Wood => [101, 67, 33, 255],       // Dark Brown (if visible)
-        VoxelType::TopSoil => [34, 139, 34, 255],    // Forest Green (Grass)
-        VoxelType::SubSoil => [139, 69, 19, 255],    // Saddle Brown
-        VoxelType::Rock => [169, 169, 169, 255],     // Dark Gray
-        VoxelType::Bedrock => [105, 105, 105, 255],  // Dim Gray
-        VoxelType::Sand => [238, 214, 175, 255],     // Sand
-        VoxelType::Clay => [180, 140, 100, 255],     // Clay color
-        VoxelType::Water => [30, 144, 255, 255],     // Dodger Blue
+        VoxelType::Leaves => [50, 205, 50, 255], // Lime Green / Bright Green for Trees
+        VoxelType::Wood => [101, 67, 33, 255],   // Dark Brown (if visible)
+        VoxelType::TopSoil => [34, 139, 34, 255], // Forest Green (Grass)
+        VoxelType::SubSoil => [139, 69, 19, 255], // Saddle Brown
+        VoxelType::Rock => [169, 169, 169, 255], // Dark Gray
+        VoxelType::Bedrock => [105, 105, 105, 255], // Dim Gray
+        VoxelType::Sand => [238, 214, 175, 255], // Sand
+        VoxelType::Clay => [180, 140, 100, 255], // Clay color
+        VoxelType::Water => [30, 144, 255, 255], // Dodger Blue
         VoxelType::DungeonWall => [70, 70, 80, 255], // Dark Blue-Gray
         VoxelType::DungeonFloor => [60, 60, 70, 255],
         _ => [0, 0, 0, 0], // Transparent/Air

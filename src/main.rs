@@ -7,36 +7,35 @@ use bevy::diagnostic::{
 };
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::render::settings::{Backends, RenderCreation, WgpuSettings, WgpuLimits};
 use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, RenderCreation, WgpuLimits, WgpuSettings};
 use bevy::window::{Window, WindowPlugin, WindowResolution};
 use std::collections::HashMap;
+use voxel_builder::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
+use voxel_builder::building::BuildingPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
 use voxel_builder::constants::{
-    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES,
-    MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
+    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
 };
+use voxel_builder::debug_ui::DebugUiPlugin;
 use voxel_builder::entity::EntityPlugin;
 use voxel_builder::environment::AtmospherePlugin;
-use voxel_builder::atmosphere::{FogPlugin, AtmosphereIntegrationPlugin};
+use voxel_builder::input::InputPlugin;
 use voxel_builder::interaction::InteractionPlugin;
 use voxel_builder::inventory_ui::InventoryUiPlugin;
 use voxel_builder::map::MapPlugin;
 use voxel_builder::menu::PauseMenuPlugin;
-use voxel_builder::props::PropsPlugin;
+use voxel_builder::particles::ParticlePlugin;
 use voxel_builder::physics::PhysicsPlugin;
 use voxel_builder::player::PlayerPlugin;
-use voxel_builder::rendering::plugin::RenderingPlugin;
+use voxel_builder::props::PropsPlugin;
 use voxel_builder::rendering::AdaptiveGIPlugin;
+use voxel_builder::rendering::plugin::RenderingPlugin;
+use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
 use voxel_builder::voxel::plugin::VoxelPlugin;
-use voxel_builder::debug_ui::DebugUiPlugin;
-use voxel_builder::particles::ParticlePlugin;
-use voxel_builder::terrain::TerrainToolsPlugin;
-use voxel_builder::input::InputPlugin;
-use voxel_builder::building::BuildingPlugin;
 
 mod input;
 
@@ -50,7 +49,6 @@ mod input;
 /// - `WgpuLimits` contains the texture/sampler limits to request
 /// - `Option<Backends>` specifies which graphics backend to use (DX12 on Windows, auto elsewhere)
 fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
-
     #[cfg(target_os = "windows")]
     let (backends, backend_name) = (wgpu::Backends::DX12, "DX12");
     #[cfg(target_os = "macos")]
@@ -60,7 +58,10 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let (backends, backend_name) = (wgpu::Backends::all(), "Auto");
 
-    eprintln!("[GPU] Initializing wgpu instance with backend: {}", backend_name);
+    eprintln!(
+        "[GPU] Initializing wgpu instance with backend: {}",
+        backend_name
+    );
     eprintln!("[GPU] Target OS: {}", std::env::consts::OS);
     eprintln!("[GPU] Target Arch: {}", std::env::consts::ARCH);
 
@@ -74,7 +75,10 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     let adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all());
     for (i, adapter) in adapters.iter().enumerate() {
         let info = adapter.get_info();
-        eprintln!("[GPU]   [{}] {} ({:?}, {:?})", i, info.name, info.backend, info.device_type);
+        eprintln!(
+            "[GPU]   [{}] {} ({:?}, {:?})",
+            i, info.name, info.backend, info.device_type
+        );
     }
     eprintln!("[GPU] Found {} adapter(s)", adapters.len());
 
@@ -98,14 +102,32 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
         println!("║ Backend: {:<51?} ║", info.backend);
         println!("║ Device Type: {:<47?} ║", info.device_type);
         println!("║ Driver: {:<52} ║", truncate_str(&info.driver, 52));
-        println!("║ Driver Info: {:<47} ║", truncate_str(&info.driver_info, 47));
+        println!(
+            "║ Driver Info: {:<47} ║",
+            truncate_str(&info.driver_info, 47)
+        );
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ Max Textures/Stage: {:<40} ║", device_limits.max_sampled_textures_per_shader_stage);
-        println!("║ Max Samplers/Stage: {:<40} ║", device_limits.max_samplers_per_shader_stage);
+        println!(
+            "║ Max Textures/Stage: {:<40} ║",
+            device_limits.max_sampled_textures_per_shader_stage
+        );
+        println!(
+            "║ Max Samplers/Stage: {:<40} ║",
+            device_limits.max_samplers_per_shader_stage
+        );
         println!("║ Max Bind Groups: {:<43} ║", device_limits.max_bind_groups);
-        println!("║ Max Storage Textures: {:<38} ║", device_limits.max_storage_textures_per_shader_stage);
-        println!("║ Max Texture Dimension 2D: {:<34} ║", device_limits.max_texture_dimension_2d);
-        println!("║ Max Buffer Size: {:<43} ║", format_bytes(device_limits.max_buffer_size));
+        println!(
+            "║ Max Storage Textures: {:<38} ║",
+            device_limits.max_storage_textures_per_shader_stage
+        );
+        println!(
+            "║ Max Texture Dimension 2D: {:<34} ║",
+            device_limits.max_texture_dimension_2d
+        );
+        println!(
+            "║ Max Buffer Size: {:<43} ║",
+            format_bytes(device_limits.max_buffer_size)
+        );
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║ Required Min Textures: {:<37} ║", MIN_TEXTURES_PER_STAGE);
         println!("║ Required Min Samplers: {:<37} ║", MIN_SAMPLERS_PER_STAGE);
@@ -113,17 +135,24 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
 
         // Log additional debug info
         eprintln!("[GPU] Selected adapter: {} ({:?})", info.name, info.backend);
-        eprintln!("[GPU] Vendor ID: 0x{:04X}, Device ID: 0x{:04X}", info.vendor, info.device);
+        eprintln!(
+            "[GPU] Vendor ID: 0x{:04X}, Device ID: 0x{:04X}",
+            info.vendor, info.device
+        );
         eprintln!("[GPU] Features enabled: {:?}", features);
 
         // Check if limits are sufficient
         if device_limits.max_sampled_textures_per_shader_stage < MIN_TEXTURES_PER_STAGE {
-            eprintln!("[GPU] WARNING: Device max_sampled_textures ({}) < required ({})",
-                device_limits.max_sampled_textures_per_shader_stage, MIN_TEXTURES_PER_STAGE);
+            eprintln!(
+                "[GPU] WARNING: Device max_sampled_textures ({}) < required ({})",
+                device_limits.max_sampled_textures_per_shader_stage, MIN_TEXTURES_PER_STAGE
+            );
         }
         if device_limits.max_samplers_per_shader_stage < MIN_SAMPLERS_PER_STAGE {
-            eprintln!("[GPU] WARNING: Device max_samplers ({}) < required ({})",
-                device_limits.max_samplers_per_shader_stage, MIN_SAMPLERS_PER_STAGE);
+            eprintln!(
+                "[GPU] WARNING: Device max_samplers ({}) < required ({})",
+                device_limits.max_samplers_per_shader_stage, MIN_SAMPLERS_PER_STAGE
+            );
         }
 
         // Use actual device limits, but ensure minimums for our shaders
@@ -140,10 +169,12 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
             ..WgpuLimits::default()
         };
 
-        eprintln!("[GPU] Configured limits: textures={}, samplers={}, bind_groups={}",
+        eprintln!(
+            "[GPU] Configured limits: textures={}, samplers={}, bind_groups={}",
             limits.max_sampled_textures_per_shader_stage,
             limits.max_samplers_per_shader_stage,
-            limits.max_bind_groups);
+            limits.max_bind_groups
+        );
 
         #[cfg(target_os = "windows")]
         {
@@ -228,17 +259,18 @@ fn load_logging_config() -> String {
     let config_path = "assets/config/logging.yaml";
 
     let config: LoggingConfig = match std::fs::read_to_string(config_path) {
-        Ok(contents) => {
-            match serde_yaml::from_str(&contents) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    eprintln!("[LOG] Failed to parse {}: {}", config_path, e);
-                    LoggingConfig::default()
-                }
+        Ok(contents) => match serde_yaml::from_str(&contents) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                eprintln!("[LOG] Failed to parse {}: {}", config_path, e);
+                LoggingConfig::default()
             }
-        }
+        },
         Err(e) => {
-            eprintln!("[LOG] Failed to read {}: {}, using defaults", config_path, e);
+            eprintln!(
+                "[LOG] Failed to read {}: {}, using defaults",
+                config_path, e
+            );
             LoggingConfig::default()
         }
     };
@@ -314,7 +346,7 @@ fn main() {
         .add_plugins(PauseMenuPlugin)
         .add_plugins(PropsPlugin)
         .add_plugins(AtmospherePlugin)
-        .add_plugins(AtmosphereIntegrationPlugin)  // Physical sky rendering
+        .add_plugins(AtmosphereIntegrationPlugin) // Physical sky rendering
         .add_plugins(FogPlugin)
         .add_plugins(EntityPlugin)
         .add_plugins(DebugUiPlugin)

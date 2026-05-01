@@ -1,9 +1,9 @@
-use bevy::prelude::*;
-use super::types::{TerrainTool, TerrainToolState};
 use super::preview::TerrainRaycastHit;
-use crate::voxel::world::VoxelWorld;
-use crate::voxel::types::{Voxel, VoxelType};
+use super::types::{TerrainTool, TerrainToolState};
 use crate::interaction::mark_neighbors_dirty;
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::VoxelWorld;
+use bevy::prelude::*;
 
 /// System that applies terrain tools when mouse is clicked
 pub fn apply_terrain_tool(
@@ -40,7 +40,7 @@ pub fn apply_terrain_tool(
     let max_z = (center.z + radius).ceil() as i32;
 
     let mut modified_positions = Vec::new();
-    
+
     // Simple pseudo-random based on position for sparse application
     let seed = (center.x * 1000.0 + center.z * 100.0) as u32;
 
@@ -57,9 +57,12 @@ pub fn apply_terrain_tool(
                     // Falloff determines probability of affecting this column
                     let falloff = 1.0 - (dist / radius).powi(2);
                     let probability = falloff * strength * 0.5;
-                    
+
                     // Use position-based pseudo-random to decide if we modify this column
-                    let hash = ((x as u32).wrapping_mul(73856093) ^ (z as u32).wrapping_mul(19349663) ^ seed) % 1000;
+                    let hash = ((x as u32).wrapping_mul(73856093)
+                        ^ (z as u32).wrapping_mul(19349663)
+                        ^ seed)
+                        % 1000;
                     if (hash as f32 / 1000.0) > probability {
                         continue;
                     }
@@ -101,9 +104,12 @@ pub fn apply_terrain_tool(
                     // Falloff determines probability of affecting this column
                     let falloff = 1.0 - (dist / radius).powi(2);
                     let probability = falloff * strength * 0.5;
-                    
+
                     // Use position-based pseudo-random to decide if we modify this column
-                    let hash = ((x as u32).wrapping_mul(73856093) ^ (z as u32).wrapping_mul(19349663) ^ seed) % 1000;
+                    let hash = ((x as u32).wrapping_mul(73856093)
+                        ^ (z as u32).wrapping_mul(19349663)
+                        ^ seed)
+                        % 1000;
                     if (hash as f32 / 1000.0) > probability {
                         continue;
                     }
@@ -125,7 +131,7 @@ pub fn apply_terrain_tool(
         TerrainTool::Level => {
             // Level: Flatten terrain to the hit point height (one block at a time)
             let target_height = center.y.floor() as i32;
-            
+
             for x in min_x..=max_x {
                 for z in min_z..=max_z {
                     let dist = Vec2::new(x as f32, z as f32).distance(center.xz());
@@ -136,9 +142,12 @@ pub fn apply_terrain_tool(
                     // Falloff determines probability of affecting this column
                     let falloff = 1.0 - (dist / radius).powi(2);
                     let probability = falloff * strength * 0.5;
-                    
+
                     // Use position-based pseudo-random to decide if we modify this column
-                    let hash = ((x as u32).wrapping_mul(73856093) ^ (z as u32).wrapping_mul(19349663) ^ seed) % 1000;
+                    let hash = ((x as u32).wrapping_mul(73856093)
+                        ^ (z as u32).wrapping_mul(19349663)
+                        ^ seed)
+                        % 1000;
                     if (hash as f32 / 1000.0) > probability {
                         continue;
                     }
@@ -183,7 +192,7 @@ pub fn apply_terrain_tool(
             // Smooth: Average heights in the radius (one block at a time)
             // First pass: calculate average height
             let mut heights: Vec<(i32, i32, i32)> = Vec::new();
-            
+
             for x in min_x..=max_x {
                 for z in min_z..=max_z {
                     let dist = Vec2::new(x as f32, z as f32).distance(center.xz());
@@ -207,16 +216,19 @@ pub fn apply_terrain_tool(
                 return;
             }
 
-            let avg_height: i32 = heights.iter().map(|(_, y, _)| *y).sum::<i32>() / heights.len() as i32;
+            let avg_height: i32 =
+                heights.iter().map(|(_, y, _)| *y).sum::<i32>() / heights.len() as i32;
 
             // Second pass: adjust ONE block towards average with probability
             for (x, current_y, z) in heights {
                 let dist = Vec2::new(x as f32, z as f32).distance(center.xz());
                 let falloff = 1.0 - (dist / radius).powi(2);
                 let probability = falloff * strength * 0.3;
-                
+
                 // Use position-based pseudo-random to decide if we modify this column
-                let hash = ((x as u32).wrapping_mul(73856093) ^ (z as u32).wrapping_mul(19349663) ^ seed) % 1000;
+                let hash =
+                    ((x as u32).wrapping_mul(73856093) ^ (z as u32).wrapping_mul(19349663) ^ seed)
+                        % 1000;
                 if (hash as f32 / 1000.0) > probability {
                     continue;
                 }

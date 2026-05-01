@@ -3,8 +3,8 @@
 //! Screen-space radiance cascades leveraging voxel SDF for efficient GI.
 //! Based on Alexander Sannikov's Radiance Cascades technique.
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::prelude::*;
 use bevy::render::render_resource::*;
 
 use crate::voxel::world::VoxelWorld;
@@ -17,10 +17,7 @@ impl Plugin for RadianceCascadesPlugin {
         app.init_resource::<RadianceCascadesConfig>()
             .init_resource::<SdfVolumeState>()
             .add_systems(Startup, setup_radiance_cascades)
-            .add_systems(Update, (
-                update_sdf_volume,
-                update_cascade_params,
-            ).chain());
+            .add_systems(Update, (update_sdf_volume, update_cascade_params).chain());
 
         // Render app systems would go here for full implementation
     }
@@ -300,7 +297,10 @@ fn setup_radiance_cascades(
         history,
     });
 
-    info!("Radiance Cascades GI initialized with {} cascades", config.cascade_count);
+    info!(
+        "Radiance Cascades GI initialized with {} cascades",
+        config.cascade_count
+    );
 }
 
 /// Create 3D SDF volume texture
@@ -324,9 +324,8 @@ fn create_sdf_volume_texture(config: &RadianceCascadesConfig) -> Image {
         RenderAssetUsages::RENDER_WORLD,
     );
 
-    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
-        | TextureUsages::STORAGE_BINDING
-        | TextureUsages::COPY_DST;
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST;
 
     image
 }
@@ -437,10 +436,7 @@ pub mod sdf_generation {
 
     /// Generate SDF data on CPU (fallback for initialization)
     /// Returns raw bytes for R16Float texture
-    pub fn generate_sdf_cpu(
-        voxel_world: &VoxelWorld,
-        config: &RadianceCascadesConfig,
-    ) -> Vec<u8> {
+    pub fn generate_sdf_cpu(voxel_world: &VoxelWorld, config: &RadianceCascadesConfig) -> Vec<u8> {
         let res = config.sdf_resolution;
         let volume_size = config.sdf_world_max - config.sdf_world_min;
 
@@ -508,10 +504,7 @@ pub mod sdf_generation {
     }
 
     /// World position to SDF volume index
-    pub fn world_to_sdf_index(
-        world_pos: Vec3,
-        config: &RadianceCascadesConfig,
-    ) -> Option<UVec3> {
+    pub fn world_to_sdf_index(world_pos: Vec3, config: &RadianceCascadesConfig) -> Option<UVec3> {
         let volume_size = config.sdf_world_max - config.sdf_world_min;
         let uvw = (world_pos - config.sdf_world_min) / volume_size;
 
@@ -555,8 +548,7 @@ pub mod debug {
             ui.separator();
 
             ui.add(
-                bevy_egui::egui::Slider::new(&mut config.rays_per_probe, 4..=32)
-                    .text("Rays/Probe"),
+                bevy_egui::egui::Slider::new(&mut config.rays_per_probe, 4..=32).text("Rays/Probe"),
             );
             ui.add(
                 bevy_egui::egui::Slider::new(&mut config.probe_spacing, 4.0..=16.0)

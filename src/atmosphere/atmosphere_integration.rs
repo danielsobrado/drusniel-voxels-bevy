@@ -4,8 +4,8 @@
 //! - Raymarched: Better quality for cinematic scenes, flight simulators, space views
 //! - LookupTexture (default): Faster, ideal for ground-level outdoor scenes
 
-use bevy::prelude::*;
 use bevy::pbr::{Atmosphere, AtmosphereMode, AtmosphereSettings, ScatteringMedium};
+use bevy::prelude::*;
 use serde::Deserialize;
 
 /// Configuration for atmospheric rendering
@@ -14,25 +14,25 @@ pub struct AtmosphereConfig {
     pub enabled: bool,
     pub rendering_mode: String, // "raymarched" or "lookup"
     pub sky_max_samples: u32,
-    
+
     // Rayleigh scattering
     pub rayleigh_scattering: Option<[f32; 3]>,
     pub rayleigh_scale_height: Option<f32>,
-    
+
     // Mie scattering
     pub mie_scattering: Option<f32>,
     pub mie_scale_height: Option<f32>,
     pub mie_asymmetry: Option<f32>,
-    
+
     // Ozone
     pub ozone_absorption: Option<[f32; 3]>,
     pub ozone_center_altitude: Option<f32>,
     pub ozone_width: Option<f32>,
-    
+
     // Sun
     pub sun_intensity: f32,
     pub sun_angular_radius: Option<f32>,
-    
+
     // Planet
     pub ground_albedo: Option<[f32; 3]>,
     pub bottom_radius: Option<f32>,

@@ -3,7 +3,9 @@ use bevy_hanabi::prelude::*;
 
 pub mod weather;
 
-pub use weather::{WeatherConfig, WeatherState, WeatherType, WeatherParticlePlugin, set_weather, set_wind};
+pub use weather::{
+    WeatherConfig, WeatherParticlePlugin, WeatherState, WeatherType, set_weather, set_wind,
+};
 
 pub struct ParticlePlugin;
 
@@ -30,26 +32,24 @@ impl Plugin for ParticlePlugin {
         }
 
         app.add_message::<SpawnParticleEvent>()
-           .add_plugins(WeatherParticlePlugin)
-           .add_systems(Startup, setup_particles)
-           .add_systems(Update, (handle_particle_events, despawn_finished_effects));
+            .add_plugins(WeatherParticlePlugin)
+            .add_systems(Startup, setup_particles)
+            .add_systems(Update, (handle_particle_events, despawn_finished_effects));
     }
 }
 
 fn setup_particles(mut commands: Commands, mut effects: ResMut<Assets<EffectAsset>>) {
     // TODO: Restore particle effect definition once Spawner type is identified
     // For now, we just create a placeholder handle to prevent crashes
-    
+
     // Placeholder effect
-    let effect = EffectAsset::default(); 
+    let effect = EffectAsset::default();
     let handle = effects.add(effect);
-    
+
     commands.insert_resource(ParticleRegistry { dig_effect: handle });
 }
 
-fn handle_particle_events(
-    mut events: MessageReader<SpawnParticleEvent>,
-) {
+fn handle_particle_events(mut events: MessageReader<SpawnParticleEvent>) {
     // TODO: Implement particle spawning once bevy_hanabi API is finalized
     // Drain events to prevent memory buildup
     for _ev in events.read() {}

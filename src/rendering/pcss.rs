@@ -33,9 +33,7 @@ pub struct PcssShadows {
 
 impl Default for PcssShadows {
     fn default() -> Self {
-        Self {
-            light_size: 10.0,
-        }
+        Self { light_size: 10.0 }
     }
 }
 
@@ -83,12 +81,7 @@ fn configure_directional_lights(
 }
 
 /// Helper to enable/disable PCSS on specific lights
-pub fn toggle_pcss_light(
-    commands: &mut Commands,
-    entity: Entity,
-    enable: bool,
-    light_size: f32,
-) {
+pub fn toggle_pcss_light(commands: &mut Commands, entity: Entity, enable: bool, light_size: f32) {
     if enable {
         commands.entity(entity).insert(PcssShadows { light_size });
     } else {

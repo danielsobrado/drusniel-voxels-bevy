@@ -1,5 +1,5 @@
+use crate::rendering::cinematic::CinematicEvent;
 use bevy::prelude::*;
-use crate::rendering::cinematic::{CinematicEvent};
 
 /// Simple cutscene controller
 #[derive(Component)]
@@ -34,10 +34,10 @@ pub fn start_cutscene(
     focus_targets: Vec<Entity>,
 ) -> Entity {
     // Enter cinematic mode
-    events.write(CinematicEvent::Enter { 
-        focus_entity: focus_targets.first().copied() 
+    events.write(CinematicEvent::Enter {
+        focus_entity: focus_targets.first().copied(),
     });
-    
+
     // Spawn cutscene controller
     commands.spawn(Cutscene::new(focus_targets, 3.0)).id()
 }
@@ -60,13 +60,12 @@ pub fn update_cutscenes(
         if !cutscene.auto_advance {
             continue;
         }
-        
+
         cutscene.advance_timer.tick(time.delta());
-        
+
         if cutscene.advance_timer.just_finished() {
-            cutscene.current_target = 
-                (cutscene.current_target + 1) % cutscene.focus_targets.len();
-            
+            cutscene.current_target = (cutscene.current_target + 1) % cutscene.focus_targets.len();
+
             if let Some(&target) = cutscene.focus_targets.get(cutscene.current_target) {
                 events.write(CinematicEvent::FocusOn { entity: target });
             }

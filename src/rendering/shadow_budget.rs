@@ -64,7 +64,12 @@ pub fn update_terrain_shadow_culling(
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut commands: Commands,
     chunk_query: Query<
-        (Entity, &ChunkMesh, &GlobalTransform, Option<&NotShadowCaster>),
+        (
+            Entity,
+            &ChunkMesh,
+            &GlobalTransform,
+            Option<&NotShadowCaster>,
+        ),
         Without<WaterMesh>, // Water handled separately — always NotShadowCaster
     >,
     mut stats: ResMut<ShadowCullingStats>,
@@ -187,7 +192,10 @@ impl Plugin for ShadowBudgetPlugin {
             .init_resource::<ShadowCullingStats>()
             .add_systems(
                 Update,
-                (update_terrain_shadow_culling, manage_point_light_shadow_budget),
+                (
+                    update_terrain_shadow_culling,
+                    manage_point_light_shadow_budget,
+                ),
             );
     }
 }

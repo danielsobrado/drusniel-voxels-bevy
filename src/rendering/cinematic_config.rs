@@ -60,15 +60,19 @@ impl Default for CinematicConfig {
 impl DofConfig {
     pub fn mode(&self) -> bevy::post_process::dof::DepthOfFieldMode {
         use bevy::post_process::dof::DepthOfFieldMode;
-        
+
         match self.mode.to_lowercase().as_str() {
             "gaussian" => DepthOfFieldMode::Gaussian,
             "bokeh" => DepthOfFieldMode::Bokeh,
             _ => {
                 #[cfg(target_arch = "wasm32")]
-                { DepthOfFieldMode::Gaussian }
+                {
+                    DepthOfFieldMode::Gaussian
+                }
                 #[cfg(not(target_arch = "wasm32"))]
-                { DepthOfFieldMode::Bokeh }
+                {
+                    DepthOfFieldMode::Bokeh
+                }
             }
         }
     }

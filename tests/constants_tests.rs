@@ -21,7 +21,10 @@ fn padded_chunk_size_includes_border() {
 
 #[test]
 fn chunk_size_is_power_of_two() {
-    assert!(CHUNK_SIZE.is_power_of_two(), "Chunk size should be power of 2 for efficient indexing");
+    assert!(
+        CHUNK_SIZE.is_power_of_two(),
+        "Chunk size should be power of 2 for efficient indexing"
+    );
 }
 
 #[test]
@@ -69,7 +72,10 @@ fn lod_distances_are_ordered() {
 fn interaction_constants_are_positive() {
     assert!(INTERACTION_RANGE > 0.0);
     assert!(RAY_STEP > 0.0);
-    assert!(RAY_STEP < INTERACTION_RANGE, "Ray step should be smaller than range");
+    assert!(
+        RAY_STEP < INTERACTION_RANGE,
+        "Ray step should be smaller than range"
+    );
     assert!(ENTITY_TARGET_CONE > 0.0 && ENTITY_TARGET_CONE <= 1.0);
     assert!(ENTITY_TARGET_RADIUS > 0.0);
     assert!(ATTACK_DAMAGE > 0.0);
@@ -93,13 +99,19 @@ fn gpu_requirements_are_reasonable() {
 
 #[test]
 fn voxel_size_is_unit() {
-    assert_eq!(VOXEL_SIZE, 1.0, "Voxel size should be 1.0 for simple coordinate math");
+    assert_eq!(
+        VOXEL_SIZE, 1.0,
+        "Voxel size should be 1.0 for simple coordinate math"
+    );
 }
 
 #[test]
 fn chunk_boundary_scale_slightly_larger() {
     assert!(CHUNK_BOUNDARY_SCALE > 1.0);
-    assert!(CHUNK_BOUNDARY_SCALE < 1.1, "Scale should be subtle to avoid visual artifacts");
+    assert!(
+        CHUNK_BOUNDARY_SCALE < 1.1,
+        "Scale should be subtle to avoid visual artifacts"
+    );
 }
 
 #[test]

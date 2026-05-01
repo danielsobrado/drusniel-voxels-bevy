@@ -194,10 +194,26 @@ impl PieceDefinition {
                 SnapPointDef::new(Vec3::new(-1.0, 0.0, 0.0), Vec3::NEG_X, SnapGroup::FloorEdge),
                 SnapPointDef::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, SnapGroup::FloorEdge),
                 // Corner points for diagonal connections
-                SnapPointDef::new(Vec3::new(-1.0, 0.0, -1.0), Vec3::new(-1.0, 0.0, -1.0).normalize(), SnapGroup::FloorEdge),
-                SnapPointDef::new(Vec3::new(1.0, 0.0, -1.0), Vec3::new(1.0, 0.0, -1.0).normalize(), SnapGroup::FloorEdge),
-                SnapPointDef::new(Vec3::new(-1.0, 0.0, 1.0), Vec3::new(-1.0, 0.0, 1.0).normalize(), SnapGroup::FloorEdge),
-                SnapPointDef::new(Vec3::new(1.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 1.0).normalize(), SnapGroup::FloorEdge),
+                SnapPointDef::new(
+                    Vec3::new(-1.0, 0.0, -1.0),
+                    Vec3::new(-1.0, 0.0, -1.0).normalize(),
+                    SnapGroup::FloorEdge,
+                ),
+                SnapPointDef::new(
+                    Vec3::new(1.0, 0.0, -1.0),
+                    Vec3::new(1.0, 0.0, -1.0).normalize(),
+                    SnapGroup::FloorEdge,
+                ),
+                SnapPointDef::new(
+                    Vec3::new(-1.0, 0.0, 1.0),
+                    Vec3::new(-1.0, 0.0, 1.0).normalize(),
+                    SnapGroup::FloorEdge,
+                ),
+                SnapPointDef::new(
+                    Vec3::new(1.0, 0.0, 1.0),
+                    Vec3::new(1.0, 0.0, 1.0).normalize(),
+                    SnapGroup::FloorEdge,
+                ),
             ],
             mesh_path: None,
             can_ground: true,

@@ -1,7 +1,7 @@
 //! Benchmarks for world operations.
 
 use bevy::math::IVec3;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use voxel_builder::constants::CHUNK_SIZE;
 use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
@@ -13,11 +13,7 @@ fn benchmark_world_creation(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("world_new", format!("{}x{}x{}", size, size, size)),
             size,
-            |b, &size| {
-                b.iter(|| {
-                    black_box(VoxelWorld::new(IVec3::new(size, size, size)))
-                })
-            },
+            |b, &size| b.iter(|| black_box(VoxelWorld::new(IVec3::new(size, size, size)))),
         );
     }
 
@@ -69,9 +65,7 @@ fn benchmark_voxel_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("world_voxel_ops");
 
     group.bench_function("get_voxel", |b| {
-        b.iter(|| {
-            black_box(world.get_voxel(IVec3::new(32, 32, 32)))
-        })
+        b.iter(|| black_box(world.get_voxel(IVec3::new(32, 32, 32))))
     });
 
     group.bench_function("set_voxel", |b| {
@@ -81,15 +75,11 @@ fn benchmark_voxel_operations(c: &mut Criterion) {
     });
 
     group.bench_function("in_bounds_true", |b| {
-        b.iter(|| {
-            black_box(world.in_bounds(IVec3::new(32, 32, 32)))
-        })
+        b.iter(|| black_box(world.in_bounds(IVec3::new(32, 32, 32))))
     });
 
     group.bench_function("in_bounds_false", |b| {
-        b.iter(|| {
-            black_box(world.in_bounds(IVec3::new(-1, -1, -1)))
-        })
+        b.iter(|| black_box(world.in_bounds(IVec3::new(-1, -1, -1))))
     });
 
     group.finish();
@@ -101,15 +91,15 @@ fn benchmark_chunk_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("chunk_access");
 
     group.bench_function("get_chunk", |b| {
-        b.iter(|| {
-            black_box(world.get_chunk(IVec3::new(2, 2, 2)))
-        })
+        b.iter(|| black_box(world.get_chunk(IVec3::new(2, 2, 2))))
     });
 
     group.bench_function("get_chunk_mut", |b| {
         b.iter(|| {
             // Use the pointer address to avoid returning a reference from the closure
-            let ptr = world.get_chunk_mut(IVec3::new(2, 2, 2)).map(|chunk| chunk as *mut _);
+            let ptr = world
+                .get_chunk_mut(IVec3::new(2, 2, 2))
+                .map(|chunk| chunk as *mut _);
             black_box(ptr)
         })
     });

@@ -1,7 +1,7 @@
 //! Tests for world persistence error types.
 
-use voxel_builder::voxel::persistence::PersistenceError;
 use std::io;
+use voxel_builder::voxel::persistence::PersistenceError;
 
 #[test]
 fn file_access_error_displays_path_and_source() {

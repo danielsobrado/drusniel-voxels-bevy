@@ -98,10 +98,10 @@ impl Default for WindAffected {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WindAnimationType {
-    Grass,      // Simple sway
-    Tree,       // Complex multi-layer animation
-    Bush,       // Medium complexity
-    Foliage,    // Leaf flutter
+    Grass,   // Simple sway
+    Tree,    // Complex multi-layer animation
+    Bush,    // Medium complexity
+    Foliage, // Leaf flutter
 }
 
 pub struct WindPlugin;
@@ -139,11 +139,7 @@ pub fn load_wind_config() -> Result<WindConfig, Box<dyn std::error::Error>> {
     Ok(config_file.wind)
 }
 
-fn update_wind_state(
-    time: Res<Time>,
-    config: Res<WindConfig>,
-    mut state: ResMut<WindState>,
-) {
+fn update_wind_state(time: Res<Time>, config: Res<WindConfig>, mut state: ResMut<WindState>) {
     if !config.enabled {
         return;
     }

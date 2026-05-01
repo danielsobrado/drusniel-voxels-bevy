@@ -1,11 +1,8 @@
-use bevy::{
-    prelude::*,
-    post_process::{
-        dof::DepthOfField,
-        motion_blur::MotionBlur,
-    },
-};
 use crate::rendering::cinematic_config::CinematicConfig;
+use bevy::{
+    post_process::{dof::DepthOfField, motion_blur::MotionBlur},
+    prelude::*,
+};
 
 pub struct CinematicPlugin;
 
@@ -14,12 +11,16 @@ impl Plugin for CinematicPlugin {
         app.init_resource::<CinematicConfig>()
             .init_resource::<CinematicState>()
             .add_message::<CinematicEvent>()
-            .add_systems(Update, (
-                handle_cinematic_events,
-                update_auto_focus,
-                update_cinematic_transitions,
-                crate::rendering::cutscene::update_cutscenes,
-            ).chain());
+            .add_systems(
+                Update,
+                (
+                    handle_cinematic_events,
+                    update_auto_focus,
+                    update_cinematic_transitions,
+                    crate::rendering::cutscene::update_cutscenes,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -54,7 +55,7 @@ pub fn dof_component(config: &CinematicConfig) -> Option<DepthOfField> {
     if !config.depth_of_field.enabled {
         return None;
     }
-    
+
     Some(DepthOfField {
         mode: config.depth_of_field.mode(),
         focal_distance: config.depth_of_field.focal_distance,
@@ -68,7 +69,7 @@ pub fn motion_blur_component(config: &CinematicConfig) -> Option<MotionBlur> {
     if !config.motion_blur.enabled {
         return None;
     }
-    
+
     Some(MotionBlur {
         shutter_angle: config.motion_blur.shutter_angle,
         samples: config.motion_blur.samples,
@@ -88,21 +89,20 @@ fn handle_cinematic_events(
             CinematicEvent::Enter { focus_entity } => {
                 state.active = true;
                 state.transition_timer = Some(Timer::from_seconds(0.5, TimerMode::Once));
-                
+
                 // Calculate initial focus distance
                 let camera_entity = cameras.iter().next();
                 if let (Some(target), Some(camera_entity)) = (focus_entity, camera_entity) {
-                    if let (Ok(camera_tf), Ok(target_tf)) = (
-                        transforms.get(camera_entity),
-                        transforms.get(*target),
-                    ) {
+                    if let (Ok(camera_tf), Ok(target_tf)) =
+                        (transforms.get(camera_entity), transforms.get(*target))
+                    {
                         state.target_focal_distance =
                             camera_tf.translation().distance(target_tf.translation());
                     }
                 } else {
                     state.target_focal_distance = config.depth_of_field.focal_distance;
                 }
-                
+
                 // Add effects to camera
                 for entity in cameras.iter() {
                     if let Some(dof) = dof_component(&config) {
@@ -112,28 +112,29 @@ fn handle_cinematic_events(
                         commands.entity(entity).insert(mb);
                     }
                 }
-                
+
                 info!("Cinematic mode entered");
             }
-            
+
             CinematicEvent::Exit => {
                 state.active = false;
                 state.transition_timer = Some(Timer::from_seconds(0.3, TimerMode::Once));
-                
+
                 // Remove effects from camera
                 for entity in cameras.iter() {
-                    commands.entity(entity)
+                    commands
+                        .entity(entity)
                         .remove::<DepthOfField>()
                         .remove::<MotionBlur>();
                 }
-                
+
                 info!("Cinematic mode exited");
             }
-            
+
             CinematicEvent::SetFocus { distance } => {
                 state.target_focal_distance = *distance;
             }
-            
+
             CinematicEvent::FocusOn { entity } => {
                 if let Ok(target_tf) = transforms.get(*entity) {
                     if let Some(camera_entity) = cameras.iter().next() {
@@ -152,13 +153,13 @@ fn update_auto_focus(
     config: Res<CinematicConfig>,
     state: ResMut<CinematicState>,
     _cameras: Query<&GlobalTransform, With<CinematicCamera>>,
-    // Note: Project seems to use custom voxel collision or rapier, 
+    // Note: Project seems to use custom voxel collision or rapier,
     // but the guide mentions rapier. I will comment it out if it fails.
 ) {
     if !state.active || !config.auto_focus.enabled {
         return;
     }
-    
+
     // Auto-focus logic would go here if specialized raycasting is available
 }
 
@@ -171,18 +172,19 @@ fn update_cinematic_transitions(
     if !state.active {
         return;
     }
-    
+
     // Smooth focus transition
     let lerp_speed = config.auto_focus.lerp_speed;
     state.current_focal_distance = state.current_focal_distance
-        + (state.target_focal_distance - state.current_focal_distance) 
-        * lerp_speed * time.delta_secs();
-    
+        + (state.target_focal_distance - state.current_focal_distance)
+            * lerp_speed
+            * time.delta_secs();
+
     // Update DoF focal distance
     for mut dof in dof_query.iter_mut() {
         dof.focal_distance = state.current_focal_distance;
     }
-    
+
     // Handle transition timer
     if let Some(ref mut timer) = state.transition_timer {
         timer.tick(time.delta());

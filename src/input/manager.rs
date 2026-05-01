@@ -1,6 +1,6 @@
+use super::config::{GameAction, InputConfig};
 use bevy::prelude::*;
 use std::collections::HashMap;
-use super::config::{InputConfig, GameAction};
 
 #[derive(Resource, Default)]
 pub struct ActionState {
@@ -39,7 +39,7 @@ pub fn update_action_state(
         if currently_pressed && !previously_pressed {
             state.just_pressed.insert(*action, true);
         }
-        
+
         if !currently_pressed && previously_pressed {
             state.just_released.insert(*action, true);
         }

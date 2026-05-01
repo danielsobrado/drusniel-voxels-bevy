@@ -1,5 +1,6 @@
 use bevy::light::{
-    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight, VolumetricLight,
+    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight,
+    VolumetricLight,
 };
 use bevy::prelude::*;
 use bevy_water::*;
@@ -63,9 +64,10 @@ pub struct AtmospherePlugin;
 impl Plugin for AtmospherePlugin {
     fn build(&self, app: &mut App) {
         // Check if native atmosphere will be used (loaded separately, but we can check the config)
-        let native_atmosphere_enabled = crate::atmosphere::atmosphere_integration::load_atmosphere_config()
-            .map(|c| c.enabled)
-            .unwrap_or(false);
+        let native_atmosphere_enabled =
+            crate::atmosphere::atmosphere_integration::load_atmosphere_config()
+                .map(|c| c.enabled)
+                .unwrap_or(false);
 
         // Use transparent clear color when native atmosphere is active (it renders the sky),
         // otherwise use a soft sky tint as fallback
@@ -92,11 +94,15 @@ impl Plugin for AtmospherePlugin {
                 ..default()
             })
             .add_plugins((WaterPlugin, ImageUtilsPlugin))
+            .add_systems(Startup, (setup_atmosphere, seed_atmosphere).chain())
             .add_systems(
-                Startup,
-                (setup_atmosphere, seed_atmosphere).chain(),
-            )
-            .add_systems(Update, (animate_atmosphere, apply_visual_settings_to_sun, adjust_shadows_for_integrated_gpu));
+                Update,
+                (
+                    animate_atmosphere,
+                    apply_visual_settings_to_sun,
+                    adjust_shadows_for_integrated_gpu,
+                ),
+            );
     }
 }
 
@@ -104,7 +110,7 @@ fn setup_atmosphere(mut commands: Commands) {
     // Sun directional light with tuned settings
     commands.spawn((
         DirectionalLight {
-            color: Color::srgb(1.0, 0.98, 0.95),  // Slightly warm white sun
+            color: Color::srgb(1.0, 0.98, 0.95), // Slightly warm white sun
             // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
             // Tuned for balanced color rendering
             illuminance: 100_000.0,
@@ -118,7 +124,7 @@ fn setup_atmosphere(mut commands: Commands) {
         CascadeShadowConfigBuilder {
             num_cascades: 4,
             minimum_distance: 0.5,
-            maximum_distance: 256.0,     // Was 1024 — matches terrain shadow cull distance + margin
+            maximum_distance: 256.0, // Was 1024 — matches terrain shadow cull distance + margin
             first_cascade_far_bound: 16.0,
             overlap_proportion: 0.3,
             ..default()
@@ -163,7 +169,8 @@ fn animate_atmosphere(
 
     // Advance time if enabled
     if settings.cycle_enabled {
-        settings.time = (settings.time + time.delta_secs() * settings.time_scale) % settings.day_length;
+        settings.time =
+            (settings.time + time.delta_secs() * settings.time_scale) % settings.day_length;
     }
     if let Some(sample) = compute_atmosphere(&settings) {
         apply_atmosphere_sample(
@@ -234,8 +241,7 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     let sun_strength = lerp(2000.0, 5_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
     let moon_strength = lerp(100.0, 20.0, daylight) * night_factor;
     // Ambient light - moderate for balanced shadows
-    let ambient_strength =
-        lerp(800.0, 2000.0, daylight) * (1.0 + horizon_warmth * 0.2);
+    let ambient_strength = lerp(800.0, 2000.0, daylight) * (1.0 + horizon_warmth * 0.2);
     // Blue-ish ambient tint for cooler fill light (Valheim style)
     let ambient_tint = Vec3::new(0.10, 0.16, 0.26)
         .lerp(Vec3::new(0.24, 0.36, 0.52), daylight)
@@ -314,7 +320,7 @@ pub fn apply_visual_settings_to_sun(
         // Apply sun warmth - interpolate from neutral white to warm
         let warmth = visual_settings.sun_warmth;
         light.color = Color::srgb(1.0, 1.0 - warmth * 0.15, 1.0 - warmth * 0.5);
-        
+
         // Apply illuminance
         light.illuminance = visual_settings.illuminance;
     }

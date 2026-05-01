@@ -8,20 +8,20 @@
 //! 2. Main GTAO: Compute occlusion with horizon-based algorithm
 //! 3. Denoise: Spatial-temporal filtering for smooth results
 
+use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::prelude::*;
 use bevy::render::renderer::RenderAdapterInfo;
 use bevy::render::{
+    Render, RenderApp, RenderSystems,
     extract_component::{ExtractComponent, ExtractComponentPlugin},
-    render_resource::*,
     render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode},
+    render_resource::*,
     renderer::RenderDevice,
     texture::{CachedTexture, TextureCache},
     view::{ViewTarget, ViewUniformOffset},
-    Render, RenderApp, RenderSystems,
 };
-use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
-use wgpu::DeviceType;
 use std::num::NonZeroU64;
+use wgpu::DeviceType;
 
 use crate::rendering::ao_config::{AmbientOcclusionConfig, load_ambient_occlusion_config};
 
@@ -43,8 +43,10 @@ impl Plugin for GtaoPlugin {
 
         // Register systems in RenderApp (resources initialized in finish())
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .add_systems(Render, prepare_gtao_textures.in_set(RenderSystems::PrepareResources));
+            render_app.add_systems(
+                Render,
+                prepare_gtao_textures.in_set(RenderSystems::PrepareResources),
+            );
         }
     }
 
@@ -271,11 +273,9 @@ fn configure_camera_gtao(
 
         if let Some(gtao) = gtao_camera_components(&config, &supported) {
             // GTAO requires depth and normal prepasses
-            commands.entity(entity).insert((
-                gtao,
-                DepthPrepass,
-                NormalPrepass,
-            ));
+            commands
+                .entity(entity)
+                .insert((gtao, DepthPrepass, NormalPrepass));
             info!("GTAO enabled on camera {:?}", entity);
         }
     }
@@ -292,11 +292,9 @@ pub fn toggle_gtao(
     for (entity, existing) in cameras.iter() {
         if enable && existing.is_none() && supported.0 {
             if let Some(gtao) = gtao_camera_components(&config, &supported) {
-                commands.entity(entity).insert((
-                    gtao,
-                    DepthPrepass,
-                    NormalPrepass,
-                ));
+                commands
+                    .entity(entity)
+                    .insert((gtao, DepthPrepass, NormalPrepass));
             }
         } else if !enable && existing.is_some() {
             commands.entity(entity).remove::<GtaoSettings>();
@@ -390,10 +388,8 @@ impl FromWorld for GtaoPipelines {
 
         // Main GTAO pass bind group layout
         let main_layout_entries = gtao_main_bind_group_layout_entries();
-        let main_layout = render_device.create_bind_group_layout(
-            "gtao_main_bind_group_layout",
-            &main_layout_entries,
-        );
+        let main_layout = render_device
+            .create_bind_group_layout("gtao_main_bind_group_layout", &main_layout_entries);
 
         // Denoise pass bind group layout
         let denoise_layout = render_device.create_bind_group_layout(
@@ -658,7 +654,9 @@ impl ViewNode for GtaoNode {
         &self,
         _graph: &mut RenderGraphContext,
         _render_context: &mut bevy::render::renderer::RenderContext,
-        (_view_target, _settings, _textures, _view_offset): bevy::ecs::query::QueryItem<Self::ViewQuery>,
+        (_view_target, _settings, _textures, _view_offset): bevy::ecs::query::QueryItem<
+            Self::ViewQuery,
+        >,
         _world: &World,
     ) -> Result<(), NodeRunError> {
         // GTAO implementation stub

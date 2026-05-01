@@ -16,6 +16,7 @@
 //! - [`volumetric_clouds`] - Raymarched volumetric clouds
 //! - [`radiance_cascades`] - Radiance Cascades global illumination
 
+pub mod adaptive_gi;
 pub mod ao_config;
 pub mod array_loader;
 pub mod atlas;
@@ -25,7 +26,7 @@ pub mod capabilities;
 pub mod cinematic;
 pub mod cinematic_config;
 pub mod cutscene;
-pub mod adaptive_gi;
+pub mod god_rays;
 pub mod gtao;
 pub mod gtao_noise;
 pub mod materials;
@@ -36,24 +37,25 @@ pub mod plugin;
 pub mod props_material;
 pub mod radiance_cascades;
 pub mod ray_tracing;
+pub mod shadow_budget;
 pub mod ssao;
 pub mod triplanar_material;
 pub mod volumetric_clouds;
-pub mod god_rays;
 pub mod water;
 pub mod water_displacement;
 pub mod water_reflection;
-pub mod shadow_budget;
 pub mod water_reflection_compositor;
 
-
+pub use adaptive_gi::{AdaptiveGIPlugin, AdaptiveGIQuality, AdaptiveGISettings};
 pub use ao_config::AmbientOcclusionConfig;
-pub use building_material::{BuildingMaterial, BuildingMaterialHandle, BuildingMaterialType, BuildingMesh};
+pub use building_material::{
+    BuildingMaterial, BuildingMaterialHandle, BuildingMaterialType, BuildingMesh,
+};
 pub use cinematic::{CinematicCamera, CinematicEvent, CinematicPlugin};
 pub use cinematic_config::CinematicConfig;
-pub use adaptive_gi::{AdaptiveGIPlugin, AdaptiveGISettings, AdaptiveGIQuality};
 pub use photo_mode::PhotoModePlugin;
 pub use props_material::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
-pub use radiance_cascades::{RadianceCascadesPlugin, RadianceCascadesConfig, RadianceCascadesCamera};
-pub use ssao::{ssao_camera_components, SsaoPlugin, SsaoSupported};
-
+pub use radiance_cascades::{
+    RadianceCascadesCamera, RadianceCascadesConfig, RadianceCascadesPlugin,
+};
+pub use ssao::{SsaoPlugin, SsaoSupported, ssao_camera_components};

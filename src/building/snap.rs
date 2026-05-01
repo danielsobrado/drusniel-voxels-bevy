@@ -4,8 +4,7 @@ use bevy::prelude::*;
 
 use super::grid::{IndexedSnapPoint, SnapConfig, SnapPointIndex};
 use super::types::{
-    BuildingPieceRegistry, BuildingState, PieceTypeId, SnapPointDef,
-    SnapResult, SnapTarget,
+    BuildingPieceRegistry, BuildingState, PieceTypeId, SnapPointDef, SnapResult, SnapTarget,
 };
 
 /// Find the best snap point for placing a piece at the given cursor position.
@@ -40,12 +39,8 @@ pub fn find_best_snap(
             }
 
             // Calculate where the piece would need to be for these snap points to connect
-            let (position, alignment_score) = calculate_snap_transform(
-                target,
-                source_def,
-                rotation,
-                config,
-            );
+            let (position, alignment_score) =
+                calculate_snap_transform(target, source_def, rotation, config);
 
             // Skip if alignment is too poor
             if alignment_score < config.min_alignment {
@@ -57,8 +52,8 @@ pub fn find_best_snap(
             let distance_score = 1.0 - (dist / config.snap_radius).min(1.0);
 
             // Combined score
-            let score = config.alignment_weight * alignment_score
-                + config.distance_weight * distance_score;
+            let score =
+                config.alignment_weight * alignment_score + config.distance_weight * distance_score;
 
             if score > best_score {
                 best_score = score;
@@ -198,10 +193,10 @@ mod tests {
 
         // Perfect alignment and close distance
         let score1 = calculate_snap_score(
-            Vec3::Z,      // target pointing +Z
-            Vec3::NEG_Z,  // source pointing -Z (perfect opposite)
-            0.1,          // close
-            1.0,          // max distance
+            Vec3::Z,     // target pointing +Z
+            Vec3::NEG_Z, // source pointing -Z (perfect opposite)
+            0.1,         // close
+            1.0,         // max distance
             &config,
         );
 

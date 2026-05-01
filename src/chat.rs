@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::prelude::*;
 
 use crate::menu::PauseMenuState;
 use crate::network::NetworkSession;
@@ -174,10 +174,7 @@ fn submit_chat_message(
     } else {
         let user = chat_state.username.clone();
         let content = chat_state.buffer.clone();
-        chat_state.push_message(ChatMessage {
-            user,
-            content,
-        });
+        chat_state.push_message(ChatMessage { user, content });
     }
 
     chat_state.buffer.clear();

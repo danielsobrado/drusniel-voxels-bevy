@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::color::LinearRgba;
+use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
 use serde::Deserialize;
 
@@ -14,10 +14,10 @@ pub struct WeatherConfig {
 #[derive(Deserialize, Clone)]
 pub struct RainConfig {
     pub enabled: bool,
-    pub intensity: f32,          // Particles per second (0-10000)
-    pub drop_speed: f32,         // Fall speed in m/s
-    pub drop_length: f32,        // Visual length of raindrops
-    pub wind_influence: f32,     // How much wind affects rain
+    pub intensity: f32,      // Particles per second (0-10000)
+    pub drop_speed: f32,     // Fall speed in m/s
+    pub drop_length: f32,    // Visual length of raindrops
+    pub wind_influence: f32, // How much wind affects rain
     pub splash_enabled: bool,
     pub color: [f32; 4],
 }
@@ -144,10 +144,7 @@ impl Plugin for WeatherParticlePlugin {
             .init_resource::<WeatherState>()
             .init_resource::<WeatherEffects>()
             .add_systems(Startup, setup_weather_effects)
-            .add_systems(Update, (
-                update_weather_emitters,
-                follow_camera_system,
-            ));
+            .add_systems(Update, (update_weather_emitters, follow_camera_system));
     }
 }
 
@@ -185,11 +182,11 @@ fn create_rain_effect(
 ) -> Handle<EffectAsset> {
     // Rain particles: vertical streaks falling fast
     let writer = ExprWriter::new();
-    
+
     // Spawn position: large area above camera
     let spawn_pos = writer.lit(Vec3::ZERO).expr();
     let spawn_radius = writer.lit(50.0).expr();
-    
+
     // Initialize particle properties
     let axis_y = writer.lit(Vec3::Y).expr();
     let init_pos = SetPositionCircleModifier {
@@ -205,12 +202,9 @@ fn create_rain_effect(
         axis: axis_y2,
         speed: writer.lit(config.drop_speed * 0.1).expr(),
     };
-    
-    let init_lifetime = SetAttributeModifier::new(
-        Attribute::LIFETIME,
-        writer.lit(3.0).expr(),
-    );
-    
+
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, writer.lit(3.0).expr());
+
     // Color with alpha - pack as RGBA u32
     let color = LinearRgba::new(
         config.color[0],
@@ -218,20 +212,15 @@ fn create_rain_effect(
         config.color[2],
         config.color[3],
     );
-    let init_color = SetAttributeModifier::new(
-        Attribute::COLOR,
-        writer.lit(color.as_u32()).expr(),
-    );
-    
+    let init_color = SetAttributeModifier::new(Attribute::COLOR, writer.lit(color.as_u32()).expr());
+
     // Size (elongated for rain streaks)
-    let init_size = SetAttributeModifier::new(
-        Attribute::SIZE,
-        writer.lit(config.drop_length).expr(),
-    );
-    
+    let init_size =
+        SetAttributeModifier::new(Attribute::SIZE, writer.lit(config.drop_length).expr());
+
     // Build effect
     let spawner = SpawnerSettings::rate(config.intensity.into());
-    
+
     let effect = EffectAsset::new(32768, spawner, writer.finish())
         .with_name("rain")
         .init(init_pos)
@@ -240,7 +229,7 @@ fn create_rain_effect(
         .init(init_color)
         .init(init_size)
         .render(OrientModifier::new(OrientMode::AlongVelocity));
-    
+
     effects.add(effect)
 }
 
@@ -250,10 +239,10 @@ fn create_snow_effect(
 ) -> Handle<EffectAsset> {
     // Snow: slow falling, swirling particles
     let writer = ExprWriter::new();
-    
+
     let spawn_pos = writer.lit(Vec3::ZERO).expr();
     let spawn_radius = writer.lit(40.0).expr();
-    
+
     let axis_y = writer.lit(Vec3::Y).expr();
     let init_pos = SetPositionCircleModifier {
         center: spawn_pos,
@@ -269,30 +258,22 @@ fn create_snow_effect(
         axis: axis_y2,
         speed: writer.lit(config.fall_speed * 0.5).expr(),
     };
-    
-    let init_lifetime = SetAttributeModifier::new(
-        Attribute::LIFETIME,
-        writer.lit(8.0).expr(),
-    );
-    
+
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, writer.lit(8.0).expr());
+
     let color = LinearRgba::new(
         config.color[0],
         config.color[1],
         config.color[2],
         config.color[3],
     );
-    let init_color = SetAttributeModifier::new(
-        Attribute::COLOR,
-        writer.lit(color.as_u32()).expr(),
-    );
+    let init_color = SetAttributeModifier::new(Attribute::COLOR, writer.lit(color.as_u32()).expr());
 
-    let init_size = SetAttributeModifier::new(
-        Attribute::SIZE,
-        writer.lit(config.flake_size).expr(),
-    );
+    let init_size =
+        SetAttributeModifier::new(Attribute::SIZE, writer.lit(config.flake_size).expr());
 
     let spawner = SpawnerSettings::rate(config.intensity.into());
-    
+
     let effect = EffectAsset::new(32768, spawner, writer.finish())
         .with_name("snow")
         .init(init_pos)
@@ -300,7 +281,7 @@ fn create_snow_effect(
         .init(init_lifetime)
         .init(init_color)
         .init(init_size);
-    
+
     effects.add(effect)
 }
 
@@ -310,28 +291,25 @@ fn create_dust_effect(
 ) -> Handle<EffectAsset> {
     // Dust: drifting particles
     let writer = ExprWriter::new();
-    
+
     let spawn_pos = writer.lit(Vec3::ZERO).expr();
     let spawn_radius = writer.lit(30.0).expr();
-    
+
     let init_pos = SetPositionSphereModifier {
         center: spawn_pos,
         radius: spawn_radius,
         dimension: ShapeDimension::Volume,
     };
-    
+
     // Slow drift with some faster particles mixed in
     let speed = (writer.lit(0.3) + writer.lit(1.7) * writer.rand(ScalarType::Float)).expr();
     let init_vel = SetVelocitySphereModifier {
         center: writer.lit(Vec3::ZERO).expr(),
         speed,
     };
-    
-    let init_lifetime = SetAttributeModifier::new(
-        Attribute::LIFETIME,
-        writer.lit(6.0).expr(),
-    );
-    
+
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, writer.lit(6.0).expr());
+
     let base_color = Vec4::new(
         config.color[0],
         config.color[1],
@@ -357,7 +335,7 @@ fn create_dust_effect(
         .init(init_lifetime)
         .init(init_color)
         .init(init_size);
-    
+
     effects.add(effect)
 }
 
@@ -416,21 +394,13 @@ fn follow_camera_system(
 }
 
 /// Public API for changing weather
-pub fn set_weather(
-    weather_state: &mut WeatherState,
-    weather_type: WeatherType,
-    intensity: f32,
-) {
+pub fn set_weather(weather_state: &mut WeatherState, weather_type: WeatherType, intensity: f32) {
     weather_state.current_type = weather_type;
     weather_state.intensity = intensity.clamp(0.0, 1.0);
 }
 
 /// Set wind parameters
-pub fn set_wind(
-    weather_state: &mut WeatherState,
-    direction: Vec2,
-    speed: f32,
-) {
+pub fn set_wind(weather_state: &mut WeatherState, direction: Vec2, speed: f32) {
     weather_state.wind_direction = direction.normalize_or_zero();
     weather_state.wind_speed = speed;
 }

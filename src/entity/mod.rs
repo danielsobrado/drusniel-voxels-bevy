@@ -10,8 +10,8 @@ pub mod inventory;
 use bevy::prelude::*;
 
 pub use inventory::{
-    EquippedItem, Inventory, InventorySlot, ItemDrop, ItemType, INVENTORY_COLUMNS, INVENTORY_ROWS,
-    INVENTORY_SLOTS,
+    EquippedItem, INVENTORY_COLUMNS, INVENTORY_ROWS, INVENTORY_SLOTS, Inventory, InventorySlot,
+    ItemDrop, ItemType,
 };
 
 // ============================================================================
@@ -50,7 +50,6 @@ pub struct EntitySpawnState {
     // Placeholder if needed for other entities, currently empty as NPCs are removed
 }
 
-
 // ============================================================================
 // Shared Utilities
 // ============================================================================
@@ -78,10 +77,7 @@ pub struct Health {
 
 impl Health {
     pub fn new(max: f32) -> Self {
-        Self {
-            current: max,
-            max,
-        }
+        Self { current: max, max }
     }
 
     pub fn damage(&mut self, amount: f32) {
@@ -129,10 +125,7 @@ pub fn process_item_drops(
 }
 
 /// System to despawn dead entities
-pub fn despawn_dead(
-    mut commands: Commands,
-    query: Query<Entity, With<Dead>>,
-) {
+pub fn despawn_dead(mut commands: Commands, query: Query<Entity, With<Dead>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }

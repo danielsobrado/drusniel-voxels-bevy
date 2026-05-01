@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::pbr::ScreenSpaceAmbientOcclusionQualityLevel;
+use bevy::prelude::*;
 use serde::Deserialize;
 
 #[derive(Resource, Deserialize, Clone)]
@@ -105,7 +105,8 @@ impl SsaoConfig {
     }
 }
 
-pub fn load_ambient_occlusion_config() -> Result<AmbientOcclusionConfig, Box<dyn std::error::Error>> {
+pub fn load_ambient_occlusion_config() -> Result<AmbientOcclusionConfig, Box<dyn std::error::Error>>
+{
     // Try loading new GTAO config first, fall back to legacy SSAO config
     if let Ok(config_str) = std::fs::read_to_string("assets/config/gtao.yaml") {
         #[derive(Deserialize)]
@@ -113,7 +114,7 @@ pub fn load_ambient_occlusion_config() -> Result<AmbientOcclusionConfig, Box<dyn
             gtao: GtaoConfig,
             baked: BakedAoConfig,
         }
-        
+
         let config_file: GtaoConfigFile = serde_yaml::from_str(&config_str)?;
         return Ok(AmbientOcclusionConfig {
             ssao: SsaoConfig {
@@ -126,7 +127,7 @@ pub fn load_ambient_occlusion_config() -> Result<AmbientOcclusionConfig, Box<dyn
             baked: config_file.baked,
         });
     }
-    
+
     // Fall back to legacy SSAO config
     #[derive(Deserialize)]
     struct AoConfigFile {

@@ -1,6 +1,6 @@
 use bevy::{
-    prelude::*,
     pbr::OpaqueRendererMethod,
+    prelude::*,
     render::render_resource::{AsBindGroup, ShaderType},
 };
 use bevy_shader::ShaderRef;
@@ -65,7 +65,7 @@ impl BuildingMaterialType {
     /// Get parallax scale for this material type
     pub fn parallax_scale(&self) -> f32 {
         match self {
-            Self::WoodPlank => 0.03,   // Subtle wood grain depth
+            Self::WoodPlank => 0.03,  // Subtle wood grain depth
             Self::StoneBrick => 0.05, // More pronounced stone depth
             Self::MetalPlate => 0.02, // Minimal for smooth metal
             Self::Thatch => 0.04,     // Moderate for straw texture

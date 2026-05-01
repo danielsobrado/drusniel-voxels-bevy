@@ -2,8 +2,7 @@ use bevy::asset::LoadState;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
-const SAMPLE_GLTF: &str =
-    "models/vegetation/trees/ultimate_stylized_nature/BirchTree_1.gltf";
+const SAMPLE_GLTF: &str = "models/vegetation/trees/ultimate_stylized_nature/BirchTree_1.gltf";
 
 #[derive(Resource)]
 struct GltfCheck {

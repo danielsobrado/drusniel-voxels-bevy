@@ -1,15 +1,17 @@
 //! Ghost preview and placement systems for building.
 
-use bevy::prelude::*;
 use bevy::math::{Isometry3d, primitives::Cuboid};
+use bevy::prelude::*;
 
 use crate::interaction::TargetedBlock;
 use crate::rendering::building_material::{BuildingMaterialHandle, BuildingMesh};
-use crate::voxel::world::VoxelWorld;
 use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::VoxelWorld;
 
 use super::grid::BuildingGrid;
-use super::types::{BuildingGhost, BuildingPiece, BuildingPieceRegistry, BuildingState, PieceTypeId};
+use super::types::{
+    BuildingGhost, BuildingPiece, BuildingPieceRegistry, BuildingState, PieceTypeId,
+};
 
 /// Materials for the building ghost.
 #[derive(Resource)]
@@ -99,14 +101,7 @@ pub fn update_building_ghost(
         let rot = state.rotation_quat();
 
         // Check validity
-        let valid = validate_placement(
-            pos,
-            piece_type,
-            state.rotation,
-            &world,
-            &grid,
-            &registry,
-        );
+        let valid = validate_placement(pos, piece_type, state.rotation, &world, &grid, &registry);
 
         (pos, rot, valid, false)
     } else {
@@ -137,11 +132,7 @@ pub fn update_building_ghost(
 
     let half_size = piece_def.dimensions * 0.5;
     let cuboid = Cuboid::new(half_size.x * 2.0, half_size.y * 2.0, half_size.z * 2.0);
-    gizmos.primitive_3d(
-        &cuboid,
-        Isometry3d::new(ghost_pos, ghost_rot),
-        color,
-    );
+    gizmos.primitive_3d(&cuboid, Isometry3d::new(ghost_pos, ghost_rot), color);
 
     // Draw snap points when snapped
     if snapped {
@@ -149,7 +140,8 @@ pub fn update_building_ghost(
             // Draw line connecting the snap points
             gizmos.line(
                 snap.target_snap.position,
-                ghost_pos + (ghost_rot * piece_def.snap_points[snap.source_snap_index].local_offset),
+                ghost_pos
+                    + (ghost_rot * piece_def.snap_points[snap.source_snap_index].local_offset),
                 Color::srgba(1.0, 1.0, 0.0, 0.8),
             );
         }
@@ -266,8 +258,7 @@ pub fn place_building_piece(
             .spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(mat_handle.handle.clone()),
-                Transform::from_translation(position)
-                    .with_rotation(state.rotation_quat()),
+                Transform::from_translation(position).with_rotation(state.rotation_quat()),
                 BuildingPiece {
                     piece_type,
                     grid_position: grid_pos,
@@ -305,8 +296,7 @@ pub fn place_building_piece(
             .spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_translation(position)
-                    .with_rotation(state.rotation_quat()),
+                Transform::from_translation(position).with_rotation(state.rotation_quat()),
                 BuildingPiece {
                     piece_type,
                     grid_position: grid_pos,

@@ -62,7 +62,10 @@ fn setting_same_voxel_does_not_mark_dirty() {
     chunk.clear_dirty();
     chunk.set(UVec3::new(0, 0, 0), VoxelType::Air);
 
-    assert!(!chunk.is_dirty(), "Setting same voxel should not mark dirty");
+    assert!(
+        !chunk.is_dirty(),
+        "Setting same voxel should not mark dirty"
+    );
 }
 
 #[test]

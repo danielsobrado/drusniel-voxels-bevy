@@ -1,6 +1,6 @@
 //! Tests for VoxelType enum and its trait implementations.
 
-use voxel_builder::voxel::types::{VoxelType, Voxel};
+use voxel_builder::voxel::types::{Voxel, VoxelType};
 
 #[test]
 fn air_is_not_solid() {
@@ -86,13 +86,17 @@ fn atlas_indices_are_unique_for_visible_types() {
         VoxelType::DungeonFloor,
     ];
 
-    let mut indices: Vec<u8> = visible_types.iter().map(|v: &VoxelType| v.atlas_index()).collect();
+    let mut indices: Vec<u8> = visible_types
+        .iter()
+        .map(|v: &VoxelType| v.atlas_index())
+        .collect();
     indices.sort();
 
     // Check for no consecutive duplicates after sorting
     for i in 1..indices.len() {
         assert_ne!(
-            indices[i], indices[i - 1],
+            indices[i],
+            indices[i - 1],
             "Duplicate atlas index {} found",
             indices[i]
         );

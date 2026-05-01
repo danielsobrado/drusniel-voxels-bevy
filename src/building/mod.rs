@@ -6,20 +6,20 @@
 //! - Grid-based and free placement modes
 //! - Building piece registry with configurable snap points
 
-pub mod types;
-pub mod snap;
-pub mod grid;
 pub mod ghost;
+pub mod grid;
+pub mod snap;
+pub mod types;
 
 use bevy::prelude::*;
 
 use crate::input::config::GameAction;
 use crate::input::manager::ActionState;
 
-pub use types::*;
-pub use snap::*;
-pub use grid::*;
 pub use ghost::*;
+pub use grid::*;
+pub use snap::*;
+pub use types::*;
 
 /// Plugin for the building system.
 pub struct BuildingPlugin;
@@ -47,10 +47,7 @@ impl Plugin for BuildingPlugin {
 }
 
 /// Handle building-related input (snap toggle, rotation).
-fn handle_building_input(
-    action_state: Res<ActionState>,
-    mut state: ResMut<BuildingState>,
-) {
+fn handle_building_input(action_state: Res<ActionState>, mut state: ResMut<BuildingState>) {
     // Toggle snap mode
     if action_state.just_pressed(GameAction::ToggleSnapMode) {
         state.snap_enabled = !state.snap_enabled;
