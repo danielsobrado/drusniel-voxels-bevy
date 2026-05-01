@@ -21,6 +21,69 @@ pub struct FogConfig {
     pub screen_god_rays: ScreenGodRaysConfig,
 }
 
+#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FogQuality {
+    pub tier: FogQualityTier,
+    #[serde(default)]
+    pub user_override: bool,
+}
+
+impl Default for FogQuality {
+    fn default() -> Self {
+        Self {
+            tier: FogQualityTier::Medium,
+            user_override: false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FogQualityTier {
+    Off,
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl FogQualityTier {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+        }
+    }
+
+    pub fn step_count(self) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Low => 8,
+            Self::Medium => 16,
+            Self::High => 32,
+        }
+    }
+
+    pub fn volume_size(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Low => 256.0,
+            Self::Medium => 384.0,
+            Self::High => 512.0,
+        }
+    }
+
+    pub fn dust_enabled(self) -> bool {
+        matches!(self, Self::High)
+    }
+
+    pub fn is_enabled(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FogPreset {
@@ -59,10 +122,10 @@ fn default_god_rays_preset() -> FogVolumeConfig {
             intensity: 0.8, // Higher contrast for dramatic effect
             wind_direction: [0.7, 0.3],
         },
-        // God rays specific volumetric overrides
-        step_count_override: Some(64), // Higher steps for sharp canopy shafts
+        // FogQuality tier overrides this step count at runtime.
+        step_count_override: Some(32),
         ambient_intensity_override: Some(0.0), // Zero ambient = maximum shaft contrast
-        light_intensity: 1.0,          // Normal intensity
+        light_intensity: 1.0,                  // Normal intensity
     }
 }
 
@@ -85,7 +148,7 @@ impl Default for FogPresetConfig {
             },
             balanced: FogVolumeConfig {
                 size: 512.0,
-                density: 0.04, // Default
+                density: 0.0009, // Default
                 absorption: 0.08,
                 scattering: 0.25,
                 scattering_asymmetry: 0.7,
@@ -102,7 +165,7 @@ impl Default for FogPresetConfig {
             },
             misty: FogVolumeConfig {
                 size: 512.0,
-                density: 0.15,    // Dense mist
+                density: 0.003,   // Dense mist
                 absorption: 0.05, // Bright mist
                 scattering: 0.8,  // High scattering
                 scattering_asymmetry: 0.8,
@@ -279,13 +342,13 @@ impl Default for FogConfig {
             },
             volumetric: VolumetricConfig {
                 enabled: true,
-                step_count: 32,
+                step_count: 16,
                 jitter: 0.5,
                 ambient_intensity: 0.0,
             },
             volume: FogVolumeConfig {
                 size: 512.0,
-                density: 0.04,
+                density: 0.0009,
                 absorption: 0.08,
                 scattering: 0.25,
                 scattering_asymmetry: 0.7,

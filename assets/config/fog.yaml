@@ -17,8 +17,9 @@ fog:
   # Only enable on high-end GPUs.
   volumetric:
     enabled: true
-    # Raymarching quality (16=minimum, 32=fast, 64=quality)
-    step_count: 32
+    # Base raymarching quality. FogQuality overrides this at runtime:
+    # Off removes VolumetricFog, Low=8, Medium=16, High=32.
+    step_count: 16
     # Jitter for TAA integration
     jitter: 0.5
     # Ambient intensity (0 if using environment maps)
@@ -28,8 +29,8 @@ fog:
   volume:
     # Size in world units (cover area around camera)
     size: 256.0
-    # Base density - EXTREMELY LOW to eliminate outdoor whiteout
-    density: 0.00001
+    # Base density for the default Medium tier.
+    density: 0.0009
     # Light absorption - very low to avoid darkening
     absorption: 0.001
     # Light scattering - Lowered to prevent milky look
@@ -45,7 +46,7 @@ fog:
       wind_direction: [0.7, 0.3]
 
   # Active preset (clear, balanced, misty, god_rays)
-  current_preset: god_rays
+  current_preset: balanced
 
   # Preset configurations
   presets:
@@ -63,7 +64,7 @@ fog:
         wind_direction: [0.7, 0.3]
     balanced:
       size: 512.0
-      density: 0.04
+      density: 0.0009
       absorption: 0.08
       scattering: 0.25
       scattering_asymmetry: 0.7
@@ -75,7 +76,7 @@ fog:
         wind_direction: [0.7, 0.3]
     misty:
       size: 512.0
-      density: 0.15
+      density: 0.003
       absorption: 0.05
       scattering: 0.8
       scattering_asymmetry: 0.8
@@ -97,8 +98,8 @@ fog:
         scale: 6.0           # Larger patterns for visible dust
         intensity: 0.8       # High contrast
         wind_direction: [0.7, 0.3]
-      # Volumetric overrides for god rays preset
-      step_count_override: 32       # Higher steps for sharp canopy shafts
+      # FogQuality tier overrides preset step count.
+      step_count_override: 32
       ambient_intensity_override: 0.0  # Zero ambient = maximum ray contrast
       light_intensity: 1.0          # Normal intensity
 

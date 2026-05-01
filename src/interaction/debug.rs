@@ -5,6 +5,7 @@
 //! - G key for detailed block logging
 //! - Various toggle keys for specific debug information
 
+use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
 use crate::interaction::TargetedProp;
 use crate::interaction::editing::{DeleteMode, DragState, EditMode};
 use crate::interaction::targeting::TargetedBlock;
@@ -66,6 +67,8 @@ pub struct DebugOverlayParams<'w> {
     pub graphics: Option<Res<'w, GraphicsCapabilities>>,
     pub timing_recorder: Res<'w, AreaTimingRecorder>,
     pub timing_capture: Res<'w, AreaTimingCapture>,
+    pub fog_quality: Option<Res<'w, FogQuality>>,
+    pub fog_runtime: Option<Res<'w, VolumetricFogRuntimeState>>,
     pub shadow_stats: Res<'w, ShadowCullingStats>,
     pub reflection_status: Option<Res<'w, WaterReflectionStatus>>,
     pub enclosure: Res<'w, EnclosureState>,
@@ -675,6 +678,8 @@ pub fn update_debug_overlay(
             debug.toggles.show_timing_breakdown,
             &debug.timing_recorder,
             &debug.timing_capture,
+            debug.fog_quality.as_deref(),
+            debug.fog_runtime.as_deref(),
         );
     }
 
@@ -880,6 +885,8 @@ fn append_performance_debug(
     show_timing_breakdown: bool,
     timing_recorder: &AreaTimingRecorder,
     timing_capture: &AreaTimingCapture,
+    fog_quality: Option<&FogQuality>,
+    fog_runtime: Option<&VolumetricFogRuntimeState>,
 ) {
     text_content.push_str("\n[Performance]\n");
 
@@ -973,6 +980,21 @@ fn append_performance_debug(
     text_content.push_str(&format!("Trace: {}\n", trace_status));
     if let Some(path) = timing_capture.last_output.as_deref() {
         text_content.push_str(&format!("Trace file: {}\n", path));
+    }
+    if let Some(quality) = fog_quality {
+        let mode = if quality.user_override {
+            "user"
+        } else {
+            "auto"
+        };
+        text_content.push_str(&format!("Fog tier: {} ({})\n", quality.tier.label(), mode));
+    }
+    if let Some(runtime) = fog_runtime {
+        text_content.push_str(&format!(
+            "VolumetricFog: {} ({})\n",
+            if runtime.active { "ON" } else { "OFF" },
+            runtime.reason.label()
+        ));
     }
 
     // Entity count from diagnostic

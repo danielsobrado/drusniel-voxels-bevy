@@ -1,4 +1,4 @@
-use crate::atmosphere::FogConfig;
+use crate::atmosphere::{FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::environment::AtmosphereSettings;
 use crate::interaction::{DebugDetailToggles, palette::PlacementPaletteState};
@@ -215,7 +215,7 @@ fn run_bench_state_machine(
     mut state: ResMut<BenchState>,
     mut camera: Query<(&mut Transform, &mut PlayerCamera), With<PlayerCamera>>,
     mut atmosphere: ResMut<AtmosphereSettings>,
-    fog_config: Option<ResMut<FogConfig>>,
+    mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
@@ -248,7 +248,7 @@ fn run_bench_state_machine(
             atmosphere.time = checkpoint.time_of_day * atmosphere.day_length;
             apply_fog_tier_if_supported(
                 checkpoint,
-                fog_config,
+                fog_quality.as_deref_mut(),
                 &mut state.warned_missing_fog_quality,
             );
             state.settle_frames_left = SETTLE_FRAMES;
@@ -314,7 +314,8 @@ fn run_bench_state_machine(
             }
         }
         BenchPhase::FinishRun => {
-            finish_run(&config, &scene, &mut state, &timing);
+            let tier = fog_quality.as_deref().map(|quality| quality.tier);
+            finish_run(&config, &scene, &mut state, &timing, tier);
             if state.checkpoint_index >= scene.checkpoints.len() {
                 finish_bench(&config, &scene, &mut state, &mut exit);
             } else {
@@ -332,6 +333,7 @@ fn finish_run(
     scene: &BenchScene,
     state: &mut BenchState,
     timing: &AreaTimingRecorder,
+    fog_tier: Option<FogQualityTier>,
 ) {
     let checkpoint = &scene.checkpoints[state.checkpoint_index];
     let mut run = state.current_run.take().unwrap_or_else(|| RunRecord {
@@ -379,6 +381,16 @@ fn finish_run(
                 median_ms: area.avg_ms,
                 p99_ms: area.p99_ms,
                 calls_per_frame: area.calls_per_frame,
+            },
+        );
+    }
+    if let Some(tier) = fog_tier {
+        summary.areas.insert(
+            "Volumetric Fog".to_string(),
+            AreaSummary {
+                median_ms: volumetric_fog_tier_cost_ms(tier),
+                p99_ms: volumetric_fog_tier_cost_ms(tier),
+                calls_per_frame: if tier.is_enabled() { 1.0 } else { 0.0 },
             },
         );
     }
@@ -461,42 +473,46 @@ fn chunks_ready(world: &VoxelWorld, position: Vec3, radius: i32) -> bool {
 
 fn apply_fog_tier_if_supported(
     checkpoint: &BenchCheckpoint,
-    fog_config: Option<ResMut<FogConfig>>,
+    fog_quality: Option<&mut FogQuality>,
     warned_missing_fog_quality: &mut bool,
 ) {
     let Some(tier) = checkpoint.fog_tier.as_deref() else {
         return;
     };
 
-    let Some(mut fog_config) = fog_config else {
+    let Some(fog_quality) = fog_quality else {
         if !*warned_missing_fog_quality {
-            warn!("bench scene requested fog_tier, but fog config resource is unavailable");
+            warn!("bench scene requested fog_tier, but FogQuality resource is unavailable");
             *warned_missing_fog_quality = true;
         }
         return;
     };
 
-    match tier.to_ascii_lowercase().as_str() {
-        "off" => fog_config.volumetric.enabled = false,
-        "low" => {
-            fog_config.volumetric.enabled = true;
-            fog_config.volumetric.step_count = 8;
-            fog_config.volume.size = 256.0;
-            fog_config.volume.dust_animation.enabled = false;
+    match fog_quality_tier_from_str(tier) {
+        Some(tier) => {
+            fog_quality.tier = tier;
+            fog_quality.user_override = true;
         }
-        "medium" => {
-            fog_config.volumetric.enabled = true;
-            fog_config.volumetric.step_count = 16;
-            fog_config.volume.size = 384.0;
-            fog_config.volume.dust_animation.enabled = false;
-        }
-        "high" => {
-            fog_config.volumetric.enabled = true;
-            fog_config.volumetric.step_count = 32;
-            fog_config.volume.size = 512.0;
-            fog_config.volume.dust_animation.enabled = true;
-        }
-        other => warn!("unknown fog_tier '{}' in bench scene", other),
+        None => warn!("unknown fog_tier '{}' in bench scene", tier),
+    }
+}
+
+fn fog_quality_tier_from_str(value: &str) -> Option<FogQualityTier> {
+    match value.to_ascii_lowercase().as_str() {
+        "off" => Some(FogQualityTier::Off),
+        "low" => Some(FogQualityTier::Low),
+        "medium" => Some(FogQualityTier::Medium),
+        "high" => Some(FogQualityTier::High),
+        _ => None,
+    }
+}
+
+fn volumetric_fog_tier_cost_ms(tier: FogQualityTier) -> f64 {
+    match tier {
+        FogQualityTier::High => 6.0,
+        FogQualityTier::Medium => 3.0,
+        FogQualityTier::Low => 1.5,
+        FogQualityTier::Off => 0.0,
     }
 }
 

@@ -1,0 +1,514 @@
+{
+  "schema_version": 1,
+  "scene": "fog-tiers.toml",
+  "seed": 12345,
+  "git_sha": "951b2ea3cd03717b264ee188ce62ad032955f20e",
+  "git_dirty": true,
+  "build_profile": "release",
+  "platform": "windows",
+  "bevy_version": "0.18.x",
+  "run_started_utc": "2026-05-01T15:42:54Z",
+  "duration_secs": 486.2631164,
+  "checkpoints": [
+    {
+      "name": "fog-high",
+      "fog_tier": "high",
+      "median_frame_ms": 114.38453333333334,
+      "p99_frame_ms": 149.961,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.034166666666666665,
+          "p99_ms": 0.101,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.0027333333333333333,
+          "p99_ms": 0.006,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.0014833333333333335,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 2.9589333333333334,
+          "p99_ms": 4.958,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.0015666666666666667,
+          "p99_ms": 0.009,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.03891666666666666,
+          "p99_ms": 0.043,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.000016666666666666667,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.014016666666666667,
+          "p99_ms": 0.029,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.0005666666666666666,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.14395,
+          "p99_ms": 0.743,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0011166666666666666,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Volumetric Fog": {
+          "median_ms": 6.0,
+          "p99_ms": 6.0,
+          "calls_per_frame": 1.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 114.38453333333334,
+          "csv": "fog-tiers-fog-high-run0.csv",
+          "screenshot": "fog-tiers-fog-high-run0.png"
+        },
+        {
+          "frame_ms_median": 115.04343333333334,
+          "csv": "fog-tiers-fog-high-run1.csv",
+          "screenshot": "fog-tiers-fog-high-run1.png"
+        },
+        {
+          "frame_ms_median": 112.81868333333334,
+          "csv": "fog-tiers-fog-high-run2.csv",
+          "screenshot": "fog-tiers-fog-high-run2.png"
+        }
+      ]
+    },
+    {
+      "name": "fog-medium",
+      "fog_tier": "medium",
+      "median_frame_ms": 116.85511666666667,
+      "p99_frame_ms": 142.374,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.03315,
+          "p99_ms": 0.057,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.002616666666666667,
+          "p99_ms": 0.004,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.0015166666666666666,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 2.8966,
+          "p99_ms": 5.029,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.00145,
+          "p99_ms": 0.007,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.03915,
+          "p99_ms": 0.069,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.013816666666666666,
+          "p99_ms": 0.02,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.0005666666666666666,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.13863333333333333,
+          "p99_ms": 0.474,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0011333333333333332,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Volumetric Fog": {
+          "median_ms": 3.0,
+          "p99_ms": 3.0,
+          "calls_per_frame": 1.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 115.11963333333333,
+          "csv": "fog-tiers-fog-medium-run0.csv",
+          "screenshot": "fog-tiers-fog-medium-run0.png"
+        },
+        {
+          "frame_ms_median": 117.77008333333333,
+          "csv": "fog-tiers-fog-medium-run1.csv",
+          "screenshot": "fog-tiers-fog-medium-run1.png"
+        },
+        {
+          "frame_ms_median": 116.85511666666667,
+          "csv": "fog-tiers-fog-medium-run2.csv",
+          "screenshot": "fog-tiers-fog-medium-run2.png"
+        }
+      ]
+    },
+    {
+      "name": "fog-low",
+      "fog_tier": "low",
+      "median_frame_ms": 116.82841666666667,
+      "p99_frame_ms": 144.986,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.032549999999999996,
+          "p99_ms": 0.057,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.0026666666666666666,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.0015166666666666666,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 2.9368000000000003,
+          "p99_ms": 4.945,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.0014,
+          "p99_ms": 0.01,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.03921666666666667,
+          "p99_ms": 0.063,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.013733333333333332,
+          "p99_ms": 0.02,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.0006166666666666667,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.15280000000000002,
+          "p99_ms": 0.784,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.00006666666666666667,
+          "p99_ms": 0.004,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0010833333333333333,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Volumetric Fog": {
+          "median_ms": 1.5,
+          "p99_ms": 1.5,
+          "calls_per_frame": 1.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 113.07114999999999,
+          "csv": "fog-tiers-fog-low-run0.csv",
+          "screenshot": "fog-tiers-fog-low-run0.png"
+        },
+        {
+          "frame_ms_median": 116.82841666666667,
+          "csv": "fog-tiers-fog-low-run1.csv",
+          "screenshot": "fog-tiers-fog-low-run1.png"
+        },
+        {
+          "frame_ms_median": 117.75341666666667,
+          "csv": "fog-tiers-fog-low-run2.csv",
+          "screenshot": "fog-tiers-fog-low-run2.png"
+        }
+      ]
+    },
+    {
+      "name": "fog-off",
+      "fog_tier": "off",
+      "median_frame_ms": 119.82315,
+      "p99_frame_ms": 146.316,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Face Visibility": {
+          "median_ms": 0.032100000000000004,
+          "p99_ms": 0.048,
+          "calls_per_frame": 1.0
+        },
+        "Fog Submit": {
+          "median_ms": 0.0024,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Grass Animate": {
+          "median_ms": 0.0014666666666666665,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0
+        },
+        "Grass Collect": {
+          "median_ms": 2.92895,
+          "p99_ms": 4.945,
+          "calls_per_frame": 1.0
+        },
+        "Grass Cull": {
+          "median_ms": 0.00125,
+          "p99_ms": 0.008,
+          "calls_per_frame": 1.0
+        },
+        "Grass Wind": {
+          "median_ms": 0.040233333333333336,
+          "p99_ms": 0.107,
+          "calls_per_frame": 1.0
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.013733333333333332,
+          "p99_ms": 0.021,
+          "calls_per_frame": 1.0
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Prop Billboard": {
+          "median_ms": 0.0005166666666666667,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Prop Culling": {
+          "median_ms": 0.14303333333333332,
+          "p99_ms": 0.722,
+          "calls_per_frame": 1.0
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Reflection Render": {
+          "median_ms": 0.0011166666666666666,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0
+        },
+        "Volumetric Fog": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 119.82315,
+          "csv": "fog-tiers-fog-off-run0.csv",
+          "screenshot": "fog-tiers-fog-off-run0.png"
+        },
+        {
+          "frame_ms_median": 116.85565,
+          "csv": "fog-tiers-fog-off-run1.csv",
+          "screenshot": "fog-tiers-fog-off-run1.png"
+        },
+        {
+          "frame_ms_median": 120.49003333333334,
+          "csv": "fog-tiers-fog-off-run2.csv",
+          "screenshot": "fog-tiers-fog-off-run2.png"
+        }
+      ]
+    }
+  ]
+}

@@ -1,12 +1,15 @@
 use crate::atmosphere::config::{
-    DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset,
+    DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset, FogQuality,
+    FogQualityTier,
 };
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
 use bevy::diagnostic::FrameCount;
+use bevy::ecs::system::SystemParam;
 use bevy::light::{
     CascadeShadowConfig, FogVolume, GlobalAmbientLight, VolumetricFog, VolumetricLight,
 };
@@ -23,13 +26,14 @@ use bevy::asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 const BASE_PRESET_DENSITY: f32 = 0.0009; // "Balanced" preset baseline for scaling.
-const VOLUME_DENSITY_SCALE: f32 = 1.0; // Volumetric density scale for visible god rays
 const MIN_VOLUME_DENSITY: f32 = 0.0005; // Visible haze, avoids "invisible god rays" issue while keeping outdoors relatively clear
 const MAX_VOLUME_DENSITY: f32 = 2.0; // High cap for testing god rays
 const MIN_DISTANCE_SCALE: f32 = 0.25; // Prevents overly aggressive linear fog compression
 const MAX_DISTANCE_SCALE: f32 = 2.5; // Prevents excessively thin fog
 const MIN_DISTANCE_SPAN: f32 = 1.0; // Keep end > start
 const SHADOW_FOG_FRACTION: f32 = 0.65; // End shadows before fog gets thick
+const FOG_UPDATE_INTERVAL_SECS: f32 = 0.1;
+const NIGHT_GATE_HYSTERESIS_SECS: f32 = 2.0;
 
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
@@ -40,14 +44,25 @@ impl Plugin for FogPlugin {
         });
 
         app.insert_resource(fog_config)
+            .init_resource::<FogQuality>()
+            .init_resource::<VolumetricFogRuntimeState>()
             .init_resource::<DustAnimationState>()
             .add_systems(Startup, setup_fog)
             .add_systems(
                 Update,
                 (
+                    apply_integrated_gpu_fog_quality,
+                    update_fog_runtime_state,
                     sync_fog_toggles,
-                    handle_fog_input,
+                )
+                    .chain(),
+            )
+            .add_systems(Update, handle_fog_input)
+            .add_systems(
+                Update,
+                (
                     update_fog_from_atmosphere,
+                    sync_fog_volume_quality,
                     update_shadow_cascades_from_fog,
                     follow_camera_fog_volume,
                     animate_dust_in_fog,
@@ -137,6 +152,50 @@ pub struct AtmosphereSample {
     pub sun_altitude: f32,
 }
 
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct VolumetricFogRuntimeState {
+    pub active: bool,
+    pub reason: VolumetricFogStateReason,
+    pub daylight: f32,
+    pub twilight: f32,
+    night_gate_requested: bool,
+    night_gate_active: bool,
+    gate_timer_secs: f32,
+}
+
+impl Default for VolumetricFogRuntimeState {
+    fn default() -> Self {
+        Self {
+            active: true,
+            reason: VolumetricFogStateReason::Enabled,
+            daylight: 1.0,
+            twilight: 0.0,
+            night_gate_requested: false,
+            night_gate_active: false,
+            gate_timer_secs: NIGHT_GATE_HYSTERESIS_SECS,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumetricFogStateReason {
+    Enabled,
+    ConfigDisabled,
+    TierOff,
+    NightGate,
+}
+
+impl VolumetricFogStateReason {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::ConfigDisabled => "disabled",
+            Self::TierOff => "tier off",
+            Self::NightGate => "night gate",
+        }
+    }
+}
+
 /// Effective fog distance range after time-of-day and LOD alignment.
 #[derive(Resource, Default, Clone, Copy)]
 pub struct FogDistanceState {
@@ -174,10 +233,11 @@ fn spawn_global_fog_volume(
     commands: &mut Commands,
     config: &FogConfig,
     texture: Option<Handle<Image>>,
+    quality: &FogQuality,
 ) {
     // Use config values for proper god rays - low absorption for brightness
     let density = config.volume.density.max(MIN_VOLUME_DENSITY);
-    let size = config.volume.size;
+    let size = effective_volume_size(config, quality);
     let scattering = config.volume.scattering;
     let absorption = config.volume.absorption;
     let asymmetry = config.volume.scattering_asymmetry;
@@ -197,7 +257,7 @@ fn spawn_global_fog_volume(
     };
 
     // Apply density texture for animated dust movement in god rays
-    if dust_config.enabled {
+    if dust_config.enabled && quality.tier.dust_enabled() {
         if let Some(tex) = texture {
             fog_volume.density_texture = Some(tex);
         }
@@ -214,6 +274,7 @@ fn spawn_global_fog_volume(
 fn setup_fog(
     mut commands: Commands,
     config: Res<FogConfig>,
+    quality: Res<FogQuality>,
     mut debug_toggles: ResMut<crate::interaction::DebugDetailToggles>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -229,11 +290,11 @@ fn setup_fog(
         config.volumetric.enabled, config.volume.density, config.volume.size
     );
 
-    if config.volumetric.enabled {
+    if config.volumetric.enabled && quality.tier.is_enabled() {
         // Spawn global fog volume centered at origin
         // Will be repositioned to follow camera
         info!("Spawning GlobalFogVolume for god rays");
-        spawn_global_fog_volume(&mut commands, &config, Some(noise_handle));
+        spawn_global_fog_volume(&mut commands, &config, Some(noise_handle), &quality);
     } else {
         warn!("Volumetric fog disabled - no god rays will be visible");
     }
@@ -256,7 +317,7 @@ pub fn fog_camera_components(config: &FogConfig) -> impl Bundle {
     (
         FogCamera,
         distance_fog_component(config),
-        volumetric_fog_component(config),
+        volumetric_fog_component(config, FogQualityTier::Medium),
     )
 }
 
@@ -310,18 +371,90 @@ pub fn sun_volumetric_components() -> VolumetricLight {
     VolumetricLight
 }
 
-fn volumetric_fog_component(config: &FogConfig) -> VolumetricFog {
+fn volumetric_fog_component(config: &FogConfig, tier: FogQualityTier) -> VolumetricFog {
     // Use defaults like Bevy example, but allow config overrides
     let mut vfog = VolumetricFog::default();
-    vfog.step_count = config.volumetric.step_count;
+    vfog.step_count = tier.step_count();
     vfog.jitter = config.volumetric.jitter;
     vfog.ambient_intensity = config.volumetric.ambient_intensity;
     vfog
 }
 
+fn apply_integrated_gpu_fog_quality(
+    capabilities: Option<Res<GraphicsCapabilities>>,
+    mut quality: ResMut<FogQuality>,
+    mut ran: Local<bool>,
+) {
+    if *ran {
+        return;
+    }
+
+    let Some(capabilities) = capabilities else {
+        return;
+    };
+    if capabilities.adapter_name.is_none() {
+        return;
+    }
+
+    *ran = true;
+    if capabilities.integrated_gpu && !quality.user_override && quality.tier != FogQualityTier::Off
+    {
+        quality.tier = FogQualityTier::Off;
+        info!("Integrated GPU detected; defaulting volumetric fog quality to Off");
+    }
+}
+
+fn update_fog_runtime_state(
+    atmosphere_settings: Option<Res<AtmosphereSettings>>,
+    config: Res<FogConfig>,
+    quality: Res<FogQuality>,
+    time: Res<Time>,
+    mut state: ResMut<VolumetricFogRuntimeState>,
+) {
+    let (daylight, twilight, _) = atmosphere_settings
+        .as_deref()
+        .map(fog_light_factors)
+        .unwrap_or((1.0, 0.0, 0.0));
+
+    let night_requested = daylight < 0.05 && twilight < 0.05;
+    if night_requested != state.night_gate_requested {
+        state.night_gate_requested = night_requested;
+        state.gate_timer_secs = 0.0;
+    } else if state.gate_timer_secs < NIGHT_GATE_HYSTERESIS_SECS {
+        state.gate_timer_secs += time.delta_secs();
+        if state.gate_timer_secs >= NIGHT_GATE_HYSTERESIS_SECS {
+            state.night_gate_active = state.night_gate_requested;
+        }
+    }
+
+    let reason = if !config.volumetric.enabled {
+        VolumetricFogStateReason::ConfigDisabled
+    } else if !quality.tier.is_enabled() {
+        VolumetricFogStateReason::TierOff
+    } else if state.night_gate_active {
+        VolumetricFogStateReason::NightGate
+    } else {
+        VolumetricFogStateReason::Enabled
+    };
+
+    let active = reason == VolumetricFogStateReason::Enabled;
+    if state.active != active
+        || state.reason != reason
+        || (state.daylight - daylight).abs() > 0.001
+        || (state.twilight - twilight).abs() > 0.001
+    {
+        state.active = active;
+        state.reason = reason;
+        state.daylight = daylight;
+        state.twilight = twilight;
+    }
+}
+
 fn sync_fog_toggles(
     mut commands: Commands,
     mut config: ResMut<FogConfig>,
+    quality: Res<FogQuality>,
+    runtime: Res<VolumetricFogRuntimeState>,
     debug_toggles: Res<crate::interaction::DebugDetailToggles>,
     camera_query: Query<(Entity, Option<&DistanceFog>, Option<&VolumetricFog>), With<FogCamera>>,
     volume_query: Query<Entity, With<GlobalFogVolume>>,
@@ -338,7 +471,7 @@ fn sync_fog_toggles(
         }
     }
 
-    if !config.is_changed() {
+    if !(config.is_changed() || quality.is_changed() || runtime.is_changed()) {
         // Force check if debug toggle was just enabled but config thinks it didn't change (rare/unlikely)
         if !debug_toggles.is_changed() {
             return;
@@ -361,10 +494,10 @@ fn sync_fog_toggles(
             camera.remove::<DistanceFog>();
         }
 
-        if config.volumetric.enabled {
+        if runtime.active {
             if volumetric_fog.is_none() {
                 info!("Adding VolumetricFog to camera");
-                camera.insert(volumetric_fog_component(&config));
+                camera.insert(volumetric_fog_component(&config, quality.tier));
             }
         } else if volumetric_fog.is_some() {
             info!("Removing VolumetricFog from camera");
@@ -372,10 +505,15 @@ fn sync_fog_toggles(
         }
     }
 
-    if config.volumetric.enabled {
+    if runtime.active {
         if volume_query.iter().next().is_none() {
             info!("Spawning GlobalFogVolume for god rays (sync)");
-            spawn_global_fog_volume(&mut commands, &config, noise_texture.map(|n| n.0.clone()));
+            spawn_global_fog_volume(
+                &mut commands,
+                &config,
+                noise_texture.map(|n| n.0.clone()),
+                &quality,
+            );
         }
     } else {
         for entity in volume_query.iter() {
@@ -386,42 +524,78 @@ fn sync_fog_toggles(
 }
 
 /// Update fog colors based on time-of-day from AtmosphereSettings
+#[derive(SystemParam)]
+struct FogUpdateResources<'w> {
+    atmosphere_settings: Option<Res<'w, AtmosphereSettings>>,
+    config: Res<'w, FogConfig>,
+    quality: Res<'w, FogQuality>,
+    runtime: Res<'w, VolumetricFogRuntimeState>,
+    lod_settings: Option<Res<'w, LodSettings>>,
+    atmosphere_sample: ResMut<'w, AtmosphereSample>,
+    fog_range: ResMut<'w, FogDistanceState>,
+    fog_uniforms: ResMut<'w, FogUniforms>,
+    ambient: Res<'w, GlobalAmbientLight>,
+    world: Res<'w, VoxelWorld>,
+    time: Res<'w, Time>,
+    frame: Res<'w, FrameCount>,
+    timing: ResMut<'w, AreaTimingRecorder>,
+}
+
+#[derive(SystemParam)]
+struct FogUpdateQueries<'w, 's> {
+    camera_query: Query<'w, 's, &'static Transform, With<FogCamera>>,
+    fog_query: Query<'w, 's, &'static mut DistanceFog, With<FogCamera>>,
+    volumetric_query: Query<'w, 's, &'static mut VolumetricFog, With<FogCamera>>,
+    volume_query: Query<'w, 's, &'static mut FogVolume, With<GlobalFogVolume>>,
+}
+
 fn update_fog_from_atmosphere(
-    atmosphere_settings: Option<Res<AtmosphereSettings>>,
-    config: Res<FogConfig>,
-    lod_settings: Option<Res<LodSettings>>,
-    mut atmosphere_sample: ResMut<AtmosphereSample>,
-    mut fog_range: ResMut<FogDistanceState>,
-    mut fog_uniforms: ResMut<FogUniforms>,
-    ambient: Res<GlobalAmbientLight>,
-    world: Res<VoxelWorld>,
-    time: Res<Time>,
-    frame: Res<FrameCount>,
-    mut timing: ResMut<AreaTimingRecorder>,
+    mut resources: FogUpdateResources,
     // Smoothing for preset transitions and boost
     mut smoothing: Local<FogSmoothingState>,
-    camera_query: Query<&Transform, With<FogCamera>>,
-    mut fog_query: Query<&mut DistanceFog, With<FogCamera>>,
-    mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
-    mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
+    mut queries: FogUpdateQueries,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Fog Submit");
+    let _timer = area_timer(&mut resources.timing, resources.frame.0, "Fog Submit");
+    let config: &FogConfig = &resources.config;
+    let quality: &FogQuality = &resources.quality;
+    let lod_settings = &resources.lod_settings;
+    let ambient: &GlobalAmbientLight = &resources.ambient;
+    let world: &VoxelWorld = &resources.world;
+    let time: &Time = &resources.time;
+    let atmosphere_sample: &mut AtmosphereSample = &mut resources.atmosphere_sample;
+    let fog_range: &mut FogDistanceState = &mut resources.fog_range;
+    let fog_uniforms: &mut FogUniforms = &mut resources.fog_uniforms;
+    let camera_query = &queries.camera_query;
+    let fog_query = &mut queries.fog_query;
+    let volumetric_query = &mut queries.volumetric_query;
+    let volume_query = &mut queries.volume_query;
+
     if smoothing.current_boost == 0.0 {
         smoothing.current_boost = 1.0;
     }
     if smoothing.target_boost == 0.0 {
         smoothing.target_boost = 1.0;
     }
-    let Some(atmo_settings) = atmosphere_settings else {
+    let Some(atmo_settings) = resources.atmosphere_settings.as_deref() else {
         return;
     };
+
+    smoothing.update_timer += time.delta_secs();
+    let force_update = resources.config.is_changed()
+        || resources.quality.is_changed()
+        || resources.runtime.is_changed();
+    if smoothing.update_timer < FOG_UPDATE_INTERVAL_SECS && !force_update {
+        return;
+    }
+    let dt = smoothing.update_timer.max(time.delta_secs());
+    smoothing.update_timer = 0.0;
 
     // Get Mie settings from atmosphere (connected to menu settings)
     let mie_direction = atmo_settings.mie_direction;
     // let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
 
     // Calculate sun position from atmosphere settings
-    let phase = atmo_settings.time / atmo_settings.day_length;
+    let phase = atmosphere_phase(atmo_settings);
     let theta = phase * std::f32::consts::TAU;
     let altitude = theta.sin(); // 1 at noon, -1 at midnight
     let azimuth = theta.cos();
@@ -432,14 +606,7 @@ fn update_fog_from_atmosphere(
     atmosphere_sample.sun_altitude = altitude;
 
     // Compute blend factors from sun altitude
-    let (daylight, twilight, night) = if atmo_settings.cycle_enabled {
-        let daylight = smoothstep(-0.1, 0.25, altitude);
-        let twilight = twilight_factor(altitude, 0.15);
-        let night = (1.0 - daylight).max(0.05);
-        (daylight, twilight, night)
-    } else {
-        (1.0, 0.0, 0.0)
-    };
+    let (daylight, twilight, night) = fog_light_factors(atmo_settings);
 
     let preset_density = lerp(
         atmo_settings.fog_density.y,
@@ -480,7 +647,7 @@ fn update_fog_from_atmosphere(
     let distance_scale =
         (1.0 / (preset_scale * density_mult)).clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
     let min_end = lod_settings.as_ref().map(|lod| lod.cull_distance);
-    let (start, end) = linear_fog_range(&config, distance_scale, min_end);
+    let (start, end) = linear_fog_range(config, distance_scale, min_end);
 
     if (fog_range.start - start).abs() > 0.01 || (fog_range.end - end).abs() > 0.01 {
         fog_range.start = start;
@@ -545,10 +712,7 @@ fn update_fog_from_atmosphere(
     }
 
     // Update volumetric fog camera settings so night/dim changes take effect.
-    // Use preset overrides when available for step_count (sharper rays)
-    let step_count = preset_config
-        .step_count_override
-        .unwrap_or(config.volumetric.step_count);
+    let step_count = quality.tier.step_count();
     for mut volumetric in volumetric_query.iter_mut() {
         volumetric.ambient_color = ambient.color;
         volumetric.ambient_intensity = ambient_intensity;
@@ -570,7 +734,6 @@ fn update_fog_from_atmosphere(
 
     // Smoothly interpolate boost to avoid jarring pops when walking under trees
     let interpolation_speed = 2.0;
-    let dt = time.delta_secs();
     smoothing.current_boost = lerp(
         smoothing.current_boost,
         target,
@@ -654,6 +817,7 @@ struct FogSmoothingState {
     current_asymmetry: f32,
     current_boost: f32,
     boost_timer: f32,
+    update_timer: f32,
     target_boost: f32,
 }
 
@@ -712,9 +876,31 @@ fn update_shadow_cascades_from_fog(
     }
 }
 
+fn sync_fog_volume_quality(
+    config: Res<FogConfig>,
+    quality: Res<FogQuality>,
+    noise_texture: Option<Res<FogNoiseTexture>>,
+    mut volume_query: Query<(&mut FogVolume, &mut Transform), With<GlobalFogVolume>>,
+) {
+    if !(config.is_changed() || quality.is_changed()) {
+        return;
+    }
+
+    for (mut volume, mut transform) in volume_query.iter_mut() {
+        transform.scale = Vec3::splat(effective_volume_size(&config, &quality));
+        volume.density_texture =
+            if config.volume.dust_animation.enabled && quality.tier.dust_enabled() {
+                noise_texture.as_ref().map(|texture| texture.0.clone())
+            } else {
+                None
+            };
+    }
+}
+
 /// Keep fog volume centered on camera
 fn follow_camera_fog_volume(
     config: Res<FogConfig>,
+    quality: Res<FogQuality>,
     camera_query: Query<&Transform, With<FogCamera>>,
     mut volume_query: Query<&mut Transform, (With<GlobalFogVolume>, Without<FogCamera>)>,
 ) {
@@ -728,8 +914,8 @@ fn follow_camera_fog_volume(
         tf.translation.y = camera_tf.translation.y;
         tf.translation.z = camera_tf.translation.z;
 
-        if config.is_changed() {
-            tf.scale = Vec3::splat(config.volume.size);
+        if config.is_changed() || quality.is_changed() {
+            tf.scale = Vec3::splat(effective_volume_size(&config, &quality));
         }
     }
 }
@@ -748,6 +934,31 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 fn twilight_factor(altitude: f32, band: f32) -> f32 {
     let centered = (altitude.abs() / band).min(1.0);
     (1.0 - centered).powi(2) * (1.0 - altitude.abs().min(1.0))
+}
+
+fn atmosphere_phase(settings: &AtmosphereSettings) -> f32 {
+    if settings.day_length <= f32::EPSILON {
+        0.25
+    } else {
+        (settings.time / settings.day_length).rem_euclid(1.0)
+    }
+}
+
+fn fog_light_factors(settings: &AtmosphereSettings) -> (f32, f32, f32) {
+    let phase = atmosphere_phase(settings);
+    let altitude = (phase * std::f32::consts::TAU).sin();
+    let daylight = smoothstep(-0.1, 0.25, altitude);
+    let twilight = twilight_factor(altitude, settings.twilight_band.max(0.01));
+    let night = (1.0 - daylight).max(0.05);
+    (daylight, twilight, night)
+}
+
+fn effective_volume_size(config: &FogConfig, quality: &FogQuality) -> f32 {
+    if quality.tier.is_enabled() {
+        quality.tier.volume_size()
+    } else {
+        config.volume.size
+    }
 }
 
 fn lerp_color3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
@@ -802,22 +1013,15 @@ fn apply_color_modifiers4(color: [f32; 4], mods: &FogColorModifiers) -> [f32; 4]
 }
 
 fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
-    // Sampling pattern optimized for trees (canopy) and buildings
-    // Radius ~3.0m (Widened): Aggressively detect trees/canopies to ensure god rays trigger
     let offsets = [
         Vec3::ZERO,
         Vec3::X * 3.0,
         Vec3::NEG_X * 3.0,
         Vec3::Z * 3.0,
         Vec3::NEG_Z * 3.0,
-        Vec3::new(2.0, 0.0, 2.0),
-        Vec3::new(-2.0, 0.0, -2.0),
-        Vec3::new(2.0, 0.0, -2.0),
-        Vec3::new(-2.0, 0.0, 2.0),
     ];
     let mut blocked = 0;
-    // Check higher up (up to 32 blocks) to catch very tall pine tree canopies
-    let check_height = 32;
+    let check_height = 16;
 
     for offset in offsets {
         if column_blocked(world, position + offset, check_height) {
@@ -826,7 +1030,7 @@ fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {
     }
     let ratio = blocked as f32 / offsets.len() as f32;
     // Significant boost indoors/under trees for visible shafts
-    1.0 + ratio * 4000.0
+    1.0 + ratio * 16.0
 }
 
 fn column_blocked(world: &VoxelWorld, position: Vec3, max_height: i32) -> bool {
@@ -862,9 +1066,14 @@ fn load_fog_config() -> Result<FogConfig, Box<dyn std::error::Error>> {
 fn animate_dust_in_fog(
     time: Res<Time>,
     config: Res<FogConfig>,
+    quality: Res<FogQuality>,
     mut dust_state: ResMut<DustAnimationState>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
+    if !quality.tier.dust_enabled() {
+        return;
+    }
+
     // Get dust config from active preset
     let dust_config = match config.current_preset {
         FogPreset::Clear => &config.presets.clear.dust_animation,

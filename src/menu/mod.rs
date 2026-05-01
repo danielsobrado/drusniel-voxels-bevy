@@ -25,7 +25,7 @@ pub use types::{
 
 use types::{ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot, SettingsInputState};
 
-use crate::atmosphere::FogConfig;
+use crate::atmosphere::{FogConfig, FogQuality};
 use crate::chat::ChatState;
 use crate::environment::AtmosphereSettings;
 use crate::network::NetworkSession;
@@ -143,6 +143,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::update_twilight_backgrounds,
                     settings::update_night_backgrounds,
                     settings::update_fog_backgrounds,
+                    settings::update_fog_quality_backgrounds,
                     settings::update_fog_toggle_backgrounds,
                     settings::update_cycle_backgrounds,
                     multiplayer::handle_favorite_buttons,
@@ -281,6 +282,7 @@ pub struct SettingsResources<'w> {
     pub settings_state: ResMut<'w, SettingsState>,
     pub drag_state: ResMut<'w, SettingsDialogDrag>,
     pub active_layer: Res<'w, types::ActiveTextureLayer>,
+    pub fog_quality: Res<'w, FogQuality>,
 }
 
 /// Handles menu button clicks.
@@ -317,6 +319,7 @@ fn handle_menu_buttons(
                     &settings_res.settings_state,
                     &visual_settings,
                     &fog_config,
+                    &settings_res.fog_quality,
                     &water_reflection,
                     &atmosphere,
                 );
@@ -392,6 +395,7 @@ fn handle_save_button(
     settings_state: &SettingsState,
     visual_settings: &VisualSettings,
     fog_config: &FogConfig,
+    fog_quality: &FogQuality,
     water_reflection: &WaterReflectionConfig,
     atmosphere: &AtmosphereSettings,
 ) {
@@ -403,6 +407,7 @@ fn handle_save_button(
         settings_state,
         visual_settings,
         fog_config,
+        fog_quality,
         water_reflection,
         atmosphere,
     ) {

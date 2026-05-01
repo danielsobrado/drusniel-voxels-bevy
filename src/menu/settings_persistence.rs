@@ -13,7 +13,7 @@ use super::types::{
     OzoneOption, RayleighOption, RunSpeedPreset, SettingsState, ShadowFiltering, SkyQualityOption,
     SunSizeOption, TimeScaleOption, TwilightBandOption, VisualSettings, WalkSpeedPreset,
 };
-use crate::atmosphere::{FogConfig, FogPreset};
+use crate::atmosphere::{FogConfig, FogPreset, FogQuality};
 use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
@@ -29,6 +29,8 @@ struct SettingsSave {
     settings: SettingsSnapshot,
     visual: VisualSettings,
     fog: FogConfig,
+    #[serde(default)]
+    fog_quality: FogQuality,
     #[serde(default)]
     water_reflection: WaterReflectionConfig,
     #[serde(default)]
@@ -125,6 +127,7 @@ pub fn save_settings_to_disk(
     settings_state: &SettingsState,
     visual_settings: &VisualSettings,
     fog_config: &FogConfig,
+    fog_quality: &FogQuality,
     water_reflection: &WaterReflectionConfig,
     atmosphere: &AtmosphereSettings,
 ) -> Result<(), String> {
@@ -132,6 +135,7 @@ pub fn save_settings_to_disk(
         settings: SettingsSnapshot::from_state(settings_state),
         visual: visual_settings.clone(),
         fog: fog_config.clone(),
+        fog_quality: *fog_quality,
         water_reflection: water_reflection.clone(),
         time_of_day_hours: Some(atmosphere_time_hours(atmosphere)),
     };
@@ -154,6 +158,7 @@ pub fn load_settings_on_startup(
     mut settings_state: ResMut<SettingsState>,
     mut visual_settings: ResMut<VisualSettings>,
     mut fog_config: ResMut<FogConfig>,
+    mut fog_quality: ResMut<FogQuality>,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut player_config: ResMut<PlayerConfig>,
     mut world_config: ResMut<WorldConfig>,
@@ -171,10 +176,12 @@ pub fn load_settings_on_startup(
     save.settings.apply_to_state(&mut settings_state);
     *visual_settings = save.visual;
     *fog_config = save.fog;
+    *fog_quality = save.fog_quality;
     *water_reflection = save.water_reflection;
     water_reflection.clamp_runtime();
 
     settings_state.fog_preset = super::types::FogPresetOption(fog_config.current_preset);
+    settings_state.fog_quality_tier = fog_quality.tier;
     ray_tracing.enabled = settings_state.ray_tracing;
 
     let was_greedy = world_config.greedy_meshing;

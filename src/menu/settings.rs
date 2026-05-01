@@ -12,7 +12,7 @@ use bevy::window::{
     MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution,
 };
 
-use crate::atmosphere::{FogConfig, FogPreset};
+use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
@@ -676,6 +676,23 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                     font,
                     "God Rays",
                     FogPresetOption(FogPreset::GodRays),
+                );
+            });
+
+            spawn_option_row(content, font, "Fog Quality", |options, font| {
+                spawn_graphics_option(options, font, "Off", FogQualityOption(FogQualityTier::Off));
+                spawn_graphics_option(options, font, "Low", FogQualityOption(FogQualityTier::Low));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Medium",
+                    FogQualityOption(FogQualityTier::Medium),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "High",
+                    FogQualityOption(FogQualityTier::High),
                 );
             });
 
@@ -2579,8 +2596,10 @@ pub fn handle_fog_settings(
         (Changed<Interaction>, With<Button>),
     >,
     fog_query: Query<(&Interaction, &FogPresetOption), (Changed<Interaction>, With<Button>)>,
+    quality_query: Query<(&Interaction, &FogQualityOption), (Changed<Interaction>, With<Button>)>,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_config: ResMut<FogConfig>,
+    mut fog_quality: ResMut<FogQuality>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -2609,12 +2628,21 @@ pub fn handle_fog_settings(
                 FogPreset::GodRays => Vec2::new(0.00001, 0.0001),
             };
             fog_config.volume.density = match option.0 {
-                FogPreset::Clear => 0.005,
-                FogPreset::Balanced => 0.015,
-                FogPreset::Misty => 0.04,
-                FogPreset::GodRays => 0.00001,
+                FogPreset::Clear => 0.0005,
+                FogPreset::Balanced => 0.0009,
+                FogPreset::Misty => 0.003,
+                FogPreset::GodRays => 0.0001,
             };
             info!("Switched to Fog Preset: {:?}", option.0);
+        }
+    }
+
+    for (interaction, option) in quality_query.iter() {
+        if *interaction == Interaction::Pressed {
+            settings_state.fog_quality_tier = option.0;
+            fog_quality.tier = option.0;
+            fog_quality.user_override = true;
+            info!("Switched to Fog Quality: {:?}", option.0);
         }
     }
 }
@@ -3381,6 +3409,24 @@ pub fn update_fog_backgrounds(
     }
 }
 
+/// Updates fog quality option backgrounds.
+pub fn update_fog_quality_backgrounds(
+    settings_state: Res<SettingsState>,
+    mut query: Query<(&FogQualityOption, &mut BackgroundColor)>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+    for (option, mut background) in query.iter_mut() {
+        *background = if settings_state.fog_quality_tier == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
+    }
+}
+
 /// Updates fog toggle option backgrounds.
 pub fn update_fog_toggle_backgrounds(
     settings_state: Res<SettingsState>,
@@ -4032,6 +4078,7 @@ pub fn handle_save_settings_interaction(
     settings_state: Res<SettingsState>,
     visual_settings: Res<VisualSettings>,
     fog_config: Res<FogConfig>,
+    fog_quality: Res<FogQuality>,
     water_reflection: Res<WaterReflectionConfig>,
     atmosphere: Res<AtmosphereSettings>,
 ) {
@@ -4043,6 +4090,7 @@ pub fn handle_save_settings_interaction(
                     &settings_state,
                     &visual_settings,
                     &fog_config,
+                    &fog_quality,
                     &water_reflection,
                     &atmosphere,
                 ) {

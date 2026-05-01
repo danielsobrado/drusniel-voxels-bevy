@@ -137,6 +137,7 @@ pub struct SettingsState {
     pub ground_albedo: GroundAlbedoOption,
     pub sun_size: SunSizeOption,
     pub fog_preset: FogPresetOption,
+    pub fog_quality_tier: FogQualityTier,
     pub cycle_enabled: bool,
     pub shadow_filtering: ShadowFiltering,
     pub walk_speed: WalkSpeedPreset,
@@ -169,6 +170,7 @@ impl Default for SettingsState {
             ground_albedo: GroundAlbedoOption::Earth,
             sun_size: SunSizeOption::Earth,
             fog_preset: FogPresetOption(FogPreset::Balanced),
+            fog_quality_tier: FogQualityTier::Medium,
             cycle_enabled: false,
             shadow_filtering: ShadowFiltering::Gaussian,
             walk_speed: WalkSpeedPreset::Standard,
@@ -485,10 +487,13 @@ pub enum SunSizeOption {
     Large,
 }
 
-use crate::atmosphere::FogPreset;
+use crate::atmosphere::{FogPreset, FogQualityTier};
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub struct FogPresetOption(pub FogPreset);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub struct FogQualityOption(pub FogQualityTier);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct DistanceFogOption(pub bool);
