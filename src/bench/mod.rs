@@ -425,7 +425,7 @@ fn finish_bench(
             "release".to_string()
         },
         platform: std::env::consts::OS.to_string(),
-        bevy_version: "0.18.x".to_string(),
+        bevy_version: "0.18.1".to_string(),
         run_started_utc: state.run_started_utc.clone(),
         duration_secs: state.started.elapsed().as_secs_f64(),
         checkpoints: std::mem::take(&mut state.checkpoints),

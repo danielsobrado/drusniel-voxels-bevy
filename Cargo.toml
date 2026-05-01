@@ -10,9 +10,31 @@ tracy = ["bevy/trace_tracy"]
 legacy_prop_spawn = []
 
 [dependencies]
-bevy = { version = "0.18", features = ["dynamic_linking", "jpeg", "png", "pbr_specular_textures", "sysinfo_plugin"] }
-bevy_mesh = "0.18"
-bevy_shader = "0.18"
+bevy = { version = "0.18.1", default-features = false, features = [
+    "3d_bevy_render",
+    "async_executor",
+    "bevy_asset",
+    "bevy_input_focus",
+    "bevy_log",
+    "bevy_state",
+    "bevy_winit",
+    "custom_cursor",
+    "default_font",
+    "dynamic_linking",
+    "jpeg",
+    "keyboard",
+    "mouse",
+    "multi_threaded",
+    "pbr_specular_textures",
+    "picking",
+    "png",
+    "reflect_auto_register",
+    "scene",
+    "sysinfo_plugin",
+    "ui_bevy_render",
+] }
+bevy_mesh = "0.18.1"
+bevy_shader = "0.18.1"
 bevy_water = "0.18.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
