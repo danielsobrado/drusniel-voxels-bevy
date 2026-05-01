@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::RenderTarget;
+use bevy::prelude::*;
 use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
@@ -53,12 +53,15 @@ pub struct BlockPreviewPlugin;
 impl Plugin for BlockPreviewPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_preview_resources);
-        app.add_systems(Update, (
-            setup_preview_material,
-            rotate_preview_mesh,
-            update_preview_mesh_materials,
-            update_triplanar_preview_mesh,
-        ));
+        app.add_systems(
+            Update,
+            (
+                setup_preview_material,
+                rotate_preview_mesh,
+                update_preview_mesh_materials,
+                update_triplanar_preview_mesh,
+            ),
+        );
     }
 }
 
@@ -86,10 +89,7 @@ fn setup_preview_material(
     commands.insert_resource(BlockPreviewMaterial(material));
 }
 
-fn setup_preview_resources(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn setup_preview_resources(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let size = Extent3d {
         width: PREVIEW_IMAGE_SIZE,
         height: PREVIEW_IMAGE_SIZE,
@@ -159,43 +159,55 @@ pub fn spawn_preview_scene(
         .id();
 
     // Camera - unique order to avoid ambiguity warnings
-    let camera = commands.spawn((
-        Camera3d::default(),
-        Camera {
-            order: 100, // High unique order for block preview
-            clear_color: bevy::prelude::ClearColorConfig::Custom(Color::srgba(0.1, 0.1, 0.1, 1.0)),
-            ..default()
-        },
-        RenderTarget::Image(preview_image.0.clone().into()),
-        Transform::from_xyz(1.2, 0.8, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
-        // BLOCK_PREVIEW_LAYER,
-    )).id();
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            Camera {
+                order: 100, // High unique order for block preview
+                clear_color: bevy::prelude::ClearColorConfig::Custom(Color::srgba(
+                    0.1, 0.1, 0.1, 1.0,
+                )),
+                ..default()
+            },
+            RenderTarget::Image(preview_image.0.clone().into()),
+            Transform::from_xyz(1.2, 0.8, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
+            // BLOCK_PREVIEW_LAYER,
+        ))
+        .id();
 
     // Light
-    let light = commands.spawn((
-        PointLight {
-            intensity: 1500.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(4.0, 8.0, 4.0),
-        GlobalTransform::default(),
-        // BLOCK_PREVIEW_LAYER,
-    )).id();
+    let light = commands
+        .spawn((
+            PointLight {
+                intensity: 1500.0,
+                shadows_enabled: true,
+                ..default()
+            },
+            Transform::from_xyz(4.0, 8.0, 4.0),
+            GlobalTransform::default(),
+            // BLOCK_PREVIEW_LAYER,
+        ))
+        .id();
 
     // Cube - uses StandardMaterial with atlas texture and atlas-based UVs
     let mesh_handle = meshes.add(create_preview_cube_mesh(atlas_mapping, active_layer));
 
-    let cube = commands.spawn((
-        Mesh3d(mesh_handle),
-        MeshMaterial3d(preview_material.0.clone()),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-        BlockPreviewRotate,
-        BlockPreviewMesh,
-        // BLOCK_PREVIEW_LAYER,
-    )).id();
+    let cube = commands
+        .spawn((
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(preview_material.0.clone()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            BlockPreviewRotate,
+            BlockPreviewMesh,
+            // BLOCK_PREVIEW_LAYER,
+        ))
+        .id();
 
-    commands.entity(root).add_child(camera).add_child(light).add_child(cube);
+    commands
+        .entity(root)
+        .add_child(camera)
+        .add_child(light)
+        .add_child(cube);
 
     root
 }
@@ -220,56 +232,66 @@ pub fn spawn_triplanar_preview_scene(
         .id();
 
     // Camera - Orthographic Top-Down (2D Look)
-    let camera = commands.spawn((
-        Camera3d::default(),
-        Projection::Orthographic(OrthographicProjection {
-            scale: 1.0,
-            near: -100.0,
-            far: 100.0,
-            scaling_mode: Default::default(),
-            viewport_origin: Vec2::new(0.5, 0.5),
-            area: Rect::default(),
-        }),
-        Camera {
-            order: 11,
-            ..default()
-        },
-        RenderTarget::Image(preview_image.0.clone().into()),
-        Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z), // Look down -Y, Up is +Z? 
-                             // Wait, Plane is XZ plane. Looking down Y. Up vector usually -Z or +Z.
-                             // Default 3D look_at uses Y as up. If looking down Y, need distinct up.
-                             // Let's use look_at(ZERO, Vec3::X) to orient correctly?
-                             // Plane geometry: [-1, -1] to [1, 1] in XZ? 
-                             // create_triplanar_plane_mesh uses XZ plane.
-                             // So we want to look from +Y down to 0.
-    )).id();
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            Projection::Orthographic(OrthographicProjection {
+                scale: 1.0,
+                near: -100.0,
+                far: 100.0,
+                scaling_mode: Default::default(),
+                viewport_origin: Vec2::new(0.5, 0.5),
+                area: Rect::default(),
+            }),
+            Camera {
+                order: 11,
+                ..default()
+            },
+            RenderTarget::Image(preview_image.0.clone().into()),
+            Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z), // Look down -Y, Up is +Z?
+                                                                                // Wait, Plane is XZ plane. Looking down Y. Up vector usually -Z or +Z.
+                                                                                // Default 3D look_at uses Y as up. If looking down Y, need distinct up.
+                                                                                // Let's use look_at(ZERO, Vec3::X) to orient correctly?
+                                                                                // Plane geometry: [-1, -1] to [1, 1] in XZ?
+                                                                                // create_triplanar_plane_mesh uses XZ plane.
+                                                                                // So we want to look from +Y down to 0.
+        ))
+        .id();
 
     // Light
-    let light = commands.spawn((
-        PointLight {
-            intensity: 2000.0,
-            shadows_enabled: true,
-            range: 20.0,
-            ..default()
-        },
-        Transform::from_xyz(2.0, 6.0, 2.0),
-        GlobalTransform::default(),
-        // TRIPLANAR_PREVIEW_LAYER,
-    )).id();
+    let light = commands
+        .spawn((
+            PointLight {
+                intensity: 2000.0,
+                shadows_enabled: true,
+                range: 20.0,
+                ..default()
+            },
+            Transform::from_xyz(2.0, 6.0, 2.0),
+            GlobalTransform::default(),
+            // TRIPLANAR_PREVIEW_LAYER,
+        ))
+        .id();
 
     // Plane Mesh
     let mesh_handle = meshes.add(create_triplanar_plane_mesh(0)); // Default to Grass
 
-    let plane = commands.spawn((
-        Mesh3d(mesh_handle),
-        MeshMaterial3d(triplanar_material.handle.clone()),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-        // No rotation for ground plane
-        TriplanarPreviewMesh,
-        // TRIPLANAR_PREVIEW_LAYER,
-    )).id();
+    let plane = commands
+        .spawn((
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(triplanar_material.handle.clone()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            // No rotation for ground plane
+            TriplanarPreviewMesh,
+            // TRIPLANAR_PREVIEW_LAYER,
+        ))
+        .id();
 
-    commands.entity(root).add_child(camera).add_child(light).add_child(plane);
+    commands
+        .entity(root)
+        .add_child(camera)
+        .add_child(light)
+        .add_child(plane);
 
     root
 }
@@ -324,16 +346,17 @@ fn create_triplanar_plane_mesh(mat_idx: u32) -> Mesh {
     // 2x2 Plane
     let size = 2.0;
     let half = size / 2.0;
-    
+
     let positions = vec![
-        [-half, 0.0, -half], [ half, 0.0, -half], [ half, 0.0,  half], [-half, 0.0,  half],
+        [-half, 0.0, -half],
+        [half, 0.0, -half],
+        [half, 0.0, half],
+        [-half, 0.0, half],
     ];
     let normals = vec![[0.0, 1.0, 0.0]; 4];
-    let uvs = vec![
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]
-    ];
+    let uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let indices = vec![0, 3, 1, 1, 3, 2];
-    
+
     // Colors for material weights
     // R=Mat0(Grass), G=Mat1(Rock), B=Mat2(Sand), A=Mat3(Dirt)
     let color = match mat_idx {
@@ -345,13 +368,16 @@ fn create_triplanar_plane_mesh(mat_idx: u32) -> Mesh {
     };
     let colors = vec![color; 4];
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
-    
+
     mesh
 }
 
@@ -401,32 +427,68 @@ fn create_preview_cube_mesh(mapping: &AtlasMapping, layer: ActiveTextureLayer) -
     // 24 vertices (4 per face)
     let positions = vec![
         // Top (+Y)
-        [-half, half, -half], [ half, half, -half], [ half, half,  half], [-half, half,  half],
+        [-half, half, -half],
+        [half, half, -half],
+        [half, half, half],
+        [-half, half, half],
         // Bottom (-Y)
-        [-half,-half,  half], [ half,-half,  half], [ half,-half, -half], [-half,-half, -half],
+        [-half, -half, half],
+        [half, -half, half],
+        [half, -half, -half],
+        [-half, -half, -half],
         // Right (+X)
-        [ half, half, -half], [ half,-half, -half], [ half,-half,  half], [ half, half,  half],
+        [half, half, -half],
+        [half, -half, -half],
+        [half, -half, half],
+        [half, half, half],
         // Left (-X)
-        [-half, half,  half], [-half,-half,  half], [-half,-half, -half], [-half, half, -half],
+        [-half, half, half],
+        [-half, -half, half],
+        [-half, -half, -half],
+        [-half, half, -half],
         // Front (+Z)
-        [-half, half,  half], [ half, half,  half], [ half,-half,  half], [-half,-half,  half],
+        [-half, half, half],
+        [half, half, half],
+        [half, -half, half],
+        [-half, -half, half],
         // Back (-Z)
-        [ half, half, -half], [-half, half, -half], [-half,-half, -half], [ half,-half, -half],
+        [half, half, -half],
+        [-half, half, -half],
+        [-half, -half, -half],
+        [half, -half, -half],
     ];
 
     let normals = vec![
         // Top
-        [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
         // Bottom
-        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
         // Right
-        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
         // Left
-        [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
         // Front
-        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
         // Back
-        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
     ];
 
     // UVs mapped to atlas tile positions
@@ -436,33 +498,54 @@ fn create_preview_cube_mesh(mapping: &AtlasMapping, layer: ActiveTextureLayer) -
     // - "bottom" in UV space (v_max) corresponds to -Y in world space
     let uvs = vec![
         // Top face (+Y): vertices go around XZ plane at Y=half
-        top_uvs[0], top_uvs[1], top_uvs[2], top_uvs[3],
+        top_uvs[0],
+        top_uvs[1],
+        top_uvs[2],
+        top_uvs[3],
         // Bottom face (-Y): vertices go around XZ plane at Y=-half
-        bottom_uvs[0], bottom_uvs[1], bottom_uvs[2], bottom_uvs[3],
+        bottom_uvs[0],
+        bottom_uvs[1],
+        bottom_uvs[2],
+        bottom_uvs[3],
         // Right face (+X): verts [top-back, bottom-back, bottom-front, top-front]
         // Map: top-back->TL, bottom-back->BL, bottom-front->BR, top-front->TR
-        side_uvs[0], side_uvs[3], side_uvs[2], side_uvs[1],
+        side_uvs[0],
+        side_uvs[3],
+        side_uvs[2],
+        side_uvs[1],
         // Left face (-X): verts [top-front, bottom-front, bottom-back, top-back]
         // Map: top-front->TR, bottom-front->BR, bottom-back->BL, top-back->TL
-        side_uvs[1], side_uvs[2], side_uvs[3], side_uvs[0],
+        side_uvs[1],
+        side_uvs[2],
+        side_uvs[3],
+        side_uvs[0],
         // Front face (+Z): verts [top-left, top-right, bottom-right, bottom-left]
         // Map: top-left->TL, top-right->TR, bottom-right->BR, bottom-left->BL
-        side_uvs[0], side_uvs[1], side_uvs[2], side_uvs[3],
+        side_uvs[0],
+        side_uvs[1],
+        side_uvs[2],
+        side_uvs[3],
         // Back face (-Z): verts [top-right, top-left, bottom-left, bottom-right]
         // Map: top-right->TR, top-left->TL, bottom-left->BL, bottom-right->BR
-        side_uvs[1], side_uvs[0], side_uvs[3], side_uvs[2],
+        side_uvs[1],
+        side_uvs[0],
+        side_uvs[3],
+        side_uvs[2],
     ];
 
     let indices = vec![
-        0, 3, 1, 1, 3, 2,      // Top
-        4, 7, 5, 5, 7, 6,      // Bottom
-        8, 11, 9, 9, 11, 10,   // Right
-        12, 15, 13, 13, 15, 14,// Left
-        16, 19, 17, 17, 19, 18,// Front
-        20, 23, 21, 21, 23, 22 // Back
+        0, 3, 1, 1, 3, 2, // Top
+        4, 7, 5, 5, 7, 6, // Bottom
+        8, 11, 9, 9, 11, 10, // Right
+        12, 15, 13, 13, 15, 14, // Left
+        16, 19, 17, 17, 19, 18, // Front
+        20, 23, 21, 21, 23, 22, // Back
     ];
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);

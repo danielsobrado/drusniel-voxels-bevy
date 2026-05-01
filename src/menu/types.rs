@@ -190,6 +190,21 @@ pub enum ShadowFiltering {
 pub(crate) struct ShadowFilteringOption(pub ShadowFiltering);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct WaterReflectionEnabledOption(pub bool);
+
+#[derive(Component, Copy, Clone, PartialEq)]
+pub(crate) struct WaterReflectionScaleOption(pub f32);
+
+#[derive(Component, Copy, Clone, PartialEq)]
+pub(crate) struct WaterReflectionHzOption(pub f32);
+
+#[derive(Component, Copy, Clone, PartialEq)]
+pub(crate) struct WaterReflectionDistanceOption(pub f32);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
+pub(crate) struct WaterReflectionFrustumOption(pub bool);
+
+#[derive(Component, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct DayNightCycleOption(pub bool);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq)]

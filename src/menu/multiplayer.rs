@@ -18,7 +18,7 @@ use crate::chat::ChatState;
 use crate::network::NetworkSession;
 
 use super::types::*;
-use super::ui::{spawn_button, SECTION_BG, INPUT_ACTIVE_BG, INPUT_INACTIVE_BG};
+use super::ui::{INPUT_ACTIVE_BG, INPUT_INACTIVE_BG, SECTION_BG, spawn_button};
 
 // ============================================================================
 // Multiplayer Menu Spawning
@@ -91,9 +91,27 @@ fn spawn_join_section(
         ))
         .with_children(|section| {
             super::ui::spawn_section_title(section, font, "Join Game");
-            spawn_labeled_input(section, font, "Host IP", "Enter IPv4 or IPv6", MultiplayerField::JoinIp);
-            spawn_labeled_input(section, font, "Port", "e.g. 7777", MultiplayerField::JoinPort);
-            spawn_labeled_input(section, font, "Password", "Session password", MultiplayerField::JoinPassword);
+            spawn_labeled_input(
+                section,
+                font,
+                "Host IP",
+                "Enter IPv4 or IPv6",
+                MultiplayerField::JoinIp,
+            );
+            spawn_labeled_input(
+                section,
+                font,
+                "Port",
+                "e.g. 7777",
+                MultiplayerField::JoinPort,
+            );
+            spawn_labeled_input(
+                section,
+                font,
+                "Password",
+                "Session password",
+                MultiplayerField::JoinPassword,
+            );
 
             section
                 .spawn(Node {
@@ -239,7 +257,10 @@ pub fn handle_start_server(
     network: &mut NetworkSession,
     chat: &mut ChatState,
 ) {
-    info!("Starting server with password '{}'", form_state.host_password);
+    info!(
+        "Starting server with password '{}'",
+        form_state.host_password
+    );
     network.server_running = true;
     network.host_password = form_state.host_password.clone();
     network.reset_client();
@@ -304,7 +325,7 @@ fn attempt_connection(address: &str, join_ip: String, join_port: String) -> Conn
         Err(err) => {
             return ConnectOutcome::Failure {
                 message: format!("Cannot connect: invalid address - {}", err),
-            }
+            };
         }
     };
 
@@ -315,9 +336,7 @@ fn attempt_connection(address: &str, join_ip: String, join_port: String) -> Conn
     };
 
     let start = Instant::now();
-    if let Err(err) =
-        std::net::TcpStream::connect_timeout(&target_addr, Duration::from_secs(3))
-    {
+    if let Err(err) = std::net::TcpStream::connect_timeout(&target_addr, Duration::from_secs(3)) {
         return ConnectOutcome::Failure {
             message: format!("Cannot connect: ping/health check failed - {}", err),
         };
@@ -425,7 +444,10 @@ pub fn handle_save_favorite(
         });
     }
 
-    info!("Saved favorite server {}:{}", new_favorite.ip, new_favorite.port);
+    info!(
+        "Saved favorite server {}:{}",
+        new_favorite.ip, new_favorite.port
+    );
 }
 
 // ============================================================================
@@ -477,7 +499,12 @@ pub fn process_input_characters(
             Key::Character(c) => {
                 if c.len() == 1 {
                     if let Some(ch) = c.chars().next() {
-                        if ch.is_ascii_alphanumeric() || ch == '.' || ch == ':' || ch == '-' || ch == '_' {
+                        if ch.is_ascii_alphanumeric()
+                            || ch == '.'
+                            || ch == ':'
+                            || ch == '-'
+                            || ch == '_'
+                        {
                             field_value.push(ch);
                         }
                     }
@@ -545,7 +572,12 @@ pub fn update_input_backgrounds(
 
     for (field, mut background) in query.iter_mut() {
         let is_active = form_state.active_field == Some(field.field);
-        *background = if is_active { INPUT_ACTIVE_BG } else { INPUT_INACTIVE_BG }.into();
+        *background = if is_active {
+            INPUT_ACTIVE_BG
+        } else {
+            INPUT_INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -569,7 +601,10 @@ pub fn handle_favorite_buttons(
             form_state.join_port = entry.port;
             form_state.join_password = entry.password;
             form_state.active_field = None;
-            info!("Loaded favorite server {}:{}", form_state.join_ip, form_state.join_port);
+            info!(
+                "Loaded favorite server {}:{}",
+                form_state.join_ip, form_state.join_port
+            );
         }
     }
 }

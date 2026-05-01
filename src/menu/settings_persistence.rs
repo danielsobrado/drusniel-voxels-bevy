@@ -2,19 +2,22 @@ use std::fs;
 use std::path::Path;
 
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution};
+use bevy::window::{
+    MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution,
+};
 use serde::{Deserialize, Serialize};
 
 use super::types::{
     AntiAliasing, DayLengthOption, DisplayMode, ExposureOption, FloatHeightPreset, GraphicsQuality,
-    JumpHeightPreset, MieDirectionOption, MieOption, NightBrightnessOption, OzoneOption,
-    RayleighOption, RunSpeedPreset, SettingsState, ShadowFiltering, SkyQualityOption, SunSizeOption,
-    TimeScaleOption, TwilightBandOption, WalkSpeedPreset, GroundAlbedoOption, VisualSettings,
+    GroundAlbedoOption, JumpHeightPreset, MieDirectionOption, MieOption, NightBrightnessOption,
+    OzoneOption, RayleighOption, RunSpeedPreset, SettingsState, ShadowFiltering, SkyQualityOption,
+    SunSizeOption, TimeScaleOption, TwilightBandOption, VisualSettings, WalkSpeedPreset,
 };
 use crate::atmosphere::{FogConfig, FogPreset};
 use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::plugin::WorldConfig;
 use crate::voxel::world::VoxelWorld;
 
@@ -26,6 +29,8 @@ struct SettingsSave {
     settings: SettingsSnapshot,
     visual: VisualSettings,
     fog: FogConfig,
+    #[serde(default)]
+    water_reflection: WaterReflectionConfig,
     #[serde(default)]
     time_of_day_hours: Option<f32>,
 }
@@ -120,12 +125,14 @@ pub fn save_settings_to_disk(
     settings_state: &SettingsState,
     visual_settings: &VisualSettings,
     fog_config: &FogConfig,
+    water_reflection: &WaterReflectionConfig,
     atmosphere: &AtmosphereSettings,
 ) -> Result<(), String> {
     let save = SettingsSave {
         settings: SettingsSnapshot::from_state(settings_state),
         visual: visual_settings.clone(),
         fog: fog_config.clone(),
+        water_reflection: water_reflection.clone(),
         time_of_day_hours: Some(atmosphere_time_hours(atmosphere)),
     };
 
@@ -152,6 +159,7 @@ pub fn load_settings_on_startup(
     mut world_config: ResMut<WorldConfig>,
     mut world: ResMut<VoxelWorld>,
     mut ray_tracing: ResMut<RayTracingSettings>,
+    mut water_reflection: ResMut<WaterReflectionConfig>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
     mut bevy_atmosphere_settings_query: Query<&mut bevy::pbr::AtmosphereSettings>,
@@ -163,6 +171,8 @@ pub fn load_settings_on_startup(
     save.settings.apply_to_state(&mut settings_state);
     *visual_settings = save.visual;
     *fog_config = save.fog;
+    *water_reflection = save.water_reflection;
+    water_reflection.clamp_runtime();
 
     settings_state.fog_preset = super::types::FogPresetOption(fog_config.current_preset);
     ray_tracing.enabled = settings_state.ray_tracing;
@@ -189,7 +199,11 @@ pub fn load_settings_on_startup(
     info!(
         "Loaded settings from {}{}",
         SETTINGS_YAML_PATH,
-        if Path::new(SETTINGS_JSON_PATH).exists() { " (JSON available)" } else { "" }
+        if Path::new(SETTINGS_JSON_PATH).exists() {
+            " (JSON available)"
+        } else {
+            ""
+        }
     );
 }
 
@@ -239,10 +253,8 @@ fn apply_window_settings(
         }
     };
     window.decorations = matches!(settings_state.display_mode, DisplayMode::Bordered);
-    window.resolution = WindowResolution::new(
-        settings_state.resolution.x,
-        settings_state.resolution.y,
-    );
+    window.resolution =
+        WindowResolution::new(settings_state.resolution.x, settings_state.resolution.y);
 }
 
 fn apply_atmosphere_settings(
@@ -335,7 +347,9 @@ fn atmosphere_time_hours(atmosphere: &AtmosphereSettings) -> f32 {
 }
 
 fn apply_time_of_day(time_of_day_hours: Option<f32>, atmosphere: &mut AtmosphereSettings) {
-    let Some(hours) = time_of_day_hours else { return };
+    let Some(hours) = time_of_day_hours else {
+        return;
+    };
     let clamped = hours.clamp(0.0, 24.0);
     if atmosphere.day_length > 0.0 {
         atmosphere.time = (clamped / 24.0) * atmosphere.day_length;

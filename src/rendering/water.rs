@@ -209,8 +209,7 @@ pub struct WaterVolume {
 // Shader handles for custom water modules (registered as imports via load_internal_asset!)
 pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
     uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
-pub const WATER_FOAM_HANDLE: Handle<Shader> =
-    uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
+pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
 pub const WATER_CAUSTICS_HANDLE: Handle<Shader> =
     uuid_handle!("c3d4e5f6-a7b8-9012-cdef-012345678901");
 pub const WATER_DETAIL_NORMALS_HANDLE: Handle<Shader> =
@@ -226,31 +225,46 @@ impl Plugin for EnhancedWaterPlugin {
         load_internal_asset!(
             app,
             GERSTNER_WAVES_HANDLE,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/gerstner_waves.wgsl"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/gerstner_waves.wgsl"
+            ),
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
             WATER_FOAM_HANDLE,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/water_foam.wgsl"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/water_foam.wgsl"
+            ),
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
             WATER_CAUSTICS_HANDLE,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/water_caustics.wgsl"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/water_caustics.wgsl"
+            ),
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
             WATER_DETAIL_NORMALS_HANDLE,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/water_detail_normals.wgsl"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/water_detail_normals.wgsl"
+            ),
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
             WATER_DISPLACEMENT_COMPUTE_HANDLE,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/water_displacement_compute.wgsl"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/water_displacement_compute.wgsl"
+            ),
             Shader::from_wgsl
         );
 
@@ -290,15 +304,28 @@ fn update_water_uniforms(
         time: time.elapsed_secs(),
         amplitude: config.gerstner.amplitude,
         wave_scale: config.gerstner.wave_scale,
-        foam_intensity: if config.foam.enabled { config.foam.intensity } else { 0.0 },
-        caustic_intensity: if config.caustics.enabled { config.caustics.intensity } else { 0.0 },
+        foam_intensity: if config.foam.enabled {
+            config.foam.intensity
+        } else {
+            0.0
+        },
+        caustic_intensity: if config.caustics.enabled {
+            config.caustics.intensity
+        } else {
+            0.0
+        },
         caustic_scale: config.caustics.scale,
         clarity: config.visual.clarity,
         fresnel_power: config.visual.fresnel_power,
         deep_color: config.visual.deep_color,
         shallow_color: config.visual.shallow_color,
-        foam_color: [config.foam.color[0], config.foam.color[1], config.foam.color[2], 1.0],
+        foam_color: [
+            config.foam.color[0],
+            config.foam.color[1],
+            config.foam.color[2],
+            1.0,
+        ],
     };
-    
+
     // Uniform buffer would be updated here
 }

@@ -13,25 +13,24 @@ mod types;
 mod ui;
 
 // Re-export public types
-pub use types::{
-    AntiAliasing, DayLengthOption, DisplayMode, ExposureOption, FavoriteServer,
-    FloatHeightPreset, FogPresetOption, GraphicsQuality, JumpHeightPreset, MenuScreen,
-    MieDirectionOption, MieOption, MultiplayerField, MultiplayerFormState,
-    NightBrightnessOption, PauseMenuState, RayleighOption, SettingsDialogDrag, SettingsState,
-    SettingsTab, ShadowFiltering, TimeScaleOption, TwilightBandOption, WalkSpeedPreset,
-    RunSpeedPreset, VisualSettings, VisualSlider, SliderValueText, SliderTrack, SliderFill,
-};
 pub use preview_3d::{BlockPreviewImage, BlockPreviewPlugin};
-
-use types::{
-    ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot, SettingsInputState,
+pub use types::{
+    AntiAliasing, DayLengthOption, DisplayMode, ExposureOption, FavoriteServer, FloatHeightPreset,
+    FogPresetOption, GraphicsQuality, JumpHeightPreset, MenuScreen, MieDirectionOption, MieOption,
+    MultiplayerField, MultiplayerFormState, NightBrightnessOption, PauseMenuState, RayleighOption,
+    RunSpeedPreset, SettingsDialogDrag, SettingsState, SettingsTab, ShadowFiltering, SliderFill,
+    SliderTrack, SliderValueText, TimeScaleOption, TwilightBandOption, VisualSettings,
+    VisualSlider, WalkSpeedPreset,
 };
+
+use types::{ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot, SettingsInputState};
 
 use crate::atmosphere::FogConfig;
 use crate::chat::ChatState;
 use crate::environment::AtmosphereSettings;
 use crate::network::NetworkSession;
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::{meshing::ChunkMesh, persistence, plugin::WorldConfig, world::VoxelWorld};
 use bevy::prelude::*;
 
@@ -53,7 +52,6 @@ impl Plugin for PauseMenuPlugin {
             .init_resource::<types::VisualSettings>()
             .init_resource::<SettingsInputState>()
             .add_plugins(BlockPreviewPlugin)
-
             .init_resource::<types::RebindState>()
             .init_resource::<types::SettingsDialogDrag>()
             .init_resource::<types::ActiveTextureLayer>()
@@ -87,7 +85,13 @@ impl Plugin for PauseMenuPlugin {
             // Input systems
             .add_systems(Update, multiplayer::handle_input_interaction)
             .add_systems(Update, multiplayer::process_input_characters)
-            .add_systems(Update, (multiplayer::update_input_texts, multiplayer::update_input_backgrounds))
+            .add_systems(
+                Update,
+                (
+                    multiplayer::update_input_texts,
+                    multiplayer::update_input_backgrounds,
+                ),
+            )
             .add_systems(Update, settings::handle_settings_input_interaction)
             .add_systems(Update, settings::handle_settings_drag)
             .add_systems(Update, settings::update_settings_drag_hover)
@@ -117,6 +121,7 @@ impl Plugin for PauseMenuPlugin {
                     settings::update_settings_display_mode_backgrounds,
                     settings::update_settings_resolution_backgrounds,
                     settings::update_settings_shadow_filtering_backgrounds,
+                    settings::update_water_reflection_backgrounds,
                     settings::update_day_length_backgrounds,
                     settings::update_settings_jump_height_backgrounds,
                     settings::update_settings_float_height_backgrounds,
@@ -187,7 +192,13 @@ fn toggle_pause_menu(
     }
 
     if state.open {
-        close_menu(&mut commands, &mut state, &mut form_state, &mut settings_state, &mut drag_state);
+        close_menu(
+            &mut commands,
+            &mut state,
+            &mut form_state,
+            &mut settings_state,
+            &mut drag_state,
+        );
     } else {
         open_menu(&mut commands, &asset_server, &mut state, &form_state);
     }
@@ -215,7 +226,9 @@ fn open_menu(
         ))
         .with_children(|parent| match state.current_screen {
             MenuScreen::Main => ui::spawn_main_menu(parent, &font),
-            MenuScreen::Multiplayer => multiplayer::spawn_multiplayer_menu(parent, &font, form_state),
+            MenuScreen::Multiplayer => {
+                multiplayer::spawn_multiplayer_menu(parent, &font, form_state)
+            }
         })
         .id();
 
@@ -257,7 +270,8 @@ pub struct PreviewResources<'w> {
     pub image: Option<Res<'w, BlockPreviewImage>>,
     pub triplanar_image: Option<Res<'w, crate::menu::preview_3d::TriplanarPreviewImage>>,
     pub preview_material: Option<Res<'w, crate::menu::preview_3d::BlockPreviewMaterial>>,
-    pub triplanar_material: Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
+    pub triplanar_material:
+        Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
     pub mapping: Option<Res<'w, crate::rendering::array_loader::AtlasMapping>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
 }
@@ -287,6 +301,7 @@ fn handle_menu_buttons(
     world_config: Res<WorldConfig>,
     visual_settings: Res<VisualSettings>,
     fog_config: Res<FogConfig>,
+    water_reflection: Res<WaterReflectionConfig>,
     atmosphere: Res<AtmosphereSettings>,
     mut preview: PreviewResources,
 ) {
@@ -297,13 +312,24 @@ fn handle_menu_buttons(
 
         match action {
             PauseMenuButton::Save => {
-                handle_save_button(&world, &settings_res.settings_state, &visual_settings, &fog_config, &atmosphere);
+                handle_save_button(
+                    &world,
+                    &settings_res.settings_state,
+                    &visual_settings,
+                    &fog_config,
+                    &water_reflection,
+                    &atmosphere,
+                );
             }
             PauseMenuButton::Load => {
                 handle_load_button(&mut commands, &chunk_meshes, &mut world);
             }
             PauseMenuButton::StartServer => {
-                multiplayer::handle_start_server(&multiplayer.form_state, &mut multiplayer.network, &mut multiplayer.chat);
+                multiplayer::handle_start_server(
+                    &multiplayer.form_state,
+                    &mut multiplayer.network,
+                    &mut multiplayer.chat,
+                );
             }
             PauseMenuButton::Connect => {
                 multiplayer::handle_connect_button(
@@ -325,7 +351,12 @@ fn handle_menu_buttons(
                 );
             }
             PauseMenuButton::Multiplayer => {
-                handle_multiplayer_button(&mut commands, &asset_server, &mut state, &multiplayer.form_state);
+                handle_multiplayer_button(
+                    &mut commands,
+                    &asset_server,
+                    &mut state,
+                    &multiplayer.form_state,
+                );
             }
             PauseMenuButton::BackToMain => {
                 handle_back_to_main(&mut commands, &asset_server, &mut state);
@@ -340,7 +371,13 @@ fn handle_menu_buttons(
             }
             PauseMenuButton::Resume => {
                 // close_menu requires mutable references which we have in multiplayer struct for form_state.
-                close_menu(&mut commands, &mut state, &mut multiplayer.form_state, &mut settings_res.settings_state, &mut settings_res.drag_state);
+                close_menu(
+                    &mut commands,
+                    &mut state,
+                    &mut multiplayer.form_state,
+                    &mut settings_res.settings_state,
+                    &mut settings_res.drag_state,
+                );
             }
         }
 
@@ -355,6 +392,7 @@ fn handle_save_button(
     settings_state: &SettingsState,
     visual_settings: &VisualSettings,
     fog_config: &FogConfig,
+    water_reflection: &WaterReflectionConfig,
     atmosphere: &AtmosphereSettings,
 ) {
     match persistence::save_world(world) {
@@ -365,6 +403,7 @@ fn handle_save_button(
         settings_state,
         visual_settings,
         fog_config,
+        water_reflection,
         atmosphere,
     ) {
         Ok(()) => info!("Settings saved via pause menu"),
@@ -400,8 +439,20 @@ fn handle_settings_button(
 ) {
     if settings_res.settings_state.dialog_root.is_none() {
         // Check if all preview resources are available
-        let (Some(image), Some(trip_image), Some(preview_material), Some(trip_material), Some(mapping)) =
-            (preview.image.as_ref(), preview.triplanar_image.as_ref(), preview.preview_material.as_ref(), preview.triplanar_material.as_ref(), preview.mapping.as_ref()) else {
+        let (
+            Some(image),
+            Some(trip_image),
+            Some(preview_material),
+            Some(trip_material),
+            Some(mapping),
+        ) = (
+            preview.image.as_ref(),
+            preview.triplanar_image.as_ref(),
+            preview.preview_material.as_ref(),
+            preview.triplanar_material.as_ref(),
+            preview.mapping.as_ref(),
+        )
+        else {
             warn!("Settings dialog opened but preview resources not ready yet");
             return;
         };

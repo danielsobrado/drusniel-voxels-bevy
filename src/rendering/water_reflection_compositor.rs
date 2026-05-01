@@ -9,31 +9,31 @@
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::{
+    FullscreenShader,
     core_3d::graph::{Core3d, Node3d},
     prepass::ViewPrepassTextures,
-    FullscreenShader,
 };
 use bevy::prelude::*;
 use bevy::render::{
+    ExtractSchedule, RenderApp, RenderStartup,
     render_asset::RenderAssets,
     render_graph::{
         NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
     },
     render_resource::{
-        binding_types, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-        CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, Operations,
-        PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
+        BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BufferInitDescriptor,
+        BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
+        Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
         RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-        TextureSampleType,
+        ShaderType, TextureSampleType, binding_types,
     },
     renderer::{RenderContext, RenderDevice},
     texture::GpuImage,
     view::{ViewTarget, ViewUniformOffset, ViewUniforms},
-    ExtractSchedule, RenderApp, RenderStartup,
 };
 use bevy::shader::Shader;
 
-use crate::rendering::water_reflection::WaterReflectionTexture;
+use crate::rendering::water_reflection::{WaterReflectionStatus, WaterReflectionTexture};
 
 const COMPOSITOR_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("f0e1d2c3-b4a5-9678-efab-012345678901");
@@ -49,18 +49,38 @@ pub struct WaterReflectionCompositorLabel;
 #[derive(Resource, Clone)]
 struct ExtractedReflectionHandle(Handle<Image>);
 
+#[derive(Resource, Clone, Copy, Default)]
+struct ExtractedReflectionStatus {
+    sample_reflection: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
+struct ReflectionCompositorUniform {
+    flags: [u32; 4],
+}
+
 fn extract_reflection_texture(world: &mut World) {
-    let handle = world.resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
-        main_world
-            .get_resource::<WaterReflectionTexture>()
-            .map(|r| r.image.clone())
-    });
+    let (handle, sample_reflection) =
+        world.resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
+            (
+                main_world
+                    .get_resource::<WaterReflectionTexture>()
+                    .map(|r| r.image.clone()),
+                main_world
+                    .get_resource::<WaterReflectionStatus>()
+                    .map(|s| s.sample_reflection)
+                    .unwrap_or(false),
+            )
+        });
     match handle {
         Some(h) => {
             world.insert_resource(ExtractedReflectionHandle(h));
+            world.insert_resource(ExtractedReflectionStatus { sample_reflection });
         }
         None => {
             world.remove_resource::<ExtractedReflectionHandle>();
+            world.remove_resource::<ExtractedReflectionStatus>();
         }
     }
 }
@@ -95,6 +115,8 @@ fn init_compositor_pipeline(
                 binding_types::texture_depth_2d(),
                 // 4: Bevy View uniform (contains inverse clip_from_world, world_position)
                 binding_types::uniform_buffer::<bevy::render::view::ViewUniform>(true),
+                // 5: reflection compositor flags
+                binding_types::uniform_buffer::<ReflectionCompositorUniform>(false),
             ),
         ),
     );
@@ -140,7 +162,11 @@ impl ViewNode for CompositorNode {
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        (view_target, prepass_textures, view_offset): bevy::ecs::query::QueryItem<'w, '_, Self::ViewQuery>,
+        (view_target, prepass_textures, view_offset): bevy::ecs::query::QueryItem<
+            'w,
+            '_,
+            Self::ViewQuery,
+        >,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         // ── Guard: reflection texture must exist in the render world ─────────
@@ -151,6 +177,10 @@ impl ViewNode for CompositorNode {
         let Some(refl_gpu) = gpu_images.get(&handle.0) else {
             return Ok(());
         };
+        let sample_reflection = world
+            .get_resource::<ExtractedReflectionStatus>()
+            .map(|s| s.sample_reflection)
+            .unwrap_or(false);
 
         // ── Depth prepass ────────────────────────────────────────────────────
         let Some(depth_view) = prepass_textures.depth_view() else {
@@ -175,33 +205,45 @@ impl ViewNode for CompositorNode {
         // ── Post-process write (ping-pong source ↔ destination) ──────────────
         let post_process = view_target.post_process_write();
 
+        let uniform = ReflectionCompositorUniform {
+            flags: [u32::from(sample_reflection), 0, 0, 0],
+        };
+        let uniform_buffer =
+            render_context
+                .render_device()
+                .create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("water_reflection_compositor_uniform"),
+                    contents: bytemuck::bytes_of(&uniform),
+                    usage: BufferUsages::UNIFORM,
+                });
+
         // ── Bind group ───────────────────────────────────────────────────────
         let bind_group = render_context.render_device().create_bind_group(
             "water_reflection_compositor_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
             &BindGroupEntries::sequential((
-                post_process.source,             // 0: scene colour
-                &pipeline_res.sampler,           // 1: sampler
-                &refl_gpu.texture_view,          // 2: reflection
-                depth_view,                      // 3: depth
-                view_binding.clone(),            // 4: View uniform
+                post_process.source,                // 0: scene colour
+                &pipeline_res.sampler,              // 1: sampler
+                &refl_gpu.texture_view,             // 2: reflection
+                depth_view,                         // 3: depth
+                view_binding.clone(),               // 4: View uniform
+                uniform_buffer.as_entire_binding(), // 5: reflection flags
             )),
         );
 
         // ── Render pass ──────────────────────────────────────────────────────
-        let mut render_pass =
-            render_context.begin_tracked_render_pass(RenderPassDescriptor {
-                label: Some("water_reflection_compositor_pass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: post_process.destination,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: Operations::default(),
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("water_reflection_compositor_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: post_process.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
         render_pass.set_render_pipeline(pipeline);
         render_pass.set_bind_group(0, &bind_group, &[view_offset.offset]);

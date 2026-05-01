@@ -8,11 +8,16 @@ use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 use bevy::render::view::Hdr;
+use bevy::window::PrimaryWindow;
+use serde::{Deserialize, Serialize};
 
 use crate::camera::controller::PlayerCamera;
-use crate::constants::WATER_LEVEL;
+use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::voxel::octree::{OctreeAabb, ViewFrustum};
+use crate::voxel::types::Voxel;
+use crate::voxel::world::VoxelWorld;
 
 /// The render layer used exclusively by the reflection camera.
 /// Terrain chunks above the water line are added to BOTH layer 0 and this layer.
@@ -27,21 +32,121 @@ pub struct WaterReflectionCamera;
 #[derive(Resource)]
 pub struct WaterReflectionTexture {
     pub image: Handle<Image>,
+    width: u32,
+    height: u32,
+    scale: f32,
 }
 
-/// Resource tracking frame counter for temporal amortization
-#[derive(Resource, Default)]
-struct ReflectionFrameCounter {
-    frame: u32,
+#[derive(Resource, Clone, Serialize, Deserialize)]
+pub struct WaterReflectionConfig {
+    pub enabled: bool,
+    pub resolution_scale: f32,
+    pub update_interval: f32,
+    pub auto_disable_distance: f32,
+    pub require_water_in_frustum: bool,
+}
+
+impl Default for WaterReflectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            resolution_scale: 0.5,
+            update_interval: 0.0,
+            auto_disable_distance: 120.0,
+            require_water_in_frustum: true,
+        }
+    }
+}
+
+impl WaterReflectionConfig {
+    pub fn clamp_runtime(&mut self) {
+        self.resolution_scale = self.resolution_scale.clamp(0.25, 1.0);
+        self.update_interval = self.update_interval.max(0.0);
+        self.auto_disable_distance = self.auto_disable_distance.max(0.0);
+    }
+
+    pub fn effective_hz(&self) -> f32 {
+        if self.update_interval <= f32::EPSILON {
+            60.0
+        } else {
+            1.0 / self.update_interval
+        }
+    }
+}
+
+#[derive(Component, Default)]
+pub struct ReflectionUpdateTimer {
+    accum: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaterReflectionReason {
+    Disabled,
+    OutOfRange,
+    NoWaterInView,
+    Throttled,
+    Active,
+    NoWater,
+}
+
+impl WaterReflectionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::OutOfRange => "out-of-range",
+            Self::NoWaterInView => "no-water-in-view",
+            Self::Throttled => "throttled",
+            Self::Active => "active",
+            Self::NoWater => "no-water",
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct WaterReflectionStatus {
+    pub active: bool,
+    pub sample_reflection: bool,
+    pub reason: WaterReflectionReason,
+    pub resolution_scale: f32,
+    pub effective_hz: f32,
+}
+
+impl Default for WaterReflectionStatus {
+    fn default() -> Self {
+        let config = WaterReflectionConfig::default();
+        Self {
+            active: false,
+            sample_reflection: false,
+            reason: WaterReflectionReason::Disabled,
+            resolution_scale: config.resolution_scale,
+            effective_hz: config.effective_hz(),
+        }
+    }
+}
+
+#[derive(Resource, Default, Clone, Copy)]
+pub struct WaterPresence {
+    pub aabb: Option<OctreeAabb>,
+    scan_timer: f32,
 }
 
 pub struct WaterReflectionPlugin;
 
 impl Plugin for WaterReflectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ReflectionFrameCounter>()
+        app.init_resource::<WaterReflectionConfig>()
+            .init_resource::<WaterReflectionStatus>()
+            .init_resource::<WaterPresence>()
             .add_systems(Startup, setup_reflection_camera)
-            .add_systems(Update, (update_reflection_camera, toggle_reflection_camera));
+            .add_systems(
+                Update,
+                (
+                    apply_integrated_gpu_reflection_defaults,
+                    update_water_presence,
+                    resize_reflection_target,
+                    update_reflection_camera,
+                ),
+            );
     }
 }
 
@@ -76,32 +181,29 @@ fn create_reflection_image(images: &mut Assets<Image>, width: u32, height: u32) 
 fn setup_reflection_camera(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut config: ResMut<WaterReflectionConfig>,
     capabilities: Option<Res<GraphicsCapabilities>>,
-    water_config: Option<Res<crate::rendering::water::WaterConfig>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
+    config.clamp_runtime();
     let integrated = capabilities
         .as_ref()
         .map(|c| c.integrated_gpu)
         .unwrap_or(false);
-
-    let config = water_config
-        .as_ref()
-        .map(|c| c.reflections.clone())
-        .unwrap_or_default();
-
-    // Skip reflection setup on integrated GPUs
-    if integrated || !config.enabled {
-        info!("Water reflections disabled (integrated GPU or config)");
-        return;
+    if integrated {
+        config.resolution_scale = 0.25;
+        config.update_interval = 1.0 / 30.0;
     }
 
-    // Create half-resolution render target
-    let width = (1920.0 * config.resolution_scale) as u32;
-    let height = (1080.0 * config.resolution_scale) as u32;
+    let (width, height) =
+        reflection_target_size(window_query.single().ok(), config.resolution_scale);
     let image_handle = create_reflection_image(&mut images, width, height);
 
     commands.insert_resource(WaterReflectionTexture {
         image: image_handle.clone(),
+        width,
+        height,
+        scale: config.resolution_scale,
     });
 
     // Spawn the reflection camera
@@ -115,13 +217,13 @@ fn setup_reflection_camera(
         Camera {
             order: -1, // Render before main camera
             clear_color: ClearColorConfig::Custom(Color::srgba(0.1, 0.2, 0.4, 1.0)),
-            is_active: config.enabled,
+            is_active: false,
             ..default()
         },
         RenderTarget::Image(image_handle.into()),
         Projection::Perspective(PerspectiveProjection {
             near: 0.1,
-            far: config.max_render_distance,
+            far: config.auto_disable_distance.max(150.0),
             ..default()
         }),
         // Initial transform — updated each frame to mirror main camera
@@ -131,6 +233,7 @@ fn setup_reflection_camera(
         Hdr,
         Tonemapping::AcesFitted,
         Msaa::Off,
+        ReflectionUpdateTimer::default(),
     ));
 
     info!(
@@ -139,36 +242,192 @@ fn setup_reflection_camera(
     );
 }
 
+fn reflection_target_size(window: Option<&Window>, scale: f32) -> (u32, u32) {
+    let (base_width, base_height) = window
+        .map(|window| (window.resolution.width(), window.resolution.height()))
+        .unwrap_or((1920.0, 1080.0));
+    (
+        (base_width * scale).round().max(1.0) as u32,
+        (base_height * scale).round().max(1.0) as u32,
+    )
+}
+
+fn apply_integrated_gpu_reflection_defaults(
+    capabilities: Option<Res<GraphicsCapabilities>>,
+    mut config: ResMut<WaterReflectionConfig>,
+    mut applied: Local<bool>,
+) {
+    if *applied {
+        return;
+    }
+    let Some(capabilities) = capabilities else {
+        return;
+    };
+    if capabilities.adapter_name.is_none() {
+        return;
+    }
+    if capabilities.integrated_gpu {
+        config.resolution_scale = 0.25;
+        config.update_interval = 1.0 / 30.0;
+    }
+    config.clamp_runtime();
+    *applied = true;
+}
+
+fn resize_reflection_target(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    texture: Option<ResMut<WaterReflectionTexture>>,
+    mut config: ResMut<WaterReflectionConfig>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut reflection_camera: Query<&mut RenderTarget, With<WaterReflectionCamera>>,
+) {
+    config.clamp_runtime();
+    let Some(mut texture) = texture else { return };
+    let (width, height) =
+        reflection_target_size(window_query.single().ok(), config.resolution_scale);
+    let scale_changed = (texture.scale - config.resolution_scale).abs() > f32::EPSILON;
+    if !scale_changed && texture.width == width && texture.height == height {
+        return;
+    }
+
+    let image_handle = create_reflection_image(&mut images, width, height);
+    texture.image = image_handle.clone();
+    texture.width = width;
+    texture.height = height;
+    texture.scale = config.resolution_scale;
+
+    for mut target in reflection_camera.iter_mut() {
+        *target = RenderTarget::Image(image_handle.clone().into());
+    }
+
+    commands.insert_resource(WaterReflectionTexture {
+        image: image_handle,
+        width,
+        height,
+        scale: config.resolution_scale,
+    });
+}
+
+fn update_water_presence(
+    time: Res<Time>,
+    world: Res<VoxelWorld>,
+    mut presence: ResMut<WaterPresence>,
+) {
+    presence.scan_timer += time.delta_secs();
+    if presence.aabb.is_some() && presence.scan_timer < 1.0 && !world.is_changed() {
+        return;
+    }
+    presence.scan_timer = 0.0;
+
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    let mut found = false;
+
+    for (chunk_pos, chunk) in world.chunk_entries() {
+        let mut has_water = false;
+        'scan: for x in 0..CHUNK_SIZE_I32 {
+            for y in 0..CHUNK_SIZE_I32 {
+                for z in 0..CHUNK_SIZE_I32 {
+                    let local = UVec3::new(x as u32, y as u32, z as u32);
+                    if chunk.get(local).is_liquid() {
+                        has_water = true;
+                        break 'scan;
+                    }
+                }
+            }
+        }
+
+        if has_water {
+            let origin = VoxelWorld::chunk_to_world(*chunk_pos).as_vec3();
+            min = min.min(origin);
+            max = max.max(origin + Vec3::splat(CHUNK_SIZE_I32 as f32));
+            found = true;
+        }
+    }
+
+    presence.aabb = found.then_some(OctreeAabb::new(
+        Vec3::new(min.x, WATER_LEVEL as f32 - 0.75, min.z),
+        Vec3::new(max.x, WATER_LEVEL as f32 + 0.75, max.z),
+    ));
+}
+
 /// Mirror the main camera's position and rotation across the water plane each frame
 fn update_reflection_camera(
-    water_config: Option<Res<crate::rendering::water::WaterConfig>>,
-    mut frame_counter: ResMut<ReflectionFrameCounter>,
-    main_camera: Query<&Transform, (With<PlayerCamera>, Without<WaterReflectionCamera>)>,
+    config: Res<WaterReflectionConfig>,
+    presence: Res<WaterPresence>,
+    time: Res<Time>,
+    main_camera: Query<
+        (&Transform, &GlobalTransform, &Projection),
+        (With<PlayerCamera>, Without<WaterReflectionCamera>),
+    >,
     mut reflection_camera: Query<
-        (&mut Transform, &mut Camera),
+        (&mut Transform, &mut Camera, &mut ReflectionUpdateTimer),
         (With<WaterReflectionCamera>, Without<PlayerCamera>),
     >,
+    mut status: ResMut<WaterReflectionStatus>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Reflection Camera");
-    let Ok(main_transform) = main_camera.single() else {
+    let _timer = area_timer(&mut timing, frame.0, "Reflection Render");
+    let Ok((main_transform, main_global, projection)) = main_camera.single() else {
         return;
     };
-    let Ok((mut refl_transform, mut refl_camera)) = reflection_camera.single_mut() else {
+    let Ok((mut refl_transform, mut refl_camera, mut update_timer)) =
+        reflection_camera.single_mut()
+    else {
         return;
     };
 
-    let config = water_config
-        .as_ref()
-        .map(|c| c.reflections.clone())
-        .unwrap_or_default();
+    let mut reason = WaterReflectionReason::Active;
+    let mut active = config.enabled;
+    let mut sample_reflection = active;
 
-    // Temporal amortization: skip rendering on some frames
-    frame_counter.frame += 1;
-    if config.update_every_n_frames > 1 {
-        refl_camera.is_active = frame_counter.frame % config.update_every_n_frames == 0;
+    if !config.enabled {
+        active = false;
+        sample_reflection = false;
+        reason = WaterReflectionReason::Disabled;
+    } else if let Some(water_aabb) = presence.aabb {
+        if config.auto_disable_distance > 0.0 {
+            let dist = distance_to_aabb_xz(main_transform.translation, water_aabb);
+            if dist > config.auto_disable_distance {
+                active = false;
+                sample_reflection = false;
+                reason = WaterReflectionReason::OutOfRange;
+            }
+        }
+
+        if active
+            && config.require_water_in_frustum
+            && !water_in_camera_frustum(main_global, projection, water_aabb)
+        {
+            active = false;
+            sample_reflection = false;
+            reason = WaterReflectionReason::NoWaterInView;
+        }
+    } else {
+        active = false;
+        sample_reflection = false;
+        reason = WaterReflectionReason::NoWater;
     }
+
+    if active && config.update_interval > f32::EPSILON {
+        update_timer.accum += time.delta_secs();
+        if update_timer.accum < config.update_interval {
+            active = false;
+            sample_reflection = true;
+            reason = WaterReflectionReason::Throttled;
+        } else {
+            update_timer.accum = 0.0;
+        }
+    }
+
+    refl_camera.is_active = active;
+    status.active = active;
+    status.sample_reflection = sample_reflection;
+    status.reason = reason;
+    status.resolution_scale = config.resolution_scale;
+    status.effective_hz = config.effective_hz();
 
     let water_y = WATER_LEVEL as f32;
 
@@ -191,26 +450,32 @@ fn update_reflection_camera(
         Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up);
 }
 
-/// Toggle reflection camera based on config/capabilities changes
-fn toggle_reflection_camera(
-    water_config: Option<Res<crate::rendering::water::WaterConfig>>,
-    capabilities: Option<Res<GraphicsCapabilities>>,
-    mut reflection_camera: Query<&mut Camera, With<WaterReflectionCamera>>,
-    frame: Res<FrameCount>,
-    mut timing: ResMut<AreaTimingRecorder>,
-) {
-    let _timer = area_timer(&mut timing, frame.0, "Reflection Toggle");
-    let Some(config) = water_config else { return };
-    if !config.is_changed() {
-        return;
-    }
+fn distance_to_aabb_xz(position: Vec3, aabb: OctreeAabb) -> f32 {
+    let dx = if position.x < aabb.min.x {
+        aabb.min.x - position.x
+    } else if position.x > aabb.max.x {
+        position.x - aabb.max.x
+    } else {
+        0.0
+    };
+    let dz = if position.z < aabb.min.z {
+        aabb.min.z - position.z
+    } else if position.z > aabb.max.z {
+        position.z - aabb.max.z
+    } else {
+        0.0
+    };
+    Vec2::new(dx, dz).length()
+}
 
-    let integrated = capabilities
-        .as_ref()
-        .map(|c| c.integrated_gpu)
-        .unwrap_or(false);
-
-    for mut camera in reflection_camera.iter_mut() {
-        camera.is_active = config.reflections.enabled && !integrated;
-    }
+fn water_in_camera_frustum(
+    camera_transform: &GlobalTransform,
+    projection: &Projection,
+    water_aabb: OctreeAabb,
+) -> bool {
+    let view_matrix = camera_transform.to_matrix().inverse();
+    let proj_matrix = projection.get_clip_from_view();
+    let view_proj = proj_matrix * view_matrix;
+    let frustum = ViewFrustum::from_view_projection(&view_proj);
+    !water_aabb.outside_frustum(&frustum)
 }

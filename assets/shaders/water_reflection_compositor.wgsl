@@ -14,11 +14,16 @@
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 #import bevy_render::view::View
 
+struct ReflectionCompositorUniform {
+    flags: vec4<u32>,
+}
+
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
 @group(0) @binding(2) var reflection_texture: texture_2d<f32>;
 @group(0) @binding(3) var depth_texture: texture_depth_2d;
 @group(0) @binding(4) var<uniform> view: View;
+@group(0) @binding(5) var<uniform> reflection_state: ReflectionCompositorUniform;
 
 // Baked constants — kept in sync with src/constants.rs and WaterConfig defaults.
 const WATER_LEVEL: f32         = 18.0;
@@ -38,7 +43,7 @@ fn reconstruct_world_pos(screen_uv: vec2<f32>, depth: f32) -> vec3<f32> {
                            (1.0 - screen_uv.y) * 2.0 - 1.0);
     let clip = vec4<f32>(ndc_xy, depth, 1.0);
 
-    let view_h = view.clip_from_world_inverse * clip;
+    let view_h = view.world_from_clip * clip;
     return view_h.xyz / view_h.w;
 }
 
@@ -52,6 +57,10 @@ fn wave_distortion(world_xz: vec2<f32>) -> vec2<f32> {
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scene = textureSample(scene_texture, scene_sampler, in.uv);
+
+    if reflection_state.flags.x == 0u {
+        return scene;
+    }
 
     // Load depth (integer pixel coords, no interpolation needed)
     let pixel = vec2<i32>(in.position.xy);

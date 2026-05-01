@@ -8,12 +8,15 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::ui::{FlexWrap, RelativeCursorPosition};
-use bevy::window::{MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution};
+use bevy::window::{
+    MonitorSelection, PrimaryWindow, VideoModeSelection, Window, WindowMode, WindowResolution,
+};
 
 use crate::atmosphere::{FogConfig, FogPreset};
 use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::plugin::WorldConfig;
 use crate::voxel::world::VoxelWorld;
 
@@ -84,49 +87,50 @@ pub fn spawn_settings_dialog(
 }
 
 fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    dialog.spawn((
-        Button,
-        Node {
-            width: Val::Percent(100.0),
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
-            justify_content: JustifyContent::FlexStart,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            align_self: AlignSelf::Stretch,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.95)),
-        SettingsDragHandle,
-    ))
-    .with_children(|header| {
-        header.spawn((
+    dialog
+        .spawn((
+            Button,
             Node {
-                width: Val::Px(4.0),
-                height: Val::Percent(100.0),
+                width: Val::Percent(100.0),
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                justify_content: JustifyContent::FlexStart,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                align_self: AlignSelf::Stretch,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
-            SettingsDragHighlight,
-        ));
-        header.spawn((
-            Text::new("⋮⋮"),
-            TextFont {
-                font: font.clone(),
-                font_size: 20.0,
-                ..default()
-            },
-            TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
-        ));
-        header.spawn((
-            Text::new("Settings"),
-            TextFont {
-                font: font.clone(),
-                font_size: 28.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-        ));
-    });
+            BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.95)),
+            SettingsDragHandle,
+        ))
+        .with_children(|header| {
+            header.spawn((
+                Node {
+                    width: Val::Px(4.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
+                SettingsDragHighlight,
+            ));
+            header.spawn((
+                Text::new("⋮⋮"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
+            ));
+            header.spawn((
+                Text::new("Settings"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 28.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
 }
 
 fn spawn_settings_tabs(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
@@ -199,7 +203,13 @@ fn spawn_settings_content(
     spawn_visual_tab(dialog, font);
     spawn_controls_tab(dialog, font);
     spawn_debug_tab(dialog, font);
-    spawn_textures_tab(dialog, font, asset_server, preview_image, triplanar_preview_image);
+    spawn_textures_tab(
+        dialog,
+        font,
+        asset_server,
+        preview_image,
+        triplanar_preview_image,
+    );
 }
 
 fn spawn_settings_footer(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
@@ -293,15 +303,45 @@ fn spawn_graphics_tab(
         ))
         .with_children(|content| {
             spawn_option_row(content, font, "Quality", |options, font| {
-                spawn_graphics_option(options, font, "Low", GraphicsQualityOption(GraphicsQuality::Low));
-                spawn_graphics_option(options, font, "Medium", GraphicsQualityOption(GraphicsQuality::Medium));
-                spawn_graphics_option(options, font, "High", GraphicsQualityOption(GraphicsQuality::High));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Low",
+                    GraphicsQualityOption(GraphicsQuality::Low),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Medium",
+                    GraphicsQualityOption(GraphicsQuality::Medium),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "High",
+                    GraphicsQualityOption(GraphicsQuality::High),
+                );
             });
 
             spawn_option_row(content, font, "Anti-Aliasing", |options, font| {
-                spawn_graphics_option(options, font, "None", AntiAliasingOption(AntiAliasing::None));
-                spawn_graphics_option(options, font, "FXAA", AntiAliasingOption(AntiAliasing::Fxaa));
-                spawn_graphics_option(options, font, "MSAA 4x", AntiAliasingOption(AntiAliasing::Msaa4x));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "None",
+                    AntiAliasingOption(AntiAliasing::None),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "FXAA",
+                    AntiAliasingOption(AntiAliasing::Fxaa),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "MSAA 4x",
+                    AntiAliasingOption(AntiAliasing::Msaa4x),
+                );
                 spawn_graphics_option(options, font, "TAA", AntiAliasingOption(AntiAliasing::Taa));
             });
 
@@ -313,9 +353,52 @@ fn spawn_graphics_tab(
             }
 
             spawn_option_row(content, font, "Shadow Filter", |options, font| {
-                spawn_graphics_option(options, font, "Gaussian", ShadowFilteringOption(ShadowFiltering::Gaussian));
-                spawn_graphics_option(options, font, "Hardware", ShadowFilteringOption(ShadowFiltering::Hardware2x2));
-                spawn_graphics_option(options, font, "Temporal", ShadowFilteringOption(ShadowFiltering::Temporal));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Gaussian",
+                    ShadowFilteringOption(ShadowFiltering::Gaussian),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Hardware",
+                    ShadowFilteringOption(ShadowFiltering::Hardware2x2),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Temporal",
+                    ShadowFilteringOption(ShadowFiltering::Temporal),
+                );
+            });
+
+            spawn_option_row(content, font, "Water Reflection", |options, font| {
+                spawn_graphics_option(options, font, "Off", WaterReflectionEnabledOption(false));
+                spawn_graphics_option(options, font, "On", WaterReflectionEnabledOption(true));
+            });
+
+            spawn_option_row(content, font, "Reflection Scale", |options, font| {
+                spawn_graphics_option(options, font, "25%", WaterReflectionScaleOption(0.25));
+                spawn_graphics_option(options, font, "50%", WaterReflectionScaleOption(0.5));
+                spawn_graphics_option(options, font, "100%", WaterReflectionScaleOption(1.0));
+            });
+
+            spawn_option_row(content, font, "Reflection Hz", |options, font| {
+                spawn_graphics_option(options, font, "30", WaterReflectionHzOption(30.0));
+                spawn_graphics_option(options, font, "45", WaterReflectionHzOption(45.0));
+                spawn_graphics_option(options, font, "Frame", WaterReflectionHzOption(0.0));
+            });
+
+            spawn_option_row(content, font, "Water Range", |options, font| {
+                spawn_graphics_option(options, font, "Off", WaterReflectionDistanceOption(0.0));
+                spawn_graphics_option(options, font, "120m", WaterReflectionDistanceOption(120.0));
+                spawn_graphics_option(options, font, "200m", WaterReflectionDistanceOption(200.0));
+            });
+
+            spawn_option_row(content, font, "Water Frustum", |options, font| {
+                spawn_graphics_option(options, font, "Off", WaterReflectionFrustumOption(false));
+                spawn_graphics_option(options, font, "On", WaterReflectionFrustumOption(true));
             });
 
             spawn_option_row(content, font, "Display Mode", |options, font| {
@@ -325,9 +408,24 @@ fn spawn_graphics_tab(
             });
 
             spawn_option_row(content, font, "Resolution", |options, font| {
-                spawn_graphics_option(options, font, "1280x720", ResolutionOption(UVec2::new(1280, 720)));
-                spawn_graphics_option(options, font, "1920x1080", ResolutionOption(UVec2::new(1920, 1080)));
-                spawn_graphics_option(options, font, "2560x1440", ResolutionOption(UVec2::new(2560, 1440)));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "1280x720",
+                    ResolutionOption(UVec2::new(1280, 720)),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "1920x1080",
+                    ResolutionOption(UVec2::new(1920, 1080)),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "2560x1440",
+                    ResolutionOption(UVec2::new(2560, 1440)),
+                );
             });
         });
 }
@@ -368,27 +466,87 @@ fn spawn_gameplay_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
         ))
         .with_children(|content| {
             spawn_option_row(content, font, "Walk Speed", |options, font| {
-                spawn_graphics_option(options, font, "Slow", PlayerWalkSpeedOption(WalkSpeedPreset::Slow));
-                spawn_graphics_option(options, font, "Standard", PlayerWalkSpeedOption(WalkSpeedPreset::Standard));
-                spawn_graphics_option(options, font, "Fast", PlayerWalkSpeedOption(WalkSpeedPreset::Fast));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Slow",
+                    PlayerWalkSpeedOption(WalkSpeedPreset::Slow),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Standard",
+                    PlayerWalkSpeedOption(WalkSpeedPreset::Standard),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Fast",
+                    PlayerWalkSpeedOption(WalkSpeedPreset::Fast),
+                );
             });
 
             spawn_option_row(content, font, "Run Speed", |options, font| {
-                spawn_graphics_option(options, font, "Slow", PlayerRunSpeedOption(RunSpeedPreset::Slow));
-                spawn_graphics_option(options, font, "Standard", PlayerRunSpeedOption(RunSpeedPreset::Standard));
-                spawn_graphics_option(options, font, "Fast", PlayerRunSpeedOption(RunSpeedPreset::Fast));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Slow",
+                    PlayerRunSpeedOption(RunSpeedPreset::Slow),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Standard",
+                    PlayerRunSpeedOption(RunSpeedPreset::Standard),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Fast",
+                    PlayerRunSpeedOption(RunSpeedPreset::Fast),
+                );
             });
 
             spawn_option_row(content, font, "Jump Height", |options, font| {
-                spawn_graphics_option(options, font, "Low", PlayerJumpHeightOption(JumpHeightPreset::Low));
-                spawn_graphics_option(options, font, "Standard", PlayerJumpHeightOption(JumpHeightPreset::Standard));
-                spawn_graphics_option(options, font, "High", PlayerJumpHeightOption(JumpHeightPreset::High));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Low",
+                    PlayerJumpHeightOption(JumpHeightPreset::Low),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Standard",
+                    PlayerJumpHeightOption(JumpHeightPreset::Standard),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "High",
+                    PlayerJumpHeightOption(JumpHeightPreset::High),
+                );
             });
 
             spawn_option_row(content, font, "Float Height", |options, font| {
-                spawn_graphics_option(options, font, "Low", PlayerFloatHeightOption(FloatHeightPreset::Low));
-                spawn_graphics_option(options, font, "Standard", PlayerFloatHeightOption(FloatHeightPreset::Standard));
-                spawn_graphics_option(options, font, "High", PlayerFloatHeightOption(FloatHeightPreset::High));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Low",
+                    PlayerFloatHeightOption(FloatHeightPreset::Low),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Standard",
+                    PlayerFloatHeightOption(FloatHeightPreset::Standard),
+                );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "High",
+                    PlayerFloatHeightOption(FloatHeightPreset::High),
+                );
             });
         });
 }
@@ -506,9 +664,19 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
         .with_children(|content| {
             spawn_option_row(content, font, "Fog Preset", |options, font| {
                 spawn_graphics_option(options, font, "Clear", FogPresetOption(FogPreset::Clear));
-                spawn_graphics_option(options, font, "Balanced", FogPresetOption(FogPreset::Balanced));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Balanced",
+                    FogPresetOption(FogPreset::Balanced),
+                );
                 spawn_graphics_option(options, font, "Misty", FogPresetOption(FogPreset::Misty));
-                spawn_graphics_option(options, font, "God Rays", FogPresetOption(FogPreset::GodRays));
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "God Rays",
+                    FogPresetOption(FogPreset::GodRays),
+                );
             });
 
             content
@@ -540,15 +708,40 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                     spawn_settings_column(columns, font, "Color", |column, font| {
                         spawn_fog_slider_row(column, font, "Blue Tint", FogSlider::FogBlueTint);
                         spawn_fog_slider_row(column, font, "Brightness", FogSlider::FogBrightness);
-                        spawn_fog_slider_row(column, font, "Aerial Strength", FogSlider::AerialStrength);
+                        spawn_fog_slider_row(
+                            column,
+                            font,
+                            "Aerial Strength",
+                            FogSlider::AerialStrength,
+                        );
                         spawn_fog_slider_row(column, font, "Ambient", FogSlider::AmbientIntensity);
                     });
 
                     spawn_settings_column(columns, font, "Volume", |column, font| {
-                        spawn_fog_slider_row(column, font, "Volume Density", FogSlider::VolumeDensity);
-                        spawn_fog_slider_row(column, font, "Scattering", FogSlider::VolumeScattering);
-                        spawn_fog_slider_row(column, font, "Absorption", FogSlider::VolumeAbsorption);
-                        spawn_fog_slider_row(column, font, "Asymmetry", FogSlider::ScatteringAsymmetry);
+                        spawn_fog_slider_row(
+                            column,
+                            font,
+                            "Volume Density",
+                            FogSlider::VolumeDensity,
+                        );
+                        spawn_fog_slider_row(
+                            column,
+                            font,
+                            "Scattering",
+                            FogSlider::VolumeScattering,
+                        );
+                        spawn_fog_slider_row(
+                            column,
+                            font,
+                            "Absorption",
+                            FogSlider::VolumeAbsorption,
+                        );
+                        spawn_fog_slider_row(
+                            column,
+                            font,
+                            "Asymmetry",
+                            FogSlider::ScatteringAsymmetry,
+                        );
                         spawn_fog_slider_row(column, font, "Volume Size", FogSlider::VolumeSize);
                         spawn_fog_slider_row(column, font, "Step Count", FogSlider::StepCount);
                         spawn_fog_slider_row(column, font, "Jitter", FogSlider::Jitter);
@@ -584,17 +777,66 @@ fn spawn_visual_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 })
                 .with_children(|columns| {
                     spawn_settings_column(columns, font, "Color", |column, font| {
-                        spawn_slider_row(column, font, "Temperature", VisualSlider::Temperature, -0.3, 0.3);
-                        spawn_slider_row(column, font, "Saturation", VisualSlider::Saturation, 0.5, 2.0);
-                        spawn_slider_row(column, font, "Exposure", VisualSlider::Exposure, -1.0, 1.0);
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Temperature",
+                            VisualSlider::Temperature,
+                            -0.3,
+                            0.3,
+                        );
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Saturation",
+                            VisualSlider::Saturation,
+                            0.5,
+                            2.0,
+                        );
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Exposure",
+                            VisualSlider::Exposure,
+                            -1.0,
+                            1.0,
+                        );
                         spawn_slider_row(column, font, "Gamma", VisualSlider::Gamma, 0.5, 1.5);
                     });
 
                     spawn_settings_column(columns, font, "Light", |column, font| {
-                        spawn_slider_row(column, font, "Highlights", VisualSlider::HighlightsGain, 0.5, 1.5);
-                        spawn_slider_row(column, font, "Sun Warmth", VisualSlider::SunWarmth, 0.0, 0.3);
-                        spawn_slider_row(column, font, "Illuminance", VisualSlider::Illuminance, 5000.0, 50000.0);
-                        spawn_slider_row(column, font, "Sky Light", VisualSlider::SkyboxBrightness, 1000.0, 10000.0);
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Highlights",
+                            VisualSlider::HighlightsGain,
+                            0.5,
+                            1.5,
+                        );
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Sun Warmth",
+                            VisualSlider::SunWarmth,
+                            0.0,
+                            0.3,
+                        );
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Illuminance",
+                            VisualSlider::Illuminance,
+                            5000.0,
+                            50000.0,
+                        );
+                        spawn_slider_row(
+                            column,
+                            font,
+                            "Sky Light",
+                            VisualSlider::SkyboxBrightness,
+                            1000.0,
+                            10000.0,
+                        );
                     });
                 });
         });
@@ -602,7 +844,7 @@ fn spawn_visual_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
 
 fn spawn_controls_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     use crate::input::config::GameAction;
-    
+
     dialog
         .spawn((
             Node {
@@ -664,7 +906,7 @@ fn spawn_controls_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                     spawn_controls_column(columns, font, &left_actions);
                     spawn_controls_column(columns, font, &right_actions);
                 });
-            
+
             spawn_save_controls_button(content, font);
         });
 }
@@ -750,9 +992,7 @@ fn spawn_debug_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                         ("Contact Shadows Log", "Alt+C"),
                     ];
 
-                    let misc_toggles = [
-                        ("Cycle Fog Preset", "Alt+P"),
-                    ];
+                    let misc_toggles = [("Cycle Fog Preset", "Alt+P")];
 
                     spawn_debug_column(columns, font, "Debug & Development", &debug_core);
                     spawn_debug_column(columns, font, "F3 Overlay (Alt+)", &overlay_toggles);
@@ -876,7 +1116,7 @@ fn spawn_rebind_row(
             ))
             .with_children(|button| {
                 button.spawn((
-                    Text::new("..."), 
+                    Text::new("..."),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -897,29 +1137,30 @@ fn spawn_save_controls_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
             ..default()
         })
         .with_children(|container| {
-            container.spawn((
-                Button,
-                Node {
-                    width: Val::Px(140.0),
-                    height: Val::Px(36.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9)),
-                SaveControlsButton,
-            ))
-            .with_children(|button| {
-                button.spawn((
-                    Text::new("Save Controls"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
+            container
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(140.0),
+                        height: Val::Px(36.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
-                ));
-            });
+                    BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9)),
+                    SaveControlsButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("Save Controls"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
         });
 }
 
@@ -927,8 +1168,8 @@ fn spawn_save_controls_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
 pub struct SaveControlsButton;
 
 fn spawn_textures_tab(
-    dialog: &mut ChildSpawnerCommands, 
-    font: &Handle<Font>, 
+    dialog: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
     asset_server: &AssetServer,
     preview_image: &Res<BlockPreviewImage>,
     triplanar_preview_image: &Res<TriplanarPreviewImage>,
@@ -964,262 +1205,357 @@ fn spawn_textures_tab(
             ));
 
             // Main container: Atlas on left, settings on right
-            content.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(20.0),
-                ..default()
-            }).with_children(|main_row| {
-                // Left side: Atlas grid with tile numbers
-                main_row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
+            content
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(20.0),
                     ..default()
-                }).with_children(|left| {
-                    left.spawn((
-                        Text::new("Atlas (click tile to assign)"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
+                })
+                .with_children(|main_row| {
+                    // Left side: Atlas grid with tile numbers
+                    main_row
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(8.0),
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-
-                    // Atlas Viewport (Scrollable)
-                    left.spawn((
-                        Node {
-                            width: Val::Px(280.0),
-                            height: Val::Px(260.0), // Visible area
-                            overflow: Overflow::clip(),
-                            border: UiRect::all(Val::Px(1.0)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.5)),
-                    )).with_children(|viewport| {
-                        // Atlas Content (The long list)
-                        viewport.spawn((
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                // Allow height to expand
-                                ..default()
-                            },
-                            AtlasScrollContent, // Marker for scrolling system
-                        )).with_children(|content| {
-                            // Create grid of clickable tiles (Extendable)
-                            // Example: 8 rows instead of 4 to show scrolling potential (or just 4 for now)
-                            let total_rows = 6; // Increased from 4 to demonstrate scrolling if tile count increases
-                            for row in 0..total_rows {
-                                content.spawn(Node {
-                                    flex_direction: FlexDirection::Row,
+                        })
+                        .with_children(|left| {
+                            left.spawn((
+                                Text::new("Atlas (click tile to assign)"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
                                     ..default()
-                                }).with_children(|grid_row| {
-                                    for col in 0..4 {
-                                        let tile_index = row * 4 + col;
-                                        spawn_atlas_tile_button(grid_row, &atlas_texture, tile_index, font);
-                                    }
-                                });
-                            }
-                        });
-                    });
-                });
+                                },
+                                TextColor(Color::WHITE),
+                            ));
 
-                // Right side: Layer selection and cube preview
-                main_row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    min_width: Val::Px(240.0),
-                    ..default()
-                }).with_children(|right| {
-                    
-                    // Middle Column: Face Selection and 3D Cube
-                    right.spawn((
-                        Text::new("2. Select Face:"),
-                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-
-                    right.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    }).with_children(|row| {
-                        let mut spawn_face_btn = |label: &str, face: ActiveTextureFace| {
-                            row.spawn((
-                                Button,
+                            // Atlas Viewport (Scrollable)
+                            left.spawn((
                                 Node {
-                                    width: Val::Px(70.0), height: Val::Px(28.0),
-                                    justify_content: JustifyContent::Center, align_items: AlignItems::Center,
+                                    width: Val::Px(280.0),
+                                    height: Val::Px(260.0), // Visible area
+                                    overflow: Overflow::clip(),
                                     border: UiRect::all(Val::Px(1.0)),
                                     ..default()
                                 },
-                                BackgroundColor(INACTIVE_BG),
-                                BorderColor::all(Color::BLACK),
-                                TextureFaceButton(face),
-                            )).with_children(|btn| {
-                                btn.spawn((Text::new(label), TextFont { font: font.clone(), font_size: 12.0, ..default() }, TextColor(Color::WHITE)));
+                                BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.5)),
+                            ))
+                            .with_children(|viewport| {
+                                // Atlas Content (The long list)
+                                viewport
+                                    .spawn((
+                                        Node {
+                                            flex_direction: FlexDirection::Column,
+                                            // Allow height to expand
+                                            ..default()
+                                        },
+                                        AtlasScrollContent, // Marker for scrolling system
+                                    ))
+                                    .with_children(|content| {
+                                        // Create grid of clickable tiles (Extendable)
+                                        // Example: 8 rows instead of 4 to show scrolling potential (or just 4 for now)
+                                        let total_rows = 6; // Increased from 4 to demonstrate scrolling if tile count increases
+                                        for row in 0..total_rows {
+                                            content
+                                                .spawn(Node {
+                                                    flex_direction: FlexDirection::Row,
+                                                    ..default()
+                                                })
+                                                .with_children(|grid_row| {
+                                                    for col in 0..4 {
+                                                        let tile_index = row * 4 + col;
+                                                        spawn_atlas_tile_button(
+                                                            grid_row,
+                                                            &atlas_texture,
+                                                            tile_index,
+                                                            font,
+                                                        );
+                                                    }
+                                                });
+                                        }
+                                    });
                             });
-                        };
-                        spawn_face_btn("Top", ActiveTextureFace::Top);
-                        spawn_face_btn("Side", ActiveTextureFace::Side);
-                        spawn_face_btn("Bottom", ActiveTextureFace::Bottom);
-                    });
+                        });
 
-                     // Face Texture Previews (Under buttons)
-                     right.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(4.0),
-                        margin: UiRect::bottom(Val::Px(8.0)), // Add some spacing after faces
-                        ..default()
-                    }).with_children(|row| {
-                        let mut spawn_face_preview = |face: ActiveTextureFace| {
-                            row.spawn(Node {
-                                width: Val::Px(70.0), // Match button width
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            }).with_children(|container| {
-                                container.spawn((
+                    // Right side: Layer selection and cube preview
+                    main_row
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(12.0),
+                            min_width: Val::Px(240.0),
+                            ..default()
+                        })
+                        .with_children(|right| {
+                            // Middle Column: Face Selection and 3D Cube
+                            right.spawn((
+                                Text::new("2. Select Face:"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+
+                            right
+                                .spawn(Node {
+                                    flex_direction: FlexDirection::Row,
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    let mut spawn_face_btn =
+                                        |label: &str, face: ActiveTextureFace| {
+                                            row.spawn((
+                                                Button,
+                                                Node {
+                                                    width: Val::Px(70.0),
+                                                    height: Val::Px(28.0),
+                                                    justify_content: JustifyContent::Center,
+                                                    align_items: AlignItems::Center,
+                                                    border: UiRect::all(Val::Px(1.0)),
+                                                    ..default()
+                                                },
+                                                BackgroundColor(INACTIVE_BG),
+                                                BorderColor::all(Color::BLACK),
+                                                TextureFaceButton(face),
+                                            ))
+                                            .with_children(|btn| {
+                                                btn.spawn((
+                                                    Text::new(label),
+                                                    TextFont {
+                                                        font: font.clone(),
+                                                        font_size: 12.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::WHITE),
+                                                ));
+                                            });
+                                        };
+                                    spawn_face_btn("Top", ActiveTextureFace::Top);
+                                    spawn_face_btn("Side", ActiveTextureFace::Side);
+                                    spawn_face_btn("Bottom", ActiveTextureFace::Bottom);
+                                });
+
+                            // Face Texture Previews (Under buttons)
+                            right
+                                .spawn(Node {
+                                    flex_direction: FlexDirection::Row,
+                                    column_gap: Val::Px(4.0),
+                                    margin: UiRect::bottom(Val::Px(8.0)), // Add some spacing after faces
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    let mut spawn_face_preview =
+                                        |face: ActiveTextureFace| {
+                                            row.spawn(Node {
+                                                width: Val::Px(70.0), // Match button width
+                                                justify_content: JustifyContent::Center,
+                                                ..default()
+                                            })
+                                            .with_children(|container| {
+                                                container
+                                                    .spawn((
+                                                        Node {
+                                                            width: Val::Px(50.0),
+                                                            height: Val::Px(50.0),
+                                                            border: UiRect::all(Val::Px(1.0)),
+                                                            ..default()
+                                                        },
+                                                        BorderColor::all(Color::srgba(
+                                                            0.5, 0.5, 0.5, 0.5,
+                                                        )),
+                                                        FaceTilePreview(face),
+                                                    ))
+                                                    .with_children(|preview| {
+                                                        preview.spawn((
+                                                            Node {
+                                                                width: Val::Percent(100.0),
+                                                                height: Val::Percent(100.0),
+                                                                ..default()
+                                                            },
+                                                            ImageNode {
+                                                                image: atlas_texture.clone(),
+                                                                rect: Some(bevy::math::Rect::new(
+                                                                    0.0, 0.0, 256.0, 256.0,
+                                                                )), // Will be updated by system
+                                                                ..default()
+                                                            },
+                                                            BackgroundColor(Color::WHITE),
+                                                        ));
+                                                    });
+                                            });
+                                        };
+                                    spawn_face_preview(ActiveTextureFace::Top);
+                                    spawn_face_preview(ActiveTextureFace::Side);
+                                    spawn_face_preview(ActiveTextureFace::Bottom);
+                                });
+
+                            // 3D Preview
+                            right
+                                .spawn((
                                     Node {
-                                        width: Val::Px(50.0), height: Val::Px(50.0),
-                                        border: UiRect::all(Val::Px(1.0)),
+                                        width: Val::Px(180.0),
+                                        height: Val::Px(180.0),
+                                        margin: UiRect::top(Val::Px(10.0)),
+                                        border: UiRect::all(Val::Px(2.0)),
                                         ..default()
                                     },
-                                    BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.5)),
-                                    FaceTilePreview(face),
-                                )).with_children(|preview| {
-                                    preview.spawn((
-                                        Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                                    BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                                    BackgroundColor(Color::BLACK),
+                                ))
+                                .with_children(|frame| {
+                                    frame.spawn((
+                                        Node {
+                                            width: Val::Percent(100.0),
+                                            height: Val::Percent(100.0),
+                                            ..default()
+                                        },
                                         ImageNode {
-                                            image: atlas_texture.clone(),
-                                            rect: Some(bevy::math::Rect::new(0.0, 0.0, 256.0, 256.0)), // Will be updated by system
+                                            image: preview_image.0.clone(),
                                             ..default()
                                         },
                                         BackgroundColor(Color::WHITE),
                                     ));
                                 });
-                            });
-                        };
-                        spawn_face_preview(ActiveTextureFace::Top);
-                        spawn_face_preview(ActiveTextureFace::Side);
-                        spawn_face_preview(ActiveTextureFace::Bottom);
-                    });
 
-                    // 3D Preview
-                    right.spawn((
-                        Node {
-                            width: Val::Px(180.0), height: Val::Px(180.0),
-                            margin: UiRect::top(Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(2.0)),
+                            // Save settings button
+                            right
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(160.0),
+                                        padding: UiRect::all(Val::Px(8.0)),
+                                        margin: UiRect::top(Val::Px(12.0)),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.2, 0.5, 0.3, 0.9)),
+                                    SaveAtlasMappingButton,
+                                ))
+                                .with_children(|button| {
+                                    button.spawn((
+                                        Text::new("Save & Apply"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 16.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                });
+                        });
+
+                    // Right Panel: Material List & Big Preview
+                    main_row
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(12.0),
+                            min_width: Val::Px(240.0),
+                            margin: UiRect::left(Val::Px(20.0)),
                             ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 1.0)),
-                        BackgroundColor(Color::BLACK),
-                    )).with_children(|frame| {
-                        frame.spawn((
-                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
-                            ImageNode { image: preview_image.0.clone(), ..default() },
-                            BackgroundColor(Color::WHITE),
-                        ));
-                    });
-
-                    // Save settings button
-                    right.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(160.0),
-                            padding: UiRect::all(Val::Px(8.0)),
-                            margin: UiRect::top(Val::Px(12.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.2, 0.5, 0.3, 0.9)),
-                        SaveAtlasMappingButton,
-                    ))
-                    .with_children(|button| {
-                        button.spawn((
-                            Text::new("Save & Apply"),
-                            TextFont { font: font.clone(), font_size: 16.0, ..default() },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-                });
-
-                // Right Panel: Material List & Big Preview
-                main_row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    min_width: Val::Px(240.0),
-                    margin: UiRect::left(Val::Px(20.0)),
-                    ..default()
-                }).with_children(|right_col| {
-                     right_col.spawn((
-                        Text::new("3. Select Material:"),
-                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-
-                    // Material List (Vertical)
-                    right_col.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
-                        width: Val::Percent(100.0),
-                        ..default()
-                    }).with_children(|list| {
-                        let mut spawn_list_btn = |label: &str, layer: ActiveTextureLayer| {
-                            list.spawn((
-                                Button,
-                                Node {
-                                    width: Val::Percent(100.0), 
-                                    height: Val::Px(32.0),
-                                    justify_content: JustifyContent::Start, 
-                                    align_items: AlignItems::Center,
-                                    padding: UiRect::left(Val::Px(10.0)),
-                                    border: UiRect::all(Val::Px(1.0)),
+                        })
+                        .with_children(|right_col| {
+                            right_col.spawn((
+                                Text::new("3. Select Material:"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
                                     ..default()
                                 },
-                                BackgroundColor(INACTIVE_BG),
-                                BorderColor::all(Color::BLACK),
-                                TextureLayerButton(layer),
-                            )).with_children(|btn| {
-                                btn.spawn((Text::new(label), TextFont { font: font.clone(), font_size: 14.0, ..default() }, TextColor(Color::WHITE)));
-                            });
-                        };
-                        
-                        spawn_list_btn("Grass", ActiveTextureLayer::Grass);
-                        spawn_list_btn("Dirt", ActiveTextureLayer::Dirt);
-                        spawn_list_btn("Rock", ActiveTextureLayer::Rock);
-                        spawn_list_btn("Sand", ActiveTextureLayer::Sand);
-                    });
+                                TextColor(Color::WHITE),
+                            ));
 
-                    // Large Texture Preview
-                    right_col.spawn((
-                        Text::new("Selected Texture Preview:"),
-                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
+                            // Material List (Vertical)
+                            right_col
+                                .spawn(Node {
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(4.0),
+                                    width: Val::Percent(100.0),
+                                    ..default()
+                                })
+                                .with_children(|list| {
+                                    let mut spawn_list_btn =
+                                        |label: &str, layer: ActiveTextureLayer| {
+                                            list.spawn((
+                                                Button,
+                                                Node {
+                                                    width: Val::Percent(100.0),
+                                                    height: Val::Px(32.0),
+                                                    justify_content: JustifyContent::Start,
+                                                    align_items: AlignItems::Center,
+                                                    padding: UiRect::left(Val::Px(10.0)),
+                                                    border: UiRect::all(Val::Px(1.0)),
+                                                    ..default()
+                                                },
+                                                BackgroundColor(INACTIVE_BG),
+                                                BorderColor::all(Color::BLACK),
+                                                TextureLayerButton(layer),
+                                            ))
+                                            .with_children(|btn| {
+                                                btn.spawn((
+                                                    Text::new(label),
+                                                    TextFont {
+                                                        font: font.clone(),
+                                                        font_size: 14.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::WHITE),
+                                                ));
+                                            });
+                                        };
 
-                    right_col.spawn((
-                        Node {
-                            width: Val::Px(200.0), height: Val::Px(200.0),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 1.0)),
-                        BackgroundColor(Color::BLACK),
-                    )).with_children(|frame| {
-                        // We use a dedicated component or tag to update this image based on selection
-                         frame.spawn((
-                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
-                            ImageNode { image: triplanar_preview_image.0.clone(), ..default() }, // Default to triplanar preview for now
-                            BackgroundColor(Color::WHITE),
-                            LargeTexturePreviewImage,
-                        ));
-                    });
-                });
+                                    spawn_list_btn("Grass", ActiveTextureLayer::Grass);
+                                    spawn_list_btn("Dirt", ActiveTextureLayer::Dirt);
+                                    spawn_list_btn("Rock", ActiveTextureLayer::Rock);
+                                    spawn_list_btn("Sand", ActiveTextureLayer::Sand);
+                                });
+
+                            // Large Texture Preview
+                            right_col.spawn((
+                                Text::new("Selected Texture Preview:"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+
+                            right_col
+                                .spawn((
+                                    Node {
+                                        width: Val::Px(200.0),
+                                        height: Val::Px(200.0),
+                                        border: UiRect::all(Val::Px(2.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 1.0)),
+                                    BackgroundColor(Color::BLACK),
+                                ))
+                                .with_children(|frame| {
+                                    // We use a dedicated component or tag to update this image based on selection
+                                    frame.spawn((
+                                        Node {
+                                            width: Val::Percent(100.0),
+                                            height: Val::Percent(100.0),
+                                            ..default()
+                                        },
+                                        ImageNode {
+                                            image: triplanar_preview_image.0.clone(),
+                                            ..default()
+                                        }, // Default to triplanar preview for now
+                                        BackgroundColor(Color::WHITE),
+                                        LargeTexturePreviewImage,
+                                    ));
+                                });
+                        });
 
                     // Save button
-// Save button moved to center column
-            });
+                    // Save button moved to center column
+                });
         });
 }
 
@@ -1238,57 +1574,62 @@ fn spawn_atlas_tile_button(
     let row = tile_index / 4;
     let col = tile_index % 4;
 
-    parent.spawn((
-        Button,
-        Node {
-            width: Val::Px(tile_size),
-            height: Val::Px(tile_size),
-            margin: UiRect::all(Val::Px(1.0)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::End,
-            padding: UiRect::ZERO,
-            ..default()
-        },
-        BackgroundColor(Color::NONE),
-        AtlasTileButton(tile_index),
-    )).with_children(|tile| {
-        // Image background
-        tile.spawn((
+    parent
+        .spawn((
+            Button,
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
+                width: Val::Px(tile_size),
+                height: Val::Px(tile_size),
+                margin: UiRect::all(Val::Px(1.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::End,
+                padding: UiRect::ZERO,
                 ..default()
             },
-            ImageNode {
-                image: atlas_texture.clone(),
-                rect: Some(bevy::math::Rect {
-                    min: bevy::math::Vec2::new(col as f32 * 256.0, row as f32 * 256.0),
-                    max: bevy::math::Vec2::new((col + 1) as f32 * 256.0, (row + 1) as f32 * 256.0),
-                }),
-                ..default()
-            },
-        ));
+            BackgroundColor(Color::NONE),
+            AtlasTileButton(tile_index),
+        ))
+        .with_children(|tile| {
+            // Image background
+            tile.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+                ImageNode {
+                    image: atlas_texture.clone(),
+                    rect: Some(bevy::math::Rect {
+                        min: bevy::math::Vec2::new(col as f32 * 256.0, row as f32 * 256.0),
+                        max: bevy::math::Vec2::new(
+                            (col + 1) as f32 * 256.0,
+                            (row + 1) as f32 * 256.0,
+                        ),
+                    }),
+                    ..default()
+                },
+            ));
 
-        // Tile number overlay
-        tile.spawn((
-            Text::new(format!("{}", tile_index)),
-            TextFont {
-                font: font.clone(),
-                font_size: 12.0,
-                ..default()
-            },
-            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.9)),
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(2.0),
-                right: Val::Px(4.0),
-                padding: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-        ));
-    });
+            // Tile number overlay
+            tile.spawn((
+                Text::new(format!("{}", tile_index)),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.9)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(2.0),
+                    right: Val::Px(4.0),
+                    padding: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            ));
+        });
 }
 
 fn spawn_layer_button(
@@ -1298,77 +1639,81 @@ fn spawn_layer_button(
     layer: ActiveTextureLayer,
     atlas_texture: &Handle<Image>,
 ) {
-    use crate::menu::types::{TextureLayerButton, LayerTilePreview};
+    use crate::menu::types::{LayerTilePreview, TextureLayerButton};
 
-    parent.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(8.0),
-        ..default()
-    }).with_children(|row| {
-        // Layer selection button
-        row.spawn((
-            Button,
-            Node {
-                width: Val::Px(100.0),
-                height: Val::Px(28.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(INACTIVE_BG),
-            TextureLayerButton(layer),
-        )).with_children(|btn| {
-            btn.spawn((
-                Text::new(label),
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|row| {
+            // Layer selection button
+            row.spawn((
+                Button,
+                Node {
+                    width: Val::Px(100.0),
+                    height: Val::Px(28.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(INACTIVE_BG),
+                TextureLayerButton(layer),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new(label),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
+            // Current tile preview for this layer
+            row.spawn((
+                Node {
+                    width: Val::Px(28.0),
+                    height: Val::Px(28.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                LayerTilePreview(layer),
+            ))
+            .with_children(|preview| {
+                preview.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    ImageNode {
+                        image: atlas_texture.clone(),
+                        rect: Some(bevy::math::Rect {
+                            min: bevy::math::Vec2::ZERO,
+                            max: bevy::math::Vec2::new(256.0, 256.0),
+                        }),
+                        ..default()
+                    },
+                ));
+            });
+
+            // Tile index text
+            row.spawn((
+                Text::new("= 0"),
                 TextFont {
                     font: font.clone(),
-                    font_size: 13.0,
+                    font_size: 12.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                LayerTileIndexText(layer),
             ));
         });
-
-        // Current tile preview for this layer
-        row.spawn((
-            Node {
-                width: Val::Px(28.0),
-                height: Val::Px(28.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-            LayerTilePreview(layer),
-        )).with_children(|preview| {
-            preview.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                ImageNode {
-                    image: atlas_texture.clone(),
-                    rect: Some(bevy::math::Rect {
-                        min: bevy::math::Vec2::ZERO,
-                        max: bevy::math::Vec2::new(256.0, 256.0),
-                    }),
-                    ..default()
-                },
-            ));
-        });
-
-        // Tile index text
-        row.spawn((
-            Text::new("= 0"),
-            TextFont {
-                font: font.clone(),
-                font_size: 12.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            LayerTileIndexText(layer),
-        ));
-    });
 }
 
 #[derive(Component, Copy, Clone)]
@@ -1381,48 +1726,51 @@ fn spawn_cube_face_preview(
     face: CubePreviewFace,
     atlas_texture: &Handle<Image>,
 ) {
-    parent.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        row_gap: Val::Px(4.0),
-        ..default()
-    }).with_children(|col| {
-        col.spawn((
-            Text::new(label),
-            TextFont {
-                font: font.clone(),
-                font_size: 11.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.8, 0.8, 0.8)),
-        ));
-
-        col.spawn((
-            Node {
-                width: Val::Px(48.0),
-                height: Val::Px(48.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-            face,
-        )).with_children(|preview| {
-            preview.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|col| {
+            col.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 11.0,
                     ..default()
                 },
-                ImageNode {
-                    image: atlas_texture.clone(),
-                    rect: Some(bevy::math::Rect {
-                        min: bevy::math::Vec2::ZERO,
-                        max: bevy::math::Vec2::new(256.0, 256.0),
-                    }),
-                    ..default()
-                },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
             ));
+
+            col.spawn((
+                Node {
+                    width: Val::Px(48.0),
+                    height: Val::Px(48.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                face,
+            ))
+            .with_children(|preview| {
+                preview.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    ImageNode {
+                        image: atlas_texture.clone(),
+                        rect: Some(bevy::math::Rect {
+                            min: bevy::math::Vec2::ZERO,
+                            max: bevy::math::Vec2::new(256.0, 256.0),
+                        }),
+                        ..default()
+                    },
+                ));
+            });
         });
-    });
 }
 
 /// Spawns a slider row with label, track, and value display
@@ -1833,13 +2181,43 @@ pub fn handle_settings_tabs(
 pub fn handle_graphics_settings(
     state: Res<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
-    quality_query: Query<(&Interaction, &GraphicsQualityOption), (Changed<Interaction>, With<Button>)>,
+    quality_query: Query<
+        (&Interaction, &GraphicsQualityOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     aa_query: Query<(&Interaction, &AntiAliasingOption), (Changed<Interaction>, With<Button>)>,
     rt_query: Query<(&Interaction, &RayTracingOption), (Changed<Interaction>, With<Button>)>,
     display_query: Query<(&Interaction, &DisplayModeOption), (Changed<Interaction>, With<Button>)>,
-    resolution_query: Query<(&Interaction, &ResolutionOption), (Changed<Interaction>, With<Button>)>,
-    shadow_query: Query<(&Interaction, &ShadowFilteringOption), (Changed<Interaction>, With<Button>)>,
+    resolution_query: Query<
+        (&Interaction, &ResolutionOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    shadow_query: Query<
+        (&Interaction, &ShadowFilteringOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    reflection_enabled_query: Query<
+        (&Interaction, &WaterReflectionEnabledOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    reflection_scale_query: Query<
+        (&Interaction, &WaterReflectionScaleOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    reflection_hz_query: Query<
+        (&Interaction, &WaterReflectionHzOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    reflection_distance_query: Query<
+        (&Interaction, &WaterReflectionDistanceOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    reflection_frustum_query: Query<
+        (&Interaction, &WaterReflectionFrustumOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut rt_settings: ResMut<RayTracingSettings>,
+    mut reflection_config: ResMut<WaterReflectionConfig>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -1888,6 +2266,39 @@ pub fn handle_graphics_settings(
             settings_state.shadow_filtering = option.0;
         }
     }
+
+    for (interaction, option) in reflection_enabled_query.iter() {
+        if *interaction == Interaction::Pressed {
+            reflection_config.enabled = option.0;
+        }
+    }
+
+    for (interaction, option) in reflection_scale_query.iter() {
+        if *interaction == Interaction::Pressed {
+            reflection_config.resolution_scale = option.0;
+            reflection_config.clamp_runtime();
+        }
+    }
+
+    for (interaction, option) in reflection_hz_query.iter() {
+        if *interaction == Interaction::Pressed {
+            reflection_config.update_interval = if option.0 <= 0.0 { 0.0 } else { 1.0 / option.0 };
+            reflection_config.clamp_runtime();
+        }
+    }
+
+    for (interaction, option) in reflection_distance_query.iter() {
+        if *interaction == Interaction::Pressed {
+            reflection_config.auto_disable_distance = option.0;
+            reflection_config.clamp_runtime();
+        }
+    }
+
+    for (interaction, option) in reflection_frustum_query.iter() {
+        if *interaction == Interaction::Pressed {
+            reflection_config.require_water_in_frustum = option.0;
+        }
+    }
 }
 
 /// Handles meshing settings changes.
@@ -1922,8 +2333,14 @@ pub fn handle_gameplay_settings(
     mut settings_state: ResMut<SettingsState>,
     walk_query: Query<(&Interaction, &PlayerWalkSpeedOption), (Changed<Interaction>, With<Button>)>,
     run_query: Query<(&Interaction, &PlayerRunSpeedOption), (Changed<Interaction>, With<Button>)>,
-    jump_query: Query<(&Interaction, &PlayerJumpHeightOption), (Changed<Interaction>, With<Button>)>,
-    float_query: Query<(&Interaction, &PlayerFloatHeightOption), (Changed<Interaction>, With<Button>)>,
+    jump_query: Query<
+        (&Interaction, &PlayerJumpHeightOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    float_query: Query<
+        (&Interaction, &PlayerFloatHeightOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut player_config: ResMut<PlayerConfig>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -1970,8 +2387,14 @@ pub fn handle_atmosphere_settings(
     mie_query: Query<(&Interaction, &MieOption), (Changed<Interaction>, With<Button>)>,
     mie_dir_query: Query<(&Interaction, &MieDirectionOption), (Changed<Interaction>, With<Button>)>,
     exposure_query: Query<(&Interaction, &ExposureOption), (Changed<Interaction>, With<Button>)>,
-    twilight_query: Query<(&Interaction, &TwilightBandOption), (Changed<Interaction>, With<Button>)>,
-    night_query: Query<(&Interaction, &NightBrightnessOption), (Changed<Interaction>, With<Button>)>,
+    twilight_query: Query<
+        (&Interaction, &TwilightBandOption),
+        (Changed<Interaction>, With<Button>),
+    >,
+    night_query: Query<
+        (&Interaction, &NightBrightnessOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut atmosphere: ResMut<AtmosphereSettings>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
@@ -2084,9 +2507,15 @@ pub fn handle_atmosphere_settings(
 pub fn handle_bevy_atmosphere_settings(
     state: Res<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
-    sky_quality_query: Query<(&Interaction, &SkyQualityOption), (Changed<Interaction>, With<Button>)>,
+    sky_quality_query: Query<
+        (&Interaction, &SkyQualityOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     ozone_query: Query<(&Interaction, &OzoneOption), (Changed<Interaction>, With<Button>)>,
-    ground_albedo_query: Query<(&Interaction, &GroundAlbedoOption), (Changed<Interaction>, With<Button>)>,
+    ground_albedo_query: Query<
+        (&Interaction, &GroundAlbedoOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     sun_size_query: Query<(&Interaction, &SunSizeOption), (Changed<Interaction>, With<Button>)>,
     mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
     mut atmo_settings_query: Query<&mut bevy::pbr::AtmosphereSettings>,
@@ -2145,7 +2574,10 @@ pub fn handle_fog_settings(
     state: Res<PauseMenuState>,
     mut settings_state: ResMut<SettingsState>,
     distance_query: Query<(&Interaction, &DistanceFogOption), (Changed<Interaction>, With<Button>)>,
-    volumetric_query: Query<(&Interaction, &VolumetricFogOption), (Changed<Interaction>, With<Button>)>,
+    volumetric_query: Query<
+        (&Interaction, &VolumetricFogOption),
+        (Changed<Interaction>, With<Button>),
+    >,
     fog_query: Query<(&Interaction, &FogPresetOption), (Changed<Interaction>, With<Button>)>,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_config: ResMut<FogConfig>,
@@ -2211,13 +2643,13 @@ fn apply_window_settings(
 
     window.mode = match settings_state.display_mode {
         DisplayMode::Bordered | DisplayMode::Borderless => WindowMode::Windowed,
-        DisplayMode::Fullscreen => WindowMode::Fullscreen(MonitorSelection::Primary, VideoModeSelection::Current),
+        DisplayMode::Fullscreen => {
+            WindowMode::Fullscreen(MonitorSelection::Primary, VideoModeSelection::Current)
+        }
     };
     window.decorations = matches!(settings_state.display_mode, DisplayMode::Bordered);
-    window.resolution = WindowResolution::new(
-        settings_state.resolution.x,
-        settings_state.resolution.y,
-    );
+    window.resolution =
+        WindowResolution::new(settings_state.resolution.x, settings_state.resolution.y);
 }
 
 // ============================================================================
@@ -2252,15 +2684,124 @@ pub fn update_settings_tab_backgrounds(
 /// Updates settings content visibility based on active tab.
 pub fn update_settings_content_visibility(
     settings_state: Res<SettingsState>,
-    mut graphics_query: Query<&mut Node, (With<GraphicsTabContent>, Without<GameplayTabContent>, Without<MeshingTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut meshing_query: Query<&mut Node, (With<MeshingTabContent>, Without<GraphicsTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut gameplay_query: Query<&mut Node, (With<GameplayTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut atmosphere_query: Query<&mut Node, (With<AtmosphereTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut fog_query: Query<&mut Node, (With<FogTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut visual_query: Query<&mut Node, (With<VisualTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut controls_query: Query<&mut Node, (With<ControlsTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<TexturesTabContent>)>,
-    mut debug_query: Query<&mut Node, (With<DebugTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>, Without<TexturesTabContent>)>,
-    mut textures_query: Query<&mut Node, (With<TexturesTabContent>, Without<GraphicsTabContent>, Without<MeshingTabContent>, Without<GameplayTabContent>, Without<AtmosphereTabContent>, Without<FogTabContent>, Without<VisualTabContent>, Without<ControlsTabContent>)>,
+    mut graphics_query: Query<
+        &mut Node,
+        (
+            With<GraphicsTabContent>,
+            Without<GameplayTabContent>,
+            Without<MeshingTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut meshing_query: Query<
+        &mut Node,
+        (
+            With<MeshingTabContent>,
+            Without<GraphicsTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut gameplay_query: Query<
+        &mut Node,
+        (
+            With<GameplayTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut atmosphere_query: Query<
+        &mut Node,
+        (
+            With<AtmosphereTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut fog_query: Query<
+        &mut Node,
+        (
+            With<FogTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut visual_query: Query<
+        &mut Node,
+        (
+            With<VisualTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut controls_query: Query<
+        &mut Node,
+        (
+            With<ControlsTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut debug_query: Query<
+        &mut Node,
+        (
+            With<DebugTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+            Without<TexturesTabContent>,
+        ),
+    >,
+    mut textures_query: Query<
+        &mut Node,
+        (
+            With<TexturesTabContent>,
+            Without<GraphicsTabContent>,
+            Without<MeshingTabContent>,
+            Without<GameplayTabContent>,
+            Without<AtmosphereTabContent>,
+            Without<FogTabContent>,
+            Without<VisualTabContent>,
+            Without<ControlsTabContent>,
+        ),
+    >,
 ) {
     if settings_state.dialog_root.is_none() {
         return;
@@ -2348,7 +2889,12 @@ pub fn update_settings_graphics_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.graphics_quality == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.graphics_quality == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2361,7 +2907,12 @@ pub fn update_settings_aa_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.anti_aliasing == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.anti_aliasing == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2375,7 +2926,12 @@ pub fn update_settings_greedy_meshing_backgrounds(
     }
 
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.greedy_meshing == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.greedy_meshing == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2388,7 +2944,12 @@ pub fn update_settings_walk_speed_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.walk_speed == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.walk_speed == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2401,7 +2962,12 @@ pub fn update_settings_run_speed_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.run_speed == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.run_speed == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2414,7 +2980,12 @@ pub fn update_settings_jump_height_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.jump_height == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.jump_height == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2427,7 +2998,12 @@ pub fn update_settings_float_height_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.float_height == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.float_height == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2440,7 +3016,12 @@ pub fn update_settings_ray_tracing_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.ray_tracing == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.ray_tracing == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2471,10 +3052,64 @@ pub fn update_settings_shadow_filtering_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.shadow_filtering == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.shadow_filtering == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
+pub fn update_water_reflection_backgrounds(
+    settings_state: Res<SettingsState>,
+    reflection_config: Res<WaterReflectionConfig>,
+    mut queries: ParamSet<(
+        Query<(&WaterReflectionEnabledOption, &mut BackgroundColor)>,
+        Query<(&WaterReflectionScaleOption, &mut BackgroundColor)>,
+        Query<(&WaterReflectionHzOption, &mut BackgroundColor)>,
+        Query<(&WaterReflectionDistanceOption, &mut BackgroundColor)>,
+        Query<(&WaterReflectionFrustumOption, &mut BackgroundColor)>,
+    )>,
+) {
+    if settings_state.dialog_root.is_none() {
+        return;
+    }
+
+    for (option, mut background) in queries.p0().iter_mut() {
+        *background = if reflection_config.enabled == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
+    }
+    for (option, mut background) in queries.p1().iter_mut() {
+        let active = (reflection_config.resolution_scale - option.0).abs() < 0.01;
+        *background = if active { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+    for (option, mut background) in queries.p2().iter_mut() {
+        let current_hz = if reflection_config.update_interval <= f32::EPSILON {
+            0.0
+        } else {
+            1.0 / reflection_config.update_interval
+        };
+        let active = (current_hz - option.0).abs() < 1.0;
+        *background = if active { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+    for (option, mut background) in queries.p3().iter_mut() {
+        let active = (reflection_config.auto_disable_distance - option.0).abs() < 1.0;
+        *background = if active { ACTIVE_BG } else { INACTIVE_BG }.into();
+    }
+    for (option, mut background) in queries.p4().iter_mut() {
+        *background = if reflection_config.require_water_in_frustum == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
+    }
+}
 
 /// Updates resolution option backgrounds.
 pub fn update_settings_resolution_backgrounds(
@@ -2485,7 +3120,12 @@ pub fn update_settings_resolution_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.resolution == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.resolution == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2498,7 +3138,12 @@ pub fn update_cycle_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.cycle_enabled == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.cycle_enabled == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2511,7 +3156,12 @@ pub fn update_day_length_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.day_length == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.day_length == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2524,7 +3174,12 @@ pub fn update_time_scale_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.time_scale == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.time_scale == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2537,7 +3192,12 @@ pub fn update_rayleigh_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.rayleigh == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.rayleigh == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2550,7 +3210,12 @@ pub fn update_mie_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.mie == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.mie == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2563,7 +3228,12 @@ pub fn update_mie_direction_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.mie_direction == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.mie_direction == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2576,7 +3246,12 @@ pub fn update_exposure_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.exposure == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.exposure == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2589,7 +3264,12 @@ pub fn update_twilight_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.twilight_band == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.twilight_band == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2602,7 +3282,12 @@ pub fn update_night_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.night_brightness == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.night_brightness == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2672,9 +3357,9 @@ pub fn update_face_tile_previews(
         let y = row as f32 * tile_size;
 
         for child in children.iter() {
-           if let Ok(mut node) = image_nodes.get_mut(child) {
-               node.rect = Some(bevy::math::Rect::new(x, y, x + tile_size, y + tile_size));
-           }
+            if let Ok(mut node) = image_nodes.get_mut(child) {
+                node.rect = Some(bevy::math::Rect::new(x, y, x + tile_size, y + tile_size));
+            }
         }
     }
 }
@@ -2687,10 +3372,14 @@ pub fn update_fog_backgrounds(
         return;
     }
     for (option, mut background) in query.iter_mut() {
-        *background = if settings_state.fog_preset == *option { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if settings_state.fog_preset == *option {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
-
 
 /// Updates fog toggle option backgrounds.
 pub fn update_fog_toggle_backgrounds(
@@ -2706,11 +3395,21 @@ pub fn update_fog_toggle_backgrounds(
     }
 
     for (option, mut background) in queries.p0().iter_mut() {
-        *background = if fog_config.distance.enabled == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if fog_config.distance.enabled == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 
     for (option, mut background) in queries.p1().iter_mut() {
-        *background = if fog_config.volumetric.enabled == option.0 { ACTIVE_BG } else { INACTIVE_BG }.into();
+        *background = if fog_config.volumetric.enabled == option.0 {
+            ACTIVE_BG
+        } else {
+            INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2738,7 +3437,8 @@ pub fn handle_settings_input_interaction(
         }
 
         input_state.active = Some(input.0);
-        input_state.buffer = format_settings_input_value(&visual_settings, &fog_config, &atmosphere, input.0);
+        input_state.buffer =
+            format_settings_input_value(&visual_settings, &fog_config, &atmosphere, input.0);
     }
 }
 
@@ -2756,7 +3456,9 @@ pub fn handle_settings_drag(
         return;
     }
 
-    let Ok(window) = window_query.single() else { return };
+    let Ok(window) = window_query.single() else {
+        return;
+    };
 
     for interaction in handle_query.iter() {
         if *interaction != Interaction::Pressed {
@@ -2802,7 +3504,9 @@ pub fn update_settings_drag_hover(
         return;
     }
 
-    let Ok(mut highlight) = highlight_query.single_mut() else { return };
+    let Ok(mut highlight) = highlight_query.single_mut() else {
+        return;
+    };
 
     for interaction in handle_query.iter() {
         *highlight = match *interaction {
@@ -2864,7 +3568,9 @@ pub fn process_settings_input_characters(
             _ => {}
         }
 
-        let Some(active) = input_state.active else { continue };
+        let Some(active) = input_state.active else {
+            continue;
+        };
         if let Ok(value) = input_state.buffer.parse::<f32>() {
             apply_settings_input_value(
                 active,
@@ -2889,7 +3595,12 @@ pub fn update_settings_input_backgrounds(
 
     for (field, mut background) in query.iter_mut() {
         let is_active = input_state.active == Some(field.0);
-        *background = if is_active { INPUT_ACTIVE_BG } else { INPUT_INACTIVE_BG }.into();
+        *background = if is_active {
+            INPUT_ACTIVE_BG
+        } else {
+            INPUT_INACTIVE_BG
+        }
+        .into();
     }
 }
 
@@ -2928,7 +3639,9 @@ pub fn handle_fog_sliders(
             continue;
         }
 
-        let Some(relative_pos) = relative_cursor.normalized else { continue };
+        let Some(relative_pos) = relative_cursor.normalized else {
+            continue;
+        };
         let normalized = relative_pos.x.clamp(0.0, 1.0);
         apply_fog_slider(&mut fog_config, slider_track.0, normalized);
         if input_state.active == Some(SettingsInputField::Fog(slider_track.0)) {
@@ -3012,8 +3725,6 @@ fn fog_slider_value(config: &FogConfig, slider: FogSlider) -> f32 {
     }
 }
 
-
-
 fn inv_lerp(min: f32, max: f32, value: f32) -> f32 {
     if (max - min).abs() < f32::EPSILON {
         return 0.0;
@@ -3088,7 +3799,9 @@ pub fn handle_visual_sliders(
         }
 
         // Get normalized position from RelativeCursorPosition (0.0 to 1.0)
-        let Some(relative_pos) = relative_cursor.normalized else { continue };
+        let Some(relative_pos) = relative_cursor.normalized else {
+            continue;
+        };
         let normalized = relative_pos.x.clamp(0.0, 1.0);
 
         apply_visual_slider(&mut visual_settings, slider_track.0, normalized);
@@ -3187,8 +3900,6 @@ fn format_visual_slider_value(settings: &VisualSettings, slider: VisualSlider) -
         VisualSlider::SkyboxBrightness => format!("{:.0}", settings.skybox_brightness),
     }
 }
-
-
 
 fn format_fog_slider_value(config: &FogConfig, slider: FogSlider) -> String {
     match slider {
@@ -3321,6 +4032,7 @@ pub fn handle_save_settings_interaction(
     settings_state: Res<SettingsState>,
     visual_settings: Res<VisualSettings>,
     fog_config: Res<FogConfig>,
+    water_reflection: Res<WaterReflectionConfig>,
     atmosphere: Res<AtmosphereSettings>,
 ) {
     for (interaction, mut bg) in interaction_query.iter_mut() {
@@ -3331,9 +4043,14 @@ pub fn handle_save_settings_interaction(
                     &settings_state,
                     &visual_settings,
                     &fog_config,
+                    &water_reflection,
                     &atmosphere,
                 ) {
-                    Ok(()) => info!("Settings saved to {} / {}", super::settings_persistence::SETTINGS_YAML_PATH, super::settings_persistence::SETTINGS_JSON_PATH),
+                    Ok(()) => info!(
+                        "Settings saved to {} / {}",
+                        super::settings_persistence::SETTINGS_YAML_PATH,
+                        super::settings_persistence::SETTINGS_JSON_PATH
+                    ),
                     Err(err) => warn!("Failed to save settings: {}", err),
                 }
             }
@@ -3358,10 +4075,10 @@ pub fn process_rebind_input(
                 // Ignore Escape to cancel? or bind it? Let's bind it for now, user can rebind menu elsewhere if stuck
                 // Actually, let's make Escape cancel rebind if that's standard, but for flexibility we might want to bind it.
                 // Assuming raw key code mapping.
-                
+
                 input_config.bindings.insert(action, event.key_code);
                 rebind_state.active_action = None;
-                break; 
+                break;
             }
         }
     }
@@ -3385,7 +4102,9 @@ pub fn update_controls_tab_display(
             *bg = BackgroundColor(INACTIVE_BG);
             if let Some(child) = children.first() {
                 if let Ok(mut text) = text_query.get_mut(*child) {
-                    let key_name = input_config.bindings.get(&button.0)
+                    let key_name = input_config
+                        .bindings
+                        .get(&button.0)
                         .map(|k| format!("{:?}", k).replace("Key", ""))
                         .unwrap_or("None".to_string());
                     **text = key_name;
@@ -3452,7 +4171,7 @@ pub fn handle_atlas_tile_clicks(
     for (interaction, tile_button) in query.iter() {
         if *interaction == Interaction::Pressed {
             let tile_index = tile_button.0;
-            
+
             let target_map = match *active_layer {
                 ActiveTextureLayer::Grass => &mut atlas_mapping.grass,
                 ActiveTextureLayer::Dirt => &mut atlas_mapping.dirt,
@@ -3465,8 +4184,11 @@ pub fn handle_atlas_tile_clicks(
                 ActiveTextureFace::Side => target_map.side = tile_index,
                 ActiveTextureFace::Bottom => target_map.bottom = tile_index,
             }
-            
-            info!("Assigned atlas tile {} to {:?} {:?}", tile_index, *active_layer, *active_face);
+
+            info!(
+                "Assigned atlas tile {} to {:?} {:?}",
+                tile_index, *active_layer, *active_face
+            );
         }
     }
 }
@@ -3476,7 +4198,7 @@ pub fn update_texture_face_backgrounds(
     active_face: Res<ActiveTextureFace>,
     mut query: Query<(&TextureFaceButton, &mut BackgroundColor)>,
 ) {
-     if settings_state.dialog_root.is_none() {
+    if settings_state.dialog_root.is_none() {
         return;
     }
     for (face_button, mut bg) in query.iter_mut() {
@@ -3511,11 +4233,12 @@ pub fn update_texture_layer_backgrounds(
 
 /// Updates layer tile previews (NOT USED in new layout currently, but kept for compatibility or cleanup)
 pub fn update_layer_tile_previews(
-    // Empty implementation or removed system? 
+    // Empty implementation or removed system?
     // Just keeping it empty to satisfy mod.rs registration if I don't remove it there.
     // Or I can update it to show the current tile index in a text somewhere?
     _settings_state: Res<SettingsState>,
-) {}
+) {
+}
 
 /// Updates cube preview faces to show current texture assignments
 pub fn update_cube_preview_faces(

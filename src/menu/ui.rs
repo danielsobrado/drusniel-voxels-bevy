@@ -2,8 +2,8 @@
 //!
 //! This module provides common UI elements used across the menu system.
 
-use bevy::prelude::*;
 use super::types::*;
+use bevy::prelude::*;
 
 // ============================================================================
 // Constants
