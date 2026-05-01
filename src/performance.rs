@@ -1,4 +1,4 @@
-use bevy::diagnostic::FrameCount;
+use bevy::diagnostic::{DiagnosticsStore, FrameCount, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -8,12 +8,30 @@ use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const AREA_TIMING_WINDOW_FRAMES: usize = 60;
+const REQUIRED_TIMING_AREAS: &[&str] = &[
+    "Mesh Dirty",
+    "LOD Update",
+    "Octree Rebuild",
+    "Visible Chunks",
+    "Face Visibility",
+    "Grass Collect",
+    "Grass Animate",
+    "Water Sim",
+    "Water Upload",
+    "Reflection Render",
+    "Fog Submit",
+    "God Rays",
+    "Prop Spawn",
+    "Prop Billboard",
+    "Collider Build",
+];
 
 #[derive(Resource, Default)]
 pub struct AreaTimingRecorder {
     pub enabled: bool,
     frame_index: u32,
     frame_initialized: bool,
+    current_frame_total_us: Option<u64>,
     area_us: BTreeMap<&'static str, u64>,
     area_calls: BTreeMap<&'static str, u32>,
     history: std::collections::VecDeque<AreaTimingFrameSample>,
@@ -28,6 +46,7 @@ struct AreaTimingSample {
 #[derive(Clone, Default)]
 struct AreaTimingFrameSample {
     areas: BTreeMap<&'static str, AreaTimingSample>,
+    frame_total_us: Option<u64>,
 }
 
 pub struct AreaTimingSummary {
@@ -45,17 +64,23 @@ impl AreaTimingRecorder {
         }
         self.enabled = enabled;
         self.frame_initialized = false;
+        self.current_frame_total_us = None;
         self.area_us.clear();
         self.area_calls.clear();
         self.history.clear();
     }
 
     pub fn reset_frame(&mut self, frame: u32) {
+        self.reset_frame_with_total(frame, None);
+    }
+
+    pub fn reset_frame_with_total(&mut self, frame: u32, frame_total_ms: Option<f64>) {
         if self.enabled && self.frame_initialized {
             self.push_current_frame();
         }
         self.frame_index = frame;
         self.frame_initialized = true;
+        self.current_frame_total_us = frame_total_ms.map(|ms| (ms.max(0.0) * 1000.0) as u64);
         self.area_us.clear();
         self.area_calls.clear();
     }
@@ -85,6 +110,7 @@ impl AreaTimingRecorder {
         }
 
         let mut areas = std::collections::BTreeSet::new();
+        areas.extend(REQUIRED_TIMING_AREAS.iter().copied());
         for frame in &self.history {
             areas.extend(frame.areas.keys().copied());
         }
@@ -123,6 +149,29 @@ impl AreaTimingRecorder {
         summaries
     }
 
+    pub fn frame_total_summary(&self) -> Option<AreaTimingSummary> {
+        let mut samples: Vec<u64> = self
+            .history
+            .iter()
+            .filter_map(|frame| frame.frame_total_us)
+            .collect();
+        if samples.is_empty() {
+            return None;
+        }
+
+        let total_us = samples.iter().sum::<u64>();
+        samples.sort_unstable();
+        let max_us = samples.last().copied().unwrap_or(0);
+        let p99_us = percentile_us(&samples, 0.99);
+        Some(AreaTimingSummary {
+            area: "__frame_total",
+            avg_ms: total_us as f64 / samples.len() as f64 / 1000.0,
+            max_ms: max_us as f64 / 1000.0,
+            p99_ms: p99_us as f64 / 1000.0,
+            calls_per_frame: 1.0,
+        })
+    }
+
     fn push_current_frame(&mut self) {
         let mut areas = BTreeMap::new();
         for (area, total_us) in &self.area_us {
@@ -134,7 +183,10 @@ impl AreaTimingRecorder {
                 },
             );
         }
-        self.history.push_back(AreaTimingFrameSample { areas });
+        self.history.push_back(AreaTimingFrameSample {
+            areas,
+            frame_total_us: self.current_frame_total_us,
+        });
         while self.history.len() > AREA_TIMING_WINDOW_FRAMES {
             self.history.pop_front();
         }
@@ -183,9 +235,16 @@ pub fn area_timer<'a>(
     }
 }
 
-pub fn reset_area_timing_frame(mut recorder: ResMut<AreaTimingRecorder>, frame: Res<FrameCount>) {
+pub fn reset_area_timing_frame(
+    mut recorder: ResMut<AreaTimingRecorder>,
+    frame: Res<FrameCount>,
+    diagnostics: Res<DiagnosticsStore>,
+) {
     if recorder.enabled {
-        recorder.reset_frame(frame.0);
+        let frame_total_ms = diagnostics
+            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+            .and_then(|diagnostic| diagnostic.value().or_else(|| diagnostic.smoothed()));
+        recorder.reset_frame_with_total(frame.0, frame_total_ms);
     }
 }
 
@@ -263,22 +322,59 @@ pub fn capture_area_timings(
 pub fn dump_area_timing_csv(recorder: &AreaTimingRecorder) -> std::io::Result<PathBuf> {
     let mut path = PathBuf::from("perf-dumps");
     create_dir_all(&path)?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let timestamp = utc_timestamp_for_filename(SystemTime::now());
     path.push(format!("frame-{}.csv", timestamp));
 
     let mut file = File::create(&path)?;
     writeln!(file, "area,avg_ms,max_ms,p99_ms,calls_per_frame")?;
+    let frame_total = recorder.frame_total_summary().unwrap_or(AreaTimingSummary {
+        area: "__frame_total",
+        avg_ms: 0.0,
+        max_ms: 0.0,
+        p99_ms: 0.0,
+        calls_per_frame: 1.0,
+    });
+    write_csv_row(&mut file, &frame_total)?;
     for summary in recorder.rolling_summaries() {
-        writeln!(
-            file,
-            "{},{:.3},{:.3},{:.3},{:.3}",
-            summary.area, summary.avg_ms, summary.max_ms, summary.p99_ms, summary.calls_per_frame,
-        )?;
+        write_csv_row(&mut file, &summary)?;
     }
-    Ok(path)
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn write_csv_row(file: &mut File, summary: &AreaTimingSummary) -> std::io::Result<()> {
+    writeln!(
+        file,
+        "{},{:.3},{:.3},{:.3},{:.3}",
+        summary.area, summary.avg_ms, summary.max_ms, summary.p99_ms, summary.calls_per_frame,
+    )
+}
+
+fn utc_timestamp_for_filename(time: SystemTime) -> String {
+    let secs = time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = secs.div_euclid(86_400);
+    let second_of_day = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = second_of_day / 3_600;
+    let minute = (second_of_day % 3_600) / 60;
+    let second = second_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}-{minute:02}-{second:02}Z")
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u32, day as u32)
 }
 
 fn trace_output_path() -> PathBuf {

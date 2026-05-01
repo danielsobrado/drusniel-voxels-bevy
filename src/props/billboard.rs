@@ -376,7 +376,7 @@ pub fn update_billboard_lod(
     mut timing: ResMut<AreaTimingRecorder>,
     mut last_update: Local<f32>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Billboard LOD");
+    let _timer = area_timer(&mut timing, frame.0, "Prop Billboard");
     if !settings.enabled || !cache.initialized {
         return;
     }

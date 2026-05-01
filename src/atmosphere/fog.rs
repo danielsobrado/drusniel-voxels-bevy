@@ -2,9 +2,11 @@ use crate::atmosphere::config::{
     DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset,
 };
 use crate::environment::{AtmosphereSettings, Sun};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
+use bevy::diagnostic::FrameCount;
 use bevy::light::{
     CascadeShadowConfig, FogVolume, GlobalAmbientLight, VolumetricFog, VolumetricLight,
 };
@@ -394,6 +396,8 @@ fn update_fog_from_atmosphere(
     ambient: Res<GlobalAmbientLight>,
     world: Res<VoxelWorld>,
     time: Res<Time>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
     // Smoothing for preset transitions and boost
     mut smoothing: Local<FogSmoothingState>,
     camera_query: Query<&Transform, With<FogCamera>>,
@@ -401,6 +405,7 @@ fn update_fog_from_atmosphere(
     mut volumetric_query: Query<&mut VolumetricFog, With<FogCamera>>,
     mut volume_query: Query<&mut FogVolume, With<GlobalFogVolume>>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Fog Submit");
     if smoothing.current_boost == 0.0 {
         smoothing.current_boost = 1.0;
     }

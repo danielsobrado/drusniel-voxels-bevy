@@ -1,0 +1,2 @@
+[env]
+TRACY_CLIENT_SYS_CXXFLAGS_x86_64_pc_windows_msvc = "/DRelationProcessorDie=((LOGICAL_PROCESSOR_RELATIONSHIP)5)"

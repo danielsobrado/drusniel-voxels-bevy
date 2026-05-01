@@ -149,7 +149,7 @@ pub fn attach_procedural_grass_to_chunks(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Grass Build");
+    let _timer = area_timer(&mut timing, frame.0, "Grass Collect");
     let base_density = veg_config.grass_density;
     let base_max_count = veg_config.max_blades_per_chunk;
 
@@ -988,9 +988,11 @@ pub fn spawn_floating_particles(
 pub fn animate_particles(
     time: Res<Time>,
     frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     mut particles: Query<(&mut Transform, &FloatingParticle), Without<PlayerCamera>>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Grass Animate");
     // Skip odd frames — halves transform write cost for 200 entities
     if frame.0 % 2 != 0 {
         return;

@@ -338,7 +338,6 @@ fn step_and_upload_displacement(
     mut frame_counter: Local<u32>,
     mut settled: Local<bool>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Water Displace");
     *frame_counter = frame_counter.wrapping_add(1);
 
     // Check if simulation has settled (no impulses and max height < threshold)
@@ -370,11 +369,17 @@ fn step_and_upload_displacement(
         .map(|c| c.displacement.clone())
         .unwrap_or_default();
 
-    state.step(config.wave_speed, config.damping);
+    {
+        let _timer = area_timer(&mut timing, frame.0, "Water Sim");
+        state.step(config.wave_speed, config.damping);
+    }
 
-    if let Some(image) = images.get_mut(&displacement_tex.image) {
-        let buf = image.data.as_mut().unwrap();
-        state.write_to_rgba8(buf);
+    {
+        let _timer = area_timer(&mut timing, frame.0, "Water Upload");
+        if let Some(image) = images.get_mut(&displacement_tex.image) {
+            let buf = image.data.as_mut().unwrap();
+            state.write_to_rgba8(buf);
+        }
     }
 }
 

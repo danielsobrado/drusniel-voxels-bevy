@@ -70,7 +70,8 @@ fn should_show_inspector(state: Res<DebugUiState>) -> bool {
 }
 
 fn toggle_debug_ui(mut state: ResMut<DebugUiState>, keys: Res<ButtonInput<KeyCode>>) {
-    if keys.just_pressed(KeyCode::F4) {
+    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if shift_held && keys.just_pressed(KeyCode::F4) {
         state.show_inspector = !state.show_inspector;
         state.show_settings = !state.show_settings;
     }
@@ -215,7 +216,7 @@ fn debug_settings_ui(
             }
 
             ui.separator();
-            ui.label("Press F4 to toggle this window and Inspector");
+            ui.label("Press Shift+F4 to toggle this window and Inspector");
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
             ui.label("Press F10 to toggle Sun Shadows");

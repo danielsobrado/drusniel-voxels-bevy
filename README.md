@@ -64,7 +64,7 @@ Current development version: **v0.5**.
 *   **Weather Particles**: GPU-accelerated weather system (rain/snow/dust) via bevy_hanabi with camera-following emitters.
 *   **Vegetation Wind**: Multi-layer wind animation for vegetation (trunk sway, branch movement, leaf flutter) with configurable presets. Enhanced grass shader with SSS (subsurface scattering) and contact shadows for realistic foliage rendering.
 *   **Wind + Foliage Notes**: Detailed write-up on segmented tree bending, UV-based leaf flutter, and depth pre-pass optimization for alpha-cutout foliage in [docs/wind-foliage-depth-prepass.md](docs/wind-foliage-depth-prepass.md).
-*   **Vegetation Alpha Fade**: Grass-like props fade to a configurable minimum alpha near the camera to keep visibility through dense foliage. Tuned in the F4 settings.
+*   **Vegetation Alpha Fade**: Grass-like props fade to a configurable minimum alpha near the camera to keep visibility through dense foliage. Tuned in the Shift+F4 settings.
 *   **Shadow + LOD Alignment**: Cascade shadows tuned to fog visibility and chunk LOD cull distances to avoid dark banding.
 *   **Texture Quality**: Texture arrays with mipmaps and anisotropic filtering for terrain, plus expanded PBR materials for buildings/props.
 *   **Chunk LOD System**: High/low/culled LODs with skirts for seam hiding and integrated GPU fallbacks.
@@ -158,8 +158,8 @@ Props and vegetation with LOD optimizations:
 
 ### Debug & Development
 *   **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
-*   **F2**: Dump current performance timing window to `perf-dumps/`
-*   **F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
+*   **F4**: Dump current performance timing window to `perf-dumps/`
+*   **Shift+F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
 *   **F5**: Toggle Mesh Mode (Blocky ↔ SurfaceNets)
 *   **F6**: Toggle Water Visibility (debug builds only)
 *   **F7**: Toggle Grass Visibility (debug builds only)
@@ -179,7 +179,7 @@ Props and vegetation with LOD optimizations:
 ## Profiling
 
 *   **F3**: Show the in-game 60-frame CPU area timing table.
-*   **F2**: Dump the current timing window as CSV to `perf-dumps/frame-<timestamp>.csv` (`F4` is already used by the inspector/settings window).
+*   **F4**: Dump the current timing window as CSV to `perf-dumps/frame-<UTC>.csv`, including `__frame_total`.
 *   **Tracy**: Run `cargo run --release --features tracy`, then connect with Tracy 0.11.x.
 
 #### Adaptive GI Controls (Alt+)

@@ -364,9 +364,12 @@ pub fn toggle_debug_details(
         );
     }
 
-    if keyboard.just_pressed(KeyCode::F2) {
+    if !shift_held && keyboard.just_pressed(KeyCode::F4) {
         match dump_area_timing_csv(&timing_recorder) {
-            Ok(path) => info!("Performance timing CSV written to {}", path.display()),
+            Ok(path) => {
+                println!("Performance timing CSV written to {}", path.display());
+                info!("Performance timing CSV written to {}", path.display());
+            }
             Err(err) => warn!("Failed to write performance timing CSV: {}", err),
         }
     }
@@ -1077,12 +1080,9 @@ fn append_area_timing_table(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
 
-    text_content.push_str(&format!(
-        "CPU frame: {:.2}ms  GPU frame: N/A\n",
-        cpu_frame_ms
-    ));
+    text_content.push_str(&format!("CPU frame: {:.2}ms\n", cpu_frame_ms));
     text_content.push_str("\n[Frame Areas - 60f avg]\n");
-    text_content.push_str("Area                 Avg ms  Max ms  Calls\n");
+    text_content.push_str("Area                 Avg ms  Max ms  p99 ms  Calls\n");
 
     let summaries = timing_recorder.rolling_summaries();
     if summaries.is_empty() {
@@ -1092,8 +1092,19 @@ fn append_area_timing_table(
 
     for summary in summaries.iter().take(12) {
         text_content.push_str(&format!(
-            "{:<20} {:>6.2} {:>7.2} {:>6.1}\n",
-            summary.area, summary.avg_ms, summary.max_ms, summary.calls_per_frame,
+            "{:<20} {:>6.2} {:>7.2} {:>7.2} {:>6.1}\n",
+            summary.area, summary.avg_ms, summary.max_ms, summary.p99_ms, summary.calls_per_frame,
+        ));
+    }
+
+    if let Some(frame_total) = timing_recorder.frame_total_summary() {
+        text_content.push_str(&format!(
+            "{:<20} {:>6.2} {:>7.2} {:>7.2} {:>6.1}\n",
+            "Frame total",
+            frame_total.avg_ms,
+            frame_total.max_ms,
+            frame_total.p99_ms,
+            frame_total.calls_per_frame,
         ));
     }
 }
@@ -1187,7 +1198,8 @@ fn append_control_hints(
     timing_capture: &AreaTimingCapture,
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
-    text_content.push_str("\n[F2] Dump performance CSV");
+    text_content.push_str("\n[F4] Dump performance CSV");
+    text_content.push_str("\n[Shift+F4] Inspector/settings");
     text_content.push_str("\n[F11] Toggle enclosure culling");
     text_content.push_str("\n[G] Detailed log");
     text_content.push_str(&format!(

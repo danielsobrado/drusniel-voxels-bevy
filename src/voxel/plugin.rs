@@ -1347,7 +1347,7 @@ fn update_octree_system(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Octree Update");
+    let _timer = area_timer(&mut timing, frame.0, "Octree Rebuild");
     // Skip when occlusion culling is disabled — octree is only used by culling
     if !config.enabled {
         return;
