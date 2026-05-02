@@ -73,8 +73,8 @@ pub struct InstancedPropGroup {
     pub shadow_instances: Vec<PropInstance>,
     shadow_culled: Vec<bool>,
     tint_enabled: bool,
-    pub dirty: bool,
-    pub shadow_dirty: bool,
+    pub version: u64,
+    pub shadow_version: u64,
 }
 
 impl ExtractComponent for InstancedPropGroup {
@@ -344,8 +344,8 @@ fn get_or_create_group(
                         shadow_instances: Vec::new(),
                         shadow_culled: Vec::new(),
                         tint_enabled: !groups.integrated_gpu,
-                        dirty: true,
-                        shadow_dirty: true,
+                        version: 1,
+                        shadow_version: 1,
                     },
                     NoIndirectDrawing,
                     // TODO: keep props on layer 0 until reflection-layer membership is designed.
@@ -384,8 +384,7 @@ fn apply_pending_instances(
         group
             .shadow_instances
             .extend(update.instances.iter().copied());
-        group.dirty = true;
-        group.shadow_dirty = true;
+        bump_versions(&mut group);
         commands
             .entity(entity)
             .insert(Aabb::from_min_max(update.min, update.max));
@@ -414,7 +413,7 @@ fn sync_dirty_prop_transforms(
             let final_transform = *transform * visual.local_transform;
             if let Some(instance) = group.instances.get_mut(slot) {
                 instance.transform = final_transform.to_matrix().to_cols_array_2d();
-                group.dirty = true;
+                bump_version(&mut group);
             }
             if let Some(culled) = group.shadow_culled.get_mut(slot) {
                 *culled = shadow_culled.is_some();
@@ -450,90 +449,190 @@ fn rebuild_shadow_instances(group: &mut InstancedPropGroup) {
         .zip(group.shadow_culled.iter())
         .filter_map(|(instance, culled)| (!*culled).then_some(*instance))
         .collect();
-    group.shadow_dirty = true;
+    bump_shadow_version(group);
+}
+
+fn bump_version(group: &mut InstancedPropGroup) {
+    group.version = group.version.wrapping_add(1).max(1);
+}
+
+fn bump_shadow_version(group: &mut InstancedPropGroup) {
+    group.shadow_version = group.shadow_version.wrapping_add(1).max(1);
+}
+
+fn bump_versions(group: &mut InstancedPropGroup) {
+    bump_version(group);
+    bump_shadow_version(group);
 }
 
 #[derive(Component)]
-struct InstanceBuffer {
-    buffer: Buffer,
-    length: usize,
-    shadow_buffer: Buffer,
-    shadow_length: usize,
+pub struct InstanceBuffer {
+    pub buffer: Buffer,
+    pub capacity: usize,
+    pub length: usize,
+    pub uploaded_version: u64,
+    pub shadow_buffer: Buffer,
+    pub shadow_capacity: usize,
+    pub shadow_length: usize,
+    pub uploaded_shadow_version: u64,
 }
 
 fn prepare_instance_buffers(
     mut commands: Commands,
-    query: Query<
-        (Entity, &InstancedPropGroup),
-        Or<(Changed<InstancedPropGroup>, Without<InstanceBuffer>)>,
-    >,
+    query: Query<(Entity, &InstancedPropGroup, Option<&InstanceBuffer>)>,
     render_device: Res<RenderDevice>,
     timing: Option<Res<RenderTimingSink>>,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
+    let mut groups_examined = 0usize;
+    let mut groups_skipped = 0usize;
     let mut groups_uploaded = 0usize;
+    let mut visible_buffers_uploaded = 0usize;
+    let mut shadow_buffers_uploaded = 0usize;
     let mut instances_uploaded = 0usize;
     let mut shadow_instances_uploaded = 0usize;
     let mut bytes_uploaded = 0usize;
 
-    for (entity, group) in &query {
+    for (entity, group, existing) in &query {
+        groups_examined += 1;
         if group.instances.is_empty() {
             continue;
         }
-        groups_uploaded += 1;
-        instances_uploaded += group.instances.len();
-        shadow_instances_uploaded += group.shadow_instances.len();
-        let instance_bytes: Vec<PropInstanceNoTint>;
-        let contents = if group.tint_enabled {
-            bytemuck::cast_slice(group.instances.as_slice())
+
+        let visible_clean = existing
+            .map(|buffer| {
+                buffer.uploaded_version == group.version
+                    && buffer.capacity >= group.instances.len()
+                    && buffer.length == group.instances.len()
+            })
+            .unwrap_or(false);
+        let shadow_clean = existing
+            .map(|buffer| {
+                buffer.uploaded_shadow_version == group.shadow_version
+                    && buffer.shadow_capacity >= group.shadow_instances.len()
+                    && buffer.shadow_length == group.shadow_instances.len()
+            })
+            .unwrap_or(false);
+
+        if visible_clean && shadow_clean {
+            groups_skipped += 1;
+            continue;
+        }
+
+        let mut uploaded_any = false;
+        let (buffer, capacity, length, uploaded_version) = if visible_clean {
+            let existing = existing.expect("visible_clean requires an existing buffer");
+            (
+                existing.buffer.clone(),
+                existing.capacity,
+                existing.length,
+                existing.uploaded_version,
+            )
         } else {
-            instance_bytes = group
-                .instances
-                .iter()
-                .map(|instance| PropInstanceNoTint {
-                    transform: instance.transform,
-                })
-                .collect();
-            bytemuck::cast_slice(instance_bytes.as_slice())
+            let instance_bytes: Vec<PropInstanceNoTint>;
+            let contents = if group.tint_enabled {
+                bytemuck::cast_slice(group.instances.as_slice())
+            } else {
+                instance_bytes = group
+                    .instances
+                    .iter()
+                    .map(|instance| PropInstanceNoTint {
+                        transform: instance.transform,
+                    })
+                    .collect();
+                bytemuck::cast_slice(instance_bytes.as_slice())
+            };
+            bytes_uploaded += contents.len();
+            instances_uploaded += group.instances.len();
+            visible_buffers_uploaded += 1;
+            uploaded_any = true;
+            (
+                render_device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("instanced prop data buffer"),
+                    contents,
+                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                }),
+                group.instances.len(),
+                group.instances.len(),
+                group.version,
+            )
         };
-        bytes_uploaded += contents.len();
-        let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("instanced prop data buffer"),
-            contents,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-        });
-        let shadow_instance_bytes: Vec<PropInstanceNoTint>;
-        let shadow_contents = if group.tint_enabled {
-            bytemuck::cast_slice(group.shadow_instances.as_slice())
-        } else {
-            shadow_instance_bytes = group
-                .shadow_instances
-                .iter()
-                .map(|instance| PropInstanceNoTint {
-                    transform: instance.transform,
-                })
-                .collect();
-            bytemuck::cast_slice(shadow_instance_bytes.as_slice())
-        };
-        bytes_uploaded += shadow_contents.len();
-        let shadow_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("instanced prop shadow data buffer"),
-            contents: shadow_contents,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-        });
+
+        let (shadow_buffer, shadow_capacity, shadow_length, uploaded_shadow_version) =
+            if shadow_clean {
+                let existing = existing.expect("shadow_clean requires an existing buffer");
+                (
+                    existing.shadow_buffer.clone(),
+                    existing.shadow_capacity,
+                    existing.shadow_length,
+                    existing.uploaded_shadow_version,
+                )
+            } else {
+                let shadow_instance_bytes: Vec<PropInstanceNoTint>;
+                let shadow_contents = if group.tint_enabled {
+                    bytemuck::cast_slice(group.shadow_instances.as_slice())
+                } else {
+                    shadow_instance_bytes = group
+                        .shadow_instances
+                        .iter()
+                        .map(|instance| PropInstanceNoTint {
+                            transform: instance.transform,
+                        })
+                        .collect();
+                    bytemuck::cast_slice(shadow_instance_bytes.as_slice())
+                };
+                bytes_uploaded += shadow_contents.len();
+                shadow_instances_uploaded += group.shadow_instances.len();
+                shadow_buffers_uploaded += 1;
+                uploaded_any = true;
+                (
+                    render_device.create_buffer_with_data(&BufferInitDescriptor {
+                        label: Some("instanced prop shadow data buffer"),
+                        contents: shadow_contents,
+                        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                    }),
+                    group.shadow_instances.len(),
+                    group.shadow_instances.len(),
+                    group.shadow_version,
+                )
+            };
+
+        if uploaded_any {
+            groups_uploaded += 1;
+        }
         commands.entity(entity).insert(InstanceBuffer {
             buffer,
-            length: group.instances.len(),
+            capacity,
+            length,
+            uploaded_version,
             shadow_buffer,
-            shadow_length: group.shadow_instances.len(),
+            shadow_capacity,
+            shadow_length,
+            uploaded_shadow_version,
         });
     }
 
     if let Some(sink) = sink {
         sink.push_count(
+            "Render Instancing Buffer Groups Examined",
+            groups_examined as f64,
+        );
+        sink.push_count(
+            "Render Instancing Buffer Groups Skipped",
+            groups_skipped as f64,
+        );
+        sink.push_count(
             "Render Instancing Buffer Groups Uploaded",
             groups_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Visible Buffers Uploaded",
+            visible_buffers_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Shadow Buffers Uploaded",
+            shadow_buffers_uploaded as f64,
         );
         sink.push_count(
             "Render Instancing Buffer Instances Uploaded",

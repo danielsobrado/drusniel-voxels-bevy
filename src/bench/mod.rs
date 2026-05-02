@@ -19,6 +19,9 @@ use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const SETTLE_FRAMES: u32 = 30;
+const SCREENSHOT_WAIT_FRAMES: u32 = 60;
+const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
+const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
@@ -62,6 +65,7 @@ struct BenchState {
     settle_frames_left: u32,
     hold_frames_left: u32,
     screenshot_wait_left: u32,
+    screenshot_wait_started: Option<Instant>,
     hold_elapsed_frames: u32,
     next_screenshot_point: usize,
     current_screenshots: Vec<ScreenshotRecord>,
@@ -208,6 +212,7 @@ impl Plugin for BenchPlugin {
                 settle_frames_left: 0,
                 hold_frames_left: 0,
                 screenshot_wait_left: 0,
+                screenshot_wait_started: None,
                 hold_elapsed_frames: 0,
                 next_screenshot_point: 0,
                 current_screenshots: Vec::new(),
@@ -343,9 +348,11 @@ fn run_bench_state_machine(
                         .map(|screenshot| screenshot.path.clone())
                 };
                 state.screenshot_wait_left = if state.current_screenshots.is_empty() {
+                    state.screenshot_wait_started = None;
                     0
                 } else {
-                    60
+                    state.screenshot_wait_started = Some(Instant::now());
+                    SCREENSHOT_WAIT_FRAMES
                 };
                 state.current_run = Some(RunRecord {
                     frame_ms_median: frame_ms,
@@ -365,10 +372,21 @@ fn run_bench_state_machine(
             }
         }
         BenchPhase::Screenshot => {
-            if state.screenshot_wait_left == 0 {
+            let wait_elapsed = state
+                .screenshot_wait_started
+                .map(|started| started.elapsed().as_secs_f32())
+                .unwrap_or(SCREENSHOT_WAIT_MAX_SECS);
+            let waited_long_enough = wait_elapsed >= SCREENSHOT_WAIT_MIN_SECS;
+            let wait_timed_out = wait_elapsed >= SCREENSHOT_WAIT_MAX_SECS;
+            let screenshots_ready = screenshots_exist(&config, &state.current_screenshots);
+            if state.screenshot_wait_left == 0
+                && waited_long_enough
+                && (screenshots_ready || wait_timed_out)
+            {
+                state.screenshot_wait_started = None;
                 state.phase = BenchPhase::FinishRun;
             } else {
-                state.screenshot_wait_left -= 1;
+                state.screenshot_wait_left = state.screenshot_wait_left.saturating_sub(1);
             }
         }
         BenchPhase::FinishRun => {
@@ -384,6 +402,12 @@ fn run_bench_state_machine(
     }
 
     let _ = frame;
+}
+
+fn screenshots_exist(config: &BenchConfig, screenshots: &[ScreenshotRecord]) -> bool {
+    screenshots
+        .iter()
+        .all(|screenshot| config.output_dir.join(&screenshot.path).exists())
 }
 
 fn finish_run(
@@ -529,7 +553,8 @@ fn capture_due_screenshots(
             path,
         });
         state.next_screenshot_point += 1;
-        state.screenshot_wait_left = 60;
+        state.screenshot_wait_left = SCREENSHOT_WAIT_FRAMES;
+        state.screenshot_wait_started = Some(Instant::now());
     }
 }
 
