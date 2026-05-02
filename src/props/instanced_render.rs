@@ -34,7 +34,7 @@ use bevy::render::{
         ViewBinnedRenderPhases, ViewSortedRenderPhases,
     },
     render_resource::*,
-    renderer::RenderDevice,
+    renderer::{RenderDevice, RenderQueue},
     sync_world::MainEntity,
     view::{ExtractedView, NoIndirectDrawing},
 };
@@ -477,10 +477,45 @@ pub struct InstanceBuffer {
     pub uploaded_shadow_version: u64,
 }
 
+fn instance_stride(tint_enabled: bool) -> usize {
+    if tint_enabled {
+        size_of::<PropInstance>()
+    } else {
+        size_of::<PropInstanceNoTint>()
+    }
+}
+
+fn ensure_instance_buffer_capacity(
+    render_device: &RenderDevice,
+    existing: Option<&Buffer>,
+    current_capacity: usize,
+    required_len: usize,
+    tint_enabled: bool,
+    label: &'static str,
+) -> (Buffer, usize, bool) {
+    if let Some(buffer) = existing {
+        if current_capacity >= required_len {
+            return (buffer.clone(), current_capacity, false);
+        }
+    }
+
+    let new_capacity = required_len.next_power_of_two().max(1);
+    let size = (new_capacity * instance_stride(tint_enabled)) as u64;
+    let buffer = render_device.create_buffer(&BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    (buffer, new_capacity, true)
+}
+
 fn prepare_instance_buffers(
     mut commands: Commands,
     query: Query<(Entity, &InstancedPropGroup, Option<&InstanceBuffer>)>,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     timing: Option<Res<RenderTimingSink>>,
 ) {
     let sink = timing.as_deref();
@@ -490,6 +525,8 @@ fn prepare_instance_buffers(
     let mut groups_uploaded = 0usize;
     let mut visible_buffers_uploaded = 0usize;
     let mut shadow_buffers_uploaded = 0usize;
+    let mut visible_buffers_created = 0usize;
+    let mut shadow_buffers_created = 0usize;
     let mut instances_uploaded = 0usize;
     let mut shadow_instances_uploaded = 0usize;
     let mut bytes_uploaded = 0usize;
@@ -543,20 +580,21 @@ fn prepare_instance_buffers(
                     .collect();
                 bytemuck::cast_slice(instance_bytes.as_slice())
             };
+            let (buffer, capacity, created) = ensure_instance_buffer_capacity(
+                &render_device,
+                existing.map(|buffer| &buffer.buffer),
+                existing.map(|buffer| buffer.capacity).unwrap_or(0),
+                group.instances.len(),
+                group.tint_enabled,
+                "instanced prop data buffer",
+            );
+            render_queue.write_buffer(&buffer, 0, contents);
             bytes_uploaded += contents.len();
             instances_uploaded += group.instances.len();
             visible_buffers_uploaded += 1;
+            visible_buffers_created += usize::from(created);
             uploaded_any = true;
-            (
-                render_device.create_buffer_with_data(&BufferInitDescriptor {
-                    label: Some("instanced prop data buffer"),
-                    contents,
-                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                }),
-                group.instances.len(),
-                group.instances.len(),
-                group.version,
-            )
+            (buffer, capacity, group.instances.len(), group.version)
         };
 
         let (shadow_buffer, shadow_capacity, shadow_length, uploaded_shadow_version) =
@@ -582,17 +620,25 @@ fn prepare_instance_buffers(
                         .collect();
                     bytemuck::cast_slice(shadow_instance_bytes.as_slice())
                 };
+                let (shadow_buffer, shadow_capacity, created) = ensure_instance_buffer_capacity(
+                    &render_device,
+                    existing.map(|buffer| &buffer.shadow_buffer),
+                    existing.map(|buffer| buffer.shadow_capacity).unwrap_or(0),
+                    group.shadow_instances.len(),
+                    group.tint_enabled,
+                    "instanced prop shadow data buffer",
+                );
+                if !shadow_contents.is_empty() {
+                    render_queue.write_buffer(&shadow_buffer, 0, shadow_contents);
+                    shadow_buffers_uploaded += 1;
+                }
                 bytes_uploaded += shadow_contents.len();
                 shadow_instances_uploaded += group.shadow_instances.len();
-                shadow_buffers_uploaded += 1;
+                shadow_buffers_created += usize::from(created);
                 uploaded_any = true;
                 (
-                    render_device.create_buffer_with_data(&BufferInitDescriptor {
-                        label: Some("instanced prop shadow data buffer"),
-                        contents: shadow_contents,
-                        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                    }),
-                    group.shadow_instances.len(),
+                    shadow_buffer,
+                    shadow_capacity,
                     group.shadow_instances.len(),
                     group.shadow_version,
                 )
@@ -633,6 +679,14 @@ fn prepare_instance_buffers(
         sink.push_count(
             "Render Instancing Shadow Buffers Uploaded",
             shadow_buffers_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Visible Buffers Created",
+            visible_buffers_created as f64,
+        );
+        sink.push_count(
+            "Render Instancing Shadow Buffers Created",
+            shadow_buffers_created as f64,
         );
         sink.push_count(
             "Render Instancing Buffer Instances Uploaded",
