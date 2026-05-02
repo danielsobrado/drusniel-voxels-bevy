@@ -191,6 +191,7 @@ cargo run --release -- --bench bench/scenes/visual-regression.toml
 
 Output: `bench-runs/<timestamp>/summary.json` plus per-checkpoint CSV files and screenshots.
 `visual-regression.toml` runs deterministic camera movement paths for run, jump, and look-sweep coverage, with named screenshots captured at fixed frames for visual comparison.
+Bench runs also enable render timing rows for Bevy render stages, render-graph CPU/GPU pass diagnostics, shadow passes, post-processing, and window texture acquisition. Outside bench mode, set `VOXEL_RENDER_TIMING=1` to capture the same render timing rows in the debug timing CSV.
 
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)

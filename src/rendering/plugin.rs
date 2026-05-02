@@ -22,6 +22,7 @@ use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::ssao::SsaoPlugin;
 use crate::rendering::triplanar_material::TriplanarMaterial;
@@ -34,6 +35,10 @@ pub struct RenderingPlugin;
 
 impl Plugin for RenderingPlugin {
     fn build(&self, app: &mut App) {
+        if render_timing_enabled(app) {
+            install_render_timing(app);
+        }
+
         app.init_resource::<GraphicsCapabilities>()
             .init_resource::<RayTracingSettings>()
             .add_systems(
@@ -103,4 +108,9 @@ impl Plugin for RenderingPlugin {
                 ),
             );
     }
+}
+
+fn render_timing_enabled(app: &App) -> bool {
+    app.world().contains_resource::<crate::bench::BenchConfig>()
+        || std::env::var_os("VOXEL_RENDER_TIMING").is_some()
 }

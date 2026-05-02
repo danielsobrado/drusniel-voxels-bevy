@@ -9,6 +9,17 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const AREA_TIMING_WINDOW_FRAMES: usize = 60;
 const REQUIRED_TIMING_AREAS: &[&str] = &[
+    "Render PrepareAssets CPU",
+    "Render PrepareMeshes CPU",
+    "Render Present Acquire CPU",
+    "Render ManageViews CPU",
+    "Render Queue CPU",
+    "Render QueueMeshes CPU",
+    "Render PhaseSort CPU",
+    "Render Prepare CPU",
+    "Render PrepareResources CPU",
+    "Render PrepareBindGroups CPU",
+    "Render Graph CPU",
     "Mesh Dirty",
     "LOD Update",
     "Octree Rebuild",
@@ -32,8 +43,8 @@ pub struct AreaTimingRecorder {
     frame_index: u32,
     frame_initialized: bool,
     current_frame_total_us: Option<u64>,
-    area_us: BTreeMap<&'static str, u64>,
-    area_calls: BTreeMap<&'static str, u32>,
+    area_us: BTreeMap<String, u64>,
+    area_calls: BTreeMap<String, u32>,
     history: std::collections::VecDeque<AreaTimingFrameSample>,
 }
 
@@ -45,12 +56,12 @@ struct AreaTimingSample {
 
 #[derive(Clone, Default)]
 struct AreaTimingFrameSample {
-    areas: BTreeMap<&'static str, AreaTimingSample>,
+    areas: BTreeMap<String, AreaTimingSample>,
     frame_total_us: Option<u64>,
 }
 
 pub struct AreaTimingSummary {
-    pub area: &'static str,
+    pub area: String,
     pub avg_ms: f64,
     pub max_ms: f64,
     pub p99_ms: f64,
@@ -86,6 +97,10 @@ impl AreaTimingRecorder {
     }
 
     pub fn record(&mut self, frame: u32, area: &'static str, duration_us: u64) {
+        self.record_area(frame, area, duration_us);
+    }
+
+    pub fn record_area(&mut self, frame: u32, area: impl Into<String>, duration_us: u64) {
         if !self.enabled {
             return;
         }
@@ -95,11 +110,12 @@ impl AreaTimingRecorder {
         } else if self.frame_index != frame {
             self.reset_frame(frame);
         }
-        *self.area_us.entry(area).or_insert(0) += duration_us;
+        let area = area.into();
+        *self.area_us.entry(area.clone()).or_insert(0) += duration_us;
         *self.area_calls.entry(area).or_insert(0) += 1;
     }
 
-    pub fn areas(&self) -> &BTreeMap<&'static str, u64> {
+    pub fn areas(&self) -> &BTreeMap<String, u64> {
         &self.area_us
     }
 
@@ -110,9 +126,9 @@ impl AreaTimingRecorder {
         }
 
         let mut areas = std::collections::BTreeSet::new();
-        areas.extend(REQUIRED_TIMING_AREAS.iter().copied());
+        areas.extend(REQUIRED_TIMING_AREAS.iter().map(|area| (*area).to_string()));
         for frame in &self.history {
-            areas.extend(frame.areas.keys().copied());
+            areas.extend(frame.areas.keys().cloned());
         }
 
         let mut summaries = Vec::with_capacity(areas.len());
@@ -122,7 +138,7 @@ impl AreaTimingRecorder {
             let mut samples = Vec::with_capacity(frame_count);
 
             for frame in &self.history {
-                let sample = frame.areas.get(area).copied().unwrap_or_default();
+                let sample = frame.areas.get(&area).copied().unwrap_or_default();
                 total_us += sample.total_us;
                 total_calls += sample.calls as u64;
                 samples.push(sample.total_us);
@@ -144,7 +160,7 @@ impl AreaTimingRecorder {
             b.avg_ms
                 .partial_cmp(&a.avg_ms)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.area.cmp(b.area))
+                .then_with(|| a.area.cmp(&b.area))
         });
         summaries
     }
@@ -164,7 +180,7 @@ impl AreaTimingRecorder {
         let max_us = samples.last().copied().unwrap_or(0);
         let p99_us = percentile_us(&samples, 0.99);
         Some(AreaTimingSummary {
-            area: "__frame_total",
+            area: "__frame_total".to_string(),
             avg_ms: total_us as f64 / samples.len() as f64 / 1000.0,
             max_ms: max_us as f64 / 1000.0,
             p99_ms: p99_us as f64 / 1000.0,
@@ -184,7 +200,7 @@ impl AreaTimingRecorder {
         let mut areas = BTreeMap::new();
         for (area, total_us) in &self.area_us {
             areas.insert(
-                *area,
+                area.clone(),
                 AreaTimingSample {
                     total_us: *total_us,
                     calls: self.area_calls.get(area).copied().unwrap_or(0),
@@ -346,7 +362,7 @@ pub fn write_area_timing_csv(
     let mut file = File::create(&path)?;
     writeln!(file, "area,avg_ms,max_ms,p99_ms,calls_per_frame")?;
     let frame_total = recorder.frame_total_summary().unwrap_or(AreaTimingSummary {
-        area: "__frame_total",
+        area: "__frame_total".to_string(),
         avg_ms: 0.0,
         max_ms: 0.0,
         p99_ms: 0.0,

@@ -37,6 +37,7 @@ pub mod plugin;
 pub mod props_material;
 pub mod radiance_cascades;
 pub mod ray_tracing;
+pub mod render_timing;
 pub mod shadow_budget;
 pub mod ssao;
 pub mod triplanar_material;
