@@ -38,3 +38,4 @@ v0.3_vegetation_mod.rs
 *.txt
 assets/models/plants/custom/*.glb
 saves/
+debug/*.json

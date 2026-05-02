@@ -219,6 +219,7 @@ fn debug_settings_ui(
             ui.label("Press Shift+F4 to toggle this window and Inspector");
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
+            ui.label("Press Shift+F9 to dump terrain hole probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
         },
     );
@@ -274,7 +275,8 @@ fn toggle_ssao_key(
     >,
     mut ssao_enabled: Local<bool>,
 ) {
-    if keys.just_pressed(KeyCode::F9) {
+    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if !shift_held && keys.just_pressed(KeyCode::F9) {
         *ssao_enabled = !*ssao_enabled;
         for (entity, existing_ssao, existing_gtao) in cameras.iter() {
             if *ssao_enabled {

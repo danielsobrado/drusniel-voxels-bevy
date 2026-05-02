@@ -86,7 +86,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(vec3<f32>(0.4, 0.8, 0.3));
     let half_dir = normalize(light_dir + view_dir);
     let roughness = clamp(props.default_roughness, 0.04, 1.0);
-    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_l_raw = dot(normal, light_dir);
+    let n_dot_l = max(n_dot_l_raw, 0.0);
+    let wrapped_n_dot_l = clamp(n_dot_l_raw * 0.5 + 0.5, 0.0, 1.0);
     let n_dot_v = max(dot(normal, view_dir), 0.0);
     let n_dot_h = max(dot(normal, half_dir), 0.0);
     let h_dot_v = max(dot(half_dir, view_dir), 0.0);
@@ -101,8 +103,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular = (d * g_v * g_l * f) / max(4.0 * n_dot_v * n_dot_l, 0.001);
     let albedo = shaded_albedo.rgb;
     let diffuse = (vec3<f32>(1.0) - f) * albedo / 3.14159265;
-    var color = vec3<f32>(0.16, 0.18, 0.20) * albedo
-        + (diffuse + specular) * vec3<f32>(1.0, 0.95, 0.9) * n_dot_l;
+    let ambient = vec3<f32>(0.36, 0.40, 0.42) * albedo;
+    var color = ambient
+        + (diffuse * wrapped_n_dot_l + specular * n_dot_l) * vec3<f32>(1.0, 0.95, 0.9);
     let distance = length(view.world_position - world_pos);
     let fog_range = max(props.fog_end - props.fog_start, 1.0);
     let fog_factor = clamp((distance - props.fog_start) / fog_range, 0.0, 1.0) * props.aerial_strength;

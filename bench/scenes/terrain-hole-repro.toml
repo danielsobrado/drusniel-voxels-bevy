@@ -1,0 +1,17 @@
+seed = 12345
+duration_warmup_secs = 3.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = false
+
+[[checkpoint]]
+name = "terrain-hole-repro"
+position = [389.6, 50.0, 172.6]
+look_at = [384.0, 47.0, 174.0]
+time_of_day = 0.5
+hold_frames = 300
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "repro", frame = 120 },
+]

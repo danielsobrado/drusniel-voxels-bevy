@@ -60,6 +60,7 @@ use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
     toggle_enclosure_culling, update_enclosure_state,
 };
+use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 use crate::voxel::meshing::{
     ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail, generate_chunk_mesh_with_mode,
 };
@@ -338,6 +339,7 @@ impl Plugin for VoxelPlugin {
             ExtractComponentPlugin::<ChunkMesh>::default(),
             ExtractComponentPlugin::<WaterMesh>::default(),
             ExtractComponentPlugin::<WaterMeshDetail>::default(),
+            TerrainHoleProbePlugin,
         ));
 
         app.insert_resource(WorldConfig {

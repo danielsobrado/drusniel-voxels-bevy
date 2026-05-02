@@ -19,6 +19,7 @@ pub mod baked_ao;
 pub mod chunk;
 pub mod enclosure;
 pub mod gravity;
+pub mod hole_probe;
 pub mod meshing;
 pub mod occlusion;
 pub mod octree;
