@@ -498,36 +498,49 @@ fn regenerate_dirty_chunks(
         return;
     }
 
-    let dirty: Vec<IVec2> = state.take_dirty_chunks();
+    let dirty_source = state.take_dirty_chunks();
+    let mut dirty_set = HashSet::new();
+    for chunk_pos in dirty_source {
+        dirty_set.insert(chunk_pos);
+        for region_chunk in instanced_render::PropInstanceGroups::region_chunks_for_chunk(chunk_pos)
+        {
+            if state.loaded_chunks.contains_key(&region_chunk) {
+                dirty_set.insert(region_chunk);
+            }
+        }
+    }
+    let dirty: Vec<IVec2> = dirty_set.into_iter().collect();
     info!("Regenerating {} dirty prop chunks", dirty.len());
 
     let generator =
         crate::voxel::terrain::TerrainGenerator::<crate::voxel::terrain::ValueNoise>::default();
     let placement_config = placement::PlacementConfig::default();
 
-    for chunk_pos in dirty {
-        // Despawn existing props in this chunk
+    let mut removed_regions = HashSet::new();
+    for chunk_pos in &dirty {
         if let Some(entities) = state.loaded_chunks.remove(&chunk_pos) {
             for entity in entities {
                 commands.entity(entity).despawn();
             }
         }
-        for entity in prop_groups.remove_chunk(chunk_pos) {
-            commands.entity(entity).despawn();
+        let region = instanced_render::PropInstanceGroups::region_for_chunk(*chunk_pos);
+        if removed_regions.insert(region) {
+            for entity in prop_groups.remove_chunk(*chunk_pos) {
+                commands.entity(entity).despawn();
+            }
         }
+    }
 
-        // Regenerate props for this chunk
+    for chunk_pos in dirty {
         let props =
             regenerate_chunk_props(chunk_pos, &world, &generator, &config, &placement_config);
 
-        // Save to disk
         if let Some(ref mut manifest) = state.manifest {
             if let Err(e) = save_chunk_and_update_manifest(chunk_pos, &props, manifest) {
                 warn!("Failed to save regenerated chunk {:?}: {}", chunk_pos, e);
             }
         }
 
-        // Spawn new entities
         let entities = spawn_props_from_placement_data(
             &mut commands,
             &props,

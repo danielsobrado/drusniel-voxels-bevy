@@ -19,6 +19,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
 use crate::rendering::water_reflection::WaterReflectionStatus;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
+use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
@@ -410,7 +411,7 @@ pub fn toggle_mesh_mode(
         // Mark all chunks dirty to trigger re-meshing
         for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
             if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
-                chunk.mark_dirty();
+                chunk.mark_dirty_with_reason(MeshDirtyReason::WaterMaterial);
             }
         }
         info!(

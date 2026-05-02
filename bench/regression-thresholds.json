@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Thresholds are intentionally local-machine tunables. The defaults below are based on the accepted RTX 4080 visual-regression bench from 2026-05-02.",
+    "Bench summary field median_ms is the rolling average reported by the harness for timing areas."
+  ],
+  "checks": [
+    {
+      "name": "instancing_prepare_buffers_avg_ridge",
+      "checkpoint": "ridge-run-noon",
+      "area": "Render Instancing Prepare Buffers",
+      "field": "median_ms",
+      "max": 0.5,
+      "unit": "ms",
+      "description": "Instanced prop GPU buffer preparation must stay cheap."
+    },
+    {
+      "name": "instancing_prepare_buffers_avg_jump",
+      "checkpoint": "jump-water-sunset",
+      "area": "Render Instancing Prepare Buffers",
+      "field": "median_ms",
+      "max": 0.5,
+      "unit": "ms",
+      "description": "Instanced prop GPU buffer preparation must stay cheap."
+    },
+    {
+      "name": "instancing_prepare_buffers_avg_forest",
+      "checkpoint": "forest-look-sweep",
+      "area": "Render Instancing Prepare Buffers",
+      "field": "median_ms",
+      "max": 0.5,
+      "unit": "ms",
+      "description": "Instanced prop GPU buffer preparation must stay cheap."
+    },
+    {
+      "name": "forest_phase_sort_avg",
+      "checkpoint": "forest-look-sweep",
+      "area": "Render PhaseSort CPU",
+      "field": "median_ms",
+      "max": 7.0,
+      "unit": "ms",
+      "description": "Forest prop phase sorting should not regress back toward the transparent-sort bottleneck."
+    },
+    {
+      "name": "forest_queue_meshes_avg",
+      "checkpoint": "forest-look-sweep",
+      "area": "Render QueueMeshes CPU",
+      "field": "median_ms",
+      "max": 7.0,
+      "unit": "ms",
+      "description": "Forest queueing should stay near the current accepted draw-pressure baseline."
+    },
+    {
+      "name": "ridge_mesh_dirty_p99",
+      "checkpoint": "ridge-run-noon",
+      "area": "Mesh Dirty",
+      "field": "p99_ms",
+      "max": 5.0,
+      "unit": "ms",
+      "description": "LOD/remesh spikes during ridge movement should stay under budget."
+    },
+    {
+      "name": "jump_mesh_dirty_p99",
+      "checkpoint": "jump-water-sunset",
+      "area": "Mesh Dirty",
+      "field": "p99_ms",
+      "max": 5.0,
+      "unit": "ms",
+      "description": "LOD/remesh spikes during jump movement should stay under budget."
+    },
+    {
+      "name": "ridge_water_reflection_inactive",
+      "checkpoint": "ridge-run-noon",
+      "area": "Counter Water Reflection Active",
+      "field": "median_ms",
+      "max": 0.0,
+      "unit": "count",
+      "description": "Reflection should be disabled when no meaningful water is visible."
+    },
+    {
+      "name": "jump_water_reflection_inactive",
+      "checkpoint": "jump-water-sunset",
+      "area": "Counter Water Reflection Active",
+      "field": "median_ms",
+      "max": 0.0,
+      "unit": "count",
+      "description": "Reflection should be disabled when no meaningful water is visible."
+    },
+    {
+      "name": "forest_water_reflection_inactive",
+      "checkpoint": "forest-look-sweep",
+      "area": "Counter Water Reflection Active",
+      "field": "median_ms",
+      "max": 0.0,
+      "unit": "count",
+      "description": "Reflection should be disabled when no meaningful water is visible."
+    },
+    {
+      "name": "ridge_instanced_draws",
+      "checkpoint": "ridge-run-noon",
+      "area": "Counter Render Instancing Props Queued Total",
+      "field": "median_ms",
+      "max": 140.0,
+      "unit": "count",
+      "description": "Queued instanced draw count should stay within a small tolerance of the accepted 121-draw baseline."
+    },
+    {
+      "name": "jump_instanced_draws",
+      "checkpoint": "jump-water-sunset",
+      "area": "Counter Render Instancing Props Queued Total",
+      "field": "median_ms",
+      "max": 145.0,
+      "unit": "count",
+      "description": "Queued instanced draw count should stay within a small tolerance of the accepted 122-draw baseline."
+    },
+    {
+      "name": "forest_instanced_draws",
+      "checkpoint": "forest-look-sweep",
+      "area": "Counter Render Instancing Props Queued Total",
+      "field": "median_ms",
+      "max": 240.0,
+      "unit": "count",
+      "description": "Queued instanced draw count should stay within a small tolerance of the accepted 211-draw baseline."
+    }
+  ]
+}

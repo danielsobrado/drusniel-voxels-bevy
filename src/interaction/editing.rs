@@ -7,6 +7,7 @@
 
 use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::interaction::targeting::TargetedBlock;
+use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::input::mouse::MouseWheel;
@@ -308,7 +309,7 @@ pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
     // Mark the chunk containing this block
     let chunk_pos = VoxelWorld::world_to_chunk(pos);
     if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
-        chunk.mark_dirty();
+        chunk.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
     }
 
     // Check if we're near a chunk boundary and mark neighbor chunks
@@ -329,7 +330,7 @@ pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
         if near_edge {
             let neighbor_chunk = chunk_pos + offset;
             if let Some(chunk) = world.get_chunk_mut(neighbor_chunk) {
-                chunk.mark_dirty();
+                chunk.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             }
         }
     }

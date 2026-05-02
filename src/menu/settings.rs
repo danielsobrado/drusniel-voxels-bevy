@@ -17,6 +17,7 @@ use crate::environment::AtmosphereSettings;
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::water_reflection::WaterReflectionConfig;
+use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::plugin::WorldConfig;
 use crate::voxel::world::VoxelWorld;
 
@@ -2338,7 +2339,7 @@ pub fn handle_meshing_settings(
             settings_state.greedy_meshing = option.0;
             world_config.greedy_meshing = option.0;
             for (_, chunk) in world.chunk_entries_mut() {
-                chunk.mark_dirty();
+                chunk.mark_dirty_with_reason(MeshDirtyReason::WaterMaterial);
             }
         }
     }

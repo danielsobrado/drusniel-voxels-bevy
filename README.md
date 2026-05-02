@@ -32,7 +32,7 @@ Current development version: **v0.5**.
 
 *   **Performance Optimization Sweep**: Systematic GPU/CPU cost reduction across all major rendering and simulation systems, using distance-based culling, budget limiting, and quality scaling.
 
-    *   **Shadow Budget System** (`rendering/shadow_budget.rs`): New distance-based shadow culling for terrain chunks — chunks beyond 192m get `NotShadowCaster` added (with 16m hysteresis). Point light shadow budget limits concurrent shadow-casting lights to the 4 closest within 80m. Water meshes permanently marked `NotShadowCaster` (translucent surfaces shouldn't cast opaque shadows). Shadow stats shown in F3 debug overlay.
+![1777687466660](image/README/1777687466660.png)![1777687470259](image/README/1777687470259.png)    *   **Shadow Budget System** (`rendering/shadow_budget.rs`): New distance-based shadow culling for terrain chunks — chunks beyond 192m get `NotShadowCaster` added (with 16m hysteresis). Point light shadow budget limits concurrent shadow-casting lights to the 4 closest within 80m. Water meshes permanently marked `NotShadowCaster` (translucent surfaces shouldn't cast opaque shadows). Shadow stats shown in F3 debug overlay.
 
     *   **Cascade Shadow Tightening**: Directional light cascade max distance reduced from 1024m to 256m — 4× better shadow texel density at the same 4096² resolution. Integrated GPUs get further reduction (2 cascades, 96m range).
 
@@ -192,6 +192,18 @@ cargo run --release -- --bench bench/scenes/visual-regression.toml
 Output: `bench-runs/<timestamp>/summary.json` plus per-checkpoint CSV files and screenshots.
 `visual-regression.toml` runs deterministic camera movement paths for run, jump, and look-sweep coverage, with named screenshots captured at fixed frames for visual comparison.
 Bench runs also enable render timing rows for Bevy render stages, render-graph CPU/GPU pass diagnostics, shadow passes, post-processing, and window texture acquisition. Outside bench mode, set `VOXEL_RENDER_TIMING=1` to capture the same render timing rows in the debug timing CSV.
+
+Run the regression guard after a visual bench to catch known render bottlenecks:
+
+```powershell
+cargo run --bin bench_regression_guard -- --summary bench-runs/<run>/summary.json
+```
+
+Thresholds live in `bench/regression-thresholds.json` and can be copied or tuned per machine/GPU. To run the bench and guard in one step:
+
+```powershell
+cargo run --bin bench_regression_guard -- --run-visual-bench --bench-out bench-runs/regression-guard
+```
 
 #### Adaptive GI Controls (Alt+)
 *   **Alt+1**: Low Quality (Approx. 8x faster, Contact Shadows OFF)

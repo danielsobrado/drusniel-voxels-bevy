@@ -12,12 +12,17 @@ use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 
 use crate::camera::controller::PlayerCamera;
-use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
+use crate::constants::{
+    CHUNK_SIZE_I32, WATER_FANCY_MIN_DEPTH, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL,
+};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::voxel::octree::{OctreeAabb, ViewFrustum};
+use crate::voxel::meshing::{WaterMesh, WaterMeshDetail};
+use crate::voxel::octree::OctreeAabb;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
+
+const NEAR_VISIBLE_WATER_DISTANCE: f32 = 24.0;
 
 /// The render layer used exclusively by the reflection camera.
 /// Terrain chunks above the water line are added to BOTH layer 0 and this layer.
@@ -84,6 +89,7 @@ pub enum WaterReflectionReason {
     Disabled,
     OutOfRange,
     NoWaterInView,
+    TooSmall,
     Throttled,
     Active,
     NoWater,
@@ -95,6 +101,7 @@ impl WaterReflectionReason {
             Self::Disabled => "disabled",
             Self::OutOfRange => "out-of-range",
             Self::NoWaterInView => "no-water-in-view",
+            Self::TooSmall => "too-small",
             Self::Throttled => "throttled",
             Self::Active => "active",
             Self::NoWater => "no-water",
@@ -127,7 +134,28 @@ impl Default for WaterReflectionStatus {
 #[derive(Resource, Default, Clone, Copy)]
 pub struct WaterPresence {
     pub aabb: Option<OctreeAabb>,
+    pub water_meshes: u32,
+    pub visible_meshes: u32,
+    pub eligible_meshes: u32,
+    pub view_visible_meshes: u32,
+    pub nearest_water_distance: Option<f32>,
+    pub nearest_visible_distance: Option<f32>,
+    pub using_startup_fallback: bool,
     scan_timer: f32,
+    age_secs: f32,
+}
+
+impl WaterPresence {
+    fn reset_mesh_summary(&mut self) {
+        self.aabb = None;
+        self.water_meshes = 0;
+        self.visible_meshes = 0;
+        self.eligible_meshes = 0;
+        self.view_visible_meshes = 0;
+        self.nearest_water_distance = None;
+        self.nearest_visible_distance = None;
+        self.using_startup_fallback = false;
+    }
 }
 
 pub struct WaterReflectionPlugin;
@@ -142,9 +170,9 @@ impl Plugin for WaterReflectionPlugin {
                 Update,
                 (
                     apply_integrated_gpu_reflection_defaults,
-                    update_water_presence,
                     resize_reflection_target,
-                    update_reflection_camera,
+                    update_water_presence,
+                    update_reflection_camera.after(update_water_presence),
                 ),
             );
     }
@@ -312,10 +340,111 @@ fn resize_reflection_target(
 fn update_water_presence(
     time: Res<Time>,
     world: Res<VoxelWorld>,
+    config: Res<WaterReflectionConfig>,
+    main_camera: Query<
+        (&Transform, &Projection),
+        (With<PlayerCamera>, Without<WaterReflectionCamera>),
+    >,
+    water_meshes: Query<
+        (
+            &Transform,
+            Option<&ViewVisibility>,
+            Option<&WaterMeshDetail>,
+        ),
+        With<WaterMesh>,
+    >,
     mut presence: ResMut<WaterPresence>,
 ) {
-    presence.scan_timer += time.delta_secs();
-    if presence.aabb.is_some() && presence.scan_timer < 1.0 && !world.is_changed() {
+    presence.age_secs += time.delta_secs();
+    presence.reset_mesh_summary();
+
+    let Ok((main_transform, projection)) = main_camera.single() else {
+        return;
+    };
+    let mut eligible_min = Vec3::splat(f32::INFINITY);
+    let mut eligible_max = Vec3::splat(f32::NEG_INFINITY);
+    let mut found_eligible = false;
+
+    for (transform, view_visibility, detail) in water_meshes.iter() {
+        presence.water_meshes += 1;
+        if view_visibility.is_some_and(|visibility| visibility.get()) {
+            presence.view_visible_meshes += 1;
+        }
+
+        let water_aabb = water_mesh_aabb(transform);
+        let distance = distance_to_aabb_xz(main_transform.translation, water_aabb);
+        presence.nearest_water_distance = Some(
+            presence
+                .nearest_water_distance
+                .map(|nearest| nearest.min(distance))
+                .unwrap_or(distance),
+        );
+        if config.require_water_in_frustum
+            && !aabb_in_camera_view(main_transform, projection, water_aabb)
+            && distance > NEAR_VISIBLE_WATER_DISTANCE
+        {
+            continue;
+        }
+
+        presence.visible_meshes += 1;
+        presence.nearest_visible_distance = Some(
+            presence
+                .nearest_visible_distance
+                .map(|nearest| nearest.min(distance))
+                .unwrap_or(distance),
+        );
+
+        if config.auto_disable_distance > 0.0 && distance > config.auto_disable_distance {
+            continue;
+        }
+
+        let meaningful_water = detail
+            .map(|detail| {
+                detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES
+                    && detail.max_depth >= WATER_FANCY_MIN_DEPTH
+            })
+            .unwrap_or(true);
+        if !meaningful_water {
+            continue;
+        }
+
+        presence.eligible_meshes += 1;
+        eligible_min = eligible_min.min(water_aabb.min);
+        eligible_max = eligible_max.max(water_aabb.max);
+        found_eligible = true;
+    }
+
+    if found_eligible {
+        presence.aabb = Some(OctreeAabb::new(eligible_min, eligible_max));
+        return;
+    }
+
+    if presence.water_meshes > 0 || presence.age_secs > 8.0 {
+        return;
+    }
+
+    update_startup_fallback_water_presence(
+        &world,
+        world.is_changed(),
+        time.delta_secs(),
+        &config,
+        main_transform,
+        projection,
+        &mut presence,
+    );
+}
+
+fn update_startup_fallback_water_presence(
+    world: &VoxelWorld,
+    world_changed: bool,
+    delta_secs: f32,
+    config: &WaterReflectionConfig,
+    main_transform: &Transform,
+    projection: &Projection,
+    presence: &mut WaterPresence,
+) {
+    presence.scan_timer += delta_secs;
+    if presence.aabb.is_some() && presence.scan_timer < 1.0 && !world_changed {
         return;
     }
     presence.scan_timer = 0.0;
@@ -346,10 +475,28 @@ fn update_water_presence(
         }
     }
 
-    presence.aabb = found.then_some(OctreeAabb::new(
+    let Some(water_aabb) = found.then_some(OctreeAabb::new(
         Vec3::new(min.x, WATER_LEVEL as f32 - 0.75, min.z),
         Vec3::new(max.x, WATER_LEVEL as f32 + 0.75, max.z),
-    ));
+    )) else {
+        return;
+    };
+
+    if config.require_water_in_frustum
+        && !aabb_in_camera_view(main_transform, projection, water_aabb)
+    {
+        return;
+    }
+    let distance = distance_to_aabb_xz(main_transform.translation, water_aabb);
+    if config.auto_disable_distance > 0.0 && distance > config.auto_disable_distance {
+        return;
+    }
+
+    presence.visible_meshes = 1;
+    presence.eligible_meshes = 1;
+    presence.nearest_visible_distance = Some(distance);
+    presence.using_startup_fallback = true;
+    presence.aabb = Some(water_aabb);
 }
 
 /// Mirror the main camera's position and rotation across the water plane each frame
@@ -357,10 +504,7 @@ fn update_reflection_camera(
     config: Res<WaterReflectionConfig>,
     presence: Res<WaterPresence>,
     time: Res<Time>,
-    main_camera: Query<
-        (&Transform, &GlobalTransform, &Projection),
-        (With<PlayerCamera>, Without<WaterReflectionCamera>),
-    >,
+    main_camera: Query<&Transform, (With<PlayerCamera>, Without<WaterReflectionCamera>)>,
     mut reflection_camera: Query<
         (&mut Transform, &mut Camera, &mut ReflectionUpdateTimer),
         (With<WaterReflectionCamera>, Without<PlayerCamera>),
@@ -370,7 +514,7 @@ fn update_reflection_camera(
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Reflection Render");
-    let Ok((main_transform, main_global, projection)) = main_camera.single() else {
+    let Ok(main_transform) = main_camera.single() else {
         return;
     };
     let Ok((mut refl_transform, mut refl_camera, mut update_timer)) =
@@ -387,28 +531,26 @@ fn update_reflection_camera(
         active = false;
         sample_reflection = false;
         reason = WaterReflectionReason::Disabled;
-    } else if let Some(water_aabb) = presence.aabb {
-        if config.auto_disable_distance > 0.0 {
-            let dist = distance_to_aabb_xz(main_transform.translation, water_aabb);
-            if dist > config.auto_disable_distance {
-                active = false;
-                sample_reflection = false;
-                reason = WaterReflectionReason::OutOfRange;
-            }
-        }
-
-        if active
-            && config.require_water_in_frustum
-            && !water_in_camera_frustum(main_global, projection, water_aabb)
-        {
-            active = false;
-            sample_reflection = false;
-            reason = WaterReflectionReason::NoWaterInView;
-        }
-    } else {
+    } else if presence.visible_meshes == 0 {
         active = false;
         sample_reflection = false;
-        reason = WaterReflectionReason::NoWater;
+        reason = if presence.water_meshes == 0 && !presence.using_startup_fallback {
+            WaterReflectionReason::NoWater
+        } else {
+            WaterReflectionReason::NoWaterInView
+        };
+    } else if config.auto_disable_distance > 0.0
+        && presence
+            .nearest_visible_distance
+            .is_some_and(|distance| distance > config.auto_disable_distance)
+    {
+        active = false;
+        sample_reflection = false;
+        reason = WaterReflectionReason::OutOfRange;
+    } else if presence.eligible_meshes == 0 {
+        active = false;
+        sample_reflection = false;
+        reason = WaterReflectionReason::TooSmall;
     }
 
     if active && config.update_interval > f32::EPSILON {
@@ -429,31 +571,67 @@ fn update_reflection_camera(
     status.resolution_scale = config.resolution_scale;
     status.effective_hz = config.effective_hz();
 
-    let water_y = WATER_LEVEL as f32;
+    if active {
+        let water_y = WATER_LEVEL as f32;
 
-    // Mirror position: reflect Y across water plane
-    let mirrored_pos = Vec3::new(
-        main_transform.translation.x,
-        2.0 * water_y - main_transform.translation.y,
-        main_transform.translation.z,
-    );
+        // Mirror position: reflect Y across water plane
+        let mirrored_pos = Vec3::new(
+            main_transform.translation.x,
+            2.0 * water_y - main_transform.translation.y,
+            main_transform.translation.z,
+        );
 
-    // Mirror rotation: flip the pitch (look direction reflected across Y)
-    let main_forward = main_transform.forward().as_vec3();
-    let mirrored_forward = Vec3::new(main_forward.x, -main_forward.y, main_forward.z);
+        // Mirror rotation: flip the pitch (look direction reflected across Y)
+        let main_forward = main_transform.forward().as_vec3();
+        let mirrored_forward = Vec3::new(main_forward.x, -main_forward.y, main_forward.z);
 
-    // Compute the mirrored up direction
-    let main_up = main_transform.up().as_vec3();
-    let mirrored_up = Vec3::new(main_up.x, -main_up.y, main_up.z);
+        // Compute the mirrored up direction
+        let main_up = main_transform.up().as_vec3();
+        let mirrored_up = Vec3::new(main_up.x, -main_up.y, main_up.z);
 
-    *refl_transform =
-        Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up);
+        *refl_transform =
+            Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up);
+    }
     drop(_timer);
+    timing.record_count(
+        frame.0,
+        "Water Meshes Visible In Frustum",
+        presence.visible_meshes as f64,
+    );
+    timing.record_count(frame.0, "Water Meshes Total", presence.water_meshes as f64);
+    timing.record_count(
+        frame.0,
+        "Water Meshes View Visible",
+        presence.view_visible_meshes as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Meshes Nearest Distance",
+        presence.nearest_water_distance.unwrap_or(0.0) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Meshes Eligible For Reflection",
+        presence.eligible_meshes as f64,
+    );
     timing.record_count(frame.0, "Water Reflection Active", u8::from(active) as f64);
     timing.record_count(
         frame.0,
         "Water Reflection Sampled",
         u8::from(sample_reflection) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Disabled No Visible Water",
+        u8::from(matches!(
+            reason,
+            WaterReflectionReason::NoWater | WaterReflectionReason::NoWaterInView
+        )) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Disabled Too Small",
+        u8::from(reason == WaterReflectionReason::TooSmall) as f64,
     );
 }
 
@@ -475,14 +653,70 @@ fn distance_to_aabb_xz(position: Vec3, aabb: OctreeAabb) -> f32 {
     Vec2::new(dx, dz).length()
 }
 
-fn water_in_camera_frustum(
-    camera_transform: &GlobalTransform,
+fn water_mesh_aabb(transform: &Transform) -> OctreeAabb {
+    let origin = transform.translation;
+    OctreeAabb::new(
+        origin,
+        Vec3::new(
+            origin.x + CHUNK_SIZE_I32 as f32,
+            origin.y + CHUNK_SIZE_I32 as f32,
+            origin.z + CHUNK_SIZE_I32 as f32,
+        ),
+    )
+}
+
+fn aabb_in_camera_view(
+    camera_transform: &Transform,
     projection: &Projection,
-    water_aabb: OctreeAabb,
+    aabb: OctreeAabb,
 ) -> bool {
-    let view_matrix = camera_transform.to_matrix().inverse();
-    let proj_matrix = projection.get_clip_from_view();
-    let view_proj = proj_matrix * view_matrix;
-    let frustum = ViewFrustum::from_view_projection(&view_proj);
-    !water_aabb.outside_frustum(&frustum)
+    let camera_pos = camera_transform.translation;
+    if point_in_aabb(camera_pos, aabb) {
+        return true;
+    }
+
+    let forward = camera_transform.forward().as_vec3();
+    let min_dot = match projection {
+        Projection::Perspective(_) => -0.05,
+        Projection::Orthographic(_) => -0.25,
+        Projection::Custom(_) => -0.05,
+    };
+
+    for point in aabb_sample_points(aabb) {
+        let to_point = point - camera_pos;
+        if to_point.length_squared() < 1.0 {
+            return true;
+        }
+        if forward.dot(to_point.normalize()) >= min_dot {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn point_in_aabb(point: Vec3, aabb: OctreeAabb) -> bool {
+    point.x >= aabb.min.x
+        && point.x <= aabb.max.x
+        && point.y >= aabb.min.y
+        && point.y <= aabb.max.y
+        && point.z >= aabb.min.z
+        && point.z <= aabb.max.z
+}
+
+fn aabb_sample_points(aabb: OctreeAabb) -> [Vec3; 9] {
+    let min = aabb.min;
+    let max = aabb.max;
+    let center = aabb.center();
+    [
+        center,
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
 }

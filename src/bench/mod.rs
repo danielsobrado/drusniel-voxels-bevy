@@ -6,6 +6,7 @@ use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
+use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
@@ -18,7 +19,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-const SETTLE_FRAMES: u32 = 30;
+const SETTLE_FRAMES: u32 = 60;
+const READY_STABLE_FRAMES: u32 = 90;
+const READY_MIN_SECS: f32 = 10.0;
+const READY_TIMEOUT_SECS: f32 = 75.0;
 const SCREENSHOT_WAIT_FRAMES: u32 = 60;
 const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
 const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
@@ -62,6 +66,15 @@ struct BenchState {
     checkpoint_index: usize,
     run_index: u32,
     warmup_started: Option<Instant>,
+    ready_started: Option<Instant>,
+    ready_stable_frames: u32,
+    ready_wait_frames: u32,
+    ready_last_signature: Option<BenchReadySignature>,
+    last_ready_wait_frames: u32,
+    last_ready_wait_secs: f32,
+    last_ready_stable_frames: u32,
+    last_ready_snapshot: BenchReadySnapshot,
+    last_ready_timed_out: bool,
     settle_frames_left: u32,
     hold_frames_left: u32,
     screenshot_wait_left: u32,
@@ -82,12 +95,40 @@ struct BenchState {
 enum BenchPhase {
     Warmup,
     SetupCheckpoint,
-    WaitChunks,
+    WaitReady,
     Settle,
     Hold,
     Screenshot,
     FinishRun,
     Done,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BenchReadySignature {
+    missing_chunks: u32,
+    dirty_chunks: u32,
+    mesh_entities: u32,
+    water_mesh_entities: u32,
+    high_lod_chunks: u32,
+    low_lod_chunks: u32,
+    culled_chunks: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct BenchReadySnapshot {
+    signature: BenchReadySignature,
+    chunks_meshed_this_frame: u32,
+    chunks_skipped_this_frame: u32,
+}
+
+impl BenchReadySnapshot {
+    fn is_ready_candidate(self) -> bool {
+        self.signature.missing_chunks == 0
+            && self.signature.dirty_chunks == 0
+            && self.chunks_meshed_this_frame == 0
+            && self.chunks_skipped_this_frame == 0
+            && self.signature.mesh_entities + self.signature.water_mesh_entities > 0
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -96,6 +137,8 @@ struct BenchScene {
     duration_warmup_secs: f32,
     median_runs: u32,
     chunk_load_radius: i32,
+    #[serde(default = "default_freeze_terrain_lod_after_ready")]
+    freeze_terrain_lod_after_ready: bool,
     #[serde(rename = "checkpoint")]
     checkpoints: Vec<BenchCheckpoint>,
 }
@@ -163,6 +206,12 @@ struct RunRecord {
     csv: String,
     screenshot: Option<String>,
     screenshots: Vec<ScreenshotRecord>,
+    ready_wait_frames: u32,
+    ready_wait_secs: f32,
+    ready_stable_frames: u32,
+    ready_timed_out: bool,
+    ready_mesh_entities: u32,
+    ready_water_mesh_entities: u32,
 }
 
 #[derive(Serialize, Clone)]
@@ -209,6 +258,15 @@ impl Plugin for BenchPlugin {
                 checkpoint_index: 0,
                 run_index: 0,
                 warmup_started: None,
+                ready_started: None,
+                ready_stable_frames: 0,
+                ready_wait_frames: 0,
+                ready_last_signature: None,
+                last_ready_wait_frames: 0,
+                last_ready_wait_secs: 0.0,
+                last_ready_stable_frames: 0,
+                last_ready_snapshot: BenchReadySnapshot::default(),
+                last_ready_timed_out: false,
                 settle_frames_left: 0,
                 hold_frames_left: 0,
                 screenshot_wait_left: 0,
@@ -257,6 +315,8 @@ fn run_bench_state_machine(
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
+    chunk_stats: Res<RuntimeChunkStats>,
+    mut terrain_lod_control: Option<ResMut<TerrainLodControl>>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
     mut exit: MessageWriter<AppExit>,
@@ -280,6 +340,9 @@ fn run_bench_state_machine(
         }
         BenchPhase::SetupCheckpoint => {
             let checkpoint = &scene.checkpoints[state.checkpoint_index];
+            if let Some(control) = terrain_lod_control.as_deref_mut() {
+                control.freeze_lod = false;
+            }
             if let Ok((mut transform, mut player_camera)) = camera.single_mut() {
                 player_camera.mode = CameraMode::Fly;
                 *transform = Transform::from_translation(vec3(checkpoint.position))
@@ -297,11 +360,112 @@ fn run_bench_state_machine(
             state.next_screenshot_point = 0;
             state.current_screenshots.clear();
             state.current_run = None;
-            state.phase = BenchPhase::WaitChunks;
+            state.ready_started = Some(Instant::now());
+            state.ready_stable_frames = 0;
+            state.ready_wait_frames = 0;
+            state.ready_last_signature = None;
+            state.last_ready_wait_frames = 0;
+            state.last_ready_wait_secs = 0.0;
+            state.last_ready_stable_frames = 0;
+            state.last_ready_snapshot = BenchReadySnapshot::default();
+            state.last_ready_timed_out = false;
+            state.phase = BenchPhase::WaitReady;
         }
-        BenchPhase::WaitChunks => {
+        BenchPhase::WaitReady => {
             let checkpoint = &scene.checkpoints[state.checkpoint_index];
-            if chunks_ready(&world, vec3(checkpoint.position), scene.chunk_load_radius) {
+            let snapshot = bench_ready_snapshot(
+                &world,
+                &chunk_stats,
+                vec3(checkpoint.position),
+                scene.chunk_load_radius,
+            );
+            let signature_stable = state.ready_last_signature == Some(snapshot.signature);
+            if snapshot.is_ready_candidate() && signature_stable {
+                state.ready_stable_frames += 1;
+            } else {
+                state.ready_stable_frames = 0;
+            }
+            state.ready_wait_frames += 1;
+            state.ready_last_signature = Some(snapshot.signature);
+            let wait_secs = state
+                .ready_started
+                .map(|started| started.elapsed().as_secs_f32())
+                .unwrap_or_default();
+            let min_wait_satisfied = wait_secs >= READY_MIN_SECS;
+            record_bench_ready_counts(
+                &mut timing,
+                frame.0,
+                snapshot,
+                state.ready_wait_frames,
+                state.ready_stable_frames,
+                min_wait_satisfied,
+                false,
+            );
+
+            let ready = state.ready_stable_frames >= READY_STABLE_FRAMES && min_wait_satisfied;
+            let timed_out = wait_secs >= READY_TIMEOUT_SECS;
+            if ready || timed_out {
+                if scene.freeze_terrain_lod_after_ready {
+                    if let Some(control) = terrain_lod_control.as_deref_mut() {
+                        control.freeze_lod = true;
+                    }
+                }
+                state.last_ready_wait_frames = state.ready_wait_frames;
+                state.last_ready_wait_secs = wait_secs;
+                state.last_ready_stable_frames = state.ready_stable_frames;
+                state.last_ready_snapshot = snapshot;
+                state.last_ready_timed_out = timed_out && !ready;
+                if state.last_ready_timed_out {
+                    warn!(
+                        "Bench checkpoint '{}' run {} starting after readiness timeout ({:.1}s, stable {}/{} frames, missing {}, dirty {}, meshed this frame {})",
+                        checkpoint.name,
+                        state.run_index,
+                        wait_secs,
+                        state.ready_stable_frames,
+                        READY_STABLE_FRAMES,
+                        snapshot.signature.missing_chunks,
+                        snapshot.signature.dirty_chunks,
+                        snapshot.chunks_meshed_this_frame,
+                    );
+                    println!(
+                        "[BENCH READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} missing_chunks={} dirty_chunks={} mesh_entities={} water_mesh_entities={}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.ready_wait_frames,
+                        wait_secs,
+                        state.ready_stable_frames,
+                        READY_MIN_SECS,
+                        snapshot.signature.missing_chunks,
+                        snapshot.signature.dirty_chunks,
+                        snapshot.signature.mesh_entities,
+                        snapshot.signature.water_mesh_entities,
+                    );
+                } else {
+                    info!(
+                        "Bench checkpoint '{}' run {} ready after {} frames ({:.1}s): meshes {}, water {}, high LOD {}, low LOD {}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.ready_wait_frames,
+                        wait_secs,
+                        snapshot.signature.mesh_entities,
+                        snapshot.signature.water_mesh_entities,
+                        snapshot.signature.high_lod_chunks,
+                        snapshot.signature.low_lod_chunks,
+                    );
+                    println!(
+                        "[BENCH READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} mesh_entities={} water_mesh_entities={} high_lod_chunks={} low_lod_chunks={}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.ready_wait_frames,
+                        wait_secs,
+                        state.ready_stable_frames,
+                        READY_MIN_SECS,
+                        snapshot.signature.mesh_entities,
+                        snapshot.signature.water_mesh_entities,
+                        snapshot.signature.high_lod_chunks,
+                        snapshot.signature.low_lod_chunks,
+                    );
+                }
                 state.phase = BenchPhase::Settle;
             }
         }
@@ -359,9 +523,27 @@ fn run_bench_state_machine(
                     csv: csv_name,
                     screenshot,
                     screenshots: state.current_screenshots.clone(),
+                    ready_wait_frames: state.last_ready_wait_frames,
+                    ready_wait_secs: state.last_ready_wait_secs,
+                    ready_stable_frames: state.last_ready_stable_frames,
+                    ready_timed_out: state.last_ready_timed_out,
+                    ready_mesh_entities: state.last_ready_snapshot.signature.mesh_entities,
+                    ready_water_mesh_entities: state
+                        .last_ready_snapshot
+                        .signature
+                        .water_mesh_entities,
                 });
                 state.phase = BenchPhase::Screenshot;
             } else {
+                record_bench_ready_counts(
+                    &mut timing,
+                    frame.0,
+                    state.last_ready_snapshot,
+                    state.last_ready_wait_frames,
+                    state.last_ready_stable_frames,
+                    state.last_ready_wait_secs >= READY_MIN_SECS,
+                    state.last_ready_timed_out,
+                );
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
                 if let Ok((mut transform, _player_camera)) = camera.single_mut() {
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
@@ -423,6 +605,12 @@ fn finish_run(
         csv: String::new(),
         screenshot: None,
         screenshots: Vec::new(),
+        ready_wait_frames: 0,
+        ready_wait_secs: 0.0,
+        ready_stable_frames: 0,
+        ready_timed_out: false,
+        ready_mesh_entities: 0,
+        ready_water_mesh_entities: 0,
     });
     if let Some(screenshot) = run.screenshot.as_deref() {
         if !config.output_dir.join(screenshot).exists() {
@@ -495,7 +683,7 @@ fn finish_bench(
     exit: &mut MessageWriter<AppExit>,
 ) {
     let summary = BenchSummary {
-        schema_version: 1,
+        schema_version: 2,
         scene: config
             .scene_path
             .file_name()
@@ -657,9 +845,33 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn chunks_ready(world: &VoxelWorld, position: Vec3, radius: i32) -> bool {
+fn bench_ready_snapshot(
+    world: &VoxelWorld,
+    chunk_stats: &RuntimeChunkStats,
+    position: Vec3,
+    radius: i32,
+) -> BenchReadySnapshot {
+    let (missing_chunks, dirty_chunks) = chunks_pending_counts(world, position, radius);
+    BenchReadySnapshot {
+        signature: BenchReadySignature {
+            missing_chunks,
+            dirty_chunks,
+            mesh_entities: chunk_stats.mesh_entities,
+            water_mesh_entities: chunk_stats.water_mesh_entities,
+            high_lod_chunks: chunk_stats.high_lod_chunks,
+            low_lod_chunks: chunk_stats.low_lod_chunks,
+            culled_chunks: chunk_stats.culled_chunks,
+        },
+        chunks_meshed_this_frame: chunk_stats.chunks_meshed_this_frame,
+        chunks_skipped_this_frame: chunk_stats.chunks_skipped_this_frame,
+    }
+}
+
+fn chunks_pending_counts(world: &VoxelWorld, position: Vec3, radius: i32) -> (u32, u32) {
     let center = VoxelWorld::world_to_chunk(position.floor().as_ivec3());
     let world_size = world.world_size_chunks();
+    let mut missing_chunks = 0;
+    let mut dirty_chunks = 0;
     for x in center.x - radius..=center.x + radius {
         for z in center.z - radius..=center.z + radius {
             for y in 0..world_size.y {
@@ -668,15 +880,85 @@ fn chunks_ready(world: &VoxelWorld, position: Vec3, radius: i32) -> bool {
                     continue;
                 }
                 let Some(chunk) = world.get_chunk(pos) else {
-                    return false;
+                    missing_chunks += 1;
+                    continue;
                 };
                 if chunk.is_dirty() {
-                    return false;
+                    dirty_chunks += 1;
                 }
             }
         }
     }
-    true
+    (missing_chunks, dirty_chunks)
+}
+
+fn record_bench_ready_counts(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    snapshot: BenchReadySnapshot,
+    wait_frames: u32,
+    stable_frames: u32,
+    min_wait_satisfied: bool,
+    timed_out: bool,
+) {
+    timing.record_count(
+        frame,
+        "Bench Ready Indicator",
+        (min_wait_satisfied && !timed_out) as u8 as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Min Wait Satisfied",
+        min_wait_satisfied as u8 as f64,
+    );
+    timing.record_count(frame, "Bench Ready Timed Out", timed_out as u8 as f64);
+    timing.record_count(frame, "Bench Ready Wait Frames", wait_frames as f64);
+    timing.record_count(frame, "Bench Ready Stable Frames", stable_frames as f64);
+    timing.record_count(
+        frame,
+        "Bench Ready Missing Chunks",
+        snapshot.signature.missing_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Dirty Chunks",
+        snapshot.signature.dirty_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Mesh Entities",
+        snapshot.signature.mesh_entities as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Water Mesh Entities",
+        snapshot.signature.water_mesh_entities as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready High LOD Chunks",
+        snapshot.signature.high_lod_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Low LOD Chunks",
+        snapshot.signature.low_lod_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Culled Chunks",
+        snapshot.signature.culled_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Chunks Meshed This Frame",
+        snapshot.chunks_meshed_this_frame as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Chunks Skipped This Frame",
+        snapshot.chunks_skipped_this_frame as f64,
+    );
 }
 
 fn apply_fog_tier_if_supported(
@@ -779,6 +1061,10 @@ fn vec3(value: [f32; 3]) -> Vec3 {
 
 fn default_motion_kind() -> String {
     "static".to_string()
+}
+
+fn default_freeze_terrain_lod_after_ready() -> bool {
+    true
 }
 
 fn median(mut values: Vec<f64>) -> f64 {

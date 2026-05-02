@@ -190,6 +190,7 @@ impl LodLevel {
 pub struct Chunk {
     voxels: [VoxelType; CHUNK_VOLUME],
     dirty: bool,
+    dirty_reasons: u8,
     mesh_entity: Option<Entity>,
     water_mesh_entity: Option<Entity>,
     position: IVec3, // Chunk coords (not world)
@@ -202,11 +203,36 @@ pub struct Chunk {
     visibility_dirty: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeshDirtyReason {
+    Lod,
+    NeighborLod,
+    Visibility,
+    Generation,
+    WaterMaterial,
+    TerrainMutation,
+}
+
+impl MeshDirtyReason {
+    #[inline]
+    pub const fn bit(self) -> u8 {
+        match self {
+            MeshDirtyReason::Lod => 1 << 0,
+            MeshDirtyReason::NeighborLod => 1 << 1,
+            MeshDirtyReason::Visibility => 1 << 2,
+            MeshDirtyReason::Generation => 1 << 3,
+            MeshDirtyReason::WaterMaterial => 1 << 4,
+            MeshDirtyReason::TerrainMutation => 1 << 5,
+        }
+    }
+}
+
 impl Chunk {
     pub fn new(position: IVec3) -> Self {
         Self {
             voxels: [VoxelType::Air; CHUNK_VOLUME],
             dirty: true,
+            dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
             water_mesh_entity: None,
             position,
@@ -261,7 +287,7 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
-            self.dirty = true;
+            self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
             // Invalidate face visibility since topology changed
@@ -279,7 +305,7 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
-            self.dirty = true;
+            self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
             // Invalidate face visibility since topology changed
@@ -296,8 +322,22 @@ impl Chunk {
         self.dirty = true;
     }
 
+    pub fn mark_dirty_with_reason(&mut self, reason: MeshDirtyReason) {
+        self.dirty = true;
+        self.dirty_reasons |= reason.bit();
+    }
+
+    pub fn dirty_reason_flags(&self) -> u8 {
+        self.dirty_reasons
+    }
+
+    pub fn has_dirty_reason(&self, reason: MeshDirtyReason) -> bool {
+        self.dirty_reasons & reason.bit() != 0
+    }
+
     pub fn clear_dirty(&mut self) {
         self.dirty = false;
+        self.dirty_reasons = 0;
     }
 
     pub fn set_mesh_entity(&mut self, entity: Entity) {
@@ -336,7 +376,7 @@ impl Chunk {
         let changed = self.lod_level != lod_level;
         if changed {
             self.lod_level = lod_level;
-            self.dirty = true;
+            self.mark_dirty_with_reason(MeshDirtyReason::Lod);
         }
         changed
     }
@@ -395,6 +435,7 @@ impl Chunk {
         Self {
             voxels,
             dirty: true, // Mark dirty so mesh gets generated
+            dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
             water_mesh_entity: None,
             position: data.position,

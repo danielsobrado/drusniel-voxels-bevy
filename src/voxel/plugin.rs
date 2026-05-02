@@ -6,6 +6,7 @@
 //! - Mesh generation and update systems
 //! - Async chunk generation using Bevy's task pool
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,6 +38,8 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 16;
+const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
+const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -44,7 +47,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
-use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
+use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
     toggle_enclosure_culling, update_enclosure_state,
@@ -66,6 +69,16 @@ use bevy::camera::visibility::RenderLayers;
 use bevy_water::water::material::StandardWaterMaterial;
 
 pub struct VoxelPlugin;
+
+#[derive(Resource, Default, Debug)]
+pub struct TerrainLodControl {
+    pub freeze_lod: bool,
+}
+
+#[derive(Resource, Default)]
+struct TerrainLodTransitionState {
+    last_change_frame: HashMap<IVec3, u32>,
+}
 
 #[derive(Resource)]
 pub struct WorldConfig {
@@ -111,6 +124,10 @@ pub struct RuntimeChunkStats {
     // Mesh statistics
     pub mesh_entities: u32,
     pub water_mesh_entities: u32,
+    pub water_air_boundaries_total: u64,
+    pub water_air_boundaries_exposed: u64,
+    pub water_air_boundaries_sealed: u64,
+    pub water_triangles_removed_sealed: u64,
 
     // Per-frame statistics (reset each frame in the meshing system)
     pub chunks_meshed_this_frame: u32,
@@ -313,8 +330,11 @@ impl Plugin for VoxelPlugin {
         // Use SurfaceNets for smooth terrain meshing (change to Blocky for Minecraft-style)
         .insert_resource(MeshSettings {
             mode: MeshMode::SurfaceNets,
+            ..default()
         })
         .insert_resource(LodSettings::default())
+        .insert_resource(TerrainLodControl::default())
+        .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
         .insert_resource(RuntimeChunkStats::default())
@@ -631,9 +651,10 @@ fn generate_chunk_async(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chun
         }
     }
 
-    chunk.mark_dirty();
     // Compute uniformity eagerly to enable skipping empty/solid chunks during meshing
     chunk.compute_uniformity();
+    chunk.clear_dirty();
+    chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
     (chunk, stats)
 }
 
@@ -721,6 +742,39 @@ fn poll_chunk_generation_tasks(
     }
 }
 
+#[derive(Default)]
+struct MeshDirtyReasonCounts {
+    lod: u32,
+    neighbor_lod: u32,
+    visibility: u32,
+    generation: u32,
+    water_material: u32,
+    terrain_mutation: u32,
+}
+
+impl MeshDirtyReasonCounts {
+    fn add_flags(&mut self, flags: u8) {
+        if flags & MeshDirtyReason::Lod.bit() != 0 {
+            self.lod += 1;
+        }
+        if flags & MeshDirtyReason::NeighborLod.bit() != 0 {
+            self.neighbor_lod += 1;
+        }
+        if flags & MeshDirtyReason::Visibility.bit() != 0 {
+            self.visibility += 1;
+        }
+        if flags & MeshDirtyReason::Generation.bit() != 0 {
+            self.generation += 1;
+        }
+        if flags & MeshDirtyReason::WaterMaterial.bit() != 0 {
+            self.water_material += 1;
+        }
+        if flags & MeshDirtyReason::TerrainMutation.bit() != 0 {
+            self.terrain_mutation += 1;
+        }
+    }
+}
+
 fn mesh_dirty_chunks_system(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
@@ -761,7 +815,14 @@ fn mesh_dirty_chunks_system(
     // Collect dirty chunks and sort by distance from camera (nearest first)
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
+    let dirty_chunks_queued = dirty_chunks.len();
     let had_dirty_chunks = !dirty_chunks.is_empty();
+    let mut reason_counts = MeshDirtyReasonCounts::default();
+    for chunk_pos in &dirty_chunks {
+        if let Some(chunk) = world.get_chunk(*chunk_pos) {
+            reason_counts.add_flags(chunk.dirty_reason_flags());
+        }
+    }
     let camera_pos = camera_query
         .single()
         .ok()
@@ -871,6 +932,7 @@ fn mesh_dirty_chunks_system(
                 neighbor_lods,
                 &skirt_config,
                 &ao_config.baked,
+                mesh_settings.water_air_exposure_mode,
             )
         } else {
             continue;
@@ -879,6 +941,14 @@ fn mesh_dirty_chunks_system(
 
         // Track vertex count for this mesh (before it's consumed)
         let vertex_count = mesh_result.solid.positions.len() as u32;
+        chunk_stats.water_air_boundaries_total +=
+            mesh_result.water_stats.air_boundaries_total as u64;
+        chunk_stats.water_air_boundaries_exposed +=
+            mesh_result.water_stats.air_boundaries_exposed as u64;
+        chunk_stats.water_air_boundaries_sealed +=
+            mesh_result.water_stats.air_boundaries_sealed as u64;
+        chunk_stats.water_triangles_removed_sealed +=
+            mesh_result.water_stats.triangles_removed_sealed as u64;
 
         let water_max_depth = if mesh_result.water.is_empty() {
             0
@@ -1069,6 +1139,79 @@ fn mesh_dirty_chunks_system(
     if had_dirty_chunks && frame.0 % 30 == 0 {
         chunk_stats.recompute_from_world(&world);
     }
+
+    drop(_timer);
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Queued",
+        dirty_chunks_queued as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Processed",
+        chunks_processed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Deferred",
+        dirty_chunks_queued.saturating_sub(chunks_processed) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "MAX_CHUNKS_PER_FRAME Hit",
+        u8::from(dirty_chunks_queued > MAX_CHUNKS_PER_FRAME) as f64,
+    );
+    timing.record_count(frame.0, "Mesh Dirty Reason LOD", reason_counts.lod as f64);
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Reason Neighbor LOD",
+        reason_counts.neighbor_lod as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Reason Visibility",
+        reason_counts.visibility as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Reason Generation",
+        reason_counts.generation as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Reason Water Material",
+        reason_counts.water_material as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Reason Terrain Mutation",
+        reason_counts.terrain_mutation as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Air Boundaries Total",
+        chunk_stats.water_air_boundaries_total as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Air Boundaries Exposed",
+        chunk_stats.water_air_boundaries_exposed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Air Boundaries Sealed",
+        chunk_stats.water_air_boundaries_sealed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Triangles Removed Sealed",
+        chunk_stats.water_triangles_removed_sealed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Mesh Entities",
+        chunk_stats.water_mesh_entities as f64,
+    );
 }
 
 fn update_water_material_lod(
@@ -1253,7 +1396,7 @@ fn calculate_target_lod_with_hysteresis(
     match current_lod {
         LodLevel::Lod0 => {
             // Currently highest detail - need to go PAST threshold to switch to lower
-            if distance > settings.high_detail_distance + LOD_HYSTERESIS {
+            if distance > settings.high_detail_distance + TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod1
             } else {
                 LodLevel::Lod0
@@ -1261,27 +1404,27 @@ fn calculate_target_lod_with_hysteresis(
         }
         LodLevel::Lod1 => {
             // Check transitions in both directions
-            if distance < settings.high_detail_distance - LOD_HYSTERESIS {
+            if distance < settings.high_detail_distance - TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod0
-            } else if distance > lod1_distance + LOD_HYSTERESIS {
+            } else if distance > lod1_distance + TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod2
             } else {
                 LodLevel::Lod1
             }
         }
         LodLevel::Lod2 => {
-            if distance < lod1_distance - LOD_HYSTERESIS {
+            if distance < lod1_distance - TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod1
-            } else if distance > lod2_distance + LOD_HYSTERESIS {
+            } else if distance > lod2_distance + TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod3
             } else {
                 LodLevel::Lod2
             }
         }
         LodLevel::Lod3 => {
-            if distance < lod2_distance - LOD_HYSTERESIS {
+            if distance < lod2_distance - TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod2
-            } else if distance > settings.cull_distance + LOD_HYSTERESIS {
+            } else if distance > settings.cull_distance + TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Culled
             } else {
                 LodLevel::Lod3
@@ -1289,7 +1432,7 @@ fn calculate_target_lod_with_hysteresis(
         }
         LodLevel::Culled => {
             // Currently culled - need to come INSIDE cull threshold to show
-            if distance < settings.cull_distance - LOD_HYSTERESIS {
+            if distance < settings.cull_distance - TERRAIN_LOD_HYSTERESIS {
                 LodLevel::Lod3
             } else {
                 LodLevel::Culled
@@ -1424,6 +1567,8 @@ fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
+    lod_control: Res<TerrainLodControl>,
+    mut lod_transitions: ResMut<TerrainLodTransitionState>,
     time: Res<Time>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -1431,6 +1576,10 @@ fn update_chunk_lod_system(
     mut last_camera_pos: Local<Option<Vec3>>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "LOD Update");
+    if lod_control.freeze_lod {
+        return;
+    }
+
     // Throttle to ~4Hz (every 0.25s)
     let now = time.elapsed_secs();
     if now - *last_update < 0.25 {
@@ -1464,7 +1613,21 @@ fn update_chunk_lod_system(
         let current_lod = chunk.lod_level();
         let target_lod = calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings);
 
+        if target_lod != current_lod {
+            let cooldown_elapsed = lod_transitions
+                .last_change_frame
+                .get(chunk_pos)
+                .map(|last_frame| frame.0.saturating_sub(*last_frame) >= LOD_CHANGE_COOLDOWN_FRAMES)
+                .unwrap_or(true);
+            if !cooldown_elapsed {
+                continue;
+            }
+        }
+
         if chunk.set_lod_level(target_lod) {
+            lod_transitions
+                .last_change_frame
+                .insert(*chunk_pos, frame.0);
             lod_changed.push(*chunk_pos);
         }
     }
@@ -1478,8 +1641,14 @@ fn update_chunk_lod_system(
         ] {
             let neighbor_pos = chunk_pos + offset;
             if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                neighbor.mark_dirty();
+                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
             }
         }
+    }
+
+    if !lod_transitions.last_change_frame.is_empty() && frame.0 % 600 == 0 {
+        lod_transitions
+            .last_change_frame
+            .retain(|_, last_frame| frame.0.saturating_sub(*last_frame) < 3_600);
     }
 }

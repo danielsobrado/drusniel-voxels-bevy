@@ -28,6 +28,7 @@ use crate::constants::{
     PADDED_CHUNK_SIZE_U32,
     UV_PADDING,
     VOXEL_SIZE,
+    WATER_LEVEL,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
@@ -38,6 +39,7 @@ use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // Surface nets imports for smooth meshing
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
@@ -55,6 +57,31 @@ pub struct WaterMesh;
 pub struct WaterMeshDetail {
     pub triangle_count: usize,
     pub max_depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WaterAirExposureMode {
+    /// Debug mode: any water/air boundary can render, matching the old behavior.
+    AllAir,
+    /// Production fast path: air must have an open vertical column to sky.
+    OpenToSky,
+    /// Production conservative path: open-to-sky or connected to exterior air by flood fill.
+    #[default]
+    ExteriorConnected,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WaterMeshingStats {
+    pub air_boundaries_total: u32,
+    pub air_boundaries_exposed: u32,
+    pub air_boundaries_sealed: u32,
+    pub triangles_removed_sealed: u32,
+}
+
+#[derive(Default)]
+struct WaterExposureCache {
+    mode: WaterAirExposureMode,
+    cache: HashMap<IVec3, bool>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -115,10 +142,37 @@ impl MeshData {
     }
 }
 
+impl WaterExposureCache {
+    fn new(mode: WaterAirExposureMode) -> Self {
+        Self {
+            mode,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn air_exposed(&mut self, world: &VoxelWorld, air_pos: IVec3) -> bool {
+        if self.mode == WaterAirExposureMode::AllAir {
+            return true;
+        }
+        if let Some(exposed) = self.cache.get(&air_pos) {
+            return *exposed;
+        }
+
+        let exposed = match self.mode {
+            WaterAirExposureMode::AllAir => true,
+            WaterAirExposureMode::OpenToSky => air_open_to_sky(world, air_pos),
+            WaterAirExposureMode::ExteriorConnected => air_connected_to_exterior(world, air_pos),
+        };
+        self.cache.insert(air_pos, exposed);
+        exposed
+    }
+}
+
 /// Result of chunk meshing containing separate meshes for solid and water blocks
 pub struct ChunkMeshResult {
     pub solid: MeshData,
     pub water: MeshData,
+    pub water_stats: WaterMeshingStats,
 }
 
 // =============================================================================
@@ -502,6 +556,7 @@ pub fn generate_chunk_mesh(
     chunk: &Chunk,
     world: &VoxelWorld,
     ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(1024, 1536);
     let mut water_mesh = MeshData::with_capacity(256, 384);
@@ -536,9 +591,18 @@ pub fn generate_chunk_mesh(
 
     // Greedy meshing for water faces — merges ocean surfaces into large quads
     let mut water_quads: Vec<GreedyQuad> = Vec::with_capacity(32);
+    let mut water_exposure = WaterExposureCache::new(water_exposure_mode);
+    let mut water_stats = WaterMeshingStats::default();
     for face in faces {
         for depth in 0..CHUNK_SIZE as u32 {
-            let mut mask = build_water_face_mask(chunk, world, face, depth);
+            let mut mask = build_water_face_mask(
+                chunk,
+                world,
+                face,
+                depth,
+                &mut water_exposure,
+                &mut water_stats,
+            );
             greedy_mesh_slice(&mut mask, depth, &mut water_quads);
             for quad in &water_quads {
                 add_greedy_water_face(&mut water_mesh, quad, face);
@@ -549,6 +613,7 @@ pub fn generate_chunk_mesh(
     ChunkMeshResult {
         solid: solid_mesh,
         water: water_mesh,
+        water_stats,
     }
 }
 
@@ -568,6 +633,7 @@ fn check_face(
     }
 }
 
+#[allow(dead_code)]
 fn check_water_face(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -670,6 +736,7 @@ fn is_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) 
 }
 
 /// Water face is visible only when neighbor is air.
+#[allow(dead_code)]
 fn is_water_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
     is_face_visible_with(
         chunk,
@@ -681,6 +748,32 @@ fn is_water_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: 
     )
 }
 
+fn water_face_neighbor_air_pos(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    local: UVec3,
+    face: Face,
+) -> Option<IVec3> {
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let air_pos = chunk_origin + local.as_ivec3() + face_direction(face);
+    match world.get_voxel(air_pos) {
+        Some(VoxelType::Air) => Some(air_pos),
+        None => Some(air_pos),
+        _ => None,
+    }
+}
+
+fn face_direction(face: Face) -> IVec3 {
+    match face {
+        Face::Top => IVec3::Y,
+        Face::Bottom => -IVec3::Y,
+        Face::North => -IVec3::Z,
+        Face::South => IVec3::Z,
+        Face::East => IVec3::X,
+        Face::West => -IVec3::X,
+    }
+}
+
 /// Build a 2D mask for water faces on a given slice (analogous to build_face_mask).
 /// All water voxels share the same type, so greedy meshing merges them aggressively.
 fn build_water_face_mask(
@@ -688,6 +781,8 @@ fn build_water_face_mask(
     world: &VoxelWorld,
     face: Face,
     depth: u32,
+    exposure: &mut WaterExposureCache,
+    stats: &mut WaterMeshingStats,
 ) -> [[FaceInfo; CHUNK_SIZE]; CHUNK_SIZE] {
     let mut mask = [[FaceInfo::default(); CHUNK_SIZE]; CHUNK_SIZE];
 
@@ -704,7 +799,7 @@ fn build_water_face_mask(
                 continue;
             }
 
-            if is_water_face_visible(chunk, world, local, face) {
+            if should_render_water_face(chunk, world, local, face, exposure, stats) {
                 mask[u][v] = FaceInfo {
                     voxel,
                     visible: true,
@@ -714,6 +809,108 @@ fn build_water_face_mask(
     }
 
     mask
+}
+
+fn should_render_water_face(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    local: UVec3,
+    face: Face,
+    exposure: &mut WaterExposureCache,
+    stats: &mut WaterMeshingStats,
+) -> bool {
+    if !matches!(face, Face::Top) {
+        return false;
+    }
+
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let world_pos = chunk_origin + local.as_ivec3();
+    if world_pos.y != WATER_LEVEL {
+        return false;
+    }
+
+    let Some(air_pos) = water_face_neighbor_air_pos(chunk, world, local, face) else {
+        return false;
+    };
+
+    stats.air_boundaries_total += 1;
+    let exposed = world.get_voxel(air_pos).is_none() || exposure.air_exposed(world, air_pos);
+    if exposed {
+        stats.air_boundaries_exposed += 1;
+        true
+    } else {
+        stats.air_boundaries_sealed += 1;
+        stats.triangles_removed_sealed += 2;
+        false
+    }
+}
+
+fn air_open_to_sky(world: &VoxelWorld, air_pos: IVec3) -> bool {
+    let world_top = world.world_size_chunks().y * CHUNK_SIZE_I32;
+    for y in air_pos.y..world_top {
+        let pos = IVec3::new(air_pos.x, y, air_pos.z);
+        let Some(voxel) = world.get_voxel(pos) else {
+            return false;
+        };
+        if voxel.is_solid() {
+            return false;
+        }
+    }
+    true
+}
+
+fn air_connected_to_exterior(world: &VoxelWorld, air_pos: IVec3) -> bool {
+    if air_open_to_sky(world, air_pos) {
+        return true;
+    }
+
+    const MAX_FLOOD_NODES: usize = 16_384;
+    const MAX_FLOOD_RADIUS: i32 = 64;
+
+    let world_size = world.world_size_chunks() * CHUNK_SIZE_I32;
+    let min_bound = (air_pos - IVec3::splat(MAX_FLOOD_RADIUS)).max(IVec3::ZERO);
+    let max_bound = (air_pos + IVec3::splat(MAX_FLOOD_RADIUS)).min(world_size - IVec3::ONE);
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(air_pos);
+    queue.push_back(air_pos);
+
+    while let Some(pos) = queue.pop_front() {
+        if visited.len() > MAX_FLOOD_NODES {
+            return false;
+        }
+        if pos.x == 0
+            || pos.y == 0
+            || pos.z == 0
+            || pos.x == world_size.x - 1
+            || pos.y == world_size.y - 1
+            || pos.z == world_size.z - 1
+            || air_open_to_sky(world, pos)
+        {
+            return true;
+        }
+
+        for offset in [
+            IVec3::X,
+            -IVec3::X,
+            IVec3::Y,
+            -IVec3::Y,
+            IVec3::Z,
+            -IVec3::Z,
+        ] {
+            let next = pos + offset;
+            if next.cmplt(min_bound).any() || next.cmpgt(max_bound).any() || visited.contains(&next)
+            {
+                continue;
+            }
+            if matches!(world.get_voxel(next), Some(VoxelType::Air)) {
+                visited.insert(next);
+                queue.push_back(next);
+            }
+        }
+    }
+
+    false
 }
 
 /// Emit a greedy-merged water quad. Produces the same geometry as `add_water_face`
@@ -1893,13 +2090,38 @@ fn get_voxel_for_water_sdf(
     }
 }
 
+fn water_sdf_value_for_voxel(
+    voxel: VoxelType,
+    world: &VoxelWorld,
+    world_pos: IVec3,
+    exposure: &mut WaterExposureCache,
+) -> f32 {
+    if voxel.is_liquid() || voxel.is_solid() {
+        return -1.0;
+    }
+    if voxel != VoxelType::Air {
+        return -1.0;
+    }
+
+    if exposure.air_exposed(world, world_pos) {
+        1.0
+    } else {
+        -1.0
+    }
+}
+
 /// Generate an SDF array for water surfaces.
 /// Only generates surfaces at water/air boundaries.
-/// Solid voxels are treated as "outside" to prevent water from appearing on terrain.
-fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
+/// Solid voxels and sealed air are treated as inside so hidden water surfaces are not generated.
+fn generate_water_sdf(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    water_exposure_mode: WaterAirExposureMode,
+) -> [f32; 5832] {
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+    let mut exposure = WaterExposureCache::new(water_exposure_mode);
 
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
@@ -1908,16 +2130,9 @@ fn generate_water_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
         let pz = pz as i32;
 
         let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px, py, pz);
+        let world_pos = chunk_origin + IVec3::new(px - 1, py - 1, pz - 1);
 
-        sdf[i] = if voxel.is_liquid() {
-            // Water is "inside" - surface generated at water/air boundary
-            -1.0
-        } else {
-            // Both solid and air are "outside"
-            // This ensures water surface only appears at water/air boundaries,
-            // not at solid/air boundaries above water (which caused striping)
-            1.0
-        };
+        sdf[i] = water_sdf_value_for_voxel(voxel, world, world_pos, &mut exposure);
     }
 
     sdf
@@ -2094,7 +2309,8 @@ fn generate_water_mesh(
     world: &VoxelWorld,
     _chunk_center: Vec3,
     chunk_origin: IVec3,
-) -> MeshData {
+    water_exposure_mode: WaterAirExposureMode,
+) -> (MeshData, WaterMeshingStats) {
     let mut water_mesh = MeshData::with_capacity(256, 384);
     let faces = [
         Face::Top,
@@ -2107,9 +2323,18 @@ fn generate_water_mesh(
 
     // Greedy meshing for water — merges ocean surfaces into large quads
     let mut water_quads: Vec<GreedyQuad> = Vec::with_capacity(32);
+    let mut water_exposure = WaterExposureCache::new(water_exposure_mode);
+    let mut water_stats = WaterMeshingStats::default();
     for face in faces {
         for depth in 0..CHUNK_SIZE as u32 {
-            let mut mask = build_water_face_mask(chunk, world, face, depth);
+            let mut mask = build_water_face_mask(
+                chunk,
+                world,
+                face,
+                depth,
+                &mut water_exposure,
+                &mut water_stats,
+            );
             greedy_mesh_slice(&mut mask, depth, &mut water_quads);
             for quad in &water_quads {
                 add_greedy_water_face_world(&mut water_mesh, quad, face, chunk_origin);
@@ -2117,7 +2342,7 @@ fn generate_water_mesh(
         }
     }
 
-    water_mesh
+    (water_mesh, water_stats)
 }
 
 /// Old Surface Nets water mesh generation (kept for reference).
@@ -2130,7 +2355,7 @@ fn generate_water_mesh_surface_nets(
 ) -> MeshData {
     let mut water_mesh = MeshData::with_capacity(256, 384);
 
-    let water_sdf = generate_water_sdf(chunk, world);
+    let water_sdf = generate_water_sdf(chunk, world, WaterAirExposureMode::default());
     let mut water_buffer = SurfaceNetsBuffer::default();
     surface_nets(
         &water_sdf,
@@ -2219,6 +2444,7 @@ pub fn generate_chunk_mesh_surface_nets(
     neighbor_lods: NeighborLods,
     skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(2048, 3072);
     let mut local_positions: Vec<Vec3> = Vec::new();
@@ -2368,11 +2594,18 @@ pub fn generate_chunk_mesh_surface_nets(
     }
 
     // Generate water mesh using the extracted helper
-    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+    let (water_mesh, water_stats) = generate_water_mesh(
+        chunk,
+        world,
+        chunk_center,
+        chunk_origin,
+        water_exposure_mode,
+    );
 
     ChunkMeshResult {
         solid: solid_mesh,
         water: water_mesh,
+        water_stats,
     }
 }
 
@@ -2386,6 +2619,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     neighbor_lods: NeighborLods,
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(512, 768);
     let mut local_positions: Vec<Vec3> = Vec::new();
@@ -2545,11 +2779,18 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
-    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+    let (water_mesh, water_stats) = generate_water_mesh(
+        chunk,
+        world,
+        chunk_center,
+        chunk_origin,
+        water_exposure_mode,
+    );
 
     ChunkMeshResult {
         solid: solid_mesh,
         water: water_mesh,
+        water_stats,
     }
 }
 
@@ -2563,6 +2804,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     neighbor_lods: NeighborLods,
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(256, 384);
     let mut local_positions: Vec<Vec3> = Vec::new();
@@ -2722,11 +2964,18 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
-    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+    let (water_mesh, water_stats) = generate_water_mesh(
+        chunk,
+        world,
+        chunk_center,
+        chunk_origin,
+        water_exposure_mode,
+    );
 
     ChunkMeshResult {
         solid: solid_mesh,
         water: water_mesh,
+        water_stats,
     }
 }
 
@@ -2740,6 +2989,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     neighbor_lods: NeighborLods,
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(128, 192);
     let mut local_positions: Vec<Vec3> = Vec::new();
@@ -2899,11 +3149,126 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
-    let water_mesh = generate_water_mesh(chunk, world, chunk_center, chunk_origin);
+    let (water_mesh, water_stats) = generate_water_mesh(
+        chunk,
+        world,
+        chunk_center,
+        chunk_origin,
+        water_exposure_mode,
+    );
 
     ChunkMeshResult {
         solid: solid_mesh,
         water: water_mesh,
+        water_stats,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rendering::ao_config::BakedAoConfig;
+
+    fn ao_config() -> BakedAoConfig {
+        BakedAoConfig {
+            enabled: false,
+            strength: 0.0,
+            corner_darkness: 0.0,
+            fix_anisotropy: false,
+        }
+    }
+
+    fn world_with_test_chunks(size: IVec3) -> VoxelWorld {
+        let mut world = VoxelWorld::new(size);
+        for x in 0..size.x {
+            for y in 0..size.y {
+                for z in 0..size.z {
+                    world.insert_chunk(Chunk::new(IVec3::new(x, y, z)));
+                }
+            }
+        }
+        world
+    }
+
+    fn world_with_vertical_chunks() -> VoxelWorld {
+        world_with_test_chunks(IVec3::new(1, 3, 1))
+    }
+
+    fn seal_air_cell(world: &mut VoxelWorld, air_pos: IVec3) {
+        for offset in [IVec3::X, -IVec3::X, IVec3::Y, IVec3::Z, -IVec3::Z] {
+            world.set_voxel(air_pos + offset, VoxelType::Rock);
+        }
+    }
+
+    fn meshed_water(world: &VoxelWorld) -> ChunkMeshResult {
+        let chunk = world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+        generate_chunk_mesh(
+            chunk,
+            world,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        )
+    }
+
+    #[test]
+    fn sealed_below_sea_water_surface_is_not_meshed() {
+        let mut world = world_with_vertical_chunks();
+        world.set_voxel(IVec3::new(8, WATER_LEVEL, 8), VoxelType::Water);
+        seal_air_cell(&mut world, IVec3::new(8, WATER_LEVEL + 1, 8));
+
+        let mesh = meshed_water(&world);
+
+        assert!(mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.air_boundaries_total, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 0);
+        assert_eq!(mesh.water_stats.air_boundaries_sealed, 1);
+        assert_eq!(mesh.water_stats.triangles_removed_sealed, 2);
+    }
+
+    #[test]
+    fn open_water_surface_is_still_meshed() {
+        let mut world = world_with_vertical_chunks();
+        world.set_voxel(IVec3::new(8, WATER_LEVEL, 8), VoxelType::Water);
+
+        let mesh = meshed_water(&world);
+
+        assert!(!mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.air_boundaries_total, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_sealed, 0);
+    }
+
+    #[test]
+    fn sealed_air_is_inside_water_sdf() {
+        let mut world = world_with_vertical_chunks();
+        world.set_voxel(IVec3::new(8, WATER_LEVEL, 8), VoxelType::Water);
+        seal_air_cell(&mut world, IVec3::new(8, WATER_LEVEL + 1, 8));
+        let chunk = world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+
+        let sdf = generate_water_sdf(chunk, &world, WaterAirExposureMode::ExteriorConnected);
+        let air_above_water_index = PaddedChunkShape::linearize([9, 4, 9]) as usize;
+
+        assert_eq!(sdf[air_above_water_index], -1.0);
+    }
+
+    #[test]
+    fn sealed_air_across_chunk_boundary_does_not_create_seam() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 3, 1));
+        let water_pos = IVec3::new(15, WATER_LEVEL, 8);
+        let air_pos = water_pos + IVec3::Y;
+        world.set_voxel(water_pos, VoxelType::Water);
+        seal_air_cell(&mut world, air_pos);
+
+        let chunk = world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+        let mesh = generate_chunk_mesh(
+            chunk,
+            &world,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+
+        assert!(mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.air_boundaries_sealed, 1);
     }
 }
 
@@ -2931,12 +3296,14 @@ impl MeshMode {
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct MeshSettings {
     pub mode: MeshMode,
+    pub water_air_exposure_mode: WaterAirExposureMode,
 }
 
 impl Default for MeshSettings {
     fn default() -> Self {
         Self {
             mode: MeshMode::Blocky,
+            water_air_exposure_mode: WaterAirExposureMode::default(),
         }
     }
 }
@@ -2952,9 +3319,10 @@ pub fn generate_chunk_mesh_with_mode(
     neighbor_lods: NeighborLods,
     skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     match mode {
-        MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config),
+        MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config, water_exposure_mode),
         MeshMode::SurfaceNets => {
             // Select LOD-appropriate mesh generation
             match my_lod {
@@ -2967,6 +3335,7 @@ pub fn generate_chunk_mesh_with_mode(
                         neighbor_lods,
                         skirt_config,
                         ao_config,
+                        water_exposure_mode,
                     )
                 }
                 LodLevel::Lod1 => {
@@ -2979,6 +3348,7 @@ pub fn generate_chunk_mesh_with_mode(
                         neighbor_lods,
                         skirt_config,
                         ao_config,
+                        water_exposure_mode,
                     )
                 }
                 LodLevel::Lod2 => {
@@ -2991,6 +3361,7 @@ pub fn generate_chunk_mesh_with_mode(
                         neighbor_lods,
                         skirt_config,
                         ao_config,
+                        water_exposure_mode,
                     )
                 }
                 LodLevel::Lod3 => {
@@ -3003,6 +3374,7 @@ pub fn generate_chunk_mesh_with_mode(
                         neighbor_lods,
                         skirt_config,
                         ao_config,
+                        water_exposure_mode,
                     )
                 }
                 LodLevel::Culled => {
@@ -3011,6 +3383,7 @@ pub fn generate_chunk_mesh_with_mode(
                     ChunkMeshResult {
                         solid: MeshData::new(),
                         water: MeshData::new(),
+                        water_stats: WaterMeshingStats::default(),
                     }
                 }
             }
