@@ -22,6 +22,10 @@ use crate::rendering::materials::{
 use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
+use crate::rendering::quality::{
+    RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
+    sync_render_quality_preset,
+};
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;
@@ -42,13 +46,19 @@ impl Plugin for RenderingPlugin {
 
         app.init_resource::<GraphicsCapabilities>()
             .init_resource::<RayTracingSettings>()
+            .init_resource::<RenderQualityPreset>()
             .add_systems(
                 Update,
-                detect_graphics_capabilities
-                    .in_set(GraphicsDetectionSet)
-                    .run_if(|capabilities: Res<GraphicsCapabilities>| {
-                        capabilities.adapter_name.is_none()
-                    }),
+                (
+                    detect_graphics_capabilities
+                        .in_set(GraphicsDetectionSet)
+                        .run_if(|capabilities: Res<GraphicsCapabilities>| {
+                            capabilities.adapter_name.is_none()
+                        }),
+                    sync_render_quality_preset,
+                    apply_render_quality_preset.after(sync_render_quality_preset),
+                    record_render_quality_counters.after(sync_render_quality_preset),
+                ),
             )
             // GTAO replaces SSAO for better quality
             .add_plugins(GtaoPlugin)

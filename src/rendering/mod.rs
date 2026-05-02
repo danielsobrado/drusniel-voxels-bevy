@@ -35,6 +35,7 @@ pub mod pcss;
 pub mod photo_mode;
 pub mod plugin;
 pub mod props_material;
+pub mod quality;
 pub mod radiance_cascades;
 pub mod ray_tracing;
 pub mod render_timing;
@@ -56,6 +57,7 @@ pub use cinematic::{CinematicCamera, CinematicEvent, CinematicPlugin};
 pub use cinematic_config::CinematicConfig;
 pub use photo_mode::PhotoModePlugin;
 pub use props_material::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
+pub use quality::RenderQualityPreset;
 pub use radiance_cascades::{
     RadianceCascadesCamera, RadianceCascadesConfig, RadianceCascadesPlugin,
 };

@@ -11,7 +11,7 @@ use crate::rendering::building_material::{
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::triplanar_material::{
-    TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
+    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
 };
 use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
 use bevy::diagnostic::FrameCount;
@@ -173,7 +173,7 @@ pub fn setup_triplanar_material(
         .map(|capabilities| capabilities.integrated_gpu)
         .unwrap_or(false);
 
-    let material_handle = materials.add(if integrated {
+    let base_material = if integrated {
         TriplanarMaterial {
             uniforms: TriplanarUniforms {
                 base_color: LinearRgba::WHITE,
@@ -184,6 +184,7 @@ pub fn setup_triplanar_material(
                 ao_strength: 0.0,
                 _padding: 0.0,
             },
+            quality: TerrainMaterialQuality::FullTriplanar,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -204,6 +205,7 @@ pub fn setup_triplanar_material(
                 ao_strength: 0.0,      // V0.3 soft shadow look
                 _padding: 0.0,
             },
+            quality: TerrainMaterialQuality::FullTriplanar,
             // Grass textures (for TopSoil top faces)
             grass_albedo: Some(asset_server.load("pbr/grass/albedo.png")),
             grass_normal: Some(asset_server.load("pbr/grass/normal.png")),
@@ -217,10 +219,27 @@ pub fn setup_triplanar_material(
             dirt_albedo: Some(asset_server.load("pbr/dirt/albedo.png")),
             dirt_normal: Some(asset_server.load("pbr/dirt/normal.png")),
         }
-    });
+    };
+
+    let mut full_material = base_material.clone();
+    full_material.quality = TerrainMaterialQuality::FullTriplanar;
+    let mut cheap_material = base_material.clone();
+    cheap_material.quality = TerrainMaterialQuality::CheapTriplanar;
+    let mut single_projection_far_material = base_material.clone();
+    single_projection_far_material.quality = TerrainMaterialQuality::SingleProjectionFar;
+    let mut atlas_only_debug_material = base_material;
+    atlas_only_debug_material.quality = TerrainMaterialQuality::AtlasOnlyDebug;
+
+    let material_handle = materials.add(full_material);
+    let cheap_handle = materials.add(cheap_material);
+    let single_projection_far_handle = materials.add(single_projection_far_material);
+    let atlas_only_debug_handle = materials.add(atlas_only_debug_material);
 
     commands.insert_resource(TriplanarMaterialHandle {
         handle: material_handle,
+        cheap_handle,
+        single_projection_far_handle,
+        atlas_only_debug_handle,
     });
 }
 

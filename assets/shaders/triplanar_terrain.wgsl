@@ -89,16 +89,29 @@ fn parallax_offset(uv: vec2<f32>, view_dir: vec3<f32>) -> vec2<f32> {
     return uv - offset;
 }
 
+fn sample_albedo_single(uv: vec2<f32>, mat: i32) -> vec4<f32> {
+    if (mat == 0) {
+        return textureSample(grass_albedo, tex_sampler, uv);
+    } else if (mat == 1) {
+        return textureSample(rock_albedo, tex_sampler, uv);
+    } else if (mat == 2) {
+        return textureSample(sand_albedo, tex_sampler, uv);
+    }
+    return textureSample(dirt_albedo, tex_sampler, uv);
+}
+
 // Sample albedo with optional parallax for rock
 fn sample_albedo_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec3<f32>, mat: i32, view_dir: vec3<f32>) -> vec4<f32> {
     var cy = uv_yz; var cz = uv_xz; var cx = uv_xy;
     
+#ifndef TERRAIN_CHEAP_TRIPLANAR
     // Apply parallax only to rock material
     if (mat == 1) {
         cy = parallax_offset(uv_yz, view_dir);
         cz = parallax_offset(uv_xz, view_dir);
         cx = parallax_offset(uv_xy, view_dir);
     }
+#endif
     
     var col: vec4<f32>;
     if (mat == 0) {
@@ -124,11 +137,13 @@ fn sample_albedo_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec
 fn sample_normal_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec3<f32>, wn: vec3<f32>, mat: i32, view_dir: vec3<f32>) -> vec3<f32> {
     var cy = uv_yz; var cz = uv_xz; var cx = uv_xy;
     
+#ifndef TERRAIN_CHEAP_TRIPLANAR
     if (mat == 1) {
         cy = parallax_offset(uv_yz, view_dir);
         cz = parallax_offset(uv_xz, view_dir);
         cx = parallax_offset(uv_xy, view_dir);
     }
+#endif
     
     var nx: vec3<f32>; var ny: vec3<f32>; var nz: vec3<f32>;
     if (mat == 0) {
@@ -176,6 +191,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let w_total = dot(mat_weights, vec4<f32>(1.0));
     let w = mat_weights / max(w_total, 0.001);
 
+    let w_max = max(max(w.x, w.y), max(w.z, w.w));
+    var mat_idx = 0;
+    if (w.y == w_max) { mat_idx = 1; }
+    else if (w.z == w_max) { mat_idx = 2; }
+    else if (w.w == w_max) { mat_idx = 3; }
+
+#ifdef TERRAIN_ATLAS_ONLY_DEBUG
+    pbr_input.material.base_color = vec4<f32>(
+        w.x + 0.20 * w.w,
+        w.z + 0.35 * w.x,
+        w.y + 0.15 * w.z,
+        1.0
+    ) * uniforms.base_color;
+    pbr_input.material.perceptual_roughness = 0.9;
+    pbr_input.material.metallic = 0.0;
+    pbr_input.N = world_normal;
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT;
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
+    var debug_color = pbr_functions::apply_pbr_lighting(pbr_input);
+    return pbr_functions::main_pass_post_lighting_processing(pbr_input, debug_color);
+#endif
+
     let weights = triplanar_weights(world_normal);
     let uv_yz = compute_uv(world_pos.yz);
     let uv_xz = compute_uv(world_pos.xz);
@@ -188,18 +225,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     // Most terrain fragments are purely one material.  When the dominant
     // weight > 0.95 we skip the other 3 material branches entirely,
     // cutting texture reads from 24 → 6 (or 3 when distant).
-    let w_max = max(max(w.x, w.y), max(w.z, w.w));
     // Distance check: skip expensive normal maps on distant terrain
     let frag_dist = length(pbr_input.world_position.xyz);
+#ifdef TERRAIN_CHEAP_TRIPLANAR
+    let skip_normals = true;
+#else
     let skip_normals = frag_dist > 120.0; // normal maps invisible past 120 u
+#endif
 
+#ifdef TERRAIN_SINGLE_PROJECTION_FAR
+    let far_uv = compute_uv(world_pos.xz);
+    if (w_max > 0.95) {
+        albedo = sample_albedo_single(far_uv, mat_idx);
+    } else {
+        if (w.x > 0.001) { albedo += sample_albedo_single(far_uv, 0) * w.x; }
+        if (w.y > 0.001) { albedo += sample_albedo_single(far_uv, 1) * w.y; }
+        if (w.z > 0.001) { albedo += sample_albedo_single(far_uv, 2) * w.z; }
+        if (w.w > 0.001) { albedo += sample_albedo_single(far_uv, 3) * w.w; }
+    }
+    final_normal = world_normal;
+#else
     if (w_max > 0.95) {
         // Determine which single material dominates
-        var mat_idx = 0;
-        if (w.y == w_max) { mat_idx = 1; }
-        else if (w.z == w_max) { mat_idx = 2; }
-        else if (w.w == w_max) { mat_idx = 3; }
-
         albedo = sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, mat_idx, view_dir);
         if (skip_normals) {
             final_normal = world_normal;
@@ -244,6 +291,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
             final_normal = world_normal;
         }
     }
+#endif
     
     albedo = albedo * uniforms.base_color;
     let blended_n = normalize(final_normal);

@@ -7,6 +7,8 @@ use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
 use crate::rendering::building_material::BuildingMesh;
+use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
@@ -89,6 +91,45 @@ pub struct BenchRenderToggles {
     pub disable_prop_lod_hiding: bool,
     #[serde(default)]
     pub disable_prop_shadow_lod: bool,
+    #[serde(default)]
+    pub terrain_material_quality: BenchTerrainMaterialQuality,
+    #[serde(default)]
+    pub disable_terrain_material_lod: bool,
+    #[serde(default)]
+    pub prop_subcluster_grid: u8,
+    #[serde(default)]
+    pub quality_preset: Option<RenderQualityPreset>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchTerrainMaterialQuality {
+    #[default]
+    Auto,
+    FullTriplanar,
+    CheapTriplanar,
+    SingleProjectionFar,
+    AtlasOnlyDebug,
+}
+
+impl BenchTerrainMaterialQuality {
+    pub fn forced_quality(self) -> Option<TerrainMaterialQuality> {
+        match self {
+            BenchTerrainMaterialQuality::Auto => None,
+            BenchTerrainMaterialQuality::FullTriplanar => {
+                Some(TerrainMaterialQuality::FullTriplanar)
+            }
+            BenchTerrainMaterialQuality::CheapTriplanar => {
+                Some(TerrainMaterialQuality::CheapTriplanar)
+            }
+            BenchTerrainMaterialQuality::SingleProjectionFar => {
+                Some(TerrainMaterialQuality::SingleProjectionFar)
+            }
+            BenchTerrainMaterialQuality::AtlasOnlyDebug => {
+                Some(TerrainMaterialQuality::AtlasOnlyDebug)
+            }
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -173,7 +214,7 @@ struct BenchRenderReadySignature {
     instanced_prop_items: u32,
     queued_instanced_draws: u32,
     queued_instanced_instances: u32,
-    water_reflection_active: u32,
+    water_reflection_sampled: u32,
 }
 
 impl BenchReadySnapshot {
@@ -1215,7 +1256,7 @@ fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRend
             timing,
             "Render Instancing Queue Instances",
         )?,
-        water_reflection_active: latest_counter_u32(timing, "Water Reflection Active")?,
+        water_reflection_sampled: latest_counter_u32(timing, "Water Reflection Sampled")?,
     })
 }
 
@@ -1311,8 +1352,8 @@ fn record_bench_render_ready_counts(
     );
     timing.record_count(
         frame,
-        "Bench Render Ready Water Reflection Active",
-        signature.water_reflection_active as f64,
+        "Bench Render Ready Water Reflection Sampled",
+        signature.water_reflection_sampled as f64,
     );
 }
 

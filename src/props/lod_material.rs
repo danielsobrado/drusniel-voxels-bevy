@@ -14,6 +14,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::constants::{
     PROP_LOD_MATERIAL_HYSTERESIS, PROP_SHADOW_CULL_DISTANCE, PROP_SIMPLE_MATERIAL_DISTANCE,
 };
+use crate::rendering::quality::RenderQualityPreset;
 
 use super::Prop;
 
@@ -182,6 +183,7 @@ pub fn update_prop_shadow_lod(
         With<Prop>,
     >,
     mut stats: ResMut<PropLodStats>,
+    quality_preset: Res<RenderQualityPreset>,
     mut last_update: Local<f32>,
 ) {
     if !config.shadow_culling_enabled {
@@ -203,6 +205,8 @@ pub fn update_prop_shadow_lod(
     let mut with_shadows = 0usize;
     let mut without_shadows = 0usize;
     let mut switches = 0usize;
+    let shadow_cull_distance =
+        config.shadow_cull_distance * quality_preset.prop_shadow_distance_scale();
 
     for (entity, transform, lod_state, has_no_shadow) in prop_query.iter_mut() {
         let prop_pos = transform.translation();
@@ -211,9 +215,9 @@ pub fn update_prop_shadow_lod(
         // Determine if shadows should be disabled with hysteresis
         let currently_no_shadow = has_no_shadow.is_some();
         let threshold = if currently_no_shadow {
-            config.shadow_cull_distance - config.hysteresis
+            shadow_cull_distance - config.hysteresis
         } else {
-            config.shadow_cull_distance + config.hysteresis
+            shadow_cull_distance + config.hysteresis
         };
 
         let should_disable_shadows = distance > threshold;

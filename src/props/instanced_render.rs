@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use bevy::asset::AssetId;
-use bevy::camera::primitives::Aabb;
+use bevy::camera::primitives::{Aabb, Frustum, Sphere};
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::core_3d::{
     AlphaMask3d, CORE_3D_DEPTH_FORMAT, Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey, Transparent3d,
@@ -49,6 +49,7 @@ use crate::props::instancing::{CachedPropMesh, InstancedProp};
 use crate::props::lod_material::PropLodState;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle};
+use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
 const SHADER_ASSET_PATH: &str = "shaders/instanced_prop.wgsl";
@@ -63,6 +64,10 @@ const FOLIAGE_FULL_LOD_DISTANCE: f32 = 96.0;
 const FOLIAGE_HIDDEN_LOD_DISTANCE: f32 = 160.0;
 const TINY_CLUTTER_FULL_LOD_DISTANCE: f32 = 64.0;
 const TINY_CLUTTER_HIDDEN_LOD_DISTANCE: f32 = 80.0;
+const PROP_SUBCLUSTER_MIN_GROUP_INSTANCES: usize = 24;
+const PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES: usize = 8;
+const PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP: usize = 3;
+const PROP_SUBCLUSTER_BOUNDS_PADDING: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum InstancedPropRenderPhase {
@@ -660,6 +665,7 @@ fn update_instanced_prop_lod(
     mut groups: Query<(Entity, &mut InstancedPropGroup)>,
     timing: Option<Res<RenderTimingSink>>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
+    quality_preset: Res<RenderQualityPreset>,
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
@@ -678,6 +684,8 @@ fn update_instanced_prop_lod(
     let disable_shadow_lod = bench_toggles
         .as_deref()
         .is_some_and(|toggles| toggles.disable_prop_shadow_lod);
+    let lod_distance_scale = quality_preset.prop_lod_distance_scale();
+    let shadow_distance_scale = quality_preset.prop_shadow_distance_scale();
 
     let mut full_instances = 0usize;
     let mut mid_instances = 0usize;
@@ -700,8 +708,15 @@ fn update_instanced_prop_lod(
                 .unwrap_or(PropInstanceLod::Full);
             let distance =
                 camera_pos.distance(instance_translation(&group.source_instances[index]));
-            let next =
-                classify_instance_lod(class, current, distance, disable_hiding, disable_shadow_lod);
+            let next = classify_instance_lod(
+                class,
+                current,
+                distance,
+                disable_hiding,
+                disable_shadow_lod,
+                lod_distance_scale,
+                shadow_distance_scale,
+            );
             if let Some(lod) = group.lod_states.get_mut(index) {
                 if *lod != next {
                     *lod = next;
@@ -758,19 +773,16 @@ fn classify_instance_lod(
     distance: f32,
     disable_hiding: bool,
     disable_shadow_lod: bool,
+    lod_distance_scale: f32,
+    shadow_distance_scale: f32,
 ) -> PropInstanceLod {
     let lod = match class {
         PropRenderClass::ImportantOpaque => {
             if disable_shadow_lod {
                 return PropInstanceLod::Full;
             }
-            if distance
-                > threshold_for_entering(
-                    current,
-                    PropInstanceLod::Mid,
-                    IMPORTANT_PROP_SHADOW_LOD_DISTANCE,
-                )
-            {
+            let shadow_distance = IMPORTANT_PROP_SHADOW_LOD_DISTANCE * shadow_distance_scale;
+            if distance > threshold_for_entering(current, PropInstanceLod::Mid, shadow_distance) {
                 PropInstanceLod::Mid
             } else {
                 PropInstanceLod::Full
@@ -779,14 +791,14 @@ fn classify_instance_lod(
         PropRenderClass::CutoutFoliage => classify_visible_lod(
             current,
             distance,
-            FOLIAGE_FULL_LOD_DISTANCE,
-            FOLIAGE_HIDDEN_LOD_DISTANCE,
+            FOLIAGE_FULL_LOD_DISTANCE * lod_distance_scale,
+            FOLIAGE_HIDDEN_LOD_DISTANCE * lod_distance_scale,
         ),
         PropRenderClass::TinyGroundClutter => classify_visible_lod(
             current,
             distance,
-            TINY_CLUTTER_FULL_LOD_DISTANCE,
-            TINY_CLUTTER_HIDDEN_LOD_DISTANCE,
+            TINY_CLUTTER_FULL_LOD_DISTANCE * lod_distance_scale,
+            TINY_CLUTTER_HIDDEN_LOD_DISTANCE * lod_distance_scale,
         ),
     };
 
@@ -959,6 +971,17 @@ pub struct InstanceBuffer {
     pub shadow_capacity: usize,
     pub shadow_length: usize,
     pub uploaded_shadow_version: u64,
+    subcluster_grid: u8,
+    subcluster_source_version: u64,
+    subcluster_visibility_mask: u64,
+    subclusters: Vec<PreparedPropSubcluster>,
+}
+
+#[derive(Clone)]
+struct PreparedPropSubcluster {
+    center: Vec3,
+    radius: f32,
+    instances: Vec<PropInstance>,
 }
 
 fn instance_stride(tint_enabled: bool) -> usize {
@@ -1009,21 +1032,192 @@ fn shadow_instances_match_visible(group: &InstancedPropGroup) -> bool {
     group.shadow_instances == group.instances
 }
 
+fn normalized_prop_subcluster_grid(bench_toggles: Option<&BenchRenderToggles>) -> u8 {
+    match bench_toggles.map(|toggles| toggles.prop_subcluster_grid) {
+        Some(2) => 2,
+        Some(4) => 4,
+        _ => 0,
+    }
+}
+
+fn prop_instance_translation(instance: &PropInstance) -> Vec3 {
+    Vec3::new(
+        instance.transform[3][0],
+        instance.transform[3][1],
+        instance.transform[3][2],
+    )
+}
+
+fn cluster_from_instances(instances: Vec<PropInstance>) -> PreparedPropSubcluster {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for instance in &instances {
+        let position = prop_instance_translation(instance);
+        min = min.min(position);
+        max = max.max(position);
+    }
+    let center = (min + max) * 0.5;
+    let radius = ((max - min) * 0.5).length() + PROP_SUBCLUSTER_BOUNDS_PADDING;
+    PreparedPropSubcluster {
+        center,
+        radius,
+        instances,
+    }
+}
+
+fn build_prop_subclusters(instances: &[PropInstance], grid: u8) -> Vec<PreparedPropSubcluster> {
+    if !matches!(grid, 2 | 4) || instances.len() < PROP_SUBCLUSTER_MIN_GROUP_INSTANCES {
+        return Vec::new();
+    }
+
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for instance in instances {
+        let position = prop_instance_translation(instance);
+        min = min.min(position);
+        max = max.max(position);
+    }
+
+    let extent = max - min;
+    if extent.x <= f32::EPSILON && extent.z <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let grid_usize = grid as usize;
+    let mut cells = vec![Vec::new(); grid_usize * grid_usize];
+    let inv_x = if extent.x > f32::EPSILON {
+        1.0 / extent.x
+    } else {
+        0.0
+    };
+    let inv_z = if extent.z > f32::EPSILON {
+        1.0 / extent.z
+    } else {
+        0.0
+    };
+
+    for instance in instances {
+        let position = prop_instance_translation(instance);
+        let x = (((position.x - min.x) * inv_x) * grid as f32)
+            .floor()
+            .clamp(0.0, (grid - 1) as f32) as usize;
+        let z = (((position.z - min.z) * inv_z) * grid as f32)
+            .floor()
+            .clamp(0.0, (grid - 1) as f32) as usize;
+        cells[z * grid_usize + x].push(*instance);
+    }
+
+    let mut tiny_instances = Vec::new();
+    let mut clusters = Vec::new();
+    for cell in cells {
+        // Fold sparse cells into one bounded fallback cluster
+        // instead of letting the experiment devolve into one draw per instance.
+        if cell.len() >= PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES {
+            clusters.push(cluster_from_instances(cell));
+        } else {
+            tiny_instances.extend(cell);
+        }
+    }
+    if !tiny_instances.is_empty() {
+        clusters.push(cluster_from_instances(tiny_instances));
+    }
+
+    if clusters.len() <= 1 {
+        return Vec::new();
+    }
+
+    clusters.sort_by(|a, b| b.instances.len().cmp(&a.instances.len()));
+    if clusters.len() > PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP {
+        let mut merged_instances = Vec::new();
+        for cluster in clusters.drain((PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP - 1)..) {
+            merged_instances.extend(cluster.instances);
+        }
+        clusters.push(cluster_from_instances(merged_instances));
+    }
+
+    clusters
+}
+
+fn extracted_view_frustum(view: &ExtractedView) -> Frustum {
+    let clip_from_world = view
+        .clip_from_world
+        .unwrap_or_else(|| view.clip_from_view * view.world_from_view.to_matrix().inverse());
+    Frustum::from_clip_from_world(&clip_from_world)
+}
+
+fn prop_subcluster_visible_mask(subclusters: &[PreparedPropSubcluster], frusta: &[Frustum]) -> u64 {
+    if subclusters.is_empty() {
+        return 0;
+    }
+    if frusta.is_empty() {
+        let count = subclusters.len().min(64);
+        return if count == 64 {
+            u64::MAX
+        } else {
+            (1u64 << count) - 1
+        };
+    }
+
+    let mut mask = 0u64;
+    for (index, subcluster) in subclusters.iter().enumerate().take(64) {
+        let sphere = Sphere {
+            center: Vec3A::from(subcluster.center),
+            radius: subcluster.radius,
+        };
+        if frusta
+            .iter()
+            .any(|frustum| frustum.intersects_sphere(&sphere, true))
+        {
+            mask |= 1u64 << index;
+        }
+    }
+    mask
+}
+
+fn prop_subcluster_visible_len(subclusters: &[PreparedPropSubcluster], mask: u64) -> usize {
+    subclusters
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| (mask & (1u64 << index)) != 0)
+        .map(|(_, subcluster)| subcluster.instances.len())
+        .sum()
+}
+
+fn collect_prop_subcluster_instances(
+    subclusters: &[PreparedPropSubcluster],
+    mask: u64,
+) -> Vec<PropInstance> {
+    let mut instances = Vec::with_capacity(prop_subcluster_visible_len(subclusters, mask));
+    for (index, subcluster) in subclusters.iter().enumerate() {
+        if (mask & (1u64 << index)) != 0 {
+            instances.extend_from_slice(&subcluster.instances);
+        }
+    }
+    instances
+}
+
 fn prepare_instance_buffers(
     mut commands: Commands,
     query: Query<(Entity, &InstancedPropGroup, Option<&InstanceBuffer>)>,
-    visible_view_entities: Query<&RenderVisibleEntities>,
+    views: Query<(&ExtractedView, &RenderVisibleEntities)>,
     visible_meshes: Query<&RenderVisibleMeshEntities>,
     visible_cubemaps: Query<&RenderCubemapVisibleEntities>,
     visible_cascades: Query<&RenderCascadesVisibleEntities>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     timing: Option<Res<RenderTimingSink>>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
+    let subcluster_grid = normalized_prop_subcluster_grid(bench_toggles.as_deref());
+    let subcluster_mode = subcluster_grid != 0;
     let mut visible_entities = HashSet::new();
-    for visible_view_entities in &visible_view_entities {
+    let mut view_frusta = Vec::new();
+    for (view, visible_view_entities) in &views {
+        if subcluster_mode {
+            view_frusta.push(extracted_view_frustum(view));
+        }
         visible_entities.extend(
             visible_view_entities
                 .iter::<Mesh3d>()
@@ -1059,6 +1253,12 @@ fn prepare_instance_buffers(
     let mut shadow_instances_uploaded = 0usize;
     let mut shadow_instances_reused = 0usize;
     let mut bytes_uploaded = 0usize;
+    let mut subclusters_total = 0usize;
+    let mut subclusters_visible = 0usize;
+    let mut subclusters_queued = 0usize;
+    let mut subcluster_draws = 0usize;
+    let mut subcluster_instances_queued = 0usize;
+    let mut subcluster_instances_culled = 0usize;
 
     for (entity, group, existing) in &query {
         groups_examined += 1;
@@ -1082,17 +1282,62 @@ fn prepare_instance_buffers(
                         shadow_capacity: existing.shadow_capacity,
                         shadow_length: 0,
                         uploaded_shadow_version: group.shadow_version,
+                        subcluster_grid: 0,
+                        subcluster_source_version: 0,
+                        subcluster_visibility_mask: 0,
+                        subclusters: Vec::new(),
                     });
                 }
             }
             continue;
         }
 
+        let mut built_subclusters = None;
+        let subclusters: &[PreparedPropSubcluster] = if subcluster_mode {
+            if let Some(buffer) = existing.filter(|buffer| {
+                buffer.subcluster_grid == subcluster_grid
+                    && buffer.subcluster_source_version == group.version
+            }) {
+                &buffer.subclusters
+            } else {
+                built_subclusters = Some(build_prop_subclusters(&group.instances, subcluster_grid));
+                built_subclusters.as_deref().unwrap_or(&[])
+            }
+        } else {
+            &[]
+        };
+        let subcluster_visibility_mask = if subcluster_mode {
+            prop_subcluster_visible_mask(subclusters, &view_frusta)
+        } else {
+            0
+        };
+        let visible_instance_len = if subcluster_mode && !subclusters.is_empty() {
+            prop_subcluster_visible_len(subclusters, subcluster_visibility_mask)
+        } else {
+            group.instances.len()
+        };
+        if subcluster_mode && !subclusters.is_empty() {
+            let visible_count = subcluster_visibility_mask.count_ones() as usize;
+            subclusters_total += subclusters.len();
+            subclusters_visible += visible_count;
+            subclusters_queued += visible_count;
+            if visible_instance_len > 0 {
+                subcluster_draws += 1;
+            }
+            subcluster_instances_queued += visible_instance_len;
+            subcluster_instances_culled +=
+                group.instances.len().saturating_sub(visible_instance_len);
+        }
+
         let visible_clean = existing
             .map(|buffer| {
                 buffer.uploaded_version == group.version
-                    && buffer.capacity >= group.instances.len()
-                    && buffer.length == group.instances.len()
+                    && buffer.capacity >= visible_instance_len
+                    && buffer.length == visible_instance_len
+                    && buffer.subcluster_grid == subcluster_grid
+                    && (!subcluster_mode
+                        || (buffer.subcluster_source_version == group.version
+                            && buffer.subcluster_visibility_mask == subcluster_visibility_mask))
             })
             .unwrap_or(false);
         let shadow_clean = existing
@@ -1118,12 +1363,19 @@ fn prepare_instance_buffers(
                 existing.uploaded_version,
             )
         } else {
+            let subcluster_instances;
             let instance_bytes: Vec<PropInstanceNoTint>;
-            let contents = if group.tint_enabled {
-                bytemuck::cast_slice(group.instances.as_slice())
+            let visible_instances = if subcluster_mode && !subclusters.is_empty() {
+                subcluster_instances =
+                    collect_prop_subcluster_instances(subclusters, subcluster_visibility_mask);
+                subcluster_instances.as_slice()
             } else {
-                instance_bytes = group
-                    .instances
+                group.instances.as_slice()
+            };
+            let contents = if group.tint_enabled {
+                bytemuck::cast_slice(visible_instances)
+            } else {
+                instance_bytes = visible_instances
                     .iter()
                     .map(|instance| PropInstanceNoTint {
                         transform: instance.transform,
@@ -1135,17 +1387,19 @@ fn prepare_instance_buffers(
                 &render_device,
                 existing.map(|buffer| &buffer.buffer),
                 existing.map(|buffer| buffer.capacity).unwrap_or(0),
-                group.instances.len(),
+                visible_instance_len,
                 group.tint_enabled,
                 "instanced prop data buffer",
             );
-            render_queue.write_buffer(&buffer, 0, contents);
+            if !contents.is_empty() {
+                render_queue.write_buffer(&buffer, 0, contents);
+            }
             bytes_uploaded += contents.len();
-            instances_uploaded += group.instances.len();
+            instances_uploaded += visible_instance_len;
             visible_buffers_uploaded += 1;
             visible_buffers_created += usize::from(created);
             uploaded_any = true;
-            (buffer, capacity, group.instances.len(), group.version)
+            (buffer, capacity, visible_instance_len, group.version)
         };
 
         let (shadow_buffer, shadow_capacity, shadow_length, uploaded_shadow_version) =
@@ -1157,7 +1411,10 @@ fn prepare_instance_buffers(
                     existing.shadow_length,
                     existing.uploaded_shadow_version,
                 )
-            } else if group.shadow_instances.is_empty() || shadow_instances_match_visible(group) {
+            } else if group.shadow_instances.is_empty()
+                || (visible_instance_len == group.instances.len()
+                    && shadow_instances_match_visible(group))
+            {
                 shadow_buffers_reused += 1;
                 shadow_instances_reused += group.shadow_instances.len();
                 (
@@ -1207,6 +1464,13 @@ fn prepare_instance_buffers(
         if uploaded_any {
             groups_uploaded += 1;
         }
+        let subclusters_to_store = if subcluster_mode {
+            built_subclusters
+                .or_else(|| existing.map(|buffer| buffer.subclusters.clone()))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         commands.entity(entity).insert(InstanceBuffer {
             buffer,
             capacity,
@@ -1216,6 +1480,10 @@ fn prepare_instance_buffers(
             shadow_capacity,
             shadow_length,
             uploaded_shadow_version,
+            subcluster_grid,
+            subcluster_source_version: if subcluster_mode { group.version } else { 0 },
+            subcluster_visibility_mask,
+            subclusters: subclusters_to_store,
         });
     }
 
@@ -1271,6 +1539,27 @@ fn prepare_instance_buffers(
         sink.push_count(
             "Render Instancing Buffer Bytes Uploaded",
             bytes_uploaded as f64,
+        );
+        sink.push_count("Prop Subclusters Total", subclusters_total as f64);
+        sink.push_count("Prop Subclusters Visible", subclusters_visible as f64);
+        sink.push_count("Prop Subclusters Queued", subclusters_queued as f64);
+        sink.push_count("Prop Subcluster Draws", subcluster_draws as f64);
+        sink.push_count(
+            "Prop Subcluster Instances Queued",
+            subcluster_instances_queued as f64,
+        );
+        sink.push_count(
+            "Prop Subcluster Instances Culled",
+            subcluster_instances_culled as f64,
+        );
+        let avg_instances_per_draw = if subcluster_draws > 0 {
+            subcluster_instances_queued as f64 / subcluster_draws as f64
+        } else {
+            0.0
+        };
+        sink.push_count(
+            "Prop Subcluster Avg Instances Per Draw",
+            avg_instances_per_draw,
         );
     }
 }
@@ -1513,7 +1802,12 @@ struct QueueInstancedPropsParams<'w, 's> {
     material_meshes: Query<
         'w,
         's,
-        (Entity, &'static MainEntity, &'static InstancedPropGroup),
+        (
+            Entity,
+            &'static MainEntity,
+            &'static InstancedPropGroup,
+            &'static InstanceBuffer,
+        ),
         (With<InstancedPropGroup>, With<InstanceBuffer>),
     >,
     opaque_render_phases: ResMut<'w, ViewBinnedRenderPhases<Opaque3d>>,
@@ -1607,14 +1901,16 @@ fn queue_instanced_props(
 
         for (entity, main_entity) in visible_entities.iter::<Mesh3d>().copied() {
             visible_candidates += 1;
-            let Ok((_, group_main_entity, group)) = params.material_meshes.get(entity) else {
+            let Ok((_, group_main_entity, group, instance_buffer)) =
+                params.material_meshes.get(entity)
+            else {
                 continue;
             };
             if *group_main_entity != main_entity {
                 continue;
             }
             groups_visible += 1;
-            if group.instances.is_empty() {
+            if instance_buffer.length == 0 {
                 continue;
             }
             let Some(mesh_instance) = params
@@ -1653,7 +1949,7 @@ fn queue_instanced_props(
                 .mesh_allocator
                 .mesh_slabs(&mesh_instance.mesh_asset_id);
             let material_bind_group_index = Some(material.binding.group.0);
-            let group_instances = group.instances.len();
+            let group_instances = instance_buffer.length;
 
             match phase {
                 InstancedPropRenderPhase::Opaque => {

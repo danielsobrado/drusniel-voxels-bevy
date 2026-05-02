@@ -381,6 +381,7 @@ pub enum GraphicsQuality {
     Low,
     Medium,
     High,
+    Performance100,
 }
 
 #[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]

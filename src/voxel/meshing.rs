@@ -31,6 +31,7 @@ use crate::constants::{
     WATER_LEVEL,
 };
 use crate::rendering::ao_config::BakedAoConfig;
+use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts};
@@ -50,6 +51,10 @@ use ndshape::{ConstShape, ConstShape3u32};
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
     pub chunk_position: IVec3,
+    pub vertex_count: u32,
+    pub triangle_count: u32,
+    pub mesh_mode: MeshMode,
+    pub material_quality: TerrainMaterialQuality,
 }
 
 impl ExtractComponent for ChunkMesh {
@@ -79,6 +84,16 @@ impl ExtractComponent for WaterMesh {
 pub struct WaterMeshDetail {
     pub triangle_count: usize,
     pub max_depth: usize,
+}
+
+impl ExtractComponent for WaterMeshDetail {
+    type QueryData = &'static WaterMeshDetail;
+    type QueryFilter = ();
+    type Out = WaterMeshDetail;
+
+    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self::Out> {
+        Some(*item)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -10,14 +10,15 @@ use bevy::{
     mesh::Mesh3d,
     pbr::Shadow,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::performance::AreaTimingRecorder;
 use crate::props::instanced_render::InstancedPropGroup;
 use crate::rendering::building_material::BuildingMesh;
-use crate::voxel::meshing::{ChunkMesh, WaterMesh};
+use crate::rendering::triplanar_material::TerrainMaterialQuality;
+use crate::voxel::meshing::{ChunkMesh, MeshMode, WaterMesh, WaterMeshDetail};
 
 #[derive(Clone)]
 pub enum RenderTimingSample {
@@ -256,6 +257,20 @@ struct PhaseSourceInventory {
     unknown: usize,
 }
 
+#[derive(Default)]
+struct TerrainPressureInventory {
+    terrain_entities: usize,
+    terrain_vertices: u64,
+    terrain_triangles: u64,
+    water_triangles: u64,
+    triplanar_meshes: usize,
+    blocky_meshes: usize,
+    full_triplanar_meshes: usize,
+    cheap_triplanar_meshes: usize,
+    single_projection_far_meshes: usize,
+    atlas_only_debug_meshes: usize,
+}
+
 fn binned_phase_inventory<BPI>(phases: &ViewBinnedRenderPhases<BPI>) -> BinnedPhaseInventory
 where
     BPI: BinnedPhaseItem,
@@ -389,6 +404,55 @@ fn visible_mesh_source_inventory(
     sources
 }
 
+fn visible_terrain_pressure_inventory(
+    views: &Query<&RenderVisibleEntities>,
+    terrain: &Query<&ChunkMesh, Without<WaterMesh>>,
+    water: &Query<&WaterMeshDetail, With<WaterMesh>>,
+) -> TerrainPressureInventory {
+    let mut stats = TerrainPressureInventory::default();
+    let mut terrain_entities = HashSet::new();
+    let mut water_entities = HashSet::new();
+
+    for visible_entities in views.iter() {
+        for (entity, _) in visible_entities.iter::<Mesh3d>().copied() {
+            if terrain.get(entity).is_ok() {
+                terrain_entities.insert(entity);
+            } else if water.get(entity).is_ok() {
+                water_entities.insert(entity);
+            }
+        }
+    }
+
+    for entity in terrain_entities {
+        let Ok(chunk_mesh) = terrain.get(entity) else {
+            continue;
+        };
+        stats.terrain_entities += 1;
+        stats.terrain_vertices += chunk_mesh.vertex_count as u64;
+        stats.terrain_triangles += chunk_mesh.triangle_count as u64;
+        match chunk_mesh.mesh_mode {
+            MeshMode::SurfaceNets => stats.triplanar_meshes += 1,
+            MeshMode::Blocky => stats.blocky_meshes += 1,
+        }
+        match chunk_mesh.material_quality {
+            TerrainMaterialQuality::FullTriplanar => stats.full_triplanar_meshes += 1,
+            TerrainMaterialQuality::CheapTriplanar => stats.cheap_triplanar_meshes += 1,
+            TerrainMaterialQuality::SingleProjectionFar => {
+                stats.single_projection_far_meshes += 1;
+            }
+            TerrainMaterialQuality::AtlasOnlyDebug => stats.atlas_only_debug_meshes += 1,
+        }
+    }
+
+    for entity in water_entities {
+        if let Ok(detail) = water.get(entity) {
+            stats.water_triangles += detail.triangle_count as u64;
+        }
+    }
+
+    stats
+}
+
 fn push_binned_phase_counts(
     sink: &RenderTimingSink,
     label: &'static str,
@@ -467,6 +531,8 @@ fn record_render_phase_inventory(
     views: Query<&RenderVisibleEntities>,
     terrain: Query<(), With<ChunkMesh>>,
     water: Query<(), With<WaterMesh>>,
+    terrain_meshes: Query<&ChunkMesh, Without<WaterMesh>>,
+    water_details: Query<&WaterMeshDetail, With<WaterMesh>>,
     instanced: Query<(), With<InstancedPropGroup>>,
     buildings: Query<(), With<BuildingMesh>>,
 ) {
@@ -575,6 +641,49 @@ fn record_render_phase_inventory(
     sink.push_count(
         "Render Phase Items Exact Unknown",
         exact_sources.unknown as f64,
+    );
+
+    let terrain_pressure =
+        visible_terrain_pressure_inventory(&views, &terrain_meshes, &water_details);
+    sink.push_count(
+        "Visible Terrain Mesh Entities",
+        terrain_pressure.terrain_entities as f64,
+    );
+    sink.push_count(
+        "Visible Terrain Vertices",
+        terrain_pressure.terrain_vertices as f64,
+    );
+    sink.push_count(
+        "Visible Terrain Triangles",
+        terrain_pressure.terrain_triangles as f64,
+    );
+    sink.push_count(
+        "Visible Water Triangles",
+        terrain_pressure.water_triangles as f64,
+    );
+    sink.push_count(
+        "Triplanar Terrain Mesh Count",
+        terrain_pressure.triplanar_meshes as f64,
+    );
+    sink.push_count(
+        "Blocky Terrain Mesh Count",
+        terrain_pressure.blocky_meshes as f64,
+    );
+    sink.push_count(
+        "Terrain Material Quality FullTriplanar Meshes",
+        terrain_pressure.full_triplanar_meshes as f64,
+    );
+    sink.push_count(
+        "Terrain Material Quality CheapTriplanar Meshes",
+        terrain_pressure.cheap_triplanar_meshes as f64,
+    );
+    sink.push_count(
+        "Terrain Material Quality SingleProjectionFar Meshes",
+        terrain_pressure.single_projection_far_meshes as f64,
+    );
+    sink.push_count(
+        "Terrain Material Quality AtlasOnlyDebug Meshes",
+        terrain_pressure.atlas_only_debug_meshes as f64,
     );
 }
 

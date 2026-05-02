@@ -322,6 +322,12 @@ fn spawn_graphics_tab(
                     "High",
                     GraphicsQualityOption(GraphicsQuality::High),
                 );
+                spawn_graphics_option(
+                    options,
+                    font,
+                    "Perf 100",
+                    GraphicsQualityOption(GraphicsQuality::Performance100),
+                );
             });
 
             spawn_option_row(content, font, "Anti-Aliasing", |options, font| {

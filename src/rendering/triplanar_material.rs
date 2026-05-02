@@ -44,9 +44,12 @@ impl Default for TriplanarUniforms {
 
 /// Custom triplanar PBR terrain material with multiple terrain types
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+#[bind_group_data(TriplanarMaterialKey)]
 pub struct TriplanarMaterial {
     #[uniform(0)]
     pub uniforms: TriplanarUniforms,
+
+    pub quality: TerrainMaterialQuality,
 
     // Grass textures (mat 0)
     #[texture(1)]
@@ -74,10 +77,34 @@ pub struct TriplanarMaterial {
     pub dirt_normal: Option<Handle<Image>>,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum TerrainMaterialQuality {
+    #[default]
+    FullTriplanar,
+    CheapTriplanar,
+    SingleProjectionFar,
+    AtlasOnlyDebug,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct TriplanarMaterialKey {
+    quality: TerrainMaterialQuality,
+}
+
+impl From<&TriplanarMaterial> for TriplanarMaterialKey {
+    fn from(material: &TriplanarMaterial) -> Self {
+        Self {
+            quality: material.quality,
+        }
+    }
+}
+
 impl Default for TriplanarMaterial {
     fn default() -> Self {
         Self {
             uniforms: TriplanarUniforms::default(),
+            quality: TerrainMaterialQuality::FullTriplanar,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -119,6 +146,22 @@ impl Material for TriplanarMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         // Disable backface culling to match v0.3 behavior
         descriptor.primitive.cull_mode = None;
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            match _key.bind_group_data.quality {
+                TerrainMaterialQuality::FullTriplanar => {}
+                TerrainMaterialQuality::CheapTriplanar => {
+                    fragment.shader_defs.push("TERRAIN_CHEAP_TRIPLANAR".into());
+                }
+                TerrainMaterialQuality::SingleProjectionFar => {
+                    fragment
+                        .shader_defs
+                        .push("TERRAIN_SINGLE_PROJECTION_FAR".into());
+                }
+                TerrainMaterialQuality::AtlasOnlyDebug => {
+                    fragment.shader_defs.push("TERRAIN_ATLAS_ONLY_DEBUG".into());
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -127,4 +170,20 @@ impl Material for TriplanarMaterial {
 #[derive(Resource)]
 pub struct TriplanarMaterialHandle {
     pub handle: Handle<TriplanarMaterial>,
+    pub cheap_handle: Handle<TriplanarMaterial>,
+    pub single_projection_far_handle: Handle<TriplanarMaterial>,
+    pub atlas_only_debug_handle: Handle<TriplanarMaterial>,
+}
+
+impl TriplanarMaterialHandle {
+    pub fn handle_for_quality(&self, quality: TerrainMaterialQuality) -> Handle<TriplanarMaterial> {
+        match quality {
+            TerrainMaterialQuality::FullTriplanar => self.handle.clone(),
+            TerrainMaterialQuality::CheapTriplanar => self.cheap_handle.clone(),
+            TerrainMaterialQuality::SingleProjectionFar => {
+                self.single_projection_far_handle.clone()
+            }
+            TerrainMaterialQuality::AtlasOnlyDebug => self.atlas_only_debug_handle.clone(),
+        }
+    }
 }

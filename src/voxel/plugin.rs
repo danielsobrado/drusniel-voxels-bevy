@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
+use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
     BEDROCK_DEPTH,
@@ -41,12 +42,18 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 const MAX_CHUNKS_PER_FRAME: usize = 16;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
+const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
+const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
+const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
-use crate::rendering::triplanar_material::TriplanarMaterialHandle;
+use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::triplanar_material::{
+    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
+};
 use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{
@@ -79,6 +86,11 @@ pub struct TerrainLodControl {
 #[derive(Resource, Default)]
 struct TerrainLodTransitionState {
     last_change_frame: HashMap<IVec3, u32>,
+    change_count: HashMap<IVec3, u32>,
+    last_change_second: f32,
+    changes_this_second: u32,
+    changes_per_second: f32,
+    repeated_chunks_this_frame: u32,
 }
 
 #[derive(Resource)]
@@ -325,6 +337,7 @@ impl Plugin for VoxelPlugin {
         app.add_plugins((
             ExtractComponentPlugin::<ChunkMesh>::default(),
             ExtractComponentPlugin::<WaterMesh>::default(),
+            ExtractComponentPlugin::<WaterMeshDetail>::default(),
         ));
 
         app.insert_resource(WorldConfig {
@@ -388,6 +401,7 @@ impl Plugin for VoxelPlugin {
                 mesh_dirty_chunks_system.after(update_chunk_lod_system),
                 // Stage 5b: Water material LOD (independent of meshing, can be parallel)
                 update_water_material_lod.after(update_chunk_lod_system),
+                update_terrain_material_lod.after(update_chunk_lod_system),
             ),
         );
         // .add_plugins(GravityPlugin); // Deactivated due to performance impact
@@ -788,6 +802,7 @@ fn mesh_dirty_chunks_system(
     blocky_material: Option<Res<VoxelMaterial>>,
     triplanar_material: Res<TriplanarMaterialHandle>,
     water_material: Res<WaterMaterial>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
     mesh_settings: Res<MeshSettings>,
     lod_settings: Res<LodSettings>,
     skirt_config: Res<SkirtConfig>,
@@ -945,8 +960,9 @@ fn mesh_dirty_chunks_system(
         };
         let mesh_elapsed = mesh_start.elapsed();
 
-        // Track vertex count for this mesh (before it's consumed)
+        // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;
+        let triangle_count = (mesh_result.solid.indices.len() / 3) as u32;
         chunk_stats.water_air_boundaries_total +=
             mesh_result.water_stats.air_boundaries_total as u64;
         chunk_stats.water_air_boundaries_exposed +=
@@ -969,6 +985,16 @@ fn mesh_dirty_chunks_system(
 
             let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
             let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            let terrain_quality =
+                terrain_material_quality_for_lod(lod_level, bench_toggles.as_deref());
+            let triplanar_handle = triplanar_material.handle_for_quality(terrain_quality);
+            let chunk_mesh = crate::voxel::meshing::ChunkMesh {
+                chunk_position: chunk_pos,
+                vertex_count,
+                triangle_count,
+                mesh_mode: target_mode,
+                material_quality: terrain_quality,
+            };
 
             // Track meshing statistics
             chunk_stats.meshing_time_us += mesh_elapsed.as_micros() as u64;
@@ -994,6 +1020,7 @@ fn mesh_dirty_chunks_system(
                                     .insert((
                                         Mesh3d(mesh_handle),
                                         MeshMaterial3d(blocky_mat.handle.clone()),
+                                        chunk_mesh,
                                         NeedsCollider,
                                     ))
                                     .remove::<MeshMaterial3d<
@@ -1006,7 +1033,8 @@ fn mesh_dirty_chunks_system(
                                 .entity(entity)
                                 .insert((
                                     Mesh3d(mesh_handle),
-                                    MeshMaterial3d(triplanar_material.handle.clone()),
+                                    MeshMaterial3d(triplanar_handle),
+                                    chunk_mesh,
                                     NeedsCollider,
                                 ))
                                 .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
@@ -1038,9 +1066,7 @@ fn mesh_dirty_chunks_system(
                                         world_pos.y as f32,
                                         world_pos.z as f32,
                                     ),
-                                    crate::voxel::meshing::ChunkMesh {
-                                        chunk_position: chunk_pos,
-                                    },
+                                    chunk_mesh,
                                     NeedsCollider,
                                     terrain_layers,
                                 ))
@@ -1049,15 +1075,13 @@ fn mesh_dirty_chunks_system(
                         MeshMode::SurfaceNets => commands
                             .spawn((
                                 Mesh3d(mesh_handle),
-                                MeshMaterial3d(triplanar_material.handle.clone()),
+                                MeshMaterial3d(triplanar_handle),
                                 Transform::from_xyz(
                                     world_pos.x as f32,
                                     world_pos.y as f32,
                                     world_pos.z as f32,
                                 ),
-                                crate::voxel::meshing::ChunkMesh {
-                                    chunk_position: chunk_pos,
-                                },
+                                chunk_mesh,
                                 NeedsCollider,
                                 terrain_layers,
                             ))
@@ -1074,6 +1098,7 @@ fn mesh_dirty_chunks_system(
                     chunk.clear_water_mesh_entity();
                 }
             } else {
+                let water_vertex_count = mesh_result.water.positions.len() as u32;
                 let water_triangle_count = mesh_result.water.indices.len() / 3;
                 let allow_fancy_water = water_triangle_count >= WATER_FANCY_MIN_TRIANGLES
                     && water_max_depth >= WATER_FANCY_MIN_DEPTH;
@@ -1088,6 +1113,13 @@ fn mesh_dirty_chunks_system(
                     let mut entity_cmd = commands.entity(entity);
                     entity_cmd.insert((
                         Mesh3d(water_mesh_handle),
+                        crate::voxel::meshing::ChunkMesh {
+                            chunk_position: chunk_pos,
+                            vertex_count: water_vertex_count,
+                            triangle_count: water_triangle_count as u32,
+                            mesh_mode: MeshMode::Blocky,
+                            material_quality: TerrainMaterialQuality::FullTriplanar,
+                        },
                         WaterMesh,
                         WaterMeshDetail {
                             triangle_count: water_triangle_count,
@@ -1114,6 +1146,10 @@ fn mesh_dirty_chunks_system(
                         ),
                         crate::voxel::meshing::ChunkMesh {
                             chunk_position: chunk_pos,
+                            vertex_count: water_vertex_count,
+                            triangle_count: water_triangle_count as u32,
+                            mesh_mode: MeshMode::Blocky,
+                            material_quality: TerrainMaterialQuality::FullTriplanar,
                         },
                         WaterMesh,
                         WaterMeshDetail {
@@ -1218,6 +1254,104 @@ fn mesh_dirty_chunks_system(
         "Water Mesh Entities",
         chunk_stats.water_mesh_entities as f64,
     );
+}
+
+fn terrain_material_quality_for_lod(
+    lod_level: LodLevel,
+    bench_toggles: Option<&BenchRenderToggles>,
+) -> TerrainMaterialQuality {
+    if let Some(forced) =
+        bench_toggles.and_then(|toggles| toggles.terrain_material_quality.forced_quality())
+    {
+        return forced;
+    }
+    if bench_toggles.is_some_and(|toggles| toggles.disable_terrain_material_lod) {
+        return TerrainMaterialQuality::FullTriplanar;
+    }
+    match lod_level {
+        LodLevel::Lod0 => TerrainMaterialQuality::FullTriplanar,
+        LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 | LodLevel::Culled => {
+            TerrainMaterialQuality::SingleProjectionFar
+        }
+    }
+}
+
+fn terrain_material_quality_for_distance(
+    distance: f32,
+    current: TerrainMaterialQuality,
+    bench_toggles: Option<&BenchRenderToggles>,
+    quality_preset: RenderQualityPreset,
+) -> TerrainMaterialQuality {
+    if let Some(forced) =
+        bench_toggles.and_then(|toggles| toggles.terrain_material_quality.forced_quality())
+    {
+        return forced;
+    }
+    if bench_toggles.is_some_and(|toggles| toggles.disable_terrain_material_lod) {
+        return TerrainMaterialQuality::FullTriplanar;
+    }
+
+    let lod_distance = quality_preset.terrain_material_lod_distance(TERRAIN_MATERIAL_LOD_DISTANCE);
+    let switch_in = (lod_distance - TERRAIN_MATERIAL_LOD_HYSTERESIS).max(0.0);
+    let switch_out = lod_distance + TERRAIN_MATERIAL_LOD_HYSTERESIS;
+    match current {
+        TerrainMaterialQuality::FullTriplanar if distance > switch_out => {
+            TerrainMaterialQuality::SingleProjectionFar
+        }
+        TerrainMaterialQuality::SingleProjectionFar if distance < switch_in => {
+            TerrainMaterialQuality::FullTriplanar
+        }
+        TerrainMaterialQuality::CheapTriplanar | TerrainMaterialQuality::AtlasOnlyDebug => current,
+        _ => current,
+    }
+}
+
+fn update_terrain_material_lod(
+    time: Res<Time>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    triplanar_material: Res<TriplanarMaterialHandle>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
+    quality_preset: Res<RenderQualityPreset>,
+    mut terrain_meshes: Query<
+        (
+            &Transform,
+            &mut ChunkMesh,
+            &mut MeshMaterial3d<TriplanarMaterial>,
+        ),
+        Without<WaterMesh>,
+    >,
+    mut last_update: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last_update < TERRAIN_MATERIAL_UPDATE_INTERVAL {
+        return;
+    }
+    *last_update = now;
+
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let camera_pos = camera_transform.translation;
+    let bench_toggles = bench_toggles.as_deref();
+
+    for (transform, mut chunk_mesh, mut material) in &mut terrain_meshes {
+        if chunk_mesh.mesh_mode != MeshMode::SurfaceNets {
+            continue;
+        }
+        let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+        let distance = chunk_center.distance(camera_pos);
+        let target_quality = terrain_material_quality_for_distance(
+            distance,
+            chunk_mesh.material_quality,
+            bench_toggles,
+            *quality_preset,
+        );
+        if target_quality == chunk_mesh.material_quality {
+            continue;
+        }
+        **material = triplanar_material.handle_for_quality(target_quality);
+        chunk_mesh.material_quality = target_quality;
+    }
 }
 
 fn update_water_material_lod(
@@ -1582,17 +1716,44 @@ fn update_chunk_lod_system(
     mut last_camera_pos: Local<Option<Vec3>>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "LOD Update");
+    lod_transitions.repeated_chunks_this_frame = 0;
     if lod_control.freeze_lod {
+        drop(_timer);
+        record_lod_counters(
+            &mut timing,
+            frame.0,
+            0,
+            lod_transitions.changes_per_second,
+            0,
+        );
         return;
     }
 
     // Throttle to ~4Hz (every 0.25s)
     let now = time.elapsed_secs();
     if now - *last_update < 0.25 {
+        refresh_lod_change_rate(now, &mut lod_transitions);
+        drop(_timer);
+        record_lod_counters(
+            &mut timing,
+            frame.0,
+            0,
+            lod_transitions.changes_per_second,
+            0,
+        );
         return;
     }
 
     let Ok(camera_transform) = camera_query.single() else {
+        refresh_lod_change_rate(now, &mut lod_transitions);
+        drop(_timer);
+        record_lod_counters(
+            &mut timing,
+            frame.0,
+            0,
+            lod_transitions.changes_per_second,
+            0,
+        );
         return;
     };
 
@@ -1601,6 +1762,15 @@ fn update_chunk_lod_system(
     // Skip if camera hasn't moved more than 2 world units since last update
     if let Some(prev) = *last_camera_pos {
         if camera_pos.distance_squared(prev) < 4.0 {
+            refresh_lod_change_rate(now, &mut lod_transitions);
+            drop(_timer);
+            record_lod_counters(
+                &mut timing,
+                frame.0,
+                0,
+                lod_transitions.changes_per_second,
+                0,
+            );
             return;
         }
     }
@@ -1634,18 +1804,27 @@ fn update_chunk_lod_system(
             lod_transitions
                 .last_change_frame
                 .insert(*chunk_pos, frame.0);
+            let change_count = lod_transitions.change_count.entry(*chunk_pos).or_insert(0);
+            *change_count += 1;
+            if *change_count > 1 {
+                lod_transitions.repeated_chunks_this_frame += 1;
+            }
             lod_changed.push(*chunk_pos);
         }
     }
 
-    for chunk_pos in lod_changed {
+    lod_transitions.changes_this_second += lod_changed.len() as u32;
+    refresh_lod_change_rate(now, &mut lod_transitions);
+
+    let lod_changed_count = lod_changed.len() as u32;
+    for chunk_pos in &lod_changed {
         for offset in [
             IVec3::new(-1, 0, 0),
             IVec3::new(1, 0, 0),
             IVec3::new(0, 0, -1),
             IVec3::new(0, 0, 1),
         ] {
-            let neighbor_pos = chunk_pos + offset;
+            let neighbor_pos = *chunk_pos + offset;
             if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
                 neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
             }
@@ -1656,5 +1835,49 @@ fn update_chunk_lod_system(
         lod_transitions
             .last_change_frame
             .retain(|_, last_frame| frame.0.saturating_sub(*last_frame) < 3_600);
+        let active_change_frames = lod_transitions.last_change_frame.clone();
+        lod_transitions
+            .change_count
+            .retain(|chunk_pos, _| active_change_frames.contains_key(chunk_pos));
     }
+    let repeated_chunks_this_frame = lod_transitions.repeated_chunks_this_frame;
+    let changes_per_second = lod_transitions.changes_per_second;
+    drop(_timer);
+    record_lod_counters(
+        &mut timing,
+        frame.0,
+        lod_changed_count,
+        changes_per_second,
+        repeated_chunks_this_frame,
+    );
+}
+
+fn record_lod_counters(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    changes: u32,
+    changes_per_second: f32,
+    repeated_chunks: u32,
+) {
+    timing.record_count(frame, "Terrain LOD Changes", changes as f64);
+    timing.record_count(
+        frame,
+        "Terrain LOD Changes Per Second",
+        changes_per_second as f64,
+    );
+    timing.record_count(frame, "Terrain LOD Repeated Chunks", repeated_chunks as f64);
+}
+
+fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionState) {
+    if lod_transitions.last_change_second == 0.0 {
+        lod_transitions.last_change_second = now;
+        return;
+    }
+    if now - lod_transitions.last_change_second < 1.0 {
+        return;
+    }
+    let elapsed = (now - lod_transitions.last_change_second).max(0.001);
+    lod_transitions.changes_per_second = lod_transitions.changes_this_second as f32 / elapsed;
+    lod_transitions.changes_this_second = 0;
+    lod_transitions.last_change_second = now;
 }
