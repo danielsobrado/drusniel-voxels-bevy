@@ -522,6 +522,7 @@ pub fn setup_props_material(
                 blend_sharpness: 4.0,
                 normal_intensity: 0.0,
                 default_roughness: 0.8,
+                alpha_cutoff: 0.0,
                 ..default()
             },
             ..default()
@@ -535,6 +536,7 @@ pub fn setup_props_material(
                 blend_sharpness: 4.0,
                 normal_intensity: 1.0,
                 default_roughness: 0.8,
+                alpha_cutoff: 0.0,
                 ..default()
             },
             // Rock textures (full props PBR)
@@ -542,6 +544,7 @@ pub fn setup_props_material(
             rock_normal: load_image_if_exists(&asset_server, "pbr/props/rock/normal.png"),
             rock_roughness: load_image_if_exists(&asset_server, "pbr/props/rock/roughness.png"),
             rock_ao: load_image_if_exists(&asset_server, "pbr/props/rock/ao.png"),
+            alpha_mode: AlphaMode::Opaque,
         }
     });
 
@@ -582,7 +585,8 @@ pub fn sync_fog_to_materials(
 
     // Update props material
     if let Some(handle) = props_handle {
-        if let Some(mat) = props_materials.get_mut(&handle.handle) {
+        let _ = handle;
+        for (_, mat) in props_materials.iter_mut() {
             mat.uniforms.fog_color = fog.fog_color;
             mat.uniforms.fog_start = fog.fog_start;
             mat.uniforms.fog_end = fog.fog_end;

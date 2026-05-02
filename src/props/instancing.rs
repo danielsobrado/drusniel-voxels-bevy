@@ -5,12 +5,14 @@
 //! to batch identical meshes together.
 
 use bevy::gltf::{GltfMesh, GltfNode};
+use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::PropAssets;
 #[cfg(feature = "legacy_prop_spawn")]
 use super::PropType;
+use crate::rendering::props_material::{PropsMaterial, PropsUniforms};
 
 /// Cached mesh data extracted from a GLTF prop.
 #[derive(Clone)]
@@ -19,6 +21,8 @@ pub struct CachedPropMesh {
     pub mesh: Handle<Mesh>,
     /// The material handle (shared across all instances)
     pub material: Handle<StandardMaterial>,
+    /// Converted material used by the custom instanced props renderer.
+    pub instanced_material: Handle<PropsMaterial>,
     /// Local transform offset from the GLTF node
     pub local_transform: Transform,
 }
@@ -83,8 +87,9 @@ pub fn extract_prop_meshes(
     gltf_assets: Res<Assets<Gltf>>,
     gltf_meshes: Res<Assets<GltfMesh>>,
     gltf_nodes: Res<Assets<GltfNode>>,
-    meshes: Res<Assets<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut props_materials: ResMut<Assets<PropsMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
     if !cache.enabled || cache.extraction_complete || !prop_assets.loaded {
@@ -130,6 +135,9 @@ pub fn extract_prop_meshes(
     let pending: Vec<(String, Handle<Gltf>)> = cache.pending_gltfs.drain().collect();
     let mut still_pending = Vec::new();
 
+    let mut converted_materials = HashMap::new();
+    let mut instancing_meshes = HashMap::new();
+
     for (prop_id, gltf_handle) in pending {
         let Some(gltf) = gltf_assets.get(&gltf_handle) else {
             // Not loaded yet, keep waiting
@@ -146,10 +154,14 @@ pub fn extract_prop_meshes(
                     gltf_node,
                     &gltf_nodes,
                     &gltf_meshes,
-                    &meshes,
+                    &mut meshes,
+                    &materials,
+                    &mut props_materials,
                     &default_mat,
                     Transform::IDENTITY,
                     &mut cached_meshes,
+                    &mut converted_materials,
+                    &mut instancing_meshes,
                 );
             }
         }
@@ -167,10 +179,22 @@ pub fn extract_prop_meshes(
                             .material
                             .clone()
                             .unwrap_or_else(|| default_mat.clone());
+                        let instanced_material = converted_props_material(
+                            &material,
+                            &materials,
+                            &mut props_materials,
+                            &mut converted_materials,
+                        );
+                        let mesh = ensure_instancing_mesh(
+                            &primitive.mesh,
+                            &mut meshes,
+                            &mut instancing_meshes,
+                        );
 
                         cached_meshes.push(CachedPropMesh {
-                            mesh: primitive.mesh.clone(),
+                            mesh,
                             material,
+                            instanced_material,
                             local_transform: Transform::IDENTITY,
                         });
                     }
@@ -213,10 +237,14 @@ fn extract_meshes_from_node(
     node: &GltfNode,
     gltf_nodes: &Assets<GltfNode>,
     gltf_meshes: &Assets<GltfMesh>,
-    meshes: &Assets<Mesh>,
+    meshes: &mut Assets<Mesh>,
+    materials: &Assets<StandardMaterial>,
+    props_materials: &mut Assets<PropsMaterial>,
     default_material: &Handle<StandardMaterial>,
     parent_transform: Transform,
     results: &mut Vec<CachedPropMesh>,
+    converted_materials: &mut HashMap<AssetId<StandardMaterial>, Handle<PropsMaterial>>,
+    instancing_meshes: &mut HashMap<AssetId<Mesh>, Handle<Mesh>>,
 ) {
     let node_transform = parent_transform * node.transform;
 
@@ -232,10 +260,18 @@ fn extract_meshes_from_node(
                     .material
                     .clone()
                     .unwrap_or_else(|| default_material.clone());
+                let instanced_material = converted_props_material(
+                    &material,
+                    materials,
+                    props_materials,
+                    converted_materials,
+                );
+                let mesh = ensure_instancing_mesh(&primitive.mesh, meshes, instancing_meshes);
 
                 results.push(CachedPropMesh {
-                    mesh: primitive.mesh.clone(),
+                    mesh,
                     material,
+                    instanced_material,
                     local_transform: node_transform,
                 });
             }
@@ -250,12 +286,108 @@ fn extract_meshes_from_node(
                 gltf_nodes,
                 gltf_meshes,
                 meshes,
+                materials,
+                props_materials,
                 default_material,
                 node_transform,
                 results,
+                converted_materials,
+                instancing_meshes,
             );
         }
     }
+}
+
+fn converted_props_material(
+    material_handle: &Handle<StandardMaterial>,
+    materials: &Assets<StandardMaterial>,
+    props_materials: &mut Assets<PropsMaterial>,
+    converted_materials: &mut HashMap<AssetId<StandardMaterial>, Handle<PropsMaterial>>,
+) -> Handle<PropsMaterial> {
+    let material_id = material_handle.id();
+    if let Some(existing) = converted_materials.get(&material_id) {
+        return existing.clone();
+    }
+
+    let source = materials.get(material_handle);
+    let alpha_mode = source
+        .map(|material| material.alpha_mode.clone())
+        .unwrap_or(AlphaMode::Opaque);
+    let alpha_cutoff = match alpha_mode {
+        AlphaMode::Mask(cutoff) => cutoff,
+        _ => 0.0,
+    };
+    let handle = props_materials.add(PropsMaterial {
+        uniforms: PropsUniforms {
+            base_color: source
+                .map(|material| material.base_color.to_linear())
+                .unwrap_or(LinearRgba::WHITE),
+            default_roughness: source
+                .map(|material| material.perceptual_roughness)
+                .unwrap_or(0.8),
+            normal_intensity: if source
+                .is_some_and(|material| material.normal_map_texture.is_some())
+            {
+                1.0
+            } else {
+                0.0
+            },
+            alpha_cutoff,
+            ..default()
+        },
+        rock_albedo: source.and_then(|material| material.base_color_texture.clone()),
+        rock_normal: source.and_then(|material| material.normal_map_texture.clone()),
+        rock_roughness: None,
+        rock_ao: None,
+        alpha_mode,
+    });
+    converted_materials.insert(material_id, handle.clone());
+    handle
+}
+
+fn ensure_instancing_mesh(
+    mesh_handle: &Handle<Mesh>,
+    meshes: &mut Assets<Mesh>,
+    instancing_meshes: &mut HashMap<AssetId<Mesh>, Handle<Mesh>>,
+) -> Handle<Mesh> {
+    let mesh_id = mesh_handle.id();
+    if let Some(existing) = instancing_meshes.get(&mesh_id) {
+        return existing.clone();
+    }
+
+    let Some(mesh) = meshes.get(mesh_handle) else {
+        return mesh_handle.clone();
+    };
+
+    let missing_color = mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_none();
+    let missing_uv = mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none();
+    if !missing_color && !missing_uv {
+        instancing_meshes.insert(mesh_id, mesh_handle.clone());
+        return mesh_handle.clone();
+    }
+
+    let vertex_count = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(values)) => values.len(),
+        _ => {
+            instancing_meshes.insert(mesh_id, mesh_handle.clone());
+            return mesh_handle.clone();
+        }
+    };
+
+    let mut patched_mesh = mesh.clone();
+    if missing_uv {
+        patched_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0_f32, 0.0_f32]; vertex_count]);
+    }
+    if missing_color {
+        patched_mesh.insert_attribute(
+            Mesh::ATTRIBUTE_COLOR,
+            vec![[1.0_f32, 1.0_f32, 1.0_f32, 1.0_f32]; vertex_count],
+        );
+    }
+
+    let patched_handle = meshes.add(patched_mesh);
+    instancing_meshes.insert(mesh_id, patched_handle.clone());
+    patched_handle
 }
 
 /// Spawn a prop using cached meshes instead of SceneRoot.

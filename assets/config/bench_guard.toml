@@ -349,8 +349,8 @@ scene = "water-reflection-direct.toml"
 checkpoint = "direct-water"
 area = "Counter Water Reflection Active"
 field = "avg_ms"
-warn_lt = 1
-fail_lt = 1
+warn_lt = 0.5
+fail_lt = 0.25
 unit = "count"
 
 [[check]]
@@ -376,6 +376,374 @@ unit = "count"
 name = "direct_water_triangles_removed_counter_exists"
 scene = "water-reflection-direct.toml"
 checkpoint = "direct-water"
+area = "Counter Water Triangles Removed Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+# Final phase named scenes. These are intentionally conservative and machine-tunable.
+
+[[check]]
+name = "high_ridge_frame_avg"
+scene = "visual-regression-high.toml"
+checkpoint = "ridge-run-noon"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 12.0
+fail_gt = 15.0
+unit = "ms"
+
+[[check]]
+name = "high_jump_frame_avg"
+scene = "visual-regression-high.toml"
+checkpoint = "jump-water-sunset"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 12.0
+fail_gt = 15.0
+unit = "ms"
+
+[[check]]
+name = "high_forest_frame_avg"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 12.0
+fail_gt = 15.0
+unit = "ms"
+
+[[check]]
+name = "high_ridge_frame_p99"
+scene = "visual-regression-high.toml"
+checkpoint = "ridge-run-noon"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 15.0
+fail_gt = 20.0
+unit = "ms"
+
+[[check]]
+name = "high_jump_frame_p99"
+scene = "visual-regression-high.toml"
+checkpoint = "jump-water-sunset"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 15.0
+fail_gt = 20.0
+unit = "ms"
+
+[[check]]
+name = "high_forest_frame_p99"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 15.0
+fail_gt = 20.0
+unit = "ms"
+
+[[check]]
+name = "high_instancing_prepare_avg"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Render Instancing Prepare Buffers"
+field = "avg_ms"
+warn_gt = 0.5
+fail_gt = 1.0
+unit = "ms"
+
+[[check]]
+name = "high_mesh_dirty_p99"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Mesh Dirty"
+field = "p99_ms"
+warn_gt = 1.0
+fail_gt = 2.0
+unit = "ms"
+
+[[check]]
+name = "high_gpu_opaque_avg"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "GPU main_opaque_pass_3d"
+field = "avg_ms"
+warn_gt = 10.0
+fail_gt = 12.0
+unit = "ms"
+
+[[check]]
+name = "high_forest_instanced_draws"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Render Instancing Queue Draws"
+field = "avg_ms"
+warn_gt = 350
+fail_gt = 450
+unit = "count"
+
+[[check]]
+name = "high_forest_instanced_instances"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Render Instancing Queue Instances"
+field = "avg_ms"
+warn_gt = 15000
+fail_gt = 18000
+unit = "count"
+
+[[check]]
+name = "high_water_reflection_inactive_without_eligible_water"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Reflection Active"
+field = "avg_ms"
+fail_gt = 0
+unit = "count"
+[check.skip_if]
+area = "Counter Water Meshes Eligible For Reflection"
+field = "avg_ms"
+gt = 0
+
+[[check]]
+name = "high_water_reflection_not_sampled_without_eligible_water"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Reflection Sampled"
+field = "avg_ms"
+fail_gt = 0
+unit = "count"
+[check.skip_if]
+area = "Counter Water Meshes Eligible For Reflection"
+field = "avg_ms"
+gt = 0
+
+[[check]]
+name = "high_water_air_sealed_counter_exists"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Air Boundaries Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "high_water_triangles_removed_counter_exists"
+scene = "visual-regression-high.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Triangles Removed Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "perf100_ridge_frame_avg"
+scene = "visual-regression-performance100.toml"
+checkpoint = "ridge-run-noon"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 19.0
+fail_gt = 22.0
+unit = "ms"
+
+[[check]]
+name = "perf100_jump_frame_avg"
+scene = "visual-regression-performance100.toml"
+checkpoint = "jump-water-sunset"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 19.0
+fail_gt = 22.0
+unit = "ms"
+
+[[check]]
+name = "perf100_forest_frame_avg"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "__frame_total"
+field = "avg_ms"
+warn_gt = 19.0
+fail_gt = 22.0
+unit = "ms"
+
+[[check]]
+name = "perf100_ridge_frame_p99"
+scene = "visual-regression-performance100.toml"
+checkpoint = "ridge-run-noon"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 22.0
+fail_gt = 25.0
+unit = "ms"
+
+[[check]]
+name = "perf100_jump_frame_p99"
+scene = "visual-regression-performance100.toml"
+checkpoint = "jump-water-sunset"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 22.0
+fail_gt = 25.0
+unit = "ms"
+
+[[check]]
+name = "perf100_forest_frame_p99"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 22.0
+fail_gt = 25.0
+unit = "ms"
+
+[[check]]
+name = "perf100_instancing_prepare_avg"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Render Instancing Prepare Buffers"
+field = "avg_ms"
+warn_gt = 0.5
+fail_gt = 1.0
+unit = "ms"
+
+[[check]]
+name = "perf100_mesh_dirty_p99"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Mesh Dirty"
+field = "p99_ms"
+warn_gt = 1.0
+fail_gt = 2.0
+unit = "ms"
+
+[[check]]
+name = "perf100_gpu_opaque_avg"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "GPU main_opaque_pass_3d"
+field = "avg_ms"
+warn_gt = 10.0
+fail_gt = 12.0
+unit = "ms"
+
+[[check]]
+name = "perf100_forest_instanced_draws"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Render Instancing Queue Draws"
+field = "avg_ms"
+warn_gt = 250
+fail_gt = 350
+unit = "count"
+
+[[check]]
+name = "perf100_forest_instanced_instances"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Render Instancing Queue Instances"
+field = "avg_ms"
+warn_gt = 12000
+fail_gt = 15000
+unit = "count"
+
+[[check]]
+name = "perf100_water_reflection_inactive_without_eligible_water"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Reflection Active"
+field = "avg_ms"
+fail_gt = 0
+unit = "count"
+[check.skip_if]
+area = "Counter Water Meshes Eligible For Reflection"
+field = "avg_ms"
+gt = 0
+
+[[check]]
+name = "perf100_water_reflection_not_sampled_without_eligible_water"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Reflection Sampled"
+field = "avg_ms"
+fail_gt = 0
+unit = "count"
+[check.skip_if]
+area = "Counter Water Meshes Eligible For Reflection"
+field = "avg_ms"
+gt = 0
+
+[[check]]
+name = "perf100_water_air_sealed_counter_exists"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Air Boundaries Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "perf100_water_triangles_removed_counter_exists"
+scene = "visual-regression-performance100.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Triangles Removed Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "live_lod_ridge_mesh_dirty_p99"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "ridge-run-noon"
+area = "Mesh Dirty"
+field = "p99_ms"
+warn_gt = 5.0
+fail_gt = 10.0
+unit = "ms"
+
+[[check]]
+name = "live_lod_jump_mesh_dirty_p99"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "jump-water-sunset"
+area = "Mesh Dirty"
+field = "p99_ms"
+warn_gt = 5.0
+fail_gt = 10.0
+unit = "ms"
+
+[[check]]
+name = "live_lod_forest_mesh_dirty_p99"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "forest-look-sweep"
+area = "Mesh Dirty"
+field = "p99_ms"
+warn_gt = 5.0
+fail_gt = 10.0
+unit = "ms"
+
+[[check]]
+name = "live_lod_frame_p99"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "forest-look-sweep"
+area = "__frame_total"
+field = "p99_ms"
+warn_gt = 20.0
+fail_gt = 25.0
+unit = "ms"
+
+[[check]]
+name = "live_lod_water_air_sealed_counter_exists"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter Water Air Boundaries Sealed"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "live_lod_water_triangles_removed_counter_exists"
+scene = "visual-regression-live-lod.toml"
+checkpoint = "forest-look-sweep"
 area = "Counter Water Triangles Removed Sealed"
 field = "avg_ms"
 exists = true

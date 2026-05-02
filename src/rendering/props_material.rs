@@ -26,6 +26,8 @@ pub struct PropsUniforms {
     pub fog_end: f32,
     /// Aerial perspective strength multiplier
     pub aerial_strength: f32,
+    /// Alpha cutoff for mask materials; 0.0 disables cutout discard
+    pub alpha_cutoff: f32,
     /// Padding for alignment
     pub _padding: f32,
     /// Fog color for aerial perspective (from atmosphere system)
@@ -43,6 +45,7 @@ impl Default for PropsUniforms {
             fog_start: 80.0,
             fog_end: 220.0,
             aerial_strength: 1.0,
+            alpha_cutoff: 0.0,
             _padding: 0.0,
             fog_color: LinearRgba::new(0.7, 0.78, 0.88, 1.0), // Default day fog
         }
@@ -93,6 +96,7 @@ pub struct PropsMaterial {
     pub rock_roughness: Option<Handle<Image>>,
     #[texture(5)]
     pub rock_ao: Option<Handle<Image>>,
+    pub alpha_mode: AlphaMode,
     // Furniture textures - standard PBR (vertex AO baked)
     // #[texture(6)]
     // pub furniture_albedo: Option<Handle<Image>>,
@@ -116,6 +120,7 @@ impl Default for PropsMaterial {
             rock_normal: None,
             rock_roughness: None,
             rock_ao: None,
+            alpha_mode: AlphaMode::Opaque,
             // furniture_albedo: None,
             // furniture_normal: None,
             // furniture_roughness: None,
@@ -135,7 +140,7 @@ impl Material for PropsMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
+        self.alpha_mode.clone()
     }
 
     fn opaque_render_method(&self) -> OpaqueRendererMethod {

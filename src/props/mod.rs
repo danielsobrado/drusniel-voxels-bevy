@@ -777,10 +777,10 @@ fn spawn_props_from_placement_data(
             if let (Some(cached), Some(prop_material)) =
                 (mesh_cache.get_cached(&prop.id), prop_material)
             {
+                let _ = prop_material;
                 if let Some(entity) = instanced_render::spawn_instanced_prop(
                     commands,
                     prop_groups,
-                    prop_material,
                     cached,
                     &prop.id,
                     transform.clone(),

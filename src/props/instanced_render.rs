@@ -48,7 +48,7 @@ use crate::props::PropType;
 use crate::props::instancing::{CachedPropMesh, InstancedProp};
 use crate::props::lod_material::PropLodState;
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle};
+use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
@@ -368,7 +368,6 @@ fn configure_prop_instancing_limits(
 pub fn spawn_instanced_prop(
     commands: &mut Commands,
     groups: &mut PropInstanceGroups,
-    prop_material: &PropsMaterialHandle,
     cached: &[CachedPropMesh],
     prop_id: &str,
     transform: Transform,
@@ -405,7 +404,7 @@ pub fn spawn_instanced_prop(
             commands,
             groups,
             cached_mesh.mesh.clone(),
-            prop_material.handle.clone(),
+            cached_mesh.instanced_material.clone(),
             chunk_pos,
             min,
             max,
@@ -1651,6 +1650,7 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            Mesh::ATTRIBUTE_COLOR.at_shader_location(3),
         ])?;
         descriptor.vertex.shader = self.shader.clone();
         descriptor.vertex.shader_defs.push(ShaderDefVal::UInt(
@@ -1703,6 +1703,7 @@ impl SpecializedMeshPipeline for PropInstancingShadowPipeline {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            Mesh::ATTRIBUTE_COLOR.at_shader_location(3),
         ])?;
         descriptor.vertex.shader = self.shader.clone();
         descriptor.vertex.shader_defs.push(ShaderDefVal::UInt(
@@ -1755,29 +1756,29 @@ fn instance_vertex_buffer_layout(tint_enabled: bool) -> VertexBufferLayout {
         VertexAttribute {
             format: VertexFormat::Float32x4,
             offset: 0,
-            shader_location: 3,
-        },
-        VertexAttribute {
-            format: VertexFormat::Float32x4,
-            offset: VertexFormat::Float32x4.size(),
             shader_location: 4,
         },
         VertexAttribute {
             format: VertexFormat::Float32x4,
-            offset: VertexFormat::Float32x4.size() * 2,
+            offset: VertexFormat::Float32x4.size(),
             shader_location: 5,
         },
         VertexAttribute {
             format: VertexFormat::Float32x4,
-            offset: VertexFormat::Float32x4.size() * 3,
+            offset: VertexFormat::Float32x4.size() * 2,
             shader_location: 6,
+        },
+        VertexAttribute {
+            format: VertexFormat::Float32x4,
+            offset: VertexFormat::Float32x4.size() * 3,
+            shader_location: 7,
         },
     ];
     if tint_enabled {
         attributes.push(VertexAttribute {
             format: VertexFormat::Float32x4,
             offset: VertexFormat::Float32x4.size() * 4,
-            shader_location: 7,
+            shader_location: 8,
         });
     }
     VertexBufferLayout {
@@ -1932,6 +1933,7 @@ fn queue_instanced_props(
                     | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology()),
                 phase,
                 group,
+                material,
             );
             let key = PropInstancingPipelineKey {
                 mesh_key,
@@ -2204,6 +2206,7 @@ fn instanced_prop_mesh_key_for_phase(
     mut mesh_key: MeshPipelineKey,
     phase: InstancedPropRenderPhase,
     group: &InstancedPropGroup,
+    material: &PreparedMaterial,
 ) -> MeshPipelineKey {
     match phase {
         InstancedPropRenderPhase::Opaque => {
@@ -2215,7 +2218,12 @@ fn instanced_prop_mesh_key_for_phase(
             mesh_key |= MeshPipelineKey::MAY_DISCARD;
         }
         InstancedPropRenderPhase::Transparent => {
-            if group_uses_blended_alpha(group) {
+            if group_uses_blended_alpha(group)
+                || matches!(
+                    material.properties.render_phase_type,
+                    RenderPhaseType::Transparent | RenderPhaseType::Transmissive
+                )
+            {
                 mesh_key |= MeshPipelineKey::BLEND_ALPHA;
             } else if instanced_prop_shader_uses_cutout() {
                 mesh_key |= MeshPipelineKey::MAY_DISCARD;

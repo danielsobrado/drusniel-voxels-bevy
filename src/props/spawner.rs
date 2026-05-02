@@ -638,10 +638,10 @@ fn spawn_props_from_data(
             if let (Some(cached), Some(prop_material)) =
                 (mesh_cache.get_cached(&prop.id), prop_material)
             {
+                let _ = prop_material;
                 if let Some(entity) = instanced_render::spawn_instanced_prop(
                     commands,
                     prop_groups,
-                    prop_material,
                     cached,
                     &prop.id,
                     transform.clone(),
@@ -1047,6 +1047,7 @@ pub fn spawn_debug_custom_props_near_player(
         if let (Some(cached), Some(prop_material)) =
             (mesh_cache.get_cached(id), prop_material.as_deref())
         {
+            let _ = prop_material;
             let chunk_pos = IVec2::new(
                 (position.x.floor() as i32).div_euclid(PROP_CHUNK_SIZE),
                 (position.z.floor() as i32).div_euclid(PROP_CHUNK_SIZE),
@@ -1054,7 +1055,6 @@ pub fn spawn_debug_custom_props_near_player(
             if let Some(entity) = instanced_render::spawn_instanced_prop(
                 &mut commands,
                 &mut prop_groups,
-                prop_material,
                 cached,
                 id,
                 transform.clone(),
