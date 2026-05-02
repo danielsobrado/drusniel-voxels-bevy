@@ -1,0 +1,45 @@
+seed = 12345
+duration_warmup_secs = 2.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = false
+
+[[checkpoint]]
+name = "terrain-boundary-sprint"
+position = [462.6, 36.0, 400.7]
+look_at = [500.0, 32.0, 440.0]
+time_of_day = 0.45
+hold_frames = 720
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [462.6, 34.5, 400.7]
+start_look_at = [500.0, 32.0, 440.0]
+movement = [0.0, 1.0]
+sprint = true
+jump_every_frames = 120
+min_horizontal_speed = 2.0
+stall_after_frames = 18
+max_stall_events = 0
+fail_on_stall = true
+
+[[checkpoint]]
+name = "old-hole-repro-sprint"
+position = [389.6, 52.0, 172.6]
+look_at = [430.0, 47.0, 215.0]
+time_of_day = 0.45
+hold_frames = 720
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [389.6, 50.5, 172.6]
+start_look_at = [430.0, 47.0, 215.0]
+movement = [0.0, 1.0]
+sprint = true
+jump_every_frames = 120
+min_horizontal_speed = 2.0
+stall_after_frames = 18
+max_stall_events = 0
+fail_on_stall = true

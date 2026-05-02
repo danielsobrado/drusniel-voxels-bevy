@@ -1,3 +1,5 @@
+use avian3d::prelude::LinearVelocity;
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
@@ -5,6 +7,7 @@ use super::{Player, PlayerConfig, PlayerMovementScheme, PlayerMovementSchemeConf
 use crate::camera::controller::PlayerCamera;
 use crate::input::config::GameAction;
 use crate::input::manager::ActionState;
+use crate::performance::AreaTimingRecorder;
 
 /// Player input state.
 #[derive(Resource, Default)]
@@ -84,5 +87,91 @@ pub fn apply_player_movement(
 
     if input.jump {
         controller.action(PlayerMovementScheme::Jump(TnuaBuiltinJump::default()));
+    }
+}
+
+pub fn record_player_movement_diagnostics(
+    input: Res<PlayerInput>,
+    frame: Res<FrameCount>,
+    mut stall_frames: Local<u32>,
+    mut last_profile_log_frame: Local<u32>,
+    mut timing: ResMut<AreaTimingRecorder>,
+    player_query: Query<(&Transform, Option<&LinearVelocity>, &PlayerConfig), With<Player>>,
+) {
+    let Ok((transform, velocity, config)) = player_query.single() else {
+        return;
+    };
+
+    let profile_log_enabled = std::env::var_os("VOXEL_MOVEMENT_PROFILE").is_some();
+    if profile_log_enabled && !timing.enabled {
+        timing.set_enabled(true);
+    }
+
+    let requested_speed = if input.sprint {
+        config.run_speed
+    } else {
+        config.walk_speed
+    };
+    let horizontal_speed = velocity
+        .map(|velocity| Vec2::new(velocity.x, velocity.z).length())
+        .unwrap_or(0.0);
+    let input_active = input.movement.length_squared() > 0.25;
+    let stalled = input_active && requested_speed > 0.0 && horizontal_speed < requested_speed * 0.2;
+
+    if stalled {
+        *stall_frames += 1;
+    } else {
+        *stall_frames = 0;
+    }
+
+    timing.record_count(
+        frame.0,
+        "Player Movement Input Active",
+        input_active as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Player Movement Horizontal Speed",
+        horizontal_speed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Player Movement Stall Frames",
+        *stall_frames as f64,
+    );
+
+    let should_log_profile = profile_log_enabled
+        && frame.0.saturating_sub(*last_profile_log_frame) >= 300
+        && !timing.rolling_summaries().is_empty();
+    let should_log_stall = profile_log_enabled
+        && *stall_frames >= 12
+        && (*stall_frames == 12 || *stall_frames % 60 == 0);
+
+    if should_log_profile || should_log_stall {
+        *last_profile_log_frame = frame.0;
+        let mut summaries = timing.rolling_summaries();
+        summaries.truncate(12);
+        let summary_text = summaries
+            .iter()
+            .map(|summary| {
+                format!(
+                    "{} avg={:.2} p99={:.2} {}",
+                    summary.area, summary.avg_ms, summary.p99_ms, summary.unit
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let level = if should_log_stall { "stall" } else { "profile" };
+        warn!(
+            "Player movement {level}: stall_frames={} input_active={} pos=({:.1},{:.1},{:.1}) requested_speed={:.2} horizontal_speed={:.2} timings=[{}]",
+            *stall_frames,
+            input_active,
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z,
+            requested_speed,
+            horizontal_speed,
+            summary_text
+        );
     }
 }

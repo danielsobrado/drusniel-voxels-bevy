@@ -13,7 +13,7 @@ use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
 use clap::Parser;
 use std::collections::HashMap;
 use voxel_builder::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
-use voxel_builder::bench::{BenchCli, BenchConfig, BenchPlugin};
+use voxel_builder::bench::{BenchCli, BenchConfig, BenchPlugin, bench_scene_requires_gameplay};
 use voxel_builder::building::BuildingPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
@@ -360,7 +360,10 @@ fn main() {
         .add_plugins(EntityPlugin)
         .add_plugins(ParticlePlugin);
 
-    if bench_config.is_some() {
+    if let Some(config) = bench_config.as_ref() {
+        if bench_scene_requires_gameplay(&config.scene_path) {
+            app.add_plugins(PhysicsPlugin).add_plugins(PlayerPlugin);
+        }
         app.add_plugins(BenchPlugin);
     } else {
         app.add_plugins(PhysicsPlugin)

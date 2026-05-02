@@ -17,6 +17,7 @@ impl Plugin for PlayerPlugin {
             (
                 read_player_input,
                 apply_player_movement.in_set(TnuaUserControlsSystems),
+                record_player_movement_diagnostics,
             )
                 .chain(),
         );

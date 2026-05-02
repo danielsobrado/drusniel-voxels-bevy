@@ -39,7 +39,7 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
-const MAX_CHUNKS_PER_FRAME: usize = 16;
+const MAX_CHUNKS_PER_FRAME: usize = 4;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
@@ -994,12 +994,8 @@ fn mesh_dirty_chunks_system(
         // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;
         let triangle_count = (mesh_result.solid.indices.len() / 3) as u32;
-        if uniformity != ChunkUniformity::Empty && triangle_count == 0 {
+        if uniformity == ChunkUniformity::Mixed && triangle_count == 0 {
             terrain_mesh_empty_but_solid_voxels += 1;
-            warn!(
-                "Terrain mesh empty despite non-empty voxel data: chunk={:?} uniformity={:?} lod={:?}",
-                chunk_pos, uniformity, lod_level
-            );
         }
         chunk_stats.water_air_boundaries_total +=
             mesh_result.water_stats.air_boundaries_total as u64;
@@ -1876,17 +1872,15 @@ fn update_chunk_lod_system(
 
     let lod_changed_count = lod_changed.len() as u32;
     for chunk_pos in &lod_changed {
-        for dz in -1..=1 {
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    if dx == 0 && dy == 0 && dz == 0 {
-                        continue;
-                    }
-                    let neighbor_pos = *chunk_pos + IVec3::new(dx, dy, dz);
-                    if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                        neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
-                    }
-                }
+        for offset in [
+            IVec3::new(-1, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(0, 0, -1),
+            IVec3::new(0, 0, 1),
+        ] {
+            let neighbor_pos = *chunk_pos + offset;
+            if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
+                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
             }
         }
     }

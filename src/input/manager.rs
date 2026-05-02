@@ -21,6 +21,31 @@ impl ActionState {
     pub fn just_released(&self, action: GameAction) -> bool {
         *self.just_released.get(&action).unwrap_or(&false)
     }
+
+    pub fn set_pressed(&mut self, action: GameAction, currently_pressed: bool) {
+        let previously_pressed = *self.pressed.get(&action).unwrap_or(&false);
+
+        if currently_pressed && !previously_pressed {
+            self.just_pressed.insert(action, true);
+        } else {
+            self.just_pressed.remove(&action);
+        }
+
+        if !currently_pressed && previously_pressed {
+            self.just_released.insert(action, true);
+        } else {
+            self.just_released.remove(&action);
+        }
+
+        self.pressed.insert(action, currently_pressed);
+    }
+
+    pub fn release_all(&mut self) {
+        let actions = self.pressed.keys().copied().collect::<Vec<_>>();
+        for action in actions {
+            self.set_pressed(action, false);
+        }
+    }
 }
 
 pub fn update_action_state(

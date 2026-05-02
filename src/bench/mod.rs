@@ -1,11 +1,14 @@
 use crate::atmosphere::{FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::environment::AtmosphereSettings;
-use crate::interaction::{DebugDetailToggles, palette::PlacementPaletteState};
+use crate::input::config::GameAction;
+use crate::input::manager::ActionState;
+use crate::interaction::{DebugDetailToggles, TargetedBlock, palette::PlacementPaletteState};
 use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
+use crate::player::Player;
 use crate::rendering::building_material::BuildingMesh;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
@@ -13,6 +16,7 @@ use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
+use avian3d::prelude::LinearVelocity;
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
@@ -164,6 +168,10 @@ struct BenchState {
     next_screenshot_point: usize,
     current_screenshots: Vec<ScreenshotRecord>,
     current_run: Option<RunRecord>,
+    gameplay_stall_frames: u32,
+    gameplay_stall_events: u32,
+    gameplay_min_horizontal_speed: f32,
+    gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
     started: Instant,
     run_started_utc: String,
@@ -254,6 +262,7 @@ struct BenchCheckpoint {
     screenshot_points: Vec<ScreenshotPoint>,
     fog_tier: Option<String>,
     motion: Option<BenchMotion>,
+    gameplay: Option<BenchGameplay>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -271,6 +280,26 @@ struct BenchMotion {
     jump_height: Option<f32>,
     bob_amplitude: Option<f32>,
     look_sway_degrees: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchGameplay {
+    start_position: Option<[f32; 3]>,
+    start_look_at: Option<[f32; 3]>,
+    #[serde(default = "default_gameplay_movement")]
+    movement: [f32; 2],
+    #[serde(default)]
+    sprint: bool,
+    #[serde(default)]
+    jump_every_frames: Option<u32>,
+    #[serde(default = "default_gameplay_min_horizontal_speed")]
+    min_horizontal_speed: f32,
+    #[serde(default = "default_gameplay_stall_after_frames")]
+    stall_after_frames: u32,
+    #[serde(default)]
+    max_stall_events: u32,
+    #[serde(default = "default_true")]
+    fail_on_stall: bool,
 }
 
 #[derive(Serialize)]
@@ -312,6 +341,9 @@ struct RunRecord {
     render_ready_secs: f32,
     render_ready_stable_frames: u32,
     render_ready_timed_out: bool,
+    gameplay_stall_events: u32,
+    gameplay_failed: bool,
+    gameplay_min_horizontal_speed: f32,
     ready_mesh_entities: u32,
     ready_water_mesh_entities: u32,
 }
@@ -392,6 +424,10 @@ impl Plugin for BenchPlugin {
                 next_screenshot_point: 0,
                 current_screenshots: Vec::new(),
                 current_run: None,
+                gameplay_stall_frames: 0,
+                gameplay_stall_events: 0,
+                gameplay_min_horizontal_speed: 0.0,
+                gameplay_failed: false,
                 checkpoints: Vec::new(),
                 started: Instant::now(),
                 run_started_utc: utc_timestamp(SystemTime::now()),
@@ -407,8 +443,16 @@ impl Plugin for BenchPlugin {
             .init_resource::<PlacementPaletteState>()
             .init_resource::<MapState>()
             .init_resource::<InventoryUiState>()
+            .init_resource::<ActionState>()
+            .init_resource::<TargetedBlock>()
             .add_systems(Startup, setup_bench_environment)
-            .add_systems(PreUpdate, crate::performance::reset_area_timing_frame)
+            .add_systems(
+                PreUpdate,
+                (
+                    crate::performance::reset_area_timing_frame,
+                    apply_bench_gameplay_input,
+                ),
+            )
             .add_systems(
                 Update,
                 (apply_bench_render_toggles, run_bench_state_machine),
@@ -465,12 +509,57 @@ fn apply_bench_render_toggles(
     }
 }
 
+fn apply_bench_gameplay_input(
+    scene: Option<Res<BenchSceneResource>>,
+    state: Option<Res<BenchState>>,
+    mut actions: ResMut<ActionState>,
+) {
+    let Some(scene) = scene else {
+        actions.release_all();
+        return;
+    };
+    let Some(state) = state else {
+        actions.release_all();
+        return;
+    };
+    let Some(checkpoint) = scene.0.checkpoints.get(state.checkpoint_index) else {
+        actions.release_all();
+        return;
+    };
+    let Some(gameplay) = checkpoint.gameplay.as_ref() else {
+        actions.release_all();
+        return;
+    };
+    if state.phase != BenchPhase::Hold {
+        actions.release_all();
+        return;
+    }
+
+    let movement = Vec2::new(gameplay.movement[0], gameplay.movement[1]).normalize_or_zero();
+    actions.set_pressed(GameAction::MoveLeft, movement.x < -0.25);
+    actions.set_pressed(GameAction::MoveRight, movement.x > 0.25);
+    actions.set_pressed(GameAction::MoveBackward, movement.y < -0.25);
+    actions.set_pressed(GameAction::MoveForward, movement.y > 0.25);
+    actions.set_pressed(GameAction::Sprint, gameplay.sprint);
+
+    let jump_pressed = gameplay
+        .jump_every_frames
+        .filter(|frames| *frames > 0)
+        .map(|frames| state.hold_elapsed_frames % frames < 2)
+        .unwrap_or(false);
+    actions.set_pressed(GameAction::Jump, jump_pressed);
+}
+
 fn run_bench_state_machine(
     mut commands: Commands,
     config: Res<BenchConfig>,
     scene: Res<BenchSceneResource>,
     mut state: ResMut<BenchState>,
     mut camera: Query<(&mut Transform, &mut PlayerCamera), With<PlayerCamera>>,
+    mut player: Query<
+        (&mut Transform, Option<&mut LinearVelocity>),
+        (With<Player>, Without<PlayerCamera>),
+    >,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
@@ -502,10 +591,34 @@ fn run_bench_state_machine(
             if let Some(control) = terrain_lod_control.as_deref_mut() {
                 control.freeze_lod = false;
             }
+            let gameplay = checkpoint.gameplay.as_ref();
             if let Ok((mut transform, mut player_camera)) = camera.single_mut() {
-                player_camera.mode = CameraMode::Fly;
-                *transform = Transform::from_translation(vec3(checkpoint.position))
-                    .looking_at(vec3(checkpoint.look_at), Vec3::Y);
+                if let Some(gameplay) = gameplay {
+                    player_camera.mode = CameraMode::Walk;
+                    let start_position = gameplay.start_position.map(vec3).unwrap_or_else(|| {
+                        Transform::from_translation(vec3(checkpoint.position))
+                            .looking_at(vec3(checkpoint.look_at), Vec3::Y)
+                            .translation
+                    });
+                    let start_look_at = gameplay
+                        .start_look_at
+                        .map(vec3)
+                        .unwrap_or(vec3(checkpoint.look_at));
+                    *transform = Transform::from_translation(start_position + Vec3::Y * 1.7)
+                        .looking_at(start_look_at, Vec3::Y);
+                    if let Ok((mut player_transform, velocity)) = player.single_mut() {
+                        player_transform.translation = start_position;
+                        if let Some(mut velocity) = velocity {
+                            velocity.x = 0.0;
+                            velocity.y = 0.0;
+                            velocity.z = 0.0;
+                        }
+                    }
+                } else {
+                    player_camera.mode = CameraMode::Fly;
+                    *transform = Transform::from_translation(vec3(checkpoint.position))
+                        .looking_at(vec3(checkpoint.look_at), Vec3::Y);
+                }
             }
             atmosphere.time = checkpoint.time_of_day * atmosphere.day_length;
             apply_fog_tier_if_supported(
@@ -519,6 +632,10 @@ fn run_bench_state_machine(
             state.next_screenshot_point = 0;
             state.current_screenshots.clear();
             state.current_run = None;
+            state.gameplay_stall_frames = 0;
+            state.gameplay_stall_events = 0;
+            state.gameplay_min_horizontal_speed = f32::MAX;
+            state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
             state.ready_stable_frames = 0;
             state.ready_wait_frames = 0;
@@ -795,6 +912,16 @@ fn run_bench_state_machine(
                     render_ready_secs: state.last_render_ready_secs,
                     render_ready_stable_frames: state.last_render_ready_stable_frames,
                     render_ready_timed_out: state.last_render_ready_timed_out,
+                    gameplay_stall_events: state.gameplay_stall_events,
+                    gameplay_failed: state.gameplay_failed,
+                    gameplay_min_horizontal_speed: if state
+                        .gameplay_min_horizontal_speed
+                        .is_finite()
+                    {
+                        state.gameplay_min_horizontal_speed
+                    } else {
+                        0.0
+                    },
                     ready_mesh_entities: state.last_ready_snapshot.signature.mesh_entities,
                     ready_water_mesh_entities: state
                         .last_ready_snapshot
@@ -822,7 +949,16 @@ fn run_bench_state_machine(
                     state.last_render_ready_timed_out,
                 );
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
-                if let Ok((mut transform, _player_camera)) = camera.single_mut() {
+                record_bench_gameplay_counts(
+                    &mut timing,
+                    frame.0,
+                    checkpoint,
+                    &mut state,
+                    &mut player,
+                );
+                if checkpoint.gameplay.is_none()
+                    && let Ok((mut transform, _player_camera)) = camera.single_mut()
+                {
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
                 }
                 capture_due_screenshots(&mut commands, &config, checkpoint, &mut state);
@@ -890,6 +1026,9 @@ fn finish_run(
         render_ready_secs: 0.0,
         render_ready_stable_frames: 0,
         render_ready_timed_out: false,
+        gameplay_stall_events: 0,
+        gameplay_failed: false,
+        gameplay_min_horizontal_speed: 0.0,
         ready_mesh_entities: 0,
         ready_water_mesh_entities: 0,
     });
@@ -963,6 +1102,11 @@ fn finish_bench(
     state: &mut BenchState,
     exit: &mut MessageWriter<AppExit>,
 ) {
+    let gameplay_failed = state
+        .checkpoints
+        .iter()
+        .flat_map(|checkpoint| checkpoint.runs.iter())
+        .any(|run| run.gameplay_failed);
     let summary = BenchSummary {
         schema_version: 2,
         scene: config
@@ -1000,6 +1144,12 @@ fn finish_bench(
         Err(err) => warn!("failed to write bench summary {}: {}", path.display(), err),
     }
     state.phase = BenchPhase::Done;
+    if gameplay_failed {
+        eprintln!(
+            "Benchmark gameplay validation failed; see summary.json for gameplay_stall_events"
+        );
+        std::process::exit(1);
+    }
     exit.write(AppExit::Success);
 }
 
@@ -1357,6 +1507,81 @@ fn record_bench_render_ready_counts(
     );
 }
 
+fn record_bench_gameplay_counts(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    checkpoint: &BenchCheckpoint,
+    state: &mut BenchState,
+    player: &mut Query<
+        (&mut Transform, Option<&mut LinearVelocity>),
+        (With<Player>, Without<PlayerCamera>),
+    >,
+) {
+    let Some(gameplay) = checkpoint.gameplay.as_ref() else {
+        return;
+    };
+
+    let horizontal_speed = player
+        .single_mut()
+        .ok()
+        .and_then(|(_transform, velocity)| {
+            velocity.map(|velocity| Vec2::new(velocity.x, velocity.z).length())
+        })
+        .unwrap_or(0.0);
+    state.gameplay_min_horizontal_speed = state.gameplay_min_horizontal_speed.min(horizontal_speed);
+
+    let input_active =
+        Vec2::new(gameplay.movement[0], gameplay.movement[1]).length_squared() > 0.25;
+    let stalled = input_active && horizontal_speed < gameplay.min_horizontal_speed;
+    if stalled {
+        state.gameplay_stall_frames += 1;
+    } else {
+        state.gameplay_stall_frames = 0;
+    }
+
+    if state.gameplay_stall_frames == gameplay.stall_after_frames {
+        state.gameplay_stall_events += 1;
+        warn!(
+            "Bench gameplay stall: checkpoint='{}' run={} frame={} speed={:.2} min={:.2} stall_events={}",
+            checkpoint.name,
+            state.run_index,
+            state.hold_elapsed_frames,
+            horizontal_speed,
+            gameplay.min_horizontal_speed,
+            state.gameplay_stall_events,
+        );
+    }
+    if gameplay.fail_on_stall && state.gameplay_stall_events > gameplay.max_stall_events {
+        state.gameplay_failed = true;
+    }
+
+    timing.record_count(
+        frame,
+        "Bench Gameplay Input Active",
+        input_active as u8 as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Horizontal Speed",
+        horizontal_speed as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Stall Frames",
+        state.gameplay_stall_frames as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Stall Events",
+        state.gameplay_stall_events as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Failed",
+        state.gameplay_failed as u8 as f64,
+    );
+}
+
 fn apply_fog_tier_if_supported(
     checkpoint: &BenchCheckpoint,
     fog_quality: Option<&mut FogQuality>,
@@ -1406,6 +1631,30 @@ fn load_scene(path: &Path) -> Result<BenchScene, Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(path)?;
     let scene: BenchScene = toml::from_str(&text)?;
     Ok(scene)
+}
+
+pub fn bench_scene_requires_gameplay(path: &Path) -> bool {
+    #[derive(Deserialize)]
+    struct ProbeScene {
+        #[serde(rename = "checkpoint", default)]
+        checkpoints: Vec<ProbeCheckpoint>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProbeCheckpoint {
+        gameplay: Option<toml::Value>,
+    }
+
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| toml::from_str::<ProbeScene>(&text).ok())
+        .map(|scene| {
+            scene
+                .checkpoints
+                .iter()
+                .any(|checkpoint| checkpoint.gameplay.is_some())
+        })
+        .unwrap_or(false)
 }
 
 fn run_file_name(
@@ -1460,6 +1709,22 @@ fn default_motion_kind() -> String {
 }
 
 fn default_freeze_terrain_lod_after_ready() -> bool {
+    true
+}
+
+fn default_gameplay_movement() -> [f32; 2] {
+    [0.0, 1.0]
+}
+
+fn default_gameplay_min_horizontal_speed() -> f32 {
+    2.0
+}
+
+fn default_gameplay_stall_after_frames() -> u32 {
+    18
+}
+
+fn default_true() -> bool {
     true
 }
 
