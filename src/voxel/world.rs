@@ -48,7 +48,35 @@ impl VoxelWorld {
         let local_pos = Self::world_to_local(world_pos);
 
         if let Some(chunk) = self.get_chunk_mut(chunk_pos) {
+            let previous = chunk.get(local_pos);
+            if previous == voxel {
+                return true;
+            }
             chunk.set(local_pos, voxel);
+            for dz in -1..=1 {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if dx == 0 && dy == 0 && dz == 0 {
+                            continue;
+                        }
+                        let touches_neighbor = (dx < 0 && local_pos.x <= 1)
+                            || (dx > 0 && local_pos.x >= (CHUNK_SIZE_I32 - 2) as u32)
+                            || (dy < 0 && local_pos.y <= 1)
+                            || (dy > 0 && local_pos.y >= (CHUNK_SIZE_I32 - 2) as u32)
+                            || (dz < 0 && local_pos.z <= 1)
+                            || (dz > 0 && local_pos.z >= (CHUNK_SIZE_I32 - 2) as u32);
+                        if touches_neighbor {
+                            if let Some(neighbor) =
+                                self.get_chunk_mut(chunk_pos + IVec3::new(dx, dy, dz))
+                            {
+                                neighbor.mark_dirty_with_reason(
+                                    crate::voxel::chunk::MeshDirtyReason::TerrainMutation,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             true
         } else {
             false

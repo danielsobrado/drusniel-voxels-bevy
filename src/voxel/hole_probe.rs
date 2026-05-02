@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use avian3d::prelude::{Collider, RigidBody, SpatialQuery, SpatialQueryFilter};
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy_mesh::{Indices, VertexAttributeValues};
 use serde::Serialize;
 
 use crate::camera::controller::PlayerCamera;
@@ -40,6 +41,7 @@ struct TerrainHoleProbeDump {
     classification: TerrainHoleClassification,
     columns: Vec<ColumnProbe>,
     physics: PhysicsProbe,
+    render_mesh_ray_hits: Vec<RenderMeshRayProbe>,
     chunks: Vec<ChunkProbe>,
 }
 
@@ -51,6 +53,13 @@ struct TerrainHoleClassification {
     collider_pending: bool,
     collider_failed: bool,
     visibility_hidden: bool,
+    mesh_surface_mismatch: bool,
+    collider_surface_mismatch: bool,
+    vertical_chunk_boundary_surface: bool,
+    expected_surface_y: Option<f32>,
+    physics_hit_y: Option<f32>,
+    physics_surface_error: Option<f32>,
+    render_mesh_ray_hit_y: Option<f32>,
     notes: Vec<String>,
 }
 
@@ -108,6 +117,17 @@ struct RayHitProbe {
 }
 
 #[derive(Serialize)]
+struct RenderMeshRayProbe {
+    entity: String,
+    chunk_position: Option<IVec3Dump>,
+    hit_y: Option<f32>,
+    surface_error: Option<f32>,
+    vertex_count: Option<usize>,
+    triangle_count: Option<usize>,
+    mesh_available: bool,
+}
+
+#[derive(Serialize)]
 struct ChunkProbe {
     chunk_position: IVec3Dump,
     exists_in_world: bool,
@@ -119,6 +139,7 @@ struct ChunkProbe {
     uniformity: Option<String>,
     mesh_entity_from_world: Option<String>,
     water_mesh_entity_from_world: Option<String>,
+    target_local_y_is_boundary: bool,
     terrain_entity: Option<EntityProbe>,
     water_entity: Option<EntityProbe>,
 }
@@ -173,6 +194,8 @@ type TerrainEntityQuery<'w, 's> = Query<
     's,
     (
         Entity,
+        Option<&'static Mesh3d>,
+        Option<&'static Transform>,
         Option<&'static ChunkMesh>,
         Option<&'static WaterMesh>,
         Option<&'static Visibility>,
@@ -193,6 +216,7 @@ fn dump_terrain_hole_probe(
     player_query: Query<&GlobalTransform, With<Player>>,
     camera_query: Query<&GlobalTransform, (With<PlayerCamera>, Without<Player>)>,
     terrain_entities: TerrainEntityQuery,
+    meshes: Res<Assets<Mesh>>,
     mut spatial_query: SpatialQuery,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -243,12 +267,23 @@ fn dump_terrain_hole_probe(
             160.0,
         ),
     };
-    let chunks = sample_neighbor_chunks(&world, target_chunk, &terrain_entities);
+    let expected_surface_y = expected_surface_y(&columns);
+    let render_mesh_ray_hits = sample_render_mesh_rays(
+        &world,
+        &terrain_entities,
+        &meshes,
+        target_chunk,
+        target_pos,
+        expected_surface_y,
+    );
+    let chunks = sample_neighbor_chunks(&world, target_chunk, target_local, &terrain_entities);
     let classification = classify_probe(
         target_pos,
+        target_local,
         target_voxel,
         &columns,
         &physics,
+        &render_mesh_ray_hits,
         &chunks,
         &world,
     );
@@ -283,6 +318,22 @@ fn dump_terrain_hole_probe(
         "Terrain Hole Probe: Visibility Hidden",
         classification.visibility_hidden as u8 as f64,
     );
+    timing.record_count(
+        frame.0,
+        "Terrain Surface Coverage Mismatch",
+        (classification.mesh_surface_mismatch || classification.collider_surface_mismatch) as u8
+            as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Surface Mismatch",
+        classification.collider_surface_mismatch as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Mesh Surface Mismatch",
+        classification.mesh_surface_mismatch as u8 as f64,
+    );
 
     let timestamp = timestamp_utc_compact();
     let dump = TerrainHoleProbeDump {
@@ -298,6 +349,7 @@ fn dump_terrain_hole_probe(
         classification,
         columns,
         physics,
+        render_mesh_ray_hits,
         chunks,
     };
 
@@ -401,18 +453,18 @@ fn cast_down_ray(
             let hit_y = origin.y - hit.distance;
             let entity_probe = terrain_entities.get(hit.entity).ok();
             let chunk_position = entity_probe
-                .and_then(|(_, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh)
+                .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh)
                 .map(|chunk_mesh| chunk_mesh.chunk_position.into());
             let has_chunk_mesh = entity_probe
-                .is_some_and(|(_, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh.is_some());
+                .is_some_and(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh.is_some());
             let has_chunk_collider =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, chunk_collider, _, _)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, chunk_collider, _, _)| {
                     chunk_collider.is_some()
                 });
             let has_collider = entity_probe
-                .is_some_and(|(_, _, _, _, _, _, _, _, collider, _)| collider.is_some());
+                .is_some_and(|(_, _, _, _, _, _, _, _, _, _, collider, _)| collider.is_some());
             let has_static_rigid_body =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, body)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, body)| {
                     matches!(body, Some(RigidBody::Static))
                 });
 
@@ -437,37 +489,183 @@ fn cast_down_ray(
     }
 }
 
+fn expected_surface_y(columns: &[ColumnProbe]) -> Option<f32> {
+    columns
+        .iter()
+        .find(|column| column.offset_x == 0 && column.offset_z == 0)
+        .and_then(|column| column.first_solid_from_above.as_ref())
+        .map(|sample| sample.world_position.y as f32 + 1.0)
+}
+
+fn sample_render_mesh_rays(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    center_chunk: IVec3,
+    target_pos: IVec3,
+    expected_surface_y: Option<f32>,
+) -> Vec<RenderMeshRayProbe> {
+    let ray_x = target_pos.x as f32 + 0.5;
+    let ray_z = target_pos.z as f32 + 0.5;
+    let origin_y = target_pos.y as f32 + 32.0;
+    let mut hits = Vec::new();
+
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let chunk_pos = center_chunk + IVec3::new(dx, dy, dz);
+                let Some(entity) = world
+                    .get_chunk(chunk_pos)
+                    .and_then(|chunk| chunk.mesh_entity())
+                else {
+                    continue;
+                };
+                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _)) =
+                    terrain_entities.get(entity)
+                else {
+                    continue;
+                };
+                let Some(mesh3d) = mesh3d else {
+                    hits.push(RenderMeshRayProbe {
+                        entity: format!("{entity:?}"),
+                        chunk_position: chunk_mesh.map(|chunk| chunk.chunk_position.into()),
+                        hit_y: None,
+                        surface_error: None,
+                        vertex_count: None,
+                        triangle_count: None,
+                        mesh_available: false,
+                    });
+                    continue;
+                };
+                let Some(mesh) = meshes.get(&mesh3d.0) else {
+                    hits.push(RenderMeshRayProbe {
+                        entity: format!("{entity:?}"),
+                        chunk_position: chunk_mesh.map(|chunk| chunk.chunk_position.into()),
+                        hit_y: None,
+                        surface_error: None,
+                        vertex_count: None,
+                        triangle_count: None,
+                        mesh_available: false,
+                    });
+                    continue;
+                };
+                let transform = transform
+                    .map(|transform| transform.translation)
+                    .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+                let hit_y = cpu_mesh_vertical_ray_hit(mesh, transform, ray_x, ray_z, origin_y);
+                let surface_error = hit_y
+                    .zip(expected_surface_y)
+                    .map(|(hit_y, expected)| (hit_y - expected).abs());
+                let vertex_count = mesh.count_vertices();
+                let triangle_count = mesh_indices(mesh).map(|indices| indices.len() / 3);
+                hits.push(RenderMeshRayProbe {
+                    entity: format!("{entity:?}"),
+                    chunk_position: chunk_mesh.map(|chunk| chunk.chunk_position.into()),
+                    hit_y,
+                    surface_error,
+                    vertex_count: Some(vertex_count),
+                    triangle_count,
+                    mesh_available: true,
+                });
+            }
+        }
+    }
+
+    hits
+}
+
+fn cpu_mesh_vertical_ray_hit(
+    mesh: &Mesh,
+    translation: Vec3,
+    world_x: f32,
+    world_z: f32,
+    origin_y: f32,
+) -> Option<f32> {
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return None;
+    };
+    let indices = mesh_indices(mesh)?;
+    let mut best_hit = None;
+    for tri in indices.chunks_exact(3) {
+        let p0 = Vec3::from_array(positions[tri[0] as usize]) + translation;
+        let p1 = Vec3::from_array(positions[tri[1] as usize]) + translation;
+        let p2 = Vec3::from_array(positions[tri[2] as usize]) + translation;
+        if let Some(hit_y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2) {
+            if best_hit.map_or(true, |best| hit_y > best) {
+                best_hit = Some(hit_y);
+            }
+        }
+    }
+    best_hit
+}
+
+fn mesh_indices(mesh: &Mesh) -> Option<Vec<u32>> {
+    match mesh.indices()? {
+        Indices::U16(indices) => Some(indices.iter().map(|index| *index as u32).collect()),
+        Indices::U32(indices) => Some(indices.clone()),
+    }
+}
+
+fn vertical_ray_triangle_hit_y(
+    x: f32,
+    z: f32,
+    origin_y: f32,
+    p0: Vec3,
+    p1: Vec3,
+    p2: Vec3,
+) -> Option<f32> {
+    let denom = (p1.z - p2.z) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.z - p2.z);
+    if denom.abs() < 1e-5 {
+        return None;
+    }
+    let a = ((p1.z - p2.z) * (x - p2.x) + (p2.x - p1.x) * (z - p2.z)) / denom;
+    let b = ((p2.z - p0.z) * (x - p2.x) + (p0.x - p2.x) * (z - p2.z)) / denom;
+    let c = 1.0 - a - b;
+    if a >= -1e-4 && b >= -1e-4 && c >= -1e-4 {
+        let y = a * p0.y + b * p1.y + c * p2.y;
+        (y <= origin_y).then_some(y)
+    } else {
+        None
+    }
+}
+
 fn sample_neighbor_chunks(
     world: &VoxelWorld,
     center_chunk: IVec3,
+    target_local: UVec3,
     terrain_entities: &TerrainEntityQuery,
 ) -> Vec<ChunkProbe> {
     let mut chunks = Vec::new();
     for dz in -1..=1 {
-        for dx in -1..=1 {
-            let chunk_pos = center_chunk + IVec3::new(dx, 0, dz);
-            let chunk = world.get_chunk(chunk_pos);
-            let mesh_entity = chunk.and_then(|chunk| chunk.mesh_entity());
-            let water_entity = chunk.and_then(|chunk| chunk.water_mesh_entity());
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let chunk_pos = center_chunk + IVec3::new(dx, dy, dz);
+                let chunk = world.get_chunk(chunk_pos);
+                let mesh_entity = chunk.and_then(|chunk| chunk.mesh_entity());
+                let water_entity = chunk.and_then(|chunk| chunk.water_mesh_entity());
 
-            chunks.push(ChunkProbe {
-                chunk_position: chunk_pos.into(),
-                exists_in_world: chunk.is_some(),
-                lod_level: chunk.map(|chunk| lod_name(chunk.lod_level()).to_string()),
-                dirty: chunk.map(|chunk| chunk.is_dirty()),
-                dirty_reason_flags: chunk.map(|chunk| chunk.dirty_reason_flags()),
-                dirty_reasons: chunk
-                    .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
-                    .unwrap_or_default(),
-                visibility_dirty: chunk.map(|chunk| chunk.is_visibility_dirty()),
-                uniformity: chunk.map(|chunk| uniformity_name(chunk.uniformity()).to_string()),
-                mesh_entity_from_world: mesh_entity.map(|entity| format!("{entity:?}")),
-                water_mesh_entity_from_world: water_entity.map(|entity| format!("{entity:?}")),
-                terrain_entity: mesh_entity
-                    .and_then(|entity| entity_probe(entity, terrain_entities)),
-                water_entity: water_entity
-                    .and_then(|entity| entity_probe(entity, terrain_entities)),
-            });
+                chunks.push(ChunkProbe {
+                    chunk_position: chunk_pos.into(),
+                    exists_in_world: chunk.is_some(),
+                    lod_level: chunk.map(|chunk| lod_name(chunk.lod_level()).to_string()),
+                    dirty: chunk.map(|chunk| chunk.is_dirty()),
+                    dirty_reason_flags: chunk.map(|chunk| chunk.dirty_reason_flags()),
+                    dirty_reasons: chunk
+                        .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
+                        .unwrap_or_default(),
+                    visibility_dirty: chunk.map(|chunk| chunk.is_visibility_dirty()),
+                    uniformity: chunk.map(|chunk| uniformity_name(chunk.uniformity()).to_string()),
+                    mesh_entity_from_world: mesh_entity.map(|entity| format!("{entity:?}")),
+                    water_mesh_entity_from_world: water_entity.map(|entity| format!("{entity:?}")),
+                    target_local_y_is_boundary: target_local.y == 0 || target_local.y == 15,
+                    terrain_entity: mesh_entity
+                        .and_then(|entity| entity_probe(entity, terrain_entities)),
+                    water_entity: water_entity
+                        .and_then(|entity| entity_probe(entity, terrain_entities)),
+                });
+            }
         }
     }
     chunks
@@ -476,6 +674,8 @@ fn sample_neighbor_chunks(
 fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option<EntityProbe> {
     let (
         entity,
+        _mesh3d,
+        _transform,
         chunk_mesh,
         water_mesh,
         visibility,
@@ -510,15 +710,53 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
 
 fn classify_probe(
     target_pos: IVec3,
+    target_local: UVec3,
     target_voxel: Option<VoxelType>,
     columns: &[ColumnProbe],
     physics: &PhysicsProbe,
+    render_mesh_ray_hits: &[RenderMeshRayProbe],
     chunks: &[ChunkProbe],
     world: &VoxelWorld,
 ) -> TerrainHoleClassification {
     let mut classification = TerrainHoleClassification::default();
     let mut notes = Vec::new();
     let target_chunk = VoxelWorld::world_to_chunk(target_pos);
+    classification.vertical_chunk_boundary_surface = target_local.y == 0 || target_local.y == 15;
+    classification.expected_surface_y = expected_surface_y(columns);
+    classification.physics_hit_y = physics.target_down_ray.hit.as_ref().map(|hit| hit.hit_y);
+    classification.render_mesh_ray_hit_y = render_mesh_ray_hits
+        .iter()
+        .filter_map(|hit| hit.hit_y)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    if let (Some(expected), Some(hit_y)) = (
+        classification.expected_surface_y,
+        classification.physics_hit_y,
+    ) {
+        let error = (hit_y - expected).abs();
+        classification.physics_surface_error = Some(error);
+        if error > 2.0 {
+            classification.collider_surface_mismatch = true;
+            notes.push(format!(
+                "Target physics ray hit y={hit_y:.2}, expected terrain surface near y={expected:.2}."
+            ));
+        }
+    } else if classification.expected_surface_y.is_some() {
+        classification.collider_surface_mismatch = true;
+        notes.push("Target physics ray did not hit an expected terrain surface.".to_string());
+    }
+
+    if let Some(expected) = classification.expected_surface_y {
+        let render_error = classification
+            .render_mesh_ray_hit_y
+            .map(|hit_y| (hit_y - expected).abs());
+        if render_error.map_or(true, |error| error > 2.0) {
+            classification.mesh_surface_mismatch = true;
+            notes.push(format!(
+                "CPU render mesh ray missed expected terrain surface near y={expected:.2}."
+            ));
+        }
+    }
 
     if target_voxel.is_none() {
         classification.world_data_hole = true;

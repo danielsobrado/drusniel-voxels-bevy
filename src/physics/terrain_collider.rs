@@ -20,11 +20,61 @@ pub struct NeedsCollider;
 #[derive(Component)]
 pub struct ChunkCollider;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerrainColliderMode {
+    Auto,
+    Trimesh,
+    Voxelized,
+}
+
+fn terrain_collider_mode() -> TerrainColliderMode {
+    match std::env::var("VOXEL_TERRAIN_COLLIDER")
+        .unwrap_or_else(|_| "auto".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "trimesh" => TerrainColliderMode::Trimesh,
+        "voxelized" => TerrainColliderMode::Voxelized,
+        _ => TerrainColliderMode::Auto,
+    }
+}
+
+fn build_terrain_collider(mesh: &Mesh, chunk_mesh: &ChunkMesh) -> Option<Collider> {
+    let mode = terrain_collider_mode();
+    let trimesh =
+        || Collider::trimesh_from_mesh_with_config(mesh, TrimeshFlags::FIX_INTERNAL_EDGES);
+    let voxelized = || {
+        Collider::voxelized_trimesh_from_mesh(
+            mesh,
+            TERRAIN_COLLIDER_VOXEL_SIZE,
+            FillMode::SurfaceOnly,
+        )
+    };
+
+    match mode {
+        TerrainColliderMode::Trimesh => trimesh(),
+        TerrainColliderMode::Voxelized => voxelized().or_else(trimesh),
+        TerrainColliderMode::Auto => {
+            if matches!(
+                chunk_mesh.mesh_mode,
+                crate::voxel::meshing::MeshMode::SurfaceNets
+            ) {
+                trimesh().or_else(voxelized)
+            } else {
+                voxelized().or_else(trimesh)
+            }
+        }
+    }
+}
+
 /// System to generate trimesh colliders for terrain chunks.
 /// Throttled to MAX_COLLIDERS_PER_FRAME per frame, sorted nearest-to-camera first.
 pub fn generate_chunk_colliders(
     mut commands: Commands,
-    chunks: Query<(Entity, &Mesh3d, &Transform), (With<ChunkMesh>, With<NeedsCollider>)>,
+    chunks: Query<
+        (Entity, &Mesh3d, &Transform, &ChunkMesh),
+        (With<ChunkMesh>, With<NeedsCollider>),
+    >,
     meshes: Res<Assets<Mesh>>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -46,7 +96,7 @@ pub fn generate_chunk_colliders(
     });
 
     let mut generated = 0usize;
-    for (entity, mesh_handle, _transform) in pending {
+    for (entity, mesh_handle, _transform, chunk_mesh) in pending {
         if generated >= MAX_COLLIDERS_PER_FRAME {
             break;
         }
@@ -58,14 +108,7 @@ pub fn generate_chunk_colliders(
             continue;
         };
 
-        let collider = Collider::voxelized_trimesh_from_mesh(
-            mesh,
-            TERRAIN_COLLIDER_VOXEL_SIZE,
-            FillMode::SurfaceOnly,
-        )
-        .or_else(|| {
-            Collider::trimesh_from_mesh_with_config(mesh, TrimeshFlags::FIX_INTERNAL_EDGES)
-        });
+        let collider = build_terrain_collider(mesh, chunk_mesh);
 
         if let Some(collider) = collider {
             // Use regular commands (not queue_silenced) so Avian's observers

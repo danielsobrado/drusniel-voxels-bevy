@@ -62,7 +62,9 @@ use crate::voxel::enclosure::{
 };
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 use crate::voxel::meshing::{
-    ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail, generate_chunk_mesh_with_mode,
+    ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
+    count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
+    generate_chunk_mesh_with_mode,
 };
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
@@ -142,6 +144,10 @@ pub struct RuntimeChunkStats {
     pub water_air_boundaries_exposed: u64,
     pub water_air_boundaries_sealed: u64,
     pub water_triangles_removed_sealed: u64,
+    pub terrain_mesh_empty_but_solid_voxels: u64,
+    pub terrain_mesh_boundary_missing_neighbor: u64,
+    pub terrain_mesh_degenerate_triangles_removed: u64,
+    pub terrain_mesh_lod_seam_repairs: u64,
 
     // Per-frame statistics (reset each frame in the meshing system)
     pub chunks_meshed_this_frame: u32,
@@ -177,6 +183,10 @@ impl RuntimeChunkStats {
         self.high_lod_chunks = 0;
         self.low_lod_chunks = 0;
         self.culled_chunks = 0;
+        self.terrain_mesh_empty_but_solid_voxels = 0;
+        self.terrain_mesh_boundary_missing_neighbor = 0;
+        self.terrain_mesh_degenerate_triangles_removed = 0;
+        self.terrain_mesh_lod_seam_repairs = 0;
         // Note: vertex counts are tracked during mesh generation, not here
 
         for (_, chunk) in world.chunk_entries() {
@@ -869,6 +879,10 @@ fn mesh_dirty_chunks_system(
     let mut chunks_meshed = 0u32;
     let mut chunks_skipped = 0u32;
     let mut chunks_processed = 0usize;
+    let mut terrain_mesh_empty_but_solid_voxels = 0u32;
+    let mut terrain_mesh_boundary_missing_neighbor = 0u32;
+    let terrain_mesh_degenerate_triangles_removed = 0u32;
+    let mut terrain_mesh_lod_seam_repairs = 0u32;
 
     for chunk_pos in dirty_chunks {
         // Throttle: limit chunks meshed per frame to prevent frame spikes
@@ -912,21 +926,36 @@ fn mesh_dirty_chunks_system(
             continue;
         }
 
-        // Skip meshing for empty chunks (all air) - no geometry to render
+        let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
+            && matches!(target_mode, MeshMode::SurfaceNets)
+            && empty_chunk_has_surface_nets_boundary_surface(&world, chunk_pos);
+
+        // Skip meshing for empty chunks unless Surface Nets needs this all-air
+        // chunk to own a terrain boundary surface from the one-voxel halo.
         if uniformity == ChunkUniformity::Empty {
-            if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
-                if let Some(entity) = chunk.mesh_entity() {
-                    commands.entity(entity).despawn();
-                    chunk.clear_mesh_entity();
+            if empty_surface_neighbor {
+                terrain_mesh_lod_seam_repairs += 1;
+            } else {
+                if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+                    if let Some(entity) = chunk.mesh_entity() {
+                        commands.entity(entity).despawn();
+                        chunk.clear_mesh_entity();
+                    }
+                    if let Some(entity) = chunk.water_mesh_entity() {
+                        commands.entity(entity).despawn();
+                        chunk.clear_water_mesh_entity();
+                    }
+                    chunk.clear_dirty();
                 }
-                if let Some(entity) = chunk.water_mesh_entity() {
-                    commands.entity(entity).despawn();
-                    chunk.clear_water_mesh_entity();
-                }
-                chunk.clear_dirty();
+                chunks_skipped += 1;
+                continue;
             }
-            chunks_skipped += 1;
-            continue;
+        }
+
+        let missing_boundary_neighbors =
+            count_missing_in_bounds_boundary_neighbors(&world, chunk_pos);
+        if missing_boundary_neighbors > 0 {
+            terrain_mesh_boundary_missing_neighbor += 1;
         }
 
         let neighbor_lods = NeighborLods {
@@ -965,6 +994,13 @@ fn mesh_dirty_chunks_system(
         // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;
         let triangle_count = (mesh_result.solid.indices.len() / 3) as u32;
+        if uniformity != ChunkUniformity::Empty && triangle_count == 0 {
+            terrain_mesh_empty_but_solid_voxels += 1;
+            warn!(
+                "Terrain mesh empty despite non-empty voxel data: chunk={:?} uniformity={:?} lod={:?}",
+                chunk_pos, uniformity, lod_level
+            );
+        }
         chunk_stats.water_air_boundaries_total +=
             mesh_result.water_stats.air_boundaries_total as u64;
         chunk_stats.water_air_boundaries_exposed +=
@@ -1255,6 +1291,26 @@ fn mesh_dirty_chunks_system(
         frame.0,
         "Water Mesh Entities",
         chunk_stats.water_mesh_entities as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Mesh Empty But Solid Voxels",
+        terrain_mesh_empty_but_solid_voxels as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Mesh Boundary Missing Neighbor",
+        terrain_mesh_boundary_missing_neighbor as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Mesh Degenerate Triangles Removed",
+        terrain_mesh_degenerate_triangles_removed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Mesh LOD Seam Repairs",
+        terrain_mesh_lod_seam_repairs as f64,
     );
 }
 
@@ -1820,15 +1876,17 @@ fn update_chunk_lod_system(
 
     let lod_changed_count = lod_changed.len() as u32;
     for chunk_pos in &lod_changed {
-        for offset in [
-            IVec3::new(-1, 0, 0),
-            IVec3::new(1, 0, 0),
-            IVec3::new(0, 0, -1),
-            IVec3::new(0, 0, 1),
-        ] {
-            let neighbor_pos = *chunk_pos + offset;
-            if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
+                    }
+                    let neighbor_pos = *chunk_pos + IVec3::new(dx, dy, dz);
+                    if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
+                        neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
+                    }
+                }
             }
         }
     }

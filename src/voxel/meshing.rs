@@ -1881,11 +1881,104 @@ fn sample_voxel_solid(
     let voxel = if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
         chunk.get(UVec3::new(px - 1, py - 1, pz - 1))
     } else {
-        world.get_voxel(world_pos).unwrap_or(VoxelType::Air)
+        match world.get_voxel(world_pos) {
+            Some(voxel) => voxel,
+            None if world.in_bounds(world_pos) => VoxelType::Rock,
+            None => VoxelType::Air,
+        }
     };
 
     // Treat water as solid for SDF so we don't generate surfaces at solid-water boundaries
     voxel.is_solid() || voxel.is_liquid()
+}
+
+/// Surface Nets can assign a boundary surface to the all-air chunk adjacent to
+/// terrain. Those chunks still need mesh/collider generation even though their
+/// own voxel payload is empty.
+pub(crate) fn empty_chunk_has_surface_nets_boundary_surface(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+) -> bool {
+    let origin = VoxelWorld::chunk_to_world(chunk_pos);
+    let planes = [
+        (
+            IVec3::NEG_X,
+            IVec3::new(origin.x - 1, origin.y, origin.z),
+            IVec3::Y,
+            IVec3::Z,
+        ),
+        (
+            IVec3::X,
+            IVec3::new(origin.x + CHUNK_SIZE_I32, origin.y, origin.z),
+            IVec3::Y,
+            IVec3::Z,
+        ),
+        (
+            IVec3::NEG_Y,
+            IVec3::new(origin.x, origin.y - 1, origin.z),
+            IVec3::X,
+            IVec3::Z,
+        ),
+        (
+            IVec3::Y,
+            IVec3::new(origin.x, origin.y + CHUNK_SIZE_I32, origin.z),
+            IVec3::X,
+            IVec3::Z,
+        ),
+        (
+            IVec3::NEG_Z,
+            IVec3::new(origin.x, origin.y, origin.z - 1),
+            IVec3::X,
+            IVec3::Y,
+        ),
+        (
+            IVec3::Z,
+            IVec3::new(origin.x, origin.y, origin.z + CHUNK_SIZE_I32),
+            IVec3::X,
+            IVec3::Y,
+        ),
+    ];
+
+    for (_, plane_origin, axis_a, axis_b) in planes {
+        for a in 0..CHUNK_SIZE_I32 {
+            for b in 0..CHUNK_SIZE_I32 {
+                let pos = plane_origin + axis_a * a + axis_b * b;
+                if world.get_voxel(pos).is_some_and(|voxel| voxel.is_solid()) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+pub(crate) fn count_missing_in_bounds_boundary_neighbors(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+) -> u32 {
+    let mut missing = 0;
+    let origin = VoxelWorld::chunk_to_world(chunk_pos);
+    for z in -1..=CHUNK_SIZE_I32 {
+        for y in -1..=CHUNK_SIZE_I32 {
+            for x in -1..=CHUNK_SIZE_I32 {
+                let on_halo = x == -1
+                    || x == CHUNK_SIZE_I32
+                    || y == -1
+                    || y == CHUNK_SIZE_I32
+                    || z == -1
+                    || z == CHUNK_SIZE_I32;
+                if !on_halo {
+                    continue;
+                }
+                let pos = origin + IVec3::new(x, y, z);
+                if world.in_bounds(pos) && world.get_voxel(pos).is_none() {
+                    missing += 1;
+                }
+            }
+        }
+    }
+    missing
 }
 
 /// Smooths an SDF array at interior cells by averaging with neighbors.
@@ -1961,6 +2054,7 @@ fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
 fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
     match world.get_voxel(world_pos) {
         Some(voxel) => voxel.is_solid() || voxel.is_liquid(),
+        None if world.in_bounds(world_pos) => true,
         None => false, // Outside world bounds = air
     }
 }
@@ -3247,6 +3341,84 @@ mod tests {
         )
     }
 
+    fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        generate_chunk_mesh_surface_nets(
+            chunk,
+            world,
+            LodLevel::Lod0,
+            NeighborLods {
+                neg_x: None,
+                pos_x: None,
+                neg_z: None,
+                pos_z: None,
+            },
+            &SkirtConfig::default(),
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        )
+    }
+
+    fn set_column(
+        world: &mut VoxelWorld,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        voxel: VoxelType,
+    ) {
+        for y in y_min..=y_max {
+            world.set_voxel(IVec3::new(x, y, z), voxel);
+        }
+    }
+
+    fn mesh_has_vertical_hit(
+        mesh: &MeshData,
+        chunk_origin: IVec3,
+        world_x: f32,
+        world_z: f32,
+    ) -> bool {
+        let origin_y = chunk_origin.y as f32 + 32.0;
+        for tri in mesh.indices.chunks_exact(3) {
+            let p0 = Vec3::from_array(mesh.positions[tri[0] as usize]) + chunk_origin.as_vec3();
+            let p1 = Vec3::from_array(mesh.positions[tri[1] as usize]) + chunk_origin.as_vec3();
+            let p2 = Vec3::from_array(mesh.positions[tri[2] as usize]) + chunk_origin.as_vec3();
+            if vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn vertical_ray_triangle_hit_y(
+        x: f32,
+        z: f32,
+        origin_y: f32,
+        p0: Vec3,
+        p1: Vec3,
+        p2: Vec3,
+    ) -> Option<f32> {
+        let x0 = p0.x;
+        let z0 = p0.z;
+        let x1 = p1.x;
+        let z1 = p1.z;
+        let x2 = p2.x;
+        let z2 = p2.z;
+        let denom = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
+        if denom.abs() < 1e-5 {
+            return None;
+        }
+        let a = ((z1 - z2) * (x - x2) + (x2 - x1) * (z - z2)) / denom;
+        let b = ((z2 - z0) * (x - x2) + (x0 - x2) * (z - z2)) / denom;
+        let c = 1.0 - a - b;
+        if a >= -1e-4 && b >= -1e-4 && c >= -1e-4 {
+            let y = a * p0.y + b * p1.y + c * p2.y;
+            (y <= origin_y).then_some(y)
+        } else {
+            None
+        }
+    }
+
     #[test]
     fn sealed_below_sea_water_surface_is_not_meshed() {
         let mut world = world_with_vertical_chunks();
@@ -3306,6 +3478,90 @@ mod tests {
 
         assert!(mesh.water.indices.is_empty());
         assert_eq!(mesh.water_stats.air_boundaries_sealed, 1);
+    }
+
+    #[test]
+    fn surface_nets_chunk_top_boundary_sand_surface_generates_geometry() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 3, 2));
+        for x in 14..=18 {
+            for z in 15..=19 {
+                set_column(&mut world, x, z, 0, 27, VoxelType::Rock);
+                set_column(&mut world, x, z, 28, 30, VoxelType::SubSoil);
+                world.set_voxel(IVec3::new(x, 31, z), VoxelType::Sand);
+            }
+        }
+
+        let lower_mesh = surface_nets_mesh(IVec3::new(1, 1, 1), &world);
+        let upper_mesh = surface_nets_mesh(IVec3::new(1, 2, 1), &world);
+
+        assert!(
+            !lower_mesh.solid.indices.is_empty() || !upper_mesh.solid.indices.is_empty(),
+            "Surface Nets must produce geometry for a solid surface exactly at a vertical chunk boundary"
+        );
+        assert!(
+            lower_mesh
+                .solid
+                .positions
+                .iter()
+                .chain(upper_mesh.solid.positions.iter())
+                .any(|position| position[1] >= -0.1 && position[1] <= 16.1),
+            "expected boundary surface vertices in one of the two chunks"
+        );
+        assert!(
+            mesh_has_vertical_hit(&lower_mesh.solid, IVec3::new(16, 16, 16), 16.5, 17.5)
+                || mesh_has_vertical_hit(&upper_mesh.solid, IVec3::new(16, 32, 16), 16.5, 17.5),
+            "expected a downward physics/render ray to hit the chunk-boundary sand surface"
+        );
+        assert!(
+            empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 2, 1)),
+            "empty upper chunk must not be skipped because it owns the vertical boundary surface"
+        );
+    }
+
+    #[test]
+    fn surface_nets_empty_chunk_above_water_only_does_not_need_terrain_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 3, 1));
+        world.set_voxel(IVec3::new(8, 31, 8), VoxelType::Water);
+
+        assert!(
+            !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(0, 2, 0)),
+            "water-only boundaries should remain water mesh responsibility, not terrain mesh"
+        );
+    }
+
+    #[test]
+    fn surface_nets_side_boundary_sand_surface_generates_geometry() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 2, 2));
+        for z in 15..=18 {
+            for y in 0..=3 {
+                world.set_voxel(IVec3::new(15, y, z), VoxelType::Sand);
+            }
+        }
+
+        let left_mesh = surface_nets_mesh(IVec3::new(0, 0, 1), &world);
+        let right_mesh = surface_nets_mesh(IVec3::new(1, 0, 1), &world);
+
+        assert!(
+            !left_mesh.solid.indices.is_empty() || !right_mesh.solid.indices.is_empty(),
+            "Surface Nets must produce side-boundary terrain geometry"
+        );
+    }
+
+    #[test]
+    fn surface_nets_bottom_boundary_air_over_solid_generates_geometry() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 3, 1));
+        for x in 6..=10 {
+            for z in 6..=10 {
+                world.set_voxel(IVec3::new(x, 15, z), VoxelType::Sand);
+            }
+        }
+
+        let upper_mesh = surface_nets_mesh(IVec3::new(0, 1, 0), &world);
+
+        assert!(
+            mesh_has_vertical_hit(&upper_mesh.solid, IVec3::new(0, 16, 0), 8.5, 8.5),
+            "air chunk above a solid top boundary must generate the owned boundary surface"
+        );
     }
 }
 
