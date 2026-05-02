@@ -6,10 +6,7 @@ use bevy::asset::AssetId;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d};
-use bevy::ecs::{
-    query::QueryItem,
-    system::{SystemParamItem, lifetimeless::*},
-};
+use bevy::ecs::system::{SystemParamItem, lifetimeless::*};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
 use bevy::pbr::{
@@ -23,9 +20,8 @@ use bevy::pbr::{
 use bevy::prelude::*;
 use bevy::render::erased_render_asset::ErasedRenderAssets;
 use bevy::render::{
-    Render, RenderApp, RenderStartup, RenderSystems,
+    Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
     batching::gpu_preprocessing::GpuPreprocessingSupport,
-    extract_component::{ExtractComponent, ExtractComponentPlugin},
     mesh::{RenderMesh, RenderMeshBufferInfo, allocator::MeshAllocator},
     render_asset::RenderAssets,
     render_phase::{
@@ -35,7 +31,8 @@ use bevy::render::{
     },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
-    sync_world::MainEntity,
+    sync_component::SyncComponentPlugin,
+    sync_world::{MainEntity, RenderEntity},
     view::{ExtractedView, NoIndirectDrawing},
 };
 use bevy_shader::ShaderDefVal;
@@ -75,16 +72,6 @@ pub struct InstancedPropGroup {
     tint_enabled: bool,
     pub version: u64,
     pub shadow_version: u64,
-}
-
-impl ExtractComponent for InstancedPropGroup {
-    type QueryData = &'static InstancedPropGroup;
-    type QueryFilter = ();
-    type Out = Self;
-
-    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
-        Some(item.clone())
-    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -189,13 +176,14 @@ impl Plugin for PropInstancingPlugin {
                 ),
             );
 
-        app.add_plugins(ExtractComponentPlugin::<InstancedPropGroup>::default());
+        app.add_plugins(SyncComponentPlugin::<InstancedPropGroup>::default());
         app.sub_app_mut(RenderApp)
             .add_render_command::<Transparent3d, DrawInstancedProp>()
             .add_render_command::<Shadow, DrawInstancedPropShadow>()
             .init_resource::<SpecializedMeshPipelines<PropInstancingPipeline>>()
             .init_resource::<SpecializedMeshPipelines<PropInstancingShadowPipeline>>()
             .add_systems(RenderStartup, init_prop_instancing_pipeline)
+            .add_systems(ExtractSchedule, extract_instanced_prop_groups)
             .add_systems(
                 Render,
                 (
@@ -463,6 +451,116 @@ fn bump_shadow_version(group: &mut InstancedPropGroup) {
 fn bump_versions(group: &mut InstancedPropGroup) {
     bump_version(group);
     bump_shadow_version(group);
+}
+
+fn extract_instanced_prop_groups(
+    mut commands: Commands,
+    source_groups: Extract<Query<(RenderEntity, &InstancedPropGroup)>>,
+    mut render_groups: Query<&mut InstancedPropGroup>,
+    timing: Option<Res<RenderTimingSink>>,
+) {
+    let sink = timing.as_deref();
+    let _timer = render_timing_guard(sink, "Render Instancing Extract Groups");
+    let mut groups_examined = 0usize;
+    let mut groups_skipped = 0usize;
+    let mut groups_inserted = 0usize;
+    let mut groups_updated = 0usize;
+    let mut metadata_updates = 0usize;
+    let mut visible_vectors_cloned = 0usize;
+    let mut shadow_vectors_cloned = 0usize;
+    let mut visible_instances_cloned = 0usize;
+    let mut shadow_instances_cloned = 0usize;
+
+    for (render_entity, source) in &source_groups {
+        groups_examined += 1;
+        let entity = render_entity;
+
+        let Ok(mut target) = render_groups.get_mut(entity) else {
+            commands.entity(entity).insert(source.clone());
+            groups_inserted += 1;
+            visible_vectors_cloned += 1;
+            shadow_vectors_cloned += 1;
+            visible_instances_cloned += source.instances.len();
+            shadow_instances_cloned += source.shadow_instances.len();
+            continue;
+        };
+
+        let metadata_dirty = target.mesh != source.mesh
+            || target.material != source.material
+            || target.tint_enabled != source.tint_enabled;
+        let visible_dirty =
+            target.version != source.version || target.instances.len() != source.instances.len();
+        let shadow_dirty = target.shadow_version != source.shadow_version
+            || target.shadow_instances.len() != source.shadow_instances.len();
+
+        if !metadata_dirty && !visible_dirty && !shadow_dirty {
+            groups_skipped += 1;
+            continue;
+        }
+
+        groups_updated += 1;
+
+        if metadata_dirty {
+            target.mesh = source.mesh.clone();
+            target.material = source.material.clone();
+            target.tint_enabled = source.tint_enabled;
+            metadata_updates += 1;
+        }
+
+        if visible_dirty {
+            target.instances.clone_from(&source.instances);
+            target.version = source.version;
+            visible_vectors_cloned += 1;
+            visible_instances_cloned += source.instances.len();
+        }
+
+        if shadow_dirty {
+            target.shadow_instances.clone_from(&source.shadow_instances);
+            target.shadow_culled.clone_from(&source.shadow_culled);
+            target.shadow_version = source.shadow_version;
+            shadow_vectors_cloned += 1;
+            shadow_instances_cloned += source.shadow_instances.len();
+        }
+    }
+
+    if let Some(sink) = sink {
+        sink.push_count(
+            "Render Instancing Extract Groups Examined",
+            groups_examined as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Groups Skipped",
+            groups_skipped as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Groups Inserted",
+            groups_inserted as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Groups Updated",
+            groups_updated as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Metadata Updates",
+            metadata_updates as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Visible Vectors Cloned",
+            visible_vectors_cloned as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Shadow Vectors Cloned",
+            shadow_vectors_cloned as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Visible Instances Cloned",
+            visible_instances_cloned as f64,
+        );
+        sink.push_count(
+            "Render Instancing Extract Shadow Instances Cloned",
+            shadow_instances_cloned as f64,
+        );
+    }
 }
 
 #[derive(Component)]
