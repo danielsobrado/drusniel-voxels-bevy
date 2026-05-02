@@ -13,6 +13,7 @@ use std::time::Instant;
 use bevy::diagnostic::FrameCount;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
 use crate::camera::controller::PlayerCamera;
@@ -321,6 +322,11 @@ struct ChunkGenerationTask {
 
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ExtractComponentPlugin::<ChunkMesh>::default(),
+            ExtractComponentPlugin::<WaterMesh>::default(),
+        ));
+
         app.insert_resource(WorldConfig {
             size_chunks: IVec3::new(32, 4, 32),
             chunk_size: 16,

@@ -11,6 +11,7 @@ use bevy::render::view::Hdr;
 use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 
+use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
     CHUNK_SIZE_I32, WATER_FANCY_MIN_DEPTH, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL,
@@ -341,6 +342,8 @@ fn update_water_presence(
     time: Res<Time>,
     world: Res<VoxelWorld>,
     config: Res<WaterReflectionConfig>,
+    mut timing: ResMut<AreaTimingRecorder>,
+    frame: Res<FrameCount>,
     main_camera: Query<
         (&Transform, &Projection),
         (With<PlayerCamera>, Without<WaterReflectionCamera>),
@@ -355,6 +358,7 @@ fn update_water_presence(
     >,
     mut presence: ResMut<WaterPresence>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Water Reflection Presence CPU");
     presence.age_secs += time.delta_secs();
     presence.reset_mesh_summary();
 
@@ -503,6 +507,7 @@ fn update_startup_fallback_water_presence(
 fn update_reflection_camera(
     config: Res<WaterReflectionConfig>,
     presence: Res<WaterPresence>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
     time: Res<Time>,
     main_camera: Query<&Transform, (With<PlayerCamera>, Without<WaterReflectionCamera>)>,
     mut reflection_camera: Query<
@@ -513,7 +518,7 @@ fn update_reflection_camera(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Reflection Render");
+    let _timer = area_timer(&mut timing, frame.0, "Water Reflection Update CPU");
     let Ok(main_transform) = main_camera.single() else {
         return;
     };
@@ -527,7 +532,11 @@ fn update_reflection_camera(
     let mut active = config.enabled;
     let mut sample_reflection = active;
 
-    if !config.enabled {
+    if bench_toggles.is_some_and(|toggles| toggles.disable_reflection_cameras) {
+        active = false;
+        sample_reflection = false;
+        reason = WaterReflectionReason::Disabled;
+    } else if !config.enabled {
         active = false;
         sample_reflection = false;
         reason = WaterReflectionReason::Disabled;

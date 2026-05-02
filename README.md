@@ -192,17 +192,20 @@ cargo run --release -- --bench bench/scenes/visual-regression.toml
 Output: `bench-runs/<timestamp>/summary.json` plus per-checkpoint CSV files and screenshots.
 `visual-regression.toml` runs deterministic camera movement paths for run, jump, and look-sweep coverage, with named screenshots captured at fixed frames for visual comparison.
 Bench runs also enable render timing rows for Bevy render stages, render-graph CPU/GPU pass diagnostics, shadow passes, post-processing, and window texture acquisition. Outside bench mode, set `VOXEL_RENDER_TIMING=1` to capture the same render timing rows in the debug timing CSV.
+Before a checkpoint starts moving, the bench now waits for both terrain readiness and a render-ready signature made from stable phase item, prop queue, terrain, water, and reflection counters. The console prints `[BENCH READY]` first, then `[BENCH RENDER READY]` when the fully drawn frame is stable enough to begin measurement.
+Bench scenes can also set `[render_toggles]` for A/B diagnosis only: `disable_instanced_props`, `disable_water_meshes`, `disable_buildings`, `disable_shadows`, `disable_reflection_cameras`, `force_instanced_props_transparent`, `force_cutout_props_alpha_mask`, `force_instanced_props_opaque`, `disable_prop_lod_hiding`, and `disable_prop_shadow_lod`. For example, `bench/scenes/forest-ab-disable-instanced-props.toml` runs the forest look sweep with prop instancing removed from the render queue.
 
 Run the regression guard after a visual bench to catch known render bottlenecks:
 
 ```powershell
-cargo run --bin bench_regression_guard -- --summary bench-runs/<run>/summary.json
+cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
-Thresholds live in `bench/regression-thresholds.json` and can be copied or tuned per machine/GPU. To run the bench and guard in one step:
+Thresholds live in `assets/config/bench_guard.toml` and can be copied or tuned per machine/GPU. The guard is a bench/regression command only; it is not part of normal `cargo build` or `cargo check`.
+Pass both the visual bench and direct-water summaries when validating water reflection behavior:
 
 ```powershell
-cargo run --bin bench_regression_guard -- --run-visual-bench --bench-out bench-runs/regression-guard
+cargo run --bin bench_guard -- bench-runs/<visual-run>/summary.json bench-runs/<direct-water-run>/summary.json
 ```
 
 #### Adaptive GI Controls (Alt+)

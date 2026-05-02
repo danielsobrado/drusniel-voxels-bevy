@@ -6,11 +6,15 @@ use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
+use crate::rendering::building_material::BuildingMesh;
+use crate::rendering::water_reflection::WaterReflectionConfig;
+use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy::render::RenderApp;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -23,6 +27,9 @@ const SETTLE_FRAMES: u32 = 60;
 const READY_STABLE_FRAMES: u32 = 90;
 const READY_MIN_SECS: f32 = 10.0;
 const READY_TIMEOUT_SECS: f32 = 75.0;
+const RENDER_READY_STABLE_FRAMES: u32 = 45;
+const RENDER_READY_MIN_FRAMES: u32 = 90;
+const RENDER_READY_TIMEOUT_SECS: f32 = 30.0;
 const SCREENSHOT_WAIT_FRAMES: u32 = 60;
 const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
 const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
@@ -60,6 +67,30 @@ impl BenchConfig {
 #[derive(Resource)]
 struct BenchSceneResource(BenchScene);
 
+#[derive(Resource, Clone, Copy, Debug, Default, Deserialize)]
+pub struct BenchRenderToggles {
+    #[serde(default)]
+    pub disable_instanced_props: bool,
+    #[serde(default)]
+    pub disable_water_meshes: bool,
+    #[serde(default)]
+    pub disable_buildings: bool,
+    #[serde(default)]
+    pub disable_shadows: bool,
+    #[serde(default)]
+    pub disable_reflection_cameras: bool,
+    #[serde(default)]
+    pub force_instanced_props_transparent: bool,
+    #[serde(default)]
+    pub force_cutout_props_alpha_mask: bool,
+    #[serde(default)]
+    pub force_instanced_props_opaque: bool,
+    #[serde(default)]
+    pub disable_prop_lod_hiding: bool,
+    #[serde(default)]
+    pub disable_prop_shadow_lod: bool,
+}
+
 #[derive(Resource)]
 struct BenchState {
     phase: BenchPhase,
@@ -70,11 +101,20 @@ struct BenchState {
     ready_stable_frames: u32,
     ready_wait_frames: u32,
     ready_last_signature: Option<BenchReadySignature>,
+    render_ready_started: Option<Instant>,
+    render_ready_wait_frames: u32,
+    render_ready_stable_frames: u32,
+    render_ready_last_signature: Option<BenchRenderReadySignature>,
     last_ready_wait_frames: u32,
     last_ready_wait_secs: f32,
     last_ready_stable_frames: u32,
     last_ready_snapshot: BenchReadySnapshot,
     last_ready_timed_out: bool,
+    last_render_ready_wait_frames: u32,
+    last_render_ready_secs: f32,
+    last_render_ready_stable_frames: u32,
+    last_render_ready_signature: Option<BenchRenderReadySignature>,
+    last_render_ready_timed_out: bool,
     settle_frames_left: u32,
     hold_frames_left: u32,
     screenshot_wait_left: u32,
@@ -96,6 +136,7 @@ enum BenchPhase {
     Warmup,
     SetupCheckpoint,
     WaitReady,
+    WaitRenderReady,
     Settle,
     Hold,
     Screenshot,
@@ -121,6 +162,20 @@ struct BenchReadySnapshot {
     chunks_skipped_this_frame: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BenchRenderReadySignature {
+    opaque_items: u32,
+    alpha_mask_items: u32,
+    transparent_items: u32,
+    shadow_items: u32,
+    terrain_items: u32,
+    water_items: u32,
+    instanced_prop_items: u32,
+    queued_instanced_draws: u32,
+    queued_instanced_instances: u32,
+    water_reflection_active: u32,
+}
+
 impl BenchReadySnapshot {
     fn is_ready_candidate(self) -> bool {
         self.signature.missing_chunks == 0
@@ -139,6 +194,8 @@ struct BenchScene {
     chunk_load_radius: i32,
     #[serde(default = "default_freeze_terrain_lod_after_ready")]
     freeze_terrain_lod_after_ready: bool,
+    #[serde(default)]
+    render_toggles: BenchRenderToggles,
     #[serde(rename = "checkpoint")]
     checkpoints: Vec<BenchCheckpoint>,
 }
@@ -210,6 +267,10 @@ struct RunRecord {
     ready_wait_secs: f32,
     ready_stable_frames: u32,
     ready_timed_out: bool,
+    render_ready_wait_frames: u32,
+    render_ready_secs: f32,
+    render_ready_stable_frames: u32,
+    render_ready_timed_out: bool,
     ready_mesh_entities: u32,
     ready_water_mesh_entities: u32,
 }
@@ -252,7 +313,13 @@ impl Plugin for BenchPlugin {
             warn!("--bench-headless requested; falling back to windowed rendering on this backend");
         }
 
+        let render_toggles = scene.render_toggles;
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.insert_resource(render_toggles);
+        }
+
         app.insert_resource(BenchSceneResource(scene.clone()))
+            .insert_resource(render_toggles)
             .insert_resource(BenchState {
                 phase: BenchPhase::Warmup,
                 checkpoint_index: 0,
@@ -262,11 +329,20 @@ impl Plugin for BenchPlugin {
                 ready_stable_frames: 0,
                 ready_wait_frames: 0,
                 ready_last_signature: None,
+                render_ready_started: None,
+                render_ready_wait_frames: 0,
+                render_ready_stable_frames: 0,
+                render_ready_last_signature: None,
                 last_ready_wait_frames: 0,
                 last_ready_wait_secs: 0.0,
                 last_ready_stable_frames: 0,
                 last_ready_snapshot: BenchReadySnapshot::default(),
                 last_ready_timed_out: false,
+                last_render_ready_wait_frames: 0,
+                last_render_ready_secs: 0.0,
+                last_render_ready_stable_frames: 0,
+                last_render_ready_signature: None,
+                last_render_ready_timed_out: false,
                 settle_frames_left: 0,
                 hold_frames_left: 0,
                 screenshot_wait_left: 0,
@@ -292,7 +368,10 @@ impl Plugin for BenchPlugin {
             .init_resource::<InventoryUiState>()
             .add_systems(Startup, setup_bench_environment)
             .add_systems(PreUpdate, crate::performance::reset_area_timing_frame)
-            .add_systems(Update, run_bench_state_machine);
+            .add_systems(
+                Update,
+                (apply_bench_render_toggles, run_bench_state_machine),
+            );
     }
 }
 
@@ -304,6 +383,45 @@ fn setup_bench_environment(
     time.set_max_delta(std::time::Duration::from_millis(100));
     atmosphere.cycle_enabled = false;
     timing.set_enabled(true);
+}
+
+fn apply_bench_render_toggles(
+    toggles: Res<BenchRenderToggles>,
+    mut visibility_queries: ParamSet<(
+        Query<&mut Visibility, With<WaterMesh>>,
+        Query<&mut Visibility, With<BuildingMesh>>,
+    )>,
+    mut directional_lights: Query<&mut DirectionalLight>,
+    mut point_lights: Query<&mut PointLight>,
+    mut spot_lights: Query<&mut SpotLight>,
+    mut reflection_config: Option<ResMut<WaterReflectionConfig>>,
+) {
+    if toggles.disable_water_meshes {
+        for mut visibility in &mut visibility_queries.p0() {
+            *visibility = Visibility::Hidden;
+        }
+    }
+    if toggles.disable_buildings {
+        for mut visibility in &mut visibility_queries.p1() {
+            *visibility = Visibility::Hidden;
+        }
+    }
+    if toggles.disable_shadows {
+        for mut light in &mut directional_lights {
+            light.shadows_enabled = false;
+        }
+        for mut light in &mut point_lights {
+            light.shadows_enabled = false;
+        }
+        for mut light in &mut spot_lights {
+            light.shadows_enabled = false;
+        }
+    }
+    if toggles.disable_reflection_cameras {
+        if let Some(config) = reflection_config.as_deref_mut() {
+            config.enabled = false;
+        }
+    }
 }
 
 fn run_bench_state_machine(
@@ -364,11 +482,20 @@ fn run_bench_state_machine(
             state.ready_stable_frames = 0;
             state.ready_wait_frames = 0;
             state.ready_last_signature = None;
+            state.render_ready_started = None;
+            state.render_ready_wait_frames = 0;
+            state.render_ready_stable_frames = 0;
+            state.render_ready_last_signature = None;
             state.last_ready_wait_frames = 0;
             state.last_ready_wait_secs = 0.0;
             state.last_ready_stable_frames = 0;
             state.last_ready_snapshot = BenchReadySnapshot::default();
             state.last_ready_timed_out = false;
+            state.last_render_ready_wait_frames = 0;
+            state.last_render_ready_secs = 0.0;
+            state.last_render_ready_stable_frames = 0;
+            state.last_render_ready_signature = None;
+            state.last_render_ready_timed_out = false;
             state.phase = BenchPhase::WaitReady;
         }
         BenchPhase::WaitReady => {
@@ -466,6 +593,102 @@ fn run_bench_state_machine(
                         snapshot.signature.low_lod_chunks,
                     );
                 }
+                state.render_ready_started = Some(Instant::now());
+                state.render_ready_wait_frames = 0;
+                state.render_ready_stable_frames = 0;
+                state.render_ready_last_signature = None;
+                state.phase = BenchPhase::WaitRenderReady;
+            }
+        }
+        BenchPhase::WaitRenderReady => {
+            let checkpoint = &scene.checkpoints[state.checkpoint_index];
+            record_bench_ready_counts(
+                &mut timing,
+                frame.0,
+                state.last_ready_snapshot,
+                state.last_ready_wait_frames,
+                state.last_ready_stable_frames,
+                state.last_ready_wait_secs >= READY_MIN_SECS,
+                state.last_ready_timed_out,
+            );
+
+            let signature = bench_render_ready_signature(&timing);
+            let signature_stable = signature.is_some()
+                && state.render_ready_last_signature.is_some()
+                && signature == state.render_ready_last_signature;
+            if signature_stable {
+                state.render_ready_stable_frames += 1;
+            } else {
+                state.render_ready_stable_frames = 0;
+            }
+            state.render_ready_wait_frames += 1;
+            state.render_ready_last_signature = signature;
+
+            let wait_secs = state
+                .render_ready_started
+                .map(|started| started.elapsed().as_secs_f32())
+                .unwrap_or_default();
+            let min_frames_satisfied = state.render_ready_wait_frames >= RENDER_READY_MIN_FRAMES;
+            record_bench_render_ready_counts(
+                &mut timing,
+                frame.0,
+                signature,
+                state.render_ready_wait_frames,
+                state.render_ready_stable_frames,
+                min_frames_satisfied,
+                false,
+            );
+
+            let ready = signature.is_some()
+                && state.render_ready_stable_frames >= RENDER_READY_STABLE_FRAMES
+                && min_frames_satisfied;
+            let timed_out = wait_secs >= RENDER_READY_TIMEOUT_SECS;
+            if ready || timed_out {
+                state.last_render_ready_wait_frames = state.render_ready_wait_frames;
+                state.last_render_ready_secs = wait_secs;
+                state.last_render_ready_stable_frames = state.render_ready_stable_frames;
+                state.last_render_ready_signature = signature;
+                state.last_render_ready_timed_out = timed_out && !ready;
+                if state.last_render_ready_timed_out {
+                    warn!(
+                        "Bench checkpoint '{}' run {} render-ready timeout after {:.1}s, stable {}/{} frames, signature {:?}",
+                        checkpoint.name,
+                        state.run_index,
+                        wait_secs,
+                        state.render_ready_stable_frames,
+                        RENDER_READY_STABLE_FRAMES,
+                        signature,
+                    );
+                    println!(
+                        "[BENCH RENDER READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_frames={} signature={:?}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.render_ready_wait_frames,
+                        wait_secs,
+                        state.render_ready_stable_frames,
+                        RENDER_READY_MIN_FRAMES,
+                        signature,
+                    );
+                } else {
+                    info!(
+                        "Bench checkpoint '{}' run {} render-ready after {} frames ({:.1}s): {:?}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.render_ready_wait_frames,
+                        wait_secs,
+                        signature,
+                    );
+                    println!(
+                        "[BENCH RENDER READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_frames={} signature={:?}",
+                        checkpoint.name,
+                        state.run_index,
+                        state.render_ready_wait_frames,
+                        wait_secs,
+                        state.render_ready_stable_frames,
+                        RENDER_READY_MIN_FRAMES,
+                        signature,
+                    );
+                }
                 state.phase = BenchPhase::Settle;
             }
         }
@@ -527,6 +750,10 @@ fn run_bench_state_machine(
                     ready_wait_secs: state.last_ready_wait_secs,
                     ready_stable_frames: state.last_ready_stable_frames,
                     ready_timed_out: state.last_ready_timed_out,
+                    render_ready_wait_frames: state.last_render_ready_wait_frames,
+                    render_ready_secs: state.last_render_ready_secs,
+                    render_ready_stable_frames: state.last_render_ready_stable_frames,
+                    render_ready_timed_out: state.last_render_ready_timed_out,
                     ready_mesh_entities: state.last_ready_snapshot.signature.mesh_entities,
                     ready_water_mesh_entities: state
                         .last_ready_snapshot
@@ -543,6 +770,15 @@ fn run_bench_state_machine(
                     state.last_ready_stable_frames,
                     state.last_ready_wait_secs >= READY_MIN_SECS,
                     state.last_ready_timed_out,
+                );
+                record_bench_render_ready_counts(
+                    &mut timing,
+                    frame.0,
+                    state.last_render_ready_signature,
+                    state.last_render_ready_wait_frames,
+                    state.last_render_ready_stable_frames,
+                    state.last_render_ready_wait_frames >= RENDER_READY_MIN_FRAMES,
+                    state.last_render_ready_timed_out,
                 );
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
                 if let Ok((mut transform, _player_camera)) = camera.single_mut() {
@@ -609,6 +845,10 @@ fn finish_run(
         ready_wait_secs: 0.0,
         ready_stable_frames: 0,
         ready_timed_out: false,
+        render_ready_wait_frames: 0,
+        render_ready_secs: 0.0,
+        render_ready_stable_frames: 0,
+        render_ready_timed_out: false,
         ready_mesh_entities: 0,
         ready_water_mesh_entities: 0,
     });
@@ -958,6 +1198,121 @@ fn record_bench_ready_counts(
         frame,
         "Bench Ready Chunks Skipped This Frame",
         snapshot.chunks_skipped_this_frame as f64,
+    );
+}
+
+fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRenderReadySignature> {
+    Some(BenchRenderReadySignature {
+        opaque_items: latest_counter_u32(timing, "Render Phase Items Opaque3d Total")?,
+        alpha_mask_items: latest_counter_u32(timing, "Render Phase Items AlphaMask3d Total")?,
+        transparent_items: latest_counter_u32(timing, "Render Phase Items Transparent3d Total")?,
+        shadow_items: latest_counter_u32(timing, "Render Phase Items Shadow Total")?,
+        terrain_items: latest_counter_u32(timing, "Render Phase Items Terrain")?,
+        water_items: latest_counter_u32(timing, "Render Phase Items Water")?,
+        instanced_prop_items: latest_counter_u32(timing, "Render Phase Items Instanced Props")?,
+        queued_instanced_draws: latest_counter_u32(timing, "Render Instancing Props Queued Total")?,
+        queued_instanced_instances: latest_counter_u32(
+            timing,
+            "Render Instancing Queue Instances",
+        )?,
+        water_reflection_active: latest_counter_u32(timing, "Water Reflection Active")?,
+    })
+}
+
+fn latest_counter_u32(timing: &AreaTimingRecorder, area: &str) -> Option<u32> {
+    timing
+        .latest_counter_value(area)
+        .map(|value| value.round().max(0.0) as u32)
+}
+
+fn record_bench_render_ready_counts(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    signature: Option<BenchRenderReadySignature>,
+    wait_frames: u32,
+    stable_frames: u32,
+    min_frames_satisfied: bool,
+    timed_out: bool,
+) {
+    let ready = signature.is_some()
+        && min_frames_satisfied
+        && !timed_out
+        && stable_frames >= RENDER_READY_STABLE_FRAMES;
+    timing.record_count(frame, "Bench Render Ready Indicator", ready as u8 as f64);
+    timing.record_count(
+        frame,
+        "Bench Render Ready Min Frames Satisfied",
+        min_frames_satisfied as u8 as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Timed Out",
+        timed_out as u8 as f64,
+    );
+    timing.record_count(frame, "Bench Render Ready Wait Frames", wait_frames as f64);
+    timing.record_count(
+        frame,
+        "Bench Render Ready Stable Frames",
+        stable_frames as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Signature Available",
+        signature.is_some() as u8 as f64,
+    );
+
+    let Some(signature) = signature else {
+        return;
+    };
+    timing.record_count(
+        frame,
+        "Bench Render Ready Opaque Items",
+        signature.opaque_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready AlphaMask Items",
+        signature.alpha_mask_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Transparent Items",
+        signature.transparent_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Shadow Items",
+        signature.shadow_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Terrain Items",
+        signature.terrain_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Water Items",
+        signature.water_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Instanced Prop Items",
+        signature.instanced_prop_items as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Instanced Draws",
+        signature.queued_instanced_draws as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Instanced Instances",
+        signature.queued_instanced_instances as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Water Reflection Active",
+        signature.water_reflection_active as f64,
     );
 }
 

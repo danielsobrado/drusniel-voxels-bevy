@@ -253,6 +253,17 @@ impl AreaTimingRecorder {
         })
     }
 
+    pub fn latest_counter_value(&self, area: &str) -> Option<f64> {
+        let counter = format!("Counter {area}");
+        if let Some(value) = self.counter_values.get(&counter) {
+            return Some(*value);
+        }
+        self.history
+            .iter()
+            .rev()
+            .find_map(|frame| frame.counters.get(&counter).map(|sample| sample.total))
+    }
+
     pub fn clear_window(&mut self) {
         self.frame_initialized = false;
         self.current_frame_total_us = None;

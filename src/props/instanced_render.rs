@@ -42,6 +42,7 @@ use bevy::render::{
 use bevy_shader::ShaderDefVal;
 use bytemuck::{Pod, Zeroable};
 
+use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
 use crate::props::PropType;
 use crate::props::instancing::{CachedPropMesh, InstancedProp};
@@ -604,6 +605,13 @@ fn sync_prop_shadow_culling(
 }
 
 fn rebuild_visible_and_shadow_instances(group: &mut InstancedPropGroup) -> (bool, bool) {
+    rebuild_visible_and_shadow_instances_with_options(group, false)
+}
+
+fn rebuild_visible_and_shadow_instances_with_options(
+    group: &mut InstancedPropGroup,
+    disable_shadow_lod: bool,
+) -> (bool, bool) {
     let mut visible_instances = Vec::with_capacity(group.source_instances.len());
     let mut shadow_instances = Vec::with_capacity(group.source_instances.len());
 
@@ -617,7 +625,7 @@ fn rebuild_visible_and_shadow_instances(group: &mut InstancedPropGroup) -> (bool
             continue;
         }
         visible_instances.push(*instance);
-        if !*shadow_culled && *lod == PropInstanceLod::Full {
+        if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full) {
             shadow_instances.push(*instance);
         }
     }
@@ -651,6 +659,7 @@ fn update_instanced_prop_lod(
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut groups: Query<(Entity, &mut InstancedPropGroup)>,
     timing: Option<Res<RenderTimingSink>>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
@@ -663,6 +672,12 @@ fn update_instanced_prop_lod(
         return;
     };
     let camera_pos = camera_transform.translation();
+    let disable_hiding = bench_toggles
+        .as_deref()
+        .is_some_and(|toggles| toggles.disable_prop_lod_hiding);
+    let disable_shadow_lod = bench_toggles
+        .as_deref()
+        .is_some_and(|toggles| toggles.disable_prop_shadow_lod);
 
     let mut full_instances = 0usize;
     let mut mid_instances = 0usize;
@@ -685,7 +700,8 @@ fn update_instanced_prop_lod(
                 .unwrap_or(PropInstanceLod::Full);
             let distance =
                 camera_pos.distance(instance_translation(&group.source_instances[index]));
-            let next = classify_instance_lod(class, current, distance);
+            let next =
+                classify_instance_lod(class, current, distance, disable_hiding, disable_shadow_lod);
             if let Some(lod) = group.lod_states.get_mut(index) {
                 if *lod != next {
                     *lod = next;
@@ -697,17 +713,22 @@ fn update_instanced_prop_lod(
                 PropInstanceLod::Full => full_instances += 1,
                 PropInstanceLod::Mid => {
                     mid_instances += 1;
-                    shadows_disabled += 1;
+                    if !disable_shadow_lod {
+                        shadows_disabled += 1;
+                    }
                 }
                 PropInstanceLod::Hidden => {
                     hidden_instances += 1;
-                    shadows_disabled += 1;
+                    if !disable_shadow_lod {
+                        shadows_disabled += 1;
+                    }
                 }
             }
         }
 
         if lod_changed {
-            let (visible_dirty, shadow_dirty) = rebuild_visible_and_shadow_instances(&mut group);
+            let (visible_dirty, shadow_dirty) =
+                rebuild_visible_and_shadow_instances_with_options(&mut group, disable_shadow_lod);
             if visible_dirty || shadow_dirty {
                 groups_dirtied += 1;
             }
@@ -735,9 +756,14 @@ fn classify_instance_lod(
     class: PropRenderClass,
     current: PropInstanceLod,
     distance: f32,
+    disable_hiding: bool,
+    disable_shadow_lod: bool,
 ) -> PropInstanceLod {
-    match class {
+    let lod = match class {
         PropRenderClass::ImportantOpaque => {
+            if disable_shadow_lod {
+                return PropInstanceLod::Full;
+            }
             if distance
                 > threshold_for_entering(
                     current,
@@ -762,6 +788,13 @@ fn classify_instance_lod(
             TINY_CLUTTER_FULL_LOD_DISTANCE,
             TINY_CLUTTER_HIDDEN_LOD_DISTANCE,
         ),
+    };
+
+    match lod {
+        PropInstanceLod::Hidden if disable_hiding && disable_shadow_lod => PropInstanceLod::Full,
+        PropInstanceLod::Hidden if disable_hiding => PropInstanceLod::Mid,
+        PropInstanceLod::Mid if disable_shadow_lod => PropInstanceLod::Full,
+        other => other,
     }
 }
 
@@ -1493,9 +1526,26 @@ struct QueueInstancedPropsParams<'w, 's> {
 fn queue_instanced_props(
     mut params: QueueInstancedPropsParams,
     timing: Option<Res<RenderTimingSink>>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Queue Props");
+    let _main_timer = render_timing_guard(sink, "Render Instancing Queue Main CPU");
+    let bench_toggles = bench_toggles.as_deref();
+    if bench_toggles.is_some_and(|toggles| toggles.disable_instanced_props) {
+        if let Some(sink) = sink {
+            sink.push_count("Render Instancing Props Groups Examined", 0.0);
+            sink.push_count("Render Instancing Props Groups Visible", 0.0);
+            sink.push_count("Render Instancing Props Groups Queued", 0.0);
+            sink.push_count("Render Instancing Queue Draws", 0.0);
+            sink.push_count("Render Instancing Queue Instances", 0.0);
+            sink.push_count("Render Instancing Props Queued Opaque", 0.0);
+            sink.push_count("Render Instancing Props Queued AlphaMask", 0.0);
+            sink.push_count("Render Instancing Props Queued Transparent", 0.0);
+            sink.push_count("Render Instancing Props Queued Total", 0.0);
+        }
+        return;
+    }
     let collect_diagnostics = sink.is_some();
     let groups_examined = if collect_diagnostics {
         params.material_meshes.iter().count()
@@ -1579,9 +1629,14 @@ fn queue_instanced_props(
             let Some(mesh) = params.meshes.get(mesh_instance.mesh_asset_id) else {
                 continue;
             };
-            let mesh_key = *view_key
-                | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits())
-                | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology());
+            let phase = classify_instanced_prop_render_phase(group, material, bench_toggles);
+            let mesh_key = instanced_prop_mesh_key_for_phase(
+                *view_key
+                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits())
+                    | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology()),
+                phase,
+                group,
+            );
             let key = PropInstancingPipelineKey {
                 mesh_key,
                 tint_enabled: group.tint_enabled,
@@ -1598,7 +1653,6 @@ fn queue_instanced_props(
                 .mesh_allocator
                 .mesh_slabs(&mesh_instance.mesh_asset_id);
             let material_bind_group_index = Some(material.binding.group.0);
-            let phase = classify_instanced_prop_render_phase(group, material);
             let group_instances = group.instances.len();
 
             match phase {
@@ -1811,11 +1865,30 @@ fn asset_id_label<A: Asset>(asset_id: AssetId<A>) -> String {
 fn classify_instanced_prop_render_phase(
     group: &InstancedPropGroup,
     material: &PreparedMaterial,
+    bench_toggles: Option<&BenchRenderToggles>,
 ) -> InstancedPropRenderPhase {
+    if bench_toggles.is_some_and(|toggles| toggles.force_instanced_props_transparent) {
+        return InstancedPropRenderPhase::Transparent;
+    }
+
+    let uses_blended_alpha = group_uses_blended_alpha(group);
+
+    if bench_toggles.is_some_and(|toggles| toggles.force_instanced_props_opaque) {
+        if !uses_blended_alpha {
+            return InstancedPropRenderPhase::Opaque;
+        }
+    }
+
+    if bench_toggles.is_some_and(|toggles| toggles.force_cutout_props_alpha_mask) {
+        if !uses_blended_alpha && instanced_prop_shader_uses_cutout() {
+            return InstancedPropRenderPhase::AlphaMask;
+        }
+    }
+
     if group.instances.len() < MIN_BINNED_PROP_GROUP_INSTANCES {
         return InstancedPropRenderPhase::Transparent;
     }
-    if group_uses_blended_alpha(group) {
+    if uses_blended_alpha {
         return InstancedPropRenderPhase::Transparent;
     }
 
@@ -1829,6 +1902,31 @@ fn classify_instanced_prop_render_phase(
             InstancedPropRenderPhase::Transparent
         }
     }
+}
+
+fn instanced_prop_mesh_key_for_phase(
+    mut mesh_key: MeshPipelineKey,
+    phase: InstancedPropRenderPhase,
+    group: &InstancedPropGroup,
+) -> MeshPipelineKey {
+    match phase {
+        InstancedPropRenderPhase::Opaque => {
+            if instanced_prop_shader_uses_cutout() {
+                mesh_key |= MeshPipelineKey::MAY_DISCARD;
+            }
+        }
+        InstancedPropRenderPhase::AlphaMask => {
+            mesh_key |= MeshPipelineKey::MAY_DISCARD;
+        }
+        InstancedPropRenderPhase::Transparent => {
+            if group_uses_blended_alpha(group) {
+                mesh_key |= MeshPipelineKey::BLEND_ALPHA;
+            } else if instanced_prop_shader_uses_cutout() {
+                mesh_key |= MeshPipelineKey::MAY_DISCARD;
+            }
+        }
+    }
+    mesh_key
 }
 
 fn group_uses_blended_alpha(group: &InstancedPropGroup) -> bool {
@@ -1863,9 +1961,22 @@ fn queue_instanced_prop_shadows(
     )>,
     view_key_cache: Res<ViewKeyCache>,
     timing: Option<Res<RenderTimingSink>>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Queue Shadows");
+    let _shadow_timer = render_timing_guard(sink, "Render Instancing Queue Shadows CPU");
+    if bench_toggles
+        .is_some_and(|toggles| toggles.disable_instanced_props || toggles.disable_shadows)
+    {
+        if let Some(sink) = sink {
+            sink.push_count("Render Instancing Shadow Views", 0.0);
+            sink.push_count("Render Instancing Shadow Lights", 0.0);
+            sink.push_count("Render Instancing Shadow Draws", 0.0);
+            sink.push_count("Render Instancing Shadow Instances", 0.0);
+        }
+        return;
+    }
     let Some(pipeline) = pipeline else {
         if let Some(sink) = sink {
             sink.push_count("Render Instancing Shadow Draws", 0.0);

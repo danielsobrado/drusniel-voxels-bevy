@@ -37,7 +37,9 @@ use crate::voxel::skirt::{NeighborLods, SkirtConfig, extract_boundary_edges, gen
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
+use bevy::ecs::query::QueryItem;
 use bevy::prelude::*;
+use bevy::render::extract_component::ExtractComponent;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -45,13 +47,33 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
     pub chunk_position: IVec3,
 }
 
-#[derive(Component)]
+impl ExtractComponent for ChunkMesh {
+    type QueryData = &'static ChunkMesh;
+    type QueryFilter = ();
+    type Out = ChunkMesh;
+
+    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self::Out> {
+        Some(*item)
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug)]
 pub struct WaterMesh;
+
+impl ExtractComponent for WaterMesh {
+    type QueryData = &'static WaterMesh;
+    type QueryFilter = ();
+    type Out = WaterMesh;
+
+    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self::Out> {
+        Some(*item)
+    }
+}
 
 #[derive(Component, Copy, Clone, Debug)]
 pub struct WaterMeshDetail {

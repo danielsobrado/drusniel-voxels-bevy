@@ -1,11 +1,12 @@
 use bevy::prelude::*;
+use bevy::render::extract_component::ExtractComponentPlugin;
 
 use crate::props::billboard::BillboardMaterial;
 use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::array_loader::{create_texture_array, start_loading_texture_arrays};
 use crate::rendering::atlas::load_texture_atlas;
 use crate::rendering::blocky_material::BlockyMaterial;
-use crate::rendering::building_material::BuildingMaterial;
+use crate::rendering::building_material::{BuildingMaterial, BuildingMesh};
 use crate::rendering::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
 };
@@ -77,6 +78,7 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<BlockyMaterial>::default())
             // Register BuildingMaterial (Full PBR for RTX 40xx)
             .add_plugins(MaterialPlugin::<BuildingMaterial>::default())
+            .add_plugins(ExtractComponentPlugin::<BuildingMesh>::default())
             // Register PropsMaterial (Medium PBR)
             .add_plugins(MaterialPlugin::<PropsMaterial>::default())
             // Register BillboardMaterial for tree LOD.

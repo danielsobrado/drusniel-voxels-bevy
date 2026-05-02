@@ -1,6 +1,8 @@
 use bevy::{
+    ecs::query::QueryItem,
     pbr::OpaqueRendererMethod,
     prelude::*,
+    render::extract_component::ExtractComponent,
     render::render_resource::{AsBindGroup, ShaderType},
 };
 use bevy_shader::ShaderRef;
@@ -210,7 +212,17 @@ pub struct BuildingMaterialHandle {
 }
 
 /// Marker component for building meshes that use building material
-#[derive(Component)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct BuildingMesh {
     pub material_type: BuildingMaterialType,
+}
+
+impl ExtractComponent for BuildingMesh {
+    type QueryData = &'static BuildingMesh;
+    type QueryFilter = ();
+    type Out = BuildingMesh;
+
+    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self::Out> {
+        Some(*item)
+    }
 }
