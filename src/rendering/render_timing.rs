@@ -8,9 +8,9 @@ use std::time::Instant;
 use crate::performance::AreaTimingRecorder;
 
 #[derive(Clone)]
-struct RenderTimingSample {
-    area: String,
-    duration_us: u64,
+pub enum RenderTimingSample {
+    Duration { area: String, duration_us: u64 },
+    Counter { area: String, value: f64 },
 }
 
 #[derive(Resource, Clone, Default)]
@@ -19,20 +19,55 @@ pub struct RenderTimingSink {
 }
 
 impl RenderTimingSink {
-    fn push(&self, area: impl Into<String>, duration_us: u64) {
+    pub fn push_duration(&self, area: impl Into<String>, duration_us: u64) {
         if let Ok(mut samples) = self.samples.lock() {
-            samples.push(RenderTimingSample {
+            samples.push(RenderTimingSample::Duration {
                 area: area.into(),
                 duration_us,
             });
         }
     }
 
-    fn drain(&self) -> Vec<RenderTimingSample> {
+    pub fn push_count(&self, area: impl Into<String>, value: f64) {
+        if let Ok(mut samples) = self.samples.lock() {
+            samples.push(RenderTimingSample::Counter {
+                area: area.into(),
+                value,
+            });
+        }
+    }
+
+    pub fn drain(&self) -> Vec<RenderTimingSample> {
         self.samples
             .lock()
             .map(|mut samples| samples.drain(..).collect())
             .unwrap_or_default()
+    }
+}
+
+pub struct RenderTimingGuard {
+    sink: Option<RenderTimingSink>,
+    area: &'static str,
+    start: Option<Instant>,
+}
+
+impl Drop for RenderTimingGuard {
+    fn drop(&mut self) {
+        let (Some(sink), Some(start)) = (&self.sink, self.start) else {
+            return;
+        };
+        sink.push_duration(self.area, start.elapsed().as_micros() as u64);
+    }
+}
+
+pub fn render_timing_guard(
+    sink: Option<&RenderTimingSink>,
+    area: &'static str,
+) -> RenderTimingGuard {
+    RenderTimingGuard {
+        sink: sink.cloned(),
+        area,
+        start: sink.map(|_| Instant::now()),
     }
 }
 
@@ -50,7 +85,7 @@ impl RenderTimingMarkers {
         let Some(start) = self.starts.remove(key) else {
             return;
         };
-        sink.push(area, start.elapsed().as_micros() as u64);
+        sink.push_duration(area, start.elapsed().as_micros() as u64);
     }
 }
 
@@ -158,9 +193,15 @@ pub fn install_render_timing(app: &mut App) {
                     begin_prepare.before(RenderSystems::Prepare),
                     end_prepare.after(RenderSystems::Prepare),
                     begin_prepare_resources.before(RenderSystems::PrepareResources),
-                    end_prepare_resources.after(RenderSystems::PrepareResources),
-                    begin_prepare_bind_groups.before(RenderSystems::PrepareBindGroups),
-                    end_prepare_bind_groups.after(RenderSystems::PrepareBindGroups),
+                    end_prepare_resources
+                        .after(RenderSystems::PrepareResources)
+                        .before(RenderSystems::PrepareResourcesCollectPhaseBuffers),
+                    begin_prepare_bind_groups
+                        .after(RenderSystems::PrepareResourcesFlush)
+                        .before(RenderSystems::PrepareBindGroups),
+                    end_prepare_bind_groups
+                        .after(RenderSystems::PrepareBindGroups)
+                        .before(RenderSystems::Render),
                 ),
             )
             .add_systems(
@@ -188,7 +229,14 @@ fn drain_render_timing_samples(
 
     if let Some(sink) = sink {
         for sample in sink.drain() {
-            timing.record_area(frame.0, sample.area, sample.duration_us);
+            match sample {
+                RenderTimingSample::Duration { area, duration_us } => {
+                    timing.record_area(frame.0, area, duration_us);
+                }
+                RenderTimingSample::Counter { area, value } => {
+                    timing.record_count(frame.0, area, value);
+                }
+            }
         }
     }
 

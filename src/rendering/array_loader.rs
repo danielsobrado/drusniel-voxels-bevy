@@ -1,4 +1,5 @@
 use bevy::asset::RenderAssetUsages;
+use bevy::diagnostic::FrameCount;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -9,6 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::constants::{ATLAS_COLUMNS, ATLAS_TILE_SIZE};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
 use crate::rendering::materials::VoxelMaterial;
 use crate::rendering::mipmaps::{calculate_mip_count, generate_array_mipmaps_rgba8};
@@ -381,7 +383,10 @@ pub fn create_texture_array(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<BlockyMaterial>>,
     existing_handle: Option<ResMut<BlockyMaterialHandle>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Build Blocky Array");
     // Check if we need to rebuild due to mapping change
     let needs_rebuild = mapping.needs_rebuild;
     if needs_rebuild {

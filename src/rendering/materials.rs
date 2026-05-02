@@ -3,6 +3,7 @@ use crate::constants::{
     VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT, VOXEL_WATER_WAVE_AMPLITUDE_MULT,
     VOXEL_WATER_WAVE_UV_SCALE,
 };
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{
     BuildingMaterial, BuildingMaterialHandle, BuildingUniforms,
@@ -13,6 +14,7 @@ use crate::rendering::triplanar_material::{
     TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
 };
 use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
+use bevy::diagnostic::FrameCount;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy_water::WaterSettings;
@@ -50,7 +52,10 @@ pub fn setup_water_material(
     mut fancy_materials: ResMut<Assets<StandardWaterMaterial>>,
     mut cheap_materials: ResMut<Assets<StandardMaterial>>,
     water_settings: Option<Res<WaterSettings>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Setup Water");
     let settings = water_settings.as_deref().cloned().unwrap_or_default();
     // Voxel water uses the same water shader as the ocean tiles for wave/foam effects.
     // Base parameters match the v0.3 blue partial-alpha look.
@@ -111,7 +116,10 @@ pub fn sync_voxel_water_material_overrides(
     water_settings: Option<Res<WaterSettings>>,
     water_material: Option<Res<WaterMaterial>>,
     mut materials: ResMut<Assets<StandardWaterMaterial>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Sync Water");
     let (Some(settings), Some(water_material)) = (water_settings, water_material) else {
         return;
     };
@@ -156,7 +164,10 @@ pub fn setup_triplanar_material(
     mut materials: ResMut<Assets<TriplanarMaterial>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     asset_server: Res<AssetServer>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Setup Triplanar");
     let integrated = capabilities
         .as_ref()
         .map(|capabilities| capabilities.integrated_gpu)
@@ -219,7 +230,10 @@ pub fn configure_triplanar_textures(
     materials: Res<Assets<TriplanarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut configured: Local<bool>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Configure Triplanar");
     if *configured {
         return;
     }
@@ -276,7 +290,10 @@ pub fn configure_building_textures(
     materials: Res<Assets<BuildingMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut configured: Local<bool>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Configure Building");
     if *configured {
         return;
     }
@@ -324,7 +341,10 @@ pub fn configure_props_textures(
     materials: Res<Assets<PropsMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut configured: Local<bool>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Configure Props");
     if *configured {
         return;
     }
@@ -373,7 +393,10 @@ pub fn setup_building_material(
     mut materials: ResMut<Assets<BuildingMaterial>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     asset_server: Res<AssetServer>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Setup Building");
     let integrated = capabilities
         .as_ref()
         .map(|c| c.integrated_gpu)
@@ -462,7 +485,10 @@ pub fn setup_props_material(
     mut materials: ResMut<Assets<PropsMaterial>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     asset_server: Res<AssetServer>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Setup Props");
     let integrated = capabilities
         .as_ref()
         .map(|c| c.integrated_gpu)
@@ -515,7 +541,10 @@ pub fn sync_fog_to_materials(
     mut building_materials: ResMut<Assets<BuildingMaterial>>,
     mut props_materials: ResMut<Assets<PropsMaterial>>,
     mut grass_materials: ResMut<Assets<GrassMaterial>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Sync Fog");
     let Some(fog) = fog_uniforms else { return };
 
     if !fog.is_changed() {

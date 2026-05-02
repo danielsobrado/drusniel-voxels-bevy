@@ -45,6 +45,8 @@ pub struct AreaTimingRecorder {
     current_frame_total_us: Option<u64>,
     area_us: BTreeMap<String, u64>,
     area_calls: BTreeMap<String, u32>,
+    counter_values: BTreeMap<String, f64>,
+    counter_calls: BTreeMap<String, u32>,
     history: std::collections::VecDeque<AreaTimingFrameSample>,
 }
 
@@ -54,9 +56,16 @@ struct AreaTimingSample {
     calls: u32,
 }
 
+#[derive(Clone, Copy, Default)]
+struct AreaCounterSample {
+    total: f64,
+    calls: u32,
+}
+
 #[derive(Clone, Default)]
 struct AreaTimingFrameSample {
     areas: BTreeMap<String, AreaTimingSample>,
+    counters: BTreeMap<String, AreaCounterSample>,
     frame_total_us: Option<u64>,
 }
 
@@ -66,6 +75,7 @@ pub struct AreaTimingSummary {
     pub max_ms: f64,
     pub p99_ms: f64,
     pub calls_per_frame: f64,
+    pub unit: &'static str,
 }
 
 impl AreaTimingRecorder {
@@ -78,6 +88,8 @@ impl AreaTimingRecorder {
         self.current_frame_total_us = None;
         self.area_us.clear();
         self.area_calls.clear();
+        self.counter_values.clear();
+        self.counter_calls.clear();
         self.history.clear();
     }
 
@@ -94,6 +106,8 @@ impl AreaTimingRecorder {
         self.current_frame_total_us = frame_total_ms.map(|ms| (ms.max(0.0) * 1000.0) as u64);
         self.area_us.clear();
         self.area_calls.clear();
+        self.counter_values.clear();
+        self.counter_calls.clear();
     }
 
     pub fn record(&mut self, frame: u32, area: &'static str, duration_us: u64) {
@@ -113,6 +127,21 @@ impl AreaTimingRecorder {
         let area = area.into();
         *self.area_us.entry(area.clone()).or_insert(0) += duration_us;
         *self.area_calls.entry(area).or_insert(0) += 1;
+    }
+
+    pub fn record_count(&mut self, frame: u32, area: impl Into<String>, value: f64) {
+        if !self.enabled || !value.is_finite() {
+            return;
+        }
+        if !self.frame_initialized {
+            self.frame_index = frame;
+            self.frame_initialized = true;
+        } else if self.frame_index != frame {
+            self.reset_frame(frame);
+        }
+        let area = format!("Counter {}", area.into());
+        *self.counter_values.entry(area.clone()).or_insert(0.0) += value.max(0.0);
+        *self.counter_calls.entry(area).or_insert(0) += 1;
     }
 
     pub fn areas(&self) -> &BTreeMap<String, u64> {
@@ -153,13 +182,48 @@ impl AreaTimingRecorder {
                 max_ms: max_us as f64 / 1000.0,
                 p99_ms: p99_us as f64 / 1000.0,
                 calls_per_frame: total_calls as f64 / frame_count as f64,
+                unit: "ms",
+            });
+        }
+
+        let mut counters = std::collections::BTreeSet::new();
+        for frame in &self.history {
+            counters.extend(frame.counters.keys().cloned());
+        }
+        for counter in counters {
+            let mut total = 0.0;
+            let mut total_calls = 0u64;
+            let mut samples = Vec::with_capacity(frame_count);
+
+            for frame in &self.history {
+                let sample = frame.counters.get(&counter).copied().unwrap_or_default();
+                total += sample.total;
+                total_calls += sample.calls as u64;
+                samples.push(sample.total);
+            }
+
+            samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let max_value = samples.last().copied().unwrap_or(0.0);
+            let p99_value = percentile_f64(&samples, 0.99);
+            summaries.push(AreaTimingSummary {
+                area: counter,
+                avg_ms: total / frame_count as f64,
+                max_ms: max_value,
+                p99_ms: p99_value,
+                calls_per_frame: total_calls as f64 / frame_count as f64,
+                unit: "count",
             });
         }
 
         summaries.sort_by(|a, b| {
-            b.avg_ms
-                .partial_cmp(&a.avg_ms)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            a.unit
+                .cmp(b.unit)
+                .reverse()
+                .then_with(|| {
+                    b.avg_ms
+                        .partial_cmp(&a.avg_ms)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .then_with(|| a.area.cmp(&b.area))
         });
         summaries
@@ -185,6 +249,7 @@ impl AreaTimingRecorder {
             max_ms: max_us as f64 / 1000.0,
             p99_ms: p99_us as f64 / 1000.0,
             calls_per_frame: 1.0,
+            unit: "ms",
         })
     }
 
@@ -193,6 +258,8 @@ impl AreaTimingRecorder {
         self.current_frame_total_us = None;
         self.area_us.clear();
         self.area_calls.clear();
+        self.counter_values.clear();
+        self.counter_calls.clear();
         self.history.clear();
     }
 
@@ -207,8 +274,19 @@ impl AreaTimingRecorder {
                 },
             );
         }
+        let mut counters = BTreeMap::new();
+        for (area, total) in &self.counter_values {
+            counters.insert(
+                area.clone(),
+                AreaCounterSample {
+                    total: *total,
+                    calls: self.counter_calls.get(area).copied().unwrap_or(0),
+                },
+            );
+        }
         self.history.push_back(AreaTimingFrameSample {
             areas,
+            counters,
             frame_total_us: self.current_frame_total_us,
         });
         while self.history.len() > AREA_TIMING_WINDOW_FRAMES {
@@ -220,6 +298,14 @@ impl AreaTimingRecorder {
 fn percentile_us(sorted_samples: &[u64], percentile: f64) -> u64 {
     if sorted_samples.is_empty() {
         return 0;
+    }
+    let rank = ((sorted_samples.len() as f64) * percentile).ceil() as usize;
+    sorted_samples[rank.saturating_sub(1).min(sorted_samples.len() - 1)]
+}
+
+fn percentile_f64(sorted_samples: &[f64], percentile: f64) -> f64 {
+    if sorted_samples.is_empty() {
+        return 0.0;
     }
     let rank = ((sorted_samples.len() as f64) * percentile).ceil() as usize;
     sorted_samples[rank.saturating_sub(1).min(sorted_samples.len() - 1)]
@@ -367,6 +453,7 @@ pub fn write_area_timing_csv(
         max_ms: 0.0,
         p99_ms: 0.0,
         calls_per_frame: 1.0,
+        unit: "ms",
     });
     write_csv_row(&mut file, &frame_total)?;
     for summary in recorder.rolling_summaries() {

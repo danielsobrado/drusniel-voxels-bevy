@@ -152,6 +152,9 @@ pub fn attach_procedural_grass_to_chunks(
     let _timer = area_timer(&mut timing, frame.0, "Grass Collect");
     let base_density = veg_config.grass_density;
     let base_max_count = veg_config.max_blades_per_chunk;
+    let mut chunks_considered = 0usize;
+    let mut chunks_spawned = 0usize;
+    let mut instances_spawned = 0usize;
 
     let camera_pos = camera_query
         .single()
@@ -167,6 +170,7 @@ pub fn attach_procedural_grass_to_chunks(
         if distance > GRASS_CULL_DISTANCE {
             continue;
         }
+        chunks_considered += 1;
 
         // Reduce density for medium-distance chunks
         let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
@@ -177,7 +181,7 @@ pub fn attach_procedural_grass_to_chunks(
             (base_density, base_max_count)
         };
 
-        process_chunk_for_grass(
+        let spawned = process_chunk_for_grass(
             &mut commands,
             &assets,
             &mut meshes,
@@ -188,6 +192,10 @@ pub fn attach_procedural_grass_to_chunks(
             density,
             max_count,
         );
+        if spawned > 0 {
+            chunks_spawned += 1;
+            instances_spawned += spawned;
+        }
     }
 
     // Process triplanar chunks (surface nets mode)
@@ -198,6 +206,7 @@ pub fn attach_procedural_grass_to_chunks(
         if distance > GRASS_CULL_DISTANCE {
             continue;
         }
+        chunks_considered += 1;
 
         let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
             (base_density.max(1) / 2, base_max_count / 2)
@@ -207,7 +216,7 @@ pub fn attach_procedural_grass_to_chunks(
             (base_density, base_max_count)
         };
 
-        process_chunk_for_grass(
+        let spawned = process_chunk_for_grass(
             &mut commands,
             &assets,
             &mut meshes,
@@ -218,7 +227,15 @@ pub fn attach_procedural_grass_to_chunks(
             density,
             max_count,
         );
+        if spawned > 0 {
+            chunks_spawned += 1;
+            instances_spawned += spawned;
+        }
     }
+    drop(_timer);
+    timing.record_count(frame.0, "Grass Chunks Considered", chunks_considered as f64);
+    timing.record_count(frame.0, "Grass Chunks Spawned", chunks_spawned as f64);
+    timing.record_count(frame.0, "Grass Instances Spawned", instances_spawned as f64);
 }
 
 /// Helper function to spawn grass on a chunk
@@ -232,25 +249,26 @@ fn process_chunk_for_grass(
     transform: &Transform,
     density: u32,
     max_count: usize,
-) {
+) -> usize {
     let Some(chunk_source_mesh) = meshes.get(&chunk_mesh.0) else {
-        return;
+        return 0;
     };
 
     let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count);
     if instances.is_empty() {
-        return;
+        return 0;
     }
+    let instance_count = instances.len();
 
     let template_mesh = match meshes.get(&assets.blade_mesh) {
         Some(mesh) => mesh,
-        None => return,
+        None => return 0,
     };
 
     // Pass chunk origin so grass positions are relative to chunk (since we parent to chunk)
     let chunk_origin = transform.translation;
     let Some(grass_mesh) = build_grass_patch_mesh(template_mesh, &instances, chunk_origin) else {
-        return;
+        return 0;
     };
 
     let mesh_handle = meshes.add(grass_mesh);
@@ -275,6 +293,7 @@ fn process_chunk_for_grass(
         NotShadowCaster,
         ChildOf(entity),
     ));
+    instance_count
 }
 
 /// Extract grass instances from a mesh by sampling upward-facing triangles
@@ -1006,8 +1025,11 @@ pub fn animate_particles(
     let t = time.elapsed_secs();
     // Compensate for double delta by using 2× delta when we do run
     let dt = time.delta_secs() * 2.0;
+    let mut updated = 0usize;
+    let mut wrapped = 0usize;
 
     for (mut transform, particle) in particles.iter_mut() {
+        updated += 1;
         // Gentle bobbing motion
         let bob = (t * particle.speed + particle.phase).sin() * 0.12;
         transform.translation.y = particle.base_y + bob;
@@ -1025,6 +1047,7 @@ pub fn animate_particles(
         .length();
 
         if dist_to_camera > 100.0 {
+            wrapped += 1;
             // Teleport to other side of player
             let angle = simple_hash(
                 (transform.translation.x * 100.0) as i32,
@@ -1039,6 +1062,9 @@ pub fn animate_particles(
             transform.translation.z = camera_pos.z + angle.sin() * new_radius;
         }
     }
+    drop(_timer);
+    timing.record_count(frame.0, "Grass Particles Updated", updated as f64);
+    timing.record_count(frame.0, "Grass Particles Wrapped", wrapped as f64);
 }
 
 /// Sync wind and near-fade parameters from VegetationConfig to grass materials
@@ -1089,8 +1115,11 @@ pub fn cull_distant_grass(
 
     // Use hysteresis: despawn only beyond cull + hysteresis
     let cull_threshold = GRASS_CULL_DISTANCE + GRASS_CULL_HYSTERESIS;
+    let mut checked = 0usize;
+    let mut despawned = 0usize;
 
     for (grass_entity, child_of) in grass_query.iter() {
+        checked += 1;
         let parent_entity = child_of.0;
         let Ok(chunk_tf) = chunk_query.get(parent_entity) else {
             continue;
@@ -1099,6 +1128,7 @@ pub fn cull_distant_grass(
         let distance = camera_pos.distance(chunk_center);
 
         if distance > cull_threshold {
+            despawned += 1;
             commands.entity(grass_entity).despawn();
             // Remove marker so grass can be re-spawned when player returns
             commands
@@ -1106,6 +1136,9 @@ pub fn cull_distant_grass(
                 .remove::<ChunkGrassAttached>();
         }
     }
+    drop(_timer);
+    timing.record_count(frame.0, "Grass Patches Checked", checked as f64);
+    timing.record_count(frame.0, "Grass Patches Despawned", despawned as f64);
 }
 
 pub struct VegetationPlugin;

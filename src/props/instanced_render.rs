@@ -46,6 +46,7 @@ use crate::props::instancing::{CachedPropMesh, InstancedProp};
 use crate::props::lod_material::PropLodState;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle};
+use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
 const SHADER_ASSET_PATH: &str = "shaders/instanced_prop.wgsl";
 const INTEGRATED_GROUP_INSTANCE_LIMIT: usize = 2048;
@@ -467,11 +468,22 @@ fn prepare_instance_buffers(
         Or<(Changed<InstancedPropGroup>, Without<InstanceBuffer>)>,
     >,
     render_device: Res<RenderDevice>,
+    timing: Option<Res<RenderTimingSink>>,
 ) {
+    let sink = timing.as_deref();
+    let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
+    let mut groups_uploaded = 0usize;
+    let mut instances_uploaded = 0usize;
+    let mut shadow_instances_uploaded = 0usize;
+    let mut bytes_uploaded = 0usize;
+
     for (entity, group) in &query {
         if group.instances.is_empty() {
             continue;
         }
+        groups_uploaded += 1;
+        instances_uploaded += group.instances.len();
+        shadow_instances_uploaded += group.shadow_instances.len();
         let instance_bytes: Vec<PropInstanceNoTint>;
         let contents = if group.tint_enabled {
             bytemuck::cast_slice(group.instances.as_slice())
@@ -485,6 +497,7 @@ fn prepare_instance_buffers(
                 .collect();
             bytemuck::cast_slice(instance_bytes.as_slice())
         };
+        bytes_uploaded += contents.len();
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("instanced prop data buffer"),
             contents,
@@ -503,6 +516,7 @@ fn prepare_instance_buffers(
                 .collect();
             bytemuck::cast_slice(shadow_instance_bytes.as_slice())
         };
+        bytes_uploaded += shadow_contents.len();
         let shadow_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("instanced prop shadow data buffer"),
             contents: shadow_contents,
@@ -514,6 +528,25 @@ fn prepare_instance_buffers(
             shadow_buffer,
             shadow_length: group.shadow_instances.len(),
         });
+    }
+
+    if let Some(sink) = sink {
+        sink.push_count(
+            "Render Instancing Buffer Groups Uploaded",
+            groups_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Buffer Instances Uploaded",
+            instances_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Buffer Shadow Instances Uploaded",
+            shadow_instances_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Buffer Bytes Uploaded",
+            bytes_uploaded as f64,
+        );
     }
 }
 
@@ -564,11 +597,20 @@ fn ensure_prop_instancing_shadow_pipeline(
     mesh_pipeline: Res<MeshPipeline>,
     prepass_pipeline: Option<Res<PrepassPipeline>>,
     render_device: Res<RenderDevice>,
+    timing: Option<Res<RenderTimingSink>>,
 ) {
+    let sink = timing.as_deref();
+    let _timer = render_timing_guard(sink, "Render Instancing Ensure Shadow Pipeline");
     if existing.is_some() {
+        if let Some(sink) = sink {
+            sink.push_count("Render Instancing Shadow Pipeline Builds", 0.0);
+        }
         return;
     }
     let Some(prepass_pipeline) = prepass_pipeline else {
+        if let Some(sink) = sink {
+            sink.push_count("Render Instancing Shadow Pipeline Builds", 0.0);
+        }
         return;
     };
     commands.insert_resource(PropInstancingShadowPipeline {
@@ -577,6 +619,9 @@ fn ensure_prop_instancing_shadow_pipeline(
         prepass_pipeline: prepass_pipeline.clone(),
         material_layout: PropsMaterial::bind_group_layout_descriptor(&render_device),
     });
+    if let Some(sink) = sink {
+        sink.push_count("Render Instancing Shadow Pipeline Builds", 1.0);
+    }
 }
 
 impl SpecializedMeshPipeline for PropInstancingPipeline {
@@ -742,16 +787,26 @@ fn queue_instanced_props(
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     views: Query<&ExtractedView>,
     view_key_cache: Res<ViewKeyCache>,
+    timing: Option<Res<RenderTimingSink>>,
 ) {
+    let sink = timing.as_deref();
+    let _timer = render_timing_guard(sink, "Render Instancing Queue Props");
+    let mut views_seen = 0usize;
+    let mut phase_views = 0usize;
+    let mut draws_queued = 0usize;
+    let mut instances_queued = 0usize;
+
     let draw_function = transparent_3d_draw_functions
         .read()
         .id::<DrawInstancedProp>();
 
     for view in &views {
+        views_seen += 1;
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
         else {
             continue;
         };
+        phase_views += 1;
         let Some(view_key) = view_key_cache.get(&view.retained_view_entity) else {
             continue;
         };
@@ -786,7 +841,16 @@ fn queue_instanced_props(
                 extra_index: PhaseItemExtraIndex::None,
                 indexed: true,
             });
+            draws_queued += 1;
+            instances_queued += group.instances.len();
         }
+    }
+
+    if let Some(sink) = sink {
+        sink.push_count("Render Instancing Queue Views", views_seen as f64);
+        sink.push_count("Render Instancing Queue Phase Views", phase_views as f64);
+        sink.push_count("Render Instancing Queue Draws", draws_queued as f64);
+        sink.push_count("Render Instancing Queue Instances", instances_queued as f64);
     }
 }
 
@@ -803,21 +867,33 @@ fn queue_instanced_prop_shadows(
     mut shadow_render_phases: ResMut<ViewBinnedRenderPhases<Shadow>>,
     view_lights: Query<(Entity, &ViewLightEntities, Option<&RenderLayers>), With<ExtractedView>>,
     view_light_entities: Query<(&LightEntity, &ExtractedView)>,
-    point_light_entities: Query<&RenderCubemapVisibleEntities, With<ExtractedPointLight>>,
-    directional_light_entities: Query<
-        &RenderCascadesVisibleEntities,
-        With<ExtractedDirectionalLight>,
-    >,
-    spot_light_entities: Query<&RenderVisibleMeshEntities, With<ExtractedPointLight>>,
+    mut light_visible_entities: ParamSet<(
+        Query<&RenderCascadesVisibleEntities, With<ExtractedDirectionalLight>>,
+        Query<&RenderCubemapVisibleEntities, With<ExtractedPointLight>>,
+        Query<&RenderVisibleMeshEntities, With<ExtractedPointLight>>,
+    )>,
     view_key_cache: Res<ViewKeyCache>,
+    timing: Option<Res<RenderTimingSink>>,
 ) {
+    let sink = timing.as_deref();
+    let _timer = render_timing_guard(sink, "Render Instancing Queue Shadows");
     let Some(pipeline) = pipeline else {
+        if let Some(sink) = sink {
+            sink.push_count("Render Instancing Shadow Draws", 0.0);
+            sink.push_count("Render Instancing Shadow Instances", 0.0);
+        }
         return;
     };
+    let mut shadow_views_seen = 0usize;
+    let mut lights_seen = 0usize;
+    let mut draws_queued = 0usize;
+    let mut instances_queued = 0usize;
     let draw_function = shadow_draw_functions.read().id::<DrawInstancedPropShadow>();
 
     for (camera_entity, view_lights, camera_layers) in &view_lights {
+        shadow_views_seen += 1;
         for view_light_entity in view_lights.lights.iter().copied() {
+            lights_seen += 1;
             let Ok((light_entity, extracted_view_light)) =
                 view_light_entities.get(view_light_entity)
             else {
@@ -833,29 +909,45 @@ fn queue_instanced_prop_shadows(
                 continue;
             };
 
-            let visible_entities = match light_entity {
+            let visible_entities: Vec<_> = match light_entity {
                 LightEntity::Directional {
                     light_entity,
                     cascade_index,
-                } => directional_light_entities
-                    .get(*light_entity)
-                    .ok()
-                    .and_then(|entities| entities.entities.get(&camera_entity))
-                    .and_then(|cascades| cascades.get(*cascade_index)),
+                } => {
+                    let query = light_visible_entities.p0();
+                    query
+                        .get(*light_entity)
+                        .ok()
+                        .and_then(|entities| entities.entities.get(&camera_entity))
+                        .and_then(|cascades| cascades.get(*cascade_index))
+                        .map(|entities| entities.iter().copied().collect())
+                        .unwrap_or_default()
+                }
                 LightEntity::Point {
                     light_entity,
                     face_index,
-                } => point_light_entities
-                    .get(*light_entity)
-                    .ok()
-                    .map(|entities| entities.get(*face_index)),
-                LightEntity::Spot { light_entity } => spot_light_entities.get(*light_entity).ok(),
+                } => {
+                    let query = light_visible_entities.p1();
+                    query
+                        .get(*light_entity)
+                        .ok()
+                        .map(|entities| entities.get(*face_index).iter().copied().collect())
+                        .unwrap_or_default()
+                }
+                LightEntity::Spot { light_entity } => {
+                    let query = light_visible_entities.p2();
+                    query
+                        .get(*light_entity)
+                        .ok()
+                        .map(|entities| entities.iter().copied().collect())
+                        .unwrap_or_default()
+                }
             };
-            let Some(visible_entities) = visible_entities else {
+            if visible_entities.is_empty() {
                 continue;
-            };
+            }
 
-            for (render_entity, main_entity) in visible_entities.iter().copied() {
+            for (render_entity, main_entity) in visible_entities {
                 let Ok((group, instance_buffer)) = groups.get(render_entity) else {
                     continue;
                 };
@@ -918,8 +1010,20 @@ fn queue_instanced_prop_shadows(
                     ),
                     Default::default(),
                 );
+                draws_queued += 1;
+                instances_queued += instance_buffer.shadow_length;
             }
         }
+    }
+
+    if let Some(sink) = sink {
+        sink.push_count("Render Instancing Shadow Views", shadow_views_seen as f64);
+        sink.push_count("Render Instancing Shadow Lights", lights_seen as f64);
+        sink.push_count("Render Instancing Shadow Draws", draws_queued as f64);
+        sink.push_count(
+            "Render Instancing Shadow Instances",
+            instances_queued as f64,
+        );
     }
 }
 

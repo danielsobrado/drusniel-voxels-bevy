@@ -173,6 +173,7 @@ struct AreaSummary {
     median_ms: f64,
     p99_ms: f64,
     calls_per_frame: f64,
+    unit: &'static str,
 }
 
 pub struct BenchPlugin;
@@ -439,6 +440,7 @@ fn finish_run(
                 median_ms: area.avg_ms,
                 p99_ms: area.p99_ms,
                 calls_per_frame: area.calls_per_frame,
+                unit: area.unit,
             },
         );
     }
@@ -449,6 +451,7 @@ fn finish_run(
                 median_ms: volumetric_fog_tier_cost_ms(tier),
                 p99_ms: volumetric_fog_tier_cost_ms(tier),
                 calls_per_frame: if tier.is_enabled() { 1.0 } else { 0.0 },
+                unit: "ms",
             },
         );
     }

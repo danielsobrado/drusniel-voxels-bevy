@@ -1069,9 +1069,15 @@ fn append_performance_debug(
             text_content.push_str("  (no data)\n");
         } else {
             for summary in summaries.iter().take(12) {
+                let unit = if summary.unit == "count" { "ct" } else { "ms" };
                 text_content.push_str(&format!(
-                    "  {}: avg {:.2}ms max {:.2}ms calls {:.1}\n",
-                    summary.area, summary.avg_ms, summary.max_ms, summary.calls_per_frame,
+                    "  {}: avg {:.2}{} max {:.2}{} calls {:.1}\n",
+                    summary.area,
+                    summary.avg_ms,
+                    unit,
+                    summary.max_ms,
+                    unit,
+                    summary.calls_per_frame,
                 ));
             }
         }
@@ -1104,7 +1110,7 @@ fn append_area_timing_table(
 
     text_content.push_str(&format!("CPU frame: {:.2}ms\n", cpu_frame_ms));
     text_content.push_str("\n[Frame Areas - 60f avg]\n");
-    text_content.push_str("Area                 Avg ms  Max ms  p99 ms  Calls\n");
+    text_content.push_str("Area                 Avg     Max     p99    Calls Unit\n");
 
     let summaries = timing_recorder.rolling_summaries();
     if summaries.is_empty() {
@@ -1113,9 +1119,15 @@ fn append_area_timing_table(
     }
 
     for summary in summaries.iter().take(12) {
+        let unit = if summary.unit == "count" { "ct" } else { "ms" };
         text_content.push_str(&format!(
-            "{:<20} {:>6.2} {:>7.2} {:>7.2} {:>6.1}\n",
-            summary.area, summary.avg_ms, summary.max_ms, summary.p99_ms, summary.calls_per_frame,
+            "{:<20} {:>6.2} {:>7.2} {:>7.2} {:>6.1} {}\n",
+            summary.area,
+            summary.avg_ms,
+            summary.max_ms,
+            summary.p99_ms,
+            summary.calls_per_frame,
+            unit,
         ));
     }
 

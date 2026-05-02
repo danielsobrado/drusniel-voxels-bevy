@@ -448,6 +448,13 @@ fn update_reflection_camera(
 
     *refl_transform =
         Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up);
+    drop(_timer);
+    timing.record_count(frame.0, "Water Reflection Active", u8::from(active) as f64);
+    timing.record_count(
+        frame.0,
+        "Water Reflection Sampled",
+        u8::from(sample_reflection) as f64,
+    );
 }
 
 fn distance_to_aabb_xz(position: Vec3, aabb: OctreeAabb) -> f32 {
