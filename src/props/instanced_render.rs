@@ -50,7 +50,7 @@ const INTEGRATED_GROUP_INSTANCE_LIMIT: usize = 2048;
 const DEDICATED_GROUP_INSTANCE_LIMIT: usize = 65_536;
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct PropInstance {
     pub transform: [[f32; 4]; 4],
     pub tint: [f32; 4],
@@ -609,6 +609,20 @@ fn ensure_instance_buffer_capacity(
     (buffer, new_capacity, true)
 }
 
+fn shadow_instances_match_visible(group: &InstancedPropGroup) -> bool {
+    if group.shadow_instances.len() != group.instances.len() {
+        return false;
+    }
+
+    if group.shadow_culled.len() == group.instances.len()
+        && group.shadow_culled.iter().all(|culled| !*culled)
+    {
+        return true;
+    }
+
+    group.shadow_instances == group.instances
+}
+
 fn prepare_instance_buffers(
     mut commands: Commands,
     query: Query<(Entity, &InstancedPropGroup, Option<&InstanceBuffer>)>,
@@ -625,8 +639,10 @@ fn prepare_instance_buffers(
     let mut shadow_buffers_uploaded = 0usize;
     let mut visible_buffers_created = 0usize;
     let mut shadow_buffers_created = 0usize;
+    let mut shadow_buffers_reused = 0usize;
     let mut instances_uploaded = 0usize;
     let mut shadow_instances_uploaded = 0usize;
+    let mut shadow_instances_reused = 0usize;
     let mut bytes_uploaded = 0usize;
 
     for (entity, group, existing) in &query {
@@ -703,6 +719,15 @@ fn prepare_instance_buffers(
                     existing.shadow_capacity,
                     existing.shadow_length,
                     existing.uploaded_shadow_version,
+                )
+            } else if group.shadow_instances.is_empty() || shadow_instances_match_visible(group) {
+                shadow_buffers_reused += 1;
+                shadow_instances_reused += group.shadow_instances.len();
+                (
+                    buffer.clone(),
+                    capacity,
+                    group.shadow_instances.len(),
+                    group.shadow_version,
                 )
             } else {
                 let shadow_instance_bytes: Vec<PropInstanceNoTint>;
@@ -787,12 +812,20 @@ fn prepare_instance_buffers(
             shadow_buffers_created as f64,
         );
         sink.push_count(
+            "Render Instancing Shadow Buffers Reused",
+            shadow_buffers_reused as f64,
+        );
+        sink.push_count(
             "Render Instancing Buffer Instances Uploaded",
             instances_uploaded as f64,
         );
         sink.push_count(
             "Render Instancing Buffer Shadow Instances Uploaded",
             shadow_instances_uploaded as f64,
+        );
+        sink.push_count(
+            "Render Instancing Buffer Shadow Instances Reused",
+            shadow_instances_reused as f64,
         );
         sink.push_count(
             "Render Instancing Buffer Bytes Uploaded",
