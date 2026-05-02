@@ -478,6 +478,7 @@ fn regenerate_dirty_chunks(
     mesh_cache: Res<instancing::PropMeshCache>,
     prop_material: Option<Res<crate::rendering::props_material::PropsMaterialHandle>>,
     mut prop_groups: ResMut<instanced_render::PropInstanceGroups>,
+    bounds_config: Res<instanced_render::PropBoundsConfig>,
     mut instancing_stats: ResMut<instancing::InstancingStats>,
 ) {
     // Check if we have any events
@@ -548,6 +549,7 @@ fn regenerate_dirty_chunks(
             &mesh_cache,
             prop_material.as_deref(),
             &mut prop_groups,
+            bounds_config.as_ref(),
             &mut instancing_stats,
             chunk_pos,
         );
@@ -732,6 +734,7 @@ fn spawn_props_from_placement_data(
     mesh_cache: &instancing::PropMeshCache,
     prop_material: Option<&crate::rendering::props_material::PropsMaterialHandle>,
     prop_groups: &mut instanced_render::PropInstanceGroups,
+    bounds_config: &instanced_render::PropBoundsConfig,
     stats: &mut instancing::InstancingStats,
     chunk_pos: IVec2,
 ) -> Vec<Entity> {
@@ -781,6 +784,7 @@ fn spawn_props_from_placement_data(
                 if let Some(entity) = instanced_render::spawn_instanced_prop(
                     commands,
                     prop_groups,
+                    bounds_config,
                     cached,
                     &prop.id,
                     transform.clone(),

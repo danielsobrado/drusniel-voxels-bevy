@@ -217,7 +217,7 @@ fn dump_terrain_hole_probe(
     camera_query: Query<&GlobalTransform, (With<PlayerCamera>, Without<Player>)>,
     terrain_entities: TerrainEntityQuery,
     meshes: Res<Assets<Mesh>>,
-    mut spatial_query: SpatialQuery,
+    spatial_query: Option<SpatialQuery>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -226,6 +226,10 @@ fn dump_terrain_hole_probe(
         return;
     }
 
+    let Some(mut spatial_query) = spatial_query else {
+        warn!("Terrain hole probe skipped: physics SpatialQuery resource is not available");
+        return;
+    };
     spatial_query.update_pipeline();
 
     let player_pos = player_query

@@ -1,0 +1,20 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = true
+
+[[checkpoint]]
+name = "prop-culling-large-tree-yaw"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 240
+screenshot = true
+fog_tier = "off"
+motion = { kind = "look_sweep", end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 28.0 }
+screenshot_points = [
+    { name = "left-edge", frame = 0 },
+    { name = "center", frame = 120 },
+    { name = "right-edge", frame = 239 },
+]

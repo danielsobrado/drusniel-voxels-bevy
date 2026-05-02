@@ -25,6 +25,16 @@ pub struct CachedPropMesh {
     pub instanced_material: Handle<PropsMaterial>,
     /// Local transform offset from the GLTF node
     pub local_transform: Transform,
+    /// Mesh-space AABB minimum, computed from vertex positions.
+    pub local_aabb_min: Vec3,
+    /// Mesh-space AABB maximum, computed from vertex positions.
+    pub local_aabb_max: Vec3,
+    /// Mesh-space bounding sphere center.
+    pub local_bounding_sphere_center: Vec3,
+    /// Mesh-space bounding sphere radius.
+    pub local_bounding_sphere_radius: f32,
+    /// True when bounds came from mesh vertex positions.
+    pub bounds_from_mesh: bool,
 }
 
 /// Resource storing cached meshes for each prop type.
@@ -185,6 +195,7 @@ pub fn extract_prop_meshes(
                             &mut props_materials,
                             &mut converted_materials,
                         );
+                        let bounds = mesh_bounds_from_positions(&meshes, &primitive.mesh);
                         let mesh = ensure_instancing_mesh(
                             &primitive.mesh,
                             &mut meshes,
@@ -196,6 +207,11 @@ pub fn extract_prop_meshes(
                             material,
                             instanced_material,
                             local_transform: Transform::IDENTITY,
+                            local_aabb_min: bounds.min,
+                            local_aabb_max: bounds.max,
+                            local_bounding_sphere_center: bounds.sphere_center,
+                            local_bounding_sphere_radius: bounds.sphere_radius,
+                            bounds_from_mesh: bounds.from_mesh,
                         });
                     }
                 }
@@ -266,6 +282,7 @@ fn extract_meshes_from_node(
                     props_materials,
                     converted_materials,
                 );
+                let bounds = mesh_bounds_from_positions(meshes, &primitive.mesh);
                 let mesh = ensure_instancing_mesh(&primitive.mesh, meshes, instancing_meshes);
 
                 results.push(CachedPropMesh {
@@ -273,6 +290,11 @@ fn extract_meshes_from_node(
                     material,
                     instanced_material,
                     local_transform: node_transform,
+                    local_aabb_min: bounds.min,
+                    local_aabb_max: bounds.max,
+                    local_bounding_sphere_center: bounds.sphere_center,
+                    local_bounding_sphere_radius: bounds.sphere_radius,
+                    bounds_from_mesh: bounds.from_mesh,
                 });
             }
         }
@@ -295,6 +317,63 @@ fn extract_meshes_from_node(
                 instancing_meshes,
             );
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MeshBounds {
+    min: Vec3,
+    max: Vec3,
+    sphere_center: Vec3,
+    sphere_radius: f32,
+    from_mesh: bool,
+}
+
+fn mesh_bounds_from_positions(meshes: &Assets<Mesh>, mesh_handle: &Handle<Mesh>) -> MeshBounds {
+    let Some(mesh) = meshes.get(mesh_handle) else {
+        return fallback_mesh_bounds();
+    };
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return fallback_mesh_bounds();
+    };
+    if positions.is_empty() {
+        return fallback_mesh_bounds();
+    }
+
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for position in positions {
+        let position = Vec3::from_array(*position);
+        min = min.min(position);
+        max = max.max(position);
+    }
+
+    let sphere_center = (min + max) * 0.5;
+    let mut sphere_radius: f32 = 0.0;
+    for position in positions {
+        sphere_radius = sphere_radius.max(Vec3::from_array(*position).distance(sphere_center));
+    }
+
+    MeshBounds {
+        min,
+        max,
+        sphere_center,
+        sphere_radius,
+        from_mesh: true,
+    }
+}
+
+fn fallback_mesh_bounds() -> MeshBounds {
+    let min = Vec3::splat(-1.0);
+    let max = Vec3::splat(1.0);
+    MeshBounds {
+        min,
+        max,
+        sphere_center: Vec3::ZERO,
+        sphere_radius: Vec3::ONE.length(),
+        from_mesh: false,
     }
 }
 

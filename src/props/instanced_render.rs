@@ -9,6 +9,7 @@ use bevy::core_pipeline::core_3d::{
     AlphaMask3d, CORE_3D_DEPTH_FORMAT, Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey, Transparent3d,
 };
 use bevy::core_pipeline::prepass::{OpaqueNoLightmap3dBatchSetKey, OpaqueNoLightmap3dBinKey};
+use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::{SystemParam, SystemParamItem, lifetimeless::*};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
@@ -44,6 +45,8 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
+use crate::interaction::TargetedProp;
+use crate::performance::AreaTimingRecorder;
 use crate::props::PropType;
 use crate::props::instancing::{CachedPropMesh, InstancedProp};
 use crate::props::lod_material::PropLodState;
@@ -68,6 +71,40 @@ const PROP_SUBCLUSTER_MIN_GROUP_INSTANCES: usize = 24;
 const PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES: usize = 8;
 const PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP: usize = 3;
 const PROP_SUBCLUSTER_BOUNDS_PADDING: f32 = 8.0;
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct PropBoundsConfig {
+    pub default_padding: f32,
+    pub tree_padding: f32,
+    pub foliage_wind_padding: f32,
+    pub missing_mesh_fallback_padding: f32,
+}
+
+impl Default for PropBoundsConfig {
+    fn default() -> Self {
+        Self {
+            default_padding: 0.5,
+            tree_padding: 2.0,
+            foliage_wind_padding: 1.75,
+            missing_mesh_fallback_padding: 4.0,
+        }
+    }
+}
+
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct PropBoundsDebugSettings {
+    pub enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PropBoundsStats {
+    heuristic_used: usize,
+    from_mesh: usize,
+    missing_mesh_fallback: usize,
+    max_radius: f32,
+    max_extent: f32,
+    large_guard_expansions: usize,
+}
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum InstancedPropRenderPhase {
@@ -132,9 +169,11 @@ pub struct InstancedPropGroup {
     pub mesh: Handle<Mesh>,
     pub material: Handle<PropsMaterial>,
     source_instances: Vec<PropInstance>,
+    source_bounds: Vec<PropInstanceBounds>,
     prop_classes: Vec<PropRenderClass>,
     lod_states: Vec<PropInstanceLod>,
     pub instances: Vec<PropInstance>,
+    instance_bounds: Vec<PropInstanceBounds>,
     pub shadow_instances: Vec<PropInstance>,
     shadow_culled: Vec<bool>,
     tint_enabled: bool,
@@ -149,9 +188,11 @@ impl InstancedPropGroup {
             mesh: self.mesh.clone(),
             material: self.material.clone(),
             source_instances: Vec::new(),
+            source_bounds: self.source_bounds.clone(),
             prop_classes: Vec::new(),
             lod_states: Vec::new(),
             instances: self.instances.clone(),
+            instance_bounds: self.instance_bounds.clone(),
             shadow_instances: self.shadow_instances.clone(),
             shadow_culled: self.shadow_culled.clone(),
             tint_enabled: self.tint_enabled,
@@ -167,6 +208,8 @@ pub struct PropVisualRef {
     pub group: Entity,
     pub slot: u32,
     pub local_transform: Transform,
+    pub local_bounds: PropLocalBounds,
+    pub bounds_padding: f32,
 }
 
 #[derive(Component, Clone)]
@@ -176,6 +219,33 @@ pub struct PropVisualRefs {
 
 #[derive(Component)]
 pub struct PropTransformDirty;
+
+#[derive(Clone, Copy, Debug)]
+pub struct PropLocalBounds {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub sphere_center: Vec3,
+    pub sphere_radius: f32,
+}
+
+impl From<&CachedPropMesh> for PropLocalBounds {
+    fn from(mesh: &CachedPropMesh) -> Self {
+        Self {
+            min: mesh.local_aabb_min,
+            max: mesh.local_aabb_max,
+            sphere_center: mesh.local_bounding_sphere_center,
+            sphere_radius: mesh.local_bounding_sphere_radius,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PropInstanceBounds {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub sphere_center: Vec3,
+    pub sphere_radius: f32,
+}
 
 #[derive(Clone, Copy, Eq)]
 struct PropGroupKey {
@@ -213,6 +283,7 @@ struct PropGroupRecord {
 #[derive(Default)]
 struct PendingPropGroupUpdate {
     instances: Vec<PropInstance>,
+    bounds: Vec<PropInstanceBounds>,
     prop_classes: Vec<PropRenderClass>,
     shadow_culled: Vec<bool>,
     min: Vec3,
@@ -225,6 +296,7 @@ pub struct PropInstanceGroups {
     groups: HashMap<PropGroupKey, PropGroupRecord>,
     pending: HashMap<Entity, PendingPropGroupUpdate>,
     integrated_gpu: bool,
+    bounds_stats: PropBoundsStats,
 }
 
 impl PropInstanceGroups {
@@ -264,6 +336,105 @@ impl PropInstanceGroups {
             .values()
             .find(|record| record.entity == entity)
             .map(|record| (record.min, record.max))
+    }
+
+    fn record_bounds(&mut self, from_mesh: bool, bounds: PropInstanceBounds, bounds_padding: f32) {
+        if from_mesh {
+            self.bounds_stats.from_mesh += 1;
+        } else {
+            self.bounds_stats.missing_mesh_fallback += 1;
+        }
+        if bounds_padding > PropBoundsConfig::default().default_padding {
+            self.bounds_stats.large_guard_expansions += 1;
+        }
+        self.bounds_stats.max_radius = self.bounds_stats.max_radius.max(bounds.sphere_radius);
+        self.bounds_stats.max_extent = self
+            .bounds_stats
+            .max_extent
+            .max((bounds.max - bounds.min).max_element());
+    }
+}
+
+fn prop_bounds_padding(
+    config: &PropBoundsConfig,
+    prop_id: &str,
+    prop_type: PropType,
+    bounds_from_mesh: bool,
+) -> f32 {
+    let id = prop_id.to_ascii_lowercase();
+    let mut padding = config.default_padding.max(0.0);
+    if prop_type == PropType::Tree {
+        padding += config.tree_padding.max(0.0);
+    }
+    if matches!(prop_type, PropType::Bush | PropType::Flower)
+        || id.contains("leaf")
+        || id.contains("foliage")
+        || id.contains("grass")
+    {
+        padding += config.foliage_wind_padding.max(0.0);
+    }
+    if !bounds_from_mesh {
+        padding += config.missing_mesh_fallback_padding.max(0.0);
+    }
+    padding
+}
+
+fn transformed_prop_bounds(
+    local_bounds: PropLocalBounds,
+    transform: &Transform,
+    padding: f32,
+) -> PropInstanceBounds {
+    transformed_padded_aabb(
+        local_bounds.min,
+        local_bounds.max,
+        local_bounds.sphere_center,
+        local_bounds.sphere_radius,
+        transform,
+        padding,
+    )
+}
+
+fn transformed_padded_aabb(
+    local_min: Vec3,
+    local_max: Vec3,
+    local_sphere_center: Vec3,
+    local_sphere_radius: f32,
+    transform: &Transform,
+    padding: f32,
+) -> PropInstanceBounds {
+    let matrix = transform.to_matrix();
+    let corners = [
+        Vec3::new(local_min.x, local_min.y, local_min.z),
+        Vec3::new(local_max.x, local_min.y, local_min.z),
+        Vec3::new(local_min.x, local_max.y, local_min.z),
+        Vec3::new(local_max.x, local_max.y, local_min.z),
+        Vec3::new(local_min.x, local_min.y, local_max.z),
+        Vec3::new(local_max.x, local_min.y, local_max.z),
+        Vec3::new(local_min.x, local_max.y, local_max.z),
+        Vec3::new(local_max.x, local_max.y, local_max.z),
+    ];
+
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for corner in corners {
+        let world = matrix.transform_point3(corner);
+        min = min.min(world);
+        max = max.max(world);
+    }
+
+    let padding = padding.max(0.0);
+    min -= Vec3::splat(padding);
+    max += Vec3::splat(padding);
+
+    let sphere_center = matrix.transform_point3(local_sphere_center);
+    let radius_scale = transform.scale.abs().max_element();
+    let sphere_radius = local_sphere_radius * radius_scale + padding;
+
+    PropInstanceBounds {
+        min,
+        max,
+        sphere_center,
+        sphere_radius,
     }
 }
 
@@ -321,6 +492,8 @@ pub struct PropInstancingPlugin;
 impl Plugin for PropInstancingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PropInstanceGroups>()
+            .init_resource::<PropBoundsConfig>()
+            .init_resource::<PropBoundsDebugSettings>()
             .add_systems(Startup, configure_prop_instancing_limits)
             .add_systems(
                 Update,
@@ -329,9 +502,11 @@ impl Plugin for PropInstancingPlugin {
                     sync_dirty_prop_transforms,
                     sync_prop_shadow_culling,
                     update_instanced_prop_lod,
+                    record_prop_bounds_timing,
                 )
                     .chain(),
             );
+        app.add_systems(Update, (toggle_prop_bounds_debug, draw_prop_bounds_debug));
 
         app.add_plugins(SyncComponentPlugin::<InstancedPropGroup>::default());
         app.sub_app_mut(RenderApp)
@@ -368,6 +543,7 @@ fn configure_prop_instancing_limits(
 pub fn spawn_instanced_prop(
     commands: &mut Commands,
     groups: &mut PropInstanceGroups,
+    bounds_config: &PropBoundsConfig,
     cached: &[CachedPropMesh],
     prop_id: &str,
     transform: Transform,
@@ -392,22 +568,33 @@ pub fn spawn_instanced_prop(
             cached_mesh.local_transform
         };
         let final_transform = transform * local_transform;
+        let local_bounds = PropLocalBounds::from(cached_mesh);
+        let bounds_padding = prop_bounds_padding(
+            bounds_config,
+            prop_id,
+            prop_type,
+            cached_mesh.bounds_from_mesh,
+        );
+        let instance_bounds =
+            transformed_prop_bounds(local_bounds, &final_transform, bounds_padding);
         let instance = PropInstance {
             transform: final_transform.to_matrix().to_cols_array_2d(),
             tint: tint.to_array(),
         };
 
-        let radius = final_transform.scale.abs().max_element().max(1.0) * 4.0;
-        let min = final_transform.translation - Vec3::splat(radius);
-        let max = final_transform.translation + Vec3::splat(radius);
+        groups.record_bounds(
+            cached_mesh.bounds_from_mesh,
+            instance_bounds,
+            bounds_padding,
+        );
         let (group, slot) = get_or_create_group(
             commands,
             groups,
             cached_mesh.mesh.clone(),
             cached_mesh.instanced_material.clone(),
             chunk_pos,
-            min,
-            max,
+            instance_bounds.min,
+            instance_bounds.max,
             prop_type,
         );
 
@@ -416,18 +603,20 @@ pub fn spawn_instanced_prop(
             .entry(group)
             .and_modify(|pending| {
                 pending.instances.push(instance);
+                pending.bounds.push(instance_bounds);
                 pending.prop_classes.push(prop_class);
                 pending.shadow_culled.push(false);
-                pending.min = pending.min.min(min);
-                pending.max = pending.max.max(max);
+                pending.min = pending.min.min(instance_bounds.min);
+                pending.max = pending.max.max(instance_bounds.max);
                 pending.prop_type_mask |= prop_type_mask(prop_type);
             })
             .or_insert_with(|| PendingPropGroupUpdate {
                 instances: vec![instance],
+                bounds: vec![instance_bounds],
                 prop_classes: vec![prop_class],
                 shadow_culled: vec![false],
-                min,
-                max,
+                min: instance_bounds.min,
+                max: instance_bounds.max,
                 prop_type_mask: prop_type_mask(prop_type),
             });
 
@@ -435,6 +624,8 @@ pub fn spawn_instanced_prop(
             group,
             slot,
             local_transform,
+            local_bounds,
+            bounds_padding,
         });
     }
 
@@ -495,9 +686,11 @@ fn get_or_create_group(
                         mesh: mesh.clone(),
                         material: material.clone(),
                         source_instances: Vec::new(),
+                        source_bounds: Vec::new(),
                         prop_classes: Vec::new(),
                         lod_states: Vec::new(),
                         instances: Vec::new(),
+                        instance_bounds: Vec::new(),
                         shadow_instances: Vec::new(),
                         shadow_culled: Vec::new(),
                         tint_enabled: !groups.integrated_gpu,
@@ -541,6 +734,7 @@ fn apply_pending_instances(
         group
             .source_instances
             .extend(update.instances.iter().copied());
+        group.source_bounds.extend(update.bounds.iter().copied());
         group
             .prop_classes
             .extend(update.prop_classes.iter().copied());
@@ -581,10 +775,22 @@ fn sync_dirty_prop_transforms(
             if let Some(instance) = group.source_instances.get_mut(slot) {
                 instance.transform = final_transform.to_matrix().to_cols_array_2d();
             }
+            if let Some(bounds) = group.source_bounds.get_mut(slot) {
+                *bounds = transformed_prop_bounds(
+                    visual.local_bounds,
+                    &final_transform,
+                    visual.bounds_padding,
+                );
+            }
             if let Some(culled) = group.shadow_culled.get_mut(slot) {
                 *culled = shadow_culled.is_some();
             }
             rebuild_visible_and_shadow_instances(&mut group);
+            if let Some((min, max)) = source_bounds_aabb(&group.source_bounds) {
+                commands
+                    .entity(visual.group)
+                    .insert(Aabb::from_min_max(min, max));
+            }
         }
         commands.entity(entity).remove::<PropTransformDirty>();
     }
@@ -608,6 +814,108 @@ fn sync_prop_shadow_culling(
     }
 }
 
+fn record_prop_bounds_timing(
+    groups: Res<PropInstanceGroups>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let stats = groups.bounds_stats;
+    timing.record_count(
+        frame.0,
+        "Prop Bounds Heuristic Used",
+        stats.heuristic_used as f64,
+    );
+    timing.record_count(frame.0, "Prop Bounds From Mesh", stats.from_mesh as f64);
+    timing.record_count(
+        frame.0,
+        "Prop Bounds Missing Mesh Fallback",
+        stats.missing_mesh_fallback as f64,
+    );
+    timing.record_count(frame.0, "Prop Bounds Max Radius", stats.max_radius as f64);
+    timing.record_count(frame.0, "Prop Bounds Max Extent", stats.max_extent as f64);
+    timing.record_count(
+        frame.0,
+        "Large Prop Visibility Guard Expansions",
+        stats.large_guard_expansions as f64,
+    );
+}
+
+fn toggle_prop_bounds_debug(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut settings: ResMut<PropBoundsDebugSettings>,
+) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if alt_held && keyboard.just_pressed(KeyCode::KeyB) {
+        settings.enabled = !settings.enabled;
+        info!(
+            "Prop bounds debug: {}",
+            if settings.enabled { "ON" } else { "OFF" }
+        );
+    }
+}
+
+fn draw_prop_bounds_debug(
+    settings: Res<PropBoundsDebugSettings>,
+    targeted_prop: Option<Res<TargetedProp>>,
+    mut gizmos: Gizmos,
+    groups: Query<(Entity, &InstancedPropGroup, Option<&Aabb>, &Visibility)>,
+    props: Query<(Entity, &PropVisualRefs), With<InstancedProp>>,
+) {
+    if !settings.enabled {
+        return;
+    }
+
+    for (_entity, _group, aabb, visibility) in &groups {
+        let Some(aabb) = aabb else {
+            continue;
+        };
+        let color = if *visibility == Visibility::Hidden {
+            Color::srgba(1.0, 0.15, 0.1, 0.75)
+        } else {
+            Color::srgba(0.2, 0.55, 1.0, 0.55)
+        };
+        draw_aabb(
+            &mut gizmos,
+            Vec3::from(aabb.min()),
+            Vec3::from(aabb.max()),
+            color,
+        );
+    }
+
+    let Some(targeted_entity) = targeted_prop.and_then(|targeted| targeted.entity) else {
+        return;
+    };
+    let Ok((_entity, refs)) = props.get(targeted_entity) else {
+        return;
+    };
+    for visual in &refs.refs {
+        let Ok((_group_entity, group, _aabb, _visibility)) = groups.get(visual.group) else {
+            continue;
+        };
+        let Some(bounds) = group.source_bounds.get(visual.slot as usize) else {
+            continue;
+        };
+        draw_aabb(
+            &mut gizmos,
+            bounds.min,
+            bounds.max,
+            Color::srgba(0.15, 1.0, 0.25, 0.9),
+        );
+        gizmos.sphere(
+            Isometry3d::from_translation(bounds.sphere_center),
+            bounds.sphere_radius,
+            Color::srgba(1.0, 0.9, 0.1, 0.65),
+        );
+    }
+}
+
+fn draw_aabb(gizmos: &mut Gizmos, min: Vec3, max: Vec3, color: Color) {
+    let center = (min + max) * 0.5;
+    let size = (max - min).max(Vec3::splat(0.01));
+    let cuboid = Cuboid::new(size.x, size.y, size.z);
+    gizmos.primitive_3d(&cuboid, Isometry3d::from_translation(center), color);
+}
+
 fn rebuild_visible_and_shadow_instances(group: &mut InstancedPropGroup) -> (bool, bool) {
     rebuild_visible_and_shadow_instances_with_options(group, false)
 }
@@ -617,11 +925,13 @@ fn rebuild_visible_and_shadow_instances_with_options(
     disable_shadow_lod: bool,
 ) -> (bool, bool) {
     let mut visible_instances = Vec::with_capacity(group.source_instances.len());
+    let mut visible_bounds = Vec::with_capacity(group.source_bounds.len());
     let mut shadow_instances = Vec::with_capacity(group.source_instances.len());
 
-    for ((instance, lod), shadow_culled) in group
+    for (((instance, bounds), lod), shadow_culled) in group
         .source_instances
         .iter()
+        .zip(group.source_bounds.iter())
         .zip(group.lod_states.iter())
         .zip(group.shadow_culled.iter())
     {
@@ -629,14 +939,17 @@ fn rebuild_visible_and_shadow_instances_with_options(
             continue;
         }
         visible_instances.push(*instance);
+        visible_bounds.push(*bounds);
         if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full) {
             shadow_instances.push(*instance);
         }
     }
 
-    let visible_dirty = group.instances != visible_instances;
+    let visible_dirty =
+        group.instances != visible_instances || group.instance_bounds != visible_bounds;
     if visible_dirty {
         group.instances = visible_instances;
+        group.instance_bounds = visible_bounds;
         bump_version(group);
     }
 
@@ -647,6 +960,17 @@ fn rebuild_visible_and_shadow_instances_with_options(
     }
 
     (visible_dirty, shadow_dirty)
+}
+
+fn source_bounds_aabb(bounds: &[PropInstanceBounds]) -> Option<(Vec3, Vec3)> {
+    let first = bounds.first()?;
+    let mut min = first.min;
+    let mut max = first.max;
+    for bounds in &bounds[1..] {
+        min = min.min(bounds.min);
+        max = max.max(bounds.max);
+    }
+    Some((min, max))
 }
 
 fn bump_version(group: &mut InstancedPropGroup) {
@@ -705,8 +1029,15 @@ fn update_instanced_prop_lod(
                 .get(index)
                 .copied()
                 .unwrap_or(PropInstanceLod::Full);
-            let distance =
-                camera_pos.distance(instance_translation(&group.source_instances[index]));
+            let distance = group
+                .source_bounds
+                .get(index)
+                .map(|bounds| {
+                    (camera_pos.distance(bounds.sphere_center) - bounds.sphere_radius).max(0.0)
+                })
+                .unwrap_or_else(|| {
+                    camera_pos.distance(instance_translation(&group.source_instances[index]))
+                });
             let next = classify_instance_lod(
                 class,
                 current,
@@ -906,6 +1237,8 @@ fn extract_instanced_prop_groups(
 
         if visible_dirty {
             target.instances.clone_from(&source.instances);
+            target.instance_bounds.clone_from(&source.instance_bounds);
+            target.source_bounds.clone_from(&source.source_bounds);
             target.version = source.version;
             visible_vectors_cloned += 1;
             visible_instances_cloned += source.instances.len();
@@ -983,6 +1316,12 @@ struct PreparedPropSubcluster {
     instances: Vec<PropInstance>,
 }
 
+#[derive(Clone, Copy)]
+struct PropSubclusterSource {
+    instance: PropInstance,
+    bounds: PropInstanceBounds,
+}
+
 fn instance_stride(tint_enabled: bool) -> usize {
     if tint_enabled {
         size_of::<PropInstance>()
@@ -1047,13 +1386,14 @@ fn prop_instance_translation(instance: &PropInstance) -> Vec3 {
     )
 }
 
-fn cluster_from_instances(instances: Vec<PropInstance>) -> PreparedPropSubcluster {
+fn cluster_from_sources(sources: Vec<PropSubclusterSource>) -> PreparedPropSubcluster {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for instance in &instances {
-        let position = prop_instance_translation(instance);
-        min = min.min(position);
-        max = max.max(position);
+    let mut instances = Vec::with_capacity(sources.len());
+    for source in sources {
+        min = min.min(source.bounds.min);
+        max = max.max(source.bounds.max);
+        instances.push(source.instance);
     }
     let center = (min + max) * 0.5;
     let radius = ((max - min) * 0.5).length() + PROP_SUBCLUSTER_BOUNDS_PADDING;
@@ -1064,17 +1404,29 @@ fn cluster_from_instances(instances: Vec<PropInstance>) -> PreparedPropSubcluste
     }
 }
 
-fn build_prop_subclusters(instances: &[PropInstance], grid: u8) -> Vec<PreparedPropSubcluster> {
+fn build_prop_subclusters(
+    instances: &[PropInstance],
+    bounds: &[PropInstanceBounds],
+    grid: u8,
+) -> Vec<PreparedPropSubcluster> {
     if !matches!(grid, 2 | 4) || instances.len() < PROP_SUBCLUSTER_MIN_GROUP_INSTANCES {
         return Vec::new();
     }
 
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for instance in instances {
-        let position = prop_instance_translation(instance);
-        min = min.min(position);
-        max = max.max(position);
+    let mut sources = Vec::with_capacity(instances.len());
+    for (index, instance) in instances.iter().enumerate() {
+        let bounds = bounds
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| point_instance_bounds(instance));
+        min = min.min(bounds.min);
+        max = max.max(bounds.max);
+        sources.push(PropSubclusterSource {
+            instance: *instance,
+            bounds,
+        });
     }
 
     let extent = max - min;
@@ -1095,15 +1447,15 @@ fn build_prop_subclusters(instances: &[PropInstance], grid: u8) -> Vec<PreparedP
         0.0
     };
 
-    for instance in instances {
-        let position = prop_instance_translation(instance);
+    for source in sources {
+        let position = source.bounds.sphere_center;
         let x = (((position.x - min.x) * inv_x) * grid as f32)
             .floor()
             .clamp(0.0, (grid - 1) as f32) as usize;
         let z = (((position.z - min.z) * inv_z) * grid as f32)
             .floor()
             .clamp(0.0, (grid - 1) as f32) as usize;
-        cells[z * grid_usize + x].push(*instance);
+        cells[z * grid_usize + x].push(source);
     }
 
     let mut tiny_instances = Vec::new();
@@ -1112,13 +1464,13 @@ fn build_prop_subclusters(instances: &[PropInstance], grid: u8) -> Vec<PreparedP
         // Fold sparse cells into one bounded fallback cluster
         // instead of letting the experiment devolve into one draw per instance.
         if cell.len() >= PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES {
-            clusters.push(cluster_from_instances(cell));
+            clusters.push(cluster_from_sources(cell));
         } else {
             tiny_instances.extend(cell);
         }
     }
     if !tiny_instances.is_empty() {
-        clusters.push(cluster_from_instances(tiny_instances));
+        clusters.push(cluster_from_sources(tiny_instances));
     }
 
     if clusters.len() <= 1 {
@@ -1128,13 +1480,34 @@ fn build_prop_subclusters(instances: &[PropInstance], grid: u8) -> Vec<PreparedP
     clusters.sort_by(|a, b| b.instances.len().cmp(&a.instances.len()));
     if clusters.len() > PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP {
         let mut merged_instances = Vec::new();
+        let mut merged_min = Vec3::splat(f32::INFINITY);
+        let mut merged_max = Vec3::splat(f32::NEG_INFINITY);
         for cluster in clusters.drain((PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP - 1)..) {
+            let radius = Vec3::splat(cluster.radius);
+            merged_min = merged_min.min(cluster.center - radius);
+            merged_max = merged_max.max(cluster.center + radius);
             merged_instances.extend(cluster.instances);
         }
-        clusters.push(cluster_from_instances(merged_instances));
+        let center = (merged_min + merged_max) * 0.5;
+        let radius = ((merged_max - merged_min) * 0.5).length();
+        clusters.push(PreparedPropSubcluster {
+            center,
+            radius,
+            instances: merged_instances,
+        });
     }
 
     clusters
+}
+
+fn point_instance_bounds(instance: &PropInstance) -> PropInstanceBounds {
+    let center = prop_instance_translation(instance);
+    PropInstanceBounds {
+        min: center,
+        max: center,
+        sphere_center: center,
+        sphere_radius: 0.0,
+    }
 }
 
 fn extracted_view_frustum(view: &ExtractedView) -> Frustum {
@@ -1171,6 +1544,21 @@ fn prop_subcluster_visible_mask(subclusters: &[PreparedPropSubcluster], frusta: 
         }
     }
     mask
+}
+
+fn group_instance_sphere_intersects_frusta(group: &InstancedPropGroup, frusta: &[Frustum]) -> bool {
+    if frusta.is_empty() {
+        return false;
+    }
+    group.source_bounds.iter().any(|bounds| {
+        let sphere = Sphere {
+            center: Vec3A::from(bounds.sphere_center),
+            radius: bounds.sphere_radius,
+        };
+        frusta
+            .iter()
+            .any(|frustum| frustum.intersects_sphere(&sphere, true))
+    })
 }
 
 fn prop_subcluster_visible_len(subclusters: &[PreparedPropSubcluster], mask: u64) -> usize {
@@ -1211,10 +1599,11 @@ fn prepare_instance_buffers(
     let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
     let subcluster_grid = normalized_prop_subcluster_grid(bench_toggles.as_deref());
     let subcluster_mode = subcluster_grid != 0;
+    let collect_frustum_diagnostics = subcluster_mode || sink.is_some();
     let mut visible_entities = HashSet::new();
     let mut view_frusta = Vec::new();
     for (view, visible_view_entities) in &views {
-        if subcluster_mode {
+        if collect_frustum_diagnostics {
             view_frusta.push(extracted_view_frustum(view));
         }
         visible_entities.extend(
@@ -1258,11 +1647,15 @@ fn prepare_instance_buffers(
     let mut subcluster_draws = 0usize;
     let mut subcluster_instances_queued = 0usize;
     let mut subcluster_instances_culled = 0usize;
+    let mut groups_culled_but_instance_sphere_intersects = 0usize;
 
     for (entity, group, existing) in &query {
         groups_examined += 1;
         if visibility_filter_active && !visible_entities.contains(&entity) {
             groups_skipped_not_visible += 1;
+            if group_instance_sphere_intersects_frusta(group, &view_frusta) {
+                groups_culled_but_instance_sphere_intersects += 1;
+            }
             continue;
         }
         if group.instances.is_empty() {
@@ -1299,7 +1692,11 @@ fn prepare_instance_buffers(
             }) {
                 &buffer.subclusters
             } else {
-                built_subclusters = Some(build_prop_subclusters(&group.instances, subcluster_grid));
+                built_subclusters = Some(build_prop_subclusters(
+                    &group.instances,
+                    &group.instance_bounds,
+                    subcluster_grid,
+                ));
                 built_subclusters.as_deref().unwrap_or(&[])
             }
         } else {
@@ -1498,6 +1895,14 @@ fn prepare_instance_buffers(
         sink.push_count(
             "Render Instancing Buffer Groups Skipped Not Visible",
             groups_skipped_not_visible as f64,
+        );
+        sink.push_count(
+            "Prop Groups Culled By Frustum",
+            groups_skipped_not_visible as f64,
+        );
+        sink.push_count(
+            "Prop Groups Culled But Instance Sphere Intersects Frustum",
+            groups_culled_but_instance_sphere_intersects as f64,
         );
         sink.push_count(
             "Render Instancing Buffer Groups Uploaded",
@@ -2614,5 +3019,93 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
             }
         }
         RenderCommandResult::Success
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_vec3_close(actual: Vec3, expected: Vec3) {
+        let delta = (actual - expected).abs();
+        assert!(
+            delta.max_element() < 0.001,
+            "actual {actual:?} expected {expected:?}"
+        );
+    }
+
+    fn bounds_for(min: Vec3, max: Vec3, transform: Transform) -> PropInstanceBounds {
+        let center = (min + max) * 0.5;
+        let radius = (max - center).length();
+        transformed_padded_aabb(min, max, center, radius, &transform, 0.0)
+    }
+
+    #[test]
+    fn identity_transform_preserves_aabb() {
+        let bounds = bounds_for(
+            Vec3::new(-1.0, 0.0, -2.0),
+            Vec3::new(3.0, 4.0, 2.0),
+            Transform::IDENTITY,
+        );
+        assert_vec3_close(bounds.min, Vec3::new(-1.0, 0.0, -2.0));
+        assert_vec3_close(bounds.max, Vec3::new(3.0, 4.0, 2.0));
+    }
+
+    #[test]
+    fn translated_mesh_aabb_moves_with_transform() {
+        let bounds = bounds_for(
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Transform::from_translation(Vec3::new(10.0, 2.0, -4.0)),
+        );
+        assert_vec3_close(bounds.min, Vec3::new(9.0, 1.0, -5.0));
+        assert_vec3_close(bounds.max, Vec3::new(11.0, 3.0, -3.0));
+    }
+
+    #[test]
+    fn rotated_mesh_aabb_uses_all_corners() {
+        let bounds = bounds_for(
+            Vec3::new(-1.0, -0.5, -3.0),
+            Vec3::new(1.0, 0.5, 3.0),
+            Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        );
+        assert_vec3_close(bounds.min, Vec3::new(-3.0, -0.5, -1.0));
+        assert_vec3_close(bounds.max, Vec3::new(3.0, 0.5, 1.0));
+    }
+
+    #[test]
+    fn non_uniform_scale_expands_each_axis() {
+        let bounds = bounds_for(
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Transform::from_scale(Vec3::new(2.0, 3.0, 0.5)),
+        );
+        assert_vec3_close(bounds.min, Vec3::new(-2.0, -3.0, -0.5));
+        assert_vec3_close(bounds.max, Vec3::new(2.0, 3.0, 0.5));
+    }
+
+    #[test]
+    fn multi_mesh_local_transform_offsets_bounds() {
+        let prop = Transform::from_translation(Vec3::new(10.0, 0.0, 0.0));
+        let local = Transform::from_translation(Vec3::new(0.0, 5.0, 2.0));
+        let bounds = bounds_for(Vec3::splat(-1.0), Vec3::splat(1.0), prop * local);
+        assert_vec3_close(bounds.min, Vec3::new(9.0, 4.0, 1.0));
+        assert_vec3_close(bounds.max, Vec3::new(11.0, 6.0, 3.0));
+    }
+
+    #[test]
+    fn large_canopy_offset_from_origin_sets_sphere_distance() {
+        let bounds = transformed_padded_aabb(
+            Vec3::new(8.0, 4.0, -3.0),
+            Vec3::new(18.0, 16.0, 7.0),
+            Vec3::new(13.0, 10.0, 2.0),
+            8.0,
+            &Transform::from_translation(Vec3::new(20.0, 0.0, 30.0)),
+            2.0,
+        );
+        assert_vec3_close(bounds.min, Vec3::new(26.0, 2.0, 25.0));
+        assert_vec3_close(bounds.max, Vec3::new(40.0, 18.0, 39.0));
+        assert_vec3_close(bounds.sphere_center, Vec3::new(33.0, 10.0, 32.0));
+        assert!((bounds.sphere_radius - 10.0).abs() < 0.001);
     }
 }

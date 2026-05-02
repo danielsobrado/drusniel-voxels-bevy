@@ -1301,6 +1301,7 @@ fn append_control_hints(
             "OFF"
         }
     ));
+    text_content.push_str("\n[Alt+B] Prop bounds debug: gizmos");
     text_content.push_str(&format!(
         "\n[Alt+F] Performance: {}",
         if toggles.show_performance {
