@@ -61,6 +61,8 @@ struct ReflectionCompositorUniform {
 }
 
 fn extract_reflection_texture(world: &mut World) {
+    let compositor_disabled =
+        std::env::var_os("VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR").is_some();
     let (handle, sample_reflection) =
         world.resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
             (
@@ -73,6 +75,7 @@ fn extract_reflection_texture(world: &mut World) {
                     .unwrap_or(false),
             )
         });
+    let sample_reflection = sample_reflection && !compositor_disabled;
     match handle {
         Some(h) => {
             world.insert_resource(ExtractedReflectionHandle(h));

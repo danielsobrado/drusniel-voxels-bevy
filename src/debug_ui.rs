@@ -220,6 +220,7 @@ fn debug_settings_ui(
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
             ui.label("Press Shift+F9 to dump terrain hole probe JSON");
+            ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
         },
     );
@@ -230,7 +231,8 @@ fn toggle_sun_shadows(
     mut sun_query: Query<&mut DirectionalLight>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    if keys.just_pressed(KeyCode::F10) {
+    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if !shift_held && keys.just_pressed(KeyCode::F10) {
         for mut light in sun_query.iter_mut() {
             light.shadows_enabled = !light.shadows_enabled;
             info!(

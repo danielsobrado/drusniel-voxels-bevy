@@ -35,6 +35,7 @@ use crate::rendering::water::EnhancedWaterPlugin;
 use crate::rendering::water_displacement::WaterDisplacementPlugin;
 use crate::rendering::water_reflection::WaterReflectionPlugin;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorPlugin;
+use crate::rendering::water_visual_probe::WaterVisualProbePlugin;
 
 pub struct RenderingPlugin;
 
@@ -75,6 +76,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WaterReflectionPlugin)
             // Post-process compositor: blends the reflection texture onto water pixels
             .add_plugins(WaterReflectionCompositorPlugin)
+            // Diagnostic-only water visual probe and overlay counters.
+            .add_plugins(WaterVisualProbePlugin)
             // Interactive water displacement (CPU wave physics + GPU texture)
             .add_plugins(WaterDisplacementPlugin)
             // Screen-space god rays (radial blur toward sun, independent of volumetric fog)

@@ -47,6 +47,7 @@ pub mod water;
 pub mod water_displacement;
 pub mod water_reflection;
 pub mod water_reflection_compositor;
+pub mod water_visual_probe;
 
 pub use adaptive_gi::{AdaptiveGIPlugin, AdaptiveGIQuality, AdaptiveGISettings};
 pub use ao_config::AmbientOcclusionConfig;

@@ -21,6 +21,10 @@ use bevy_water::WaterSettings;
 use bevy_water::water::material::{StandardWaterMaterial, WaterMaterial as BevyWaterMaterial};
 use std::path::Path;
 
+fn water_debug_solid_color_enabled() -> bool {
+    std::env::var_os("VOXEL_WATER_DEBUG_SOLID_COLOR").is_some()
+}
+
 #[derive(Resource)]
 pub struct VoxelMaterial {
     pub handle: Handle<BlockyMaterial>,
@@ -57,12 +61,38 @@ pub fn setup_water_material(
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Material Setup Water");
     let settings = water_settings.as_deref().cloned().unwrap_or_default();
+    let debug_solid_color = water_debug_solid_color_enabled();
+    let base_color = if debug_solid_color {
+        Color::srgba(0.0, 0.75, 1.0, 1.0)
+    } else {
+        settings.base_color
+    };
+    let alpha_mode = if debug_solid_color {
+        AlphaMode::Opaque
+    } else {
+        AlphaMode::Blend
+    };
+    let wave_amplitude = if debug_solid_color {
+        0.0
+    } else {
+        settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT
+    };
+    let deep_color = if debug_solid_color {
+        Color::srgba(0.0, 0.55, 1.0, 1.0)
+    } else {
+        settings.deep_color
+    };
+    let shallow_color = if debug_solid_color {
+        Color::srgba(0.0, 0.75, 1.0, 1.0)
+    } else {
+        settings.shallow_color
+    };
     // Voxel water uses the same water shader as the ocean tiles for wave/foam effects.
     // Base parameters match the v0.3 blue partial-alpha look.
     let near_handle = fancy_materials.add(StandardWaterMaterial {
         base: StandardMaterial {
-            base_color: settings.base_color,
-            alpha_mode: AlphaMode::Blend,
+            base_color,
+            alpha_mode,
             perceptual_roughness: 0.06,
             metallic: 0.0,
             reflectance: 0.8,
@@ -79,11 +109,11 @@ pub fn setup_water_material(
             ..default()
         },
         extension: BevyWaterMaterial {
-            amplitude: settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT,
+            amplitude: wave_amplitude,
             clarity: settings.clarity * VOXEL_WATER_CLARITY_MULT,
-            deep_color: settings.deep_color,
-            shallow_color: settings.shallow_color,
-            edge_color: settings.shallow_color,
+            deep_color,
+            shallow_color,
+            edge_color: shallow_color,
             edge_scale: settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT,
             coord_offset: Vec2::ZERO,
             coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
@@ -93,8 +123,8 @@ pub fn setup_water_material(
     });
 
     let far_handle = cheap_materials.add(StandardMaterial {
-        base_color: settings.base_color,
-        alpha_mode: AlphaMode::Blend,
+        base_color,
+        alpha_mode,
         perceptual_roughness: 0.08,
         metallic: 0.0,
         reflectance: 0.78,
@@ -128,9 +158,18 @@ pub fn sync_voxel_water_material_overrides(
         return;
     }
 
+    let debug_solid_color = water_debug_solid_color_enabled();
     if let Some(mat) = materials.get_mut(&water_material.near_handle) {
-        mat.base.base_color = settings.base_color;
-        mat.base.alpha_mode = settings.alpha_mode;
+        mat.base.base_color = if debug_solid_color {
+            Color::srgba(0.0, 0.75, 1.0, 1.0)
+        } else {
+            settings.base_color
+        };
+        mat.base.alpha_mode = if debug_solid_color {
+            AlphaMode::Opaque
+        } else {
+            settings.alpha_mode
+        };
         mat.base.perceptual_roughness = 0.06;
         mat.base.metallic = 0.0;
         mat.base.reflectance = 0.8;
@@ -143,11 +182,23 @@ pub fn sync_voxel_water_material_overrides(
         mat.base.ior = 1.33;
         mat.base.thickness = 0.5;
 
-        mat.extension.amplitude = settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT;
+        mat.extension.amplitude = if debug_solid_color {
+            0.0
+        } else {
+            settings.amplitude * VOXEL_WATER_WAVE_AMPLITUDE_MULT
+        };
         mat.extension.clarity = settings.clarity * VOXEL_WATER_CLARITY_MULT;
-        mat.extension.deep_color = settings.deep_color;
-        mat.extension.shallow_color = settings.shallow_color;
-        mat.extension.edge_color = settings.shallow_color;
+        mat.extension.deep_color = if debug_solid_color {
+            Color::srgba(0.0, 0.55, 1.0, 1.0)
+        } else {
+            settings.deep_color
+        };
+        mat.extension.shallow_color = if debug_solid_color {
+            Color::srgba(0.0, 0.75, 1.0, 1.0)
+        } else {
+            settings.shallow_color
+        };
+        mat.extension.edge_color = mat.extension.shallow_color;
         mat.extension.edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
         mat.extension.coord_offset = Vec2::ZERO;
         mat.extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);

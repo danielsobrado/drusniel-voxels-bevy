@@ -81,6 +81,10 @@ use crate::voxel::world::VoxelWorld;
 use bevy::camera::visibility::RenderLayers;
 use bevy_water::water::material::StandardWaterMaterial;
 
+fn env_flag(name: &str) -> bool {
+    std::env::var_os(name).is_some()
+}
+
 pub struct VoxelPlugin;
 
 #[derive(Resource, Default, Debug)]
@@ -1159,10 +1163,18 @@ fn mesh_dirty_chunks_system(
                     && water_max_depth >= WATER_FANCY_MIN_DEPTH;
                 let water_mesh = mesh_result.water.into_mesh();
                 let water_mesh_handle = meshes.add(water_mesh);
+                let force_fancy = env_flag("VOXEL_FORCE_ALL_WATER_FANCY");
+                let force_cheap = env_flag("VOXEL_FORCE_ALL_WATER_CHEAP");
                 let use_fancy_water = camera_pos
                     .map(|pos| chunk_center.distance_squared(pos) <= fancy_distance_sq)
                     .unwrap_or(true);
-                let use_fancy_water = use_fancy_water && allow_fancy_water;
+                let use_fancy_water = if force_cheap {
+                    false
+                } else if force_fancy {
+                    true
+                } else {
+                    use_fancy_water && allow_fancy_water
+                };
 
                 if let Some(entity) = chunk.water_mesh_entity() {
                     let mut entity_cmd = commands.entity(entity);
@@ -1488,6 +1500,8 @@ fn update_water_material_lod(
     };
 
     let camera_pos = camera_transform.translation;
+    let force_fancy = env_flag("VOXEL_FORCE_ALL_WATER_FANCY");
+    let force_cheap = env_flag("VOXEL_FORCE_ALL_WATER_CHEAP");
     let fancy_in = (WATER_FANCY_DISTANCE - WATER_FANCY_HYSTERESIS).max(0.0);
     let fancy_out = WATER_FANCY_DISTANCE + WATER_FANCY_HYSTERESIS;
     let fancy_in_sq = fancy_in * fancy_in;
@@ -1495,6 +1509,24 @@ fn update_water_material_lod(
     let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
 
     for (entity, transform, fancy_mat, cheap_mat, detail) in water_meshes.iter() {
+        if force_cheap {
+            if cheap_mat.is_none() {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+            }
+            continue;
+        }
+        if force_fancy {
+            if fancy_mat.is_none() {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
+            }
+            continue;
+        }
         let allow_fancy_water = detail
             .map(|detail| {
                 detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES

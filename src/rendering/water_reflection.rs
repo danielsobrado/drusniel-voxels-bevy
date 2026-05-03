@@ -25,6 +25,10 @@ use crate::voxel::world::VoxelWorld;
 
 const NEAR_VISIBLE_WATER_DISTANCE: f32 = 24.0;
 
+fn env_flag(name: &str) -> bool {
+    std::env::var_os(name).is_some()
+}
+
 /// The render layer used exclusively by the reflection camera.
 /// Terrain chunks above the water line are added to BOTH layer 0 and this layer.
 /// Below-water chunks are only in layer 0, so they won't appear in reflections.
@@ -571,6 +575,13 @@ fn update_reflection_camera(
         } else {
             update_timer.accum = 0.0;
         }
+    }
+
+    if env_flag("VOXEL_FORCE_WATER_REFLECTION_ACTIVE") {
+        active = true;
+        sample_reflection = true;
+        reason = WaterReflectionReason::Active;
+        update_timer.accum = 0.0;
     }
 
     refl_camera.is_active = active;

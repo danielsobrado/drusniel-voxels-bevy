@@ -19,6 +19,7 @@ use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
 use crate::rendering::water_reflection::WaterReflectionStatus;
+use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
@@ -73,6 +74,7 @@ pub struct DebugOverlayParams<'w> {
     pub fog_runtime: Option<Res<'w, VolumetricFogRuntimeState>>,
     pub shadow_stats: Res<'w, ShadowCullingStats>,
     pub reflection_status: Option<Res<'w, WaterReflectionStatus>>,
+    pub water_visual_debug: Option<Res<'w, WaterVisualDebugState>>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
@@ -484,6 +486,7 @@ pub fn update_debug_overlay(
     text_content.push_str(&format!("FPS: {}\n", fps));
     append_area_timing_table(&mut text_content, &diagnostics, &debug.timing_recorder);
     append_reflection_status(&mut text_content, debug.reflection_status.as_deref());
+    append_water_visual_debug(&mut text_content, debug.water_visual_debug.as_deref());
     append_enclosure_status(
         &mut text_content,
         &debug.enclosure,
@@ -1171,6 +1174,26 @@ fn append_reflection_status(text_content: &mut String, status: Option<&WaterRefl
         status.reason.as_str(),
         status.resolution_scale,
         status.effective_hz,
+    ));
+}
+
+fn append_water_visual_debug(text_content: &mut String, state: Option<&WaterVisualDebugState>) {
+    let Some(state) = state else {
+        return;
+    };
+    text_content.push_str(&format!(
+        "Water Debug: mat near {} far {} depth {} tris {}\n",
+        u8::from(state.nearest_material_near),
+        u8::from(state.nearest_material_far),
+        state.nearest_max_depth,
+        state.nearest_triangles,
+    ));
+    text_content.push_str(&format!(
+        "Water Debug: refl eligible {} active {} compositor {} body_unknown {}\n",
+        u8::from(state.reflection_eligible),
+        u8::from(state.reflection_active),
+        u8::from(state.compositor_pixel_matched),
+        u8::from(state.body_unknown),
     ));
 }
 
