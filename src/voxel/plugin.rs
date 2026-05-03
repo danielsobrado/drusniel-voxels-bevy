@@ -40,6 +40,8 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 4;
+const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 1;
+const MAX_LOD_CHANGES_PER_UPDATE: usize = 4;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
@@ -825,7 +827,7 @@ fn mesh_dirty_chunks_system(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Mesh Dirty");
+    let mesh_dirty_total_start = timing.enabled.then(Instant::now);
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
 
@@ -862,6 +864,7 @@ fn mesh_dirty_chunks_system(
         .map(|transform| transform.translation);
     let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
 
+    let sort_start = timing.enabled.then(Instant::now);
     // Sort by distance to camera if available
     if let Some(camera_pos) = camera_pos {
         dirty_chunks.sort_by(|a, b| {
@@ -876,9 +879,25 @@ fn mesh_dirty_chunks_system(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
+    let mesh_dirty_sort_us = sort_start
+        .map(|start| start.elapsed().as_micros() as u64)
+        .unwrap_or(0);
     let mut chunks_meshed = 0u32;
     let mut chunks_skipped = 0u32;
     let mut chunks_processed = 0usize;
+    let mut mesh_dirty_generate_us = 0u64;
+    let mut mesh_dirty_apply_us = 0u64;
+    let lod_churn_only = reason_counts.generation == 0
+        && reason_counts.terrain_mutation == 0
+        && (reason_counts.lod > 0
+            || reason_counts.neighbor_lod > 0
+            || reason_counts.visibility > 0
+            || reason_counts.water_material > 0);
+    let chunks_per_frame_limit = if lod_churn_only {
+        MAX_LOD_DIRTY_CHUNKS_PER_FRAME
+    } else {
+        MAX_CHUNKS_PER_FRAME
+    };
     let mut terrain_mesh_empty_but_solid_voxels = 0u32;
     let mut terrain_mesh_boundary_missing_neighbor = 0u32;
     let terrain_mesh_degenerate_triangles_removed = 0u32;
@@ -886,7 +905,7 @@ fn mesh_dirty_chunks_system(
 
     for chunk_pos in dirty_chunks {
         // Throttle: limit chunks meshed per frame to prevent frame spikes
-        if chunks_processed >= MAX_CHUNKS_PER_FRAME {
+        if chunks_processed >= chunks_per_frame_limit {
             break;
         }
         chunks_processed += 1;
@@ -990,6 +1009,7 @@ fn mesh_dirty_chunks_system(
             continue;
         };
         let mesh_elapsed = mesh_start.elapsed();
+        mesh_dirty_generate_us += mesh_elapsed.as_micros() as u64;
 
         // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;
@@ -1013,6 +1033,7 @@ fn mesh_dirty_chunks_system(
         };
 
         // Step 2: Update chunk state using mutable borrow
+        let apply_start = timing.enabled.then(Instant::now);
         if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
             // Clear dirty flag
             chunk.clear_dirty();
@@ -1204,19 +1225,35 @@ fn mesh_dirty_chunks_system(
 
             chunks_meshed += 1;
         }
+        mesh_dirty_apply_us += apply_start
+            .map(|start| start.elapsed().as_micros() as u64)
+            .unwrap_or(0);
     }
 
     // Update runtime statistics
     chunk_stats.chunks_meshed_this_frame = chunks_meshed;
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
 
-    // Throttle full stats recompute to ~every 0.5s at 60fps (was O(N) over all chunks every dirty frame).
-    // Per-frame counters (meshed/skipped/vertices) are still updated immediately above.
-    if had_dirty_chunks && frame.0 % 30 == 0 {
+    // Keep the O(N) debug/stat snapshot off hot dirty-mesh frames while the
+    // terrain queue is backed up. Per-frame mesh counters above stay current.
+    let stats_recompute_due = had_dirty_chunks && frame.0 % 30 == 0;
+    let stats_recompute_blocked =
+        stats_recompute_due && dirty_chunks_queued > chunks_per_frame_limit;
+    let stats_recompute_start = timing.enabled.then(Instant::now);
+    if stats_recompute_due && !stats_recompute_blocked {
         chunk_stats.recompute_from_world(&world);
     }
+    let mesh_dirty_stats_us = stats_recompute_start
+        .map(|start| start.elapsed().as_micros() as u64)
+        .unwrap_or(0);
 
-    drop(_timer);
+    if let Some(start) = mesh_dirty_total_start {
+        timing.record_area(frame.0, "Mesh Dirty", start.elapsed().as_micros() as u64);
+    }
+    timing.record_area(frame.0, "Mesh Dirty Sort CPU", mesh_dirty_sort_us);
+    timing.record_area(frame.0, "Mesh Dirty Generate CPU", mesh_dirty_generate_us);
+    timing.record_area(frame.0, "Mesh Dirty Apply CPU", mesh_dirty_apply_us);
+    timing.record_area(frame.0, "Mesh Dirty Stats CPU", mesh_dirty_stats_us);
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Queued",
@@ -1235,7 +1272,22 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "MAX_CHUNKS_PER_FRAME Hit",
-        u8::from(dirty_chunks_queued > MAX_CHUNKS_PER_FRAME) as f64,
+        u8::from(dirty_chunks_queued > chunks_per_frame_limit) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Frame Limit",
+        chunks_per_frame_limit as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty LOD Churn Only",
+        lod_churn_only as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Stats Recompute Blocked",
+        stats_recompute_blocked as u8 as f64,
     );
     timing.record_count(frame.0, "Mesh Dirty Reason LOD", reason_counts.lod as f64);
     timing.record_count(
@@ -1832,7 +1884,7 @@ fn update_chunk_lod_system(
     *last_update = now;
     *last_camera_pos = Some(camera_pos);
 
-    let mut lod_changed: Vec<IVec3> = Vec::new();
+    let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32)> = Vec::new();
 
     for (chunk_pos, chunk) in world.chunk_entries_mut() {
         let world_pos = VoxelWorld::chunk_to_world(*chunk_pos);
@@ -1852,19 +1904,35 @@ fn update_chunk_lod_system(
             if !cooldown_elapsed {
                 continue;
             }
+            lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
         }
+    }
 
-        if chunk.set_lod_level(target_lod) {
-            lod_transitions
-                .last_change_frame
-                .insert(*chunk_pos, frame.0);
-            let change_count = lod_transitions.change_count.entry(*chunk_pos).or_insert(0);
-            *change_count += 1;
-            if *change_count > 1 {
-                lod_transitions.repeated_chunks_this_frame += 1;
-            }
-            lod_changed.push(*chunk_pos);
+    lod_candidates.sort_by(|a, b| {
+        let a_upgrade = a.2.is_higher_detail_than(a.1);
+        let b_upgrade = b.2.is_higher_detail_than(b.1);
+        b_upgrade
+            .cmp(&a_upgrade)
+            .then_with(|| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let mut lod_changed: Vec<IVec3> = Vec::new();
+    for (chunk_pos, _current_lod, target_lod, _distance) in
+        lod_candidates.into_iter().take(MAX_LOD_CHANGES_PER_UPDATE)
+    {
+        let Some(chunk) = world.get_chunk_mut(chunk_pos) else {
+            continue;
+        };
+        if !chunk.set_lod_level(target_lod) {
+            continue;
         }
+        lod_transitions.last_change_frame.insert(chunk_pos, frame.0);
+        let change_count = lod_transitions.change_count.entry(chunk_pos).or_insert(0);
+        *change_count += 1;
+        if *change_count > 1 {
+            lod_transitions.repeated_chunks_this_frame += 1;
+        }
+        lod_changed.push(chunk_pos);
     }
 
     lod_transitions.changes_this_second += lod_changed.len() as u32;

@@ -16,7 +16,7 @@ use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
-use avian3d::prelude::LinearVelocity;
+use avian3d::prelude::{LinearVelocity, Position};
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
@@ -557,7 +557,11 @@ fn run_bench_state_machine(
     mut state: ResMut<BenchState>,
     mut camera: Query<(&mut Transform, &mut PlayerCamera), With<PlayerCamera>>,
     mut player: Query<
-        (&mut Transform, Option<&mut LinearVelocity>),
+        (
+            &mut Transform,
+            Option<&mut Position>,
+            Option<&mut LinearVelocity>,
+        ),
         (With<Player>, Without<PlayerCamera>),
     >,
     mut atmosphere: ResMut<AtmosphereSettings>,
@@ -606,8 +610,11 @@ fn run_bench_state_machine(
                         .unwrap_or(vec3(checkpoint.look_at));
                     *transform = Transform::from_translation(start_position + Vec3::Y * 1.7)
                         .looking_at(start_look_at, Vec3::Y);
-                    if let Ok((mut player_transform, velocity)) = player.single_mut() {
+                    if let Ok((mut player_transform, position, velocity)) = player.single_mut() {
                         player_transform.translation = start_position;
+                        if let Some(mut position) = position {
+                            position.0 = start_position;
+                        }
                         if let Some(mut velocity) = velocity {
                             velocity.x = 0.0;
                             velocity.y = 0.0;
@@ -1513,7 +1520,11 @@ fn record_bench_gameplay_counts(
     checkpoint: &BenchCheckpoint,
     state: &mut BenchState,
     player: &mut Query<
-        (&mut Transform, Option<&mut LinearVelocity>),
+        (
+            &mut Transform,
+            Option<&mut Position>,
+            Option<&mut LinearVelocity>,
+        ),
         (With<Player>, Without<PlayerCamera>),
     >,
 ) {
@@ -1524,7 +1535,7 @@ fn record_bench_gameplay_counts(
     let horizontal_speed = player
         .single_mut()
         .ok()
-        .and_then(|(_transform, velocity)| {
+        .and_then(|(_transform, _position, velocity)| {
             velocity.map(|velocity| Vec2::new(velocity.x, velocity.z).length())
         })
         .unwrap_or(0.0);
