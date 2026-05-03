@@ -815,6 +815,8 @@ fn reflection_params_for_water(
     let max_depth = detail.map(|detail| detail.max_depth).unwrap_or(0);
     let kind = if max_depth >= 8 {
         WaterBodyKind::Ocean
+    } else if max_depth <= 1 {
+        WaterBodyKind::ShallowFlood
     } else if max_depth <= 2 {
         WaterBodyKind::Pond
     } else {
@@ -837,6 +839,14 @@ fn reflection_params_for_water(
             distortion_strength: 0.006,
             surface_y,
             kind: WaterBodyKind::Ocean,
+        }
+    } else if kind == WaterBodyKind::ShallowFlood {
+        WaterReflectionBodyParams {
+            reflection_strength: 0.12,
+            fresnel_power: 3.0,
+            distortion_strength: 0.001,
+            surface_y,
+            kind: WaterBodyKind::ShallowFlood,
         }
     } else if kind == WaterBodyKind::Pond {
         WaterReflectionBodyParams {
@@ -1034,32 +1044,32 @@ fn update_reflection_camera(
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Mask Pixels",
+        "Estimated Water Reflection Mask Pixels",
         mask_stats.estimated_mask_pixels as f64,
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Mask Bodies",
+        "Estimated Water Reflection Mask Bodies",
         mask_stats.mask_bodies as f64,
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Compositor Applied Pixels",
+        "Estimated Water Reflection Compositor Applied Pixels",
         mask_stats.estimated_applied_pixels as f64,
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Compositor Skipped No Mask",
+        "Estimated Water Reflection Compositor Skipped No Mask",
         mask_stats.estimated_skipped_no_mask_pixels as f64,
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Compositor Skipped Disabled",
+        "Estimated Water Reflection Compositor Skipped Disabled",
         mask_stats.estimated_skipped_disabled_pixels as f64,
     );
     timing.record_count(
         frame.0,
-        "Water Reflection Compositor Skipped Too Far",
+        "Estimated Water Reflection Compositor Skipped Too Far",
         mask_stats.estimated_skipped_too_far_pixels as f64,
     );
 }

@@ -42,7 +42,7 @@ fog:
     near_fade: 0.35
     falloff: atmospheric
   volumetric:
-    enabled: true
+    enabled: false
     step_count: 32
     jitter: 0.5
     ambient_intensity: 0.0
@@ -201,7 +201,7 @@ fog:
     num_samples: 32
     threshold: 2.0
 fog_quality:
-  tier: medium
+  tier: off
   user_override: false
 water_reflection:
   enabled: true

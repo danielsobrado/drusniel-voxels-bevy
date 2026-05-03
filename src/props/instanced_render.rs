@@ -91,9 +91,15 @@ impl Default for PropBoundsConfig {
     }
 }
 
-#[derive(Resource, Default, Clone, Copy, Debug)]
+#[derive(Resource, Clone, Copy, Debug)]
 pub struct PropBoundsDebugSettings {
     pub enabled: bool,
+}
+
+impl Default for PropBoundsDebugSettings {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]

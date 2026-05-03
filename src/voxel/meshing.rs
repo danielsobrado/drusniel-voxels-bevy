@@ -106,6 +106,7 @@ pub enum WaterBodyKind {
     Lake,
     River,
     Pond,
+    ShallowFlood,
     #[default]
     Unknown,
 }
@@ -117,6 +118,7 @@ impl WaterBodyKind {
             Self::Lake => "Lake",
             Self::River => "River",
             Self::Pond => "Pond",
+            Self::ShallowFlood => "ShallowFlood",
             Self::Unknown => "Unknown",
         }
     }

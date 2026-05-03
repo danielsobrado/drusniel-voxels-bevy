@@ -170,7 +170,7 @@ impl Default for SettingsState {
             ground_albedo: GroundAlbedoOption::Earth,
             sun_size: SunSizeOption::Earth,
             fog_preset: FogPresetOption(FogPreset::Balanced),
-            fog_quality_tier: FogQualityTier::Medium,
+            fog_quality_tier: FogQualityTier::Off,
             cycle_enabled: false,
             shadow_filtering: ShadowFiltering::Gaussian,
             walk_speed: WalkSpeedPreset::Standard,

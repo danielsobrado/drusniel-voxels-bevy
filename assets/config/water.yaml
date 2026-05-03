@@ -69,6 +69,7 @@ body_presets:
     murkiness: 0.1
     detail_normal_intensity: 0.8
     detail_scroll_speed: 0.04
+    lake_ripple_overlay_strength: 1.0
 
   lake:
     wave_amplitude: 0.36
@@ -88,6 +89,7 @@ body_presets:
     murkiness: 0.22
     detail_normal_intensity: 1.35
     detail_scroll_speed: 0.02
+    lake_ripple_overlay_strength: 0.22
 
   river:
     wave_amplitude: 0.22
@@ -107,6 +109,7 @@ body_presets:
     murkiness: 0.28
     detail_normal_intensity: 0.45
     detail_scroll_speed: 0.026
+    lake_ripple_overlay_strength: 0.28
 
   pond:
     wave_amplitude: 0.08
@@ -126,6 +129,27 @@ body_presets:
     murkiness: 0.42
     detail_normal_intensity: 0.55
     detail_scroll_speed: 0.012
+    lake_ripple_overlay_strength: 0.08
+
+  shallow_flood:
+    wave_amplitude: 0.015
+    wave_speed: 0.18
+    wave_scale: 4.0
+    wave_count: 1
+    reflection_strength: 0.12
+    fresnel_power: 3.0
+    distortion_strength: 0.001
+    shallow_color: [0.12, 0.18, 0.18, 0.34]
+    deep_color: [0.04, 0.075, 0.08, 0.42]
+    clarity: 0.25
+    base_alpha: 0.34
+    foam_enabled: false
+    shore_foam: false
+    wave_crest_foam: false
+    murkiness: 0.65
+    detail_normal_intensity: 0.1
+    detail_scroll_speed: 0.006
+    lake_ripple_overlay_strength: 0.0
 
 detail_normals:
   enabled: true

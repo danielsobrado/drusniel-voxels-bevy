@@ -16,6 +16,7 @@ use crate::performance::{
 use crate::player::{Player, classify_player_world_validity};
 use crate::props::billboard::BillboardStats;
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
+use crate::props::instanced_render::PropBoundsDebugSettings;
 use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
@@ -84,6 +85,7 @@ pub struct DebugOverlayParams<'w> {
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
     pub billboard_stats: Res<'w, BillboardStats>,
+    pub prop_bounds_debug: Res<'w, PropBoundsDebugSettings>,
 }
 
 #[derive(SystemParam)]
@@ -746,6 +748,7 @@ pub fn update_debug_overlay(
         &drag_state,
         &debug.toggles,
         &debug.timing_capture,
+        debug.prop_bounds_debug.enabled,
     );
 
     for mut text in query.iter_mut() {
@@ -1352,7 +1355,7 @@ fn append_reflection_mask_status(
         return;
     };
     text_content.push_str(&format!(
-        "Reflection Mask: px {} bodies {} applied {}\n",
+        "Reflection Mask Estimate: px {} bodies {} applied {}\n",
         stats.estimated_mask_pixels, stats.mask_bodies, stats.estimated_applied_pixels,
     ));
     text_content.push_str(&format!(
@@ -1388,8 +1391,13 @@ fn append_water_body_status(text_content: &mut String, registry: Option<&WaterBo
         return;
     };
     text_content.push_str(&format!(
-        "Water Bodies: {} ocean {} lake {} river {} pond {}\n",
-        registry.total, registry.ocean, registry.lake, registry.river, registry.pond,
+        "Water Bodies: {} ocean {} lake {} river {} pond {} shallow_flood {}\n",
+        registry.total,
+        registry.ocean,
+        registry.lake,
+        registry.river,
+        registry.pond,
+        registry.shallow_flood,
     ));
     text_content.push_str(&format!(
         "Water Body LOD: fancy {} cheap {} switches {} forced {}\n",
@@ -1398,6 +1406,26 @@ fn append_water_body_status(text_content: &mut String, registry: Option<&WaterBo
         registry.material_switches,
         registry.chunks_forced_consistent,
     ));
+    let mut bodies: Vec<_> = registry.bodies.values().collect();
+    bodies.sort_by(|a, b| a.nearest_distance.total_cmp(&b.nearest_distance));
+    for body in bodies
+        .into_iter()
+        .filter(|body| body.visible_chunks > 0)
+        .take(5)
+    {
+        text_content.push_str(&format!(
+            "Water Body {}: {} {} area {:.0} depth {}/avg {:.1} chunks {} dist {:.1} refl {:.2}\n",
+            body.id.0,
+            body.kind.as_str(),
+            body.material_mode.as_str(),
+            body.surface_area,
+            body.max_depth,
+            body.average_depth,
+            body.chunk_count,
+            body.nearest_distance,
+            body.reflection_strength,
+        ));
+    }
 }
 
 fn append_enclosure_status(
@@ -1473,6 +1501,7 @@ fn append_control_hints(
     drag_state: &DragState,
     toggles: &DebugDetailToggles,
     timing_capture: &AreaTimingCapture,
+    prop_bounds_debug_enabled: bool,
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[F4] Dump performance CSV");
@@ -1543,7 +1572,14 @@ fn append_control_hints(
             "OFF"
         }
     ));
-    text_content.push_str("\n[Alt+B] Prop bounds debug: gizmos");
+    text_content.push_str(&format!(
+        "\n[Alt+B] Prop bounds debug: {}",
+        if prop_bounds_debug_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    ));
     text_content.push_str(&format!(
         "\n[Alt+F] Performance: {}",
         if toggles.show_performance {

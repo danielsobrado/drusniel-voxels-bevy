@@ -68,6 +68,8 @@ pub struct WaterBodyPresetsConfig {
     pub lake: WaterBodyPresetConfig,
     pub river: WaterBodyPresetConfig,
     pub pond: WaterBodyPresetConfig,
+    #[serde(default = "default_shallow_flood_preset")]
+    pub shallow_flood: WaterBodyPresetConfig,
 }
 
 #[derive(Deserialize, Clone)]
@@ -89,6 +91,8 @@ pub struct WaterBodyPresetConfig {
     pub murkiness: f32,
     pub detail_normal_intensity: f32,
     pub detail_scroll_speed: f32,
+    #[serde(default = "default_ripple_overlay_strength")]
+    pub lake_ripple_overlay_strength: f32,
 }
 
 impl WaterConfig {
@@ -98,9 +102,14 @@ impl WaterConfig {
             WaterBodyKind::Lake => &self.body_presets.lake,
             WaterBodyKind::River => &self.body_presets.river,
             WaterBodyKind::Pond => &self.body_presets.pond,
+            WaterBodyKind::ShallowFlood => &self.body_presets.shallow_flood,
             WaterBodyKind::Unknown => &self.body_presets.lake,
         }
     }
+}
+
+fn default_ripple_overlay_strength() -> f32 {
+    1.0
 }
 
 impl Default for WaterBodyPresetsConfig {
@@ -124,6 +133,7 @@ impl Default for WaterBodyPresetsConfig {
                 murkiness: 0.1,
                 detail_normal_intensity: 0.8,
                 detail_scroll_speed: 0.04,
+                lake_ripple_overlay_strength: 1.0,
             },
             lake: WaterBodyPresetConfig {
                 wave_amplitude: 0.36,
@@ -143,6 +153,7 @@ impl Default for WaterBodyPresetsConfig {
                 murkiness: 0.22,
                 detail_normal_intensity: 1.35,
                 detail_scroll_speed: 0.02,
+                lake_ripple_overlay_strength: 0.22,
             },
             river: WaterBodyPresetConfig {
                 wave_amplitude: 0.22,
@@ -162,6 +173,7 @@ impl Default for WaterBodyPresetsConfig {
                 murkiness: 0.28,
                 detail_normal_intensity: 0.45,
                 detail_scroll_speed: 0.026,
+                lake_ripple_overlay_strength: 0.28,
             },
             pond: WaterBodyPresetConfig {
                 wave_amplitude: 0.08,
@@ -181,8 +193,33 @@ impl Default for WaterBodyPresetsConfig {
                 murkiness: 0.42,
                 detail_normal_intensity: 0.55,
                 detail_scroll_speed: 0.012,
+                lake_ripple_overlay_strength: 0.08,
             },
+            shallow_flood: default_shallow_flood_preset(),
         }
+    }
+}
+
+fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
+    WaterBodyPresetConfig {
+        wave_amplitude: 0.015,
+        wave_speed: 0.18,
+        wave_scale: 4.0,
+        wave_count: 1,
+        reflection_strength: 0.12,
+        fresnel_power: 3.0,
+        distortion_strength: 0.001,
+        shallow_color: [0.12, 0.18, 0.18, 0.34],
+        deep_color: [0.04, 0.075, 0.08, 0.42],
+        clarity: 0.25,
+        base_alpha: 0.34,
+        foam_enabled: false,
+        shore_foam: false,
+        wave_crest_foam: false,
+        murkiness: 0.65,
+        detail_normal_intensity: 0.1,
+        detail_scroll_speed: 0.006,
+        lake_ripple_overlay_strength: 0.0,
     }
 }
 

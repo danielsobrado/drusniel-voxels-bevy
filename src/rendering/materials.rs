@@ -26,6 +26,10 @@ fn water_debug_solid_color_enabled() -> bool {
     std::env::var_os("VOXEL_WATER_DEBUG_SOLID_COLOR").is_some()
 }
 
+fn water_debug_body_colors_enabled() -> bool {
+    std::env::var_os("VOXEL_WATER_DEBUG_BODY_COLORS").is_some()
+}
+
 #[derive(Resource)]
 pub struct VoxelMaterial {
     pub handle: Handle<BlockyMaterial>,
@@ -40,6 +44,7 @@ pub struct WaterMaterial {
     pub lake: BodyWaterMaterialHandles,
     pub river: BodyWaterMaterialHandles,
     pub pond: BodyWaterMaterialHandles,
+    pub shallow_flood: BodyWaterMaterialHandles,
     pub unknown: BodyWaterMaterialHandles,
 }
 
@@ -64,6 +69,7 @@ impl WaterMaterial {
             WaterBodyKind::Lake => &self.lake,
             WaterBodyKind::River => &self.river,
             WaterBodyKind::Pond => &self.pond,
+            WaterBodyKind::ShallowFlood => &self.shallow_flood,
             WaterBodyKind::Unknown => &self.unknown,
         }
     }
@@ -129,6 +135,14 @@ pub fn setup_water_material(
         &mut fancy_materials,
         &mut cheap_materials,
     );
+    let shallow_flood = create_body_water_materials(
+        WaterBodyKind::ShallowFlood,
+        &config,
+        &settings,
+        debug_solid_color,
+        &mut fancy_materials,
+        &mut cheap_materials,
+    );
     let unknown = create_body_water_materials(
         WaterBodyKind::Unknown,
         &config,
@@ -154,6 +168,7 @@ pub fn setup_water_material(
         lake,
         river,
         pond,
+        shallow_flood,
         unknown,
     });
 }
@@ -167,14 +182,23 @@ fn create_body_water_materials(
     cheap_materials: &mut Assets<StandardMaterial>,
 ) -> BodyWaterMaterialHandles {
     let preset = config.body_preset(kind);
-    let base_color = water_base_color(preset, settings, debug_solid_color);
+    let debug_body_colors = water_debug_body_colors_enabled();
+    let base_color = water_base_color(preset, settings, debug_solid_color, debug_body_colors, kind);
     let alpha_mode = if debug_solid_color {
         AlphaMode::Opaque
     } else {
         AlphaMode::Blend
     };
-    let shallow_color = water_color(preset.shallow_color, debug_solid_color);
-    let deep_color = water_color(preset.deep_color, debug_solid_color);
+    let shallow_color = if debug_body_colors && !debug_solid_color {
+        water_debug_body_color(kind)
+    } else {
+        water_color(preset.shallow_color, debug_solid_color)
+    };
+    let deep_color = if debug_body_colors && !debug_solid_color {
+        water_debug_body_color(kind)
+    } else {
+        water_color(preset.deep_color, debug_solid_color)
+    };
     let wave_amplitude = if debug_solid_color {
         0.0
     } else {
@@ -190,9 +214,14 @@ fn create_body_water_materials(
         WaterBodyKind::Lake | WaterBodyKind::Pond => {
             (settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT * 1.45).max(0.1)
         }
-        WaterBodyKind::River | WaterBodyKind::Unknown => {
+        WaterBodyKind::River | WaterBodyKind::ShallowFlood | WaterBodyKind::Unknown => {
             settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT
         }
+    };
+    let edge_scale = if water_ripple_lines_disabled() {
+        -edge_scale.abs()
+    } else {
+        edge_scale
     };
 
     let near = fancy_materials.add(StandardWaterMaterial {
@@ -208,6 +237,8 @@ fn create_body_water_materials(
             reflectance: preset.reflection_strength.clamp(0.0, 1.0),
             clearcoat: if matches!(kind, WaterBodyKind::Lake) {
                 0.72
+            } else if matches!(kind, WaterBodyKind::ShallowFlood) {
+                0.1
             } else {
                 0.55
             },
@@ -221,6 +252,8 @@ fn create_body_water_materials(
             depth_bias: 4.0,
             specular_transmission: if matches!(kind, WaterBodyKind::Ocean) {
                 0.18
+            } else if matches!(kind, WaterBodyKind::ShallowFlood) {
+                0.02
             } else {
                 0.12
             },
@@ -237,7 +270,7 @@ fn create_body_water_materials(
             clarity,
             deep_color,
             shallow_color,
-            edge_color: shallow_color,
+            edge_color: water_edge_color(shallow_color, preset, debug_solid_color),
             edge_scale,
             coord_offset: Vec2::ZERO,
             coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
@@ -258,6 +291,8 @@ fn create_body_water_materials(
         reflectance: preset.reflection_strength.clamp(0.0, 1.0),
         clearcoat: if matches!(kind, WaterBodyKind::Lake) {
             0.62
+        } else if matches!(kind, WaterBodyKind::ShallowFlood) {
+            0.08
         } else {
             0.5
         },
@@ -279,18 +314,50 @@ fn water_color(rgba: [f32; 4], debug_solid_color: bool) -> Color {
     }
 }
 
+fn water_edge_color(
+    shallow_color: Color,
+    preset: &WaterBodyPresetConfig,
+    debug_solid_color: bool,
+) -> Color {
+    if debug_solid_color {
+        return shallow_color;
+    }
+    let linear = shallow_color.to_linear();
+    Color::linear_rgba(
+        linear.red,
+        linear.green,
+        linear.blue,
+        preset.lake_ripple_overlay_strength.clamp(0.0, 2.0),
+    )
+}
+
 fn water_base_color(
     preset: &WaterBodyPresetConfig,
     settings: &WaterSettings,
     debug_solid_color: bool,
+    debug_body_colors: bool,
+    kind: WaterBodyKind,
 ) -> Color {
     if debug_solid_color {
         Color::srgba(0.0, 0.75, 1.0, 1.0)
+    } else if debug_body_colors {
+        water_debug_body_color(kind)
     } else {
         let [r, g, b, _] = preset.shallow_color;
         let alpha = preset.base_alpha.clamp(0.05, 1.0);
         let _ = settings;
         Color::srgba(r, g, b, alpha)
+    }
+}
+
+fn water_debug_body_color(kind: WaterBodyKind) -> Color {
+    match kind {
+        WaterBodyKind::Ocean => Color::srgba(0.0, 0.18, 1.0, 0.78),
+        WaterBodyKind::Lake => Color::srgba(0.0, 0.75, 0.25, 0.78),
+        WaterBodyKind::River => Color::srgba(0.6, 0.15, 1.0, 0.78),
+        WaterBodyKind::Pond => Color::srgba(0.85, 0.8, 0.0, 0.78),
+        WaterBodyKind::ShallowFlood => Color::srgba(1.0, 0.15, 0.05, 0.58),
+        WaterBodyKind::Unknown => Color::srgba(1.0, 1.0, 1.0, 0.6),
     }
 }
 
@@ -312,17 +379,28 @@ pub fn sync_voxel_water_material_overrides(
     }
 
     let debug_solid_color = water_debug_solid_color_enabled();
+    let debug_body_colors = water_debug_body_colors_enabled();
     let config = water_config.as_deref().cloned().unwrap_or_default();
     for (kind, handle) in [
         (WaterBodyKind::Ocean, &water_material.ocean.near),
         (WaterBodyKind::Lake, &water_material.lake.near),
         (WaterBodyKind::River, &water_material.river.near),
         (WaterBodyKind::Pond, &water_material.pond.near),
+        (
+            WaterBodyKind::ShallowFlood,
+            &water_material.shallow_flood.near,
+        ),
         (WaterBodyKind::Unknown, &water_material.unknown.near),
     ] {
         let preset = config.body_preset(kind);
         if let Some(mat) = materials.get_mut(handle) {
-            mat.base.base_color = water_base_color(preset, &settings, debug_solid_color);
+            mat.base.base_color = water_base_color(
+                preset,
+                &settings,
+                debug_solid_color,
+                debug_body_colors,
+                kind,
+            );
             mat.base.alpha_mode = if debug_solid_color {
                 AlphaMode::Opaque
             } else {
@@ -342,15 +420,38 @@ pub fn sync_voxel_water_material_overrides(
             } else {
                 preset.clarity.max(0.0)
             };
-            mat.extension.deep_color = water_color(preset.deep_color, debug_solid_color);
-            mat.extension.shallow_color = water_color(preset.shallow_color, debug_solid_color);
-            mat.extension.edge_color = mat.extension.shallow_color;
-            mat.extension.edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
+            mat.extension.deep_color = if debug_body_colors && !debug_solid_color {
+                water_debug_body_color(kind)
+            } else {
+                water_color(preset.deep_color, debug_solid_color)
+            };
+            mat.extension.shallow_color = if debug_body_colors && !debug_solid_color {
+                water_debug_body_color(kind)
+            } else {
+                water_color(preset.shallow_color, debug_solid_color)
+            };
+            mat.extension.edge_color =
+                water_edge_color(mat.extension.shallow_color, preset, debug_solid_color);
+            let edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
+            mat.extension.edge_scale = if water_ripple_lines_disabled() {
+                -edge_scale.abs()
+            } else {
+                edge_scale
+            };
             mat.extension.coord_offset = Vec2::ZERO;
             mat.extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);
             mat.extension.quality = settings.water_quality.into();
         }
     }
+}
+
+fn water_ripple_lines_disabled() -> bool {
+    std::env::var("VOXEL_DISABLE_VOXEL_WATER_RIPPLE_LINES").is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 /// Ensure the atlas uses a repeat/mipmapped sampler so tiled terrain does not clamp or alias

@@ -16,7 +16,7 @@ fog:
   # WARNING: Very expensive! Drops FPS from 40-50 to ~10 FPS.
   # Only enable on high-end GPUs.
   volumetric:
-    enabled: true
+    enabled: false
     # Base raymarching quality. FogQuality overrides this at runtime:
     # Off removes VolumetricFog, Low=8, Medium=16, High=32.
     step_count: 16

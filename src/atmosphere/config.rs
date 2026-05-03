@@ -31,7 +31,7 @@ pub struct FogQuality {
 impl Default for FogQuality {
     fn default() -> Self {
         Self {
-            tier: FogQualityTier::Medium,
+            tier: FogQualityTier::Off,
             user_override: false,
         }
     }
@@ -341,7 +341,7 @@ impl Default for FogConfig {
                 falloff: FogFalloffMode::Linear,
             },
             volumetric: VolumetricConfig {
-                enabled: true,
+                enabled: false,
                 step_count: 16,
                 jitter: 0.5,
                 ambient_intensity: 0.0,

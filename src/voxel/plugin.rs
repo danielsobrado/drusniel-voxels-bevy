@@ -52,6 +52,10 @@ const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
 const WATER_BODY_LAKE_MIN_AREA: f32 = 128.0;
 const WATER_BODY_OCEAN_MIN_AREA: f32 = 4096.0;
 const WATER_BODY_RIVER_ASPECT_RATIO: f32 = 4.0;
+const WATER_BODY_LAKE_MIN_DEPTH: usize = 3;
+const WATER_BODY_LAKE_MIN_AVG_DEPTH: f32 = 1.5;
+const WATER_BODY_SHALLOW_FLOOD_MAX_DEPTH: usize = 1;
+const WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH: f32 = 1.25;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -326,6 +330,7 @@ pub struct WaterBodyRegistry {
     pub lake: u32,
     pub river: u32,
     pub pond: u32,
+    pub shallow_flood: u32,
     pub fancy_count: u32,
     pub cheap_count: u32,
     pub hidden_count: u32,
@@ -343,6 +348,7 @@ impl WaterBodyRegistry {
         self.lake = 0;
         self.river = 0;
         self.pond = 0;
+        self.shallow_flood = 0;
         self.fancy_count = 0;
         self.cheap_count = 0;
         self.hidden_count = 0;
@@ -357,6 +363,7 @@ impl WaterBodyRegistry {
             WaterBodyKind::Lake => self.lake += 1,
             WaterBodyKind::River => self.river += 1,
             WaterBodyKind::Pond => self.pond += 1,
+            WaterBodyKind::ShallowFlood => self.shallow_flood += 1,
             WaterBodyKind::Unknown => {}
         }
         match body.material_mode {
@@ -1742,7 +1749,19 @@ fn update_water_body_registry(
         samples.push(sample);
     }
 
-    let groups = build_water_body_groups(&samples, &world, camera_pos, &previous_modes);
+    let mut groups = build_water_body_groups(&samples, &world, camera_pos, &previous_modes);
+    if let Some(forced_kind) = forced_water_body_kind("VOXEL_FORCE_WATER_BODY_KIND") {
+        for group in &mut groups {
+            group.kind = forced_kind;
+        }
+    } else if let Some(forced_kind) = forced_water_body_kind("VOXEL_FORCE_NEAREST_WATER_KIND") {
+        if let Some(nearest_group) = groups
+            .iter_mut()
+            .min_by(|a, b| a.nearest_distance.total_cmp(&b.nearest_distance))
+        {
+            nearest_group.kind = forced_kind;
+        }
+    }
     let mut next_bodies = HashMap::new();
     registry.reset_counts();
     registry.material_switches = 0;
@@ -2049,7 +2068,20 @@ fn build_water_body_group(
     }
 
     let id = stable_water_body_id(min_chunk, surface_y);
-    let kind = classify_water_body(world, aabb_min, aabb_max, surface_area, touches_world_edge);
+    let average_depth = if surface_area <= f32::EPSILON {
+        0.0
+    } else {
+        total_depth_weighted / surface_area
+    };
+    let kind = classify_water_body(
+        world,
+        aabb_min,
+        aabb_max,
+        surface_area,
+        max_depth,
+        average_depth,
+        touches_world_edge,
+    );
     let nearest_distance = camera_pos
         .map(|pos| distance_to_aabb_xz(pos, aabb_min, aabb_max))
         .unwrap_or(f32::INFINITY);
@@ -2058,7 +2090,7 @@ fn build_water_body_group(
         .copied()
         .unwrap_or(WaterBodyMaterialMode::Unknown);
     let material_mode =
-        water_body_material_mode(previous, nearest_distance, max_depth, surface_area);
+        water_body_material_mode(previous, nearest_distance, max_depth, surface_area, kind);
 
     WaterBodyGroup {
         id,
@@ -2069,11 +2101,7 @@ fn build_water_body_group(
         surface_y,
         surface_area,
         max_depth,
-        average_depth: if surface_area <= f32::EPSILON {
-            0.0
-        } else {
-            total_depth_weighted / surface_area
-        },
+        average_depth,
         nearest_distance,
         visible_chunks,
         material_mode,
@@ -2085,16 +2113,24 @@ fn classify_water_body(
     aabb_min: Vec3,
     aabb_max: Vec3,
     surface_area: f32,
+    max_depth: usize,
+    average_depth: f32,
     touches_world_edge: bool,
 ) -> WaterBodyKind {
     if touches_world_edge || surface_area >= WATER_BODY_OCEAN_MIN_AREA {
         return WaterBodyKind::Ocean;
     }
 
+    let shallow_loaded_body = max_depth <= WATER_BODY_SHALLOW_FLOOD_MAX_DEPTH
+        || average_depth <= WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH;
+
     let extent = aabb_max - aabb_min;
     let long = extent.x.max(extent.z).max(1.0);
     let short = extent.x.min(extent.z).max(1.0);
-    if surface_area >= WATER_BODY_LAKE_MIN_AREA && long / short >= WATER_BODY_RIVER_ASPECT_RATIO {
+    if !shallow_loaded_body
+        && surface_area >= WATER_BODY_LAKE_MIN_AREA
+        && long / short >= WATER_BODY_RIVER_ASPECT_RATIO
+    {
         return WaterBodyKind::River;
     }
 
@@ -2105,10 +2141,30 @@ fn classify_water_body(
         || aabb_max.z >= world_extent.z as f32
     {
         WaterBodyKind::Ocean
+    } else if shallow_loaded_body {
+        WaterBodyKind::ShallowFlood
     } else if surface_area < WATER_BODY_POND_MAX_AREA {
         WaterBodyKind::Pond
-    } else {
+    } else if max_depth >= WATER_BODY_LAKE_MIN_DEPTH
+        && average_depth >= WATER_BODY_LAKE_MIN_AVG_DEPTH
+        && surface_area >= WATER_BODY_LAKE_MIN_AREA
+    {
         WaterBodyKind::Lake
+    } else {
+        WaterBodyKind::Pond
+    }
+}
+
+fn forced_water_body_kind(name: &str) -> Option<WaterBodyKind> {
+    let value = std::env::var(name).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "ocean" => Some(WaterBodyKind::Ocean),
+        "lake" => Some(WaterBodyKind::Lake),
+        "river" => Some(WaterBodyKind::River),
+        "pond" => Some(WaterBodyKind::Pond),
+        "shallow_flood" | "shallowflood" | "flood" => Some(WaterBodyKind::ShallowFlood),
+        "unknown" => Some(WaterBodyKind::Unknown),
+        _ => None,
     }
 }
 
@@ -2131,6 +2187,7 @@ fn water_body_reflection_strength(
                 0.7
             }
         }
+        WaterBodyKind::ShallowFlood => 0.12,
         WaterBodyKind::Unknown => 0.72,
     }
 }
@@ -2144,6 +2201,7 @@ fn water_body_fresnel_power(kind: WaterBodyKind, water_config: Option<&WaterConf
         WaterBodyKind::Lake => 4.5,
         WaterBodyKind::River => 4.0,
         WaterBodyKind::Pond => 4.0,
+        WaterBodyKind::ShallowFlood => 3.0,
         WaterBodyKind::Unknown => 4.5,
     }
 }
@@ -2157,6 +2215,7 @@ fn water_body_distortion_strength(kind: WaterBodyKind, water_config: Option<&Wat
         WaterBodyKind::Lake => 0.0045,
         WaterBodyKind::River => 0.008,
         WaterBodyKind::Pond => 0.0035,
+        WaterBodyKind::ShallowFlood => 0.001,
         WaterBodyKind::Unknown => 0.0045,
     }
 }
@@ -2166,12 +2225,16 @@ fn water_body_material_mode(
     nearest_distance: f32,
     max_depth: usize,
     surface_area: f32,
+    kind: WaterBodyKind,
 ) -> WaterBodyMaterialMode {
     if env_flag("VOXEL_FORCE_ALL_WATER_CHEAP") {
         return WaterBodyMaterialMode::Cheap;
     }
     if env_flag("VOXEL_FORCE_ALL_WATER_FANCY") {
         return WaterBodyMaterialMode::Fancy;
+    }
+    if kind == WaterBodyKind::ShallowFlood {
+        return WaterBodyMaterialMode::Cheap;
     }
     if surface_area < WATER_FANCY_MIN_TRIANGLES as f32 || max_depth < WATER_FANCY_MIN_DEPTH {
         return WaterBodyMaterialMode::Cheap;
@@ -2233,6 +2296,11 @@ fn record_water_body_counters(
     timing.record_count(frame, "Water Bodies Lake", registry.lake as f64);
     timing.record_count(frame, "Water Bodies River", registry.river as f64);
     timing.record_count(frame, "Water Bodies Pond", registry.pond as f64);
+    timing.record_count(
+        frame,
+        "Water Bodies ShallowFlood",
+        registry.shallow_flood as f64,
+    );
     timing.record_count(frame, "Water Body Fancy Count", registry.fancy_count as f64);
     timing.record_count(frame, "Water Body Cheap Count", registry.cheap_count as f64);
     timing.record_count(
@@ -2264,7 +2332,7 @@ fn update_water_material_lod(
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
-    if now - *last_update < WATER_MATERIAL_UPDATE_INTERVAL {
+    if *last_update > 0.0 && now - *last_update < WATER_MATERIAL_UPDATE_INTERVAL {
         timing.record_count(
             frame.0,
             "Water Chunks Forced Consistent By Body",
@@ -2459,6 +2527,7 @@ fn water_body_debug_color(mode: WaterBodyMaterialMode, kind: WaterBodyKind) -> C
             WaterBodyKind::Lake => Color::srgba(0.1, 0.9, 0.4, 0.55),
             WaterBodyKind::River => Color::srgba(0.7, 0.3, 1.0, 0.55),
             WaterBodyKind::Pond => Color::srgba(0.9, 0.9, 0.2, 0.55),
+            WaterBodyKind::ShallowFlood => Color::srgba(1.0, 0.1, 0.05, 0.55),
             WaterBodyKind::Unknown => Color::srgba(1.0, 1.0, 1.0, 0.45),
         },
     }

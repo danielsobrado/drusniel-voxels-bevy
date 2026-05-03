@@ -15,7 +15,7 @@ use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::player::Player;
 use crate::rendering::water_reflection::{
-    WaterPresence, WaterReflectionConfig, WaterReflectionStatus,
+    WaterPresence, WaterReflectionConfig, WaterReflectionMaskStats, WaterReflectionStatus,
 };
 use crate::voxel::meshing::{
     ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
@@ -95,9 +95,13 @@ struct WaterVisualProbeDump {
 struct WaterDebugTogglesDump {
     force_all_water_fancy: bool,
     force_all_water_cheap: bool,
+    force_water_body_kind: Option<String>,
+    force_nearest_water_kind: Option<String>,
     force_water_reflection_active: bool,
     disable_water_reflection_compositor: bool,
     water_debug_solid_color: bool,
+    disable_voxel_water_ripple_lines: bool,
+    water_reflection_debug_view: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -134,6 +138,12 @@ struct CompositorDump {
     water_uses_alpha_mode_blend: bool,
     water_may_not_write_depth_prepass: bool,
     compositor_disabled_by_env: bool,
+    mask_pixels: u32,
+    mask_bodies: u32,
+    compositor_applied_pixels: u32,
+    compositor_skipped_no_mask_pixels: u32,
+    compositor_skipped_disabled_pixels: u32,
+    compositor_skipped_too_far_pixels: u32,
 }
 
 #[derive(Serialize)]
@@ -145,6 +155,12 @@ struct WaterMeshProbeDump {
     water_body_id: Option<u32>,
     water_body_kind: String,
     water_body_material_mode: String,
+    water_body_surface_area: Option<f32>,
+    water_body_max_depth: Option<usize>,
+    water_body_average_depth: Option<f32>,
+    water_body_nearest_distance: Option<f32>,
+    water_body_visible_chunks: Option<u32>,
+    water_body_chunk_count: Option<u32>,
     triangle_count: Option<usize>,
     max_depth: Option<usize>,
     distance_to_camera: Option<f32>,
@@ -316,11 +332,18 @@ fn dump_water_visual_probe(
     reflection_config: Option<Res<WaterReflectionConfig>>,
     reflection_status: Option<Res<WaterReflectionStatus>>,
     presence: Option<Res<WaterPresence>>,
+    mask_stats: Option<Res<WaterReflectionMaskStats>>,
     fancy_materials: Res<Assets<StandardWaterMaterial>>,
     cheap_materials: Res<Assets<StandardMaterial>>,
+    mut env_probe_dumped: Local<bool>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if !shift_held || !keys.just_pressed(KeyCode::F10) {
+    let hotkey_triggered = shift_held && keys.just_pressed(KeyCode::F10);
+    let env_triggered = env_flag("VOXEL_WATER_VISUAL_PROBE_ONCE") && !*env_probe_dumped;
+    if !hotkey_triggered && !env_triggered {
+        return;
+    }
+    if env_triggered && water_meshes.iter().next().is_none() {
         return;
     }
 
@@ -328,6 +351,12 @@ fn dump_water_visual_probe(
         warn!("Dump Water Visual Probe skipped: player camera not found");
         return;
     };
+    if env_triggered && !camera_matches_probe_wait(camera_transform.translation) {
+        return;
+    }
+    if env_triggered {
+        *env_probe_dumped = true;
+    }
 
     let target = target_cursor_water_sample(&world, &targeted, camera_transform);
     let camera_water_pos = highest_water_surface_at_xz(
@@ -408,19 +437,28 @@ fn dump_water_visual_probe(
 
     let status = reflection_status.as_deref().copied().unwrap_or_default();
     let presence = presence.as_deref().copied().unwrap_or_default();
+    let mask_stats = mask_stats.as_deref().copied().unwrap_or_default();
     let timestamp = timestamp_utc_compact();
     let dump = WaterVisualProbeDump {
         schema_version: 1,
         timestamp_utc: timestamp.clone(),
-        trigger: "Shift+F10 Dump Water Visual Probe".to_string(),
+        trigger: if hotkey_triggered {
+            "Shift+F10 Dump Water Visual Probe".to_string()
+        } else {
+            "VOXEL_WATER_VISUAL_PROBE_ONCE".to_string()
+        },
         toggles: WaterDebugTogglesDump {
             force_all_water_fancy: env_flag("VOXEL_FORCE_ALL_WATER_FANCY"),
             force_all_water_cheap: env_flag("VOXEL_FORCE_ALL_WATER_CHEAP"),
+            force_nearest_water_kind: std::env::var("VOXEL_FORCE_NEAREST_WATER_KIND").ok(),
+            force_water_body_kind: std::env::var("VOXEL_FORCE_WATER_BODY_KIND").ok(),
             force_water_reflection_active: env_flag("VOXEL_FORCE_WATER_REFLECTION_ACTIVE"),
             disable_water_reflection_compositor: env_flag(
                 "VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR",
             ),
             water_debug_solid_color: env_flag("VOXEL_WATER_DEBUG_SOLID_COLOR"),
+            disable_voxel_water_ripple_lines: env_flag("VOXEL_DISABLE_VOXEL_WATER_RIPPLE_LINES"),
+            water_reflection_debug_view: std::env::var("VOXEL_WATER_REFLECTION_DEBUG_VIEW").ok(),
         },
         player_position: player_query
             .iter()
@@ -460,6 +498,12 @@ fn dump_water_visual_probe(
             water_uses_alpha_mode_blend: nearest_material_blend,
             water_may_not_write_depth_prepass: nearest_material_blend,
             compositor_disabled_by_env: env_flag("VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR"),
+            mask_pixels: mask_stats.estimated_mask_pixels,
+            mask_bodies: mask_stats.mask_bodies,
+            compositor_applied_pixels: mask_stats.estimated_applied_pixels,
+            compositor_skipped_no_mask_pixels: mask_stats.estimated_skipped_no_mask_pixels,
+            compositor_skipped_disabled_pixels: mask_stats.estimated_skipped_disabled_pixels,
+            compositor_skipped_too_far_pixels: mask_stats.estimated_skipped_too_far_pixels,
         },
         probes: vec![camera_probe, target_probe],
         local_voxel_depth: target
@@ -633,8 +677,7 @@ fn build_probe_dump(
     let body = nearest
         .as_ref()
         .and_then(|mesh| mesh.body_id)
-        .and_then(|id| water_body_registry.and_then(|registry| registry.bodies.get(&id)))
-        .map(|body| (body.kind, body.material_mode));
+        .and_then(|id| water_body_registry.and_then(|registry| registry.bodies.get(&id)));
     WaterMeshProbeDump {
         label: label.to_string(),
         nearest_water_mesh_entity: nearest.as_ref().map(|mesh| format!("{:?}", mesh.entity)),
@@ -649,11 +692,17 @@ fn build_probe_dump(
             .as_ref()
             .and_then(|mesh| mesh.body_id.map(|id| id.0)),
         water_body_kind: body
-            .map(|(kind, _)| kind.as_str().to_string())
+            .map(|body| body.kind.as_str().to_string())
             .unwrap_or_else(|| "unknown".to_string()),
         water_body_material_mode: body
-            .map(|(_, mode)| mode.as_str().to_string())
+            .map(|body| body.material_mode.as_str().to_string())
             .unwrap_or_else(|| "unknown".to_string()),
+        water_body_surface_area: body.map(|body| body.surface_area),
+        water_body_max_depth: body.map(|body| body.max_depth),
+        water_body_average_depth: body.map(|body| body.average_depth),
+        water_body_nearest_distance: body.map(|body| body.nearest_distance),
+        water_body_visible_chunks: body.map(|body| body.visible_chunks),
+        water_body_chunk_count: body.map(|body| body.chunk_count),
         triangle_count: nearest.as_ref().and_then(|mesh| mesh.triangle_count),
         max_depth: nearest.as_ref().and_then(|mesh| mesh.max_depth),
         distance_to_camera: nearest.as_ref().map(|mesh| mesh.distance_to_camera),
@@ -673,12 +722,37 @@ fn material_kind_name(kind: WaterMaterialKind) -> &'static str {
     }
 }
 
+fn camera_matches_probe_wait(camera_position: Vec3) -> bool {
+    let Ok(value) = std::env::var("VOXEL_WATER_VISUAL_PROBE_WAIT_CAMERA_XZ") else {
+        return true;
+    };
+    let parts: Vec<_> = value
+        .split([',', ';', ' '])
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return true;
+    }
+    let Ok(x) = parts[0].parse::<f32>() else {
+        return true;
+    };
+    let Ok(z) = parts[1].parse::<f32>() else {
+        return true;
+    };
+    let threshold = parts
+        .get(2)
+        .and_then(|part| part.parse::<f32>().ok())
+        .unwrap_or(3.0);
+    Vec2::new(camera_position.x - x, camera_position.z - z).length() <= threshold
+}
+
 fn water_body_kind_code(kind: WaterBodyKind) -> u8 {
     match kind {
         WaterBodyKind::Ocean => 1,
         WaterBodyKind::Lake => 2,
         WaterBodyKind::River => 3,
         WaterBodyKind::Pond => 4,
+        WaterBodyKind::ShallowFlood => 5,
         WaterBodyKind::Unknown => 0,
     }
 }

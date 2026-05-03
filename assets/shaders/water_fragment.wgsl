@@ -52,6 +52,12 @@ fn fragment(
   var world_position: vec4<f32> = in.world_position;
   let w_pos = water_fn::uv_to_coord(in.uv);
   let material_amplitude = water_bindings::material.amplitude;
+  let debug_disable_voxel_ripple_lines = water_bindings::material.edge_scale < 0.0;
+  let ripple_overlay_strength = select(
+    clamp(water_bindings::material.edge_color.a, 0.0, 2.0),
+    0.0,
+    debug_disable_voxel_ripple_lines
+  );
   let voxel_water_surface = water_bindings::material.coord_scale.x < 8.0;
   let pond_profile = voxel_water_surface && material_amplitude <= 0.08;
   let lake_profile = voxel_water_surface && material_amplitude > 0.08 && material_amplitude <= 0.36;
@@ -136,8 +142,9 @@ fn fragment(
 #ifndef PREPASS_PIPELINE
 #ifndef WEBGL2
   let water_clarity = water_bindings::material.clarity;
-  let edge_scale = water_bindings::material.edge_scale;
-  let edge_color = water_bindings::material.edge_color;
+  let edge_scale = abs(water_bindings::material.edge_scale);
+  let edge_color_binding = water_bindings::material.edge_color;
+  let edge_color = vec4<f32>(edge_color_binding.rgb, shallow_color.a);
 
   let z_depth_buffer_ndc = bevy_pbr::prepass_utils::prepass_depth(in.position, 0u);
   let z_depth_buffer_view = depth_ndc_to_view_z(z_depth_buffer_ndc);
@@ -169,19 +176,22 @@ fn fragment(
   if (voxel_water_surface) {
     let shallow_bias = select(0.3, 0.08, calm_inland_profile);
     water_color = vec4<f32>(mix(water_color.rgb, shallow_color.rgb, shallow_bias), water_color.a);
-    let ripple_a = sin(dot(world_position.xz, vec2<f32>(1.25, 0.38)) + globals.time * body_wave_speed * 1.8);
-    let ripple_b = sin(dot(world_position.xz, vec2<f32>(-0.54, 1.05)) + globals.time * body_wave_speed * 1.25);
-    let ripple = ripple_a * 0.5 + ripple_b * 0.5;
-    let ripple_line = smoothstep(0.12, 0.72, abs(ripple));
-    let ripple_contrast = select(0.35, 1.1, lake_profile);
-    var ripple_contrast_body = select(ripple_contrast, 0.28, river_profile);
-    ripple_contrast_body = select(ripple_contrast_body, 0.72, pond_profile);
-    let ripple_highlight = vec3<f32>(0.3, 0.37, 0.38) * ripple_line * ripple_contrast_body;
-    let ripple_shadow = 1.0 - (1.0 - ripple_line) * ripple_contrast_body * 0.82;
-    water_color = vec4<f32>(
-      water_color.rgb * (1.0 + ripple * ripple_contrast_body) * ripple_shadow + ripple_highlight,
-      water_color.a
-    );
+    if (!debug_disable_voxel_ripple_lines) {
+      let ripple_a = sin(dot(world_position.xz, vec2<f32>(1.25, 0.38)) + globals.time * body_wave_speed * 1.8);
+      let ripple_b = sin(dot(world_position.xz, vec2<f32>(-0.54, 1.05)) + globals.time * body_wave_speed * 1.25);
+      let ripple = ripple_a * 0.5 + ripple_b * 0.5;
+      let ripple_line = smoothstep(0.12, 0.72, abs(ripple));
+      let ripple_contrast = select(0.35, 1.1, lake_profile);
+      var ripple_contrast_body = select(ripple_contrast, 0.28, river_profile);
+      ripple_contrast_body = select(ripple_contrast_body, 0.72, pond_profile);
+      let ripple_strength = ripple_contrast_body * ripple_overlay_strength;
+      let ripple_highlight = vec3<f32>(0.3, 0.37, 0.38) * ripple_line * ripple_strength;
+      let ripple_shadow = 1.0 - (1.0 - ripple_line) * ripple_strength * 0.82;
+      water_color = vec4<f32>(
+        water_color.rgb * (1.0 + ripple * ripple_strength) * ripple_shadow + ripple_highlight,
+        water_color.a
+      );
+    }
     let configured_alpha = max(pbr_input.material.base_color.a, max(shallow_color.a, deep_color.a) * 0.72);
     let base_alpha = clamp(configured_alpha, 0.45, 0.98);
     pbr_input.material.base_color = vec4<f32>(water_color.rgb, base_alpha);
@@ -260,7 +270,7 @@ fn fragment(
       // At glancing angles water becomes more opaque (reflecting surface, not transparent)
       mix(out.color.a, 1.0, reflection_strength * 0.6)
     );
-    if (voxel_water_surface) {
+    if (voxel_water_surface && !debug_disable_voxel_ripple_lines) {
       let lake_ripple_a = sin(dot(world_position.xz, vec2<f32>(1.25, 0.38)) + globals.time * body_wave_speed * 1.8);
       let lake_ripple_b = sin(dot(world_position.xz, vec2<f32>(-0.54, 1.05)) + globals.time * body_wave_speed * 1.25);
       let lake_ripple_fine = sin(dot(world_position.xz, vec2<f32>(2.1, -0.72)) + globals.time * body_wave_speed * 2.3);
@@ -269,8 +279,9 @@ fn fragment(
       var voxel_ripple_strength = 0.45;
       voxel_ripple_strength = select(voxel_ripple_strength, 0.72, pond_profile);
       voxel_ripple_strength = select(voxel_ripple_strength, 1.0, lake_profile);
-      let lake_trough = 1.0 - (1.0 - lake_line) * 0.42 * voxel_ripple_strength;
-      let lake_glint = vec3<f32>(0.26, 0.34, 0.36) * lake_line * voxel_ripple_strength;
+      let lake_overlay_strength = voxel_ripple_strength * ripple_overlay_strength;
+      let lake_trough = 1.0 - (1.0 - lake_line) * 0.42 * lake_overlay_strength;
+      let lake_glint = vec3<f32>(0.26, 0.34, 0.36) * lake_line * lake_overlay_strength;
       out.color = vec4<f32>(out.color.rgb * lake_trough + lake_glint, out.color.a);
     }
   }
