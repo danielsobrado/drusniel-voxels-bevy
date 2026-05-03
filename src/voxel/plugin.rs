@@ -6,7 +6,7 @@
 //! - Mesh generation and update systems
 //! - Async chunk generation using Bevy's task pool
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -47,6 +47,11 @@ const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
 const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
 const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
+const WATER_BODY_UPDATE_INTERVAL: f32 = 0.5;
+const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
+const WATER_BODY_LAKE_MIN_AREA: f32 = 128.0;
+const WATER_BODY_OCEAN_MIN_AREA: f32 = 4096.0;
+const WATER_BODY_RIVER_ASPECT_RATIO: f32 = 4.0;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -56,7 +61,7 @@ use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
-use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
+use crate::rendering::water_reflection::{REFLECTION_RENDER_LAYER, WATER_MASK_RENDER_LAYER};
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
@@ -64,9 +69,9 @@ use crate::voxel::enclosure::{
 };
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 use crate::voxel::meshing::{
-    ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
-    count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
-    generate_chunk_mesh_with_mode,
+    ChunkMesh, MeshMode, MeshSettings, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode,
+    WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
+    empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_with_mode,
 };
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
@@ -287,6 +292,75 @@ impl RuntimeChunkStats {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct WaterBodyInfo {
+    pub id: WaterBodyId,
+    pub kind: WaterBodyKind,
+    pub aabb_min: Vec3,
+    pub aabb_max: Vec3,
+    pub surface_y: f32,
+    pub surface_area: f32,
+    pub max_depth: usize,
+    pub average_depth: f32,
+    pub nearest_distance: f32,
+    pub visible_chunks: u32,
+    pub chunk_count: u32,
+    pub material_mode: WaterBodyMaterialMode,
+    pub reflection_strength: f32,
+    pub fresnel_power: f32,
+    pub distortion_strength: f32,
+}
+
+#[derive(Resource, Default, Debug)]
+pub struct WaterBodyRegistry {
+    pub bodies: HashMap<WaterBodyId, WaterBodyInfo>,
+    pub total: u32,
+    pub ocean: u32,
+    pub lake: u32,
+    pub river: u32,
+    pub pond: u32,
+    pub fancy_count: u32,
+    pub cheap_count: u32,
+    pub hidden_count: u32,
+    pub material_switches: u32,
+    pub chunks_forced_consistent: u32,
+}
+
+#[derive(Component)]
+struct WaterMaskProxy;
+
+impl WaterBodyRegistry {
+    fn reset_counts(&mut self) {
+        self.total = 0;
+        self.ocean = 0;
+        self.lake = 0;
+        self.river = 0;
+        self.pond = 0;
+        self.fancy_count = 0;
+        self.cheap_count = 0;
+        self.hidden_count = 0;
+        self.material_switches = 0;
+        self.chunks_forced_consistent = 0;
+    }
+
+    fn count_body(&mut self, body: &WaterBodyInfo) {
+        self.total += 1;
+        match body.kind {
+            WaterBodyKind::Ocean => self.ocean += 1,
+            WaterBodyKind::Lake => self.lake += 1,
+            WaterBodyKind::River => self.river += 1,
+            WaterBodyKind::Pond => self.pond += 1,
+            WaterBodyKind::Unknown => {}
+        }
+        match body.material_mode {
+            WaterBodyMaterialMode::Fancy => self.fancy_count += 1,
+            WaterBodyMaterialMode::Cheap => self.cheap_count += 1,
+            WaterBodyMaterialMode::Hidden => self.hidden_count += 1,
+            WaterBodyMaterialMode::Unknown => {}
+        }
+    }
+}
+
 // =============================================================================
 // Async Chunk Generation
 // =============================================================================
@@ -375,6 +449,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
         .insert_resource(RuntimeChunkStats::default())
+        .insert_resource(WaterBodyRegistry::default())
         // Async chunk generation state
         .insert_resource(ChunkGenerationState::default())
         // World persistence settings (set force_regenerate to true to regenerate)
@@ -418,7 +493,9 @@ impl Plugin for VoxelPlugin {
                 // Stage 5: Meshing (needs LOD from stage 4)
                 mesh_dirty_chunks_system.after(update_chunk_lod_system),
                 // Stage 5b: Water material LOD (independent of meshing, can be parallel)
-                update_water_material_lod.after(update_chunk_lod_system),
+                update_water_body_registry.after(mesh_dirty_chunks_system),
+                update_water_material_lod.after(update_water_body_registry),
+                draw_water_body_debug_overlay.after(update_water_body_registry),
                 update_terrain_material_lod.after(update_chunk_lod_system),
             ),
         );
@@ -866,8 +943,6 @@ fn mesh_dirty_chunks_system(
         .single()
         .ok()
         .map(|transform| transform.translation);
-    let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
-
     let sort_start = timing.enabled.then(Instant::now);
     // Sort by distance to camera if available
     if let Some(camera_pos) = camera_pos {
@@ -943,6 +1018,10 @@ fn mesh_dirty_chunks_system(
                     commands.entity(entity).despawn();
                     chunk.clear_water_mesh_entity();
                 }
+                if let Some(entity) = chunk.water_mask_mesh_entity() {
+                    commands.entity(entity).despawn();
+                    chunk.clear_water_mask_mesh_entity();
+                }
                 chunk.clear_dirty();
             }
             chunks_skipped += 1;
@@ -967,6 +1046,10 @@ fn mesh_dirty_chunks_system(
                     if let Some(entity) = chunk.water_mesh_entity() {
                         commands.entity(entity).despawn();
                         chunk.clear_water_mesh_entity();
+                    }
+                    if let Some(entity) = chunk.water_mask_mesh_entity() {
+                        commands.entity(entity).despawn();
+                        chunk.clear_water_mask_mesh_entity();
                     }
                     chunk.clear_dirty();
                 }
@@ -1043,7 +1126,6 @@ fn mesh_dirty_chunks_system(
             chunk.clear_dirty();
 
             let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
-            let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
             let terrain_quality =
                 terrain_material_quality_for_lod(lod_level, bench_toggles.as_deref());
             let triplanar_handle = triplanar_material.handle_for_quality(terrain_quality);
@@ -1156,30 +1238,23 @@ fn mesh_dirty_chunks_system(
                     commands.entity(entity).despawn();
                     chunk.clear_water_mesh_entity();
                 }
+                if let Some(entity) = chunk.water_mask_mesh_entity() {
+                    commands.entity(entity).despawn();
+                    chunk.clear_water_mask_mesh_entity();
+                }
             } else {
                 let water_vertex_count = mesh_result.water.positions.len() as u32;
                 let water_triangle_count = mesh_result.water.indices.len() / 3;
-                let allow_fancy_water = water_triangle_count >= WATER_FANCY_MIN_TRIANGLES
-                    && water_max_depth >= WATER_FANCY_MIN_DEPTH;
                 let water_mesh = mesh_result.water.into_mesh();
                 let water_mesh_handle = meshes.add(water_mesh);
                 let force_fancy = env_flag("VOXEL_FORCE_ALL_WATER_FANCY");
                 let force_cheap = env_flag("VOXEL_FORCE_ALL_WATER_CHEAP");
-                let use_fancy_water = camera_pos
-                    .map(|pos| chunk_center.distance_squared(pos) <= fancy_distance_sq)
-                    .unwrap_or(true);
-                let use_fancy_water = if force_cheap {
-                    false
-                } else if force_fancy {
-                    true
-                } else {
-                    use_fancy_water && allow_fancy_water
-                };
+                let use_fancy_water = force_fancy && !force_cheap;
 
                 if let Some(entity) = chunk.water_mesh_entity() {
                     let mut entity_cmd = commands.entity(entity);
                     entity_cmd.insert((
-                        Mesh3d(water_mesh_handle),
+                        Mesh3d(water_mesh_handle.clone()),
                         crate::voxel::meshing::ChunkMesh {
                             chunk_position: chunk_pos,
                             vertex_count: water_vertex_count,
@@ -1192,6 +1267,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
+                        RenderLayers::default(),
                         NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
@@ -1205,7 +1281,7 @@ fn mesh_dirty_chunks_system(
                     }
                 } else {
                     let mut entity_cmd = commands.spawn((
-                        Mesh3d(water_mesh_handle),
+                        Mesh3d(water_mesh_handle.clone()),
                         Transform::from_xyz(
                             world_pos.x as f32,
                             world_pos.y as f32,
@@ -1223,6 +1299,7 @@ fn mesh_dirty_chunks_system(
                             triangle_count: water_triangle_count,
                             max_depth: water_max_depth,
                         },
+                        RenderLayers::default(),
                         NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
@@ -1232,6 +1309,31 @@ fn mesh_dirty_chunks_system(
                     }
                     let entity = entity_cmd.id();
                     chunk.set_water_mesh_entity(entity);
+                }
+
+                let mask_transform =
+                    Transform::from_xyz(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
+                if let Some(mask_entity) = chunk.water_mask_mesh_entity() {
+                    commands.entity(mask_entity).insert((
+                        Mesh3d(water_mesh_handle.clone()),
+                        MeshMaterial3d(water_material.mask_handle.clone()),
+                        mask_transform,
+                        WaterMaskProxy,
+                        RenderLayers::layer(WATER_MASK_RENDER_LAYER),
+                        NotShadowCaster,
+                    ));
+                } else {
+                    let mask_entity = commands
+                        .spawn((
+                            Mesh3d(water_mesh_handle.clone()),
+                            MeshMaterial3d(water_material.mask_handle.clone()),
+                            mask_transform,
+                            WaterMaskProxy,
+                            RenderLayers::layer(WATER_MASK_RENDER_LAYER),
+                            NotShadowCaster,
+                        ))
+                        .id();
+                    chunk.set_water_mask_mesh_entity(mask_entity);
                 }
             }
 
@@ -1472,10 +1574,571 @@ fn update_terrain_material_lod(
     }
 }
 
+#[derive(Clone, Debug)]
+struct WaterMeshBodySample {
+    entity: Entity,
+    chunk_pos: IVec3,
+    surface_y: i32,
+    surface_area: f32,
+    max_depth: usize,
+    average_depth: f32,
+    aabb_min: Vec3,
+    aabb_max: Vec3,
+    touches_world_edge: bool,
+    view_visible: bool,
+    edge_north: HashSet<i32>,
+    edge_south: HashSet<i32>,
+    edge_west: HashSet<i32>,
+    edge_east: HashSet<i32>,
+}
+
+#[derive(Clone, Debug)]
+struct WaterBodyGroup {
+    id: WaterBodyId,
+    entities: Vec<Entity>,
+    kind: WaterBodyKind,
+    aabb_min: Vec3,
+    aabb_max: Vec3,
+    surface_y: i32,
+    surface_area: f32,
+    max_depth: usize,
+    average_depth: f32,
+    nearest_distance: f32,
+    visible_chunks: u32,
+    material_mode: WaterBodyMaterialMode,
+}
+
+fn update_water_body_registry(
+    time: Res<Time>,
+    world: Res<VoxelWorld>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    water_meshes: Query<
+        (
+            Entity,
+            &Transform,
+            &ChunkMesh,
+            Option<&WaterMeshDetail>,
+            Option<&ViewVisibility>,
+        ),
+        With<WaterMesh>,
+    >,
+    mut commands: Commands,
+    mut registry: ResMut<WaterBodyRegistry>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+    mut last_update: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last_update < WATER_BODY_UPDATE_INTERVAL && !world.is_changed() {
+        record_water_body_counters(frame.0, &mut timing, &registry);
+        return;
+    }
+    *last_update = now;
+
+    let camera_pos = camera_query
+        .single()
+        .ok()
+        .map(|transform| transform.translation);
+    let previous_modes: HashMap<WaterBodyId, WaterBodyMaterialMode> = registry
+        .bodies
+        .iter()
+        .map(|(id, body)| (*id, body.material_mode))
+        .collect();
+
+    let mut samples = Vec::new();
+    for (entity, transform, chunk_mesh, detail, view_visibility) in &water_meshes {
+        let Some(sample) = sample_water_mesh_body(
+            &world,
+            entity,
+            transform,
+            chunk_mesh.chunk_position,
+            detail,
+            view_visibility,
+        ) else {
+            continue;
+        };
+        samples.push(sample);
+    }
+
+    let groups = build_water_body_groups(&samples, &world, camera_pos, &previous_modes);
+    let mut next_bodies = HashMap::new();
+    registry.reset_counts();
+    registry.material_switches = 0;
+
+    for group in groups {
+        let body_info = WaterBodyInfo {
+            id: group.id,
+            kind: group.kind,
+            aabb_min: group.aabb_min,
+            aabb_max: group.aabb_max,
+            surface_y: group.surface_y as f32,
+            surface_area: group.surface_area,
+            max_depth: group.max_depth,
+            average_depth: group.average_depth,
+            nearest_distance: group.nearest_distance,
+            visible_chunks: group.visible_chunks,
+            chunk_count: group.entities.len() as u32,
+            material_mode: group.material_mode,
+            reflection_strength: water_body_reflection_strength(group.kind, group.max_depth),
+            fresnel_power: water_body_fresnel_power(group.kind),
+            distortion_strength: water_body_distortion_strength(group.kind),
+        };
+        if previous_modes
+            .get(&group.id)
+            .is_some_and(|previous| *previous != group.material_mode)
+        {
+            registry.material_switches += 1;
+        }
+        for entity in group.entities {
+            commands.entity(entity).insert(group.id);
+        }
+        registry.count_body(&body_info);
+        next_bodies.insert(group.id, body_info);
+    }
+
+    registry.bodies = next_bodies;
+    record_water_body_counters(frame.0, &mut timing, &registry);
+}
+
+fn sample_water_mesh_body(
+    world: &VoxelWorld,
+    entity: Entity,
+    transform: &Transform,
+    chunk_pos: IVec3,
+    detail: Option<&WaterMeshDetail>,
+    view_visibility: Option<&ViewVisibility>,
+) -> Option<WaterMeshBodySample> {
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+    let mut surface_cells: Vec<(i32, i32, i32, usize)> = Vec::new();
+    let mut y_counts: HashMap<i32, usize> = HashMap::new();
+    let mut max_depth = detail.map(|detail| detail.max_depth).unwrap_or(0);
+    let mut total_depth = 0usize;
+
+    for x in 0..CHUNK_SIZE_I32 {
+        for z in 0..CHUNK_SIZE_I32 {
+            for y in (0..CHUNK_SIZE_I32).rev() {
+                let world_pos = chunk_origin + IVec3::new(x, y, z);
+                let Some(voxel) = world.get_voxel(world_pos) else {
+                    continue;
+                };
+                if !voxel.is_liquid() {
+                    continue;
+                }
+                if world
+                    .get_voxel(world_pos + IVec3::Y)
+                    .is_some_and(|above| above.is_liquid())
+                {
+                    continue;
+                }
+
+                let mut depth = 1usize;
+                loop {
+                    let below_pos = world_pos - IVec3::Y * depth as i32;
+                    match world.get_voxel(below_pos) {
+                        Some(v) if v.is_liquid() => depth += 1,
+                        _ => break,
+                    }
+                }
+                max_depth = max_depth.max(depth);
+                total_depth += depth;
+                surface_cells.push((x, z, world_pos.y, depth));
+                *y_counts.entry(world_pos.y).or_default() += 1;
+                break;
+            }
+        }
+    }
+
+    if surface_cells.is_empty() {
+        return detail.map(|detail| WaterMeshBodySample {
+            entity,
+            chunk_pos,
+            surface_y: WATER_LEVEL,
+            surface_area: (detail.triangle_count as f32 * 0.5).max(1.0),
+            max_depth: detail.max_depth,
+            average_depth: detail.max_depth as f32,
+            aabb_min: transform.translation,
+            aabb_max: transform.translation + Vec3::splat(CHUNK_SIZE_F32),
+            touches_world_edge: chunk_touches_world_edge(world, chunk_pos),
+            view_visible: view_visibility.is_some_and(|visibility| visibility.get()),
+            edge_north: HashSet::default(),
+            edge_south: HashSet::default(),
+            edge_west: HashSet::default(),
+            edge_east: HashSet::default(),
+        });
+    }
+
+    let surface_y = y_counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(y, _)| y)
+        .unwrap_or(WATER_LEVEL);
+
+    let mut edge_north = HashSet::new();
+    let mut edge_south = HashSet::new();
+    let mut edge_west = HashSet::new();
+    let mut edge_east = HashSet::new();
+    for (x, z, y, _) in &surface_cells {
+        if *y != surface_y {
+            continue;
+        }
+        if *z == 0 {
+            edge_north.insert(*x);
+        }
+        if *z == CHUNK_SIZE_I32 - 1 {
+            edge_south.insert(*x);
+        }
+        if *x == 0 {
+            edge_west.insert(*z);
+        }
+        if *x == CHUNK_SIZE_I32 - 1 {
+            edge_east.insert(*z);
+        }
+    }
+
+    let surface_area = surface_cells.len() as f32;
+    Some(WaterMeshBodySample {
+        entity,
+        chunk_pos,
+        surface_y,
+        surface_area,
+        max_depth,
+        average_depth: if surface_cells.is_empty() {
+            0.0
+        } else {
+            total_depth as f32 / surface_cells.len() as f32
+        },
+        aabb_min: transform.translation,
+        aabb_max: transform.translation + Vec3::splat(CHUNK_SIZE_F32),
+        touches_world_edge: chunk_touches_world_edge(world, chunk_pos),
+        view_visible: view_visibility.is_some_and(|visibility| visibility.get()),
+        edge_north,
+        edge_south,
+        edge_west,
+        edge_east,
+    })
+}
+
+fn build_water_body_groups(
+    samples: &[WaterMeshBodySample],
+    world: &VoxelWorld,
+    camera_pos: Option<Vec3>,
+    previous_modes: &HashMap<WaterBodyId, WaterBodyMaterialMode>,
+) -> Vec<WaterBodyGroup> {
+    let mut index_by_chunk = HashMap::new();
+    for (index, sample) in samples.iter().enumerate() {
+        index_by_chunk.insert(sample.chunk_pos, index);
+    }
+
+    let mut visited = vec![false; samples.len()];
+    let mut groups = Vec::new();
+    for start in 0..samples.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut indices = Vec::new();
+
+        while let Some(index) = queue.pop_front() {
+            indices.push(index);
+            for neighbor in water_body_neighbors(index, samples, &index_by_chunk) {
+                if visited[neighbor] {
+                    continue;
+                }
+                visited[neighbor] = true;
+                queue.push_back(neighbor);
+            }
+        }
+
+        groups.push(build_water_body_group(
+            &indices,
+            samples,
+            world,
+            camera_pos,
+            previous_modes,
+        ));
+    }
+
+    groups
+}
+
+fn water_body_neighbors(
+    index: usize,
+    samples: &[WaterMeshBodySample],
+    index_by_chunk: &HashMap<IVec3, usize>,
+) -> Vec<usize> {
+    let sample = &samples[index];
+    let candidates = [
+        (
+            sample.chunk_pos + IVec3::X,
+            &sample.edge_east,
+            WaterBodyEdge::West,
+        ),
+        (
+            sample.chunk_pos + IVec3::NEG_X,
+            &sample.edge_west,
+            WaterBodyEdge::East,
+        ),
+        (
+            sample.chunk_pos + IVec3::Z,
+            &sample.edge_south,
+            WaterBodyEdge::North,
+        ),
+        (
+            sample.chunk_pos + IVec3::NEG_Z,
+            &sample.edge_north,
+            WaterBodyEdge::South,
+        ),
+    ];
+
+    candidates
+        .into_iter()
+        .filter_map(|(chunk_pos, edge, neighbor_edge)| {
+            let neighbor_index = *index_by_chunk.get(&chunk_pos)?;
+            let neighbor = &samples[neighbor_index];
+            if sample.surface_y != neighbor.surface_y {
+                return None;
+            }
+            let other_edge = match neighbor_edge {
+                WaterBodyEdge::North => &neighbor.edge_north,
+                WaterBodyEdge::South => &neighbor.edge_south,
+                WaterBodyEdge::West => &neighbor.edge_west,
+                WaterBodyEdge::East => &neighbor.edge_east,
+            };
+            edge.iter()
+                .any(|value| other_edge.contains(value))
+                .then_some(neighbor_index)
+        })
+        .collect()
+}
+
+enum WaterBodyEdge {
+    North,
+    South,
+    West,
+    East,
+}
+
+fn build_water_body_group(
+    indices: &[usize],
+    samples: &[WaterMeshBodySample],
+    world: &VoxelWorld,
+    camera_pos: Option<Vec3>,
+    previous_modes: &HashMap<WaterBodyId, WaterBodyMaterialMode>,
+) -> WaterBodyGroup {
+    let mut entities = Vec::with_capacity(indices.len());
+    let mut min_chunk = IVec3::splat(i32::MAX);
+    let mut aabb_min = Vec3::splat(f32::INFINITY);
+    let mut aabb_max = Vec3::splat(f32::NEG_INFINITY);
+    let mut surface_area = 0.0;
+    let mut max_depth = 0usize;
+    let mut total_depth_weighted = 0.0;
+    let mut touches_world_edge = false;
+    let mut visible_chunks = 0u32;
+    let mut surface_y = WATER_LEVEL;
+
+    for index in indices {
+        let sample = &samples[*index];
+        entities.push(sample.entity);
+        min_chunk = min_chunk.min(sample.chunk_pos);
+        aabb_min = aabb_min.min(sample.aabb_min);
+        aabb_max = aabb_max.max(sample.aabb_max);
+        surface_area += sample.surface_area;
+        max_depth = max_depth.max(sample.max_depth);
+        total_depth_weighted += sample.average_depth * sample.surface_area;
+        touches_world_edge |= sample.touches_world_edge;
+        visible_chunks += u32::from(sample.view_visible);
+        surface_y = sample.surface_y;
+    }
+
+    let id = stable_water_body_id(min_chunk, surface_y);
+    let kind = classify_water_body(world, aabb_min, aabb_max, surface_area, touches_world_edge);
+    let nearest_distance = camera_pos
+        .map(|pos| distance_to_aabb_xz(pos, aabb_min, aabb_max))
+        .unwrap_or(f32::INFINITY);
+    let previous = previous_modes
+        .get(&id)
+        .copied()
+        .unwrap_or(WaterBodyMaterialMode::Unknown);
+    let material_mode =
+        water_body_material_mode(previous, nearest_distance, max_depth, surface_area);
+
+    WaterBodyGroup {
+        id,
+        entities,
+        kind,
+        aabb_min,
+        aabb_max,
+        surface_y,
+        surface_area,
+        max_depth,
+        average_depth: if surface_area <= f32::EPSILON {
+            0.0
+        } else {
+            total_depth_weighted / surface_area
+        },
+        nearest_distance,
+        visible_chunks,
+        material_mode,
+    }
+}
+
+fn classify_water_body(
+    world: &VoxelWorld,
+    aabb_min: Vec3,
+    aabb_max: Vec3,
+    surface_area: f32,
+    touches_world_edge: bool,
+) -> WaterBodyKind {
+    if touches_world_edge || surface_area >= WATER_BODY_OCEAN_MIN_AREA {
+        return WaterBodyKind::Ocean;
+    }
+
+    let extent = aabb_max - aabb_min;
+    let long = extent.x.max(extent.z).max(1.0);
+    let short = extent.x.min(extent.z).max(1.0);
+    if surface_area >= WATER_BODY_LAKE_MIN_AREA && long / short >= WATER_BODY_RIVER_ASPECT_RATIO {
+        return WaterBodyKind::River;
+    }
+
+    let world_extent = world.world_size_chunks() * CHUNK_SIZE_I32;
+    if aabb_min.x <= 0.0
+        || aabb_min.z <= 0.0
+        || aabb_max.x >= world_extent.x as f32
+        || aabb_max.z >= world_extent.z as f32
+    {
+        WaterBodyKind::Ocean
+    } else if surface_area < WATER_BODY_POND_MAX_AREA {
+        WaterBodyKind::Pond
+    } else {
+        WaterBodyKind::Lake
+    }
+}
+
+fn water_body_reflection_strength(kind: WaterBodyKind, max_depth: usize) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.85,
+        WaterBodyKind::Lake => 0.76,
+        WaterBodyKind::River => 0.58,
+        WaterBodyKind::Pond => {
+            if max_depth <= 2 {
+                0.62
+            } else {
+                0.7
+            }
+        }
+        WaterBodyKind::Unknown => 0.72,
+    }
+}
+
+fn water_body_fresnel_power(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 5.0,
+        WaterBodyKind::Lake => 4.5,
+        WaterBodyKind::River => 4.0,
+        WaterBodyKind::Pond => 4.0,
+        WaterBodyKind::Unknown => 4.5,
+    }
+}
+
+fn water_body_distortion_strength(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.006,
+        WaterBodyKind::Lake => 0.0045,
+        WaterBodyKind::River => 0.008,
+        WaterBodyKind::Pond => 0.0035,
+        WaterBodyKind::Unknown => 0.0045,
+    }
+}
+
+fn water_body_material_mode(
+    previous: WaterBodyMaterialMode,
+    nearest_distance: f32,
+    max_depth: usize,
+    surface_area: f32,
+) -> WaterBodyMaterialMode {
+    if env_flag("VOXEL_FORCE_ALL_WATER_CHEAP") {
+        return WaterBodyMaterialMode::Cheap;
+    }
+    if env_flag("VOXEL_FORCE_ALL_WATER_FANCY") {
+        return WaterBodyMaterialMode::Fancy;
+    }
+    if surface_area < WATER_FANCY_MIN_TRIANGLES as f32 || max_depth < WATER_FANCY_MIN_DEPTH {
+        return WaterBodyMaterialMode::Cheap;
+    }
+
+    let fancy_in = (WATER_FANCY_DISTANCE - WATER_FANCY_HYSTERESIS).max(0.0);
+    let fancy_out = WATER_FANCY_DISTANCE + WATER_FANCY_HYSTERESIS;
+    match previous {
+        WaterBodyMaterialMode::Fancy if nearest_distance <= fancy_out => {
+            WaterBodyMaterialMode::Fancy
+        }
+        WaterBodyMaterialMode::Fancy => WaterBodyMaterialMode::Cheap,
+        WaterBodyMaterialMode::Cheap if nearest_distance < fancy_in => WaterBodyMaterialMode::Fancy,
+        WaterBodyMaterialMode::Cheap => WaterBodyMaterialMode::Cheap,
+        _ if nearest_distance <= WATER_FANCY_DISTANCE => WaterBodyMaterialMode::Fancy,
+        _ => WaterBodyMaterialMode::Cheap,
+    }
+}
+
+fn stable_water_body_id(min_chunk: IVec3, surface_y: i32) -> WaterBodyId {
+    let mut hash = 2_166_136_261u32;
+    for value in [min_chunk.x, min_chunk.y, min_chunk.z, surface_y] {
+        hash ^= value as u32;
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    WaterBodyId(hash.max(1))
+}
+
+fn chunk_touches_world_edge(world: &VoxelWorld, chunk_pos: IVec3) -> bool {
+    let size = world.world_size_chunks();
+    chunk_pos.x <= 0 || chunk_pos.z <= 0 || chunk_pos.x >= size.x - 1 || chunk_pos.z >= size.z - 1
+}
+
+fn distance_to_aabb_xz(position: Vec3, min: Vec3, max: Vec3) -> f32 {
+    let dx = if position.x < min.x {
+        min.x - position.x
+    } else if position.x > max.x {
+        position.x - max.x
+    } else {
+        0.0
+    };
+    let dz = if position.z < min.z {
+        min.z - position.z
+    } else if position.z > max.z {
+        position.z - max.z
+    } else {
+        0.0
+    };
+    Vec2::new(dx, dz).length()
+}
+
+fn record_water_body_counters(
+    frame: u32,
+    timing: &mut AreaTimingRecorder,
+    registry: &WaterBodyRegistry,
+) {
+    timing.record_count(frame, "Water Bodies Total", registry.total as f64);
+    timing.record_count(frame, "Water Bodies Ocean", registry.ocean as f64);
+    timing.record_count(frame, "Water Bodies Lake", registry.lake as f64);
+    timing.record_count(frame, "Water Bodies River", registry.river as f64);
+    timing.record_count(frame, "Water Bodies Pond", registry.pond as f64);
+    timing.record_count(frame, "Water Body Fancy Count", registry.fancy_count as f64);
+    timing.record_count(frame, "Water Body Cheap Count", registry.cheap_count as f64);
+    timing.record_count(
+        frame,
+        "Water Body Material Switches",
+        registry.material_switches as f64,
+    );
+}
+
 fn update_water_material_lod(
     time: Res<Time>,
+    frame: Res<FrameCount>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     water_material: Res<WaterMaterial>,
+    mut registry: ResMut<WaterBodyRegistry>,
+    mut timing: ResMut<AreaTimingRecorder>,
     mut commands: Commands,
     water_meshes: Query<
         (
@@ -1484,6 +2147,7 @@ fn update_water_material_lod(
             Option<&MeshMaterial3d<StandardWaterMaterial>>,
             Option<&MeshMaterial3d<StandardMaterial>>,
             Option<&WaterMeshDetail>,
+            Option<&WaterBodyId>,
         ),
         With<WaterMesh>,
     >,
@@ -1491,11 +2155,21 @@ fn update_water_material_lod(
 ) {
     let now = time.elapsed_secs();
     if now - *last_update < WATER_MATERIAL_UPDATE_INTERVAL {
+        timing.record_count(
+            frame.0,
+            "Water Chunks Forced Consistent By Body",
+            registry.chunks_forced_consistent as f64,
+        );
         return;
     }
     *last_update = now;
 
     let Ok(camera_transform) = camera_query.single() else {
+        timing.record_count(
+            frame.0,
+            "Water Chunks Forced Consistent By Body",
+            registry.chunks_forced_consistent as f64,
+        );
         return;
     };
 
@@ -1507,8 +2181,9 @@ fn update_water_material_lod(
     let fancy_in_sq = fancy_in * fancy_in;
     let fancy_out_sq = fancy_out * fancy_out;
     let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
+    registry.chunks_forced_consistent = 0;
 
-    for (entity, transform, fancy_mat, cheap_mat, detail) in water_meshes.iter() {
+    for (entity, transform, fancy_mat, cheap_mat, detail, body_id) in water_meshes.iter() {
         if force_cheap {
             if cheap_mat.is_none() {
                 commands
@@ -1527,6 +2202,35 @@ fn update_water_material_lod(
             }
             continue;
         }
+        if let Some(body_mode) =
+            body_id.and_then(|id| registry.bodies.get(id).map(|body| body.material_mode))
+        {
+            match body_mode {
+                WaterBodyMaterialMode::Fancy => {
+                    if fancy_mat.is_none() {
+                        registry.chunks_forced_consistent += 1;
+                        commands
+                            .entity(entity)
+                            .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                            .remove::<MeshMaterial3d<StandardMaterial>>();
+                    }
+                }
+                WaterBodyMaterialMode::Cheap | WaterBodyMaterialMode::Unknown => {
+                    if cheap_mat.is_none() {
+                        registry.chunks_forced_consistent += 1;
+                        commands
+                            .entity(entity)
+                            .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                            .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+                    }
+                }
+                WaterBodyMaterialMode::Hidden => {
+                    commands.entity(entity).insert(Visibility::Hidden);
+                }
+            }
+            continue;
+        }
+
         let allow_fancy_water = detail
             .map(|detail| {
                 detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES
@@ -1571,6 +2275,53 @@ fn update_water_material_lod(
                     .insert(MeshMaterial3d(water_material.far_handle.clone()));
             }
         }
+    }
+    timing.record_count(
+        frame.0,
+        "Water Chunks Forced Consistent By Body",
+        registry.chunks_forced_consistent as f64,
+    );
+}
+
+fn draw_water_body_debug_overlay(
+    overlay_state: Option<Res<crate::interaction::DebugOverlayState>>,
+    registry: Res<WaterBodyRegistry>,
+    water_meshes: Query<(&Transform, Option<&WaterBodyId>), With<WaterMesh>>,
+    mut gizmos: Gizmos,
+) {
+    if !overlay_state.is_some_and(|state| state.visible) {
+        return;
+    }
+
+    for (transform, body_id) in &water_meshes {
+        let (mode, kind) = body_id
+            .and_then(|id| registry.bodies.get(id))
+            .map(|body| (body.material_mode, body.kind))
+            .unwrap_or((WaterBodyMaterialMode::Unknown, WaterBodyKind::Unknown));
+        let color = water_body_debug_color(mode, kind);
+        let center = transform.translation
+            + Vec3::new(
+                CHUNK_SIZE_F32 * 0.5,
+                CHUNK_SIZE_F32 * 0.5,
+                CHUNK_SIZE_F32 * 0.5,
+            );
+        let cuboid = Cuboid::new(CHUNK_SIZE_F32, CHUNK_SIZE_F32, CHUNK_SIZE_F32);
+        gizmos.primitive_3d(&cuboid, Isometry3d::from_translation(center), color);
+    }
+}
+
+fn water_body_debug_color(mode: WaterBodyMaterialMode, kind: WaterBodyKind) -> Color {
+    match mode {
+        WaterBodyMaterialMode::Fancy => Color::srgba(0.0, 0.85, 1.0, 0.65),
+        WaterBodyMaterialMode::Cheap => Color::srgba(1.0, 0.75, 0.05, 0.65),
+        WaterBodyMaterialMode::Hidden => Color::srgba(1.0, 0.1, 0.1, 0.75),
+        WaterBodyMaterialMode::Unknown => match kind {
+            WaterBodyKind::Ocean => Color::srgba(0.2, 0.4, 1.0, 0.55),
+            WaterBodyKind::Lake => Color::srgba(0.1, 0.9, 0.4, 0.55),
+            WaterBodyKind::River => Color::srgba(0.7, 0.3, 1.0, 0.55),
+            WaterBodyKind::Pond => Color::srgba(0.9, 0.9, 0.2, 0.55),
+            WaterBodyKind::Unknown => Color::srgba(1.0, 1.0, 1.0, 0.45),
+        },
     }
 }
 

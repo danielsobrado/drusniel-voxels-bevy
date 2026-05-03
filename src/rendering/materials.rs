@@ -34,6 +34,7 @@ pub struct VoxelMaterial {
 pub struct WaterMaterial {
     pub near_handle: Handle<StandardWaterMaterial>,
     pub far_handle: Handle<StandardMaterial>,
+    pub mask_handle: Handle<StandardMaterial>,
 }
 
 fn load_image_if_exists(asset_server: &AssetServer, asset_path: &str) -> Option<Handle<Image>> {
@@ -135,10 +136,19 @@ pub fn setup_water_material(
         depth_bias: 4.0,
         ..default()
     });
+    let mask_handle = cheap_materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        alpha_mode: AlphaMode::Opaque,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    });
 
     commands.insert_resource(WaterMaterial {
         near_handle,
         far_handle,
+        mask_handle,
     });
 }
 

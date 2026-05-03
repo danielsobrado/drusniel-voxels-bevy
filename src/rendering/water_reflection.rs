@@ -13,13 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
-use crate::constants::{
-    CHUNK_SIZE_I32, WATER_FANCY_MIN_DEPTH, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL,
-};
+use crate::constants::{CHUNK_SIZE_I32, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::voxel::meshing::{WaterMesh, WaterMeshDetail};
+use crate::voxel::meshing::{WaterBodyId, WaterBodyKind, WaterMesh, WaterMeshDetail};
 use crate::voxel::octree::OctreeAabb;
+use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
 
@@ -34,9 +33,17 @@ fn env_flag(name: &str) -> bool {
 /// Below-water chunks are only in layer 0, so they won't appear in reflections.
 pub const REFLECTION_RENDER_LAYER: usize = 1;
 
+/// The render layer used by the binary-ish water mask camera.
+/// White mask proxy meshes are rendered only on this layer.
+pub const WATER_MASK_RENDER_LAYER: usize = 2;
+
 /// Marker component for the water reflection camera
 #[derive(Component)]
 pub struct WaterReflectionCamera;
+
+/// Marker component for the water mask camera.
+#[derive(Component)]
+pub struct WaterMaskCamera;
 
 /// Resource holding the reflection render target texture
 #[derive(Resource)]
@@ -45,6 +52,16 @@ pub struct WaterReflectionTexture {
     width: u32,
     height: u32,
     scale: f32,
+}
+
+/// Resource holding the mask render target. The mask is generated from actual
+/// water mesh geometry so transparent water/depth-prepass behavior does not
+/// decide where planar reflections appear.
+#[derive(Resource)]
+pub struct WaterReflectionMaskTexture {
+    pub image: Handle<Image>,
+    width: u32,
+    height: u32,
 }
 
 #[derive(Resource, Clone, Serialize, Deserialize)]
@@ -114,6 +131,67 @@ impl WaterReflectionReason {
     }
 }
 
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WaterReflectionDebugViewMode {
+    #[default]
+    Off,
+    Mask,
+    ReflectionOnly,
+    BlendFactor,
+}
+
+impl WaterReflectionDebugViewMode {
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Mask => 1,
+            Self::ReflectionOnly => 2,
+            Self::BlendFactor => 3,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Mask,
+            Self::Mask => Self::ReflectionOnly,
+            Self::ReflectionOnly => Self::BlendFactor,
+            Self::BlendFactor => Self::Off,
+        }
+    }
+
+    fn from_env() -> Option<Self> {
+        let value = std::env::var("VOXEL_WATER_REFLECTION_DEBUG_VIEW").ok()?;
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mask" => Some(Self::Mask),
+            "reflection" | "reflection_only" | "reflection-only" => Some(Self::ReflectionOnly),
+            "blend" | "blend_factor" | "blend-factor" => Some(Self::BlendFactor),
+            "off" | "0" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct WaterReflectionBodyParams {
+    pub reflection_strength: f32,
+    pub fresnel_power: f32,
+    pub distortion_strength: f32,
+    pub surface_y: f32,
+    pub kind: WaterBodyKind,
+}
+
+impl Default for WaterReflectionBodyParams {
+    fn default() -> Self {
+        Self {
+            reflection_strength: 0.85,
+            fresnel_power: 5.0,
+            distortion_strength: 0.006,
+            surface_y: WATER_LEVEL as f32,
+            kind: WaterBodyKind::Unknown,
+        }
+    }
+}
+
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct WaterReflectionStatus {
     pub active: bool,
@@ -134,6 +212,16 @@ impl Default for WaterReflectionStatus {
             effective_hz: config.effective_hz(),
         }
     }
+}
+
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct WaterReflectionMaskStats {
+    pub estimated_mask_pixels: u32,
+    pub mask_bodies: u32,
+    pub estimated_applied_pixels: u32,
+    pub estimated_skipped_no_mask_pixels: u32,
+    pub estimated_skipped_disabled_pixels: u32,
+    pub estimated_skipped_too_far_pixels: u32,
 }
 
 #[derive(Resource, Default, Clone, Copy)]
@@ -170,14 +258,20 @@ impl Plugin for WaterReflectionPlugin {
         app.init_resource::<WaterReflectionConfig>()
             .init_resource::<WaterReflectionStatus>()
             .init_resource::<WaterPresence>()
+            .init_resource::<WaterReflectionMaskStats>()
+            .init_resource::<WaterReflectionBodyParams>()
+            .init_resource::<WaterReflectionDebugViewMode>()
             .add_systems(Startup, setup_reflection_camera)
             .add_systems(
                 Update,
                 (
                     apply_integrated_gpu_reflection_defaults,
                     resize_reflection_target,
+                    resize_water_mask_target,
+                    sync_water_reflection_debug_view,
                     update_water_presence,
                     update_reflection_camera.after(update_water_presence),
+                    update_water_mask_camera.after(update_reflection_camera),
                 ),
             );
     }
@@ -197,6 +291,32 @@ fn create_reflection_image(images: &mut Assets<Image>, width: u32, height: u32) 
             size,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        },
+        ..default()
+    };
+    image.resize(size);
+    images.add(image)
+}
+
+fn create_water_mask_image(images: &mut Assets<Image>, width: u32, height: u32) -> Handle<Image> {
+    let size = Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some("water_reflection_mask_texture"),
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
             mip_level_count: 1,
             sample_count: 1,
             usage: TextureUsages::TEXTURE_BINDING
@@ -231,12 +351,19 @@ fn setup_reflection_camera(
     let (width, height) =
         reflection_target_size(window_query.single().ok(), config.resolution_scale);
     let image_handle = create_reflection_image(&mut images, width, height);
+    let (mask_width, mask_height) = water_mask_target_size(window_query.single().ok());
+    let mask_handle = create_water_mask_image(&mut images, mask_width, mask_height);
 
     commands.insert_resource(WaterReflectionTexture {
         image: image_handle.clone(),
         width,
         height,
         scale: config.resolution_scale,
+    });
+    commands.insert_resource(WaterReflectionMaskTexture {
+        image: mask_handle.clone(),
+        width: mask_width,
+        height: mask_height,
     });
 
     // Spawn the reflection camera
@@ -269,9 +396,30 @@ fn setup_reflection_camera(
         ReflectionUpdateTimer::default(),
     ));
 
+    commands.spawn((
+        WaterMaskCamera,
+        Camera3d::default(),
+        Camera {
+            order: -2,
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            is_active: true,
+            ..default()
+        },
+        RenderTarget::Image(mask_handle.into()),
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.1,
+            far: config.auto_disable_distance.max(150.0),
+            ..default()
+        }),
+        Transform::from_translation(Vec3::new(0.0, water_y + 4.0, 0.0))
+            .looking_to(Vec3::Z, Vec3::Y),
+        RenderLayers::layer(WATER_MASK_RENDER_LAYER),
+        Msaa::Off,
+    ));
+
     info!(
-        "Water reflection camera created at {}x{} (scale: {})",
-        width, height, config.resolution_scale
+        "Water reflection camera created at {}x{} (scale: {}), mask {}x{}",
+        width, height, config.resolution_scale, mask_width, mask_height
     );
 }
 
@@ -283,6 +431,17 @@ fn reflection_target_size(window: Option<&Window>, scale: f32) -> (u32, u32) {
         (base_width * scale).round().max(1.0) as u32,
         (base_height * scale).round().max(1.0) as u32,
     )
+}
+
+fn water_mask_target_size(window: Option<&Window>) -> (u32, u32) {
+    window
+        .map(|window| {
+            (
+                window.resolution.width().round().max(1.0) as u32,
+                window.resolution.height().round().max(1.0) as u32,
+            )
+        })
+        .unwrap_or((1920, 1080))
 }
 
 fn apply_integrated_gpu_reflection_defaults(
@@ -342,38 +501,101 @@ fn resize_reflection_target(
     });
 }
 
+fn resize_water_mask_target(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    texture: Option<ResMut<WaterReflectionMaskTexture>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut mask_camera: Query<&mut RenderTarget, With<WaterMaskCamera>>,
+) {
+    let Some(mut texture) = texture else { return };
+    let (width, height) = water_mask_target_size(window_query.single().ok());
+    if texture.width == width && texture.height == height {
+        return;
+    }
+
+    let image_handle = create_water_mask_image(&mut images, width, height);
+    texture.image = image_handle.clone();
+    texture.width = width;
+    texture.height = height;
+
+    for mut target in mask_camera.iter_mut() {
+        *target = RenderTarget::Image(image_handle.clone().into());
+    }
+
+    commands.insert_resource(WaterReflectionMaskTexture {
+        image: image_handle,
+        width,
+        height,
+    });
+}
+
+fn sync_water_reflection_debug_view(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mode: ResMut<WaterReflectionDebugViewMode>,
+) {
+    if let Some(env_mode) = WaterReflectionDebugViewMode::from_env() {
+        *mode = env_mode;
+        return;
+    }
+
+    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if shift_held && keys.just_pressed(KeyCode::F9) {
+        *mode = mode.next();
+        info!("Water reflection debug view: {:?}", *mode);
+    }
+}
+
 fn update_water_presence(
     time: Res<Time>,
     world: Res<VoxelWorld>,
     config: Res<WaterReflectionConfig>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    water_bodies: Option<Res<WaterBodyRegistry>>,
     main_camera: Query<
         (&Transform, &Projection),
-        (With<PlayerCamera>, Without<WaterReflectionCamera>),
+        (
+            With<PlayerCamera>,
+            Without<WaterReflectionCamera>,
+            Without<WaterMaskCamera>,
+        ),
     >,
     water_meshes: Query<
         (
             &Transform,
             Option<&ViewVisibility>,
             Option<&WaterMeshDetail>,
+            Option<&WaterBodyId>,
         ),
         With<WaterMesh>,
     >,
     mut presence: ResMut<WaterPresence>,
+    mut mask_stats: ResMut<WaterReflectionMaskStats>,
+    mut body_params: ResMut<WaterReflectionBodyParams>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Water Reflection Presence CPU");
     presence.age_secs += time.delta_secs();
     presence.reset_mesh_summary();
+    *mask_stats = WaterReflectionMaskStats::default();
 
     let Ok((main_transform, projection)) = main_camera.single() else {
         return;
     };
+    let window_size = window_query
+        .single()
+        .ok()
+        .map(|window| Vec2::new(window.resolution.width(), window.resolution.height()))
+        .unwrap_or(Vec2::new(1920.0, 1080.0));
+    let screen_pixels = (window_size.x * window_size.y).round().max(0.0) as u32;
     let mut eligible_min = Vec3::splat(f32::INFINITY);
     let mut eligible_max = Vec3::splat(f32::NEG_INFINITY);
     let mut found_eligible = false;
+    let mut visible_body_ids = std::collections::HashSet::new();
+    let mut best_params_distance = f32::INFINITY;
 
-    for (transform, view_visibility, detail) in water_meshes.iter() {
+    for (transform, view_visibility, detail, body_id) in water_meshes.iter() {
         presence.water_meshes += 1;
         if view_visibility.is_some_and(|visibility| visibility.get()) {
             presence.view_visible_meshes += 1;
@@ -395,6 +617,9 @@ fn update_water_presence(
         }
 
         presence.visible_meshes += 1;
+        if let Some(body_id) = body_id {
+            visible_body_ids.insert(body_id.0);
+        }
         presence.nearest_visible_distance = Some(
             presence
                 .nearest_visible_distance
@@ -402,17 +627,38 @@ fn update_water_presence(
                 .unwrap_or(distance),
         );
 
+        mask_stats.estimated_mask_pixels =
+            mask_stats
+                .estimated_mask_pixels
+                .saturating_add(estimate_aabb_screen_pixels(
+                    main_transform,
+                    projection,
+                    water_aabb,
+                    window_size,
+                ));
+        if distance < best_params_distance {
+            best_params_distance = distance;
+            *body_params = body_id
+                .and_then(|id| water_bodies.as_deref()?.bodies.get(id))
+                .map(|body| WaterReflectionBodyParams {
+                    reflection_strength: body.reflection_strength,
+                    fresnel_power: body.fresnel_power,
+                    distortion_strength: body.distortion_strength,
+                    surface_y: body.surface_y,
+                    kind: body.kind,
+                })
+                .unwrap_or_else(|| reflection_params_for_water(detail, transform.translation.y));
+        }
+
         if config.auto_disable_distance > 0.0 && distance > config.auto_disable_distance {
             continue;
         }
 
-        let meaningful_water = detail
-            .map(|detail| {
-                detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES
-                    && detail.max_depth >= WATER_FANCY_MIN_DEPTH
-            })
-            .unwrap_or(true);
-        if !meaningful_water {
+        let enough_screen_coverage = mask_stats.estimated_mask_pixels > 24
+            || detail
+                .map(|detail| detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES)
+                .unwrap_or(true);
+        if !enough_screen_coverage {
             continue;
         }
 
@@ -424,6 +670,33 @@ fn update_water_presence(
 
     if found_eligible {
         presence.aabb = Some(OctreeAabb::new(eligible_min, eligible_max));
+    }
+    mask_stats.mask_bodies = visible_body_ids.len() as u32;
+    let sample_enabled = config.enabled && found_eligible;
+    mask_stats.estimated_mask_pixels = mask_stats.estimated_mask_pixels.min(screen_pixels);
+    mask_stats.estimated_applied_pixels = if sample_enabled {
+        mask_stats.estimated_mask_pixels
+    } else {
+        0
+    };
+    mask_stats.estimated_skipped_no_mask_pixels =
+        screen_pixels.saturating_sub(mask_stats.estimated_mask_pixels);
+    mask_stats.estimated_skipped_disabled_pixels = if config.enabled {
+        0
+    } else {
+        mask_stats.estimated_mask_pixels
+    };
+    mask_stats.estimated_skipped_too_far_pixels = if config.auto_disable_distance > 0.0
+        && presence
+            .nearest_visible_distance
+            .is_some_and(|distance| distance > config.auto_disable_distance)
+    {
+        mask_stats.estimated_mask_pixels
+    } else {
+        0
+    };
+
+    if found_eligible {
         return;
     }
 
@@ -507,18 +780,58 @@ fn update_startup_fallback_water_presence(
     presence.aabb = Some(water_aabb);
 }
 
+fn reflection_params_for_water(
+    detail: Option<&WaterMeshDetail>,
+    surface_y: f32,
+) -> WaterReflectionBodyParams {
+    let max_depth = detail.map(|detail| detail.max_depth).unwrap_or(0);
+    if max_depth >= 8 {
+        WaterReflectionBodyParams {
+            reflection_strength: 0.85,
+            fresnel_power: 5.0,
+            distortion_strength: 0.006,
+            surface_y,
+            kind: WaterBodyKind::Ocean,
+        }
+    } else if max_depth <= 2 {
+        WaterReflectionBodyParams {
+            reflection_strength: 0.62,
+            fresnel_power: 4.0,
+            distortion_strength: 0.0035,
+            surface_y,
+            kind: WaterBodyKind::Pond,
+        }
+    } else {
+        WaterReflectionBodyParams {
+            reflection_strength: 0.74,
+            fresnel_power: 4.5,
+            distortion_strength: 0.0045,
+            surface_y,
+            kind: WaterBodyKind::Lake,
+        }
+    }
+}
+
 /// Mirror the main camera's position and rotation across the water plane each frame
 fn update_reflection_camera(
     config: Res<WaterReflectionConfig>,
     presence: Res<WaterPresence>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     time: Res<Time>,
-    main_camera: Query<&Transform, (With<PlayerCamera>, Without<WaterReflectionCamera>)>,
+    main_camera: Query<
+        &Transform,
+        (
+            With<PlayerCamera>,
+            Without<WaterReflectionCamera>,
+            Without<WaterMaskCamera>,
+        ),
+    >,
     mut reflection_camera: Query<
         (&mut Transform, &mut Camera, &mut ReflectionUpdateTimer),
         (With<WaterReflectionCamera>, Without<PlayerCamera>),
     >,
     mut status: ResMut<WaterReflectionStatus>,
+    mut mask_stats: ResMut<WaterReflectionMaskStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -591,6 +904,22 @@ fn update_reflection_camera(
     status.resolution_scale = config.resolution_scale;
     status.effective_hz = config.effective_hz();
 
+    mask_stats.estimated_applied_pixels = if sample_reflection {
+        mask_stats.estimated_mask_pixels
+    } else {
+        0
+    };
+    mask_stats.estimated_skipped_disabled_pixels = if reason == WaterReflectionReason::Disabled {
+        mask_stats.estimated_mask_pixels
+    } else {
+        0
+    };
+    mask_stats.estimated_skipped_too_far_pixels = if reason == WaterReflectionReason::OutOfRange {
+        mask_stats.estimated_mask_pixels
+    } else {
+        0
+    };
+
     if active {
         let water_y = WATER_LEVEL as f32;
 
@@ -653,6 +982,62 @@ fn update_reflection_camera(
         "Water Reflection Disabled Too Small",
         u8::from(reason == WaterReflectionReason::TooSmall) as f64,
     );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Mask Pixels",
+        mask_stats.estimated_mask_pixels as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Mask Bodies",
+        mask_stats.mask_bodies as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Compositor Applied Pixels",
+        mask_stats.estimated_applied_pixels as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Compositor Skipped No Mask",
+        mask_stats.estimated_skipped_no_mask_pixels as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Compositor Skipped Disabled",
+        mask_stats.estimated_skipped_disabled_pixels as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Reflection Compositor Skipped Too Far",
+        mask_stats.estimated_skipped_too_far_pixels as f64,
+    );
+}
+
+fn update_water_mask_camera(
+    config: Res<WaterReflectionConfig>,
+    presence: Res<WaterPresence>,
+    main_camera: Query<
+        (&Transform, &Projection),
+        (
+            With<PlayerCamera>,
+            Without<WaterReflectionCamera>,
+            Without<WaterMaskCamera>,
+        ),
+    >,
+    mut mask_camera: Query<
+        (&mut Transform, &mut Projection, &mut Camera),
+        (With<WaterMaskCamera>, Without<PlayerCamera>),
+    >,
+) {
+    let Ok((main_transform, main_projection)) = main_camera.single() else {
+        return;
+    };
+    for (mut mask_transform, mut mask_projection, mut camera) in &mut mask_camera {
+        *mask_transform = *main_transform;
+        *mask_projection = main_projection.clone();
+        camera.is_active = config.enabled && presence.visible_meshes > 0;
+    }
 }
 
 fn distance_to_aabb_xz(position: Vec3, aabb: OctreeAabb) -> f32 {
@@ -739,4 +1124,42 @@ fn aabb_sample_points(aabb: OctreeAabb) -> [Vec3; 9] {
         Vec3::new(max.x, max.y, min.z),
         Vec3::new(max.x, max.y, max.z),
     ]
+}
+
+fn estimate_aabb_screen_pixels(
+    camera_transform: &Transform,
+    projection: &Projection,
+    aabb: OctreeAabb,
+    window_size: Vec2,
+) -> u32 {
+    let clip_from_world = projection.get_clip_from_view() * camera_transform.to_matrix().inverse();
+    let mut min = Vec2::splat(f32::INFINITY);
+    let mut max = Vec2::splat(f32::NEG_INFINITY);
+    let mut any = false;
+
+    for point in aabb_sample_points(aabb) {
+        let clip = clip_from_world * point.extend(1.0);
+        if clip.w.abs() <= f32::EPSILON {
+            continue;
+        }
+        let ndc = clip.xyz() / clip.w;
+        if ndc.z < 0.0 || ndc.z > 1.0 {
+            continue;
+        }
+        let uv = Vec2::new(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        min = min.min(uv);
+        max = max.max(uv);
+        any = true;
+    }
+
+    if !any {
+        return 0;
+    }
+
+    min = min.clamp(Vec2::ZERO, Vec2::ONE);
+    max = max.clamp(Vec2::ZERO, Vec2::ONE);
+    let extent = (max - min).max(Vec2::ZERO);
+    (extent.x * window_size.x * extent.y * window_size.y)
+        .round()
+        .max(0.0) as u32
 }

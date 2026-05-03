@@ -5,7 +5,11 @@ Improve close-range water visuals without a large performance hit, while keeping
 
 ## What changed
 - Split voxel water into two materials: near uses `bevy_water` (`StandardWaterMaterial`), far uses a cheap `StandardMaterial` for performance.
-- Added water material LOD logic with distance + hysteresis + update interval, so switching does not thrash.
+- Added water body material LOD logic with distance + hysteresis + update interval, so switching does not thrash.
+- Water material LOD is now evaluated per connected water body instead of per chunk. Every loaded mesh in the same connected lake/pond/ocean gets the same `Fancy` or `Cheap` mode.
+- Added `WaterBodyId` assignment for loaded water meshes, grouped by horizontal adjacency at the same surface level, with body AABB, surface area, max depth, average depth, nearest camera distance, and approximate body kind.
+- Planar reflection compositing now uses a real water mask rendered from water mesh geometry instead of reconstructing world Y from the depth prepass and comparing to a hardcoded water level.
+- The water mask uses white, unlit mask proxy meshes on a dedicated render layer, so transparent water depth/prepass behavior does not decide where reflections are applied.
 - Added extra gating for the fancy water shader:
   - Minimum triangle count (`WATER_FANCY_MIN_TRIANGLES`).
   - Minimum vertical water depth (`WATER_FANCY_MIN_DEPTH`).
@@ -18,12 +22,16 @@ Improve close-range water visuals without a large performance hit, while keeping
 ## Key knobs
 - Water material LOD:
   - `WATER_FANCY_DISTANCE`, `WATER_FANCY_HYSTERESIS`, `WATER_MATERIAL_UPDATE_INTERVAL`
+  - `WATER_BODY_UPDATE_INTERVAL` controls low-frequency connected-body regrouping.
   - `WATER_FANCY_MIN_TRIANGLES`, `WATER_FANCY_MIN_DEPTH`
 - Voxel water shader tuning:
   - `VOXEL_WATER_WAVE_AMPLITUDE_MULT`
   - `VOXEL_WATER_WAVE_UV_SCALE`
   - `VOXEL_WATER_CLARITY_MULT`
   - `VOXEL_WATER_EDGE_SCALE_MULT`
+- Reflection mask debug:
+  - `VOXEL_WATER_REFLECTION_DEBUG_VIEW=mask|reflection|blend|off`
+  - `Shift+F9` cycles the same debug views at runtime.
 - Water-terrain transitions:
   - `WET_SAND_HEIGHT` - Height above water that gets wet effect (in `triplanar_terrain.wgsl`)
   - `WET_SAND_DARKEN` - How much to darken wet terrain (lower = darker)
@@ -33,10 +41,14 @@ Improve close-range water visuals without a large performance hit, while keeping
 
 ## Files touched
 - Water visuals: `src/rendering/materials.rs`, `src/voxel/plugin.rs`, `src/voxel/meshing.rs`, `src/constants.rs`, `src/environment.rs`, `src/debug_ui.rs`, `src/rendering/plugin.rs`
+- Water body diagnostics: `src/voxel/plugin.rs`, `src/voxel/meshing.rs`, `src/rendering/water_visual_probe.rs`, `src/interaction/debug.rs`
+- Reflection mask: `src/rendering/water_reflection.rs`, `src/rendering/water_reflection_compositor.rs`, `assets/shaders/water_reflection_compositor.wgsl`
 
 ## Current status
 - Far water looks acceptable with the cheap material.
-- Near water uses the fancy shader only for larger/deeper surfaces; shallow, thin streams stay on the cheap material.
+- Near water uses the fancy shader at body level only for larger/deeper surfaces; shallow, thin streams stay on the cheap material.
+- A connected body keeps one material mode across its loaded chunks, avoiding half-fancy/half-cheap lakes.
+- Reflection application is now mask-driven. The compositor skips terrain/sand pixels unless the mask render target contains water geometry at that pixel.
 
 ## Findings
 - Close-range shallow water shows blue striping on sand while the main area stays sandy; the tint is too weak near the camera.

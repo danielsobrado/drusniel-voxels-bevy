@@ -18,14 +18,16 @@ use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
-use crate::rendering::water_reflection::WaterReflectionStatus;
+use crate::rendering::water_reflection::{WaterReflectionMaskStats, WaterReflectionStatus};
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
-use crate::voxel::plugin::{ChunkGenerationState, LodSettings, RuntimeChunkStats};
+use crate::voxel::plugin::{
+    ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,
+};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::diagnostic::{
@@ -74,7 +76,9 @@ pub struct DebugOverlayParams<'w> {
     pub fog_runtime: Option<Res<'w, VolumetricFogRuntimeState>>,
     pub shadow_stats: Res<'w, ShadowCullingStats>,
     pub reflection_status: Option<Res<'w, WaterReflectionStatus>>,
+    pub reflection_mask_stats: Option<Res<'w, WaterReflectionMaskStats>>,
     pub water_visual_debug: Option<Res<'w, WaterVisualDebugState>>,
+    pub water_bodies: Option<Res<'w, WaterBodyRegistry>>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
@@ -486,7 +490,9 @@ pub fn update_debug_overlay(
     text_content.push_str(&format!("FPS: {}\n", fps));
     append_area_timing_table(&mut text_content, &diagnostics, &debug.timing_recorder);
     append_reflection_status(&mut text_content, debug.reflection_status.as_deref());
+    append_reflection_mask_status(&mut text_content, debug.reflection_mask_stats.as_deref());
     append_water_visual_debug(&mut text_content, debug.water_visual_debug.as_deref());
+    append_water_body_status(&mut text_content, debug.water_bodies.as_deref());
     append_enclosure_status(
         &mut text_content,
         &debug.enclosure,
@@ -1177,6 +1183,25 @@ fn append_reflection_status(text_content: &mut String, status: Option<&WaterRefl
     ));
 }
 
+fn append_reflection_mask_status(
+    text_content: &mut String,
+    stats: Option<&WaterReflectionMaskStats>,
+) {
+    let Some(stats) = stats else {
+        return;
+    };
+    text_content.push_str(&format!(
+        "Reflection Mask: px {} bodies {} applied {}\n",
+        stats.estimated_mask_pixels, stats.mask_bodies, stats.estimated_applied_pixels,
+    ));
+    text_content.push_str(&format!(
+        "Reflection Skip: no_mask {} disabled {} far {}\n",
+        stats.estimated_skipped_no_mask_pixels,
+        stats.estimated_skipped_disabled_pixels,
+        stats.estimated_skipped_too_far_pixels,
+    ));
+}
+
 fn append_water_visual_debug(text_content: &mut String, state: Option<&WaterVisualDebugState>) {
     let Some(state) = state else {
         return;
@@ -1194,6 +1219,23 @@ fn append_water_visual_debug(text_content: &mut String, state: Option<&WaterVisu
         u8::from(state.reflection_active),
         u8::from(state.compositor_pixel_matched),
         u8::from(state.body_unknown),
+    ));
+}
+
+fn append_water_body_status(text_content: &mut String, registry: Option<&WaterBodyRegistry>) {
+    let Some(registry) = registry else {
+        return;
+    };
+    text_content.push_str(&format!(
+        "Water Bodies: {} ocean {} lake {} river {} pond {}\n",
+        registry.total, registry.ocean, registry.lake, registry.river, registry.pond,
+    ));
+    text_content.push_str(&format!(
+        "Water Body LOD: fancy {} cheap {} switches {} forced {}\n",
+        registry.fancy_count,
+        registry.cheap_count,
+        registry.material_switches,
+        registry.chunks_forced_consistent,
     ));
 }
 

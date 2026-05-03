@@ -17,7 +17,7 @@ use crate::player::Player;
 use crate::rendering::water_reflection::{
     WaterPresence, WaterReflectionConfig, WaterReflectionStatus,
 };
-use crate::voxel::meshing::{ChunkMesh, WaterMesh, WaterMeshDetail};
+use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterMesh, WaterMeshDetail};
 use crate::voxel::octree::OctreeAabb;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
@@ -65,6 +65,7 @@ type WaterMeshProbeQuery<'w, 's> = Query<
         Option<&'static ViewVisibility>,
         Option<&'static MeshMaterial3d<StandardWaterMaterial>>,
         Option<&'static MeshMaterial3d<StandardMaterial>>,
+        Option<&'static WaterBodyId>,
     ),
     With<WaterMesh>,
 >;
@@ -136,6 +137,7 @@ struct WaterMeshProbeDump {
     nearest_water_mesh_entity: Option<String>,
     water_mesh_chunk_position: Option<IVec3Dump>,
     water_mesh_material_type: String,
+    water_body_id: Option<u32>,
     triangle_count: Option<usize>,
     max_depth: Option<usize>,
     distance_to_camera: Option<f32>,
@@ -226,7 +228,7 @@ pub fn update_water_visual_debug_counters(
     state.compositor_pixel_matched = state.reflection_active
         && state.reflection_eligible
         && !env_flag("VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR");
-    state.body_unknown = true;
+    state.body_unknown = nearest.as_ref().is_none_or(|mesh| mesh.body_id.is_none());
 
     timing.record_count(
         frame.0,
@@ -503,6 +505,7 @@ struct NearestWaterMesh {
     reflection_eligible: Option<bool>,
     fancy_handle: Option<Handle<StandardWaterMaterial>>,
     cheap_handle: Option<Handle<StandardMaterial>>,
+    body_id: Option<WaterBodyId>,
 }
 
 fn nearest_water_mesh(
@@ -525,6 +528,7 @@ fn nearest_water_mesh(
                 view_visibility,
                 fancy_mat,
                 cheap_mat,
+                body_id,
             )| {
                 let aabb = water_mesh_aabb(transform);
                 let distance_to_camera = distance_to_aabb_xz(camera_transform.translation, aabb);
@@ -566,6 +570,7 @@ fn nearest_water_mesh(
                         reflection_eligible,
                         fancy_handle: fancy_mat.map(|mat| mat.0.clone()),
                         cheap_handle: cheap_mat.map(|mat| mat.0.clone()),
+                        body_id: body_id.copied(),
                     },
                 )
             },
@@ -599,6 +604,9 @@ fn build_probe_dump(
             .as_ref()
             .map(|mesh| material_kind_name(mesh.material_type).to_string())
             .unwrap_or_else(|| "unknown/missing".to_string()),
+        water_body_id: nearest
+            .as_ref()
+            .and_then(|mesh| mesh.body_id.map(|id| id.0)),
         triangle_count: nearest.as_ref().and_then(|mesh| mesh.triangle_count),
         max_depth: nearest.as_ref().and_then(|mesh| mesh.max_depth),
         distance_to_camera: nearest.as_ref().map(|mesh| mesh.distance_to_camera),

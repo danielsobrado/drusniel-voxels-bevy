@@ -96,6 +96,51 @@ impl ExtractComponent for WaterMeshDetail {
     }
 }
 
+#[derive(Component, Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct WaterBodyId(pub u32);
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WaterBodyKind {
+    Ocean,
+    Lake,
+    River,
+    Pond,
+    #[default]
+    Unknown,
+}
+
+impl WaterBodyKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ocean => "Ocean",
+            Self::Lake => "Lake",
+            Self::River => "River",
+            Self::Pond => "Pond",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WaterBodyMaterialMode {
+    Fancy,
+    Cheap,
+    Hidden,
+    #[default]
+    Unknown,
+}
+
+impl WaterBodyMaterialMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fancy => "Fancy",
+            Self::Cheap => "Cheap",
+            Self::Hidden => "Hidden",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WaterAirExposureMode {
     /// Debug mode: any water/air boundary can render, matching the old behavior.

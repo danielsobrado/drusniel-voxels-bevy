@@ -193,6 +193,7 @@ pub struct Chunk {
     dirty_reasons: u8,
     mesh_entity: Option<Entity>,
     water_mesh_entity: Option<Entity>,
+    water_mask_mesh_entity: Option<Entity>,
     position: IVec3, // Chunk coords (not world)
     lod_level: LodLevel,
     /// Cached uniformity state for skipping mesh generation on uniform chunks.
@@ -235,6 +236,7 @@ impl Chunk {
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
             water_mesh_entity: None,
+            water_mask_mesh_entity: None,
             position,
             lod_level: LodLevel::Lod0,
             // New chunk is all air, so it's empty
@@ -356,12 +358,24 @@ impl Chunk {
         self.water_mesh_entity
     }
 
+    pub fn set_water_mask_mesh_entity(&mut self, entity: Entity) {
+        self.water_mask_mesh_entity = Some(entity);
+    }
+
+    pub fn water_mask_mesh_entity(&self) -> Option<Entity> {
+        self.water_mask_mesh_entity
+    }
+
     pub fn clear_mesh_entity(&mut self) {
         self.mesh_entity = None;
     }
 
     pub fn clear_water_mesh_entity(&mut self) {
         self.water_mesh_entity = None;
+    }
+
+    pub fn clear_water_mask_mesh_entity(&mut self) {
+        self.water_mask_mesh_entity = None;
     }
 
     pub fn position(&self) -> IVec3 {
@@ -438,6 +452,7 @@ impl Chunk {
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
             water_mesh_entity: None,
+            water_mask_mesh_entity: None,
             position: data.position,
             lod_level: LodLevel::Lod0,
             uniformity: ChunkUniformity::Unknown, // Will be computed on first mesh attempt
