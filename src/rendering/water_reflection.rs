@@ -17,11 +17,13 @@ use crate::constants::{CHUNK_SIZE_I32, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::water::WaterConfig;
-use crate::voxel::meshing::{WaterBodyId, WaterBodyKind, WaterMesh, WaterMeshDetail};
+use crate::voxel::meshing::{
+    WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
+};
 use crate::voxel::octree::OctreeAabb;
 use crate::voxel::plugin::WaterBodyRegistry;
-use crate::voxel::types::Voxel;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 
 const NEAR_VISIBLE_WATER_DISTANCE: f32 = 24.0;
 
@@ -235,6 +237,7 @@ pub struct WaterPresence {
     pub nearest_water_distance: Option<f32>,
     pub nearest_visible_distance: Option<f32>,
     pub using_startup_fallback: bool,
+    pub invalid_candidates_suppressed: u32,
     scan_timer: f32,
     age_secs: f32,
 }
@@ -249,6 +252,7 @@ impl WaterPresence {
         self.nearest_water_distance = None;
         self.nearest_visible_distance = None;
         self.using_startup_fallback = false;
+        self.invalid_candidates_suppressed = 0;
     }
 }
 
@@ -599,6 +603,13 @@ fn update_water_presence(
 
     for (transform, view_visibility, detail, body_id) in water_meshes.iter() {
         presence.water_meshes += 1;
+        let body_info = body_id.and_then(|id| water_bodies.as_deref()?.bodies.get(id));
+        if body_info.is_some_and(|body| body.material_mode == WaterBodyMaterialMode::Hidden)
+            || !is_valid_water_reflection_candidate(&world, transform)
+        {
+            presence.invalid_candidates_suppressed += 1;
+            continue;
+        }
         if view_visibility.is_some_and(|visibility| visibility.get()) {
             presence.view_visible_meshes += 1;
         }
@@ -744,12 +755,19 @@ fn update_startup_fallback_water_presence(
 
     for (chunk_pos, chunk) in world.chunk_entries() {
         let mut has_water = false;
+        let mut water_min_y = f32::INFINITY;
+        let mut water_max_y = f32::NEG_INFINITY;
         'scan: for x in 0..CHUNK_SIZE_I32 {
             for y in 0..CHUNK_SIZE_I32 {
                 for z in 0..CHUNK_SIZE_I32 {
                     let local = UVec3::new(x as u32, y as u32, z as u32);
-                    if chunk.get(local).is_liquid() {
+                    let world_pos = VoxelWorld::chunk_to_world(*chunk_pos) + IVec3::new(x, y, z);
+                    if chunk.get(local).is_liquid()
+                        && water_voxel_has_valid_reflection_surface(world, world_pos)
+                    {
                         has_water = true;
+                        water_min_y = water_min_y.min(world_pos.y as f32);
+                        water_max_y = water_max_y.max(world_pos.y as f32 + 1.0);
                         break 'scan;
                     }
                 }
@@ -758,16 +776,17 @@ fn update_startup_fallback_water_presence(
 
         if has_water {
             let origin = VoxelWorld::chunk_to_world(*chunk_pos).as_vec3();
-            min = min.min(origin);
-            max = max.max(origin + Vec3::splat(CHUNK_SIZE_I32 as f32));
+            min = min.min(Vec3::new(origin.x, water_min_y - 0.75, origin.z));
+            max = max.max(Vec3::new(
+                origin.x + CHUNK_SIZE_I32 as f32,
+                water_max_y + 0.75,
+                origin.z + CHUNK_SIZE_I32 as f32,
+            ));
             found = true;
         }
     }
 
-    let Some(water_aabb) = found.then_some(OctreeAabb::new(
-        Vec3::new(min.x, WATER_LEVEL as f32 - 0.75, min.z),
-        Vec3::new(max.x, WATER_LEVEL as f32 + 0.75, max.z),
-    )) else {
+    let Some(water_aabb) = found.then_some(OctreeAabb::new(min, max)) else {
         return;
     };
 
@@ -989,6 +1008,11 @@ fn update_reflection_camera(
         "Water Meshes Eligible For Reflection",
         presence.eligible_meshes as f64,
     );
+    timing.record_count(
+        frame.0,
+        "Invalid Water Reflection Candidates Suppressed",
+        presence.invalid_candidates_suppressed as f64,
+    );
     timing.record_count(frame.0, "Water Reflection Active", u8::from(active) as f64);
     timing.record_count(
         frame.0,
@@ -1038,6 +1062,61 @@ fn update_reflection_camera(
         "Water Reflection Compositor Skipped Too Far",
         mask_stats.estimated_skipped_too_far_pixels as f64,
     );
+}
+
+fn is_valid_water_reflection_candidate(world: &VoxelWorld, transform: &Transform) -> bool {
+    let origin = IVec3::new(
+        transform.translation.x.floor() as i32,
+        transform.translation.y.floor() as i32,
+        transform.translation.z.floor() as i32,
+    );
+    let bounds = world.bounds();
+    if origin.y > bounds.max_world_y || origin.y + CHUNK_SIZE_I32 - 1 < bounds.min_world_y {
+        return false;
+    }
+    if !bounds.contains_horizontal(origin)
+        || !bounds
+            .contains_horizontal(origin + IVec3::new(CHUNK_SIZE_I32 - 1, 0, CHUNK_SIZE_I32 - 1))
+    {
+        return false;
+    }
+    world.chunk_exists(VoxelWorld::world_to_chunk(origin))
+}
+
+fn water_voxel_has_valid_reflection_surface(world: &VoxelWorld, water_pos: IVec3) -> bool {
+    let bounds = world.bounds();
+    if !bounds.contains_world_pos(water_pos) || water_pos.y < bounds.min_world_y {
+        return false;
+    }
+    if !matches!(
+        world.sample_voxel_for_water_meshing(water_pos),
+        VoxelSample::InBounds(VoxelType::Water)
+    ) {
+        return false;
+    }
+    let air_pos = water_pos + IVec3::Y;
+    match world.sample_voxel_for_water_meshing(air_pos) {
+        VoxelSample::OutsideAboveWorld => true,
+        VoxelSample::InBounds(VoxelType::Air) => water_air_open_to_sky(world, air_pos),
+        VoxelSample::OutsideBelowWorld
+        | VoxelSample::OutsideHorizontalWorld
+        | VoxelSample::MissingChunkInsideBounds
+        | VoxelSample::InBounds(_) => false,
+    }
+}
+
+fn water_air_open_to_sky(world: &VoxelWorld, air_pos: IVec3) -> bool {
+    for y in air_pos.y..=world.bounds().max_world_y {
+        match world.sample_voxel_for_water_meshing(IVec3::new(air_pos.x, y, air_pos.z)) {
+            VoxelSample::InBounds(voxel) if voxel.is_solid() => return false,
+            VoxelSample::InBounds(_) => {}
+            VoxelSample::OutsideAboveWorld => return true,
+            VoxelSample::OutsideBelowWorld
+            | VoxelSample::OutsideHorizontalWorld
+            | VoxelSample::MissingChunkInsideBounds => return false,
+        }
+    }
+    true
 }
 
 fn update_water_mask_camera(
@@ -1188,4 +1267,38 @@ fn estimate_aabb_screen_pixels(
     (extent.x * window_size.x * extent.y * window_size.y)
         .round()
         .max(0.0) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constants::MIN_BREAKABLE_Y;
+    use crate::voxel::chunk::Chunk;
+
+    fn loaded_world() -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 2, 1));
+        for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
+            world.insert_chunk(Chunk::new(chunk_pos));
+        }
+        world
+    }
+
+    #[test]
+    fn reflection_presence_rejects_sealed_underground_water() {
+        let mut world = loaded_world();
+        let water_pos = IVec3::new(8, MIN_BREAKABLE_Y + 2, 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+        world.set_voxel(water_pos + IVec3::Y, VoxelType::Rock);
+
+        assert!(!water_voxel_has_valid_reflection_surface(&world, water_pos));
+    }
+
+    #[test]
+    fn reflection_presence_accepts_open_surface_water() {
+        let mut world = loaded_world();
+        let water_pos = IVec3::new(8, MIN_BREAKABLE_Y + 2, 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        assert!(water_voxel_has_valid_reflection_surface(&world, water_pos));
+    }
 }

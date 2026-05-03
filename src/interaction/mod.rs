@@ -22,7 +22,7 @@ pub use targeting::{TargetedBlock, TargetedEntity, TargetedProp, raycast_blocks}
 
 use crate::atmosphere::{FogCamera, FogConfig, GlobalFogVolume};
 use crate::camera::controller::PlayerCamera;
-use crate::constants::{ATTACK_DAMAGE, BEDROCK_DEPTH};
+use crate::constants::ATTACK_DAMAGE;
 use crate::entity::Health;
 use crate::environment::Sun;
 use crate::menu::PauseMenuState;
@@ -30,7 +30,7 @@ use crate::particles::{ParticleType, SpawnParticleEvent};
 use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
 use bevy::math::{Isometry3d, primitives::Cuboid};
@@ -176,19 +176,21 @@ fn try_break_block(
     let pos = targeted_block.position.ok_or(BreakError::NoTarget)?;
     let voxel_type = targeted_block.voxel_type.ok_or(BreakError::NoTarget)?;
 
-    if !can_modify_at(pos) {
-        return Err(BreakError::Unbreakable { position: pos });
-    }
-
     if voxel_type == VoxelType::Bedrock {
+        world.record_edit_result(VoxelEditResult::RejectedUnbreakable);
+        info!("Cannot break bedrock at {:?}", pos);
         return Err(BreakError::Unbreakable { position: pos });
     }
 
     held.block_type = voxel_type;
-    world.set_voxel(pos, VoxelType::Air);
-    editing::mark_neighbors_dirty(world, pos);
-
-    Ok(pos)
+    match world.set_voxel(pos, VoxelType::Air) {
+        VoxelEditResult::Applied => {
+            editing::mark_neighbors_dirty(world, pos);
+            Ok(pos)
+        }
+        VoxelEditResult::NoChange => Ok(pos),
+        result => Err(break_error_from_edit_result(pos, result)),
+    }
 }
 
 /// Handles block placing when the player right-clicks.
@@ -246,11 +248,9 @@ fn try_place_block(
 
     let place_pos = block_pos + normal;
 
-    if !can_modify_at(place_pos) {
-        return Err(PlacementError::InvalidPosition {
-            position: place_pos,
-            reason: "Below bedrock depth".to_string(),
-        });
+    if let Some(result) = edit_rejection_for_position(world, place_pos) {
+        world.record_edit_result(result);
+        return Err(placement_error_from_edit_result(place_pos, result));
     }
 
     // Check if player is blocking the position
@@ -261,11 +261,14 @@ fn try_place_block(
     }
 
     // Check if position is valid for placement
-    let existing = world
-        .get_voxel(place_pos)
-        .ok_or(PlacementError::OutOfBounds {
-            position: place_pos,
-        })?;
+    let existing = match world.sample_voxel_for_interaction(place_pos) {
+        VoxelSample::InBounds(voxel) => voxel,
+        _ => {
+            return Err(PlacementError::OutOfBounds {
+                position: place_pos,
+            });
+        }
+    };
 
     if existing != VoxelType::Air && existing != VoxelType::Water {
         return Err(PlacementError::PositionOccupied {
@@ -273,11 +276,14 @@ fn try_place_block(
         });
     }
 
-    // Place the block
-    world.set_voxel(place_pos, held.block_type);
-    editing::mark_neighbors_dirty(world, place_pos);
-
-    Ok(place_pos)
+    match world.set_voxel(place_pos, held.block_type) {
+        VoxelEditResult::Applied => {
+            editing::mark_neighbors_dirty(world, place_pos);
+            Ok(place_pos)
+        }
+        VoxelEditResult::NoChange => Ok(place_pos),
+        result => Err(placement_error_from_edit_result(place_pos, result)),
+    }
 }
 
 /// Checks if the player's body occupies the given position.
@@ -300,8 +306,49 @@ fn is_player_blocking_position(
     place_pos == player_block || place_pos == player_feet
 }
 
-fn can_modify_at(world_pos: IVec3) -> bool {
-    world_pos.y > BEDROCK_DEPTH
+fn can_modify_at(world: &VoxelWorld, world_pos: IVec3) -> bool {
+    edit_rejection_for_position(world, world_pos).is_none()
+}
+
+pub(super) fn record_edit_rejection_at(world: &mut VoxelWorld, world_pos: IVec3) {
+    if let Some(result) = edit_rejection_for_position(world, world_pos) {
+        world.record_edit_result(result);
+    }
+}
+
+fn edit_rejection_for_position(world: &VoxelWorld, world_pos: IVec3) -> Option<VoxelEditResult> {
+    match world.sample_voxel_for_interaction(world_pos) {
+        VoxelSample::OutsideBelowWorld => Some(VoxelEditResult::RejectedBelowWorldFloor),
+        VoxelSample::OutsideAboveWorld | VoxelSample::OutsideHorizontalWorld => {
+            Some(VoxelEditResult::RejectedOutOfBounds)
+        }
+        VoxelSample::MissingChunkInsideBounds => Some(VoxelEditResult::RejectedMissingChunk),
+        VoxelSample::InBounds(VoxelType::Bedrock) => Some(VoxelEditResult::RejectedUnbreakable),
+        VoxelSample::InBounds(_) if !world.bounds().is_breakable_y(world_pos.y) => {
+            Some(VoxelEditResult::RejectedBelowWorldFloor)
+        }
+        VoxelSample::InBounds(_) => None,
+    }
+}
+
+fn break_error_from_edit_result(position: IVec3, result: VoxelEditResult) -> BreakError {
+    match result {
+        VoxelEditResult::Applied | VoxelEditResult::NoChange => BreakError::NoTarget,
+        VoxelEditResult::RejectedOutOfBounds => BreakError::OutOfBounds { position },
+        VoxelEditResult::RejectedBelowWorldFloor => BreakError::BelowWorldFloor { position },
+        VoxelEditResult::RejectedUnbreakable => BreakError::Unbreakable { position },
+        VoxelEditResult::RejectedMissingChunk => BreakError::MissingChunk { position },
+    }
+}
+
+fn placement_error_from_edit_result(position: IVec3, result: VoxelEditResult) -> PlacementError {
+    match result {
+        VoxelEditResult::Applied | VoxelEditResult::NoChange => PlacementError::NoTarget,
+        VoxelEditResult::RejectedOutOfBounds => PlacementError::OutOfBounds { position },
+        VoxelEditResult::RejectedBelowWorldFloor => PlacementError::BelowWorldFloor { position },
+        VoxelEditResult::RejectedUnbreakable => PlacementError::Unbreakable { position },
+        VoxelEditResult::RejectedMissingChunk => PlacementError::MissingChunk { position },
+    }
 }
 
 // ============================================================================
@@ -791,6 +838,29 @@ fn find_air_gaps(world: &VoxelWorld, center: IVec3) -> usize {
     air_between_water_and_solid
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voxel::chunk::Chunk;
+
+    #[test]
+    fn voxel_interaction_cannot_break_outside_below_world() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        let mut held = HeldBlock::default();
+        let targeted = TargetedBlock {
+            position: Some(IVec3::new(1, -1, 1)),
+            normal: Some(IVec3::Y),
+            voxel_type: Some(VoxelType::Bedrock),
+        };
+
+        assert!(matches!(
+            try_break_block(&targeted, &mut world, &mut held),
+            Err(BreakError::Unbreakable { .. })
+        ));
+    }
+}
+
 // ============================================================================
 // Plugin
 // ============================================================================
@@ -886,6 +956,8 @@ impl Plugin for InteractionPlugin {
                     debug::toggle_mesh_mode.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::render_world_bounds_debug_planes
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
                     clear_expired_errors.run_if(|state: Res<PauseMenuState>| !state.open),
                 ),
             );

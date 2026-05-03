@@ -28,7 +28,7 @@ use crate::voxel::persistence as voxel_persistence;
 use crate::voxel::persistence::WorldPersistence;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 
@@ -905,9 +905,10 @@ fn conform_terrain_under_prop(
                     if !world.in_bounds(pos) {
                         continue;
                     }
-                    world.set_voxel(pos, fill_voxel);
-                    mark_neighbors_dirty(world, pos);
-                    modified_any = true;
+                    if matches!(world.set_voxel(pos, fill_voxel), VoxelEditResult::Applied) {
+                        mark_neighbors_dirty(world, pos);
+                        modified_any = true;
+                    }
                 }
             } else {
                 for y in (target_y + 1)..=current_y {
@@ -917,9 +918,13 @@ fn conform_terrain_under_prop(
                     }
                     if let Some(existing) = world.get_voxel(pos) {
                         if existing.is_solid() && existing != VoxelType::Bedrock {
-                            world.set_voxel(pos, VoxelType::Air);
-                            mark_neighbors_dirty(world, pos);
-                            modified_any = true;
+                            if matches!(
+                                world.set_voxel(pos, VoxelType::Air),
+                                VoxelEditResult::Applied
+                            ) {
+                                mark_neighbors_dirty(world, pos);
+                                modified_any = true;
+                            }
                         }
                     }
                 }

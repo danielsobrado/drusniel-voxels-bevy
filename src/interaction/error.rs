@@ -25,6 +25,18 @@ pub enum PlacementError {
     #[error("Position {position:?} is outside world bounds")]
     OutOfBounds { position: IVec3 },
 
+    /// Attempted to place below the breakable world floor.
+    #[error("Cannot place block below world floor at {position:?}")]
+    BelowWorldFloor { position: IVec3 },
+
+    /// Attempted to place into a missing chunk that is still inside world bounds.
+    #[error("Cannot place block at {position:?}: chunk is not loaded")]
+    MissingChunk { position: IVec3 },
+
+    /// Attempted to edit an unbreakable block.
+    #[error("Cannot edit unbreakable block at {position:?}")]
+    Unbreakable { position: IVec3 },
+
     /// No valid target surface to place on.
     #[error("No valid placement surface found")]
     NoTarget,
@@ -36,6 +48,18 @@ pub enum BreakError {
     /// Attempted to break an unbreakable block (bedrock).
     #[error("Cannot break bedrock at {position:?}")]
     Unbreakable { position: IVec3 },
+
+    /// Attempted to break below the breakable world floor.
+    #[error("Cannot dig below world floor at {position:?}")]
+    BelowWorldFloor { position: IVec3 },
+
+    /// Attempted to break outside world bounds.
+    #[error("Position {position:?} is outside world bounds")]
+    OutOfBounds { position: IVec3 },
+
+    /// Attempted to break a missing chunk inside world bounds.
+    #[error("Cannot dig at {position:?}: chunk is not loaded")]
+    MissingChunk { position: IVec3 },
 
     /// No block targeted for breaking.
     #[error("No block targeted")]

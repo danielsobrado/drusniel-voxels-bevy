@@ -218,3 +218,24 @@ impl TerrainConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terrain_yaml_preserves_historical_mountain_scale() {
+        let loaded = TerrainConfig::load("assets/config/terrain_generation.yaml")
+            .expect("terrain_generation.yaml should deserialize");
+        let defaults = TerrainConfig::default();
+
+        assert_eq!(loaded.height.min, defaults.height.min);
+        assert_eq!(loaded.height.max, defaults.height.max);
+        assert_eq!(loaded.height.sea_level, defaults.height.sea_level);
+        assert_eq!(loaded.continent.amplitude, defaults.continent.amplitude);
+        assert_eq!(loaded.mountains.amplitude, defaults.mountains.amplitude);
+        assert_eq!(loaded.mountains.octaves, defaults.mountains.octaves);
+        assert_eq!(loaded.hills.amplitude, defaults.hills.amplitude);
+        assert_eq!(loaded.detail.amplitude, defaults.detail.amplitude);
+    }
+}

@@ -1,14 +1,14 @@
 terrain:
   # Vertical range (world is 4 chunks = 64 voxels tall, Y: 0-63)
   height:
-    min: 1            # Minimum terrain height
-    max: 55           # Maximum terrain height (leave room for sky)
-    sea_level: 18
+    min: -64          # Matches the historical Rust default terrain range.
+    max: 180
+    sea_level: 0
 
   # Base continental shape
   continent:
     scale: 0.001      # Very large features
-    amplitude: 12.0   # Scaled for 64-voxel world
+    amplitude: 40.0
     octaves: 2
     persistence: 0.5
     lacunarity: 2.0
@@ -16,8 +16,8 @@ terrain:
   # Mountain ranges
   mountains:
     scale: 0.008
-    amplitude: 30.0   # Scaled for 64-voxel world
-    octaves: 6
+    amplitude: 120.0
+    octaves: 7
     persistence: 0.48
     lacunarity: 2.3
     ridge_power: 1.8  # Sharper peaks (1.0 = smooth, 2.0+ = sharp ridges)
@@ -25,7 +25,7 @@ terrain:
   # Hills and local variation
   hills:
     scale: 0.025
-    amplitude: 8.0    # Scaled for 64-voxel world
+    amplitude: 25.0
     octaves: 4
     persistence: 0.5
     lacunarity: 2.0
@@ -33,7 +33,7 @@ terrain:
   # Fine detail
   detail:
     scale: 0.1
-    amplitude: 2.0
+    amplitude: 3.0
     octaves: 3
     persistence: 0.5
     lacunarity: 2.0

@@ -4,7 +4,7 @@
 use crate::camera::controller::PlayerCamera;
 use crate::voxel::occlusion::OcclusionConfig;
 use crate::voxel::types::Voxel;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::*;
 
 const RAY_LEN: i32 = 24;
@@ -144,11 +144,12 @@ fn detect_mode(world: &VoxelWorld, origin: IVec3) -> EnclosureMode {
 fn ray_hits_solid(world: &VoxelWorld, origin: IVec3, dir: IVec3) -> bool {
     for step in 1..=RAY_LEN {
         let pos = origin + dir * step;
-        if !world.in_bounds(pos) {
-            return false;
-        }
-        if world.get_voxel(pos).is_some_and(|v| v.is_solid()) {
-            return true;
+        match world.sample_voxel_for_collision(pos) {
+            VoxelSample::InBounds(v) if v.is_solid() => return true,
+            VoxelSample::OutsideBelowWorld
+            | VoxelSample::OutsideHorizontalWorld
+            | VoxelSample::MissingChunkInsideBounds => return true,
+            VoxelSample::InBounds(_) | VoxelSample::OutsideAboveWorld => {}
         }
     }
     false

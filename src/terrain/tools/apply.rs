@@ -2,7 +2,7 @@ use super::preview::TerrainRaycastHit;
 use super::types::{TerrainTool, TerrainToolState};
 use crate::interaction::mark_neighbors_dirty;
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use bevy::prelude::*;
 
 /// System that applies terrain tools when mouse is clicked
@@ -84,8 +84,12 @@ pub fn apply_terrain_tool(
                         let place_pos = IVec3::new(x, sy + 1, z);
                         if let Some(existing) = world.get_voxel(place_pos) {
                             if existing == VoxelType::Air {
-                                world.set_voxel(place_pos, VoxelType::TopSoil);
-                                modified_positions.push(place_pos);
+                                apply_tool_edit(
+                                    &mut world,
+                                    place_pos,
+                                    VoxelType::TopSoil,
+                                    &mut modified_positions,
+                                );
                             }
                         }
                     }
@@ -119,8 +123,12 @@ pub fn apply_terrain_tool(
                         let check_pos = IVec3::new(x, y, z);
                         if let Some(voxel) = world.get_voxel(check_pos) {
                             if voxel.is_solid() && voxel != VoxelType::Bedrock {
-                                world.set_voxel(check_pos, VoxelType::Air);
-                                modified_positions.push(check_pos);
+                                apply_tool_edit(
+                                    &mut world,
+                                    check_pos,
+                                    VoxelType::Air,
+                                    &mut modified_positions,
+                                );
                                 break;
                             }
                         }
@@ -170,8 +178,12 @@ pub fn apply_terrain_tool(
                             let place_pos = IVec3::new(x, sy + 1, z);
                             if let Some(existing) = world.get_voxel(place_pos) {
                                 if existing == VoxelType::Air {
-                                    world.set_voxel(place_pos, VoxelType::TopSoil);
-                                    modified_positions.push(place_pos);
+                                    apply_tool_edit(
+                                        &mut world,
+                                        place_pos,
+                                        VoxelType::TopSoil,
+                                        &mut modified_positions,
+                                    );
                                 }
                             }
                         } else if sy > target_height {
@@ -179,8 +191,12 @@ pub fn apply_terrain_tool(
                             let remove_pos = IVec3::new(x, sy, z);
                             if let Some(existing) = world.get_voxel(remove_pos) {
                                 if existing.is_solid() && existing != VoxelType::Bedrock {
-                                    world.set_voxel(remove_pos, VoxelType::Air);
-                                    modified_positions.push(remove_pos);
+                                    apply_tool_edit(
+                                        &mut world,
+                                        remove_pos,
+                                        VoxelType::Air,
+                                        &mut modified_positions,
+                                    );
                                 }
                             }
                         }
@@ -238,8 +254,12 @@ pub fn apply_terrain_tool(
                     let place_pos = IVec3::new(x, current_y + 1, z);
                     if let Some(existing) = world.get_voxel(place_pos) {
                         if existing == VoxelType::Air {
-                            world.set_voxel(place_pos, VoxelType::TopSoil);
-                            modified_positions.push(place_pos);
+                            apply_tool_edit(
+                                &mut world,
+                                place_pos,
+                                VoxelType::TopSoil,
+                                &mut modified_positions,
+                            );
                         }
                     }
                 } else if current_y > avg_height {
@@ -247,8 +267,12 @@ pub fn apply_terrain_tool(
                     let remove_pos = IVec3::new(x, current_y, z);
                     if let Some(existing) = world.get_voxel(remove_pos) {
                         if existing.is_solid() && existing != VoxelType::Bedrock {
-                            world.set_voxel(remove_pos, VoxelType::Air);
-                            modified_positions.push(remove_pos);
+                            apply_tool_edit(
+                                &mut world,
+                                remove_pos,
+                                VoxelType::Air,
+                                &mut modified_positions,
+                            );
                         }
                     }
                 }
@@ -260,5 +284,16 @@ pub fn apply_terrain_tool(
     // Mark affected chunks as dirty for remeshing
     for pos in modified_positions {
         mark_neighbors_dirty(&mut world, pos);
+    }
+}
+
+fn apply_tool_edit(
+    world: &mut VoxelWorld,
+    pos: IVec3,
+    voxel: VoxelType,
+    modified_positions: &mut Vec<IVec3>,
+) {
+    if matches!(world.set_voxel(pos, voxel), VoxelEditResult::Applied) {
+        modified_positions.push(pos);
     }
 }

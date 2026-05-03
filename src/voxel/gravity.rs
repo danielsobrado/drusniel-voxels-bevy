@@ -1,5 +1,5 @@
 use crate::voxel::types::VoxelType;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::*;
 use std::collections::{HashSet, VecDeque};
 
@@ -87,7 +87,9 @@ fn gravity_system(time: Res<Time>, mut world: ResMut<VoxelWorld>, mut state: Loc
                     let local_pos = IVec3::new(x, y, z);
                     let world_pos = chunk_world_pos + local_pos;
 
-                    if let Some(voxel) = world.get_voxel(world_pos) {
+                    if let VoxelSample::InBounds(voxel) =
+                        world.sample_voxel_for_interaction(world_pos)
+                    {
                         if voxel == VoxelType::Air
                             || voxel == VoxelType::Bedrock
                             || voxel == VoxelType::Water
@@ -101,14 +103,13 @@ fn gravity_system(time: Res<Time>, mut world: ResMut<VoxelWorld>, mut state: Loc
                             // Check if space below is empty.
                             let below_pos = world_pos + IVec3::new(0, -1, 0);
 
-                            if let Some(below_voxel) = world.get_voxel(below_pos) {
+                            if let VoxelSample::InBounds(below_voxel) =
+                                world.sample_voxel_for_collision(below_pos)
+                            {
                                 if below_voxel == VoxelType::Air || below_voxel == VoxelType::Water
                                 {
                                     recursive_falls.push((world_pos, below_pos, voxel));
                                 }
-                            } else if below_pos.y < 0 {
-                                // Destroy if it falls out of the world
-                                recursive_falls.push((world_pos, below_pos, VoxelType::Air)); // Mark to remove source, but don't place destination
                             }
                         }
                     }
@@ -120,7 +121,9 @@ fn gravity_system(time: Res<Time>, mut world: ResMut<VoxelWorld>, mut state: Loc
     // Apply updates
     for (source_pos, dest_pos, voxel_type) in recursive_falls {
         // Double check source is still what we think (in case of chain reactions in future)
-        if let Some(current_source) = world.get_voxel(source_pos) {
+        if let VoxelSample::InBounds(current_source) =
+            world.sample_voxel_for_interaction(source_pos)
+        {
             if current_source != voxel_type && voxel_type != VoxelType::Air {
                 continue;
             }
@@ -148,19 +151,23 @@ fn should_fall(world: &VoxelWorld, pos: IVec3) -> bool {
     // This creates a "layer-by-layer" falling effect for floating islands,
     // which is efficient and visually acceptable (like sand).
     let below = pos + IVec3::new(0, -1, 0);
-    if let Some(below_voxel) = world.get_voxel(below) {
-        if below_voxel == VoxelType::Bedrock {
-            return false;
+    match world.sample_voxel_for_collision(below) {
+        VoxelSample::InBounds(VoxelType::Bedrock)
+        | VoxelSample::OutsideBelowWorld
+        | VoxelSample::OutsideHorizontalWorld
+        | VoxelSample::MissingChunkInsideBounds => return false,
+        VoxelSample::InBounds(below_voxel) => {
+            // If the thing below is solid, we don't fall yet.
+            // We wait for the thing below to fall first (if it's unstable).
+            // Exception: Leaves don't support things (usually).
+            if below_voxel != VoxelType::Air
+                && below_voxel != VoxelType::Water
+                && below_voxel != VoxelType::Leaves
+            {
+                return false;
+            }
         }
-        // If the thing below is solid, we don't fall yet.
-        // We wait for the thing below to fall first (if it's unstable).
-        // Exception: Leaves don't support things (usually).
-        if below_voxel != VoxelType::Air
-            && below_voxel != VoxelType::Water
-            && below_voxel != VoxelType::Leaves
-        {
-            return false;
-        }
+        VoxelSample::OutsideAboveWorld => {}
     }
 
     // 2. BFS for support with Distance Tracking
@@ -198,19 +205,22 @@ fn should_fall(world: &VoxelWorld, pos: IVec3) -> bool {
                 return false; // Found support (ground)
             }
 
-            if let Some(voxel) = world.get_voxel(next_pos) {
-                if voxel == VoxelType::Bedrock {
-                    return false; // Found support (bedrock)
+            match world.sample_voxel_for_collision(next_pos) {
+                VoxelSample::InBounds(VoxelType::Bedrock)
+                | VoxelSample::OutsideBelowWorld
+                | VoxelSample::OutsideHorizontalWorld
+                | VoxelSample::MissingChunkInsideBounds => return false,
+                VoxelSample::InBounds(voxel) => {
+                    // If voxel is solid, it can transmit support
+                    if voxel != VoxelType::Air
+                        && voxel != VoxelType::Water
+                        && voxel != VoxelType::Leaves
+                    {
+                        visited.insert(next_pos);
+                        queue.push_back((next_pos, dist + 1));
+                    }
                 }
-
-                // If voxel is solid, it can transmit support
-                if voxel != VoxelType::Air
-                    && voxel != VoxelType::Water
-                    && voxel != VoxelType::Leaves
-                {
-                    visited.insert(next_pos);
-                    queue.push_back((next_pos, dist + 1));
-                }
+                VoxelSample::OutsideAboveWorld => {}
             }
         }
     }

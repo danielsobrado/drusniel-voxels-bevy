@@ -83,7 +83,7 @@ use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::terrain::TerrainGenerator;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld, WorldBounds};
 use bevy::camera::visibility::RenderLayers;
 use bevy_water::water::material::StandardWaterMaterial;
 
@@ -156,6 +156,9 @@ pub struct RuntimeChunkStats {
     pub water_air_boundaries_exposed: u64,
     pub water_air_boundaries_sealed: u64,
     pub water_triangles_removed_sealed: u64,
+    pub invalid_water_meshes_suppressed: u64,
+    pub water_flood_fill_boundary_hits: u64,
+    pub water_exposure_outside_world_rejected: u64,
     pub terrain_mesh_empty_but_solid_voxels: u64,
     pub terrain_mesh_boundary_missing_neighbor: u64,
     pub terrain_mesh_degenerate_triangles_removed: u64,
@@ -199,6 +202,9 @@ impl RuntimeChunkStats {
         self.terrain_mesh_boundary_missing_neighbor = 0;
         self.terrain_mesh_degenerate_triangles_removed = 0;
         self.terrain_mesh_lod_seam_repairs = 0;
+        self.invalid_water_meshes_suppressed = 0;
+        self.water_flood_fill_boundary_hits = 0;
+        self.water_exposure_outside_world_rejected = 0;
         // Note: vertex counts are tracked during mesh generation, not here
 
         for (_, chunk) in world.chunk_entries() {
@@ -433,12 +439,15 @@ impl Plugin for VoxelPlugin {
             TerrainHoleProbePlugin,
         ));
 
+        let size_chunks = IVec3::new(32, 4, 32);
+
         app.insert_resource(WorldConfig {
-            size_chunks: IVec3::new(32, 4, 32),
+            size_chunks,
             chunk_size: 16,
             greedy_meshing: true,
         })
-        .insert_resource(VoxelWorld::new(IVec3::new(32, 4, 32)))
+        .insert_resource(WorldBounds::from_size_chunks(size_chunks))
+        .insert_resource(VoxelWorld::new(size_chunks))
         // Use SurfaceNets for smooth terrain meshing (change to Blocky for Minecraft-style)
         .insert_resource(MeshSettings {
             mode: MeshMode::SurfaceNets,
@@ -498,10 +507,35 @@ impl Plugin for VoxelPlugin {
                 update_water_material_lod.after(update_water_body_registry),
                 draw_water_body_debug_overlay.after(update_water_body_registry),
                 update_terrain_material_lod.after(update_chunk_lod_system),
+                record_voxel_edit_counters,
             ),
         );
         // .add_plugins(GravityPlugin); // Deactivated due to performance impact
     }
+}
+
+fn record_voxel_edit_counters(
+    world: Res<VoxelWorld>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let stats = world.edit_stats();
+    timing.record_count(frame.0, "Voxel Edits Applied", stats.applied as f64);
+    timing.record_count(
+        frame.0,
+        "Voxel Edits Rejected Below Floor",
+        stats.rejected_below_floor as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Voxel Edits Rejected Bedrock",
+        stats.rejected_unbreakable as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Voxel Edits Rejected Out Of Bounds",
+        stats.rejected_out_of_bounds as f64,
+    );
 }
 
 // =============================================================================
@@ -1126,6 +1160,12 @@ fn mesh_dirty_chunks_system(
             mesh_result.water_stats.air_boundaries_sealed as u64;
         chunk_stats.water_triangles_removed_sealed +=
             mesh_result.water_stats.triangles_removed_sealed as u64;
+        chunk_stats.invalid_water_meshes_suppressed +=
+            mesh_result.water_stats.invalid_meshes_suppressed as u64;
+        chunk_stats.water_flood_fill_boundary_hits +=
+            mesh_result.water_stats.flood_fill_boundary_hits as u64;
+        chunk_stats.water_exposure_outside_world_rejected +=
+            mesh_result.water_stats.exposure_outside_world_rejected as u64;
 
         let water_depth_detail = if mesh_result.water.is_empty() {
             WaterChunkDepthDetail::default()
@@ -1477,6 +1517,21 @@ fn mesh_dirty_chunks_system(
     );
     timing.record_count(
         frame.0,
+        "Invalid Water Meshes Suppressed",
+        chunk_stats.invalid_water_meshes_suppressed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Flood Fill Boundary Hits",
+        chunk_stats.water_flood_fill_boundary_hits as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Exposure Outside World Rejected",
+        chunk_stats.water_exposure_outside_world_rejected as f64,
+    );
+    timing.record_count(
+        frame.0,
         "Water Mesh Entities",
         chunk_stats.water_mesh_entities as f64,
     );
@@ -1752,24 +1807,25 @@ fn sample_water_mesh_body(
         for z in 0..CHUNK_SIZE_I32 {
             for y in (0..CHUNK_SIZE_I32).rev() {
                 let world_pos = chunk_origin + IVec3::new(x, y, z);
-                let Some(voxel) = world.get_voxel(world_pos) else {
+                let VoxelSample::InBounds(voxel) = world.sample_voxel_for_water_meshing(world_pos)
+                else {
                     continue;
                 };
                 if !voxel.is_liquid() {
                     continue;
                 }
-                if world
-                    .get_voxel(world_pos + IVec3::Y)
-                    .is_some_and(|above| above.is_liquid())
-                {
+                if matches!(
+                    world.sample_voxel_for_water_meshing(world_pos + IVec3::Y),
+                    VoxelSample::InBounds(above) if above.is_liquid()
+                ) {
                     continue;
                 }
 
                 let mut depth = 1usize;
                 loop {
                     let below_pos = world_pos - IVec3::Y * depth as i32;
-                    match world.get_voxel(below_pos) {
-                        Some(v) if v.is_liquid() => depth += 1,
+                    match world.sample_voxel_for_water_meshing(below_pos) {
+                        VoxelSample::InBounds(v) if v.is_liquid() => depth += 1,
                         _ => break,
                     }
                 }
@@ -2425,23 +2481,26 @@ fn compute_water_chunk_depth_detail(world: &VoxelWorld, chunk_pos: IVec3) -> Wat
         for z in 0..CHUNK_SIZE_I32 {
             for y in (0..CHUNK_SIZE_I32).rev() {
                 let world_pos = chunk_origin + IVec3::new(x, y, z);
-                let Some(voxel) = world.get_voxel(world_pos) else {
+                let VoxelSample::InBounds(voxel) = world.sample_voxel_for_water_meshing(world_pos)
+                else {
                     continue;
                 };
                 if !voxel.is_liquid() {
                     continue;
                 }
 
-                let above = world.get_voxel(world_pos + IVec3::Y);
-                if matches!(above, Some(v) if v.is_liquid()) {
+                if matches!(
+                    world.sample_voxel_for_water_meshing(world_pos + IVec3::Y),
+                    VoxelSample::InBounds(v) if v.is_liquid()
+                ) {
                     continue;
                 }
 
                 let mut depth = 1usize;
                 loop {
                     let below_pos = world_pos - IVec3::Y * depth as i32;
-                    match world.get_voxel(below_pos) {
-                        Some(v) if v.is_liquid() => {
+                    match world.sample_voxel_for_water_meshing(below_pos) {
+                        VoxelSample::InBounds(v) if v.is_liquid() => {
                             depth += 1;
                         }
                         _ => break,

@@ -9,7 +9,7 @@ use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::interaction::targeting::TargetedBlock;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
@@ -57,8 +57,7 @@ pub fn toggle_edit_mode(
             info!("Edit mode enabled - click and drag a block to move it");
         } else {
             if let Some(dragged) = drag_state.dragged_block.take() {
-                world.set_voxel(dragged.original_position, dragged.block_type);
-                mark_neighbors_dirty(&mut world, dragged.original_position);
+                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
             }
             drag_state.rotation_degrees = 0.0;
             info!("Edit mode disabled");
@@ -84,8 +83,7 @@ pub fn toggle_delete_mode(
 
         if delete_mode.enabled {
             if let Some(dragged) = drag_state.dragged_block.take() {
-                world.set_voxel(dragged.original_position, dragged.block_type);
-                mark_neighbors_dirty(&mut world, dragged.original_position);
+                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
             }
             drag_state.rotation_degrees = 0.0;
             info!("Delete mode enabled - left click a block to remove it");
@@ -113,21 +111,24 @@ pub fn start_dragging_block(
     }
 
     if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type) {
-        if !super::can_modify_at(pos) {
+        if !super::can_modify_at(&world, pos) {
+            super::record_edit_rejection_at(&mut world, pos);
             return;
         }
 
         if voxel_type == VoxelType::Bedrock {
+            super::record_edit_rejection_at(&mut world, pos);
+            info!("Cannot break bedrock at {:?}", pos);
             return;
         }
 
-        world.set_voxel(pos, VoxelType::Air);
-        mark_neighbors_dirty(&mut world, pos);
-        drag_state.dragged_block = Some(DraggedBlock {
-            block_type: voxel_type,
-            original_position: pos,
-        });
-        drag_state.rotation_degrees = 0.0;
+        if apply_edit_and_mark(&mut world, pos, VoxelType::Air) {
+            drag_state.dragged_block = Some(DraggedBlock {
+                block_type: voxel_type,
+                original_position: pos,
+            });
+            drag_state.rotation_degrees = 0.0;
+        }
     }
 }
 
@@ -151,14 +152,13 @@ pub fn finish_dragging_block(
     if let (Some(block_pos), Some(normal)) = (targeted_block.position, targeted_block.normal) {
         let place_pos = block_pos + normal;
         let Some(grounded_pos) = find_grounded_position(place_pos, &world) else {
-            world.set_voxel(dragged.original_position, dragged.block_type);
-            mark_neighbors_dirty(&mut world, dragged.original_position);
+            apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
             return;
         };
 
-        if !super::can_modify_at(grounded_pos) {
-            world.set_voxel(dragged.original_position, dragged.block_type);
-            mark_neighbors_dirty(&mut world, dragged.original_position);
+        if !super::can_modify_at(&world, grounded_pos) {
+            super::record_edit_rejection_at(&mut world, grounded_pos);
+            apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
             return;
         }
 
@@ -175,24 +175,21 @@ pub fn finish_dragging_block(
             );
 
             if grounded_pos == player_block || grounded_pos == player_feet {
-                world.set_voxel(dragged.original_position, dragged.block_type);
-                mark_neighbors_dirty(&mut world, dragged.original_position);
+                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
                 return;
             }
         }
 
-        if let Some(existing) = world.get_voxel(grounded_pos) {
+        if let VoxelSample::InBounds(existing) = world.sample_voxel_for_interaction(grounded_pos) {
             if existing == VoxelType::Air || existing == VoxelType::Water {
-                world.set_voxel(grounded_pos, dragged.block_type);
-                mark_neighbors_dirty(&mut world, grounded_pos);
+                apply_edit_and_mark(&mut world, grounded_pos, dragged.block_type);
                 return;
             }
         }
     }
 
     // Restore to the original position if we couldn't place it elsewhere
-    world.set_voxel(dragged.original_position, dragged.block_type);
-    mark_neighbors_dirty(&mut world, dragged.original_position);
+    apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
     drag_state.rotation_degrees = 0.0;
 }
 
@@ -257,15 +254,29 @@ pub fn delete_block_in_edit_mode(
     if mouse.just_pressed(MouseButton::Left) {
         if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type)
         {
-            if !super::can_modify_at(pos) {
+            if !super::can_modify_at(&world, pos) {
+                super::record_edit_rejection_at(&mut world, pos);
                 return;
             }
 
             if voxel_type != VoxelType::Bedrock {
-                world.set_voxel(pos, VoxelType::Air);
-                mark_neighbors_dirty(&mut world, pos);
+                apply_edit_and_mark(&mut world, pos, VoxelType::Air);
+            } else {
+                super::record_edit_rejection_at(&mut world, pos);
+                info!("Cannot break bedrock at {:?}", pos);
             }
         }
+    }
+}
+
+fn apply_edit_and_mark(world: &mut VoxelWorld, pos: IVec3, voxel: VoxelType) -> bool {
+    match world.set_voxel(pos, voxel) {
+        VoxelEditResult::Applied => {
+            mark_neighbors_dirty(world, pos);
+            true
+        }
+        VoxelEditResult::NoChange => true,
+        _ => false,
     }
 }
 
@@ -278,10 +289,10 @@ pub fn find_grounded_position(start: IVec3, world: &VoxelWorld) -> Option<IVec3>
     let mut pos = start;
 
     // Cannot place inside a solid block
-    match world.get_voxel(pos) {
-        Some(voxel) if voxel.is_solid() => return None,
-        Some(_) => {}
-        None => return None,
+    match world.sample_voxel_for_interaction(pos) {
+        VoxelSample::InBounds(voxel) if voxel.is_solid() => return None,
+        VoxelSample::InBounds(_) => {}
+        _ => return None,
     }
 
     // Slide downward until we find solid ground
@@ -292,10 +303,10 @@ pub fn find_grounded_position(start: IVec3, world: &VoxelWorld) -> Option<IVec3>
             return None;
         }
 
-        match world.get_voxel(below) {
-            Some(voxel) if voxel.is_solid() => return Some(pos),
-            Some(_) => pos = below,
-            None => return None,
+        match world.sample_voxel_for_interaction(below) {
+            VoxelSample::InBounds(voxel) if voxel.is_solid() => return Some(pos),
+            VoxelSample::InBounds(_) => pos = below,
+            _ => return None,
         }
     }
 }

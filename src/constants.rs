@@ -359,6 +359,12 @@ pub const CAVE_SURFACE_OFFSET: i32 = 3;
 /// World Y coordinate for the bedrock floor.
 pub const BEDROCK_DEPTH: i32 = 0;
 
+/// Lowest world Y coordinate that gameplay voxel edits may modify.
+pub const MIN_BREAKABLE_Y: i32 = BEDROCK_DEPTH + 1;
+
+/// Y coordinate below which the player should be treated as outside the playable world.
+pub const WORLD_KILL_Y: i32 = BEDROCK_DEPTH - 8;
+
 /// Smooth transition thickness for bedrock blending in SDF.
 pub const BEDROCK_BLEND: f32 = 2.0;
 

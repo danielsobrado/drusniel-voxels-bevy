@@ -13,11 +13,11 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
-use crate::player::Player;
+use crate::player::{Player, classify_player_world_validity};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldBounds};
 
 pub struct TerrainHoleProbePlugin;
 
@@ -38,6 +38,11 @@ struct TerrainHoleProbeDump {
     target_voxel_type: Option<String>,
     target_chunk_position: IVec3Dump,
     target_local_voxel_position: UVec3Dump,
+    world_bounds: WorldBoundsProbe,
+    player_validity: PlayableValidityProbe,
+    target_validity: PlayableValidityProbe,
+    player_boundary_sample: BoundarySampleProbe,
+    target_boundary_sample: BoundarySampleProbe,
     classification: TerrainHoleClassification,
     columns: Vec<ColumnProbe>,
     physics: PhysicsProbe,
@@ -64,6 +69,35 @@ struct TerrainHoleClassification {
 }
 
 #[derive(Serialize)]
+struct WorldBoundsProbe {
+    min_chunk: IVec3Dump,
+    max_chunk: IVec3Dump,
+    min_world_y: i32,
+    max_world_y: i32,
+    min_breakable_y: i32,
+    kill_y: i32,
+    bedrock_floor_y: i32,
+    horizontal_min: IVec2Dump,
+    horizontal_max: IVec2Dump,
+}
+
+#[derive(Serialize)]
+struct PlayableValidityProbe {
+    valid: bool,
+    classification: String,
+    invalid_reason: Option<String>,
+}
+
+#[derive(Serialize)]
+struct BoundarySampleProbe {
+    world_position: IVec3Dump,
+    chunk_position: IVec3Dump,
+    local_position: UVec3Dump,
+    classification: String,
+    voxel_type: Option<String>,
+}
+
+#[derive(Serialize)]
 struct ColumnProbe {
     offset_x: i32,
     offset_z: i32,
@@ -83,6 +117,7 @@ struct VoxelSample {
     chunk_position: IVec3Dump,
     local_position: UVec3Dump,
     chunk_exists: bool,
+    boundary: Option<String>,
     voxel_type: Option<String>,
     solid: bool,
     liquid: bool,
@@ -182,6 +217,12 @@ struct IVec3Dump {
     z: i32,
 }
 
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+struct IVec2Dump {
+    x: i32,
+    y: i32,
+}
+
 #[derive(Serialize, Clone, Copy)]
 struct UVec3Dump {
     x: u32,
@@ -254,7 +295,7 @@ fn dump_terrain_hole_probe(
     });
     let target_chunk = VoxelWorld::world_to_chunk(target_pos);
     let target_local = VoxelWorld::world_to_local(target_pos);
-    let target_voxel = world.get_voxel(target_pos);
+    let target_voxel = world.sample_voxel_for_collision(target_pos).voxel();
 
     let columns = sample_columns(&world, target_pos, 2);
     let physics = PhysicsProbe {
@@ -350,6 +391,25 @@ fn dump_terrain_hole_probe(
         target_voxel_type: target_voxel.map(voxel_name),
         target_chunk_position: target_chunk.into(),
         target_local_voxel_position: target_local.into(),
+        world_bounds: world_bounds_probe(world.bounds()),
+        player_validity: playable_validity_probe(&world, player_pos),
+        target_validity: playable_validity_probe(
+            &world,
+            Vec3::new(
+                target_pos.x as f32 + 0.5,
+                target_pos.y as f32 + 1.0,
+                target_pos.z as f32 + 0.5,
+            ),
+        ),
+        player_boundary_sample: boundary_sample_probe(
+            &world,
+            IVec3::new(
+                player_pos.x.floor() as i32,
+                player_pos.y.floor() as i32,
+                player_pos.z.floor() as i32,
+            ),
+        ),
+        target_boundary_sample: boundary_sample_probe(&world, target_pos),
         classification,
         columns,
         physics,
@@ -415,29 +475,75 @@ fn sample_columns(world: &VoxelWorld, target_pos: IVec3, radius: i32) -> Vec<Col
 fn sample_voxel(world: &VoxelWorld, pos: IVec3) -> VoxelSample {
     let chunk_pos = VoxelWorld::world_to_chunk(pos);
     let local_pos = VoxelWorld::world_to_local(pos);
-    let voxel = world.get_voxel(pos);
-    let is_air_or_liquid = voxel.is_some_and(|voxel| !voxel.is_solid());
+    let sample = world.sample_voxel_for_collision(pos);
+    let voxel = sample.voxel();
+    let is_air_or_liquid =
+        matches!(sample, BoundaryVoxelSample::InBounds(voxel) if !voxel.is_solid());
 
     VoxelSample {
         world_position: pos.into(),
         chunk_position: chunk_pos.into(),
         local_position: local_pos.into(),
         chunk_exists: world.chunk_exists(chunk_pos),
+        boundary: boundary_sample_name(sample).map(str::to_string),
         voxel_type: voxel.map(voxel_name),
-        solid: voxel.is_some_and(|voxel| voxel.is_solid()),
-        liquid: voxel.is_some_and(|voxel| voxel.is_liquid()),
+        solid: match sample {
+            BoundaryVoxelSample::InBounds(voxel) => voxel.is_solid(),
+            BoundaryVoxelSample::OutsideAboveWorld => false,
+            BoundaryVoxelSample::OutsideBelowWorld
+            | BoundaryVoxelSample::OutsideHorizontalWorld
+            | BoundaryVoxelSample::MissingChunkInsideBounds => true,
+        },
+        liquid: matches!(sample, BoundaryVoxelSample::InBounds(voxel) if voxel.is_liquid()),
         open_vertical_path_to_sky: is_air_or_liquid.then(|| open_vertical_path_to_sky(world, pos)),
+    }
+}
+
+fn world_bounds_probe(bounds: WorldBounds) -> WorldBoundsProbe {
+    WorldBoundsProbe {
+        min_chunk: bounds.min_chunk.into(),
+        max_chunk: bounds.max_chunk.into(),
+        min_world_y: bounds.min_world_y,
+        max_world_y: bounds.max_world_y,
+        min_breakable_y: bounds.min_breakable_y,
+        kill_y: bounds.kill_y,
+        bedrock_floor_y: bounds.bedrock_floor_y,
+        horizontal_min: bounds.horizontal_min.into(),
+        horizontal_max: bounds.horizontal_max.into(),
+    }
+}
+
+fn playable_validity_probe(world: &VoxelWorld, position: Vec3) -> PlayableValidityProbe {
+    let validity = classify_player_world_validity(world, position);
+    PlayableValidityProbe {
+        valid: validity.is_valid(),
+        classification: validity.label().to_string(),
+        invalid_reason: validity.invalid_reason().map(str::to_string),
+    }
+}
+
+fn boundary_sample_probe(world: &VoxelWorld, pos: IVec3) -> BoundarySampleProbe {
+    let sample = world.sample_voxel_for_collision(pos);
+    BoundarySampleProbe {
+        world_position: pos.into(),
+        chunk_position: VoxelWorld::world_to_chunk(pos).into(),
+        local_position: VoxelWorld::world_to_local(pos).into(),
+        classification: boundary_sample_name(sample)
+            .unwrap_or("InBounds")
+            .to_string(),
+        voxel_type: sample.voxel().map(voxel_name),
     }
 }
 
 fn open_vertical_path_to_sky(world: &VoxelWorld, pos: IVec3) -> bool {
     let top_y = world.world_size_chunks().y * CHUNK_SIZE_I32 - 1;
     for y in (pos.y + 1)..=top_y {
-        if world
-            .get_voxel(IVec3::new(pos.x, y, pos.z))
-            .is_some_and(|voxel| voxel.is_solid())
-        {
-            return false;
+        match world.sample_voxel_for_collision(IVec3::new(pos.x, y, pos.z)) {
+            BoundaryVoxelSample::InBounds(voxel) if voxel.is_solid() => return false,
+            BoundaryVoxelSample::InBounds(_) | BoundaryVoxelSample::OutsideAboveWorld => {}
+            BoundaryVoxelSample::OutsideBelowWorld
+            | BoundaryVoxelSample::OutsideHorizontalWorld
+            | BoundaryVoxelSample::MissingChunkInsideBounds => return false,
         }
     }
     true
@@ -891,6 +997,16 @@ fn voxel_name(voxel: VoxelType) -> String {
     format!("{voxel:?}")
 }
 
+fn boundary_sample_name(sample: BoundaryVoxelSample) -> Option<&'static str> {
+    match sample {
+        BoundaryVoxelSample::InBounds(_) => None,
+        BoundaryVoxelSample::OutsideBelowWorld => Some("OutsideBelowWorld"),
+        BoundaryVoxelSample::OutsideAboveWorld => Some("OutsideAboveWorld"),
+        BoundaryVoxelSample::OutsideHorizontalWorld => Some("OutsideHorizontalWorld"),
+        BoundaryVoxelSample::MissingChunkInsideBounds => Some("MissingChunkInsideBounds"),
+    }
+}
+
 fn timestamp_utc_compact() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -935,6 +1051,15 @@ impl From<IVec3> for IVec3Dump {
             x: value.x,
             y: value.y,
             z: value.z,
+        }
+    }
+}
+
+impl From<IVec2> for IVec2Dump {
+    fn from(value: IVec2) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
         }
     }
 }

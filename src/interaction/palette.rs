@@ -7,7 +7,7 @@ use crate::menu::PauseMenuState;
 use crate::props::{Prop, PropAssets, PropConfig, PropType};
 use crate::voxel::types::Voxel;
 use crate::voxel::types::VoxelType;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -144,8 +144,12 @@ fn set_edit_mode_state(
 
     if !enabled {
         if let Some(dragged) = drag_state.dragged_block.take() {
-            world.set_voxel(dragged.original_position, dragged.block_type);
-            crate::interaction::editing::mark_neighbors_dirty(world, dragged.original_position);
+            if matches!(
+                world.set_voxel(dragged.original_position, dragged.block_type),
+                VoxelEditResult::Applied
+            ) {
+                crate::interaction::editing::mark_neighbors_dirty(world, dragged.original_position);
+            }
         }
         drag_state.rotation_degrees = 0.0;
     }
@@ -773,8 +777,8 @@ pub fn update_ghost_preview(
     };
 
     let place_pos = block_pos + normal;
-    let target_voxel = world.get_voxel(block_pos);
-    let place_voxel = world.get_voxel(place_pos);
+    let target_voxel = world.sample_voxel_for_interaction(block_pos).voxel();
+    let place_voxel = world.sample_voxel_for_interaction(place_pos).voxel();
     let valid = target_voxel.map(|v| v.is_solid()).unwrap_or(false)
         && place_voxel
             .map(|v| v == VoxelType::Air || v == VoxelType::Water)

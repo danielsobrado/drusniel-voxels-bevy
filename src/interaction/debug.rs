@@ -13,6 +13,7 @@ use crate::network::NetworkSession;
 use crate::performance::{
     AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
 };
+use crate::player::{Player, classify_player_world_validity};
 use crate::props::billboard::BillboardStats;
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::{Prop, PropChunkCullState};
@@ -29,7 +30,7 @@ use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,
 };
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::diagnostic::{
     DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
     SystemInformationDiagnosticsPlugin,
@@ -91,6 +92,12 @@ pub struct PropDebugQuery<'w, 's> {
     pub props: Query<'w, 's, (&'static Prop, Option<&'static GrassPropWind>)>,
     pub children: Query<'w, 's, &'static Children>,
     pub fades: Query<'w, 's, &'static FoliageFade>,
+}
+
+#[derive(SystemParam)]
+pub struct PositionDebugQuery<'w, 's> {
+    pub camera: Query<'w, 's, &'static Transform, With<crate::camera::controller::PlayerCamera>>,
+    pub player: Query<'w, 's, &'static Transform, With<Player>>,
 }
 
 /// Entity counts by category.
@@ -442,7 +449,7 @@ pub fn update_debug_overlay(
     network: Res<NetworkSession>,
     chunk_stats: Res<RuntimeChunkStats>,
     gen_state: Res<ChunkGenerationState>,
-    camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
+    positions: PositionDebugQuery,
     all_entities: Query<Entity>,
     diagnostics: Res<DiagnosticsStore>,
     mut query: Query<&mut Text, With<DebugOverlay>>,
@@ -465,7 +472,7 @@ pub fn update_debug_overlay(
     let mut text_content = String::new();
 
     // Camera position
-    if let Ok(camera) = camera_query.single() {
+    if let Ok(camera) = positions.camera.single() {
         let pos = camera.translation;
         text_content.push_str(&format!(
             "Pos: ({:.1}, {:.1}, {:.1})\n",
@@ -478,7 +485,30 @@ pub fn update_debug_overlay(
             pos.z.floor() as i32,
         );
         let chunk_pos = VoxelWorld::world_to_chunk(block_pos);
-        text_content.push_str(&format!("Chunk: {:?}\n", chunk_pos));
+        let local_pos = VoxelWorld::world_to_local(block_pos);
+        text_content.push_str(&format!("Chunk: {:?} Local: {:?}\n", chunk_pos, local_pos));
+    }
+
+    append_world_bounds_debug(
+        &mut text_content,
+        &world,
+        positions.player.single().ok(),
+        &targeted,
+    );
+
+    // Player validity counters are recorded by the player plugin; show the live state here.
+    if let Ok(player_transform) = positions.player.single() {
+        let player_block = IVec3::new(
+            player_transform.translation.x.floor() as i32,
+            player_transform.translation.y.floor() as i32,
+            player_transform.translation.z.floor() as i32,
+        );
+        let chunk_pos = VoxelWorld::world_to_chunk(player_block);
+        let local_pos = VoxelWorld::world_to_local(player_block);
+        text_content.push_str(&format!(
+            "Player chunk: {:?} local {:?}\n",
+            chunk_pos, local_pos
+        ));
     }
 
     // Performance
@@ -720,6 +750,137 @@ pub fn update_debug_overlay(
 
     for mut text in query.iter_mut() {
         **text = text_content.clone();
+    }
+}
+
+pub fn render_world_bounds_debug_planes(
+    state: Res<DebugOverlayState>,
+    world: Res<VoxelWorld>,
+    mut gizmos: Gizmos,
+) {
+    if !state.visible {
+        return;
+    }
+
+    let bounds = world.bounds();
+    let min_x = bounds.horizontal_min.x as f32;
+    let max_x = bounds.horizontal_max.x as f32 + 1.0;
+    let min_z = bounds.horizontal_min.y as f32;
+    let max_z = bounds.horizontal_max.y as f32 + 1.0;
+
+    draw_debug_plane(
+        &mut gizmos,
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        bounds.min_world_y as f32,
+        Color::srgba(0.1, 0.6, 1.0, 0.45),
+    );
+    draw_debug_plane(
+        &mut gizmos,
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        bounds.bedrock_floor_y as f32 + 0.03,
+        Color::srgba(0.9, 0.9, 0.9, 0.5),
+    );
+    draw_debug_plane(
+        &mut gizmos,
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        bounds.kill_y as f32,
+        Color::srgba(1.0, 0.05, 0.05, 0.65),
+    );
+}
+
+fn draw_debug_plane(
+    gizmos: &mut Gizmos,
+    min_x: f32,
+    max_x: f32,
+    min_z: f32,
+    max_z: f32,
+    y: f32,
+    color: Color,
+) {
+    let corners = [
+        Vec3::new(min_x, y, min_z),
+        Vec3::new(max_x, y, min_z),
+        Vec3::new(max_x, y, max_z),
+        Vec3::new(min_x, y, max_z),
+    ];
+    for i in 0..4 {
+        gizmos.line(corners[i], corners[(i + 1) % 4], color);
+    }
+
+    let grid_lines = 8;
+    for step in 1..grid_lines {
+        let t = step as f32 / grid_lines as f32;
+        let x = min_x.lerp(max_x, t);
+        let z = min_z.lerp(max_z, t);
+        gizmos.line(Vec3::new(x, y, min_z), Vec3::new(x, y, max_z), color);
+        gizmos.line(Vec3::new(min_x, y, z), Vec3::new(max_x, y, z), color);
+    }
+}
+
+fn append_world_bounds_debug(
+    text_content: &mut String,
+    world: &VoxelWorld,
+    player_transform: Option<&Transform>,
+    targeted: &TargetedBlock,
+) {
+    let bounds = world.bounds();
+    text_content.push_str(&format!(
+        "World Y: min {} bedrock {} breakable {} kill {} max {}\n",
+        bounds.min_world_y,
+        bounds.bedrock_floor_y,
+        bounds.min_breakable_y,
+        bounds.kill_y,
+        bounds.max_world_y
+    ));
+    text_content.push_str(&format!(
+        "World XZ: x {}..{} z {}..{}\n",
+        bounds.horizontal_min.x,
+        bounds.horizontal_max.x,
+        bounds.horizontal_min.y,
+        bounds.horizontal_max.y
+    ));
+
+    if let Some(player_transform) = player_transform {
+        let validity = classify_player_world_validity(world, player_transform.translation);
+        text_content.push_str(&format!("Player validity: {}\n", validity.label()));
+        if let Some(reason) = validity.invalid_reason() {
+            text_content.push_str(&format!("Player invalid: {}\n", reason));
+        }
+        let block = IVec3::new(
+            player_transform.translation.x.floor() as i32,
+            player_transform.translation.y.floor() as i32,
+            player_transform.translation.z.floor() as i32,
+        );
+        text_content.push_str(&format!(
+            "Player sample: {}\n",
+            describe_voxel_sample(world.sample_voxel_for_interaction(block))
+        ));
+    }
+
+    if let Some(target_pos) = targeted.position {
+        text_content.push_str(&format!(
+            "Target sample: {}\n",
+            describe_voxel_sample(world.sample_voxel_for_interaction(target_pos))
+        ));
+    }
+}
+
+fn describe_voxel_sample(sample: VoxelSample) -> String {
+    match sample {
+        VoxelSample::InBounds(voxel) => format!("InBounds({voxel:?})"),
+        VoxelSample::OutsideBelowWorld => "OutsideBelowWorld".to_string(),
+        VoxelSample::OutsideAboveWorld => "OutsideAboveWorld".to_string(),
+        VoxelSample::OutsideHorizontalWorld => "OutsideHorizontalWorld".to_string(),
+        VoxelSample::MissingChunkInsideBounds => "MissingChunkInsideBounds".to_string(),
     }
 }
 

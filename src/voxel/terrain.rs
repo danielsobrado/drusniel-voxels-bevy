@@ -23,9 +23,6 @@ use crate::constants::{
     // Caves
     CAVE_MIN_Y,
     CAVE_SURFACE_OFFSET,
-    CHUNK_SIZE_I32,
-    DEFAULT_WORLD_CHUNKS_X,
-    DEFAULT_WORLD_CHUNKS_Z,
     MOUNTAIN_THRESHOLD,
     // Terrain generation (fallbacks for biomes/caves/trees)
     TERRAIN_BIOME_FREQUENCY,
@@ -44,7 +41,6 @@ use bevy::log::debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TREE_SPAWN_LOGS: AtomicUsize = AtomicUsize::new(0);
-const OCEAN_EDGE_BAND: i32 = 48;
 
 // =============================================================================
 // Noise Abstraction
@@ -497,18 +493,6 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let surface_y = WATER_LEVEL;
         let mut best = WaterGenerationMetadata::none(surface_y, base_height);
 
-        if base_height <= surface_y - 2 && is_ocean_edge_column(world_x, world_z) {
-            let depth = (surface_y - base_height).max(1);
-            best = WaterGenerationMetadata {
-                kind: GeneratedWaterBodyKind::Ocean,
-                surface_y,
-                bed_y: base_height,
-                max_depth: depth,
-                local_depth: depth as f32,
-                strength: 1.0,
-            };
-        }
-
         if self.config.rivers.enabled {
             let carve_depth = self.river_carve(world_x as f32, world_z as f32);
             if carve_depth >= 0.05 {
@@ -773,13 +757,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     /// - Bedrock layer
     /// - Biome-specific terrain
     pub fn get_voxel(&self, world_x: i32, world_y: i32, world_z: i32) -> VoxelType {
-        let terrain_height = self.get_height(world_x, world_z);
-
         // Bedrock floor (always solid below this depth)
         if world_y <= BEDROCK_DEPTH {
             return VoxelType::Bedrock;
         }
 
+        let terrain_height = self.get_height(world_x, world_z);
         let biome = self.get_biome(world_x, world_z);
 
         // Dungeons disabled
@@ -928,18 +911,10 @@ fn stronger_water_metadata(
     }
 }
 
-fn is_ocean_edge_column(world_x: i32, world_z: i32) -> bool {
-    let max_x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 - 1;
-    let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - 1;
-    world_x <= OCEAN_EDGE_BAND
-        || world_z <= OCEAN_EDGE_BAND
-        || world_x >= max_x - OCEAN_EDGE_BAND
-        || world_z >= max_z - OCEAN_EDGE_BAND
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Z};
     use crate::terrain::generation::config::TerrainConfig;
 
     struct BiomeCoverageNoise;
@@ -1149,27 +1124,21 @@ mod tests {
     }
 
     #[test]
-    fn generated_ocean_remains_surface_water() {
-        let generator =
-            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
-        let mut ocean_sample = None;
+    fn low_edge_ground_does_not_create_temporary_ocean_wall() {
+        let mut config = TerrainConfig::default();
+        config.rivers.enabled = false;
+        config.water_bodies.enabled = false;
+        let generator = TerrainGenerator::with_config(FlatLowNoise, config);
+        let x = 0;
+        let z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 / 2;
+        let meta = generator.get_water_generation_metadata(x, z);
 
-        'outer: for x in 0..512 {
-            for z in 0..512 {
-                let meta = generator.get_water_generation_metadata(x, z);
-                if meta.kind == GeneratedWaterBodyKind::Ocean {
-                    ocean_sample = Some((x, z, meta));
-                    break 'outer;
-                }
-            }
-        }
-
-        let (x, z, meta) = ocean_sample.expect("expected at least one ocean/sea sample");
-        assert!(meta.is_surface_water());
+        assert!(generator.get_base_height(x, z) < WATER_LEVEL);
+        assert_ne!(meta.kind, GeneratedWaterBodyKind::Ocean);
         assert_eq!(
             generator.get_voxel(x, WATER_LEVEL, z),
-            VoxelType::Water,
-            "ocean sample should fill to water surface"
+            VoxelType::Air,
+            "low world-edge ground should not create a vertical temporary ocean wall"
         );
     }
 

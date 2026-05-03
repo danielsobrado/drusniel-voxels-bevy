@@ -28,7 +28,6 @@ use crate::constants::{
     PADDED_CHUNK_SIZE_U32,
     UV_PADDING,
     VOXEL_SIZE,
-    WATER_LEVEL,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
@@ -36,7 +35,7 @@ use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts};
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::query::QueryItem;
 use bevy::prelude::*;
@@ -160,6 +159,9 @@ pub struct WaterMeshingStats {
     pub air_boundaries_exposed: u32,
     pub air_boundaries_sealed: u32,
     pub triangles_removed_sealed: u32,
+    pub invalid_meshes_suppressed: u32,
+    pub flood_fill_boundary_hits: u32,
+    pub exposure_outside_world_rejected: u32,
 }
 
 #[derive(Default)]
@@ -234,7 +236,22 @@ impl WaterExposureCache {
         }
     }
 
-    fn air_exposed(&mut self, world: &VoxelWorld, air_pos: IVec3) -> bool {
+    fn air_exposed(
+        &mut self,
+        world: &VoxelWorld,
+        air_pos: IVec3,
+        stats: &mut WaterMeshingStats,
+    ) -> bool {
+        match world.sample_voxel_for_water_meshing(air_pos) {
+            VoxelSample::InBounds(VoxelType::Air) | VoxelSample::OutsideAboveWorld => {}
+            VoxelSample::OutsideBelowWorld
+            | VoxelSample::OutsideHorizontalWorld
+            | VoxelSample::MissingChunkInsideBounds => {
+                stats.exposure_outside_world_rejected += 1;
+                return false;
+            }
+            VoxelSample::InBounds(_) => return false,
+        }
         if self.mode == WaterAirExposureMode::AllAir {
             return true;
         }
@@ -244,8 +261,10 @@ impl WaterExposureCache {
 
         let exposed = match self.mode {
             WaterAirExposureMode::AllAir => true,
-            WaterAirExposureMode::OpenToSky => air_open_to_sky(world, air_pos),
-            WaterAirExposureMode::ExteriorConnected => air_connected_to_exterior(world, air_pos),
+            WaterAirExposureMode::OpenToSky => air_open_to_sky_with_stats(world, air_pos, stats),
+            WaterAirExposureMode::ExteriorConnected => {
+                air_connected_to_exterior_with_stats(world, air_pos, stats)
+            }
         };
         self.cache.insert(air_pos, exposed);
         exposed
@@ -306,7 +325,7 @@ fn build_face_mask(
                 Face::East | Face::West => UVec3::new(depth, v as u32, u as u32),
             };
 
-            let voxel = chunk.get(local);
+            let voxel = terrain_meshing_voxel_in_chunk(chunk, world, local);
 
             // Skip non-solid voxels (air, water handled separately)
             if !voxel.is_solid() {
@@ -756,28 +775,53 @@ fn is_in_chunk_bounds(pos: IVec3) -> bool {
         && pos.z < CHUNK_SIZE_I32
 }
 
+#[inline]
+fn terrain_meshing_voxel_at(world: &VoxelWorld, world_pos: IVec3) -> VoxelType {
+    world
+        .sample_voxel_for_terrain_meshing(world_pos)
+        .terrain_meshing_voxel()
+}
+
+#[inline]
+fn water_meshing_voxel_at(world: &VoxelWorld, world_pos: IVec3) -> VoxelType {
+    world
+        .sample_voxel_for_water_meshing(world_pos)
+        .water_meshing_voxel()
+}
+
+#[inline]
+fn terrain_meshing_voxel_in_chunk(chunk: &Chunk, world: &VoxelWorld, local: UVec3) -> VoxelType {
+    let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
+    terrain_meshing_voxel_at(world, world_pos)
+}
+
+#[inline]
+fn water_meshing_voxel_in_chunk(chunk: &Chunk, world: &VoxelWorld, local: UVec3) -> VoxelType {
+    let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
+    water_meshing_voxel_at(world, world_pos)
+}
+
 /// Gets the neighboring voxel for a face, checking chunk first then world.
-fn get_neighbor_voxel(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-) -> Option<VoxelType> {
+fn get_neighbor_voxel(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> VoxelType {
     let offset = face_offset(face);
     let neighbor_local = IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
 
     if is_in_chunk_bounds(neighbor_local) {
-        Some(chunk.get(UVec3::new(
-            neighbor_local.x as u32,
-            neighbor_local.y as u32,
-            neighbor_local.z as u32,
-        )))
+        terrain_meshing_voxel_in_chunk(
+            chunk,
+            world,
+            UVec3::new(
+                neighbor_local.x as u32,
+                neighbor_local.y as u32,
+                neighbor_local.z as u32,
+            ),
+        )
     } else {
         // Neighbor is outside chunk - check world
         let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
         let world_pos =
             chunk_origin + IVec3::new(local.x as i32, local.y as i32, local.z as i32) + offset;
-        world.get_voxel(world_pos)
+        terrain_meshing_voxel_at(world, world_pos)
     }
 }
 
@@ -789,47 +833,32 @@ fn get_neighbor_voxel(
 /// * `local` - Local coordinates within the chunk
 /// * `face` - The face direction to check
 /// * `is_visible` - Predicate to determine visibility based on neighbor voxel
-/// * `default_if_outside` - Value to return if neighbor is outside world bounds
 fn is_face_visible_with<F>(
     chunk: &Chunk,
     world: &VoxelWorld,
     local: UVec3,
     face: Face,
     is_visible: F,
-    default_if_outside: bool,
 ) -> bool
 where
     F: Fn(VoxelType) -> bool,
 {
-    match get_neighbor_voxel(chunk, world, local, face) {
-        Some(neighbor) => is_visible(neighbor),
-        None => default_if_outside,
-    }
+    is_visible(get_neighbor_voxel(chunk, world, local, face))
 }
 
 /// Solid face is visible when neighbor is transparent (air or water).
 fn is_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
-    is_face_visible_with(
-        chunk,
-        world,
-        local,
-        face,
-        |neighbor| neighbor.is_transparent(),
-        false, // Don't render faces into the void
-    )
+    is_face_visible_with(chunk, world, local, face, |neighbor| {
+        neighbor.is_transparent()
+    })
 }
 
 /// Water face is visible only when neighbor is air.
 #[allow(dead_code)]
 fn is_water_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
-    is_face_visible_with(
-        chunk,
-        world,
-        local,
-        face,
-        |neighbor| neighbor == VoxelType::Air,
-        true, // Show water at world edges
-    )
+    is_face_visible_with(chunk, world, local, face, |neighbor| {
+        neighbor == VoxelType::Air
+    })
 }
 
 fn water_face_neighbor_air_pos(
@@ -840,9 +869,8 @@ fn water_face_neighbor_air_pos(
 ) -> Option<IVec3> {
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let air_pos = chunk_origin + local.as_ivec3() + face_direction(face);
-    match world.get_voxel(air_pos) {
-        Some(VoxelType::Air) => Some(air_pos),
-        None => Some(air_pos),
+    match world.sample_voxel_for_water_meshing(air_pos) {
+        VoxelSample::InBounds(VoxelType::Air) | VoxelSample::OutsideAboveWorld => Some(air_pos),
         _ => None,
     }
 }
@@ -878,7 +906,7 @@ fn build_water_face_mask(
                 Face::East | Face::West => UVec3::new(depth, v as u32, u as u32),
             };
 
-            let voxel = chunk.get(local);
+            let voxel = water_meshing_voxel_in_chunk(chunk, world, local);
             if !voxel.is_liquid() {
                 continue;
             }
@@ -909,16 +937,28 @@ fn should_render_water_face(
 
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let world_pos = chunk_origin + local.as_ivec3();
-    if world_pos.y != WATER_LEVEL {
+    if world_pos.y < world.bounds().min_world_y {
+        stats.invalid_meshes_suppressed += 1;
         return false;
     }
 
     let Some(air_pos) = water_face_neighbor_air_pos(chunk, world, local, face) else {
+        if matches!(
+            world.sample_voxel_for_water_meshing(world_pos + face_direction(face)),
+            VoxelSample::OutsideBelowWorld
+                | VoxelSample::OutsideHorizontalWorld
+                | VoxelSample::MissingChunkInsideBounds
+        ) {
+            stats.invalid_meshes_suppressed += 1;
+        }
         return false;
     };
 
     stats.air_boundaries_total += 1;
-    let exposed = world.get_voxel(air_pos).is_none() || exposure.air_exposed(world, air_pos);
+    let exposed = matches!(
+        world.sample_voxel_for_water_meshing(air_pos),
+        VoxelSample::OutsideAboveWorld
+    ) || exposure.air_exposed(world, air_pos, stats);
     if exposed {
         stats.air_boundaries_exposed += 1;
         true
@@ -929,31 +969,63 @@ fn should_render_water_face(
     }
 }
 
-fn air_open_to_sky(world: &VoxelWorld, air_pos: IVec3) -> bool {
-    let world_top = world.world_size_chunks().y * CHUNK_SIZE_I32;
-    for y in air_pos.y..world_top {
+fn air_open_to_sky_with_stats(
+    world: &VoxelWorld,
+    air_pos: IVec3,
+    stats: &mut WaterMeshingStats,
+) -> bool {
+    let sample = world.sample_voxel_for_water_meshing(air_pos);
+    if !matches!(
+        sample,
+        VoxelSample::InBounds(VoxelType::Air) | VoxelSample::OutsideAboveWorld
+    ) {
+        if sample.is_boundary() || sample.is_missing_chunk_inside_bounds() {
+            stats.exposure_outside_world_rejected += 1;
+        }
+        return false;
+    }
+
+    let world_top = world.bounds().max_world_y;
+    for y in air_pos.y..=world_top {
         let pos = IVec3::new(air_pos.x, y, air_pos.z);
-        let Some(voxel) = world.get_voxel(pos) else {
-            return false;
-        };
-        if voxel.is_solid() {
-            return false;
+        match world.sample_voxel_for_water_meshing(pos) {
+            VoxelSample::InBounds(voxel) if voxel.is_solid() => return false,
+            VoxelSample::InBounds(_) => {}
+            VoxelSample::OutsideAboveWorld => return true,
+            VoxelSample::OutsideBelowWorld
+            | VoxelSample::OutsideHorizontalWorld
+            | VoxelSample::MissingChunkInsideBounds => {
+                stats.exposure_outside_world_rejected += 1;
+                return false;
+            }
         }
     }
     true
 }
 
-fn air_connected_to_exterior(world: &VoxelWorld, air_pos: IVec3) -> bool {
-    if air_open_to_sky(world, air_pos) {
+fn air_connected_to_exterior_with_stats(
+    world: &VoxelWorld,
+    air_pos: IVec3,
+    stats: &mut WaterMeshingStats,
+) -> bool {
+    if air_open_to_sky_with_stats(world, air_pos, stats) {
         return true;
     }
 
     const MAX_FLOOD_NODES: usize = 16_384;
     const MAX_FLOOD_RADIUS: i32 = 64;
 
-    let world_size = world.world_size_chunks() * CHUNK_SIZE_I32;
-    let min_bound = (air_pos - IVec3::splat(MAX_FLOOD_RADIUS)).max(IVec3::ZERO);
-    let max_bound = (air_pos + IVec3::splat(MAX_FLOOD_RADIUS)).min(world_size - IVec3::ONE);
+    let bounds = world.bounds();
+    let min_bound = IVec3::new(
+        (air_pos.x - MAX_FLOOD_RADIUS).max(bounds.horizontal_min.x),
+        (air_pos.y - MAX_FLOOD_RADIUS).max(bounds.min_world_y),
+        (air_pos.z - MAX_FLOOD_RADIUS).max(bounds.horizontal_min.y),
+    );
+    let max_bound = IVec3::new(
+        (air_pos.x + MAX_FLOOD_RADIUS).min(bounds.horizontal_max.x),
+        (air_pos.y + MAX_FLOOD_RADIUS).min(bounds.max_world_y),
+        (air_pos.z + MAX_FLOOD_RADIUS).min(bounds.horizontal_max.y),
+    );
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
     visited.insert(air_pos);
@@ -963,14 +1035,7 @@ fn air_connected_to_exterior(world: &VoxelWorld, air_pos: IVec3) -> bool {
         if visited.len() > MAX_FLOOD_NODES {
             return false;
         }
-        if pos.x == 0
-            || pos.y == 0
-            || pos.z == 0
-            || pos.x == world_size.x - 1
-            || pos.y == world_size.y - 1
-            || pos.z == world_size.z - 1
-            || air_open_to_sky(world, pos)
-        {
+        if pos.y >= bounds.max_world_y || air_open_to_sky_with_stats(world, pos, stats) {
             return true;
         }
 
@@ -985,11 +1050,21 @@ fn air_connected_to_exterior(world: &VoxelWorld, air_pos: IVec3) -> bool {
             let next = pos + offset;
             if next.cmplt(min_bound).any() || next.cmpgt(max_bound).any() || visited.contains(&next)
             {
+                stats.flood_fill_boundary_hits += 1;
                 continue;
             }
-            if matches!(world.get_voxel(next), Some(VoxelType::Air)) {
-                visited.insert(next);
-                queue.push_back(next);
+            match world.sample_voxel_for_water_meshing(next) {
+                VoxelSample::InBounds(VoxelType::Air) => {
+                    visited.insert(next);
+                    queue.push_back(next);
+                }
+                VoxelSample::OutsideBelowWorld
+                | VoxelSample::OutsideHorizontalWorld
+                | VoxelSample::MissingChunkInsideBounds => {
+                    stats.flood_fill_boundary_hits += 1;
+                    stats.exposure_outside_world_rejected += 1;
+                }
+                VoxelSample::InBounds(_) | VoxelSample::OutsideAboveWorld => {}
             }
         }
     }
@@ -1143,11 +1218,11 @@ fn is_solid_at_offset(chunk: &Chunk, world: &VoxelWorld, local: UVec3, offset: I
         && local_pos.z >= 0
         && local_pos.z < CHUNK_SIZE_I32
     {
-        let v = chunk.get(UVec3::new(
-            local_pos.x as u32,
-            local_pos.y as u32,
-            local_pos.z as u32,
-        ));
+        let v = terrain_meshing_voxel_in_chunk(
+            chunk,
+            world,
+            UVec3::new(local_pos.x as u32, local_pos.y as u32, local_pos.z as u32),
+        );
         return v.is_solid();
     }
 
@@ -1156,11 +1231,7 @@ fn is_solid_at_offset(chunk: &Chunk, world: &VoxelWorld, local: UVec3, offset: I
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
     let world_pos = chunk_origin + local_pos;
 
-    if let Some(v) = world.get_voxel(world_pos) {
-        v.is_solid()
-    } else {
-        false
-    }
+    terrain_meshing_voxel_at(world, world_pos).is_solid()
 }
 
 /// Get AO values for the 4 vertices of a face
@@ -1847,8 +1918,8 @@ fn water_depth_debug_color(world: &VoxelWorld, surface_pos: IVec3) -> [f32; 4] {
     let mut depth = 0usize;
     loop {
         let sample_pos = surface_pos - IVec3::Y * depth as i32;
-        match world.get_voxel(sample_pos) {
-            Some(voxel) if voxel.is_liquid() => depth += 1,
+        match world.sample_voxel_for_water_meshing(sample_pos) {
+            VoxelSample::InBounds(voxel) if voxel.is_liquid() => depth += 1,
             _ => break,
         }
     }
@@ -1954,13 +2025,9 @@ fn sample_voxel_solid(
     let world_pos = chunk_origin + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
 
     let voxel = if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
-        chunk.get(UVec3::new(px - 1, py - 1, pz - 1))
+        terrain_meshing_voxel_in_chunk(chunk, world, UVec3::new(px - 1, py - 1, pz - 1))
     } else {
-        match world.get_voxel(world_pos) {
-            Some(voxel) => voxel,
-            None if world.in_bounds(world_pos) => VoxelType::Rock,
-            None => VoxelType::Air,
-        }
+        terrain_meshing_voxel_at(world, world_pos)
     };
 
     // Treat water as solid for SDF so we don't generate surfaces at solid-water boundaries
@@ -2018,7 +2085,7 @@ pub(crate) fn empty_chunk_has_surface_nets_boundary_surface(
         for a in 0..CHUNK_SIZE_I32 {
             for b in 0..CHUNK_SIZE_I32 {
                 let pos = plane_origin + axis_a * a + axis_b * b;
-                if world.get_voxel(pos).is_some_and(|voxel| voxel.is_solid()) {
+                if terrain_meshing_voxel_at(world, pos).is_solid() {
                     return true;
                 }
             }
@@ -2047,7 +2114,10 @@ pub(crate) fn count_missing_in_bounds_boundary_neighbors(
                     continue;
                 }
                 let pos = origin + IVec3::new(x, y, z);
-                if world.in_bounds(pos) && world.get_voxel(pos).is_none() {
+                if world
+                    .sample_voxel_for_terrain_meshing(pos)
+                    .is_missing_chunk_inside_bounds()
+                {
                     missing += 1;
                 }
             }
@@ -2127,11 +2197,8 @@ fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
 /// Sample voxel at a world position, returns true if solid or liquid.
 /// Used for LOD sampling where coordinates may be outside the chunk.
 fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
-    match world.get_voxel(world_pos) {
-        Some(voxel) => voxel.is_solid() || voxel.is_liquid(),
-        None if world.in_bounds(world_pos) => true,
-        None => false, // Outside world bounds = air
-    }
+    let voxel = terrain_meshing_voxel_at(world, world_pos);
+    voxel.is_solid() || voxel.is_liquid()
 }
 
 /// Generate an SDF array at LOD1 (half resolution) with multi-sample averaging.
@@ -2286,13 +2353,13 @@ fn get_voxel_for_water_sdf(
     let world_pos = chunk_origin + IVec3::new(px - 1, py - 1, pz - 1);
 
     if px >= 1 && px <= 16 && py >= 1 && py <= 16 && pz >= 1 && pz <= 16 {
-        chunk.get(UVec3::new(
-            (px - 1) as u32,
-            (py - 1) as u32,
-            (pz - 1) as u32,
-        ))
+        water_meshing_voxel_in_chunk(
+            chunk,
+            world,
+            UVec3::new((px - 1) as u32, (py - 1) as u32, (pz - 1) as u32),
+        )
     } else {
-        world.get_voxel(world_pos).unwrap_or(VoxelType::Air)
+        water_meshing_voxel_at(world, world_pos)
     }
 }
 
@@ -2301,6 +2368,7 @@ fn water_sdf_value_for_voxel(
     world: &VoxelWorld,
     world_pos: IVec3,
     exposure: &mut WaterExposureCache,
+    stats: &mut WaterMeshingStats,
 ) -> f32 {
     if voxel.is_liquid() || voxel.is_solid() {
         return -1.0;
@@ -2309,7 +2377,7 @@ fn water_sdf_value_for_voxel(
         return -1.0;
     }
 
-    if exposure.air_exposed(world, world_pos) {
+    if exposure.air_exposed(world, world_pos, stats) {
         1.0
     } else {
         -1.0
@@ -2328,6 +2396,7 @@ fn generate_water_sdf(
     let chunk_pos = chunk.position();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
     let mut exposure = WaterExposureCache::new(water_exposure_mode);
+    let mut stats = WaterMeshingStats::default();
 
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
@@ -2338,7 +2407,7 @@ fn generate_water_sdf(
         let voxel = get_voxel_for_water_sdf(chunk, world, chunk_origin, px, py, pz);
         let world_pos = chunk_origin + IVec3::new(px - 1, py - 1, pz - 1);
 
-        sdf[i] = water_sdf_value_for_voxel(voxel, world, world_pos, &mut exposure);
+        sdf[i] = water_sdf_value_for_voxel(voxel, world, world_pos, &mut exposure, &mut stats);
     }
 
     sdf
@@ -2403,14 +2472,16 @@ fn compute_vertex_material_weights(
                 let lz = base_z + dz;
 
                 let voxel = if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
-                    chunk.get(UVec3::new(lx as u32, ly as u32, lz as u32))
+                    terrain_meshing_voxel_in_chunk(
+                        chunk,
+                        world,
+                        UVec3::new(lx as u32, ly as u32, lz as u32),
+                    )
                 } else {
                     let wx = chunk_origin.x + lx;
                     let wy = chunk_origin.y + ly;
                     let wz = chunk_origin.z + lz;
-                    world
-                        .get_voxel(IVec3::new(wx, wy, wz))
-                        .unwrap_or(VoxelType::Air)
+                    terrain_meshing_voxel_at(world, IVec3::new(wx, wy, wz))
                 };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
@@ -2469,14 +2540,16 @@ fn compute_vertex_material_weights_lod(
                 let lz = base_z + dz;
 
                 let voxel = if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
-                    chunk.get(UVec3::new(lx as u32, ly as u32, lz as u32))
+                    terrain_meshing_voxel_in_chunk(
+                        chunk,
+                        world,
+                        UVec3::new(lx as u32, ly as u32, lz as u32),
+                    )
                 } else {
                     let wx = chunk_origin.x + lx;
                     let wy = chunk_origin.y + ly;
                     let wz = chunk_origin.z + lz;
-                    world
-                        .get_voxel(IVec3::new(wx, wy, wz))
-                        .unwrap_or(VoxelType::Air)
+                    terrain_meshing_voxel_at(world, IVec3::new(wx, wy, wz))
                 };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
@@ -2664,9 +2737,12 @@ pub fn generate_chunk_mesh_surface_nets(
             world_pos.y.floor() as i32,
             world_pos.z.floor() as i32,
         );
-        match world.get_voxel(voxel_pos) {
-            Some(voxel) if voxel.is_solid() => -1.0,
-            _ => 1.0,
+        match world.sample_voxel_for_terrain_meshing(voxel_pos) {
+            VoxelSample::InBounds(voxel) if voxel.is_solid() => -1.0,
+            VoxelSample::OutsideBelowWorld
+            | VoxelSample::OutsideHorizontalWorld
+            | VoxelSample::MissingChunkInsideBounds => -1.0,
+            VoxelSample::InBounds(_) | VoxelSample::OutsideAboveWorld => 1.0,
         }
     };
 
@@ -3373,6 +3449,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::WATER_LEVEL;
     use crate::rendering::ao_config::BakedAoConfig;
 
     fn ao_config() -> BakedAoConfig {
@@ -3408,6 +3485,16 @@ mod tests {
 
     fn meshed_water(world: &VoxelWorld) -> ChunkMeshResult {
         let chunk = world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+        generate_chunk_mesh(
+            chunk,
+            world,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        )
+    }
+
+    fn meshed_chunk(world: &VoxelWorld, chunk_pos: IVec3) -> ChunkMeshResult {
+        let chunk = world.get_chunk(chunk_pos).unwrap();
         generate_chunk_mesh(
             chunk,
             world,
@@ -3523,6 +3610,52 @@ mod tests {
     }
 
     #[test]
+    fn valid_surface_lake_above_floor_creates_water_mesh() {
+        let mut world = world_with_vertical_chunks();
+        let lake_y = WATER_LEVEL + 4;
+        world.set_voxel(IVec3::new(8, lake_y, 8), VoxelType::Water);
+
+        let mesh = meshed_water(&world);
+
+        assert!(!mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
+    }
+
+    #[test]
+    fn invalid_below_floor_water_creates_no_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        let chunk = world.get_chunk_mut(IVec3::ZERO).unwrap();
+        chunk.set(UVec3::new(8, 0, 8), VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, IVec3::ZERO);
+
+        assert!(mesh.water.indices.is_empty());
+    }
+
+    #[test]
+    fn water_exposure_does_not_leak_below_world_floor() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        let air_pos = IVec3::new(8, 1, 8);
+        for offset in [IVec3::X, -IVec3::X, IVec3::Y, IVec3::Z, -IVec3::Z] {
+            world.set_voxel(air_pos + offset, VoxelType::Rock);
+        }
+
+        let mut stats = WaterMeshingStats::default();
+        let exposed = air_connected_to_exterior_with_stats(&world, air_pos, &mut stats);
+
+        assert!(!exposed);
+
+        let mut stats = WaterMeshingStats::default();
+        let exposed = air_connected_to_exterior_with_stats(
+            &world,
+            IVec3::new(air_pos.x, -1, air_pos.z),
+            &mut stats,
+        );
+        assert!(!exposed);
+        assert!(stats.exposure_outside_world_rejected > 0);
+    }
+
+    #[test]
     fn sealed_air_is_inside_water_sdf() {
         let mut world = world_with_vertical_chunks();
         world.set_voxel(IVec3::new(8, WATER_LEVEL, 8), VoxelType::Water);
@@ -3595,11 +3728,11 @@ mod tests {
 
     #[test]
     fn surface_nets_empty_chunk_above_water_only_does_not_need_terrain_mesh() {
-        let mut world = world_with_test_chunks(IVec3::new(1, 3, 1));
-        world.set_voxel(IVec3::new(8, 31, 8), VoxelType::Water);
+        let mut world = world_with_test_chunks(IVec3::new(3, 3, 3));
+        world.set_voxel(IVec3::new(24, 31, 24), VoxelType::Water);
 
         assert!(
-            !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(0, 2, 0)),
+            !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 2, 1)),
             "water-only boundaries should remain water mesh responsibility, not terrain mesh"
         );
     }
@@ -3636,6 +3769,35 @@ mod tests {
         assert!(
             mesh_has_vertical_hit(&upper_mesh.solid, IVec3::new(0, 16, 0), 8.5, 8.5),
             "air chunk above a solid top boundary must generate the owned boundary surface"
+        );
+    }
+
+    #[test]
+    fn voxel_water_sdf_treats_outside_below_world_as_solid_boundary() {
+        let world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+
+        assert_eq!(
+            get_voxel_for_water_sdf(chunk, &world, chunk_origin, 8, 0, 8),
+            VoxelType::Bedrock
+        );
+    }
+
+    #[test]
+    fn voxel_terrain_meshing_does_not_open_bottom_face_against_world_floor() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        world.set_voxel(IVec3::new(8, 1, 8), VoxelType::Rock);
+        let mesh = generate_chunk_mesh(
+            world.get_chunk(IVec3::ZERO).unwrap(),
+            &world,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+
+        assert!(
+            !mesh.solid.normals.iter().any(|normal| normal[1] < -0.9),
+            "terrain should not render a downward face into the world floor boundary"
         );
     }
 }

@@ -6,7 +6,7 @@
 use crate::constants::{ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS, INTERACTION_RANGE, RAY_STEP};
 use crate::props::Prop;
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::*;
 
 /// Resource tracking the currently targeted block.
@@ -77,7 +77,7 @@ pub fn raycast_blocks(
         );
 
         if block_pos != prev_block {
-            if let Some(voxel) = world.get_voxel(block_pos) {
+            if let VoxelSample::InBounds(voxel) = world.sample_voxel_for_interaction(block_pos) {
                 if voxel.is_solid() {
                     // Calculate which face we hit based on direction
                     let normal = prev_block - block_pos;
@@ -106,7 +106,7 @@ pub fn update_targeted_block(
         {
             targeted.position = Some(block_pos);
             targeted.normal = Some(normal);
-            targeted.voxel_type = world.get_voxel(block_pos);
+            targeted.voxel_type = world.sample_voxel_for_interaction(block_pos).voxel();
         } else {
             targeted.position = None;
             targeted.normal = None;

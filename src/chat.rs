@@ -1,8 +1,16 @@
+use avian3d::prelude::LinearVelocity;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
 use crate::menu::PauseMenuState;
 use crate::network::NetworkSession;
+use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::player::{
+    Player, PlayerSpawnState, SpawnColliderReadiness, find_nearest_valid_spawn,
+    run_random_spawn_test,
+};
+use crate::voxel::meshing::ChunkMesh;
+use crate::voxel::world::VoxelWorld;
 
 const MAX_CHAT_MESSAGES: usize = 10;
 
@@ -159,6 +167,10 @@ fn submit_chat_message(
     keys: Res<ButtonInput<KeyCode>>,
     mut chat_state: ResMut<ChatState>,
     network: Res<NetworkSession>,
+    world: Option<Res<VoxelWorld>>,
+    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<Player>>,
+    mut spawn_state: Option<ResMut<PlayerSpawnState>>,
 ) {
     if !chat_state.active || !keys.just_pressed(KeyCode::Enter) {
         return;
@@ -169,11 +181,25 @@ fn submit_chat_message(
         return;
     }
 
+    let submitted = chat_state.buffer.trim().to_string();
+    if process_debug_command(
+        &submitted,
+        &mut chat_state,
+        world.as_deref(),
+        &collider_query,
+        &mut player_query,
+        spawn_state.as_deref_mut(),
+    ) {
+        chat_state.buffer.clear();
+        chat_state.active = false;
+        return;
+    }
+
     if !network.is_connected() {
         chat_state.push_system("Cannot send chat: not connected");
     } else {
         let user = chat_state.username.clone();
-        let content = chat_state.buffer.clone();
+        let content = submitted;
         chat_state.push_message(ChatMessage { user, content });
     }
 
@@ -222,4 +248,168 @@ impl ChatMessage {
             content: content.into(),
         }
     }
+}
+
+fn process_debug_command(
+    submitted: &str,
+    chat_state: &mut ChatState,
+    world: Option<&VoxelWorld>,
+    collider_query: &Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    player_query: &mut Query<(&mut Transform, Option<&mut LinearVelocity>), With<Player>>,
+    spawn_state: Option<&mut PlayerSpawnState>,
+) -> bool {
+    let command = submitted.strip_prefix('/').unwrap_or(submitted);
+    let mut parts = command.split_whitespace();
+    let Some(name) = parts.next() else {
+        return false;
+    };
+    match name {
+        "random-spawn-test" => {
+            let sample_count = parts
+                .next()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(100);
+            let Some(world) = world else {
+                chat_state.push_system("random-spawn-test failed: voxel world is unavailable");
+                return true;
+            };
+
+            let report = run_random_spawn_test(world, sample_count);
+            chat_state.push_system(format!(
+                "random-spawn-test {}: accepted={} rejected underground={} water={} missing={} no_headroom={} collider={} other={}",
+                report.candidates_tested,
+                report.accepted,
+                report.rejected_underground,
+                report.rejected_water,
+                report.rejected_missing_chunk,
+                report.rejected_no_headroom,
+                report.rejected_collider_not_ready,
+                report.rejected_other,
+            ));
+            info!(
+                "random-spawn-test {}: accepted={} rejected_underground={} rejected_water={} rejected_missing_chunk={} rejected_no_headroom={} rejected_collider={} rejected_other={}",
+                report.candidates_tested,
+                report.accepted,
+                report.rejected_underground,
+                report.rejected_water,
+                report.rejected_missing_chunk,
+                report.rejected_no_headroom,
+                report.rejected_collider_not_ready,
+                report.rejected_other,
+            );
+            true
+        }
+        "teleport-to-valid-surface" => {
+            teleport_player_to_valid_surface(
+                chat_state,
+                world,
+                collider_query,
+                player_query,
+                spawn_state,
+                TeleportSurfaceMode::Nearest,
+            );
+            true
+        }
+        "teleport-random-valid-surface" => {
+            teleport_player_to_valid_surface(
+                chat_state,
+                world,
+                collider_query,
+                player_query,
+                spawn_state,
+                TeleportSurfaceMode::Random,
+            );
+            true
+        }
+        "teleport-world-center-surface" => {
+            teleport_player_to_valid_surface(
+                chat_state,
+                world,
+                collider_query,
+                player_query,
+                spawn_state,
+                TeleportSurfaceMode::WorldCenter,
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TeleportSurfaceMode {
+    Nearest,
+    Random,
+    WorldCenter,
+}
+
+fn teleport_player_to_valid_surface(
+    chat_state: &mut ChatState,
+    world: Option<&VoxelWorld>,
+    collider_query: &Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    player_query: &mut Query<(&mut Transform, Option<&mut LinearVelocity>), With<Player>>,
+    spawn_state: Option<&mut PlayerSpawnState>,
+    mode: TeleportSurfaceMode,
+) {
+    let Some(world) = world else {
+        chat_state.push_system("teleport failed: voxel world is unavailable");
+        return;
+    };
+    let Ok((mut transform, velocity)) = player_query.single_mut() else {
+        chat_state.push_system("teleport failed: player entity is unavailable");
+        return;
+    };
+
+    let bounds = world.bounds();
+    let origin = match mode {
+        TeleportSurfaceMode::Nearest => transform.translation.xz(),
+        TeleportSurfaceMode::WorldCenter => Vec2::new(
+            (bounds.horizontal_min.x + bounds.horizontal_max.x) as f32 * 0.5,
+            (bounds.horizontal_min.y + bounds.horizontal_max.y) as f32 * 0.5,
+        ),
+        TeleportSurfaceMode::Random => random_world_xz(world),
+    };
+    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+    let mut report = default();
+    let Some(spawn) = find_nearest_valid_spawn(world, origin, &readiness, false, &mut report)
+    else {
+        chat_state.push_system(format!(
+            "teleport failed: no valid surface near ({:.1}, {:.1}) after {} candidates",
+            origin.x, origin.y, report.candidates_tested
+        ));
+        return;
+    };
+
+    transform.translation = spawn.position;
+    if let Some(mut velocity) = velocity {
+        velocity.0 = Vec3::ZERO;
+    }
+    if let Some(state) = spawn_state {
+        state.last_safe_grounded_position = Some(spawn.position);
+        state.last_safe_ground_valid = true;
+    }
+    chat_state.push_system(format!(
+        "teleported to valid surface at ({:.1}, {:.1}, {:.1})",
+        spawn.position.x, spawn.position.y, spawn.position.z
+    ));
+    info!(
+        "Debug teleport to valid surface: position={:?} surface={:?} candidates={}",
+        spawn.position, spawn.surface_block, report.candidates_tested
+    );
+}
+
+fn random_world_xz(world: &VoxelWorld) -> Vec2 {
+    let bounds = world.bounds();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0xD06D_F00D);
+    let mut seed = nanos ^ 0xA5A5_5A5A_1234_5678;
+    let x_span = (bounds.horizontal_max.x - bounds.horizontal_min.x + 1).max(1) as u64;
+    let z_span = (bounds.horizontal_max.y - bounds.horizontal_min.y + 1).max(1) as u64;
+    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    let x = bounds.horizontal_min.x + (seed % x_span) as i32;
+    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    let z = bounds.horizontal_min.y + (seed % z_span) as i32;
+    Vec2::new(x as f32, z as f32)
 }
