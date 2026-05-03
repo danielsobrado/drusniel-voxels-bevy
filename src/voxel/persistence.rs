@@ -12,6 +12,8 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use thiserror::Error;
 
+use crate::terrain::generation::config::terrain_config_fingerprint;
+
 /// Default path for world save files.
 const WORLD_SAVE_PATH: &str = "world_data.bin";
 
@@ -29,6 +31,12 @@ pub enum PersistenceError {
     /// Failed to serialize world data.
     #[error("Failed to serialize world data: {0}")]
     Serialization(#[from] bincode::Error),
+
+    /// Saved world was generated with a different terrain generation config.
+    #[error(
+        "Saved world terrain fingerprint mismatch: saved {saved:#018x}, current {current:#018x}"
+    )]
+    TerrainFingerprintMismatch { saved: u64, current: u64 },
 
     /// No saved world exists at the expected path.
     #[error("No saved world found at '{0}'")]
@@ -48,6 +56,8 @@ pub enum PersistenceError {
 pub struct WorldData {
     /// Size of the world in chunks.
     pub world_size_chunks: IVec3,
+    /// Fingerprint of terrain-generation rules used when the world was generated.
+    pub terrain_config_fingerprint: u64,
     /// All chunk data.
     pub chunks: Vec<ChunkData>,
 }
@@ -71,9 +81,10 @@ pub fn save_world(world: &VoxelWorld) -> Result<(), PersistenceError> {
     bincode::serialize_into(writer, &data)?;
 
     info!(
-        "World saved to {} ({} chunks)",
+        "World saved to {} ({} chunks, terrain fp {:#018x})",
         WORLD_SAVE_PATH,
-        data.chunks.len()
+        data.chunks.len(),
+        data.terrain_config_fingerprint
     );
     Ok(())
 }
@@ -96,11 +107,19 @@ pub fn load_world() -> Result<VoxelWorld, PersistenceError> {
     let reader = BufReader::new(file);
 
     let data: WorldData = bincode::deserialize_from(reader)?;
+    let current_fingerprint = terrain_config_fingerprint();
+    if data.terrain_config_fingerprint != current_fingerprint {
+        return Err(PersistenceError::TerrainFingerprintMismatch {
+            saved: data.terrain_config_fingerprint,
+            current: current_fingerprint,
+        });
+    }
 
     info!(
-        "World loaded from {} ({} chunks)",
+        "World loaded from {} ({} chunks, terrain fp {:#018x})",
         WORLD_SAVE_PATH,
-        data.chunks.len()
+        data.chunks.len(),
+        data.terrain_config_fingerprint
     );
 
     Ok(VoxelWorld::from_data(data))

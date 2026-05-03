@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::props::PropType;
+use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::types::VoxelType;
 
 /// Current schema version for migration support
@@ -264,6 +265,9 @@ pub struct PropManifest {
     pub version: String,
     /// World seed used for generation
     pub world_seed: u64,
+    /// Fingerprint of terrain-generation rules used when props were placed.
+    #[serde(default)]
+    pub terrain_config_fingerprint: u64,
     /// When props were initially generated (ISO 8601)
     pub generated_at: String,
     /// Map of chunk keys to manifest entries
@@ -278,10 +282,15 @@ impl PropManifest {
         Self {
             version: SCHEMA_VERSION.to_string(),
             world_seed,
+            terrain_config_fingerprint: terrain_config_fingerprint(),
             generated_at: chrono_now(),
             chunk_files: HashMap::new(),
             metadata: PropMetadata::default(),
         }
+    }
+
+    pub fn matches_current_terrain(&self) -> bool {
+        self.terrain_config_fingerprint == terrain_config_fingerprint()
     }
 
     /// Generate a chunk key from position

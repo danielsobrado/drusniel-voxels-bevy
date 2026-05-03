@@ -26,6 +26,9 @@ use crate::constants::{
     DEFAULT_CULL_DISTANCE,
     // LOD
     DEFAULT_HIGH_DETAIL_DISTANCE,
+    DEFAULT_WORLD_CHUNKS_X,
+    DEFAULT_WORLD_CHUNKS_Y,
+    DEFAULT_WORLD_CHUNKS_Z,
     INTEGRATED_GPU_CULL_DISTANCE,
     INTEGRATED_GPU_HIGH_DETAIL_DISTANCE,
     LOD_HYSTERESIS,
@@ -446,7 +449,11 @@ impl Plugin for VoxelPlugin {
             TerrainHoleProbePlugin,
         ));
 
-        let size_chunks = IVec3::new(32, 4, 32);
+        let size_chunks = IVec3::new(
+            DEFAULT_WORLD_CHUNKS_X,
+            DEFAULT_WORLD_CHUNKS_Y,
+            DEFAULT_WORLD_CHUNKS_Z,
+        );
 
         app.insert_resource(WorldConfig {
             size_chunks,
@@ -580,6 +587,14 @@ fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistenc
     info!("Loading saved world from disk...");
     match persistence::load_world() {
         Ok(loaded_world) => {
+            if loaded_world.world_size_chunks() != world.world_size_chunks() {
+                warn!(
+                    "Saved world size {:?} does not match configured world size {:?}; regenerating",
+                    loaded_world.world_size_chunks(),
+                    world.world_size_chunks()
+                );
+                return false;
+            }
             *world = loaded_world;
             info!("World loaded successfully!");
             true

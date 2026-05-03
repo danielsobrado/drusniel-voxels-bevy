@@ -1,4 +1,5 @@
 use crate::constants::{BEDROCK_DEPTH, CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WORLD_KILL_Y};
+use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::Chunk;
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
@@ -418,6 +419,7 @@ impl VoxelWorld {
     pub fn to_data(&self) -> WorldData {
         WorldData {
             world_size_chunks: self.world_size_chunks,
+            terrain_config_fingerprint: terrain_config_fingerprint(),
             chunks: self.chunks.values().map(|c| c.to_data()).collect(),
         }
     }

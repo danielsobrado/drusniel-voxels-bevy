@@ -38,7 +38,10 @@ pub const PADDED_CHUNK_SIZE_U32: u32 = PADDED_CHUNK_SIZE as u32;
 pub const DEFAULT_WORLD_CHUNKS_X: i32 = 32;
 
 /// Default world size in chunks along Y axis (vertical).
-pub const DEFAULT_WORLD_CHUNKS_Y: i32 = 4;
+///
+/// Terrain config allows mountains up to ~88 voxels, so the world must extend
+/// above that or high terrain clips into flat tops and saved prop positions drift.
+pub const DEFAULT_WORLD_CHUNKS_Y: i32 = 6;
 
 /// Default world size in chunks along Z axis.
 pub const DEFAULT_WORLD_CHUNKS_Z: i32 = 32;

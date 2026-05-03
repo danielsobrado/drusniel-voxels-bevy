@@ -1,8 +1,8 @@
 terrain:
-  # Vertical range (world is 4 chunks = 64 voxels tall, Y: 0-63)
+  # Vertical range (world is 6 chunks = 96 voxels tall, Y: 0-95)
   height:
     min: -64          # Matches the historical Rust default terrain range.
-    max: 180
+    max: 88
     sea_level: 0
 
   # Base continental shape

@@ -137,8 +137,16 @@ pub fn spawn_props_on_terrain(
     let manifest = if saved_props_exist() {
         match load_manifest() {
             Ok(m) => {
-                info!("Loaded existing prop manifest");
-                m
+                if m.matches_current_terrain() {
+                    info!("Loaded existing prop manifest");
+                    m
+                } else {
+                    warn!("Prop manifest terrain fingerprint mismatch; clearing stale prop cache");
+                    if let Err(e) = delete_all_props() {
+                        warn!("Failed to clear stale prop cache: {}", e);
+                    }
+                    PropManifest::new(0)
+                }
             }
             Err(e) => {
                 warn!("Failed to load prop manifest: {}, regenerating props", e);

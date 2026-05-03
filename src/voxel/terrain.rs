@@ -421,7 +421,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         ) * cfg.continent.amplitude;
 
         // Mountain mask - determines where mountains appear (using lower frequency)
-        let mountain_mask = self.fbm_configurable(
+        let mountain_signal = self.fbm_configurable(
             x,
             z,
             cfg.mountains.scale * 0.25, // Lower frequency for mountain regions
@@ -429,10 +429,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             0.5,
             2.0,
         );
-        let mountain_mask = (mountain_mask + 0.3).clamp(0.0, 1.0);
 
-        // Ridged mountains, masked by mountain regions
-        let mountains = self.ridged_noise(x, z) * mountain_mask;
+        // Ridged mountains, masked by mountain regions. The broad uplift keeps
+        // mountain ranges tall even when the sharp ridge sample is between peaks.
+        let mountain_region = (mountain_signal * 3.0).clamp(0.0, 1.0).powf(1.15);
+        let mountains = self.ridged_noise(x, z) * mountain_region;
+        let mountain_uplift = cfg.mountains.amplitude * 1.1 * mountain_region;
 
         // Hills everywhere
         let hills = self.fbm_configurable(
@@ -454,7 +456,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             cfg.detail.lacunarity,
         ) * cfg.detail.amplitude;
 
-        let height = continent + mountains + hills + detail;
+        let height = continent + mountains + mountain_uplift + hills + detail;
 
         // Clamp to world bounds from config
         height.clamp(cfg.height.min, cfg.height.max) as i32
@@ -914,7 +916,9 @@ fn stronger_water_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Z};
+    use crate::constants::{
+        CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z,
+    };
     use crate::terrain::generation::config::TerrainConfig;
 
     struct BiomeCoverageNoise;
@@ -982,6 +986,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn default_terrain_still_produces_tall_mountain_relief() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut min_height = i32::MAX;
+        let mut max_height = i32::MIN;
+
+        for x in (0..512).step_by(4) {
+            for z in (0..512).step_by(4) {
+                let height = generator.get_base_height(x, z);
+                min_height = min_height.min(height);
+                max_height = max_height.max(height);
+            }
+        }
+
+        assert!(
+            max_height >= 80,
+            "expected tall mountain peaks, got max height {max_height}"
+        );
+        assert!(
+            max_height < DEFAULT_WORLD_CHUNKS_Y * CHUNK_SIZE_I32,
+            "world vertical size should contain generated peaks, max height {max_height}"
+        );
+        assert!(
+            max_height - min_height >= 70,
+            "expected mountain/valley relief, got range {}..{}",
+            min_height,
+            max_height
+        );
     }
 
     #[test]

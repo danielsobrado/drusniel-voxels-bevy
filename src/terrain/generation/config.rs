@@ -2,6 +2,9 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
+pub const TERRAIN_GENERATION_VERSION: u64 = 3;
+
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Deserialize)]
 pub struct TerrainConfigFile {
@@ -156,7 +159,7 @@ impl Default for TerrainConfig {
         Self {
             height: HeightConfig {
                 min: -64.0,
-                max: 180.0,
+                max: 88.0,
                 sea_level: 0.0,
             },
             continent: NoiseLayer {
@@ -206,9 +209,9 @@ impl TerrainConfig {
 
     /// Load from default path, falling back to defaults if file not found
     pub fn load_or_default() -> Self {
-        match Self::load("assets/config/terrain_generation.yaml") {
+        match Self::load(TERRAIN_CONFIG_PATH) {
             Ok(config) => {
-                info!("Loaded terrain config from assets/config/terrain_generation.yaml");
+                info!("Loaded terrain config from {}", TERRAIN_CONFIG_PATH);
                 config
             }
             Err(e) => {
@@ -219,13 +222,49 @@ impl TerrainConfig {
     }
 }
 
+pub fn terrain_config_fingerprint() -> u64 {
+    let mut hash = Fnv1a64::default();
+    hash.write_u64(TERRAIN_GENERATION_VERSION);
+    match std::fs::read(TERRAIN_CONFIG_PATH) {
+        Ok(bytes) => hash.write(&bytes),
+        Err(_) => hash.write(b"default-terrain-config"),
+    }
+    hash.finish()
+}
+
+#[derive(Clone, Copy)]
+struct Fnv1a64(u64);
+
+impl Default for Fnv1a64 {
+    fn default() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+}
+
+impl Fnv1a64 {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn finish(self) -> u64 {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn terrain_yaml_preserves_historical_mountain_scale() {
-        let loaded = TerrainConfig::load("assets/config/terrain_generation.yaml")
+        let loaded = TerrainConfig::load(TERRAIN_CONFIG_PATH)
             .expect("terrain_generation.yaml should deserialize");
         let defaults = TerrainConfig::default();
 
