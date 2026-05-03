@@ -100,6 +100,16 @@ fn sum_gerstner_waves(
     base_amplitude: f32,
     wave_scale: f32,
 ) -> WaveResult {
+    return sum_gerstner_waves_limited(position, time, base_amplitude, wave_scale, 4u);
+}
+
+fn sum_gerstner_waves_limited(
+    position: vec2<f32>,
+    time: f32,
+    base_amplitude: f32,
+    wave_scale: f32,
+    wave_count: u32,
+) -> WaveResult {
     var result: WaveResult;
     result.position = vec3<f32>(0.0);
     result.normal = vec3<f32>(0.0, 1.0, 0.0);
@@ -140,25 +150,42 @@ fn sum_gerstner_waves(
     wave4.amplitude = base_amplitude * 0.15;
     wave4.speed = 0.8;
     
-    // Sum all waves
-    let w1 = gerstner_wave(position, time, wave1);
-    let w2 = gerstner_wave(position, time, wave2);
-    let w3 = gerstner_wave(position, time, wave3);
-    let w4 = gerstner_wave(position, time, wave4);
-    
-    result.position = w1.position + w2.position + w3.position + w4.position;
-    
-    // Average normals (should be weighted by amplitude)
-    result.normal = normalize(
-        w1.normal * wave1.amplitude +
-        w2.normal * wave2.amplitude +
-        w3.normal * wave3.amplitude +
-        w4.normal * wave4.amplitude
-    );
-    
-    // Max foam from all waves
-    result.foam = max(max(w1.foam, w2.foam), max(w3.foam, w4.foam));
-    
+    var normal_sum = vec3<f32>(0.0);
+    var normal_weight = 0.0;
+
+    if (wave_count >= 1u) {
+        let w1 = gerstner_wave(position, time, wave1);
+        result.position += w1.position;
+        normal_sum += w1.normal * wave1.amplitude;
+        normal_weight += wave1.amplitude;
+        result.foam = max(result.foam, w1.foam);
+    }
+    if (wave_count >= 2u) {
+        let w2 = gerstner_wave(position, time, wave2);
+        result.position += w2.position;
+        normal_sum += w2.normal * wave2.amplitude;
+        normal_weight += wave2.amplitude;
+        result.foam = max(result.foam, w2.foam);
+    }
+    if (wave_count >= 3u) {
+        let w3 = gerstner_wave(position, time, wave3);
+        result.position += w3.position;
+        normal_sum += w3.normal * wave3.amplitude;
+        normal_weight += wave3.amplitude;
+        result.foam = max(result.foam, w3.foam);
+    }
+    if (wave_count >= 4u) {
+        let w4 = gerstner_wave(position, time, wave4);
+        result.position += w4.position;
+        normal_sum += w4.normal * wave4.amplitude;
+        normal_weight += wave4.amplitude;
+        result.foam = max(result.foam, w4.foam);
+    }
+
+    if (normal_weight > 0.0001) {
+        result.normal = normalize(normal_sum);
+    }
+
     return result;
 }
 

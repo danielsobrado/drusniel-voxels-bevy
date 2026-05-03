@@ -61,6 +61,7 @@ use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
+use crate::rendering::water::WaterConfig;
 use crate::rendering::water_reflection::{REFLECTION_RENDER_LAYER, WATER_MASK_RENDER_LAYER};
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{
@@ -514,6 +515,19 @@ const DEBUG_FLAT_WORLD: bool = false;
 ///
 /// Returns `true` if loading succeeded, `false` otherwise.
 fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistence) -> bool {
+    if env_flag("VOXEL_REGENERATE_WATER_BODIES")
+        || env_flag("VOXEL_FORCE_REGENERATE_WORLD")
+        || env_flag("VOXEL_FORCE_REGENERATE_WATER")
+    {
+        match persistence::delete_saved_world() {
+            Ok(()) => info!(
+                "Water body regeneration requested; deleted saved world so terrain can regenerate"
+            ),
+            Err(e) => warn!("Failed to delete saved world for water regeneration: {}", e),
+        }
+        return false;
+    }
+
     if persistence_settings.force_regenerate {
         return false;
     }
@@ -1113,10 +1127,10 @@ fn mesh_dirty_chunks_system(
         chunk_stats.water_triangles_removed_sealed +=
             mesh_result.water_stats.triangles_removed_sealed as u64;
 
-        let water_max_depth = if mesh_result.water.is_empty() {
-            0
+        let water_depth_detail = if mesh_result.water.is_empty() {
+            WaterChunkDepthDetail::default()
         } else {
-            compute_water_max_depth(&world, chunk_pos)
+            compute_water_chunk_depth_detail(&world, chunk_pos)
         };
 
         // Step 2: Update chunk state using mutable borrow
@@ -1265,18 +1279,24 @@ fn mesh_dirty_chunks_system(
                         WaterMesh,
                         WaterMeshDetail {
                             triangle_count: water_triangle_count,
-                            max_depth: water_max_depth,
+                            max_depth: water_depth_detail.max_depth,
+                            average_depth: water_depth_detail.average_depth,
+                            surface_area: water_depth_detail.surface_area,
                         },
                         RenderLayers::default(),
                         NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
                         entity_cmd
-                            .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                            .insert(MeshMaterial3d(
+                                water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                            ))
                             .remove::<MeshMaterial3d<StandardMaterial>>();
                     } else {
                         entity_cmd
-                            .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                            .insert(MeshMaterial3d(
+                                water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                            ))
                             .remove::<MeshMaterial3d<StandardWaterMaterial>>();
                     }
                 } else {
@@ -1297,15 +1317,21 @@ fn mesh_dirty_chunks_system(
                         WaterMesh,
                         WaterMeshDetail {
                             triangle_count: water_triangle_count,
-                            max_depth: water_max_depth,
+                            max_depth: water_depth_detail.max_depth,
+                            average_depth: water_depth_detail.average_depth,
+                            surface_area: water_depth_detail.surface_area,
                         },
                         RenderLayers::default(),
                         NotShadowCaster, // Water is translucent — never cast opaque shadows
                     ));
                     if use_fancy_water {
-                        entity_cmd.insert(MeshMaterial3d(water_material.near_handle.clone()));
+                        entity_cmd.insert(MeshMaterial3d(
+                            water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                        ));
                     } else {
-                        entity_cmd.insert(MeshMaterial3d(water_material.far_handle.clone()));
+                        entity_cmd.insert(MeshMaterial3d(
+                            water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                        ));
                     }
                     let entity = entity_cmd.id();
                     chunk.set_water_mesh_entity(entity);
@@ -1624,6 +1650,7 @@ fn update_water_body_registry(
     >,
     mut commands: Commands,
     mut registry: ResMut<WaterBodyRegistry>,
+    water_config: Option<Res<WaterConfig>>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut last_update: Local<f32>,
@@ -1679,9 +1706,16 @@ fn update_water_body_registry(
             visible_chunks: group.visible_chunks,
             chunk_count: group.entities.len() as u32,
             material_mode: group.material_mode,
-            reflection_strength: water_body_reflection_strength(group.kind, group.max_depth),
-            fresnel_power: water_body_fresnel_power(group.kind),
-            distortion_strength: water_body_distortion_strength(group.kind),
+            reflection_strength: water_body_reflection_strength(
+                group.kind,
+                group.max_depth,
+                water_config.as_deref(),
+            ),
+            fresnel_power: water_body_fresnel_power(group.kind, water_config.as_deref()),
+            distortion_strength: water_body_distortion_strength(
+                group.kind,
+                water_config.as_deref(),
+            ),
         };
         if previous_modes
             .get(&group.id)
@@ -1753,9 +1787,16 @@ fn sample_water_mesh_body(
             entity,
             chunk_pos,
             surface_y: WATER_LEVEL,
-            surface_area: (detail.triangle_count as f32 * 0.5).max(1.0),
+            surface_area: detail
+                .surface_area
+                .max(detail.triangle_count as f32 * 0.5)
+                .max(1.0),
             max_depth: detail.max_depth,
-            average_depth: detail.max_depth as f32,
+            average_depth: if detail.average_depth > 0.0 {
+                detail.average_depth
+            } else {
+                detail.max_depth as f32
+            },
             aabb_min: transform.translation,
             aabb_max: transform.translation + Vec3::splat(CHUNK_SIZE_F32),
             touches_world_edge: chunk_touches_world_edge(world, chunk_pos),
@@ -2015,7 +2056,14 @@ fn classify_water_body(
     }
 }
 
-fn water_body_reflection_strength(kind: WaterBodyKind, max_depth: usize) -> f32 {
+fn water_body_reflection_strength(
+    kind: WaterBodyKind,
+    max_depth: usize,
+    water_config: Option<&WaterConfig>,
+) -> f32 {
+    if let Some(config) = water_config {
+        return config.body_preset(kind).reflection_strength;
+    }
     match kind {
         WaterBodyKind::Ocean => 0.85,
         WaterBodyKind::Lake => 0.76,
@@ -2031,7 +2079,10 @@ fn water_body_reflection_strength(kind: WaterBodyKind, max_depth: usize) -> f32 
     }
 }
 
-fn water_body_fresnel_power(kind: WaterBodyKind) -> f32 {
+fn water_body_fresnel_power(kind: WaterBodyKind, water_config: Option<&WaterConfig>) -> f32 {
+    if let Some(config) = water_config {
+        return config.body_preset(kind).fresnel_power;
+    }
     match kind {
         WaterBodyKind::Ocean => 5.0,
         WaterBodyKind::Lake => 4.5,
@@ -2041,7 +2092,10 @@ fn water_body_fresnel_power(kind: WaterBodyKind) -> f32 {
     }
 }
 
-fn water_body_distortion_strength(kind: WaterBodyKind) -> f32 {
+fn water_body_distortion_strength(kind: WaterBodyKind, water_config: Option<&WaterConfig>) -> f32 {
+    if let Some(config) = water_config {
+        return config.body_preset(kind).distortion_strength;
+    }
     match kind {
         WaterBodyKind::Ocean => 0.006,
         WaterBodyKind::Lake => 0.0045,
@@ -2184,43 +2238,53 @@ fn update_water_material_lod(
     registry.chunks_forced_consistent = 0;
 
     for (entity, transform, fancy_mat, cheap_mat, detail, body_id) in water_meshes.iter() {
+        let fallback_kind = body_id
+            .and_then(|id| registry.bodies.get(id).map(|body| body.kind))
+            .unwrap_or(WaterBodyKind::Unknown);
         if force_cheap {
-            if cheap_mat.is_none() {
+            let desired = water_material.far_handle_for_kind(fallback_kind);
+            if !standard_material_matches(cheap_mat, &desired) {
                 commands
                     .entity(entity)
-                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .insert(MeshMaterial3d(desired))
                     .remove::<MeshMaterial3d<StandardWaterMaterial>>();
             }
             continue;
         }
         if force_fancy {
-            if fancy_mat.is_none() {
+            let desired = water_material.near_handle_for_kind(fallback_kind);
+            if !standard_water_material_matches(fancy_mat, &desired) {
                 commands
                     .entity(entity)
-                    .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                    .insert(MeshMaterial3d(desired))
                     .remove::<MeshMaterial3d<StandardMaterial>>();
             }
             continue;
         }
-        if let Some(body_mode) =
-            body_id.and_then(|id| registry.bodies.get(id).map(|body| body.material_mode))
-        {
+        if let Some((body_mode, body_kind)) = body_id.and_then(|id| {
+            registry
+                .bodies
+                .get(id)
+                .map(|body| (body.material_mode, body.kind))
+        }) {
             match body_mode {
                 WaterBodyMaterialMode::Fancy => {
-                    if fancy_mat.is_none() {
+                    let desired = water_material.near_handle_for_kind(body_kind);
+                    if !standard_water_material_matches(fancy_mat, &desired) {
                         registry.chunks_forced_consistent += 1;
                         commands
                             .entity(entity)
-                            .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                            .insert(MeshMaterial3d(desired))
                             .remove::<MeshMaterial3d<StandardMaterial>>();
                     }
                 }
                 WaterBodyMaterialMode::Cheap | WaterBodyMaterialMode::Unknown => {
-                    if cheap_mat.is_none() {
+                    let desired = water_material.far_handle_for_kind(body_kind);
+                    if !standard_material_matches(cheap_mat, &desired) {
                         registry.chunks_forced_consistent += 1;
                         commands
                             .entity(entity)
-                            .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                            .insert(MeshMaterial3d(desired))
                             .remove::<MeshMaterial3d<StandardWaterMaterial>>();
                     }
                 }
@@ -2241,10 +2305,11 @@ fn update_water_material_lod(
         let dist_sq = chunk_center.distance_squared(camera_pos);
 
         if !allow_fancy_water {
-            if cheap_mat.is_none() {
+            let desired = water_material.far_handle_for_kind(WaterBodyKind::Unknown);
+            if !standard_material_matches(cheap_mat, &desired) {
                 commands
                     .entity(entity)
-                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .insert(MeshMaterial3d(desired))
                     .remove::<MeshMaterial3d<StandardWaterMaterial>>();
             }
             continue;
@@ -2254,25 +2319,29 @@ fn update_water_material_lod(
             if dist_sq > fancy_out_sq {
                 commands
                     .entity(entity)
-                    .insert(MeshMaterial3d(water_material.far_handle.clone()))
+                    .insert(MeshMaterial3d(
+                        water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                    ))
                     .remove::<MeshMaterial3d<StandardWaterMaterial>>();
             }
         } else if cheap_mat.is_some() {
             if dist_sq < fancy_in_sq {
                 commands
                     .entity(entity)
-                    .insert(MeshMaterial3d(water_material.near_handle.clone()))
+                    .insert(MeshMaterial3d(
+                        water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                    ))
                     .remove::<MeshMaterial3d<StandardMaterial>>();
             }
         } else {
             if dist_sq <= fancy_distance_sq {
-                commands
-                    .entity(entity)
-                    .insert(MeshMaterial3d(water_material.near_handle.clone()));
+                commands.entity(entity).insert(MeshMaterial3d(
+                    water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                ));
             } else {
-                commands
-                    .entity(entity)
-                    .insert(MeshMaterial3d(water_material.far_handle.clone()));
+                commands.entity(entity).insert(MeshMaterial3d(
+                    water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                ));
             }
         }
     }
@@ -2281,6 +2350,20 @@ fn update_water_material_lod(
         "Water Chunks Forced Consistent By Body",
         registry.chunks_forced_consistent as f64,
     );
+}
+
+fn standard_water_material_matches(
+    material: Option<&MeshMaterial3d<StandardWaterMaterial>>,
+    desired: &Handle<StandardWaterMaterial>,
+) -> bool {
+    material.is_some_and(|material| material.0.id() == desired.id())
+}
+
+fn standard_material_matches(
+    material: Option<&MeshMaterial3d<StandardMaterial>>,
+    desired: &Handle<StandardMaterial>,
+) -> bool {
+    material.is_some_and(|material| material.0.id() == desired.id())
 }
 
 fn draw_water_body_debug_overlay(
@@ -2325,9 +2408,18 @@ fn water_body_debug_color(mode: WaterBodyMaterialMode, kind: WaterBodyKind) -> C
     }
 }
 
-fn compute_water_max_depth(world: &VoxelWorld, chunk_pos: IVec3) -> usize {
+#[derive(Clone, Copy, Debug, Default)]
+struct WaterChunkDepthDetail {
+    max_depth: usize,
+    average_depth: f32,
+    surface_area: f32,
+}
+
+fn compute_water_chunk_depth_detail(world: &VoxelWorld, chunk_pos: IVec3) -> WaterChunkDepthDetail {
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
     let mut max_depth = 0usize;
+    let mut total_depth = 0usize;
+    let mut surface_area = 0usize;
 
     for x in 0..CHUNK_SIZE_I32 {
         for z in 0..CHUNK_SIZE_I32 {
@@ -2359,12 +2451,22 @@ fn compute_water_max_depth(world: &VoxelWorld, chunk_pos: IVec3) -> usize {
                 if depth > max_depth {
                     max_depth = depth;
                 }
+                total_depth += depth;
+                surface_area += 1;
                 break;
             }
         }
     }
 
-    max_depth
+    WaterChunkDepthDetail {
+        max_depth,
+        average_depth: if surface_area == 0 {
+            0.0
+        } else {
+            total_depth as f32 / surface_area as f32
+        },
+        surface_area: surface_area as f32,
+    }
 }
 
 /// Adjusts LOD settings for integrated GPUs to maintain performance.

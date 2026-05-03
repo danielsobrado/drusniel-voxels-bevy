@@ -20,8 +20,8 @@ use crate::interaction::mark_neighbors_dirty;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::player::Player;
 use crate::props::persistence::{
-    load_chunk_props_if_exists, load_manifest, save_chunk_and_update_manifest, save_manifest,
-    saved_props_exist,
+    delete_all_props, load_chunk_props_if_exists, load_manifest, save_chunk_and_update_manifest,
+    save_manifest, saved_props_exist,
 };
 use crate::rendering::props_material::PropsMaterialHandle;
 use crate::voxel::persistence as voxel_persistence;
@@ -125,6 +125,13 @@ pub fn spawn_props_on_terrain(
     }
 
     spawned.0 = true;
+
+    if should_clear_props_for_world_regeneration() && saved_props_exist() {
+        match delete_all_props() {
+            Ok(()) => info!("Cleared prop cache because world/water regeneration was requested"),
+            Err(e) => warn!("Failed to clear prop cache for regenerated world: {}", e),
+        }
+    }
 
     // Try to load manifest or create new one
     let manifest = if saved_props_exist() {
@@ -255,6 +262,12 @@ pub fn spawn_props_on_terrain(
         instancing_stats.instanced_spawns,
         instancing_stats.scene_spawns,
     );
+}
+
+fn should_clear_props_for_world_regeneration() -> bool {
+    std::env::var_os("VOXEL_REGENERATE_WATER_BODIES").is_some()
+        || std::env::var_os("VOXEL_FORCE_REGENERATE_WORLD").is_some()
+        || std::env::var_os("VOXEL_FORCE_REGENERATE_WATER").is_some()
 }
 
 /// Generate props for a specific chunk

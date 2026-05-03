@@ -16,6 +16,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::constants::{CHUNK_SIZE_I32, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::water::WaterConfig;
 use crate::voxel::meshing::{WaterBodyId, WaterBodyKind, WaterMesh, WaterMeshDetail};
 use crate::voxel::octree::OctreeAabb;
 use crate::voxel::plugin::WaterBodyRegistry;
@@ -574,6 +575,7 @@ fn update_water_presence(
     mut presence: ResMut<WaterPresence>,
     mut mask_stats: ResMut<WaterReflectionMaskStats>,
     mut body_params: ResMut<WaterReflectionBodyParams>,
+    water_config: Option<Res<WaterConfig>>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Water Reflection Presence CPU");
     presence.age_secs += time.delta_secs();
@@ -647,7 +649,13 @@ fn update_water_presence(
                     surface_y: body.surface_y,
                     kind: body.kind,
                 })
-                .unwrap_or_else(|| reflection_params_for_water(detail, transform.translation.y));
+                .unwrap_or_else(|| {
+                    reflection_params_for_water(
+                        detail,
+                        transform.translation.y,
+                        water_config.as_deref(),
+                    )
+                });
         }
 
         if config.auto_disable_distance > 0.0 && distance > config.auto_disable_distance {
@@ -783,9 +791,27 @@ fn update_startup_fallback_water_presence(
 fn reflection_params_for_water(
     detail: Option<&WaterMeshDetail>,
     surface_y: f32,
+    water_config: Option<&WaterConfig>,
 ) -> WaterReflectionBodyParams {
     let max_depth = detail.map(|detail| detail.max_depth).unwrap_or(0);
-    if max_depth >= 8 {
+    let kind = if max_depth >= 8 {
+        WaterBodyKind::Ocean
+    } else if max_depth <= 2 {
+        WaterBodyKind::Pond
+    } else {
+        WaterBodyKind::Lake
+    };
+    if let Some(config) = water_config {
+        let preset = config.body_preset(kind);
+        return WaterReflectionBodyParams {
+            reflection_strength: preset.reflection_strength,
+            fresnel_power: preset.fresnel_power,
+            distortion_strength: preset.distortion_strength,
+            surface_y,
+            kind,
+        };
+    }
+    if kind == WaterBodyKind::Ocean {
         WaterReflectionBodyParams {
             reflection_strength: 0.85,
             fresnel_power: 5.0,
@@ -793,7 +819,7 @@ fn reflection_params_for_water(
             surface_y,
             kind: WaterBodyKind::Ocean,
         }
-    } else if max_depth <= 2 {
+    } else if kind == WaterBodyKind::Pond {
         WaterReflectionBodyParams {
             reflection_strength: 0.62,
             fresnel_power: 4.0,

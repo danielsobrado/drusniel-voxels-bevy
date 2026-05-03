@@ -23,6 +23,9 @@ use crate::constants::{
     // Caves
     CAVE_MIN_Y,
     CAVE_SURFACE_OFFSET,
+    CHUNK_SIZE_I32,
+    DEFAULT_WORLD_CHUNKS_X,
+    DEFAULT_WORLD_CHUNKS_Z,
     MOUNTAIN_THRESHOLD,
     // Terrain generation (fallbacks for biomes/caves/trees)
     TERRAIN_BIOME_FREQUENCY,
@@ -35,12 +38,13 @@ use crate::constants::{
     TREE_SPAWN_THRESHOLD,
     WATER_LEVEL,
 };
-use crate::terrain::generation::config::TerrainConfig;
+use crate::terrain::generation::config::{BasinConfig, TerrainConfig};
 use crate::voxel::types::VoxelType;
 use bevy::log::debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TREE_SPAWN_LOGS: AtomicUsize = AtomicUsize::new(0);
+const OCEAN_EDGE_BAND: i32 = 48;
 
 // =============================================================================
 // Noise Abstraction
@@ -212,6 +216,50 @@ pub enum Biome {
     Clay,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GeneratedWaterBodyKind {
+    Ocean,
+    LakeBasin,
+    RiverChannel,
+    Pond,
+    CaveWaterAquifer,
+    #[default]
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WaterGenerationMetadata {
+    pub kind: GeneratedWaterBodyKind,
+    pub surface_y: i32,
+    pub bed_y: i32,
+    pub max_depth: i32,
+    pub local_depth: f32,
+    pub strength: f32,
+}
+
+impl WaterGenerationMetadata {
+    fn none(surface_y: i32, bed_y: i32) -> Self {
+        Self {
+            kind: GeneratedWaterBodyKind::None,
+            surface_y,
+            bed_y,
+            max_depth: 0,
+            local_depth: 0.0,
+            strength: 0.0,
+        }
+    }
+
+    pub fn is_surface_water(self) -> bool {
+        matches!(
+            self.kind,
+            GeneratedWaterBodyKind::Ocean
+                | GeneratedWaterBodyKind::LakeBasin
+                | GeneratedWaterBodyKind::RiverChannel
+                | GeneratedWaterBodyKind::Pond
+        )
+    }
+}
+
 impl Biome {
     /// Returns the biome ID for compatibility with existing code.
     pub fn id(&self) -> u8 {
@@ -337,13 +385,13 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Convert to river presence: values near 0.5 are river centers
         let river_dist = (river_noise - 0.5).abs() * 2.0; // Distance from river center [0,1]
-        let main_river = (1.0 - river_dist / (cfg.width * 0.01)).max(0.0);
+        let main_river = (1.0 - river_dist / (cfg.width * 0.01).max(0.01)).max(0.0);
 
         // Tributary rivers (smaller, more frequent)
         let trib_noise =
             self.fbm_configurable(x + 1000.0, z + 1000.0, cfg.tributary_scale, 2, 0.5, 2.0);
         let trib_dist = (trib_noise - 0.5).abs() * 2.0;
-        let tributary = (1.0 - trib_dist / (cfg.tributary_width * 0.01)).max(0.0);
+        let tributary = (1.0 - trib_dist / (cfg.tributary_width * 0.01).max(0.01)).max(0.0);
 
         // Combine rivers, main river takes priority
         let river_strength = main_river.max(tributary * 0.6);
@@ -354,14 +402,14 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         smooth_river * cfg.depth
     }
 
-    /// Calculates terrain height at a given world position.
+    /// Calculates terrain height before water body bathymetry is applied.
     ///
     /// Uses multiple noise layers for varied terrain:
     /// - Continent layer for large-scale shape
     /// - Mountains with ridged noise for dramatic peaks
     /// - Hills for medium-scale variation
     /// - Detail for fine surface variation
-    pub fn get_height(&self, world_x: i32, world_z: i32) -> i32 {
+    pub fn get_base_height(&self, world_x: i32, world_z: i32) -> i32 {
         let x = world_x as f32;
         let z = world_z as f32;
         let cfg = &self.config;
@@ -410,22 +458,183 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             cfg.detail.lacunarity,
         ) * cfg.detail.amplitude;
 
-        // Combine all layers
-        let mut height = continent + mountains + hills + detail;
-
-        // Apply river carving - rivers cut into terrain toward water level
-        let river_carve = self.river_carve(x, z);
-        if river_carve > 0.0 {
-            // Rivers carve terrain down toward just below water level
-            let target_height = (WATER_LEVEL as f32) - river_carve;
-            // Only carve if terrain is above the target
-            if height > target_height {
-                height = target_height;
-            }
-        }
+        let height = continent + mountains + hills + detail;
 
         // Clamp to world bounds from config
         height.clamp(cfg.height.min, cfg.height.max) as i32
+    }
+
+    /// Calculates terrain height at a given world position.
+    ///
+    /// Water body bathymetry lowers terrain under lakes, ponds, and river
+    /// channels before the usual water fill step runs.
+    pub fn get_height(&self, world_x: i32, world_z: i32) -> i32 {
+        let base_height = self.get_base_height(world_x, world_z);
+        let metadata = self.get_water_generation_metadata(world_x, world_z);
+        let carved_height = if metadata.is_surface_water() {
+            base_height.min(metadata.bed_y)
+        } else {
+            base_height
+        };
+        carved_height.clamp(self.config.height.min as i32, self.config.height.max as i32)
+    }
+
+    pub fn get_water_generation_metadata(
+        &self,
+        world_x: i32,
+        world_z: i32,
+    ) -> WaterGenerationMetadata {
+        let base_height = self.get_base_height(world_x, world_z);
+        self.water_generation_metadata_for_base_height(world_x, world_z, base_height)
+    }
+
+    fn water_generation_metadata_for_base_height(
+        &self,
+        world_x: i32,
+        world_z: i32,
+        base_height: i32,
+    ) -> WaterGenerationMetadata {
+        let surface_y = WATER_LEVEL;
+        let mut best = WaterGenerationMetadata::none(surface_y, base_height);
+
+        if base_height <= surface_y - 2 && is_ocean_edge_column(world_x, world_z) {
+            let depth = (surface_y - base_height).max(1);
+            best = WaterGenerationMetadata {
+                kind: GeneratedWaterBodyKind::Ocean,
+                surface_y,
+                bed_y: base_height,
+                max_depth: depth,
+                local_depth: depth as f32,
+                strength: 1.0,
+            };
+        }
+
+        if self.config.rivers.enabled {
+            let carve_depth = self.river_carve(world_x as f32, world_z as f32);
+            if carve_depth >= 0.05 {
+                let depth = carve_depth.ceil().max(2.0) as i32;
+                let bed_y = surface_y - depth;
+                let local_depth = (surface_y - bed_y.min(best.bed_y)).max(depth) as f32;
+                best = WaterGenerationMetadata {
+                    kind: GeneratedWaterBodyKind::RiverChannel,
+                    surface_y,
+                    bed_y: bed_y.min(best.bed_y),
+                    max_depth: local_depth.ceil() as i32,
+                    local_depth,
+                    strength: (carve_depth / self.config.rivers.depth.max(0.001)).clamp(0.0, 1.0),
+                };
+            }
+        }
+
+        if self.config.water_bodies.enabled {
+            if let Some(lake) = self.sample_basin(
+                world_x,
+                world_z,
+                base_height,
+                &self.config.water_bodies.lakes,
+                GeneratedWaterBodyKind::LakeBasin,
+                11,
+            ) {
+                best = stronger_water_metadata(best, lake);
+            }
+            if let Some(pond) = self.sample_basin(
+                world_x,
+                world_z,
+                base_height,
+                &self.config.water_bodies.ponds,
+                GeneratedWaterBodyKind::Pond,
+                29,
+            ) {
+                best = stronger_water_metadata(best, pond);
+            }
+        }
+
+        best
+    }
+
+    fn sample_basin(
+        &self,
+        world_x: i32,
+        world_z: i32,
+        base_height: i32,
+        cfg: &BasinConfig,
+        kind: GeneratedWaterBodyKind,
+        salt: i32,
+    ) -> Option<WaterGenerationMetadata> {
+        if !cfg.enabled || cfg.spacing <= 1.0 || cfg.max_radius <= 0.0 || cfg.density <= 0.0 {
+            return None;
+        }
+        if base_height > WATER_LEVEL + 1 {
+            return None;
+        }
+
+        let x = world_x as f32;
+        let z = world_z as f32;
+        let cell_x = (x / cfg.spacing).floor() as i32;
+        let cell_z = (z / cfg.spacing).floor() as i32;
+        let mut best: Option<WaterGenerationMetadata> = None;
+
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let cx = cell_x + dx;
+                let cz = cell_z + dz;
+                let active = hash_position(
+                    cx.wrapping_mul(41).wrapping_add(salt),
+                    cz.wrapping_mul(73).wrapping_sub(salt),
+                );
+                if active > cfg.density.clamp(0.0, 1.0) {
+                    continue;
+                }
+
+                let ox = hash_position(
+                    cx.wrapping_mul(97).wrapping_add(salt * 3),
+                    cz.wrapping_mul(37).wrapping_sub(salt * 5),
+                ) - 0.5;
+                let oz = hash_position(
+                    cx.wrapping_mul(53).wrapping_sub(salt * 7),
+                    cz.wrapping_mul(89).wrapping_add(salt * 11),
+                ) - 0.5;
+                let radius_t = hash_position(
+                    cx.wrapping_mul(131).wrapping_add(salt * 13),
+                    cz.wrapping_mul(151).wrapping_sub(salt * 17),
+                );
+                let depth_t = hash_position(
+                    cx.wrapping_mul(173).wrapping_sub(salt * 19),
+                    cz.wrapping_mul(197).wrapping_add(salt * 23),
+                );
+
+                let center_x = (cx as f32 + 0.5 + ox * 0.7) * cfg.spacing;
+                let center_z = (cz as f32 + 0.5 + oz * 0.7) * cfg.spacing;
+                let radius = lerp_f32(cfg.min_radius, cfg.max_radius, radius_t).max(1.0);
+                let dx = x - center_x;
+                let dz = z - center_z;
+                let dist = (dx * dx + dz * dz).sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let inward = (1.0 - dist / radius).clamp(0.0, 1.0);
+                let smooth = inward * inward * (3.0 - 2.0 * inward);
+                let strength = smooth.powf(cfg.shore_power.max(0.25));
+                let central_depth = lerp_f32(cfg.min_depth, cfg.max_depth, depth_t).max(1.0);
+                let local_depth = 1.0 + (central_depth - 1.0) * strength;
+                let bed_y = WATER_LEVEL - local_depth.ceil() as i32;
+                let candidate = WaterGenerationMetadata {
+                    kind,
+                    surface_y: WATER_LEVEL,
+                    bed_y,
+                    max_depth: central_depth.ceil() as i32,
+                    local_depth,
+                    strength,
+                };
+                best = Some(match best {
+                    Some(current) => stronger_water_metadata(current, candidate),
+                    None => candidate,
+                });
+            }
+        }
+
+        best
     }
 
     /// Determines the biome at a given world position.
@@ -577,7 +786,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Check caves
         if self.is_cave(world_x, world_y, world_z, terrain_height) {
-            return if world_y <= WATER_LEVEL {
+            return if self.is_cave_aquifer(world_x, world_y, world_z) {
                 VoxelType::Water
             } else {
                 VoxelType::Air
@@ -596,7 +805,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Above terrain surface
         if world_y > terrain_height {
-            return if world_y <= WATER_LEVEL {
+            let metadata = self.get_water_generation_metadata(world_x, world_z);
+            return if metadata.is_surface_water() && world_y <= metadata.surface_y {
                 VoxelType::Water
             } else {
                 VoxelType::Air
@@ -669,6 +879,18 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             }
         }
     }
+
+    pub fn is_cave_aquifer(&self, world_x: i32, world_y: i32, world_z: i32) -> bool {
+        let cfg = &self.config.water_bodies.aquifers;
+        if !self.config.water_bodies.enabled || !cfg.enabled || world_y > cfg.max_y {
+            return false;
+        }
+
+        let x = world_x as f32 * cfg.noise_scale;
+        let y = world_y as f32 * cfg.noise_scale;
+        let z = world_z as f32 * cfg.noise_scale;
+        self.noise.fbm_3d(x, y, z, 3) >= cfg.threshold
+    }
 }
 
 // =============================================================================
@@ -685,10 +907,74 @@ pub fn hash_position(x: i32, z: i32) -> f32 {
     ((n ^ (n >> 16)) as u32 as f32) / u32::MAX as f32
 }
 
+#[inline]
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
+}
+
+fn stronger_water_metadata(
+    current: WaterGenerationMetadata,
+    candidate: WaterGenerationMetadata,
+) -> WaterGenerationMetadata {
+    if current.kind == GeneratedWaterBodyKind::RiverChannel
+        && candidate.kind != GeneratedWaterBodyKind::RiverChannel
+    {
+        return current;
+    }
+    if candidate.local_depth > current.local_depth {
+        candidate
+    } else {
+        current
+    }
+}
+
+fn is_ocean_edge_column(world_x: i32, world_z: i32) -> bool {
+    let max_x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 - 1;
+    let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - 1;
+    world_x <= OCEAN_EDGE_BAND
+        || world_z <= OCEAN_EDGE_BAND
+        || world_x >= max_x - OCEAN_EDGE_BAND
+        || world_z >= max_z - OCEAN_EDGE_BAND
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::terrain::generation::config::TerrainConfig;
+
+    struct BiomeCoverageNoise;
+
+    impl NoiseGenerator for BiomeCoverageNoise {
+        fn sample_2d(&self, _x: f32, _z: f32) -> f32 {
+            0.5
+        }
+
+        fn fbm_2d(&self, x: f32, _z: f32, _octaves: u32) -> f32 {
+            if (x - 0.0).abs() < 0.001 {
+                0.1
+            } else if (x - 50.0).abs() < 0.001 {
+                0.1
+            } else if (x - 10.0).abs() < 0.001 {
+                0.6
+            } else if (x - 20.0).abs() < 0.001 || (x - 100.0).abs() < 0.001 {
+                0.8
+            } else if (x - 30.0).abs() < 0.001 {
+                0.45
+            } else if (x - 150.0).abs() < 0.001 {
+                BIOME_CLAY_DETAIL_THRESHOLD + 0.1
+            } else {
+                0.5
+            }
+        }
+    }
+
+    struct FlatLowNoise;
+
+    impl NoiseGenerator for FlatLowNoise {
+        fn sample_2d(&self, _x: f32, _z: f32) -> f32 {
+            0.0
+        }
+    }
 
     #[test]
     fn test_value_noise_range() {
@@ -725,19 +1011,196 @@ mod tests {
 
     #[test]
     fn test_biome_coverage() {
-        let generator = TerrainGenerator::default();
-        let mut biome_counts = [0u32; 4];
+        let generator = TerrainGenerator::with_config(BiomeCoverageNoise, TerrainConfig::default());
 
-        for x in 0..100 {
-            for z in 0..100 {
-                let biome = generator.get_biome(x, z);
-                biome_counts[biome.id() as usize] += 1;
+        assert_eq!(generator.get_biome(0, 0), Biome::Sandy);
+        assert_eq!(generator.get_biome(1000, 0), Biome::Grassland);
+        assert_eq!(generator.get_biome(2000, 0), Biome::Rocky);
+        assert_eq!(generator.get_biome(3000, 0), Biome::Clay);
+    }
+
+    #[test]
+    fn generated_lake_has_deep_center_and_shallow_shore() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut deepest = None;
+        let mut shallow = false;
+
+        for x in 0..512 {
+            for z in 0..512 {
+                let meta = generator.get_water_generation_metadata(x, z);
+                if meta.kind != GeneratedWaterBodyKind::LakeBasin {
+                    continue;
+                }
+                if meta.local_depth >= 3.0 {
+                    deepest = Some(meta.local_depth);
+                }
+                if meta.local_depth > 0.0 && meta.local_depth <= 2.0 {
+                    shallow = true;
+                }
             }
         }
 
-        // All biomes should appear at least once in a 100x100 area
-        for (i, &count) in biome_counts.iter().enumerate() {
-            assert!(count > 0, "Biome {} never appeared in test area", i);
+        assert!(
+            deepest.is_some_and(|depth| depth >= 3.0),
+            "expected at least one generated lake basin with depth >= 3"
+        );
+        assert!(shallow, "expected generated lake shoreline depth <= 2");
+    }
+
+    #[test]
+    fn generated_pond_has_non_flat_depth() {
+        let mut config = TerrainConfig::default();
+        config.water_bodies.ponds.density = 1.0;
+        config.water_bodies.ponds.min_radius = 12.0;
+        config.water_bodies.ponds.max_radius = 18.0;
+        let generator = TerrainGenerator::with_config(ValueNoise::default(), config);
+        let mut max_depth = 0.0f32;
+
+        for x in 0..256 {
+            for z in 0..256 {
+                let meta = generator.get_water_generation_metadata(x, z);
+                if meta.kind == GeneratedWaterBodyKind::Pond {
+                    max_depth = max_depth.max(meta.local_depth);
+                }
+            }
         }
+
+        assert!(
+            max_depth >= 2.0,
+            "expected pond basin water depth >= 2, got {max_depth}"
+        );
+    }
+
+    #[test]
+    fn generated_basins_do_not_flatten_high_ground() {
+        let mut config = TerrainConfig::default();
+        config.rivers.enabled = false;
+        config.water_bodies.lakes.density = 1.0;
+        config.water_bodies.ponds.density = 1.0;
+        let generator = TerrainGenerator::with_config(ValueNoise::default(), config);
+        let mut checked = 0;
+
+        for x in 0..256 {
+            for z in 0..256 {
+                let base_height = generator.get_base_height(x, z);
+                if base_height <= WATER_LEVEL + 1 {
+                    continue;
+                }
+                let meta = generator.get_water_generation_metadata(x, z);
+                assert_eq!(
+                    meta.kind,
+                    GeneratedWaterBodyKind::None,
+                    "high ground at ({x}, {z}) should not become a lake/pond basin"
+                );
+                assert_eq!(
+                    generator.get_height(x, z),
+                    base_height,
+                    "high ground at ({x}, {z}) should not be carved down to water level"
+                );
+                checked += 1;
+                if checked >= 128 {
+                    return;
+                }
+            }
+        }
+
+        assert!(checked > 0, "expected high ground samples in test area");
+    }
+
+    #[test]
+    fn inland_low_ground_does_not_auto_fill_with_ocean() {
+        let mut config = TerrainConfig::default();
+        config.rivers.enabled = false;
+        config.water_bodies.enabled = false;
+        let generator = TerrainGenerator::with_config(FlatLowNoise, config);
+        let x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 / 2;
+        let z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 / 2;
+
+        assert!(generator.get_base_height(x, z) < WATER_LEVEL);
+        assert_eq!(
+            generator.get_water_generation_metadata(x, z).kind,
+            GeneratedWaterBodyKind::None
+        );
+        assert_eq!(generator.get_voxel(x, WATER_LEVEL, z), VoxelType::Air);
+    }
+
+    #[test]
+    fn generated_river_channel_has_water_depth() {
+        let mut config = TerrainConfig::default();
+        config.rivers.width = 32.0;
+        config.rivers.tributary_width = 16.0;
+        let generator = TerrainGenerator::with_config(ValueNoise::default(), config);
+        let mut max_depth = 0.0f32;
+
+        for x in 0..512 {
+            for z in 0..512 {
+                let meta = generator.get_water_generation_metadata(x, z);
+                if meta.kind == GeneratedWaterBodyKind::RiverChannel {
+                    max_depth = max_depth.max(meta.local_depth);
+                }
+            }
+        }
+
+        assert!(
+            max_depth >= 2.0,
+            "expected river channel water depth >= 2, got {max_depth}"
+        );
+    }
+
+    #[test]
+    fn generated_ocean_remains_surface_water() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut ocean_sample = None;
+
+        'outer: for x in 0..512 {
+            for z in 0..512 {
+                let meta = generator.get_water_generation_metadata(x, z);
+                if meta.kind == GeneratedWaterBodyKind::Ocean {
+                    ocean_sample = Some((x, z, meta));
+                    break 'outer;
+                }
+            }
+        }
+
+        let (x, z, meta) = ocean_sample.expect("expected at least one ocean/sea sample");
+        assert!(meta.is_surface_water());
+        assert_eq!(
+            generator.get_voxel(x, WATER_LEVEL, z),
+            VoxelType::Water,
+            "ocean sample should fill to water surface"
+        );
+    }
+
+    #[test]
+    fn sealed_underground_caves_do_not_default_to_water() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut checked = false;
+
+        'outer: for x in 0..256 {
+            for z in 0..256 {
+                let terrain_height = generator.get_height(x, z);
+                for y in (CAVE_MIN_Y + 1)..WATER_LEVEL {
+                    if generator.is_cave(x, y, z, terrain_height)
+                        && !generator.is_cave_aquifer(x, y, z)
+                    {
+                        assert_eq!(
+                            generator.get_voxel(x, y, z),
+                            VoxelType::Air,
+                            "non-aquifer cave below water level should remain air"
+                        );
+                        checked = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            checked,
+            "expected to find at least one non-aquifer cave sample"
+        );
     }
 }

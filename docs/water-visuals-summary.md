@@ -14,6 +14,8 @@ Improve close-range water visuals without a large performance hit, while keeping
   - Minimum triangle count (`WATER_FANCY_MIN_TRIANGLES`).
   - Minimum vertical water depth (`WATER_FANCY_MIN_DEPTH`).
 - Added `WaterMesh` + `WaterMeshDetail` components to tag voxel water entities and store water mesh detail metrics.
+- Added deterministic water generation metadata for ocean, lake basins, river channels, ponds, and cave aquifers. Lake/pond terrain is now carved below the water surface before fill, so inland water has real voxel depth instead of one-voxel sheets.
+- `WaterMeshDetail` now records max depth, average depth, and surface area from loaded water voxels for body-level material/reflection decisions.
 - Switched voxel water UVs to world-space and set vertex colors to full alpha.
 - Tuned voxel water shader parameters (amplitude, UV scale, clarity, edge scale) and added a sync system so `WaterSettings` updates do not overwrite voxel overrides.
 - Updated water settings in the environment to use blend alpha and a blue base color.
@@ -32,6 +34,9 @@ Improve close-range water visuals without a large performance hit, while keeping
 - Reflection mask debug:
   - `VOXEL_WATER_REFLECTION_DEBUG_VIEW=mask|reflection|blend|off`
   - `Shift+F9` cycles the same debug views at runtime.
+- Water generation/debug:
+  - `VOXEL_REGENERATE_WATER_BODIES=1`, `VOXEL_FORCE_REGENERATE_WATER=1`, or `VOXEL_FORCE_REGENERATE_WORLD=1` deletes the saved world on startup so water bodies regenerate.
+  - `VOXEL_WATER_DEPTH_DEBUG_COLORS=1` tints generated water mesh vertices by measured local depth: cyan shallow, blue medium, dark blue deep.
 - Water-terrain transitions:
   - `WET_SAND_HEIGHT` - Height above water that gets wet effect (in `triplanar_terrain.wgsl`)
   - `WET_SAND_DARKEN` - How much to darken wet terrain (lower = darker)
@@ -43,12 +48,14 @@ Improve close-range water visuals without a large performance hit, while keeping
 - Water visuals: `src/rendering/materials.rs`, `src/voxel/plugin.rs`, `src/voxel/meshing.rs`, `src/constants.rs`, `src/environment.rs`, `src/debug_ui.rs`, `src/rendering/plugin.rs`
 - Water body diagnostics: `src/voxel/plugin.rs`, `src/voxel/meshing.rs`, `src/rendering/water_visual_probe.rs`, `src/interaction/debug.rs`
 - Reflection mask: `src/rendering/water_reflection.rs`, `src/rendering/water_reflection_compositor.rs`, `assets/shaders/water_reflection_compositor.wgsl`
+- Water generation bathymetry: `src/voxel/terrain.rs`, `src/terrain/generation/config.rs`, `assets/config/terrain_generation.yaml`
 
 ## Current status
 - Far water looks acceptable with the cheap material.
 - Near water uses the fancy shader at body level only for larger/deeper surfaces; shallow, thin streams stay on the cheap material.
 - A connected body keeps one material mode across its loaded chunks, avoiding half-fancy/half-cheap lakes.
 - Reflection application is now mask-driven. The compositor skips terrain/sand pixels unless the mask render target contains water geometry at that pixel.
+- Inland lake/pond generation now produces shallow shore cells and deeper central basin cells; river channels are carved below `WATER_LEVEL`, then filled by the normal water volume rule.
 
 ## Findings
 - Close-range shallow water shows blue striping on sand while the main area stays sandy; the tint is too weak near the camera.

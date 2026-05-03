@@ -1,0 +1,17 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = true
+
+[[checkpoint]]
+name = "lake-water-oblique-reflection"
+position = [94.0, 23.0, 190.0]
+look_at = [126.0, 18.0, 224.0]
+time_of_day = 0.48
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "oblique", frame = 179 },
+]

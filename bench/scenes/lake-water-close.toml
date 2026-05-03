@@ -1,0 +1,17 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = true
+
+[[checkpoint]]
+name = "lake-water-close"
+position = [108.0, 30.0, 188.0]
+look_at = [108.0, 18.0, 218.0]
+time_of_day = 0.45
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "close", frame = 179 },
+]

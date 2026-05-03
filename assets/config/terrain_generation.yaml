@@ -9,6 +9,9 @@ terrain:
   continent:
     scale: 0.001      # Very large features
     amplitude: 12.0   # Scaled for 64-voxel world
+    octaves: 2
+    persistence: 0.5
+    lacunarity: 2.0
 
   # Mountain ranges
   mountains:
@@ -44,6 +47,34 @@ terrain:
     octaves: 3           # Noise detail for meandering
     tributary_scale: 0.008  # Scale for smaller streams
     tributary_width: 2.0    # Width of tributaries
+
+  # Deterministic water body carving. Basins lower the terrain before water fill,
+  # so rendered lake/pond surfaces have actual water volume beneath them.
+  water_bodies:
+    enabled: true
+    lakes:
+      enabled: true
+      spacing: 96.0
+      density: 0.38
+      min_radius: 18.0
+      max_radius: 42.0
+      min_depth: 3.0
+      max_depth: 8.0
+      shore_power: 1.45
+    ponds:
+      enabled: true
+      spacing: 48.0
+      density: 0.34
+      min_radius: 7.0
+      max_radius: 17.0
+      min_depth: 2.0
+      max_depth: 5.0
+      shore_power: 1.25
+    aquifers:
+      enabled: true
+      max_y: 10
+      noise_scale: 0.045
+      threshold: 0.84
 
   # Biome influence on height
   biome_modifiers:

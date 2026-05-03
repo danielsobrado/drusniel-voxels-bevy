@@ -3,6 +3,8 @@ use bevy::prelude::*;
 use bevy::shader::Shader;
 use serde::Deserialize;
 
+use crate::voxel::meshing::WaterBodyKind;
+
 /// Enhanced water configuration with Gerstner waves, foam, caustics, reflections, and more
 #[derive(Resource, Deserialize, Clone)]
 pub struct WaterConfig {
@@ -10,6 +12,8 @@ pub struct WaterConfig {
     pub foam: FoamConfig,
     pub caustics: CausticsConfig,
     pub visual: WaterVisualConfig,
+    #[serde(default)]
+    pub body_presets: WaterBodyPresetsConfig,
     #[serde(default)]
     pub detail_normals: DetailNormalConfig,
     #[serde(default)]
@@ -56,6 +60,130 @@ pub struct WaterVisualConfig {
     pub clarity: f32,
     pub reflectivity: f32,
     pub fresnel_power: f32,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct WaterBodyPresetsConfig {
+    pub ocean: WaterBodyPresetConfig,
+    pub lake: WaterBodyPresetConfig,
+    pub river: WaterBodyPresetConfig,
+    pub pond: WaterBodyPresetConfig,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct WaterBodyPresetConfig {
+    pub wave_amplitude: f32,
+    pub wave_speed: f32,
+    pub wave_scale: f32,
+    pub wave_count: u32,
+    pub reflection_strength: f32,
+    pub fresnel_power: f32,
+    pub distortion_strength: f32,
+    pub shallow_color: [f32; 4],
+    pub deep_color: [f32; 4],
+    pub clarity: f32,
+    pub base_alpha: f32,
+    pub foam_enabled: bool,
+    pub shore_foam: bool,
+    pub wave_crest_foam: bool,
+    pub murkiness: f32,
+    pub detail_normal_intensity: f32,
+    pub detail_scroll_speed: f32,
+}
+
+impl WaterConfig {
+    pub fn body_preset(&self, kind: WaterBodyKind) -> &WaterBodyPresetConfig {
+        match kind {
+            WaterBodyKind::Ocean => &self.body_presets.ocean,
+            WaterBodyKind::Lake => &self.body_presets.lake,
+            WaterBodyKind::River => &self.body_presets.river,
+            WaterBodyKind::Pond => &self.body_presets.pond,
+            WaterBodyKind::Unknown => &self.body_presets.lake,
+        }
+    }
+}
+
+impl Default for WaterBodyPresetsConfig {
+    fn default() -> Self {
+        Self {
+            ocean: WaterBodyPresetConfig {
+                wave_amplitude: 3.6,
+                wave_speed: 1.3,
+                wave_scale: 0.85,
+                wave_count: 4,
+                reflection_strength: 0.88,
+                fresnel_power: 5.6,
+                distortion_strength: 0.02,
+                shallow_color: [0.04, 0.18, 0.36, 0.9],
+                deep_color: [0.01, 0.04, 0.12, 0.98],
+                clarity: 0.14,
+                base_alpha: 0.9,
+                foam_enabled: true,
+                shore_foam: true,
+                wave_crest_foam: true,
+                murkiness: 0.1,
+                detail_normal_intensity: 0.8,
+                detail_scroll_speed: 0.04,
+            },
+            lake: WaterBodyPresetConfig {
+                wave_amplitude: 0.36,
+                wave_speed: 0.5,
+                wave_scale: 1.1,
+                wave_count: 2,
+                reflection_strength: 0.84,
+                fresnel_power: 4.4,
+                distortion_strength: 0.005,
+                shallow_color: [0.006, 0.038, 0.055, 0.92],
+                deep_color: [0.0, 0.006, 0.02, 0.98],
+                clarity: 0.55,
+                base_alpha: 0.92,
+                foam_enabled: true,
+                shore_foam: true,
+                wave_crest_foam: false,
+                murkiness: 0.22,
+                detail_normal_intensity: 1.35,
+                detail_scroll_speed: 0.02,
+            },
+            river: WaterBodyPresetConfig {
+                wave_amplitude: 0.22,
+                wave_speed: 0.65,
+                wave_scale: 1.6,
+                wave_count: 2,
+                reflection_strength: 0.58,
+                fresnel_power: 4.0,
+                distortion_strength: 0.008,
+                shallow_color: [0.045, 0.14, 0.17, 0.72],
+                deep_color: [0.01, 0.035, 0.06, 0.84],
+                clarity: 0.1,
+                base_alpha: 0.72,
+                foam_enabled: true,
+                shore_foam: true,
+                wave_crest_foam: false,
+                murkiness: 0.28,
+                detail_normal_intensity: 0.45,
+                detail_scroll_speed: 0.026,
+            },
+            pond: WaterBodyPresetConfig {
+                wave_amplitude: 0.08,
+                wave_speed: 0.3,
+                wave_scale: 3.0,
+                wave_count: 1,
+                reflection_strength: 0.68,
+                fresnel_power: 4.0,
+                distortion_strength: 0.0035,
+                shallow_color: [0.035, 0.085, 0.07, 0.76],
+                deep_color: [0.01, 0.026, 0.02, 0.9],
+                clarity: 0.42,
+                base_alpha: 0.76,
+                foam_enabled: false,
+                shore_foam: false,
+                wave_crest_foam: false,
+                murkiness: 0.42,
+                detail_normal_intensity: 0.55,
+                detail_scroll_speed: 0.012,
+            },
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -179,6 +307,7 @@ impl Default for WaterConfig {
                 reflectivity: 0.8,
                 fresnel_power: 5.0,
             },
+            body_presets: WaterBodyPresetsConfig::default(),
             detail_normals: DetailNormalConfig::default(),
             reflections: ReflectionConfig::default(),
             refraction: RefractionConfig::default(),

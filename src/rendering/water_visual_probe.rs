@@ -17,8 +17,11 @@ use crate::player::Player;
 use crate::rendering::water_reflection::{
     WaterPresence, WaterReflectionConfig, WaterReflectionStatus,
 };
-use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterMesh, WaterMeshDetail};
+use crate::voxel::meshing::{
+    ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
+};
 use crate::voxel::octree::OctreeAabb;
+use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
 
@@ -44,6 +47,8 @@ impl Plugin for WaterVisualProbePlugin {
 pub struct WaterVisualDebugState {
     pub nearest_material_near: bool,
     pub nearest_material_far: bool,
+    pub nearest_body_kind: WaterBodyKind,
+    pub nearest_material_mode: WaterBodyMaterialMode,
     pub nearest_max_depth: usize,
     pub nearest_triangles: usize,
     pub reflection_eligible: bool,
@@ -138,6 +143,8 @@ struct WaterMeshProbeDump {
     water_mesh_chunk_position: Option<IVec3Dump>,
     water_mesh_material_type: String,
     water_body_id: Option<u32>,
+    water_body_kind: String,
+    water_body_material_mode: String,
     triangle_count: Option<usize>,
     max_depth: Option<usize>,
     distance_to_camera: Option<f32>,
@@ -187,6 +194,7 @@ struct IVec3Dump {
 pub fn update_water_visual_debug_counters(
     camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
     water_meshes: WaterMeshProbeQuery,
+    water_body_registry: Option<Res<WaterBodyRegistry>>,
     reflection_config: Option<Res<WaterReflectionConfig>>,
     reflection_status: Option<Res<WaterReflectionStatus>>,
     mut state: ResMut<WaterVisualDebugState>,
@@ -211,6 +219,20 @@ pub fn update_water_visual_debug_counters(
     state.nearest_material_far = nearest
         .as_ref()
         .is_some_and(|mesh| mesh.material_type == WaterMaterialKind::Far);
+    let nearest_body = nearest
+        .as_ref()
+        .and_then(|mesh| mesh.body_id)
+        .and_then(|id| {
+            water_body_registry
+                .as_deref()
+                .and_then(|registry| registry.bodies.get(&id))
+        });
+    state.nearest_body_kind = nearest_body
+        .map(|body| body.kind)
+        .unwrap_or(WaterBodyKind::Unknown);
+    state.nearest_material_mode = nearest_body
+        .map(|body| body.material_mode)
+        .unwrap_or(WaterBodyMaterialMode::Unknown);
     state.nearest_max_depth = nearest
         .as_ref()
         .and_then(|mesh| mesh.max_depth)
@@ -228,7 +250,7 @@ pub fn update_water_visual_debug_counters(
     state.compositor_pixel_matched = state.reflection_active
         && state.reflection_eligible
         && !env_flag("VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR");
-    state.body_unknown = nearest.as_ref().is_none_or(|mesh| mesh.body_id.is_none());
+    state.body_unknown = nearest_body.is_none();
 
     timing.record_count(
         frame.0,
@@ -239,6 +261,16 @@ pub fn update_water_visual_debug_counters(
         frame.0,
         "Water Debug Nearest Material Far",
         u8::from(state.nearest_material_far) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Debug Nearest Body Kind",
+        water_body_kind_code(state.nearest_body_kind) as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Debug Nearest Material Mode",
+        water_body_material_mode_code(state.nearest_material_mode) as f64,
     );
     timing.record_count(
         frame.0,
@@ -280,6 +312,7 @@ fn dump_water_visual_probe(
     camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
     player_query: Query<&GlobalTransform, With<Player>>,
     water_meshes: WaterMeshProbeQuery,
+    water_body_registry: Option<Res<WaterBodyRegistry>>,
     reflection_config: Option<Res<WaterReflectionConfig>>,
     reflection_status: Option<Res<WaterReflectionStatus>>,
     presence: Option<Res<WaterPresence>>,
@@ -324,6 +357,7 @@ fn dump_water_visual_probe(
         camera_transform,
         projection,
         &water_meshes,
+        water_body_registry.as_deref(),
         reflection_config.as_deref(),
     );
     let target_probe = build_probe_dump(
@@ -332,6 +366,7 @@ fn dump_water_visual_probe(
         camera_transform,
         projection,
         &water_meshes,
+        water_body_registry.as_deref(),
         reflection_config.as_deref(),
     );
 
@@ -585,6 +620,7 @@ fn build_probe_dump(
     camera_transform: &Transform,
     projection: &Projection,
     water_meshes: &WaterMeshProbeQuery,
+    water_body_registry: Option<&WaterBodyRegistry>,
     reflection_config: Option<&WaterReflectionConfig>,
 ) -> WaterMeshProbeDump {
     let nearest = nearest_water_mesh(
@@ -594,6 +630,11 @@ fn build_probe_dump(
         water_meshes,
         reflection_config,
     );
+    let body = nearest
+        .as_ref()
+        .and_then(|mesh| mesh.body_id)
+        .and_then(|id| water_body_registry.and_then(|registry| registry.bodies.get(&id)))
+        .map(|body| (body.kind, body.material_mode));
     WaterMeshProbeDump {
         label: label.to_string(),
         nearest_water_mesh_entity: nearest.as_ref().map(|mesh| format!("{:?}", mesh.entity)),
@@ -607,6 +648,12 @@ fn build_probe_dump(
         water_body_id: nearest
             .as_ref()
             .and_then(|mesh| mesh.body_id.map(|id| id.0)),
+        water_body_kind: body
+            .map(|(kind, _)| kind.as_str().to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        water_body_material_mode: body
+            .map(|(_, mode)| mode.as_str().to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
         triangle_count: nearest.as_ref().and_then(|mesh| mesh.triangle_count),
         max_depth: nearest.as_ref().and_then(|mesh| mesh.max_depth),
         distance_to_camera: nearest.as_ref().map(|mesh| mesh.distance_to_camera),
@@ -623,6 +670,25 @@ fn material_kind_name(kind: WaterMaterialKind) -> &'static str {
         WaterMaterialKind::Near => "near StandardWaterMaterial",
         WaterMaterialKind::Far => "far StandardMaterial",
         WaterMaterialKind::Unknown => "unknown/missing",
+    }
+}
+
+fn water_body_kind_code(kind: WaterBodyKind) -> u8 {
+    match kind {
+        WaterBodyKind::Ocean => 1,
+        WaterBodyKind::Lake => 2,
+        WaterBodyKind::River => 3,
+        WaterBodyKind::Pond => 4,
+        WaterBodyKind::Unknown => 0,
+    }
+}
+
+fn water_body_material_mode_code(mode: WaterBodyMaterialMode) -> u8 {
+    match mode {
+        WaterBodyMaterialMode::Fancy => 1,
+        WaterBodyMaterialMode::Cheap => 2,
+        WaterBodyMaterialMode::Hidden => 3,
+        WaterBodyMaterialMode::Unknown => 0,
     }
 }
 

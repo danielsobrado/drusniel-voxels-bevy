@@ -51,6 +51,46 @@ fn fragment(
   var in = p_in;
   var world_position: vec4<f32> = in.world_position;
   let w_pos = water_fn::uv_to_coord(in.uv);
+  let material_amplitude = water_bindings::material.amplitude;
+  let voxel_water_surface = water_bindings::material.coord_scale.x < 8.0;
+  let pond_profile = voxel_water_surface && material_amplitude <= 0.08;
+  let lake_profile = voxel_water_surface && material_amplitude > 0.08 && material_amplitude <= 0.36;
+  let river_profile = voxel_water_surface && material_amplitude > 0.36 && material_amplitude <= 0.5;
+  let calm_inland_profile = pond_profile || lake_profile;
+  var body_wave_speed = 1.3;
+  var body_wave_scale = 0.85;
+  var body_wave_count = 4u;
+  var body_detail_scroll_speed = 0.04;
+  var body_detail_intensity = 0.8;
+  var body_crest_foam = 1.0;
+  var body_shore_foam = 1.0;
+  if (lake_profile) {
+    body_wave_speed = 0.5;
+    body_wave_scale = 1.1;
+    body_wave_count = 2u;
+    body_detail_scroll_speed = 0.02;
+    body_detail_intensity = 1.35;
+    body_crest_foam = 0.0;
+    body_shore_foam = 0.3;
+  }
+  if (pond_profile) {
+    body_wave_speed = 0.3;
+    body_wave_scale = 3.0;
+    body_wave_count = 1u;
+    body_detail_scroll_speed = 0.012;
+    body_detail_intensity = 0.55;
+    body_crest_foam = 0.0;
+    body_shore_foam = 0.08;
+  }
+  if (river_profile) {
+    body_wave_speed = 0.65;
+    body_wave_scale = 1.6;
+    body_wave_count = 2u;
+    body_detail_scroll_speed = 0.026;
+    body_detail_intensity = 0.45;
+    body_crest_foam = 0.0;
+    body_shore_foam = 0.35;
+  }
 
   // Wave height for vertex displacement (driven by bevy_water functions)
   let height = water_fn::get_wave_height(w_pos);
@@ -58,18 +98,18 @@ fn fragment(
   // Compute normals and foam using Gerstner waves (analytical, much better than finite differences)
   var foam_from_waves = 0.0;
 #ifdef DYN_WATER
-  let gerstner = gerstner_waves::sum_gerstner_waves(
-    w_pos, globals.time, water_bindings::material.amplitude, 1.0
+  let gerstner = gerstner_waves::sum_gerstner_waves_limited(
+    w_pos, globals.time * body_wave_speed, material_amplitude, body_wave_scale, body_wave_count
   );
   in.world_normal = gerstner.normal;
-  foam_from_waves = gerstner.foam;
+  foam_from_waves = gerstner.foam * body_crest_foam;
 
   // Blend in detail normal maps for fine-scale ripple texture
 #ifdef WATER_DETAIL_NORMALS
   let cam_dist = length(view.world_position.xyz - world_position.xyz);
   in.world_normal = water_detail_normals::blend_detail_normals(
     in.world_normal, world_position.xyz, globals.time,
-    0.3, 0.17, 0.04, 0.8, cam_dist
+    0.3, 0.17, body_detail_scroll_speed, body_detail_intensity, cam_dist
   );
 #endif
 #else
@@ -103,21 +143,20 @@ fn fragment(
   let z_depth_buffer_view = depth_ndc_to_view_z(z_depth_buffer_ndc);
   let z_fragment_view = depth_ndc_to_view_z(in.position.z);
   let raw_depth_diff = z_fragment_view - z_depth_buffer_view;
-  // Detect voxel water early for depth adjustment
-  let is_voxel_water = water_bindings::material.coord_scale.x < 8.0;
   // For voxel water, enforce minimum depth to prevent striping in shallow areas
-  let min_depth = select(0.0, 0.3, is_voxel_water);
+  let min_depth = select(0.0, 0.3, voxel_water_surface);
   depth_diff_view = max(raw_depth_diff, min_depth);
   let beers_law = clamp(exp(-depth_diff_view * water_clarity), 0.0, 1.0);
   let depth_color = vec4<f32>(mix(deep_color.xyz, shallow_color.xyz, beers_law), 1.0 - beers_law);
   water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
 
   // Foam: combine depth-based shore foam with Gerstner wave crest foam
-  let shore_foam_amount = 1.0 - smoothstep(FOAM_EDGE_START, FOAM_EDGE_END, depth_diff_view);
+  let shore_foam_amount = (1.0 - smoothstep(FOAM_EDGE_START, FOAM_EDGE_END, depth_diff_view)) * body_shore_foam;
   let total_foam_amount = max(shore_foam_amount, foam_from_waves);
   var foam_params: water_foam::FoamParams;
   foam_params.color = vec3<f32>(0.9, 0.95, 1.0);
-  foam_params.intensity = 1.3;
+  foam_params.intensity = select(1.3, 0.45, calm_inland_profile);
+  foam_params.intensity = select(foam_params.intensity, 0.15, pond_profile);
   foam_params.scale = 1.2;
   foam_params.persistence = 0.9;
   foam_params.edge_sharpness = 0.3;
@@ -126,13 +165,25 @@ fn fragment(
 #endif
 #endif
 #endif
-  // Voxel water uses a much smaller coord scale; keep it visibly blue up close.
-  let voxel_water = water_bindings::material.coord_scale.x < 8.0;
-  if (voxel_water) {
-    // Light blend toward shallow_color - let wave lighting variations show through
-    water_color = vec4<f32>(mix(water_color.rgb, shallow_color.rgb, 0.3), 1.0);
-    // Higher minimum alpha ensures water is always visible even in shallow areas
-    let base_alpha = max(pbr_input.material.base_color.a, 0.95);
+  // Voxel water uses body presets for inland/ocean visual differences.
+  if (voxel_water_surface) {
+    let shallow_bias = select(0.3, 0.08, calm_inland_profile);
+    water_color = vec4<f32>(mix(water_color.rgb, shallow_color.rgb, shallow_bias), water_color.a);
+    let ripple_a = sin(dot(world_position.xz, vec2<f32>(1.25, 0.38)) + globals.time * body_wave_speed * 1.8);
+    let ripple_b = sin(dot(world_position.xz, vec2<f32>(-0.54, 1.05)) + globals.time * body_wave_speed * 1.25);
+    let ripple = ripple_a * 0.5 + ripple_b * 0.5;
+    let ripple_line = smoothstep(0.12, 0.72, abs(ripple));
+    let ripple_contrast = select(0.35, 1.1, lake_profile);
+    var ripple_contrast_body = select(ripple_contrast, 0.28, river_profile);
+    ripple_contrast_body = select(ripple_contrast_body, 0.72, pond_profile);
+    let ripple_highlight = vec3<f32>(0.3, 0.37, 0.38) * ripple_line * ripple_contrast_body;
+    let ripple_shadow = 1.0 - (1.0 - ripple_line) * ripple_contrast_body * 0.82;
+    water_color = vec4<f32>(
+      water_color.rgb * (1.0 + ripple * ripple_contrast_body) * ripple_shadow + ripple_highlight,
+      water_color.a
+    );
+    let configured_alpha = max(pbr_input.material.base_color.a, max(shallow_color.a, deep_color.a) * 0.72);
+    let base_alpha = clamp(configured_alpha, 0.45, 0.98);
     pbr_input.material.base_color = vec4<f32>(water_color.rgb, base_alpha);
   } else {
     pbr_input.material.base_color *= water_color;
@@ -166,7 +217,14 @@ fn fragment(
     let NdotV = max(dot(water_normal, view_dir), 0.0);
 
     // Schlick Fresnel — power 5.0 is physically plausible for water (IOR ~1.33)
-    let fresnel = pow(1.0 - NdotV, 5.0);
+    var fresnel_power_body = 5.6;
+    if (lake_profile) {
+      fresnel_power_body = 4.4;
+    }
+    if (pond_profile || river_profile) {
+      fresnel_power_body = 4.0;
+    }
+    let fresnel = pow(1.0 - NdotV, fresnel_power_body);
 
     // Compute reflected direction for sky color lookup
     let reflected_dir = reflect(-view_dir, water_normal);
@@ -184,13 +242,37 @@ fn fragment(
     let reflection_color = mix(horizon_color, zenith_color, sky_up) + sun_highlight;
 
     // Blend reflection into lit water color
-    let reflectivity = 0.88;
-    let reflection_strength = fresnel * reflectivity;
+    var reflectivity = 0.88;
+    if (lake_profile) {
+      reflectivity = 0.84;
+    }
+    if (pond_profile) {
+      reflectivity = 0.62;
+    }
+    if (river_profile) {
+      reflectivity = 0.58;
+    }
+    let reflection_floor = select(0.02, 0.32, lake_profile);
+    let reflection_floor_body = select(reflection_floor, 0.08, pond_profile || river_profile);
+    let reflection_strength = max(fresnel * reflectivity, reflection_floor_body);
     out.color = vec4<f32>(
       mix(out.color.rgb, reflection_color, reflection_strength),
       // At glancing angles water becomes more opaque (reflecting surface, not transparent)
       mix(out.color.a, 1.0, reflection_strength * 0.6)
     );
+    if (voxel_water_surface) {
+      let lake_ripple_a = sin(dot(world_position.xz, vec2<f32>(1.25, 0.38)) + globals.time * body_wave_speed * 1.8);
+      let lake_ripple_b = sin(dot(world_position.xz, vec2<f32>(-0.54, 1.05)) + globals.time * body_wave_speed * 1.25);
+      let lake_ripple_fine = sin(dot(world_position.xz, vec2<f32>(2.1, -0.72)) + globals.time * body_wave_speed * 2.3);
+      let lake_ripple = lake_ripple_a * 0.42 + lake_ripple_b * 0.38 + lake_ripple_fine * 0.2;
+      let lake_line = pow(smoothstep(0.1, 0.72, abs(lake_ripple)), 1.15);
+      var voxel_ripple_strength = 0.45;
+      voxel_ripple_strength = select(voxel_ripple_strength, 0.72, pond_profile);
+      voxel_ripple_strength = select(voxel_ripple_strength, 1.0, lake_profile);
+      let lake_trough = 1.0 - (1.0 - lake_line) * 0.42 * voxel_ripple_strength;
+      let lake_glint = vec3<f32>(0.26, 0.34, 0.36) * lake_line * voxel_ripple_strength;
+      out.color = vec4<f32>(out.color.rgb * lake_trough + lake_glint, out.color.a);
+    }
   }
 
   // apply in-shader post processing (fog, alpha-premultiply, and also tonemapping, debanding if the camera is non-hdr)

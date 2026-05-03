@@ -18,6 +18,8 @@ pub struct TerrainConfig {
     #[serde(default)]
     pub rivers: RiverConfig,
     #[serde(default)]
+    pub water_bodies: WaterBodyGenerationConfig,
+    #[serde(default)]
     pub biome_modifiers: HashMap<String, f32>,
 }
 
@@ -50,6 +52,75 @@ impl Default for RiverConfig {
             octaves: 3,
             tributary_scale: 0.008,
             tributary_width: 2.0,
+        }
+    }
+}
+
+/// Configuration for deterministic lake, pond, and aquifer generation.
+#[derive(Deserialize, Clone)]
+pub struct WaterBodyGenerationConfig {
+    pub enabled: bool,
+    pub lakes: BasinConfig,
+    pub ponds: BasinConfig,
+    pub aquifers: AquiferConfig,
+}
+
+impl Default for WaterBodyGenerationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            lakes: BasinConfig {
+                enabled: true,
+                spacing: 96.0,
+                density: 0.38,
+                min_radius: 18.0,
+                max_radius: 42.0,
+                min_depth: 3.0,
+                max_depth: 8.0,
+                shore_power: 1.45,
+            },
+            ponds: BasinConfig {
+                enabled: true,
+                spacing: 48.0,
+                density: 0.34,
+                min_radius: 7.0,
+                max_radius: 17.0,
+                min_depth: 2.0,
+                max_depth: 5.0,
+                shore_power: 1.25,
+            },
+            aquifers: AquiferConfig::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct BasinConfig {
+    pub enabled: bool,
+    pub spacing: f32,
+    pub density: f32,
+    pub min_radius: f32,
+    pub max_radius: f32,
+    pub min_depth: f32,
+    pub max_depth: f32,
+    pub shore_power: f32,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct AquiferConfig {
+    pub enabled: bool,
+    pub max_y: i32,
+    pub noise_scale: f32,
+    pub threshold: f32,
+}
+
+impl Default for AquiferConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_y: 10,
+            noise_scale: 0.045,
+            threshold: 0.84,
         }
     }
 }
@@ -118,6 +189,7 @@ impl Default for TerrainConfig {
                 lacunarity: 2.0,
             },
             rivers: RiverConfig::default(),
+            water_bodies: WaterBodyGenerationConfig::default(),
             biome_modifiers: HashMap::new(),
         }
     }

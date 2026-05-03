@@ -84,6 +84,8 @@ impl ExtractComponent for WaterMesh {
 pub struct WaterMeshDetail {
     pub triangle_count: usize,
     pub max_depth: usize,
+    pub average_depth: f32,
+    pub surface_area: f32,
 }
 
 impl ExtractComponent for WaterMeshDetail {
@@ -1704,6 +1706,7 @@ fn add_greedy_water_face_world(
     quad: &GreedyQuad,
     face: Face,
     chunk_origin: IVec3,
+    world: &VoxelWorld,
 ) {
     let (x, y, z, sx, sy, sz) = match face {
         Face::Top | Face::Bottom => (
@@ -1790,10 +1793,18 @@ fn add_greedy_water_face_world(
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
 
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
+    let color = if std::env::var_os("VOXEL_WATER_DEPTH_DEBUG_COLORS").is_some() {
+        water_depth_debug_color(
+            world,
+            chunk_origin + IVec3::new(x as i32, y as i32, z as i32),
+        )
+    } else {
+        [1.0, 1.0, 1.0, 1.0]
+    };
+    mesh_data.colors.push(color);
+    mesh_data.colors.push(color);
+    mesh_data.colors.push(color);
+    mesh_data.colors.push(color);
 
     let world_x = chunk_origin.x as f32 + x;
     let world_z = chunk_origin.z as f32 + z;
@@ -1830,6 +1841,25 @@ fn add_greedy_water_face_world(
     mesh_data.indices.push(start_idx);
     mesh_data.indices.push(start_idx + 3);
     mesh_data.indices.push(start_idx + 2);
+}
+
+fn water_depth_debug_color(world: &VoxelWorld, surface_pos: IVec3) -> [f32; 4] {
+    let mut depth = 0usize;
+    loop {
+        let sample_pos = surface_pos - IVec3::Y * depth as i32;
+        match world.get_voxel(sample_pos) {
+            Some(voxel) if voxel.is_liquid() => depth += 1,
+            _ => break,
+        }
+    }
+
+    if depth <= 2 {
+        [0.0, 0.95, 1.0, 1.0]
+    } else if depth <= 5 {
+        [0.0, 0.22, 1.0, 1.0]
+    } else {
+        [0.0, 0.02, 0.25, 1.0]
+    }
 }
 
 // =============================================================================
@@ -2513,7 +2543,7 @@ fn generate_water_mesh(
             );
             greedy_mesh_slice(&mut mask, depth, &mut water_quads);
             for quad in &water_quads {
-                add_greedy_water_face_world(&mut water_mesh, quad, face, chunk_origin);
+                add_greedy_water_face_world(&mut water_mesh, quad, face, chunk_origin, world);
             }
         }
     }
