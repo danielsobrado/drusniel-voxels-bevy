@@ -1,0 +1,28 @@
+(
+    prop_id: "usn_birch_3",
+    mode: Directional8,
+    texture_paths: [
+        "assets/textures/billboards/generated/usn_birch_3_dir0.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir1.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir2.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir3.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir4.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir5.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir6.png",
+        "assets/textures/billboards/generated/usn_birch_3_dir7.png",
+    ],
+    width: 3.4328125,
+    height: 5.7541943,
+    y_offset: -0.00846914,
+    alpha_cutoff: 0.5,
+    source_bounds: (
+        min: (-1.663423, -0.00846914, -0.9253931),
+        max: (1.7693895, 5.745725, 1.3416641),
+    ),
+    generated_image_resolution: (512, 512),
+    alpha_coverage: (
+        min: 0.111629486,
+        max: 0.16859436,
+        mean: 0.1411252,
+    ),
+)

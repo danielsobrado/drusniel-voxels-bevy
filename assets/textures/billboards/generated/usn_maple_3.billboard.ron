@@ -1,0 +1,28 @@
+(
+    prop_id: "usn_maple_3",
+    mode: Directional8,
+    texture_paths: [
+        "assets/textures/billboards/generated/usn_maple_3_dir0.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir1.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir2.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir3.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir4.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir5.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir6.png",
+        "assets/textures/billboards/generated/usn_maple_3_dir7.png",
+    ],
+    width: 8.979641,
+    height: 6.986656,
+    y_offset: 0.00069457665,
+    alpha_cutoff: 0.5,
+    source_bounds: (
+        min: (-4.4101844, 0.00069457665, -3.9357648),
+        max: (4.5694566, 6.987351, 2.677595),
+    ),
+    generated_image_resolution: (512, 512),
+    alpha_coverage: (
+        min: 0.16390228,
+        max: 0.22657394,
+        mean: 0.2004571,
+    ),
+)

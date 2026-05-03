@@ -79,7 +79,8 @@ impl Plugin for PropsPlugin {
                     loader::load_prop_config,
                     billboard::initialize_billboard_cache,
                     lod_material::setup_simple_lod_material,
-                ),
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,

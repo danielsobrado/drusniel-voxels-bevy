@@ -676,9 +676,7 @@ fn spawn_props_from_data(
 
                     // Add billboard LOD for trees
                     if should_use_billboard_lod(prop_type, &prop.id) {
-                        if let Some((texture, size, y_offset)) =
-                            get_billboard_config(billboard_cache, &prop.id)
-                        {
+                        if let Some(config) = get_billboard_config(billboard_cache, &prop.id) {
                             // Check if this is a single-mesh prop (cached.len() == 1)
                             let is_single_mesh = mesh_cache
                                 .get_cached(&prop.id)
@@ -689,9 +687,11 @@ fn spawn_props_from_data(
                                 is_billboard: false,
                                 billboard_entity: None,
                                 is_single_mesh,
-                                billboard_texture: texture,
-                                billboard_size: size,
-                                y_offset,
+                                mode: config.mode,
+                                billboard_materials: config.materials,
+                                current_direction: usize::MAX,
+                                billboard_size: config.size,
+                                y_offset: config.y_offset,
                             });
                         }
                     }
@@ -725,16 +725,16 @@ fn spawn_props_from_data(
                 }
 
                 if should_use_billboard_lod(prop_type, &prop.id) {
-                    if let Some((texture, size, y_offset)) =
-                        get_billboard_config(billboard_cache, &prop.id)
-                    {
+                    if let Some(config) = get_billboard_config(billboard_cache, &prop.id) {
                         entity.insert(BillboardLod {
                             is_billboard: false,
                             billboard_entity: None,
                             is_single_mesh: false,
-                            billboard_texture: texture,
-                            billboard_size: size,
-                            y_offset,
+                            mode: config.mode,
+                            billboard_materials: config.materials,
+                            current_direction: usize::MAX,
+                            billboard_size: config.size,
+                            y_offset: config.y_offset,
                         });
                     }
                 }

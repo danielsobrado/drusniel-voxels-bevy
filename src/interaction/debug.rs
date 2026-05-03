@@ -13,6 +13,7 @@ use crate::network::NetworkSession;
 use crate::performance::{
     AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
 };
+use crate::props::billboard::BillboardStats;
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
@@ -75,6 +76,7 @@ pub struct DebugOverlayParams<'w> {
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
+    pub billboard_stats: Res<'w, BillboardStats>,
 }
 
 #[derive(SystemParam)]
@@ -609,6 +611,20 @@ pub fn update_debug_overlay(
 
     if debug.toggles.show_prop_details {
         text_content.push_str("\n[Prop debug]\n");
+        text_content.push_str(&format!(
+            "Billboards: loaded {} missing {} dir8 {} active {} blocked {}\n",
+            debug.billboard_stats.generated_assets_loaded,
+            debug.billboard_stats.missing_generated_assets,
+            debug.billboard_stats.directional8_count,
+            debug.billboard_stats.currently_billboarded,
+            debug.billboard_stats.placeholder_blocked
+        ));
+        text_content.push_str(&format!(
+            "Billboard alpha: min {:.3} max {:.3} switches {}\n",
+            debug.billboard_stats.alpha_coverage_min,
+            debug.billboard_stats.alpha_coverage_max,
+            debug.billboard_stats.texture_direction_switches
+        ));
         if let Some(entity) = targeted_prop.entity {
             if let Ok((prop, wind)) = prop_debug.props.get(entity) {
                 text_content.push_str(&format!("Prop: {} ({:?})\n", prop.id, prop.prop_type));

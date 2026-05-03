@@ -11,7 +11,10 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use bevy_shader::ShaderRef;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{
@@ -21,7 +24,9 @@ use crate::constants::{
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
 
-use super::PropType;
+use super::{PropConfig, PropType};
+
+const GENERATED_BILLBOARD_DIR: &str = "assets/textures/billboards/generated";
 
 // =============================================================================
 // Resources
@@ -57,17 +62,40 @@ impl Default for BillboardLodSettings {
 /// Resource caching billboard textures and meshes per prop type.
 #[derive(Resource, Default)]
 pub struct BillboardCache {
-    /// Pre-loaded billboard textures keyed by prop ID.
-    pub textures: HashMap<String, Handle<Image>>,
+    /// Pre-loaded generated billboard assets keyed by prop ID.
+    pub assets: HashMap<String, BillboardAsset>,
 
     /// Shared quad mesh handle (all billboards use the same unit quad).
     pub quad_mesh: Option<Handle<Mesh>>,
 
-    /// Billboard sizes per prop type (width, height, y_offset).
-    pub sizes: HashMap<String, BillboardSize>,
-
     /// Whether cache initialization is complete.
     pub initialized: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BillboardMode {
+    #[default]
+    SingleAxial,
+    Directional4,
+    Directional8,
+}
+
+impl BillboardMode {
+    pub fn direction_count(self) -> usize {
+        match self {
+            Self::SingleAxial => 1,
+            Self::Directional4 => 4,
+            Self::Directional8 => 8,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BillboardAsset {
+    pub mode: BillboardMode,
+    pub materials: Vec<Handle<BillboardMaterial>>,
+    pub size: BillboardSize,
+    pub alpha_cutoff: f32,
 }
 
 /// Billboard size configuration for a prop type.
@@ -78,6 +106,33 @@ pub struct BillboardSize {
     pub y_offset: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BillboardMetadata {
+    pub prop_id: String,
+    pub mode: BillboardMode,
+    pub texture_paths: Vec<String>,
+    pub width: f32,
+    pub height: f32,
+    pub y_offset: f32,
+    pub alpha_cutoff: f32,
+    pub source_bounds: BillboardSourceBounds,
+    pub generated_image_resolution: [u32; 2],
+    pub alpha_coverage: BillboardAlphaCoverage,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct BillboardSourceBounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct BillboardAlphaCoverage {
+    pub min: f32,
+    pub max: f32,
+    pub mean: f32,
+}
+
 /// Statistics for billboard LOD system (debug UI).
 #[derive(Resource, Default)]
 pub struct BillboardStats {
@@ -85,6 +140,13 @@ pub struct BillboardStats {
     pub currently_billboarded: usize,
     pub currently_3d: usize,
     pub lod_switches_this_frame: usize,
+    pub generated_assets_loaded: usize,
+    pub missing_generated_assets: usize,
+    pub directional8_count: usize,
+    pub texture_direction_switches: usize,
+    pub placeholder_blocked: usize,
+    pub alpha_coverage_min: f32,
+    pub alpha_coverage_max: f32,
 }
 
 // =============================================================================
@@ -105,8 +167,14 @@ pub struct BillboardLod {
     /// For multi-mesh: we hide child mesh entities.
     pub is_single_mesh: bool,
 
-    /// Billboard texture handle for this prop type.
-    pub billboard_texture: Handle<Image>,
+    /// Billboard mode for texture direction selection.
+    pub mode: BillboardMode,
+
+    /// Billboard material handles for each baked direction.
+    pub billboard_materials: Vec<Handle<BillboardMaterial>>,
+
+    /// Currently selected baked texture direction.
+    pub current_direction: usize,
 
     /// Billboard dimensions (width, height) in world units.
     pub billboard_size: Vec2,
@@ -289,6 +357,8 @@ pub fn initialize_billboard_cache(
     mut materials: ResMut<Assets<BillboardMaterial>>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    config: Res<PropConfig>,
+    mut stats: ResMut<BillboardStats>,
 ) {
     if cache.initialized {
         return;
@@ -297,54 +367,134 @@ pub fn initialize_billboard_cache(
     // Create shared quad mesh
     cache.quad_mesh = Some(meshes.add(create_billboard_quad_mesh()));
 
-    // Load placeholder billboard texture
-    let placeholder_texture: Handle<Image> =
-        asset_server.load("textures/billboards/placeholder.png");
-
-    // Create billboard material with placeholder
+    // Create a fallback material without a texture. It is only kept so the material
+    // asset type is initialized; runtime billboard eligibility is gated by metadata.
     let material = materials.add(BillboardMaterial {
         uniforms: BillboardUniforms::default(),
-        texture: Some(placeholder_texture.clone()),
+        texture: None,
     });
 
     commands.insert_resource(BillboardMaterialHandle { handle: material });
 
-    // Set up default sizes for common tree types
-    // These can be overridden when actual tree definitions are loaded
-    let default_tree_size = BillboardSize {
-        width: 6.0,
-        height: 12.0,
-        y_offset: 0.0,
-    };
+    let metadata = load_generated_billboard_metadata();
+    let mut coverage_min = f32::INFINITY;
+    let mut coverage_max = 0.0_f32;
+    let mut directional8_count = 0usize;
 
-    cache
-        .sizes
-        .insert("tree_oak".to_string(), default_tree_size.clone());
-    cache.sizes.insert(
-        "tree_pine".to_string(),
-        BillboardSize {
-            width: 4.0,
-            height: 14.0,
-            y_offset: 0.0,
-        },
-    );
-    cache.sizes.insert(
-        "tree_birch".to_string(),
-        BillboardSize {
-            width: 5.0,
-            height: 16.0,
-            y_offset: 0.0,
-        },
-    );
+    for metadata in metadata {
+        if metadata.texture_paths.is_empty() {
+            warn!(
+                "Skipping billboard metadata for '{}' because it has no textures",
+                metadata.prop_id
+            );
+            continue;
+        }
 
-    // Store placeholder texture for all tree types initially
-    cache
-        .textures
-        .insert("default".to_string(), placeholder_texture);
+        let expected = metadata.mode.direction_count();
+        if metadata.texture_paths.len() != expected {
+            warn!(
+                "Skipping billboard metadata for '{}' because mode {:?} expects {} textures, found {}",
+                metadata.prop_id,
+                metadata.mode,
+                expected,
+                metadata.texture_paths.len()
+            );
+            continue;
+        }
+
+        let mut billboard_materials = Vec::with_capacity(metadata.texture_paths.len());
+        for texture_path in &metadata.texture_paths {
+            let asset_path = texture_path
+                .strip_prefix("assets/")
+                .unwrap_or(texture_path.as_str())
+                .replace('\\', "/");
+            let texture = asset_server.load(asset_path);
+            billboard_materials.push(materials.add(BillboardMaterial {
+                uniforms: BillboardUniforms {
+                    size: Vec2::new(metadata.width, metadata.height),
+                    alpha_cutoff: metadata.alpha_cutoff,
+                    ..default()
+                },
+                texture: Some(texture),
+            }));
+        }
+
+        if metadata.mode == BillboardMode::Directional8 {
+            directional8_count += 1;
+        }
+        coverage_min = coverage_min.min(metadata.alpha_coverage.min);
+        coverage_max = coverage_max.max(metadata.alpha_coverage.max);
+
+        cache.assets.insert(
+            metadata.prop_id.clone(),
+            BillboardAsset {
+                mode: metadata.mode,
+                materials: billboard_materials,
+                size: BillboardSize {
+                    width: metadata.width,
+                    height: metadata.height,
+                    y_offset: metadata.y_offset,
+                },
+                alpha_cutoff: metadata.alpha_cutoff,
+            },
+        );
+    }
 
     cache.initialized = true;
 
-    info!("Billboard cache initialized with quad mesh and placeholder texture");
+    stats.generated_assets_loaded = cache.assets.len();
+    stats.directional8_count = directional8_count;
+    stats.alpha_coverage_min = if coverage_min.is_finite() {
+        coverage_min
+    } else {
+        0.0
+    };
+    stats.alpha_coverage_max = coverage_max;
+    stats.missing_generated_assets = config
+        .props
+        .trees
+        .iter()
+        .filter(|tree| !cache.assets.contains_key(&tree.id))
+        .count();
+    stats.placeholder_blocked = stats.missing_generated_assets;
+
+    info!(
+        "Billboard cache initialized: {} generated assets loaded, {} tree assets missing; placeholders disabled",
+        stats.generated_assets_loaded, stats.missing_generated_assets
+    );
+}
+
+fn load_generated_billboard_metadata() -> Vec<BillboardMetadata> {
+    let dir = Path::new(GENERATED_BILLBOARD_DIR);
+    let Ok(entries) = fs::read_dir(dir) else {
+        info!(
+            "Generated billboard directory '{}' is missing; billboard LOD will stay disabled for unbaked props",
+            GENERATED_BILLBOARD_DIR
+        );
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".billboard.ron"))
+        })
+        .filter_map(|path| match fs::read_to_string(&path) {
+            Ok(contents) => match ron::de::from_str::<BillboardMetadata>(&contents) {
+                Ok(metadata) => Some(metadata),
+                Err(err) => {
+                    warn!("Failed to parse billboard metadata {:?}: {}", path, err);
+                    None
+                }
+            },
+            Err(err) => {
+                warn!("Failed to read billboard metadata {:?}: {}", path, err);
+                None
+            }
+        })
+        .collect()
 }
 
 /// System to update billboard material time for wind animation.
@@ -371,12 +521,13 @@ pub fn update_billboard_lod(
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut commands: Commands,
     mut lod_query: Query<(Entity, &GlobalTransform, &mut BillboardLod)>,
+    mut billboard_query: Query<&mut MeshMaterial3d<BillboardMaterial>, With<BillboardQuad>>,
     mut stats: ResMut<BillboardStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut last_update: Local<f32>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Prop Billboard");
+    let timer = area_timer(&mut timing, frame.0, "Prop Billboard");
     if !settings.enabled || !cache.initialized {
         return;
     }
@@ -422,6 +573,7 @@ pub fn update_billboard_lod(
             switches += 1;
 
             if should_be_billboard {
+                lod.current_direction = select_billboard_direction(&lod, transform, camera_pos);
                 // Switch to billboard mode
                 switch_to_billboard(
                     &mut commands,
@@ -434,6 +586,17 @@ pub fn update_billboard_lod(
             } else {
                 // Switch to mesh mode
                 switch_to_mesh(&mut commands, entity, &mut lod);
+            }
+        } else if lod.is_billboard {
+            let selected = select_billboard_direction(&lod, transform, camera_pos);
+            if selected != lod.current_direction
+                && let Some(material) = lod.billboard_materials.get(selected).cloned()
+                && let Some(billboard_entity) = lod.billboard_entity
+                && let Ok(mut mesh_material) = billboard_query.get_mut(billboard_entity)
+            {
+                mesh_material.0 = material;
+                lod.current_direction = selected;
+                stats.texture_direction_switches += 1;
             }
         }
 
@@ -448,6 +611,42 @@ pub fn update_billboard_lod(
     stats.currently_billboarded = billboard_count;
     stats.currently_3d = mesh_count;
     stats.total_billboard_capable = billboard_count + mesh_count;
+    drop(timer);
+    timing.record_count(
+        frame.0,
+        "Billboard Generated Assets Loaded",
+        stats.generated_assets_loaded as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Missing Generated Assets",
+        stats.missing_generated_assets as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Directional8 Count",
+        stats.directional8_count as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Texture Direction Switches",
+        stats.texture_direction_switches as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Placeholder Blocked",
+        stats.placeholder_blocked as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Alpha Coverage Min",
+        stats.alpha_coverage_min as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Billboard Alpha Coverage Max",
+        stats.alpha_coverage_max as f64,
+    );
 }
 
 fn switch_to_billboard(
@@ -456,8 +655,12 @@ fn switch_to_billboard(
     prop_transform: &GlobalTransform,
     lod: &mut BillboardLod,
     quad_mesh: &Handle<Mesh>,
-    material: &Handle<BillboardMaterial>,
+    _material: &Handle<BillboardMaterial>,
 ) {
+    let Some(material) = lod.billboard_materials.get(lod.current_direction).cloned() else {
+        return;
+    };
+
     // Hide the prop entity (this hides the mesh and all children)
     if let Ok(mut entity_commands) = commands.get_entity(prop_entity) {
         entity_commands.insert(Visibility::Hidden);
@@ -469,7 +672,7 @@ fn switch_to_billboard(
     let billboard_entity = commands
         .spawn((
             Mesh3d(quad_mesh.clone()),
-            MeshMaterial3d(material.clone()),
+            MeshMaterial3d(material),
             Transform::from_translation(world_pos + Vec3::new(0.0, lod.y_offset, 0.0))
                 .with_scale(Vec3::new(lod.billboard_size.x, lod.billboard_size.y, 1.0)),
             Visibility::Inherited,
@@ -495,6 +698,47 @@ fn switch_to_mesh(commands: &mut Commands, prop_entity: Entity, lod: &mut Billbo
     lod.is_billboard = false;
 }
 
+fn select_billboard_direction(
+    lod: &BillboardLod,
+    prop_transform: &GlobalTransform,
+    camera_pos: Vec3,
+) -> usize {
+    let direction_count = lod.mode.direction_count();
+    if direction_count <= 1 {
+        return 0;
+    }
+
+    let prop_transform = prop_transform.compute_transform();
+    let prop_pos = prop_transform.translation;
+    let to_camera = camera_pos - prop_pos;
+    let camera_angle = to_camera.x.atan2(to_camera.z);
+    let forward = prop_transform.rotation * Vec3::Z;
+    let prop_yaw = forward.x.atan2(forward.z);
+    let relative = (camera_angle - prop_yaw).rem_euclid(std::f32::consts::TAU);
+    let sector = std::f32::consts::TAU / direction_count as f32;
+    let selected = ((relative / sector).round() as usize) % direction_count;
+
+    if lod.current_direction >= direction_count {
+        return selected;
+    }
+
+    // Avoid flicker at exact sector boundaries by keeping the previous direction
+    // until the camera has moved a little past the midpoint to the next sector.
+    let current_center = lod.current_direction as f32 * sector;
+    let delta = angular_distance(relative, current_center);
+    let hysteresis = sector * 0.08;
+    if delta <= sector * 0.5 + hysteresis {
+        lod.current_direction
+    } else {
+        selected
+    }
+}
+
+fn angular_distance(a: f32, b: f32) -> f32 {
+    let delta = (a - b).rem_euclid(std::f32::consts::TAU);
+    delta.min(std::f32::consts::TAU - delta)
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -505,23 +749,20 @@ pub fn should_use_billboard_lod(prop_type: PropType, _prop_id: &str) -> bool {
 }
 
 /// Get billboard configuration for a prop ID.
-pub fn get_billboard_config(
-    cache: &BillboardCache,
-    prop_id: &str,
-) -> Option<(Handle<Image>, Vec2, f32)> {
-    // Try prop-specific texture first, fall back to default
-    let texture = cache
-        .textures
-        .get(prop_id)
-        .or_else(|| cache.textures.get("default"))?
-        .clone();
+pub fn get_billboard_config(cache: &BillboardCache, prop_id: &str) -> Option<BillboardLodConfig> {
+    let asset = cache.assets.get(prop_id)?;
+    Some(BillboardLodConfig {
+        mode: asset.mode,
+        materials: asset.materials.clone(),
+        size: Vec2::new(asset.size.width, asset.size.height),
+        y_offset: asset.size.y_offset,
+    })
+}
 
-    // Get size config, or use default
-    let size = cache.sizes.get(prop_id).cloned().unwrap_or(BillboardSize {
-        width: 6.0,
-        height: 12.0,
-        y_offset: 0.0,
-    });
-
-    Some((texture, Vec2::new(size.width, size.height), size.y_offset))
+#[derive(Clone)]
+pub struct BillboardLodConfig {
+    pub mode: BillboardMode,
+    pub materials: Vec<Handle<BillboardMaterial>>,
+    pub size: Vec2,
+    pub y_offset: f32,
 }

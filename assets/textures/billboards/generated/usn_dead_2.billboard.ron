@@ -1,0 +1,28 @@
+(
+    prop_id: "usn_dead_2",
+    mode: Directional8,
+    texture_paths: [
+        "assets/textures/billboards/generated/usn_dead_2_dir0.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir1.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir2.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir3.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir4.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir5.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir6.png",
+        "assets/textures/billboards/generated/usn_dead_2_dir7.png",
+    ],
+    width: 3.4239101,
+    height: 6.1957707,
+    y_offset: -0.0100101195,
+    alpha_cutoff: 0.5,
+    source_bounds: (
+        min: (-1.7882427, -0.0100101195, -0.8091591),
+        max: (1.6356673, 6.1857605, 0.6366408),
+    ),
+    generated_image_resolution: (512, 512),
+    alpha_coverage: (
+        min: 0.03834915,
+        max: 0.05065155,
+        mean: 0.045651436,
+    ),
+)

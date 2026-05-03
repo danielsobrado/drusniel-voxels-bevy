@@ -1,0 +1,28 @@
+(
+    prop_id: "southern_oak",
+    mode: Directional8,
+    texture_paths: [
+        "assets/textures/billboards/generated/southern_oak_dir0.png",
+        "assets/textures/billboards/generated/southern_oak_dir1.png",
+        "assets/textures/billboards/generated/southern_oak_dir2.png",
+        "assets/textures/billboards/generated/southern_oak_dir3.png",
+        "assets/textures/billboards/generated/southern_oak_dir4.png",
+        "assets/textures/billboards/generated/southern_oak_dir5.png",
+        "assets/textures/billboards/generated/southern_oak_dir6.png",
+        "assets/textures/billboards/generated/southern_oak_dir7.png",
+    ],
+    width: 51.902664,
+    height: 31.529432,
+    y_offset: -1.2822163,
+    alpha_cutoff: 0.5,
+    source_bounds: (
+        min: (-29.471725, -1.2822163, -20.25938),
+        max: (22.430937, 30.247215, 21.913618),
+    ),
+    generated_image_resolution: (512, 512),
+    alpha_coverage: (
+        min: 0.13018799,
+        max: 0.14575958,
+        mean: 0.13710737,
+    ),
+)
