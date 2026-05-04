@@ -5,6 +5,7 @@ import { AssetBrowserPanel } from "../../features/assets/AssetBrowserPanel";
 import { ConsolePanel } from "../../features/console/ConsolePanel";
 import { InspectorPanel } from "../../features/inspector/InspectorPanel";
 import { ProfilerPanel } from "../../features/profiler/ProfilerPanel";
+import { TextureAtlasPanel } from "../../features/materials/TextureAtlasPanel";
 import { WorldOutlinerPanel } from "../../features/outliner/WorldOutlinerPanel";
 import { ViewportPanel } from "../../features/viewport/ViewportPanel";
 
@@ -20,7 +21,7 @@ const DEFAULT_LAYOUT = {
           type: "branch",
           data: [
             { type: "leaf", data: { views: ["viewport"], activeView: "viewport", id: "center" }, size: 620 },
-            { type: "leaf", data: { views: ["assets", "console", "profiler", "agent"], activeView: "assets", id: "bottom" }, size: 240 },
+            { type: "leaf", data: { views: ["assets", "atlas", "console", "profiler", "agent"], activeView: "assets", id: "bottom" }, size: 240 },
           ],
           size: 760,
         },
@@ -37,6 +38,7 @@ const DEFAULT_LAYOUT = {
     viewport: { id: "viewport", contentComponent: "viewport", title: "Viewport" },
     inspector: { id: "inspector", contentComponent: "inspector", title: "Inspector" },
     assets: { id: "assets", contentComponent: "assets", title: "Asset Browser" },
+    atlas: { id: "atlas", contentComponent: "atlas", title: "Texture Atlas" },
     console: { id: "console", contentComponent: "console", title: "Console" },
     profiler: { id: "profiler", contentComponent: "profiler", title: "Profiler" },
     agent: { id: "agent", contentComponent: "agent", title: "Agent Workbench" },
@@ -75,6 +77,7 @@ export function DockLayout({ resetRequestId }: DockLayoutProps) {
       outliner: (_props: IDockviewPanelProps) => <WorldOutlinerPanel />,
       inspector: (_props: IDockviewPanelProps) => <InspectorPanel />,
       assets: (_props: IDockviewPanelProps) => <AssetBrowserPanel />,
+      atlas: (_props: IDockviewPanelProps) => <TextureAtlasPanel />,
       console: (_props: IDockviewPanelProps) => <ConsolePanel />,
       profiler: (_props: IDockviewPanelProps) => <ProfilerPanel />,
       agent: (_props: IDockviewPanelProps) => <AgentWorkbenchPanel />,
@@ -101,7 +104,7 @@ export function DockLayout({ resetRequestId }: DockLayoutProps) {
 
   return (
     <main className="dock-layout-root" data-testid="dock-layout">
-      <DockviewReact className="dockview-theme-dark docklayout" components={components} onReady={handleReady} />
+      <DockviewReact className="dockview-react dockview-theme-dark docklayout" components={components} onReady={handleReady} />
     </main>
   );
 }

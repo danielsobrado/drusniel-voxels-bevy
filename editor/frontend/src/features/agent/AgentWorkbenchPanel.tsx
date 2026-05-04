@@ -1,4 +1,5 @@
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
+import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
 import { useEditorStore } from "../../state/editorStore";
 import { getAgentObservation, getRuntimeWarnings } from "../../state/editorSelectors";
@@ -9,12 +10,19 @@ export function AgentWorkbenchPanel() {
   const timeline = editorState.agentTimeline;
   const observation = getAgentObservation(editorState);
   const warnings = getRuntimeWarnings(editorState);
-  const { runCommandById } = useCommandRunner();
+  const { backendClient, runtimeClient } = useEditorClients();
+  const { runCommandById } = useCommandRunner({ backendClient, runtimeClient });
   const suggestedCommands = [
     "editor.agent.observeScreen",
     "editor.agent.runPlan",
     "editor.agent.generatePlaywrightTest",
     "editor.tests.runViewportSmokeTest",
+    "editor.water.openReflectionDebug",
+    "editor.water.toggleReflectionMask",
+    "editor.water.setDebugBlendFactor",
+    "editor.water.runVisualProbe",
+    "editor.water.focusNearestWaterBody",
+    "editor.water.applyRiverPreset",
   ];
 
   return (

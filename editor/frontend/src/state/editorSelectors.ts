@@ -2,13 +2,33 @@ import type { EditorDataState } from "./editorStore";
 import type { Selection } from "../types/editor";
 import type { ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
 
+export type OutlinerNodeKind = Selection["kind"];
+
+export type OutlinerNodeKey = `${OutlinerNodeKind}:${string}`;
+
+export const getOutlinerNodeKey = (kind: OutlinerNodeKind, id: string): OutlinerNodeKey => `${kind}:${id}`;
+
 export type SelectedObject = ChunkSummary | ProtectedArea | PropInstance | WaterBody | MaterialAsset | VoxelBlock | { readonly kind: "debug_resource"; readonly id: string; readonly label: string } | undefined;
+
+const badgeByKind: Record<Selection["kind"], string> = {
+  voxel: "VOX",
+  chunk: "CHUNK",
+  area: "AREA",
+  prop: "PROP",
+  water: "WATER",
+  material: "MATERIAL",
+  debug_resource: "DEBUG",
+};
 
 export interface OutlinerNode {
   readonly id: string;
   readonly label: string;
-  readonly kind: Selection["kind"];
+  readonly kind: OutlinerNodeKind;
   readonly detail: string;
+  readonly typeBadge: string;
+  readonly visible: boolean;
+  readonly locked: boolean;
+  readonly dirty: boolean;
 }
 
 export const getSelectedObject = (state: EditorDataState): SelectedObject => {
@@ -46,13 +66,89 @@ export const getDirtyChunks = (state: EditorDataState): readonly ChunkSummary[] 
 
 export const getCurrentInspectorKind = (state: EditorDataState): Selection["kind"] => state.selection.kind;
 
-export const getVisibleOutlinerNodes = (state: EditorDataState): readonly OutlinerNode[] => [
-  ...state.chunks.map((chunk) => ({ id: chunk.id, label: chunk.label, kind: "chunk" as const, detail: `${chunk.biome} / ${chunk.meshStatus}` })),
-  ...state.protectedAreas.map((area) => ({ id: area.id, label: area.name, kind: "area" as const, detail: `${area.kind} / ${area.shape}` })),
-  ...state.waterBodies.map((waterBody) => ({ id: waterBody.id, label: waterBody.name, kind: "water" as const, detail: `${waterBody.kind} / reflection ${waterBody.reflectionStatus.enabled ? "on" : "off"}` })),
-  ...state.props.map((prop) => ({ id: prop.id, label: prop.name, kind: "prop" as const, detail: `${prop.type} / ${prop.billboardMode}` })),
-  ...state.materials.map((material) => ({ id: material.id, label: material.name, kind: "material" as const, detail: material.kind })),
-];
+export const getVisibleOutlinerNodes = (state: EditorDataState): readonly OutlinerNode[] => {
+  const toNode = (kind: OutlinerNodeKind, id: string, label: string, detail: string, dirty: boolean): OutlinerNode => {
+    const key = getOutlinerNodeKey(kind, id);
+    const nodeState = state.outlinerNodeState[key] ?? { visible: true, locked: false };
+
+    return {
+      id,
+      label,
+      kind,
+      detail,
+      typeBadge: badgeByKind[kind],
+      visible: nodeState.visible,
+      locked: nodeState.locked,
+      dirty,
+    };
+  };
+
+  return [
+    ...state.chunks.map((chunk) => toNode("chunk", chunk.id, chunk.label, `${chunk.biome} / ${chunk.meshStatus}`, Boolean(chunk.dirty))),
+    ...state.protectedAreas.map((area) => toNode("area", area.id, area.name, `${area.kind} / ${area.shape}`, state.dirtyState.dirtyAreaIds.includes(area.id))),
+    ...state.waterBodies.map((waterBody) =>
+      toNode(
+        "water",
+        waterBody.id,
+        waterBody.name,
+        `${waterBody.kind} / reflection ${waterBody.reflectionStatus.enabled ? "on" : "off"}`,
+        state.dirtyState.dirtyWaterBodyIds.includes(waterBody.id),
+      ),
+    ),
+    ...state.props.map((prop) => toNode("prop", prop.id, prop.name, `${prop.type} / ${prop.lodState}`, false)),
+    ...state.materials.map((material) => toNode("material", material.id, material.name, material.kind, false)),
+  ];
+};
+
+const areaBoundsOverlap = (left: ProtectedArea, right: ProtectedArea): boolean =>
+  left.bounds.min[0] < right.bounds.max[0] &&
+  left.bounds.max[0] > right.bounds.min[0] &&
+  left.bounds.min[2] < right.bounds.max[2] &&
+  left.bounds.max[2] > right.bounds.min[2] &&
+  left.bounds.min[1] < right.bounds.max[1] &&
+  left.bounds.max[1] > right.bounds.min[1];
+
+export const getProtectedAreaWarnings = (state: EditorDataState): Record<string, readonly string[]> => {
+  const warningsByArea: Record<string, string[]> = {};
+
+  for (const area of state.protectedAreas) {
+    const warnings: string[] = [];
+
+    if (!area.name.trim()) {
+      warnings.push("Missing area name.");
+    }
+
+    if (area.locked && state.dirtyState.dirtyAreaIds.includes(area.id)) {
+      warnings.push("Locked but edited.");
+    }
+
+    for (const other of state.protectedAreas) {
+      if (other.id === area.id) {
+        continue;
+      }
+
+      if (other.priority === area.priority) {
+        warnings.push("Equal priority conflict.");
+      }
+
+      if (areaBoundsOverlap(area, other)) {
+        warnings.push(`Overlapping area conflict with ${other.name}.`);
+      }
+    }
+
+    warningsByArea[area.id] = [...new Set(warnings)];
+  }
+
+  return Object.fromEntries(Object.entries(warningsByArea).map(([id, next]) => [id, Object.freeze(next)])) as Record<string, readonly string[]>;
+};
+
+export const getSelectedProtectedAreaWarnings = (state: EditorDataState): readonly string[] => {
+  if (state.selection.kind !== "area") {
+    return [];
+  }
+
+  return getProtectedAreaWarnings(state)[state.selection.id] ?? [];
+};
 
 export const getAgentObservation = (state: EditorDataState) => ({
   ...state.agentObservation,
@@ -61,19 +157,29 @@ export const getAgentObservation = (state: EditorDataState) => ({
 });
 
 export const getRuntimeWarnings = (state: EditorDataState): readonly string[] => {
+  const selectedWater = state.waterBodies[0];
+  const snapshot = state.waterRuntimeSnapshot;
+  const globalWarnings = snapshot && !snapshot.reflectionStatus.active
+    ? [`${selectedWater ? `${selectedWater.name} reflection mode is inactive` : "Water reflection mode"} (${snapshot.reflectionStatus.reason}).`]
+    : [];
+
   const waterWarnings = state.waterBodies.flatMap((waterBody) => {
     if (!waterBody.reflectionStatus.enabled) {
       return [`${waterBody.name} reflections are disabled.`];
     }
 
-    if (!waterBody.reflectionStatus.probeValid) {
+    if (!waterBody.reflectionStatus.sampleReflection) {
       return [`${waterBody.name} reflection probe is stale.`];
     }
 
     return [];
   });
 
+  const samplingWarnings = !snapshot || !snapshot.reflectionStatus.sampleReflection
+    ? [`Runtime water reflection sampling disabled (${snapshot?.reflectionStatus.reason ?? "unknown"}).`]
+    : [];
+
   const timingWarnings = state.runtimeMetrics.frameMs > 16.7 ? [`Frame time ${state.runtimeMetrics.frameMs} ms exceeds 60 FPS budget.`] : [];
 
-  return [...waterWarnings, ...timingWarnings];
+  return [...globalWarnings, ...waterWarnings, ...samplingWarnings, ...timingWarnings];
 };

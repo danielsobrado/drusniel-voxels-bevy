@@ -1,6 +1,24 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
+import type { BackendResult } from "../backend/EditorBackendClient";
+import type { RuntimeCommandResult } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset } from "../types/editor";
-import type { ProtectedArea, ProtectedAreaRuleMatrix } from "../types/world";
+import type { BlockType, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode } from "../types/world";
+
+const unwrapBackend = <T>(result: BackendResult<T>): T => {
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+
+  return result.data;
+};
+
+const unwrapRuntime = <T>(result: RuntimeCommandResult<T>): T => {
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+
+  return result.data;
+};
 
 const modeCommand = (id: string, title: string, mode: EditorMode, shortcut?: string): EditorCommand => ({
   id,
@@ -22,12 +40,246 @@ const qualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
   category: "View",
   keywords: ["quality", "render", preset],
   run: async (ctx) => {
-    const snapshot = await ctx.runtimeClient.setRenderQuality(preset);
+    const snapshot = unwrapRuntime(await ctx.runtimeClient.setRenderQuality(preset));
     ctx.getState().setRenderQualityPreset(snapshot.metrics.renderQualityPreset);
   },
 });
 
-const createAreaCommand = (id: string, title: string, rules: ProtectedAreaRuleMatrix, namePrefix: string): EditorCommand => ({
+const makeAreaId = (prefix: string, index: number): string => `${prefix}-${index}`;
+
+const createBounds = (center: [number, number, number], size: [number, number, number]): ProtectedArea["bounds"] => {
+  const [x, y, z] = center;
+  const [sx, sy, sz] = size;
+
+  return {
+    min: [x - sx / 2, y - sy / 2, z - sz / 2],
+    max: [x + sx / 2, y + sy / 2, z + sz / 2],
+  };
+};
+
+const areaIntersects = (left: ProtectedArea["bounds"], right: ProtectedArea["bounds"]): boolean =>
+  left.min[0] < right.max[0] &&
+  left.max[0] > right.min[0] &&
+  left.min[1] < right.max[1] &&
+  left.max[1] > right.min[1] &&
+  left.min[2] < right.max[2] &&
+  left.max[2] > right.min[2];
+
+const selectWaterBody = (state: ReturnType<EditorCommandContext["getState"]>): WaterBody | undefined => {
+  if (state.selection.kind === "water") {
+    const selectedWaterId = state.selection.id;
+    return state.waterBodies.find((waterBody) => waterBody.id === selectedWaterId);
+  }
+
+  return state.waterBodies[0];
+};
+
+const setSelectedWaterBody = (
+  state: ReturnType<EditorCommandContext["getState"]>,
+  waterBody: WaterBody,
+): void => {
+  state.setSelection({ kind: "water", id: waterBody.id, label: waterBody.name });
+  state.setActiveMode("water");
+  state.setActiveTool("water");
+};
+
+const runSetWaterDebugMode = async (
+  ctx: EditorCommandContext,
+  debugViewMode: WaterReflectionDebugViewMode,
+): Promise<void> => {
+  const state = ctx.getState();
+  const water = selectWaterBody(state);
+  if (!water) {
+    ctx.toast.warning("No water body available.");
+    return;
+  }
+
+  await ctx.runtimeClient.setWaterReflectionDebugMode(water.id, debugViewMode);
+  state.updateWaterBody(water.id, {
+    reflectionStatus: {
+      ...water.reflectionStatus,
+      debugViewMode,
+    },
+  });
+};
+
+const setReflectionModeCommand = (id: string, title: string, mode: WaterReflectionDebugViewMode): EditorCommand => ({
+  id,
+  title,
+  description: `Set reflection debug mode to ${title.toLowerCase()}.`,
+  category: "Water",
+  keywords: ["water", "reflection", "debug", mode],
+  run: async (ctx) => {
+    await runSetWaterDebugMode(ctx, mode);
+  },
+});
+
+const waterPresets: Record<string, Partial<WaterBody>> = {
+  ocean: {
+    kind: "Ocean",
+    bodyType: "deep_ocean",
+    waveAmplitude: 0.78,
+    waveSpeed: 0.9,
+    waveScale: 1.16,
+    waveCount: 6,
+    reflectionStrength: 0.94,
+    fresnelPower: 3.4,
+    distortionStrength: 0.16,
+    shallowColor: "#4a8cff",
+    deepColor: "#0d2d5a",
+    clarity: 0.85,
+    murkiness: 0.12,
+    foamEnabled: true,
+    shoreFoam: 0.9,
+    waveCrestFoam: 0.45,
+    baseAlpha: 0.9,
+    detailNormalIntensity: 0.72,
+    detailScrollSpeed: 0.31,
+  },
+  lake: {
+    kind: "Lake",
+    bodyType: "calm_lake",
+    waveAmplitude: 0.3,
+    waveSpeed: 0.5,
+    waveScale: 0.95,
+    waveCount: 4,
+    reflectionStrength: 0.92,
+    fresnelPower: 2.4,
+    distortionStrength: 0.08,
+    shallowColor: "#66d5a8",
+    deepColor: "#0f6f63",
+    clarity: 0.98,
+    murkiness: 0.04,
+    foamEnabled: false,
+    shoreFoam: 0.25,
+    waveCrestFoam: 0.15,
+    baseAlpha: 0.93,
+    detailNormalIntensity: 0.54,
+    detailScrollSpeed: 0.22,
+  },
+  river: {
+    kind: "River",
+    bodyType: "fast_current",
+    waveAmplitude: 0.64,
+    waveSpeed: 1.1,
+    waveScale: 1.2,
+    waveCount: 10,
+    reflectionStrength: 0.81,
+    fresnelPower: 3.7,
+    distortionStrength: 0.16,
+    shallowColor: "#6bb0ff",
+    deepColor: "#2b56ad",
+    clarity: 0.74,
+    murkiness: 0.22,
+    foamEnabled: true,
+    shoreFoam: 0.65,
+    waveCrestFoam: 0.58,
+    baseAlpha: 0.86,
+    detailNormalIntensity: 0.66,
+    detailScrollSpeed: 0.34,
+  },
+  pond: {
+    kind: "Pond",
+    bodyType: "slow_eddy",
+    waveAmplitude: 0.18,
+    waveSpeed: 0.28,
+    waveScale: 0.9,
+    waveCount: 3,
+    reflectionStrength: 0.65,
+    fresnelPower: 2.9,
+    distortionStrength: 0.03,
+    shallowColor: "#7ad2ff",
+    deepColor: "#1f4e97",
+    clarity: 0.82,
+    murkiness: 0.27,
+    foamEnabled: false,
+    shoreFoam: 0.2,
+    waveCrestFoam: 0.22,
+    baseAlpha: 0.86,
+    detailNormalIntensity: 0.38,
+    detailScrollSpeed: 0.14,
+  },
+};
+
+const applyWaterPreset = (ctx: EditorCommandContext, presetKind: WaterBodyKind, values: Partial<WaterBody>) => {
+  const state = ctx.getState();
+  const water = selectWaterBody(state);
+  if (!water) {
+    ctx.toast.warning("No water body selected.");
+    return;
+  }
+
+  state.updateWaterBody(water.id, {
+    kind: presetKind,
+    ...values,
+  });
+  ctx.toast.success(`${water.name} set to ${presetKind} preset.`);
+};
+
+const areaConflictWarnings = (candidate: ProtectedArea, areas: readonly ProtectedArea[]): string[] => {
+  const warnings = new Set<string>();
+
+  if (!candidate.name.trim()) {
+    warnings.add("Missing area name warning.");
+  }
+
+  for (const area of areas) {
+    if (area.id === candidate.id) {
+      continue;
+    }
+
+    if (area.priority === candidate.priority) {
+      warnings.add("Equal priority conflict warning.");
+    }
+
+    if (areaIntersects(candidate.bounds, area.bounds)) {
+      warnings.add("Overlapping area warning.");
+    }
+  }
+
+  return [...warnings];
+};
+
+const atlasTileIds = Array.from({ length: 64 }, (_, index) => `tile-${index}`);
+
+const getSelectedTile = (ctx: EditorCommandContext): string => ctx.getState().selectedAtlasTileId ?? "tile-0";
+
+const createAtlasAssignCommand = (
+  id: string,
+  title: string,
+  block: BlockType,
+  face: "top" | "side" | "bottom",
+): EditorCommand => ({
+  id,
+  title,
+  description: `Assign selected atlas tile to ${block} ${face}.`,
+  category: "Materials",
+  keywords: ["atlas", "tile", "mapping", `${block} ${face}`],
+  preconditions: ["selectedAtlasTileId"],
+  run: (ctx) => {
+    const selectedTile = getSelectedTile(ctx);
+    ctx.getState().updateAtlasMapping(block, { [face]: selectedTile });
+    ctx.getState().pushAgentTimelineEvent({
+      kind: "command",
+      message: `Assigned tile ${selectedTile} to ${block}.${face}`,
+    });
+    ctx.toast.success(`Assigned atlas tile for ${block} ${face}.`);
+  },
+});
+
+const setSelectionToFallbackChunk = (ctx: EditorCommandContext): void => {
+  const state = ctx.getState();
+  const fallback = state.chunks[0];
+  state.setSelection(fallback ? { kind: "chunk", id: fallback.id, label: fallback.label } : { kind: "debug_resource", id: "selection-empty", label: "No selection" });
+};
+
+const createAreaCommand = (
+  id: string,
+  title: string,
+  kind: ProtectedAreaKind,
+  rules: ProtectedAreaRuleMatrix,
+  namePrefix: string,
+): EditorCommand => ({
   id,
   title,
   description: `Create a mocked protected area: ${namePrefix}.`,
@@ -37,29 +289,42 @@ const createAreaCommand = (id: string, title: string, rules: ProtectedAreaRuleMa
   run: (ctx) => {
     const state = ctx.getState();
     const nextIndex = state.protectedAreas.length + 1;
+    const center: [number, number, number] = [64 + nextIndex * 4, 24, 64 + nextIndex * 3];
+    const size: [number, number, number] = [16, 16, 16];
+    const areaIdPrefix = id.split(".").at(-1) ?? id;
     const area: ProtectedArea = {
-      id: `${id.split(".").at(-1)}-${nextIndex}`,
+      id: makeAreaId(areaIdPrefix, nextIndex),
       name: `${namePrefix} ${nextIndex}`,
-      kind: "story",
+      kind,
       shape: "box",
-      center: [64 + nextIndex * 4, 24, 64 + nextIndex * 3],
-      size: [16, 16, 16],
+      center,
+      size,
+      priority: 1,
+      locked: false,
+      color: "#22d3ee",
+      bounds: createBounds(center, size),
       rules,
     };
 
-    ctx.setState({
-      activeMode: "area",
-      activeTool: "area",
-      protectedAreas: [...state.protectedAreas, area],
-      selection: { kind: "area", id: area.id, label: area.name },
-      dirtyState: {
-        ...state.dirtyState,
-        hasUnsavedChanges: true,
-        dirtyAreaIds: [...state.dirtyState.dirtyAreaIds, area.id],
-      },
-      agentObservation: { ...state.agentObservation, selectedObjectLabel: area.name },
-    });
-    state.pushAgentTimelineEvent({ kind: "command", message: `${title} created ${area.name}.` });
+    const warnings = areaConflictWarnings(area, state.protectedAreas);
+    state.addProtectedArea(area);
+    state.setActiveMode("area");
+    state.setSelection({ kind: "area", id: area.id, label: area.name });
+    state.setActiveTool("area");
+
+    if (warnings.length > 0) {
+      ctx.toast.warning(`${area.name} has warnings.`);
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "warning",
+        message: `${area.name} warning(s): ${warnings.join(", ")}`,
+      });
+    } else {
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `${area.name} created.`,
+      });
+    }
+
     ctx.toast.success(`${area.name} created.`);
   },
 });
@@ -82,7 +347,7 @@ export const editorCommands: readonly EditorCommand[] = [
     shortcut: "Ctrl+S",
     keywords: ["file", "save", "dirty"],
     run: async (ctx) => {
-      await ctx.backendClient.saveDefaultWorld();
+      unwrapBackend(await ctx.backendClient.saveDefaultWorld());
       ctx.getState().clearDirty();
       ctx.toast.success("Mock save complete.");
     },
@@ -94,7 +359,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "File",
     keywords: ["snapshot", "save"],
     run: async (ctx) => {
-      const snapshot = await ctx.backendClient.saveWorldSnapshot();
+      const snapshot = unwrapBackend(await ctx.backendClient.saveWorldSnapshot());
       ctx.getState().markDirty();
       ctx.toast.success(`Mock snapshot recorded: ${snapshot.snapshotId}.`);
     },
@@ -129,7 +394,23 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Toggle mocked prop bounds and billboard debug visibility.",
     category: "View",
     keywords: ["props", "bounds", "billboards"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("propBillboards"),
+    run: (ctx) => ctx.getState().toggleViewportOverlay("propBounds"),
+  },
+  {
+    id: "editor.view.toggleWaterDebug",
+    title: "Toggle water debug",
+    description: "Toggle mock water debug overlay.",
+    category: "View",
+    keywords: ["water", "debug", "overlay"],
+    run: (ctx) => ctx.getState().toggleViewportOverlay("waterDebug"),
+  },
+  {
+    id: "editor.view.toggleAgentTargets",
+    title: "Toggle agent targets",
+    description: "Toggle mock agent-target markers in the viewport.",
+    category: "View",
+    keywords: ["agent", "targets", "overlay"],
+    run: (ctx) => ctx.getState().toggleViewportOverlay("agentTargets"),
   },
   {
     id: "editor.view.resetLayout",
@@ -153,6 +434,18 @@ export const editorCommands: readonly EditorCommand[] = [
   modeCommand("editor.mode.debug", "Debug", "debug"),
   modeCommand("editor.mode.agent", "Agent", "agent"),
   {
+    id: "editor.world.loadSummary",
+    title: "Load world summary",
+    description: "Load a mocked world summary via backend client.",
+    category: "World",
+    keywords: ["world", "load", "summary", "backend"],
+    run: async (ctx) => {
+      const summary = unwrapBackend(await ctx.backendClient.getWorldSummary());
+      ctx.getState().replaceWorldSummary(summary);
+      ctx.toast.info(`Loaded world summary for ${summary.name}.`);
+    },
+  },
+  {
     id: "editor.world.rebuildSelectedChunk",
     title: "Rebuild selected chunk",
     description: "Mark the selected mocked chunk mesh as queued for rebuild.",
@@ -167,7 +460,7 @@ export const editorCommands: readonly EditorCommand[] = [
       }
 
       const selectedChunkId = state.selection.id;
-      await ctx.runtimeClient.rebuildSelectedChunk(selectedChunkId);
+      unwrapRuntime(await ctx.runtimeClient.rebuildSelectedChunk(selectedChunkId));
       ctx.setState({ chunks: state.chunks.map((chunk) => (chunk.id === selectedChunkId ? { ...chunk, meshStatus: "queued" } : chunk)) });
       ctx.toast.info(`${state.selection.label} rebuild queued.`);
     },
@@ -181,7 +474,7 @@ export const editorCommands: readonly EditorCommand[] = [
     run: async (ctx) => {
       const state = ctx.getState();
       const dirtyChunkIds = state.dirtyState.dirtyChunkIds;
-      await ctx.runtimeClient.rebuildDirtyChunks(dirtyChunkIds);
+      unwrapRuntime(await ctx.runtimeClient.rebuildDirtyChunks(dirtyChunkIds));
       ctx.setState({ chunks: state.chunks.map((chunk) => (dirtyChunkIds.includes(chunk.id) ? { ...chunk, meshStatus: "queued" } : chunk)) });
       ctx.toast.info("Dirty chunk rebuild queued.");
     },
@@ -189,21 +482,142 @@ export const editorCommands: readonly EditorCommand[] = [
   createAreaCommand(
     "editor.area.createUnbreakableBox",
     "Create unbreakable box area",
-    { allowVoxelEdit: false, allowPropEdit: false, allowWaterEdit: false, allowMaterialEdit: false, agentRequiresApproval: true },
+    "story_lock",
+    { canMine: false, canPlace: false, canPaint: false, canSpawnProps: false, canEditWater: false, canSaveModify: false },
     "Unbreakable Box",
   ),
   createAreaCommand(
     "editor.area.createNoBuildZone",
     "Create no-build zone",
-    { allowVoxelEdit: true, allowPropEdit: false, allowWaterEdit: true, allowMaterialEdit: true, agentRequiresApproval: true },
+    "no_build",
+    { canMine: true, canPlace: true, canPaint: false, canSpawnProps: false, canEditWater: true, canSaveModify: true },
     "No-Build Zone",
   ),
   createAreaCommand(
     "editor.area.createNoDigZone",
     "Create no-dig zone",
-    { allowVoxelEdit: false, allowPropEdit: true, allowWaterEdit: true, allowMaterialEdit: true, agentRequiresApproval: true },
+    "no_dig",
+    { canMine: false, canPlace: true, canPaint: false, canSpawnProps: true, canEditWater: true, canSaveModify: true },
     "No-Dig Zone",
   ),
+  {
+    id: "editor.area.duplicateSelected",
+    title: "Duplicate selected protected area",
+    description: "Duplicate the currently selected protected area as a mock operation.",
+    category: "Areas",
+    keywords: ["protected", "area", "duplicate", "copy"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before duplicating.");
+        return;
+      }
+
+      const sourceAreaId = state.selection.id;
+      const sourceArea = state.protectedAreas.find((area) => area.id === sourceAreaId);
+      if (!sourceArea) {
+        ctx.toast.warning("Selected protected area no longer exists.");
+        return;
+      }
+
+      const nextIndex = state.protectedAreas.length + 1;
+      const duplicate: ProtectedArea = {
+        ...sourceArea,
+        id: makeAreaId(`copy-${sourceArea.id}`, nextIndex),
+        name: `${sourceArea.name} Copy`,
+        center: [sourceArea.center[0] + 6, sourceArea.center[1], sourceArea.center[2] + 6],
+        bounds: createBounds([sourceArea.center[0] + 6, sourceArea.center[1], sourceArea.center[2] + 6], sourceArea.size),
+      };
+
+      state.addProtectedArea(duplicate);
+      state.setActiveMode("area");
+      state.setActiveTool("area");
+      state.setSelection({ kind: "area", id: duplicate.id, label: duplicate.name });
+      ctx.toast.success(`${sourceArea.name} duplicated.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Duplicated protected area ${sourceArea.name}.` });
+    },
+  },
+  {
+    id: "editor.area.deleteSelected",
+    title: "Delete selected protected area",
+    description: "Delete the selected mocked protected area.",
+    category: "Areas",
+    keywords: ["protected", "area", "delete", "remove"],
+    preconditions: ["selection.kind === area"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before deleting.");
+        return;
+      }
+
+      const targetId = state.selection.id;
+      const targetLabel = state.selection.label;
+      state.removeProtectedArea(targetId);
+      setSelectionToFallbackChunk(ctx);
+      state.setActiveMode("select");
+      state.setActiveTool("select");
+      ctx.toast.warning(`${targetLabel} deleted.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "warning", message: `Deleted protected area ${targetLabel}.` });
+    },
+  },
+  {
+    id: "editor.area.lockSelected",
+    title: "Lock selected protected area",
+    description: "Lock the selected mocked protected area.",
+    category: "Areas",
+    keywords: ["protected", "area", "lock"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before locking.");
+        return;
+      }
+
+      state.updateProtectedArea(state.selection.id, { locked: true });
+      state.setActiveTool("area");
+      ctx.toast.info(`${state.selection.label} locked.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Locked protected area ${state.selection.label}.` });
+    },
+  },
+  {
+    id: "editor.area.unlockSelected",
+    title: "Unlock selected protected area",
+    description: "Unlock the selected mocked protected area.",
+    category: "Areas",
+    keywords: ["protected", "area", "unlock"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before unlocking.");
+        return;
+      }
+
+      state.updateProtectedArea(state.selection.id, { locked: false });
+      state.setActiveTool("area");
+      ctx.toast.info(`${state.selection.label} unlocked.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Unlocked protected area ${state.selection.label}.` });
+    },
+  },
+  {
+    id: "editor.area.focusSelected",
+    title: "Focus selected protected area",
+    description: "Mock focus the selected protected area in the viewport.",
+    category: "Areas",
+    keywords: ["protected", "area", "focus", "camera"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before focusing.");
+        return;
+      }
+
+      state.setActiveMode("area");
+      state.setActiveTool("area");
+      ctx.toast.success(`Focused ${state.selection.label} in mocked viewport.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Focused protected area ${state.selection.label}.` });
+    },
+  },
   {
     id: "editor.voxel.paintMaterial",
     title: "Paint selected material",
@@ -211,8 +625,16 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Voxels",
     keywords: ["voxel", "paint", "material"],
     run: (ctx) => {
-      ctx.getState().markDirty();
+      const state = ctx.getState();
+      if (state.selection.kind !== "chunk") {
+        ctx.toast.warning("Select a chunk before painting voxels.");
+        return;
+      }
+
+      state.markDirty(state.selection.id);
+      state.pushAgentTimelineEvent({ kind: "command", message: `Painted ${state.selection.label} with ${state.brushSettings.materialBlockId}.` });
       ctx.toast.info("Mock voxel material paint applied.");
+      ctx.getState().setActiveMode("voxel_paint");
     },
   },
   {
@@ -222,8 +644,11 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Voxels",
     keywords: ["voxel", "replace", "selection"],
     run: (ctx) => {
-      ctx.getState().markDirty();
+      const state = ctx.getState();
+      state.markDirty();
+      state.pushAgentTimelineEvent({ kind: "command", message: `Replaced selection (${state.selection.label}) via mocked voxel tool.` });
       ctx.toast.info("Mock selected voxel replaced.");
+      ctx.getState().setActiveMode("voxel_paint");
     },
   },
   {
@@ -231,45 +656,240 @@ export const editorCommands: readonly EditorCommand[] = [
     title: "Open reflection debug",
     description: "Enable mocked water debug overlay.",
     category: "Water",
-    keywords: ["water", "reflection", "debug"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("waterDebug"),
-  },
-  {
-    id: "editor.water.toggleReflectionMask",
-    title: "Toggle reflection mask",
-    description: "Toggle the first mocked water body reflection debug mode between Off and Mask.",
-    category: "Water",
-    keywords: ["water", "mask", "reflection"],
-    run: async (ctx) => {
+    keywords: ["water", "reflection", "debug", "viewport", "overlay"],
+    run: (ctx) => {
       const state = ctx.getState();
-      const water = state.waterBodies[0];
-      if (!water) {
-        return;
+      if (!state.viewportOverlays.waterDebug) {
+        state.toggleViewportOverlay("waterDebug");
       }
 
-      const debugViewMode = water.reflectionStatus.debugViewMode === "Mask" ? "Off" : "Mask";
-      await ctx.runtimeClient.setWaterReflectionDebugMode(water.id, debugViewMode);
-      state.updateWaterBody(water.id, {
-        reflectionStatus: {
-          ...water.reflectionStatus,
-          debugViewMode,
-        },
+      state.setActiveMode("water");
+      state.setActiveTool("water");
+      ctx.toast.info("Water reflection debug overlay opened.");
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: "Opened water reflection debug overlay.",
       });
     },
   },
   {
+    id: "editor.water.toggleReflectionMask",
+    title: "Toggle reflection mask",
+    description: "Toggle selected water reflection debug mode between Off and Mask.",
+    category: "Water",
+    keywords: ["water", "mask", "reflection"],
+    run: async (ctx) => {
+      const state = ctx.getState();
+      const water = selectWaterBody(state);
+      if (!water) {
+        ctx.toast.warning("No water body selected.");
+        return;
+      }
+
+      const debugViewMode = water.reflectionStatus.debugViewMode === "Mask" ? "Off" : "Mask";
+      await runSetWaterDebugMode(ctx, debugViewMode);
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `Set ${water.name} reflection mode to ${debugViewMode}.`,
+      });
+    },
+  },
+  {
+    id: "editor.water.setDebugOff",
+    title: "Set reflection debug off",
+    description: "Set selected water reflection debug mode to Off.",
+    category: "Water",
+    keywords: ["water", "reflection", "debug", "off"],
+    run: (ctx) => void runSetWaterDebugMode(ctx, "Off"),
+  },
+  {
+    id: "editor.water.setDebugMask",
+    title: "Set reflection debug mask",
+    description: "Set selected water reflection debug mode to Mask.",
+    category: "Water",
+    keywords: ["water", "reflection", "debug", "mask"],
+    run: (ctx) => void runSetWaterDebugMode(ctx, "Mask"),
+  },
+  {
+    id: "editor.water.setDebugReflectionOnly",
+    title: "Set reflection-only debug",
+    description: "Set selected water reflection debug mode to ReflectionOnly.",
+    category: "Water",
+    keywords: ["water", "reflection", "debug", "reflection-only"],
+    run: (ctx) => void runSetWaterDebugMode(ctx, "ReflectionOnly"),
+  },
+  {
+    id: "editor.water.setDebugBlendFactor",
+    title: "Set reflection blend factor debug",
+    description: "Set selected water reflection debug mode to BlendFactor.",
+    category: "Water",
+    keywords: ["water", "reflection", "debug", "blend"],
+    run: (ctx) => void runSetWaterDebugMode(ctx, "BlendFactor"),
+  },
+  {
     id: "editor.water.runVisualProbe",
     title: "Run water visual probe",
-    description: "Refresh mocked water reflection probe status.",
+    description: "Run mocked water visual probe and capture sample results.",
     category: "Water",
     keywords: ["water", "probe", "reflection"],
     run: async (ctx) => {
       const state = ctx.getState();
-      const probe = await ctx.runtimeClient.runWaterVisualProbe();
+      const snapshot = unwrapRuntime(await ctx.runtimeClient.runWaterVisualProbe());
+      state.setWaterRuntimeSnapshot(snapshot);
       for (const waterBody of state.waterBodies) {
-        state.updateWaterBody(waterBody.id, { reflectionStatus: { ...waterBody.reflectionStatus, probeValid: probe.probeValid, lastProbeUpdateMs: probe.lastProbeUpdateMs } });
+        state.updateWaterBody(waterBody.id, {
+          reflectionStatus: {
+            ...waterBody.reflectionStatus,
+            probeValid: snapshot.reflectionStatus.probeValid,
+            lastProbeUpdateMs: snapshot.reflectionStatus.lastProbeUpdateMs,
+            active: snapshot.reflectionStatus.active,
+            sampleReflection: snapshot.reflectionStatus.sampleReflection,
+            reason: snapshot.reflectionStatus.reason,
+            resolutionScale: snapshot.reflectionStatus.resolutionScale,
+            effectiveHz: snapshot.reflectionStatus.effectiveHz,
+            enabled: snapshot.reflectionStatus.enabled,
+          },
+        });
       }
-      ctx.toast.success("Mock water visual probe complete.");
+      if (state.selection.kind === "water") {
+        ctx.toast.success(`Mock water visual probe completed for ${state.selection.label}.`);
+      } else {
+        ctx.toast.success("Mock water visual probe completed.");
+      }
+    },
+  },
+  {
+    id: "editor.water.focusNearestWaterBody",
+    title: "Focus nearest water body",
+    description: "Select the nearest mocked water body.",
+    category: "Water",
+    keywords: ["water", "focus", "selection", "nearest"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const lake = state.waterBodies.find((waterBody) => waterBody.id === "water-lk-03") ?? state.waterBodies[0];
+      if (!lake) {
+        ctx.toast.warning("No water body to focus.");
+        return;
+      }
+
+      setSelectedWaterBody(state, lake);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Focused water body ${lake.name}.` });
+    },
+  },
+  {
+    id: "editor.water.classifyAsOcean",
+    title: "Classify selected water as ocean",
+    description: "Set selected water kind to Ocean.",
+    category: "Water",
+    keywords: ["water", "classify", "ocean"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const water = selectWaterBody(state);
+      if (!water) {
+        ctx.toast.warning("No water body selected.");
+        return;
+      }
+
+      state.updateWaterBody(water.id, { kind: "Ocean" });
+      state.setActiveMode("water");
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Ocean.` });
+    },
+  },
+  {
+    id: "editor.water.classifyAsLake",
+    title: "Classify selected water as lake",
+    description: "Set selected water kind to Lake.",
+    category: "Water",
+    keywords: ["water", "classify", "lake"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const water = selectWaterBody(state);
+      if (!water) {
+        ctx.toast.warning("No water body selected.");
+        return;
+      }
+
+      state.updateWaterBody(water.id, { kind: "Lake" });
+      state.setActiveMode("water");
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Lake.` });
+    },
+  },
+  {
+    id: "editor.water.classifyAsRiver",
+    title: "Classify selected water as river",
+    description: "Set selected water kind to River.",
+    category: "Water",
+    keywords: ["water", "classify", "river"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const water = selectWaterBody(state);
+      if (!water) {
+        ctx.toast.warning("No water body selected.");
+        return;
+      }
+
+      state.updateWaterBody(water.id, { kind: "River" });
+      state.setActiveMode("water");
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as River.` });
+    },
+  },
+  {
+    id: "editor.water.classifyAsPond",
+    title: "Classify selected water as pond",
+    description: "Set selected water kind to Pond.",
+    category: "Water",
+    keywords: ["water", "classify", "pond"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const water = selectWaterBody(state);
+      if (!water) {
+        ctx.toast.warning("No water body selected.");
+        return;
+      }
+
+      state.updateWaterBody(water.id, { kind: "Pond" });
+      state.setActiveMode("water");
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Pond.` });
+    },
+  },
+  {
+    id: "editor.water.applyOceanPreset",
+    title: "Apply ocean preset",
+    description: "Apply mocked ocean water parameter preset.",
+    category: "Water",
+    keywords: ["water", "preset", "ocean"],
+    run: (ctx) => {
+      applyWaterPreset(ctx, "Ocean", waterPresets.ocean);
+    },
+  },
+  {
+    id: "editor.water.applyLakePreset",
+    title: "Apply lake preset",
+    description: "Apply mocked lake water parameter preset.",
+    category: "Water",
+    keywords: ["water", "preset", "lake"],
+    run: (ctx) => {
+      applyWaterPreset(ctx, "Lake", waterPresets.lake);
+    },
+  },
+  {
+    id: "editor.water.applyRiverPreset",
+    title: "Apply river preset",
+    description: "Apply mocked river water parameter preset.",
+    category: "Water",
+    keywords: ["water", "preset", "river"],
+    run: (ctx) => {
+      applyWaterPreset(ctx, "River", waterPresets.river);
+    },
+  },
+  {
+    id: "editor.water.applyPondPreset",
+    title: "Apply pond preset",
+    description: "Apply mocked pond water parameter preset.",
+    category: "Water",
+    keywords: ["water", "preset", "pond"],
+    run: (ctx) => {
+      applyWaterPreset(ctx, "Pond", waterPresets.pond);
     },
   },
   {
@@ -286,13 +906,89 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.material.openTextureAtlas",
     title: "Open texture atlas",
-    description: "Toggle mocked atlas preview overlay.",
+    description: "Open the texture atlas editing mode and reload atlas mapping.",
     category: "Materials",
-    keywords: ["material", "atlas", "texture"],
+    keywords: ["material", "atlas", "texture", "mapping"],
     run: async (ctx) => {
-      const atlasMapping = await ctx.backendClient.loadAtlasMapping();
+      const atlasMapping = unwrapBackend(await ctx.backendClient.loadAtlasMapping());
       ctx.setState({ atlasMapping });
+      ctx.getState().setActiveMode("material");
+      ctx.getState().setActiveTool("material");
+      ctx.getState().setSelection({ kind: "material", id: "mat-grass-block", label: "Grass Block" });
       ctx.getState().toggleViewportOverlay("atlasPreview");
+    },
+  },
+  {
+    id: "editor.atlas.selectTile",
+    title: "Select atlas tile",
+    description: "Set the currently selected atlas tile by ID.",
+    category: "Materials",
+    keywords: ["atlas", "tile", "selection", "index", "material"],
+    preconditions: ["selectedAtlasTileId"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      const tileId = state.selectedAtlasTileId ?? atlasTileIds.at(0);
+      if (!tileId) {
+        ctx.toast.warning("No atlas tile to select.");
+        return;
+      }
+
+      state.setSelectedAtlasTile(tileId);
+      ctx.toast.info(`Atlas tile selected: ${tileId}.`);
+    },
+  },
+  ...atlasTileIds.map(
+    (tileId): EditorCommand => ({
+      id: `editor.atlas.selectTile.${tileId}`,
+      title: `Select atlas tile ${tileId}`,
+      description: `Select atlas tile ${tileId} for mapping assignments.`,
+      category: "Materials",
+      keywords: ["atlas", "tile", tileId],
+      run: (ctx) => {
+        ctx.getState().setSelectedAtlasTile(tileId);
+        ctx.toast.info(`Atlas tile selected: ${tileId}.`);
+      },
+    }),
+  ),
+  createAtlasAssignCommand("editor.atlas.assignGrassTop", "Assign selected tile to grass top", "grass", "top"),
+  createAtlasAssignCommand("editor.atlas.assignGrassSide", "Assign selected tile to grass side", "grass", "side"),
+  createAtlasAssignCommand("editor.atlas.assignGrassBottom", "Assign selected tile to grass bottom", "grass", "bottom"),
+  createAtlasAssignCommand("editor.atlas.assignDirtTop", "Assign selected tile to dirt top", "dirt", "top"),
+  createAtlasAssignCommand("editor.atlas.assignDirtSide", "Assign selected tile to dirt side", "dirt", "side"),
+  createAtlasAssignCommand("editor.atlas.assignDirtBottom", "Assign selected tile to dirt bottom", "dirt", "bottom"),
+  createAtlasAssignCommand("editor.atlas.assignRockTop", "Assign selected tile to rock top", "rock", "top"),
+  createAtlasAssignCommand("editor.atlas.assignRockSide", "Assign selected tile to rock side", "rock", "side"),
+  createAtlasAssignCommand("editor.atlas.assignRockBottom", "Assign selected tile to rock bottom", "rock", "bottom"),
+  createAtlasAssignCommand("editor.atlas.assignSandTop", "Assign selected tile to sand top", "sand", "top"),
+  createAtlasAssignCommand("editor.atlas.assignSandSide", "Assign selected tile to sand side", "sand", "side"),
+  createAtlasAssignCommand("editor.atlas.assignSandBottom", "Assign selected tile to sand bottom", "sand", "bottom"),
+  {
+    id: "editor.atlas.rebuildTextureArray",
+    title: "Rebuild texture array",
+    description: "Clear atlas dirty state and record a mock rebuild.",
+    category: "Materials",
+    keywords: ["atlas", "rebuild", "texture", "mapping"],
+    run: async (ctx) => {
+      unwrapBackend(await ctx.backendClient.saveAtlasMapping(ctx.getState().atlasMapping));
+      ctx.getState().markAtlasRebuilt();
+      ctx.toast.success("Atlas texture array rebuild queued.");
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Rebuilt atlas texture array (mock)." });
+    },
+  },
+  {
+    id: "editor.atlas.saveMapping",
+    title: "Save atlas mapping",
+    description: "Mock save current atlas mapping and emit a YAML preview for review.",
+    category: "Materials",
+    keywords: ["atlas", "save", "mapping", "yaml"],
+    run: async (ctx) => {
+      const result = await ctx.backendClient.saveAtlasMapping(ctx.getState().atlasMapping);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      ctx.toast.success(`Atlas mapping saved as ${result.data.snapshotId ?? "mapping"}.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Saved atlas mapping (mock).", id: "agent-event-atlas-save" });
     },
   },
   {
@@ -360,6 +1056,24 @@ export const getCommand = (id: string): EditorCommand => {
 
 export const runCommand = async (id: string, context: EditorCommandContext): Promise<void> => {
   const command = getCommand(id);
-  await command.run(context);
-  context.pushCommandHistory(command.id, command.title);
+  try {
+    await command.run(context);
+    context.pushCommandHistory(command.id, command.title);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown command failure.";
+    const state = context.getState();
+    context.setState({
+      consoleMessages: [
+        {
+          id: `console-command-error-${Date.now()}`,
+          level: "error",
+          message: `${command.id}: ${message}`,
+          time: new Date().toLocaleTimeString(),
+        },
+        ...state.consoleMessages,
+      ],
+    });
+    context.pushAgentTimelineEvent({ kind: "warning", message: `${command.title} failed: ${message}` });
+    context.toast.error(`${command.title} failed.`);
+  }
 };

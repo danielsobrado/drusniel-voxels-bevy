@@ -23,8 +23,36 @@ test("editor shell renders", async ({ page }) => {
 test("selecting a mocked outliner item updates the inspector header", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("panel-world-outliner")).toBeVisible();
-  await page.getByRole("button", { name: "Select Chunk 1,0" }).dispatchEvent("click");
+  await page.locator('[data-testid="outliner-item-chunk-chunk-1-0"]').click();
   await expect(page.getByTestId("inspector-selection-header")).toHaveText("Chunk 1,0");
+});
+
+test("water inspector and viewport debug controls update mocked water runtime state", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("panel-world-outliner")).toBeVisible();
+
+  await page.getByTestId("outliner-item-water-water-lk-03").dispatchEvent("click");
+  await expect(page.getByTestId("inspector-water")).toBeVisible();
+  await expect(page.getByTestId("inspector-water-kind")).toHaveValue("Lake");
+
+  await page.getByTestId("inspector-water-debug-mode").selectOption("Mask");
+  await expect(page.getByTestId("inspector-water-debug-mode")).toHaveValue("Mask");
+  await page.getByTestId("viewport-water-open-reflection-debug").click();
+  await expect(page.getByTestId("viewport-water-overlay")).toContainText("Mode:");
+
+  await page.getByTestId("inspector-water-run-probe").click();
+  const visualProbeOutput = page.locator("[data-testid='inspector-water-visual-probe']").locator(".inspector-section-body");
+  await expect(visualProbeOutput).toContainText("Nearest body");
+  await expect(visualProbeOutput).toContainText("Lake");
+  await expect(visualProbeOutput).toContainText("Reflection eligible");
+
+  await page.getByTestId("water-preset-river").click();
+  await expect(page.getByTestId("inspector-water-kind")).toHaveValue("River");
+  await expect(page.getByTestId("inspector-water-wave-amplitude")).toHaveValue("0.64");
+
+  await expect(page.getByRole("button", { name: "Open reflection debug overlay" })).toBeVisible();
+  await expect(page.getByTestId("inspector-water-run-probe")).toBeVisible();
+  await expect(page.getByTestId("viewport-water-run-probe")).toBeVisible();
 });
 
 test("command palette creates an unbreakable protected area and toggles chunk bounds", async ({ page }) => {
@@ -33,7 +61,10 @@ test("command palette creates an unbreakable protected area and toggles chunk bo
   await page.keyboard.press("Control+K");
   await expect(page.getByTestId("command-palette")).toBeVisible();
   await page.getByPlaceholder("Run editor command...").fill("unbreakable");
-  await page.getByText("Create unbreakable box area").click();
+  await page
+    .getByTestId("command-palette")
+    .locator('[data-command-id="editor.area.createUnbreakableBox"]')
+    .click();
 
   await expect(page.getByTestId("protected-area-count")).toHaveText("4");
   await expect(page.getByTestId("current-selection-label")).toHaveText("Unbreakable Box 4");
@@ -43,4 +74,107 @@ test("command palette creates an unbreakable protected area and toggles chunk bo
   await expect(page.getByTestId("chunk-bounds-state")).toHaveText("on");
   await page.locator('[data-command-id="editor.view.toggleChunkBounds"]').first().click();
   await expect(page.getByTestId("chunk-bounds-state")).toHaveText("off");
+});
+
+test("protected area command workflow creates, edits, and deletes an area", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("app-shell")).toBeVisible();
+
+  const initialAreaCount = Number.parseInt((await page.getByTestId("protected-area-count").textContent()) ?? "0", 10);
+  const createdAreaLabel = "Unbreakable Box 4";
+  const outlinerArea = page.locator('[data-testid^="outliner-item-area-"]').filter({ hasText: createdAreaLabel });
+  const viewportAreaOverlay = page.locator('svg [data-testid^="viewport-area-overlay-"]').filter({ hasText: createdAreaLabel });
+
+  await page.keyboard.press("Control+K");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.getByPlaceholder("Run editor command...").fill("unbreakable");
+  await page
+    .getByTestId("command-palette")
+    .locator('[data-command-id="editor.area.createUnbreakableBox"]')
+    .click();
+
+  await expect(page.getByTestId("protected-area-count")).toHaveText(String(initialAreaCount + 1));
+  await expect(page.getByTestId("current-mode")).toHaveText("area");
+  await expect(page.getByTestId("viewport-active-mode")).toHaveText("Mode area");
+  await expect(outlinerArea).toBeVisible();
+  await expect(viewportAreaOverlay).toBeVisible();
+  await expect(page.getByTestId("inspector-area")).toBeVisible();
+
+  await page.getByTestId("inspector-area-bounds-min-x").fill("30");
+  await page.getByTestId("inspector-area-bounds-min-y").fill("14");
+  await page.getByTestId("inspector-area-bounds-min-z").fill("70");
+  await page.getByTestId("inspector-area-priority").fill("77");
+  await expect(page.getByTestId("inspector-area-bounds-min-x")).toHaveValue("30");
+  await expect(page.getByTestId("inspector-area-priority")).toHaveValue("77");
+
+  await page.getByTestId("inspector-area-rules-canMine").setChecked(false);
+  await page.getByTestId("inspector-area-rules-canPlace").setChecked(true);
+  await page.getByTestId("inspector-area-rules-canPaint").setChecked(false);
+  await expect(page.getByTestId("inspector-area-rules-canMine")).not.toBeChecked();
+  await expect(page.getByTestId("inspector-area-rules-canPlace")).toBeChecked();
+  await expect(page.getByTestId("inspector-area-rules-canPaint")).not.toBeChecked();
+
+  await page.keyboard.press("Control+K");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.getByPlaceholder("Run editor command...").fill("delete selected area");
+  await page
+    .getByTestId("command-palette")
+    .locator('[data-command-id="editor.area.deleteSelected"]')
+    .click();
+
+  await expect(page.getByTestId("inspector-area")).not.toBeVisible();
+  await expect(page.getByTestId("current-mode")).toHaveText("select");
+  await expect(page.getByTestId("command-history-latest-id")).toHaveText("editor.area.deleteSelected");
+  await expect(outlinerArea).not.toBeVisible();
+  await expect(viewportAreaOverlay).not.toBeVisible();
+});
+
+test("texture atlas assignment updates mappings and rebuild state", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+
+  const textureTab = page.locator('.dockview-react').getByText("Texture Atlas", { exact: true }).first();
+  await textureTab.click();
+  await expect(page.getByTestId("panel-texture-atlas")).toBeVisible();
+
+  await page.getByTestId("atlas-tile-7").click();
+  await expect(page.getByTestId("atlas-selected-tile-label")).toContainText("tile-7");
+
+  await page.getByTestId("atlas-assign-grass-side").click();
+  await expect(page.getByTestId("block-preview-grass")).toContainText("side: tile-7");
+  await expect(page.getByTestId("atlas-dirty-state")).toHaveText("yes");
+
+  await page.getByTestId("atlas-rebuild").click();
+  await expect(page.getByTestId("atlas-dirty-state")).toHaveText("no");
+
+  await page.getByTestId("atlas-save").click();
+  const yaml = await page.getByTestId("atlas-yaml-preview").textContent();
+  expect(yaml).toContain("grass:");
+  expect(yaml).toContain("side: tile-7");
+  expect(yaml).toContain("dirt:");
+  expect(yaml).toContain("rock:");
+  expect(yaml).toContain("sand:");
+  expect(yaml).toContain("top:");
+});
+
+test("voxel paint toolbar is available and updates brush controls", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator('[data-tool-id="paint"]').click();
+
+  await expect(page.getByTestId("viewport-active-mode")).toHaveText("Mode voxel_paint");
+  await expect(page.getByTestId("viewport-voxel-paint-toolbar")).toBeVisible();
+
+  await page.getByTestId("viewport-brush-shape").selectOption("Sphere");
+  await expect(page.getByTestId("viewport-brush-shape")).toHaveValue("sphere");
+
+  await page.getByTestId("viewport-brush-radius").fill("12");
+  await expect(page.getByTestId("viewport-brush-radius")).toHaveValue("12");
+
+  await page.getByTestId("viewport-brush-strength").fill("0.67");
+  await expect(page.getByTestId("viewport-brush-strength")).toHaveValue("0.67");
+
+  await page.getByTestId("viewport-brush-falloff").selectOption("constant");
+  await expect(page.getByTestId("viewport-brush-falloff")).toHaveValue("constant");
+
+  await page.getByTestId("viewport-brush-target-face").selectOption("side");
+  await expect(page.getByTestId("viewport-brush-target-face")).toHaveValue("side");
 });

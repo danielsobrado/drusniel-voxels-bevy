@@ -1,30 +1,45 @@
-import type { RuntimeClient } from "./RuntimeClient";
+import type { RuntimeClient, RuntimeCommandResult, RuntimeSnapshot } from "./RuntimeClient";
 import { mockRuntimeMetrics } from "../mocks/mockRuntime";
 import type { RenderQualityPreset } from "../types/editor";
-import type { WaterReflectionDebugViewMode } from "../types/world";
+import type { MockWaterRuntimeSnapshot, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import { mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 
 export class MockRuntimeClient implements RuntimeClient {
-  async getRuntimeSnapshot() {
-    return { metrics: mockRuntimeMetrics, status: "mocked" as const };
+  async getRuntimeSnapshot(): Promise<RuntimeCommandResult<RuntimeSnapshot>> {
+    return { ok: true, data: { metrics: mockRuntimeMetrics, status: "mocked" } };
   }
 
-  async setRenderQuality(preset: RenderQualityPreset) {
-    return { metrics: { ...mockRuntimeMetrics, renderQualityPreset: preset }, status: "mocked" as const };
+  async getRenderQuality(): Promise<RuntimeCommandResult<RenderQualityPreset>> {
+    return { ok: true, data: mockRuntimeMetrics.renderQualityPreset };
   }
 
-  async rebuildSelectedChunk(chunkId: string) {
-    return { queuedChunkId: chunkId };
+  async setRenderQuality(preset: RenderQualityPreset): Promise<RuntimeCommandResult<RuntimeSnapshot>> {
+    return { ok: true, data: { metrics: { ...mockRuntimeMetrics, renderQualityPreset: preset }, status: "mocked" } };
   }
 
-  async rebuildDirtyChunks(chunkIds: readonly string[]) {
-    return { queuedChunkIds: chunkIds };
+  async getWaterReflectionStatus(): Promise<RuntimeCommandResult<WaterReflectionStatus>> {
+    return { ok: true, data: mockWaterRuntimeSnapshot.reflectionStatus };
   }
 
   async setWaterReflectionDebugMode(waterBodyId: string, mode: WaterReflectionDebugViewMode) {
-    return { waterBodyId, mode };
+    return { ok: true as const, data: { waterBodyId, mode } };
   }
 
   async runWaterVisualProbe() {
-    return { probeValid: true as const, lastProbeUpdateMs: 1.4 };
+    const snapshot: MockWaterRuntimeSnapshot = {
+      ...mockWaterRuntimeSnapshot,
+      reflectionStatus: { ...mockWaterRuntimeSnapshot.reflectionStatus, lastProbeUpdateMs: 3.1 },
+      waterPresence: { ...mockWaterRuntimeSnapshot.waterPresence, nearestWaterDistance: 4.2 },
+    };
+
+    return { ok: true as const, data: snapshot };
+  }
+
+  async rebuildSelectedChunk(chunkId: string) {
+    return { ok: true as const, data: { queuedChunkId: chunkId } };
+  }
+
+  async rebuildDirtyChunks(chunkIds: readonly string[]) {
+    return { ok: true as const, data: { queuedChunkIds: chunkIds } };
   }
 }

@@ -1,4 +1,5 @@
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
+import type { MockWaterRuntimeSnapshot, WaterPresence, WaterReflectionStatus, WaterVisualProbeOutput } from "../types/world";
 
 export const mockRuntimeMetrics: RuntimeMetrics = {
   fps: 60,
@@ -19,6 +20,42 @@ export const mockConsoleMessages: readonly ConsoleMessage[] = [
   { id: "console-1", level: "info", message: "Editor shell booted with mocked runtime data.", time: "00:00:01" },
   { id: "console-2", level: "warning", message: "Runtime bridge is intentionally disabled for Sprint 2.", time: "00:00:03" },
 ];
+
+export const mockWaterReflectionStatus: WaterReflectionStatus = {
+  active: true,
+  sampleReflection: true,
+  reason: "active",
+  resolutionScale: 0.5,
+  effectiveHz: 60,
+  enabled: true,
+  debugViewMode: "Off",
+  probeValid: true,
+  lastProbeUpdateMs: 1.4,
+};
+
+export const mockWaterPresence: WaterPresence = {
+  nearestWaterDistance: 12.5,
+  visibleMeshes: 19,
+  eligibleMeshes: 13,
+  viewVisibleMeshes: 8,
+  totalWaterMeshes: 27,
+};
+
+export const mockWaterProbeOutput: WaterVisualProbeOutput = {
+  nearestBodyKind: "Lake",
+  materialMode: "Fancy",
+  maxDepth: 5,
+  triangles: 1246,
+  reflectionEligible: true,
+  reflectionActive: true,
+  compositorPixelMatched: true,
+};
+
+export const mockWaterRuntimeSnapshot: MockWaterRuntimeSnapshot = {
+  reflectionStatus: mockWaterReflectionStatus,
+  waterPresence: mockWaterPresence,
+  probe: mockWaterProbeOutput,
+};
 
 export const mockAgentObservation: AgentObservation = {
   summary: "Agent can inspect typed store state, visible outliner nodes, command history, and mocked runtime warnings.",

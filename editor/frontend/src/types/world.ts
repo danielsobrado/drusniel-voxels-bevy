@@ -1,5 +1,7 @@
 export type BlockType = "grass" | "dirt" | "rock" | "sand";
 
+export type ChunkMeshMode = "Greedy" | "Mesher" | "LOD" | "Baked";
+
 export interface ChunkSummary {
   readonly id: string;
   readonly label: string;
@@ -8,6 +10,11 @@ export interface ChunkSummary {
   readonly dirty: boolean;
   readonly biome: string;
   readonly meshStatus: "clean" | "dirty" | "queued";
+  readonly meshMode: ChunkMeshMode;
+  readonly vertexCount: number;
+  readonly triangleCount: number;
+  readonly waterMeshCount: number;
+  readonly lodGroup: number;
 }
 
 export interface VoxelBlock {
@@ -17,15 +24,21 @@ export interface VoxelBlock {
   readonly defaultMaterialId: string;
 }
 
-export type ProtectedAreaKind = "spawn" | "story" | "settlement";
-export type ProtectedAreaShape = "box" | "cylinder";
+export type ProtectedAreaKind = "spawn" | "story_lock" | "no_dig" | "no_build" | "no_prop";
+export type ProtectedAreaShape = "box" | "sphere" | "cylinder" | "chunk_set" | "polygon";
 
 export interface ProtectedAreaRuleMatrix {
-  readonly allowVoxelEdit: boolean;
-  readonly allowPropEdit: boolean;
-  readonly allowWaterEdit: boolean;
-  readonly allowMaterialEdit: boolean;
-  readonly agentRequiresApproval: boolean;
+  readonly canMine: boolean;
+  readonly canPlace: boolean;
+  readonly canPaint: boolean;
+  readonly canSpawnProps: boolean;
+  readonly canEditWater: boolean;
+  readonly canSaveModify: boolean;
+}
+
+export interface ProtectedAreaBounds {
+  readonly min: [number, number, number];
+  readonly max: [number, number, number];
 }
 
 export interface ProtectedArea {
@@ -33,32 +46,104 @@ export interface ProtectedArea {
   readonly name: string;
   readonly kind: ProtectedAreaKind;
   readonly shape: ProtectedAreaShape;
+  readonly priority: number;
+  readonly locked: boolean;
+  readonly color: string;
   readonly center: [number, number, number];
   readonly size: [number, number, number];
+  readonly bounds: ProtectedAreaBounds;
   readonly rules: ProtectedAreaRuleMatrix;
 }
 
 export type WaterBodyKind = "Ocean" | "Lake" | "River" | "Pond" | "Unknown";
 export type WaterReflectionDebugViewMode = "Off" | "Mask" | "ReflectionOnly" | "BlendFactor";
+export type WaterReflectionReason =
+  | "disabled"
+  | "out-of-range"
+  | "no-water-in-view"
+  | "too-small"
+  | "throttled"
+  | "active"
+  | "no-water";
+
+export interface WaterPresence {
+  readonly nearestWaterDistance: number | null;
+  readonly visibleMeshes: number;
+  readonly eligibleMeshes: number;
+  readonly viewVisibleMeshes: number;
+  readonly totalWaterMeshes: number;
+}
+
+export interface WaterVisualProbeOutput {
+  readonly nearestBodyKind: WaterBodyKind | "Unknown";
+  readonly materialMode: "Fancy" | "Cheap" | "Hidden" | "Unknown";
+  readonly maxDepth: number;
+  readonly triangles: number;
+  readonly reflectionEligible: boolean;
+  readonly reflectionActive: boolean;
+  readonly compositorPixelMatched: boolean;
+}
 
 export interface WaterReflectionStatus {
+  readonly active: boolean;
+  readonly sampleReflection: boolean;
+  readonly reason: WaterReflectionReason;
+  readonly resolutionScale: number;
+  readonly effectiveHz: number;
   readonly enabled: boolean;
   readonly debugViewMode: WaterReflectionDebugViewMode;
   readonly probeValid: boolean;
   readonly lastProbeUpdateMs: number;
 }
 
+export interface MockWaterRuntimeSnapshot {
+  readonly reflectionStatus: WaterReflectionStatus;
+  readonly waterPresence: WaterPresence;
+  readonly probe: WaterVisualProbeOutput;
+}
+
 export interface WaterBody {
   readonly id: string;
   readonly name: string;
   readonly kind: WaterBodyKind;
+  readonly bodyType: string;
   readonly center: [number, number, number];
   readonly surfaceY: number;
+  readonly waveAmplitude: number;
+  readonly waveSpeed: number;
+  readonly waveScale: number;
+  readonly waveCount: number;
+  readonly reflectionStrength: number;
+  readonly fresnelPower: number;
+  readonly distortionStrength: number;
+  readonly shallowColor: string;
+  readonly deepColor: string;
+  readonly clarity: number;
+  readonly murkiness: number;
+  readonly foamEnabled: boolean;
+  readonly shoreFoam: number;
+  readonly waveCrestFoam: number;
+  readonly baseAlpha: number;
+  readonly detailNormalIntensity: number;
+  readonly detailScrollSpeed: number;
   readonly reflectionStatus: WaterReflectionStatus;
 }
 
 export type PropType = "tree" | "rock" | "bush" | "flower" | "building";
 export type BillboardMode = "SingleAxial" | "Directional4" | "Directional8";
+export type PropLodState = "High" | "Medium" | "Low" | "Culled";
+
+export interface PropTransform {
+  readonly position: [number, number, number];
+  readonly rotation: [number, number, number];
+  readonly scale: [number, number, number];
+}
+
+export interface PlacementRules {
+  readonly avoidWater: boolean;
+  readonly maxSlope: number;
+  readonly minSeparation: number;
+}
 
 export interface PropInstance {
   readonly id: string;
@@ -67,6 +152,12 @@ export interface PropInstance {
   readonly billboardMode: BillboardMode;
   readonly position: [number, number, number];
   readonly assetPath: string;
+  readonly transform: PropTransform;
+  readonly material: string;
+  readonly lodState: PropLodState;
+  readonly collision: boolean;
+  readonly placementRules: PlacementRules;
+  readonly terrainConform: boolean;
 }
 
 export type MaterialKind = "blocky" | "triplanar" | "building" | "props" | "water";

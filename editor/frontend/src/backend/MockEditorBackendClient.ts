@@ -1,38 +1,56 @@
-import type { EditorBackendClient, WorldSummaryPayload } from "./EditorBackendClient";
+import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
 import { mockAtlasMapping, mockChunks, mockMaterials, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
-import type { BlockAtlasMap } from "../types/world";
+
+const mockWorldSummary = (): WorldSummary => ({
+  worldId: "mock-drusniel-world",
+  name: "Mock Drusniel World",
+  chunks: mockChunks,
+  protectedAreas: mockProtectedAreas,
+  waterBodies: mockWaterBodies,
+  materials: mockMaterials,
+  updatedAt: new Date().toISOString(),
+});
+
+const mockSaveSummary = (snapshotId?: string): WorldSaveSummary => ({
+  worldId: "mock-drusniel-world",
+  savedAt: new Date().toISOString(),
+  snapshotId,
+});
 
 export class MockEditorBackendClient implements EditorBackendClient {
-  async saveWorldSnapshot() {
-    return { ok: true as const, snapshotId: `mock-snapshot-${Date.now()}` };
+  async saveWorldSnapshot(): Promise<BackendResult<WorldSaveSummary>> {
+    return { ok: true, data: mockSaveSummary(`mock-snapshot-${Date.now()}`) };
   }
 
-  async loadWorldSummary(): Promise<WorldSummaryPayload> {
-    return this.loadDefaultWorld();
+  async loadDefaultWorld(): Promise<BackendResult<WorldSummary>> {
+    return { ok: true, data: mockWorldSummary() };
   }
 
-  async saveDefaultWorld() {
-    return { ok: true as const, savedAt: new Date().toISOString() };
+  async saveDefaultWorld(): Promise<BackendResult<WorldSaveSummary>> {
+    return { ok: true, data: mockSaveSummary() };
   }
 
-  async loadDefaultWorld(): Promise<WorldSummaryPayload> {
-    return {
-      chunks: mockChunks,
-      protectedAreas: mockProtectedAreas,
-      waterBodies: mockWaterBodies,
-      materials: mockMaterials,
-    };
+  async savedWorldExists(): Promise<BackendResult<boolean>> {
+    return { ok: true, data: true };
   }
 
-  async savedWorldExists() {
-    return true;
+  async deleteSavedWorld(): Promise<BackendResult<{ readonly deleted: boolean }>> {
+    return { ok: true, data: { deleted: true } };
   }
 
-  async loadAtlasMapping(): Promise<BlockAtlasMap> {
-    return mockAtlasMapping;
+  async getWorldSummary(): Promise<BackendResult<WorldSummary>> {
+    return { ok: true, data: mockWorldSummary() };
   }
 
-  async saveAtlasMapping(_atlasMapping: BlockAtlasMap) {
-    return { ok: true as const, savedAt: new Date().toISOString() };
+  async getChunkSummaries(): Promise<BackendResult<typeof mockChunks>> {
+    return { ok: true, data: mockChunks };
+  }
+
+  async loadAtlasMapping(): Promise<BackendResult<AtlasMappingDto>> {
+    return { ok: true, data: mockAtlasMapping };
+  }
+
+  async saveAtlasMapping(_atlasMapping: AtlasMappingDto): Promise<BackendResult<WorldSaveSummary>> {
+    return { ok: true, data: mockSaveSummary() };
   }
 }

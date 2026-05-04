@@ -1,20 +1,19 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { MockEditorBackendClient } from "../backend/MockEditorBackendClient";
-import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
 import { editorCommands, runCommand } from "./commandRegistry";
 import type { EditorCommandContext } from "./commandTypes";
+import type { EditorBackendClient } from "../backend/EditorBackendClient";
+import type { RuntimeClient } from "../runtime/RuntimeClient";
 import { useEditorStore } from "../state/editorStore";
 
-const backendClient = new MockEditorBackendClient();
-const runtimeClient = new MockRuntimeClient();
-
 interface UseCommandRunnerOptions {
+  readonly backendClient: EditorBackendClient;
+  readonly runtimeClient: RuntimeClient;
   readonly openCommandPalette?: () => void;
   readonly openWorldFile?: () => void;
 }
 
-export function useCommandRunner(options: UseCommandRunnerOptions = {}) {
+export function useCommandRunner(options: UseCommandRunnerOptions) {
   const runCommandById = useCallback(
     async (commandId: string) => {
       const context: EditorCommandContext = {
@@ -26,8 +25,8 @@ export function useCommandRunner(options: UseCommandRunnerOptions = {}) {
           warning: toast.warning,
           error: toast.error,
         },
-        backendClient,
-        runtimeClient,
+        backendClient: options.backendClient,
+        runtimeClient: options.runtimeClient,
         pushCommandHistory: (id, title) => useEditorStore.getState().pushCommandHistory(id, title),
         pushAgentTimelineEvent: (event) => useEditorStore.getState().pushAgentTimelineEvent(event),
         openCommandPalette: options.openCommandPalette ?? (() => undefined),
@@ -36,7 +35,7 @@ export function useCommandRunner(options: UseCommandRunnerOptions = {}) {
 
       await runCommand(commandId, context);
     },
-    [options.openCommandPalette, options.openWorldFile],
+    [options.backendClient, options.openCommandPalette, options.openWorldFile, options.runtimeClient],
   );
 
   return {

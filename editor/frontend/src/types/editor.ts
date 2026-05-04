@@ -29,6 +29,8 @@ export interface BrushSettings {
   readonly strength: number;
   readonly materialBlockId: "grass" | "dirt" | "rock" | "sand";
   readonly falloff: "linear" | "smooth" | "constant";
+  readonly brushShape: "cube" | "sphere" | "cylinder";
+  readonly targetFace: "top" | "side" | "bottom" | "all";
 }
 
 export interface ViewportOverlayState {
@@ -36,7 +38,9 @@ export interface ViewportOverlayState {
   readonly voxelGrid: boolean;
   readonly waterDebug: boolean;
   readonly protectedAreas: boolean;
+  readonly propBounds: boolean;
   readonly propBillboards: boolean;
+  readonly agentTargets: boolean;
   readonly atlasPreview: boolean;
 }
 

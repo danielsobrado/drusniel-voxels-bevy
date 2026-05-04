@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { summarizeWorldFileText } from "../domain/worldFile";
+import { useEditorClients } from "./providers";
 import { CommandPalette } from "../components/editor/CommandPalette";
 import { DockLayout } from "../components/editor/DockLayout";
 import { EditorMenubar } from "../components/editor/EditorMenubar";
@@ -13,17 +15,33 @@ export function AppShell() {
   const layoutResetRequestId = useEditorStore((state) => state.layoutResetRequestId);
   const commandHistory = useEditorStore((state) => state.commandHistory);
   const protectedAreaCount = useEditorStore((state) => state.protectedAreas.length);
+  const activeMode = useEditorStore((state) => state.activeMode);
+  const activeTool = useEditorStore((state) => state.activeTool);
   const selection = useEditorStore((state) => state.selection);
   const chunkBoundsEnabled = useEditorStore((state) => state.viewportOverlays.chunkBounds);
+  const { backendClient, runtimeClient } = useEditorClients();
 
   const openWorldFile = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
+  const openCommandPalette = useCallback(() => setPaletteOpen(true), []);
+  const didLoadWorldSummaryRef = useRef(false);
 
   const { runCommandById } = useCommandRunner({
-    openCommandPalette: () => setPaletteOpen(true),
+    backendClient,
+    runtimeClient,
+    openCommandPalette,
     openWorldFile,
   });
+
+  useEffect(() => {
+    if (didLoadWorldSummaryRef.current) {
+      return;
+    }
+
+    didLoadWorldSummaryRef.current = true;
+    void runCommandById("editor.world.loadSummary");
+  }, [runCommandById]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -41,10 +59,24 @@ export function AppShell() {
     <div className="app-shell bg-noise" data-testid="app-shell">
       <EditorMenubar runCommand={runCommandById} />
       <MainToolbar runCommand={runCommandById} />
-      <div className="sr-only" data-testid="command-history-latest-id">{commandHistory[0]?.commandId ?? "none"}</div>
-      <div className="sr-only" data-testid="protected-area-count">{protectedAreaCount}</div>
-      <div className="sr-only" data-testid="current-selection-label">{selection.label}</div>
-      <div className="sr-only" data-testid="chunk-bounds-state">{chunkBoundsEnabled ? "on" : "off"}</div>
+      <div className="sr-only" data-testid="command-history-latest-id">
+        {commandHistory[0]?.commandId ?? "none"}
+      </div>
+      <div className="sr-only" data-testid="protected-area-count">
+        {protectedAreaCount}
+      </div>
+      <div className="sr-only" data-testid="current-selection-label">
+        {selection.label}
+      </div>
+      <div className="sr-only" data-testid="chunk-bounds-state">
+        {chunkBoundsEnabled ? "on" : "off"}
+      </div>
+      <div className="sr-only" data-testid="current-mode">
+        {activeMode}
+      </div>
+      <div className="sr-only" data-testid="current-tool">
+        {activeTool}
+      </div>
       <DockLayout resetRequestId={layoutResetRequestId} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runCommand={runCommandById} />
       <input
@@ -59,7 +91,15 @@ export function AppShell() {
             return;
           }
 
-          toast.info(`World file picker received ${file.name}; parsing is deferred.`);
+          void file
+            .text()
+            .then((text) => {
+              const summary = summarizeWorldFileText({ fileName: file.name, text });
+              toast.info(`World file parser preview: ${summary.name} (${summary.payloadType}, ${summary.entityCount} entities).`);
+            })
+            .catch(() => {
+              toast.warning("Failed to parse world file preview.");
+            });
           event.target.value = "";
         }}
       />
