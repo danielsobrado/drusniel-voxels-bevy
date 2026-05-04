@@ -176,7 +176,9 @@ pub fn validate_placement(
     let half_size = piece_def.dimensions * 0.5;
 
     if protected_areas
-        .map(|registry| registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place))
+        .map(|registry| {
+            registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place)
+        })
         .unwrap_or(false)
     {
         return false;
@@ -263,7 +265,9 @@ pub fn place_building_piece(
     let position = transform.translation;
     if protected_areas
         .as_deref()
-        .map(|registry| registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place))
+        .map(|registry| {
+            registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place)
+        })
         .unwrap_or(false)
     {
         return;

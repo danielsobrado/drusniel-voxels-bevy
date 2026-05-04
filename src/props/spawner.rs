@@ -29,6 +29,7 @@ use crate::voxel::persistence::WorldPersistence;
 use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelWorld};
+use crate::world_rules::ProtectedAreaRegistry;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 
@@ -91,6 +92,7 @@ pub fn spawn_props_on_terrain(
     mut instancing_stats: ResMut<InstancingStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Prop Spawn");
     if spawned.0 || !prop_assets.loaded {
@@ -204,6 +206,7 @@ pub fn spawn_props_on_terrain(
                     &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
+                    protected_areas.as_deref(),
                 );
                 total += entities.len() as u32;
                 persistence_state.loaded_chunks.insert(chunk_pos, entities);
@@ -217,6 +220,7 @@ pub fn spawn_props_on_terrain(
                     &config,
                     &placement_config,
                     &mut terrain_modified,
+                    protected_areas.as_deref(),
                 );
 
                 // Save to disk
@@ -238,6 +242,7 @@ pub fn spawn_props_on_terrain(
                     &billboard_cache,
                     &mut instancing_stats,
                     chunk_pos,
+                    protected_areas.as_deref(),
                 );
                 total += entities.len() as u32;
                 persistence_state.loaded_chunks.insert(chunk_pos, entities);
@@ -286,6 +291,7 @@ fn generate_chunk_props(
     config: &PropConfig,
     placement_config: &PlacementConfig,
     terrain_modified: &mut bool,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Vec<PropPlacementData> {
     let mut props = Vec::new();
 
@@ -312,6 +318,7 @@ fn generate_chunk_props(
             generator,
             placement_config,
             terrain_modified,
+            protected_areas,
         );
     }
     for def in &config.props.rocks {
@@ -328,6 +335,7 @@ fn generate_chunk_props(
             generator,
             placement_config,
             terrain_modified,
+            protected_areas,
         );
     }
     for def in &config.props.bushes {
@@ -344,6 +352,7 @@ fn generate_chunk_props(
             generator,
             placement_config,
             terrain_modified,
+            protected_areas,
         );
     }
     for def in &config.props.flowers {
@@ -360,6 +369,7 @@ fn generate_chunk_props(
             generator,
             placement_config,
             terrain_modified,
+            protected_areas,
         );
     }
 
@@ -381,6 +391,7 @@ fn generate_category_props(
     generator: &TerrainGenerator<ValueNoise>,
     placement_config: &PlacementConfig,
     terrain_modified: &mut bool,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) {
     let mut max_count = def.max_count.unwrap_or(DEFAULT_MAX_PER_TYPE);
 
@@ -561,6 +572,13 @@ fn generate_category_props(
             let rotation =
                 calculate_prop_rotation(sample_result.normal, slope_strength, yaw, tilt_x, tilt_z);
 
+            if protected_areas
+                .map(|registry| registry.prop_position_blocked(sample_result.position))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
             // Optionally conform terrain to large/fixed assets to prevent floating
             if let Some(conform) = prop_conform_settings(&def.id, prop_type, scale) {
                 let did_modify = conform_terrain_under_prop(
@@ -587,6 +605,13 @@ fn generate_category_props(
                 sample_result.position.y + def.y_offset - sink,
                 sample_result.position.z,
             );
+
+            if protected_areas
+                .map(|registry| registry.prop_position_blocked(position))
+                .unwrap_or(false)
+            {
+                continue;
+            }
 
             // Create placement data
             let mut placement = PropPlacementData::new(
@@ -625,11 +650,19 @@ fn spawn_props_from_data(
     billboard_cache: &BillboardCache,
     stats: &mut InstancingStats,
     chunk_pos: IVec2,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Vec<Entity> {
     props
         .iter()
         .filter_map(|prop| {
             let transform = prop.to_transform();
+            if protected_areas
+                .map(|registry| registry.prop_position_blocked(transform.translation))
+                .unwrap_or(false)
+            {
+                return None;
+            }
+
             let prop_type: PropType = prop.prop_type.into();
 
             #[cfg(feature = "legacy_prop_spawn")]

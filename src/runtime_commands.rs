@@ -463,9 +463,10 @@ fn execute_runtime_write_command(
 
             match registry.upsert(area) {
                 Ok(area) => RuntimeCommandResult::success(json!({ "area": area })),
-                Err(message) => {
-                    RuntimeCommandResult::validation("Runtime command validation failed.", vec![message])
-                }
+                Err(message) => RuntimeCommandResult::validation(
+                    "Runtime command validation failed.",
+                    vec![message],
+                ),
             }
         }
         RuntimeWriteCommand::UpdateProtectedArea { area_id, patch } => {
@@ -481,9 +482,10 @@ fn execute_runtime_write_command(
                 Err(message) if message.contains("locked") => {
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
                 }
-                Err(message) => {
-                    RuntimeCommandResult::validation("Runtime command validation failed.", vec![message])
-                }
+                Err(message) => RuntimeCommandResult::validation(
+                    "Runtime command validation failed.",
+                    vec![message],
+                ),
             }
         }
         RuntimeWriteCommand::DeleteProtectedArea { area_id } => {
@@ -498,7 +500,9 @@ fn execute_runtime_write_command(
                 Ok(deleted) => {
                     RuntimeCommandResult::success(json!({ "areaId": area_id, "deleted": deleted }))
                 }
-                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
             }
         }
         RuntimeWriteCommand::QueryProtectedRulesAtVoxel { voxel } => {
@@ -508,9 +512,9 @@ fn execute_runtime_write_command(
                     "ProtectedAreaRegistry resource is not available.",
                 );
             };
-            RuntimeCommandResult::success(json!(registry.query_rules_at_voxel(IVec3::new(
-                voxel[0], voxel[1], voxel[2],
-            ))))
+            RuntimeCommandResult::success(json!(
+                registry.query_rules_at_voxel(IVec3::new(voxel[0], voxel[1], voxel[2],))
+            ))
         }
         RuntimeWriteCommand::ValidateProtectedAreaConflicts { area } => {
             let Some(registry) = world.get_resource::<ProtectedAreaRegistry>() else {
@@ -542,7 +546,9 @@ fn execute_runtime_write_command(
                     "snapshotId": "world-rules",
                     "areaCount": registry.area_count(),
                 })),
-                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
             }
         }
         RuntimeWriteCommand::LoadProtectedAreas {} => {
@@ -557,7 +563,9 @@ fn execute_runtime_write_command(
                     "areas": registry.areas().collect::<Vec<_>>(),
                     "areaCount": registry.area_count(),
                 })),
-                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
             }
         }
     }

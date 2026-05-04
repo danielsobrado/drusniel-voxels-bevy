@@ -223,7 +223,9 @@ impl ProtectedArea {
     pub fn point_in_area(&self, position: Vec3) -> bool {
         let bounds = self.bounds.normalized();
         match self.shape {
-            ProtectedAreaShape::Box | ProtectedAreaShape::Polygon => point_in_bounds(position, bounds),
+            ProtectedAreaShape::Box | ProtectedAreaShape::Polygon => {
+                point_in_bounds(position, bounds)
+            }
             ProtectedAreaShape::Sphere => {
                 let center = array_to_vec3(self.center);
                 let radius = self.size.iter().copied().fold(0.0_f32, f32::max).max(0.0) * 0.5;
@@ -240,7 +242,9 @@ impl ProtectedArea {
             }
             ProtectedAreaShape::ChunkSet => {
                 let chunk = (position.floor().as_ivec3()).div_euclid(IVec3::splat(CHUNK_SIZE_I32));
-                self.chunks.iter().any(|entry| *entry == [chunk.x, chunk.y, chunk.z])
+                self.chunks
+                    .iter()
+                    .any(|entry| *entry == [chunk.x, chunk.y, chunk.z])
             }
         }
     }
@@ -377,7 +381,10 @@ impl ProtectedAreaRegistry {
         if existing.locked && !allow_locked_override {
             return Err(format!("Protected area '{id}' is locked."));
         }
-        Ok(self.areas.remove(&ProtectedAreaId(id.to_string())).is_some())
+        Ok(self
+            .areas
+            .remove(&ProtectedAreaId(id.to_string()))
+            .is_some())
     }
 
     pub fn point_in_area(&self, position: Vec3) -> bool {
@@ -389,7 +396,9 @@ impl ProtectedAreaRegistry {
     }
 
     pub fn chunk_intersects_area(&self, chunk: IVec3) -> bool {
-        self.areas.values().any(|area| area.chunk_intersects_area(chunk))
+        self.areas
+            .values()
+            .any(|area| area.chunk_intersects_area(chunk))
     }
 
     pub fn prop_position_blocked(&self, position: Vec3) -> bool {
@@ -564,7 +573,11 @@ pub fn validate_protected_area(area: &ProtectedArea) -> Result<(), String> {
             area.schema_version
         ));
     }
-    if area.size.iter().any(|value| !value.is_finite() || *value < 0.0) {
+    if area
+        .size
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
         return Err("Protected area size values must be finite and non-negative.".to_string());
     }
     if area.center.iter().any(|value| !value.is_finite())
@@ -579,7 +592,9 @@ pub fn validate_protected_area(area: &ProtectedArea) -> Result<(), String> {
     Ok(())
 }
 
-fn detect_conflicts<'a>(areas: impl IntoIterator<Item = &'a ProtectedArea>) -> Vec<ProtectedAreaConflict> {
+fn detect_conflicts<'a>(
+    areas: impl IntoIterator<Item = &'a ProtectedArea>,
+) -> Vec<ProtectedAreaConflict> {
     let areas: Vec<_> = areas.into_iter().collect();
     let mut conflicts = Vec::new();
     for (left_index, left) in areas.iter().enumerate() {
@@ -635,7 +650,12 @@ mod tests {
     use crate::voxel::types::VoxelType;
     use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 
-    fn area(id: &str, kind: ProtectedAreaKind, bounds: ProtectedAreaBounds, priority: i32) -> ProtectedArea {
+    fn area(
+        id: &str,
+        kind: ProtectedAreaKind,
+        bounds: ProtectedAreaBounds,
+        priority: i32,
+    ) -> ProtectedArea {
         ProtectedArea {
             id: ProtectedAreaId(id.to_string()),
             name: id.to_string(),
@@ -663,7 +683,10 @@ mod tests {
     #[test]
     fn voxel_inside_unbreakable_area_cannot_be_mined() {
         let mut world = test_world();
-        assert_eq!(world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock), VoxelEditResult::Applied);
+        assert_eq!(
+            world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
         let mut registry = ProtectedAreaRegistry::default();
         registry
             .upsert(area(
@@ -692,7 +715,10 @@ mod tests {
     #[test]
     fn voxel_outside_area_can_be_mined() {
         let mut world = test_world();
-        assert_eq!(world.set_voxel(IVec3::new(12, 4, 12), VoxelType::Rock), VoxelEditResult::Applied);
+        assert_eq!(
+            world.set_voxel(IVec3::new(12, 4, 12), VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
         let mut registry = ProtectedAreaRegistry::default();
         registry
             .upsert(area(
@@ -743,6 +769,41 @@ mod tests {
             VoxelEditResult::RejectedProtectedArea,
         );
         assert_eq!(world.get_voxel(IVec3::new(4, 4, 4)), Some(VoxelType::Air));
+    }
+
+    #[test]
+    fn water_edit_rule_blocks_replacing_water() {
+        let mut world = test_world();
+        assert_eq!(
+            world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Water),
+            VoxelEditResult::Applied
+        );
+        let mut registry = ProtectedAreaRegistry::default();
+        let mut protected = area(
+            "no-water",
+            ProtectedAreaKind::Custom,
+            ProtectedAreaBounds {
+                min: [0.0, 0.0, 0.0],
+                max: [8.0, 8.0, 8.0],
+            },
+            1,
+        );
+        protected.rules = ProtectedAreaRuleMatrix {
+            can_edit_water: false,
+            ..ProtectedAreaRuleMatrix::ALLOW_ALL
+        };
+        registry.upsert(protected).unwrap();
+
+        assert_eq!(
+            world.set_voxel_with_rules(
+                IVec3::new(4, 4, 4),
+                VoxelType::Rock,
+                ProtectedEditIntent::Place,
+                Some(&registry),
+            ),
+            VoxelEditResult::RejectedProtectedArea,
+        );
+        assert_eq!(world.get_voxel(IVec3::new(4, 4, 4)), Some(VoxelType::Water));
     }
 
     #[test]
@@ -811,7 +872,11 @@ mod tests {
         protected.locked = true;
         registry.upsert(protected).unwrap();
 
-        assert!(registry.update("locked", ProtectedAreaPatch::default(), false).is_err());
+        assert!(
+            registry
+                .update("locked", ProtectedAreaPatch::default(), false)
+                .is_err()
+        );
         assert!(registry.delete("locked", false).is_err());
         assert!(registry.delete("locked", true).unwrap());
     }

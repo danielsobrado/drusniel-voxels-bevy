@@ -280,13 +280,20 @@ impl VoxelWorld {
         intent: ProtectedEditIntent,
         protected_areas: Option<&ProtectedAreaRegistry>,
     ) -> VoxelEditResult {
-        if protected_areas
-            .map(|registry| registry.edit_blocked(world_pos, intent))
-            .unwrap_or(false)
-        {
-            let result = VoxelEditResult::RejectedProtectedArea;
-            self.edit_stats.record(result);
-            return result;
+        if let Some(registry) = protected_areas {
+            let touches_water = voxel == VoxelType::Water
+                || matches!(
+                    self.sample_voxel_for_interaction(world_pos),
+                    VoxelSample::InBounds(VoxelType::Water)
+                );
+            if registry.edit_blocked(world_pos, intent)
+                || (touches_water
+                    && registry.edit_blocked(world_pos, ProtectedEditIntent::EditWater))
+            {
+                let result = VoxelEditResult::RejectedProtectedArea;
+                self.edit_stats.record(result);
+                return result;
+            }
         }
 
         self.set_voxel(world_pos, voxel)

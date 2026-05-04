@@ -26,6 +26,7 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
 use crate::voxel::world::VoxelWorld;
+use crate::world_rules::ProtectedAreaRegistry;
 use persistence::{
     PropEditState, PropPersistenceState, delete_all_props, save_chunk_and_update_manifest,
 };
@@ -481,6 +482,7 @@ fn regenerate_dirty_chunks(
     mut prop_groups: ResMut<instanced_render::PropInstanceGroups>,
     bounds_config: Res<instanced_render::PropBoundsConfig>,
     mut instancing_stats: ResMut<instancing::InstancingStats>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     // Check if we have any events
     if events.read().next().is_none() {
@@ -534,8 +536,14 @@ fn regenerate_dirty_chunks(
     }
 
     for chunk_pos in dirty {
-        let props =
-            regenerate_chunk_props(chunk_pos, &world, &generator, &config, &placement_config);
+        let props = regenerate_chunk_props(
+            chunk_pos,
+            &world,
+            &generator,
+            &config,
+            &placement_config,
+            protected_areas.as_deref(),
+        );
 
         if let Some(ref mut manifest) = state.manifest {
             if let Err(e) = save_chunk_and_update_manifest(chunk_pos, &props, manifest) {
@@ -553,6 +561,7 @@ fn regenerate_dirty_chunks(
             bounds_config.as_ref(),
             &mut instancing_stats,
             chunk_pos,
+            protected_areas.as_deref(),
         );
         state.loaded_chunks.insert(chunk_pos, entities);
         state.chunk_prop_data.insert(chunk_pos, props);
@@ -566,6 +575,7 @@ fn regenerate_chunk_props(
     _generator: &crate::voxel::terrain::TerrainGenerator<crate::voxel::terrain::ValueNoise>,
     config: &PropConfig,
     placement_config: &placement::PlacementConfig,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Vec<persistence::PropPlacementData> {
     use crate::constants::WATER_LEVEL;
 
@@ -664,6 +674,13 @@ fn regenerate_chunk_props(
             sample_result.position.z,
         );
 
+        if protected_areas
+            .map(|registry| registry.prop_position_blocked(position))
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
         let mut placement = persistence::PropPlacementData::new(
             def.id.clone(),
             prop_type,
@@ -738,11 +755,19 @@ fn spawn_props_from_placement_data(
     bounds_config: &instanced_render::PropBoundsConfig,
     stats: &mut instancing::InstancingStats,
     chunk_pos: IVec2,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Vec<Entity> {
     props
         .iter()
         .filter_map(|prop| {
             let transform = prop.to_transform();
+            if protected_areas
+                .map(|registry| registry.prop_position_blocked(transform.translation))
+                .unwrap_or(false)
+            {
+                return None;
+            }
+
             let prop_type: PropType = prop.prop_type.into();
 
             #[cfg(feature = "legacy_prop_spawn")]

@@ -193,7 +193,7 @@ pub fn finish_dragging_block(
                 dragged.original_position,
                 dragged.block_type,
                 ProtectedEditIntent::Place,
-                protected_areas.as_deref(),
+                None,
             );
             return;
         };
@@ -215,7 +215,7 @@ pub fn finish_dragging_block(
                 dragged.original_position,
                 dragged.block_type,
                 ProtectedEditIntent::Place,
-                protected_areas.as_deref(),
+                None,
             );
             return;
         }
@@ -238,7 +238,7 @@ pub fn finish_dragging_block(
                     dragged.original_position,
                     dragged.block_type,
                     ProtectedEditIntent::Place,
-                    protected_areas.as_deref(),
+                    None,
                 );
                 return;
             }
@@ -246,12 +246,21 @@ pub fn finish_dragging_block(
 
         if let VoxelSample::InBounds(existing) = world.sample_voxel_for_interaction(grounded_pos) {
             if existing == VoxelType::Air || existing == VoxelType::Water {
-                apply_edit_and_mark(
+                if apply_edit_and_mark(
                     &mut world,
                     grounded_pos,
                     dragged.block_type,
                     ProtectedEditIntent::Place,
                     protected_areas.as_deref(),
+                ) {
+                    return;
+                }
+                apply_edit_and_mark(
+                    &mut world,
+                    dragged.original_position,
+                    dragged.block_type,
+                    ProtectedEditIntent::Place,
+                    None,
                 );
                 return;
             }
@@ -264,7 +273,7 @@ pub fn finish_dragging_block(
         dragged.original_position,
         dragged.block_type,
         ProtectedEditIntent::Place,
-        protected_areas.as_deref(),
+        None,
     );
     drag_state.rotation_degrees = 0.0;
 }

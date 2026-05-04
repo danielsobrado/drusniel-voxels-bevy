@@ -190,7 +190,6 @@ fn try_break_block(
         return Err(BreakError::Unbreakable { position: pos });
     }
 
-    held.block_type = voxel_type;
     match world.set_voxel_with_rules(
         pos,
         VoxelType::Air,
@@ -198,10 +197,14 @@ fn try_break_block(
         protected_areas,
     ) {
         VoxelEditResult::Applied => {
+            held.block_type = voxel_type;
             editing::mark_neighbors_dirty(world, pos);
             Ok(pos)
         }
-        VoxelEditResult::NoChange => Ok(pos),
+        VoxelEditResult::NoChange => {
+            held.block_type = voxel_type;
+            Ok(pos)
+        }
         result => Err(break_error_from_edit_result(pos, result)),
     }
 }
@@ -901,6 +904,11 @@ fn find_air_gaps(world: &VoxelWorld, center: IVec3) -> usize {
 mod tests {
     use super::*;
     use crate::voxel::chunk::Chunk;
+    use crate::world_rules::{
+        ProtectedArea, ProtectedAreaBounds, ProtectedAreaId, ProtectedAreaKind,
+        ProtectedAreaRegistry, ProtectedAreaRuleMatrix, ProtectedAreaShape,
+        WORLD_RULES_SCHEMA_VERSION,
+    };
 
     #[test]
     fn voxel_interaction_cannot_break_outside_below_world() {
@@ -917,6 +925,53 @@ mod tests {
             try_break_block(&targeted, &mut world, &mut held, None),
             Err(BreakError::Unbreakable { .. })
         ));
+    }
+
+    #[test]
+    fn protected_break_rejection_does_not_change_held_block() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        assert_eq!(
+            world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+
+        let mut held = HeldBlock {
+            block_type: VoxelType::TopSoil,
+        };
+        let targeted = TargetedBlock {
+            position: Some(IVec3::new(4, 4, 4)),
+            normal: Some(IVec3::Y),
+            voxel_type: Some(VoxelType::Rock),
+        };
+        let mut protected_areas = ProtectedAreaRegistry::default();
+        protected_areas
+            .upsert(ProtectedArea {
+                id: ProtectedAreaId("locked-rock".to_string()),
+                name: "Locked Rock".to_string(),
+                kind: ProtectedAreaKind::NoDig,
+                shape: ProtectedAreaShape::Box,
+                priority: 1,
+                locked: false,
+                color: "#22d3ee".to_string(),
+                center: [4.0, 4.0, 4.0],
+                size: [8.0, 8.0, 8.0],
+                bounds: ProtectedAreaBounds {
+                    min: [0.0, 0.0, 0.0],
+                    max: [8.0, 8.0, 8.0],
+                },
+                rules: ProtectedAreaRuleMatrix::ALLOW_ALL,
+                chunks: Vec::new(),
+                schema_version: WORLD_RULES_SCHEMA_VERSION,
+                debug_label: None,
+            })
+            .unwrap();
+
+        assert!(matches!(
+            try_break_block(&targeted, &mut world, &mut held, Some(&protected_areas)),
+            Err(BreakError::ProtectedArea { .. })
+        ));
+        assert_eq!(held.block_type, VoxelType::TopSoil);
     }
 }
 
