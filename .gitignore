@@ -39,3 +39,10 @@ v0.3_vegetation_mod.rs
 assets/models/plants/custom/*.glb
 saves/
 debug/*.json
+
+# Editor frontend generated files
+editor/frontend/node_modules/
+editor/frontend/dist/
+editor/frontend/test-results/
+editor/frontend/playwright-report/
+editor/frontend/vite-dev*.log

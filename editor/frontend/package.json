@@ -1,0 +1,42 @@
+{
+  "name": "drusniel-voxels-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test:unit": "vitest run src/state/editorStore.test.ts",
+    "test:smoke": "playwright test --config playwright.config.ts"
+  },
+  "dependencies": {
+    "@radix-ui/react-menubar": "^1.1.2",
+    "@radix-ui/react-slot": "^1.1.7",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.0",
+    "dockview-react": "^4.1.0",
+    "immer": "^10.2.0",
+    "lucide-react": "^0.476.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sonner": "^1.7.0",
+    "tailwind-merge": "^2.5.5",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.8"
+  }
+}

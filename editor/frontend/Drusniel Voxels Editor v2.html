@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Drusniel Voxels Editor — Design</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<link rel="stylesheet" href="styles/editor.css" />
+
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0f12; color: #e6e8ec; font-family: 'Inter', system-ui, sans-serif; }
+  #root { height: 100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="components/icons.jsx"></script>
+<script type="text/babel" src="components/chrome.jsx"></script>
+<script type="text/babel" src="components/voxel-scene.jsx"></script>
+<script type="text/babel" src="components/viewport.jsx"></script>
+<script type="text/babel" src="components/outliner.jsx"></script>
+<script type="text/babel" src="components/panels.jsx"></script>
+<script type="text/babel" src="components/agent-and-extras.jsx"></script>
+<script type="text/babel" src="components/screens.jsx"></script>
+<script type="text/babel" src="components/screen-components.jsx"></script>
+<script type="text/babel" src="components/refinements.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="editor-screens" title="Drusniel Voxels Editor" subtitle="Five core screens for a Rust/Bevy voxel world editor — dark, dense, agent-aware">
+        <DCArtboard id="s1-default" label="01 · Default Editor Layout" width={1440} height={900}>
+          <Screen1Default />
+        </DCArtboard>
+        <DCArtboard id="s2-area" label="02 · Area / Unbreakable Zone Editing" width={1440} height={900}>
+          <Screen2Area />
+        </DCArtboard>
+        <DCArtboard id="s3-paint" label="03 · Voxel Paint + Texture Atlas" width={1440} height={900}>
+          <Screen3Paint />
+        </DCArtboard>
+        <DCArtboard id="s4-water" label="04 · Water Body Editor" width={1440} height={900}>
+          <Screen4Water />
+        </DCArtboard>
+        <DCArtboard id="s5-agent" label="05 · Agent Workbench" width={1440} height={900}>
+          <Screen5Agent />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="palette" title="Command Palette · ⌘K" subtitle="Same chrome, with the global palette open over the default layout">
+        <DCArtboard id="palette-open" label="Command Palette open" width={1440} height={900}>
+          <div style={{ position: 'relative', width: 1440, height: 900 }}>
+            <Screen1Default />
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,14,0.55)', backdropFilter: 'blur(2px)' }} />
+            <div style={{ position: 'absolute', inset: 0 }}><CommandPalette /></div>
+          </div>
+        </DCArtboard>
+        <DCArtboard id="palette-refined" label="Command Palette · refined (categorized + agent + preview)" width={1440} height={900}>
+          <div style={{ position: 'relative', width: 1440, height: 900 }}>
+            <Screen1Default />
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,14,0.65)', backdropFilter: 'blur(3px)' }} />
+            <div style={{ position: 'absolute', inset: 0 }}><CommandPaletteRefined /></div>
+          </div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="refinements" title="Refinements · v2" subtitle="State coverage, dock spec, agent flow redesign, and a11y/testid conventions">
+        <DCArtboard id="r1-tokens" label="11 · Tokens · elevation, motion, z-index, rhythm" width={1440} height={900}>
+          <ScreenTokensRefined />
+        </DCArtboard>
+        <DCArtboard id="r2-inspector-states" label="06 · Inspector States · matrix" width={1440} height={900}>
+          <ScreenInspectorStates />
+        </DCArtboard>
+        <DCArtboard id="r3-screen-states" label="07 · Screen States · empty / loading / disconnected / agent-driving" width={1440} height={900}>
+          <ScreenScreenStates />
+        </DCArtboard>
+        <DCArtboard id="r4-agent-redesign" label="08 · Agent Workbench · Observe → Plan → Act → Verify" width={1440} height={900}>
+          <ScreenAgentRedesign />
+        </DCArtboard>
+        <DCArtboard id="r5-dock-spec" label="09 · Dockable layout · responsive spec" width={1440} height={900}>
+          <ScreenDockSpec />
+        </DCArtboard>
+        <DCArtboard id="r6-a11y" label="10 · A11y + data-testid conventions" width={1440} height={900}>
+          <ScreenA11ySpec />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="components" title="Design system" subtitle="Tokens, controls, primitives, component → library map, and example Zustand state shape">
+        <DCArtboard id="components-lib" label="Component Library" width={1440} height={900}>
+          <ScreenComponents />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
