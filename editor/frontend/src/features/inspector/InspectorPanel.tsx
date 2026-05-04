@@ -624,17 +624,18 @@ function ProtectedAreaInspector({
       rules: { canMine: true, canPlace: true, canPaint: true, canSpawnProps: false, canEditWater: true, canSaveModify: true },
     },
   ];
+  const editingDisabled = pending || area.locked;
 
   return (
     <div data-testid="inspector-area">
       <InspectorHeader title={area.name} badge="area" note={pending ? "Runtime update pending." : "Runtime protected area rules are active."} />
       <InspectorSection title="Area properties">
-        <TextField label="Name" value={area.name} readOnly={pending} testId="inspector-area-name" onChange={(name) => onUpdate({ name })} />
+        <TextField label="Name" value={area.name} readOnly={editingDisabled} testId="inspector-area-name" onChange={(name) => onUpdate({ name })} />
         <EnumSelect
           label="Kind"
           value={area.kind}
           options={kindOptions}
-          disabled={pending}
+          disabled={editingDisabled}
           onChange={(kind) => onUpdate({ kind })}
         />
         <EnumSelect
@@ -642,14 +643,14 @@ function ProtectedAreaInspector({
           value={area.shape}
           options={shapeOptions}
           testId="inspector-area-shape"
-          disabled={pending}
+          disabled={editingDisabled}
           onChange={(shape) => onUpdate({ shape })}
         />
         <NumericField
           label="Priority"
           value={area.priority}
           min={0}
-          readOnly={pending}
+          readOnly={editingDisabled}
           testId="inspector-area-priority"
           onChange={(priority) => onUpdate({ priority })}
         />
@@ -660,19 +661,19 @@ function ProtectedAreaInspector({
           onChange={(locked) => onUpdate({ locked })}
           testId="inspector-area-locked"
         />
-        <ColorField label="Debug Color" value={area.color} disabled={pending} onChange={(color) => onUpdate({ color })} testId="inspector-area-color" />
+        <ColorField label="Debug Color" value={area.color} disabled={editingDisabled} onChange={(color) => onUpdate({ color })} testId="inspector-area-color" />
         <Vector3Field
           label="Bounds min"
           value={area.bounds.min}
           testId="inspector-area-bounds-min"
-          disabled={pending}
+          disabled={editingDisabled}
           onChange={(next) => onUpdate({ bounds: { ...area.bounds, min: next } })}
         />
         <Vector3Field
           label="Bounds max"
           value={area.bounds.max}
           testId="inspector-area-bounds-max"
-          disabled={pending}
+          disabled={editingDisabled}
           onChange={(next) => onUpdate({ bounds: { ...area.bounds, max: next } })}
         />
       </InspectorSection>
@@ -683,7 +684,7 @@ function ProtectedAreaInspector({
               type="button"
               key={preset.id}
               className="toolbar-button"
-              disabled={pending}
+              disabled={editingDisabled}
               data-testid={`inspector-area-preset-${preset.id}`}
               onClick={() => onUpdate({ rules: preset.rules })}
             >
@@ -692,7 +693,7 @@ function ProtectedAreaInspector({
           ))}
         </div>
       </InspectorSection>
-      <RuleMatrix rules={area.rules} disabled={pending} onChange={(rules) => onUpdate({ rules })} testId="inspector-area-rules" />
+      <RuleMatrix rules={area.rules} disabled={editingDisabled} onChange={(rules) => onUpdate({ rules })} testId="inspector-area-rules" />
       <InspectorSection title="Runtime validation">
         {warnings.length === 0 ? <p className="inspector-subnote">No active warnings.</p> : warnings.map((warning) => <p key={warning} className="inspector-subnote">?? {warning}</p>)}
       </InspectorSection>

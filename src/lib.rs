@@ -6,6 +6,7 @@ pub mod chat;
 pub mod config;
 pub mod constants;
 pub mod debug_ui;
+pub mod editor_bridge;
 pub mod entity;
 pub mod environment;
 pub mod input;

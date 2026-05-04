@@ -35,6 +35,14 @@ export function AppShell() {
     openWorldFile,
   });
 
+  const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+  };
+
   useEffect(() => {
     if (didLoadWorldSummaryRef.current) {
       return;
@@ -73,15 +81,38 @@ export function AppShell() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "k") {
         event.preventDefault();
         setPaletteOpen(true);
+        return;
+      }
+
+      if (key === "o") {
+        event.preventDefault();
+        void runCommandById("editor.file.openWorld");
+        return;
+      }
+
+      if (key === "s") {
+        event.preventDefault();
+        void runCommandById("editor.file.save");
+        return;
+      }
+
+      if (key === "z" && !isEditableKeyboardTarget(event.target)) {
+        event.preventDefault();
+        void runCommandById(event.shiftKey ? "editor.history.redo" : "editor.history.undo");
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [runCommandById]);
 
   return (
     <div className="app-shell bg-noise" data-testid="app-shell">

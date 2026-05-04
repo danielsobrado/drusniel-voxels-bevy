@@ -84,8 +84,38 @@ describe("editor store actions", () => {
     const state = useEditorStore.getState();
     const key = "area:area-spawn-keep";
     expect(state.outlinerNodeState[key]).toMatchObject({ visible: false, locked: true });
-    expect(state.protectedAreas[0].rules.canMine).toBe(false);
+    expect(state.protectedAreas[0].locked).toBe(true);
+    expect(state.protectedAreas[0].rules.canMine).toBe(mockProtectedAreas[0].rules.canMine);
     expect(state.waterBodies.find((body) => body.id === "water-mill-pond")?.murkiness).toBe(0.6);
+  });
+
+  it("keeps prop position fields in sync", () => {
+    useEditorStore.getState().updateProp("prop-tree-01", {
+      transform: {
+        ...useEditorStore.getState().props.find((prop) => prop.id === "prop-tree-01")!.transform,
+        position: [12, 34, 56],
+      },
+    });
+
+    const prop = useEditorStore.getState().props.find((candidate) => candidate.id === "prop-tree-01");
+    expect(prop?.position).toEqual([12, 34, 56]);
+    expect(prop?.transform.position).toEqual([12, 34, 56]);
+  });
+
+  it("rebuilds outliner state when replacing protected areas", () => {
+    const runtimeAreas = [
+      { ...mockProtectedAreas[0], id: "runtime-area-1", name: "Runtime Area 1", locked: true },
+      { ...mockProtectedAreas[1], id: "runtime-area-2", name: "Runtime Area 2", locked: false },
+    ];
+
+    useEditorStore.getState().setSelection({ kind: "area", id: "area-spawn-keep", label: "Spawn Keep" });
+    useEditorStore.getState().replaceProtectedAreas(runtimeAreas);
+
+    const state = useEditorStore.getState();
+    expect(state.protectedAreas).toHaveLength(2);
+    expect(state.outlinerNodeState["area:runtime-area-1"]).toMatchObject({ visible: true, locked: true });
+    expect(state.outlinerNodeState["area:runtime-area-2"]).toMatchObject({ visible: true, locked: false });
+    expect(state.selection).toMatchObject({ kind: "area", id: "runtime-area-1" });
   });
 
   it("replaces world summaries while preserving compatible selection", () => {

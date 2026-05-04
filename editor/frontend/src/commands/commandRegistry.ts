@@ -187,6 +187,7 @@ const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>)
     const spreadZ = ((random() - 0.5) * 10 * state.propBrushSettings.spacing) + Math.floor(index / 4) * 4;
     const scale = 0.85 + state.propBrushSettings.scaleJitter * random();
     const rotation = state.propBrushSettings.randomRotation ? random() * 360 : (index % 4) * 90;
+    const position: [number, number, number] = [baseX + spreadX, 20 + Math.floor(random() * 4), baseZ + spreadZ];
 
     return {
       id: `prop-scatter-${state.props.length + index + 1}`,
@@ -201,10 +202,10 @@ const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>)
       boundsWarning: false,
       generatedAssetAvailable: true,
       chunkId,
-      position: [baseX + spreadX, 20 + Math.floor(random() * 4), baseZ + spreadZ],
+      position,
       assetPath: asset.assetPath,
       transform: {
-        position: [baseX + spreadX, 20 + Math.floor(random() * 4), baseZ + spreadZ],
+        position,
         rotation: [0, rotation, 0],
         scale: [scale, scale, scale],
       },
@@ -942,7 +943,7 @@ export const editorCommands: readonly EditorCommand[] = [
     runtimeWrite: true,
     run: async (ctx) => {
       const result = unwrapRuntime(await ctx.runtimeClient.loadProtectedAreas());
-      ctx.setState({ protectedAreas: [...result.areas] });
+      ctx.getState().replaceProtectedAreas(result.areas);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Loaded ${result.areaCount} protected areas from runtime.` });
       ctx.toast.success("Protected areas loaded.");
     },

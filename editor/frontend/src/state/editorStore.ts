@@ -164,6 +164,7 @@ interface EditorActions {
   readonly toggleOutlinerNodeVisibility: (kind: Selection["kind"], id: string) => void;
   readonly toggleOutlinerNodeLock: (kind: Selection["kind"], id: string) => void;
   readonly updateProtectedArea: (id: string, patch: Partial<Omit<ProtectedArea, "id">>) => void;
+  readonly replaceProtectedAreas: (areas: readonly ProtectedArea[]) => void;
   readonly updateWaterBody: (id: string, patch: Partial<Omit<WaterBody, "id">>) => void;
   readonly removeProtectedArea: (id: string) => void;
   readonly updateProp: (id: string, patch: Partial<Omit<PropInstance, "id">>) => void;
@@ -463,29 +464,75 @@ export const useEditorStore = create<EditorStore>()(
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         state.outlinerNodeState[key] = { ...existing, visible };
+        if (kind === "prop") {
+          const propIndex = state.props.findIndex((prop) => prop.id === id);
+          if (propIndex >= 0) {
+            state.props[propIndex] = { ...state.props[propIndex], visible };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyPropIds.includes(id)) {
+              state.dirtyState.dirtyPropIds = [...state.dirtyState.dirtyPropIds, id];
+            }
+          }
+        }
       }),
     setOutlinerNodeLock: (kind, id, locked) =>
       set((state) => {
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         state.outlinerNodeState[key] = { ...existing, locked };
+        if (kind === "area") {
+          const areaIndex = state.protectedAreas.findIndex((area) => area.id === id);
+          if (areaIndex >= 0) {
+            state.protectedAreas[areaIndex] = { ...state.protectedAreas[areaIndex], locked };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyAreaIds.includes(id)) {
+              state.dirtyState.dirtyAreaIds = [...state.dirtyState.dirtyAreaIds, id];
+            }
+          }
+        }
       }),
     toggleOutlinerNodeVisibility: (kind, id) =>
       set((state) => {
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
-        state.outlinerNodeState[key] = { ...existing, visible: !existing.visible };
+        const visible = !existing.visible;
+        state.outlinerNodeState[key] = { ...existing, visible };
+        if (kind === "prop") {
+          const propIndex = state.props.findIndex((prop) => prop.id === id);
+          if (propIndex >= 0) {
+            state.props[propIndex] = { ...state.props[propIndex], visible };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyPropIds.includes(id)) {
+              state.dirtyState.dirtyPropIds = [...state.dirtyState.dirtyPropIds, id];
+            }
+          }
+        }
       }),
     toggleOutlinerNodeLock: (kind, id) =>
       set((state) => {
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
-        state.outlinerNodeState[key] = { ...existing, locked: !existing.locked };
+        const locked = !existing.locked;
+        state.outlinerNodeState[key] = { ...existing, locked };
+        if (kind === "area") {
+          const areaIndex = state.protectedAreas.findIndex((area) => area.id === id);
+          if (areaIndex >= 0) {
+            state.protectedAreas[areaIndex] = { ...state.protectedAreas[areaIndex], locked };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyAreaIds.includes(id)) {
+              state.dirtyState.dirtyAreaIds = [...state.dirtyState.dirtyAreaIds, id];
+            }
+          }
+        }
       }),
     updateProtectedArea: (id, patch) =>
       set((state) => {
         const index = state.protectedAreas.findIndex((area) => area.id === id);
         if (index < 0) {
+          return;
+        }
+
+        if (state.protectedAreas[index].locked && patch.locked !== false) {
           return;
         }
 
@@ -499,6 +546,27 @@ export const useEditorStore = create<EditorStore>()(
           const key = makeOutlinerNodeKey("area", id);
           const currentState = state.outlinerNodeState[key] ?? { visible: true, locked: false };
           state.outlinerNodeState[key] = { ...currentState, locked: patch.locked };
+        }
+      }),
+    replaceProtectedAreas: (areas) =>
+      set((state) => {
+        state.protectedAreas = [...areas];
+        state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.props, state.materials);
+        state.dirtyState.dirtyAreaIds = [];
+        state.dirtyState.hasUnsavedChanges =
+          state.dirtyState.dirtyChunkIds.length > 0 ||
+          state.dirtyState.dirtyWaterBodyIds.length > 0 ||
+          state.dirtyState.dirtyPropIds.length > 0 ||
+          state.dirtyState.dirtyAtlas ||
+          state.dirtyState.layoutDirty;
+
+        const selectedAreaId = state.selection.kind === "area" ? state.selection.id : null;
+        if (selectedAreaId && !state.protectedAreas.some((area) => area.id === selectedAreaId)) {
+          state.selection = state.protectedAreas[0]
+            ? { kind: "area", id: state.protectedAreas[0].id, label: state.protectedAreas[0].name }
+            : state.chunks[0]
+              ? { kind: "chunk", id: state.chunks[0].id, label: state.chunks[0].label }
+              : { kind: "debug_resource", id: "selection-empty", label: "No selection" };
         }
       }),
     removeProtectedArea: (id) =>
@@ -533,7 +601,14 @@ export const useEditorStore = create<EditorStore>()(
           return;
         }
 
-        state.props[index] = { ...state.props[index], ...patch };
+        const nextProp = { ...state.props[index], ...patch };
+        if (patch.transform?.position) {
+          nextProp.position = patch.transform.position;
+        } else if (patch.position) {
+          nextProp.transform = { ...nextProp.transform, position: patch.position };
+        }
+
+        state.props[index] = nextProp;
         state.dirtyState.hasUnsavedChanges = true;
         if (!state.dirtyState.dirtyPropIds.includes(id)) {
           state.dirtyState.dirtyPropIds = [...state.dirtyState.dirtyPropIds, id];

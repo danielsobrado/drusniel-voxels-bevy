@@ -277,6 +277,81 @@ pub fn handle_runtime_command_json(world: &mut World, request: Value) -> Runtime
     }
 }
 
+pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
+    let preset = world
+        .get_resource::<RenderQualityPreset>()
+        .copied()
+        .unwrap_or_default();
+    let atlas_mapping = world
+        .get_resource::<AtlasMapping>()
+        .cloned()
+        .unwrap_or_default();
+    let water_visual_probe = water_visual_probe_payload(world);
+    let protected_area_count = world
+        .get_resource::<ProtectedAreaRegistry>()
+        .map(|registry| registry.area_count())
+        .unwrap_or_default();
+
+    RuntimeCommandResult::success(json!({
+        "connectionState": "connected",
+        "capabilities": {
+            "canSelectEntity": false,
+            "canFocusCamera": false,
+            "canRebuildChunks": true,
+            "canSetRenderQuality": true,
+            "canDebugWaterReflections": true,
+            "canRunWaterVisualProbe": true,
+            "canEditAtlasMapping": true,
+            "canEditProtectedAreas": true,
+            "canSaveWorldSnapshot": false,
+        },
+        "metrics": runtime_metrics_payload(preset, &water_visual_probe),
+        "renderQuality": {
+            "preset": render_quality_preset_to_frontend(preset),
+            "metrics": render_quality_metrics(preset),
+        },
+        "selection": null,
+        "targetedVoxel": null,
+        "chunks": [],
+        "dirtyChunkIds": [],
+        "waterReflection": {
+            "waterBodyId": null,
+            "status": water_visual_probe["reflectionStatus"].clone(),
+        },
+        "waterVisualProbe": water_visual_probe,
+        "atlasMapping": {
+            "mapping": frontend_atlas_mapping_payload(&atlas_mapping),
+            "dirty": atlas_mapping.needs_rebuild,
+        },
+        "propStats": {
+            "totalInstances": 0,
+            "visibleInstances": 0,
+            "hiddenInstances": 0,
+            "billboardedCount": 0,
+            "threeDCount": 0,
+            "lodSwitches": 0,
+            "missingGeneratedAssets": 0,
+            "boundsWarnings": 0,
+            "instancedGroups": 0,
+            "shadowCastCount": 0,
+        },
+        "timingSamples": [
+            { "label": "frame.total", "ms": 16.7, "category": "frame" },
+            { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
+        ],
+        "consoleEvents": [
+            {
+                "id": format!("runtime-bridge-{}", timestamp_string()),
+                "level": "info",
+                "message": format!("Runtime bridge snapshot captured; {} protected areas registered.", protected_area_count),
+                "time": timestamp_string(),
+                "source": "runtime",
+            }
+        ],
+        "capturedAt": timestamp_string(),
+    }))
+}
+
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -602,6 +677,89 @@ fn render_quality_metrics(preset: RenderQualityPreset) -> Value {
         "waterReflectionDistance": preset.water_reflection_distance(),
         "waterReflectionQualityCode": preset.water_reflection_quality_code(),
         "shadowQualityCode": preset.shadow_quality_code(),
+    })
+}
+
+fn render_quality_preset_to_frontend(preset: RenderQualityPreset) -> &'static str {
+    match preset {
+        RenderQualityPreset::Low => "Low",
+        RenderQualityPreset::Medium => "Medium",
+        RenderQualityPreset::High => "High",
+        RenderQualityPreset::Performance100 => "Performance100",
+    }
+}
+
+fn runtime_metrics_payload(preset: RenderQualityPreset, water_visual_probe: &Value) -> Value {
+    let reflection_status = &water_visual_probe["reflectionStatus"];
+    let water_presence = &water_visual_probe["waterPresence"];
+
+    json!({
+        "fps": 60,
+        "frameMs": 16.7,
+        "renderQualityPreset": render_quality_preset_to_frontend(preset),
+        "renderQualityReadouts": render_quality_metrics(preset),
+        "chunkMeshMs": 0.0,
+        "waterReflectionMs": 0.0,
+        "propBillboardMs": 0.0,
+        "shadowBudget": {
+            "enabled": true,
+        },
+        "ambientOcclusion": {
+            "gtaoEnabled": true,
+            "gtaoQuality": "medium",
+            "gtaoSliceCount": 18,
+            "gtaoStepsPerSlice": 8,
+            "gtaoRadius": 1.35,
+            "gtaoTemporalDenoise": true,
+            "ssaoSupported": true,
+            "ssaoEnabled": true,
+            "bakedAoStrength": 0.35,
+        },
+        "adaptiveGI": {
+            "adaptiveGiQuality": 2,
+            "stochasticProbeSelection": true,
+            "probeSelectionCount": 6,
+            "sdfShadows": true,
+            "contactShadows": true,
+        },
+        "waterRenderDebug": {
+            "reflectionActive": reflection_status["active"].as_bool().unwrap_or(false),
+            "waterMaskPixels": water_presence["visibleMeshes"].as_u64().unwrap_or(0),
+            "displacementEnabled": true,
+            "visualProbeStatus": "runtime",
+        },
+        "lightingAtmosphere": {
+            "sunTimeOfDay": "runtime",
+            "fogPreset": "Runtime",
+            "fogActive": true,
+            "godRaysEnabled": false,
+            "godRayIntensity": 0.6,
+        },
+        "volumetricClouds": {
+            "coverage": 0.4,
+            "renderScale": 0.6,
+            "primarySteps": 12,
+            "lightSteps": 8,
+        },
+        "cinematicPhotoMode": {
+            "photoModeActive": false,
+            "focalDistance": 120,
+            "aperture": 1.8,
+            "blurEnabled": true,
+            "depthOfFieldMode": "Bokeh",
+            "motionBlurSamples": 8,
+            "cinematicModeActive": false,
+        },
+        "graphicsCapabilities": {
+            "adapterName": "Bevy runtime",
+            "integratedGPU": false,
+            "taaSupported": true,
+            "rayTracingSupported": false,
+        },
+        "timingSamples": [
+            { "label": "frame.total", "ms": 16.7, "category": "frame" },
+            { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
+        ],
     })
 }
 

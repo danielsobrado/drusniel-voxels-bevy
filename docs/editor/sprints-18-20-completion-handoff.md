@@ -20,12 +20,14 @@ Date: 2026-05-04
 
 ## Not included
 
-- No React-to-Tauri bridge is implemented yet.
-- No real Bevy runtime connection is implemented in the frontend shell yet.
+- A local React-to-Bevy runtime bridge is now available, but it is opt-in:
+  - Start Bevy with `DRUSNIEL_EDITOR_BRIDGE=1` to expose `http://127.0.0.1:17777`.
+  - Start the frontend with `VITE_DRUSNIEL_RUNTIME_BRIDGE=local-http`, add `?runtimeBridge=local-http`, or set `localStorage["drusniel.editor.runtimeBridge"] = "local-http"` to install `window.drusnielRuntime`.
+  - Override the bridge URL with `DRUSNIEL_EDITOR_BRIDGE_ADDR` on the Bevy side and `VITE_DRUSNIEL_RUNTIME_BRIDGE_URL` or `localStorage["drusniel.editor.runtimeBridgeUrl"]` on the frontend side.
 - The React editor still renders the mock viewport and mock world summaries. It does not render the binary `world_data.bin` voxel chunks directly.
 - Frontend snapshots are in-memory editor state checkpoints, not a new disk format.
 - No new voxel world file format was introduced.
-- Props, water overrides, protected areas, and atlas edits remain editor/mock-domain state unless the existing runtime/backend client supports a specific command path.
+- Props and explicit water-body overrides remain editor/mock-domain state. Runtime commands now cover render quality, water reflection debug/probe, chunk rebuild, atlas mapping, and protected area rule operations when the local bridge is enabled.
 
 ## Verification
 

@@ -33,7 +33,7 @@ interface RuntimeBridge {
 
 declare global {
   interface Window {
-    readonly drusnielRuntime?: RuntimeBridge;
+    drusnielRuntime?: RuntimeBridge;
   }
 }
 

@@ -162,6 +162,11 @@ export function ViewportPanel() {
     const entries: AreaOverlayState[] = [];
 
     for (const area of editorState.protectedAreas) {
+      const nodeState = editorState.outlinerNodeState[`area:${area.id}`];
+      if (nodeState?.visible === false) {
+        continue;
+      }
+
       const warnings = warningsByArea[area.id] ?? [];
       const hasWarning = warnings.length > 0;
       const isSelected = editorState.selection.kind === "area" && editorState.selection.id === area.id;
@@ -180,7 +185,7 @@ export function ViewportPanel() {
     }
 
     return entries;
-  }, [activeMode, editorState.protectedAreas, editorState.selection, warningsByArea]);
+  }, [activeMode, editorState.outlinerNodeState, editorState.protectedAreas, editorState.selection, warningsByArea]);
 
   const cameraPosition: [number, number, number] = [84, 56, 112];
   const targetedVoxel: [number, number, number] =
@@ -385,6 +390,7 @@ export function ViewportPanel() {
                   <select
                     value={selectedAreaForTool.shape}
                     data-testid="viewport-area-shape"
+                    disabled={selectedAreaForTool.locked}
                     onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                       editorState.updateProtectedArea(selectedAreaForTool.id, { shape: event.target.value as ProtectedAreaShape })
                     }
@@ -401,6 +407,7 @@ export function ViewportPanel() {
                   <select
                     value={selectedAreaForTool.kind}
                     data-testid="viewport-area-kind"
+                    disabled={selectedAreaForTool.locked}
                     onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                       editorState.updateProtectedArea(selectedAreaForTool.id, { kind: event.target.value as ProtectedAreaKind })
                     }
@@ -420,6 +427,7 @@ export function ViewportPanel() {
                     max={999}
                     value={selectedAreaForTool.priority}
                     data-testid="viewport-area-priority"
+                    disabled={selectedAreaForTool.locked}
                     onChange={(event) => {
                       const priority = Number(event.target.value);
                       if (Number.isFinite(priority)) {
@@ -443,6 +451,7 @@ export function ViewportPanel() {
                       key={preset.id}
                       type="button"
                       className="toolbar-button"
+                      disabled={selectedAreaForTool.locked}
                       data-testid={`viewport-area-preset-${preset.id}`}
                       onClick={() => editorState.updateProtectedArea(selectedAreaForTool.id, { rules: preset.rules })}
                     >

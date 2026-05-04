@@ -100,6 +100,11 @@ test("protected area command workflow creates, edits, and deletes an area", asyn
   await expect(viewportAreaOverlay).toBeVisible();
   await expect(page.getByTestId("inspector-area")).toBeVisible();
 
+  await page.getByTestId("outliner-item-area-createUnbreakableBox-4-visibility").click();
+  await expect(viewportAreaOverlay).not.toBeVisible();
+  await page.getByTestId("outliner-item-area-createUnbreakableBox-4-visibility").click();
+  await expect(viewportAreaOverlay).toBeVisible();
+
   await page.getByTestId("inspector-area-bounds-min-x").fill("30");
   await page.getByTestId("inspector-area-bounds-min-y").fill("14");
   await page.getByTestId("inspector-area-bounds-min-z").fill("70");
@@ -114,6 +119,12 @@ test("protected area command workflow creates, edits, and deletes an area", asyn
   await expect(page.getByTestId("inspector-area-rules-canPlace")).toBeChecked();
   await expect(page.getByTestId("inspector-area-rules-canPaint")).not.toBeChecked();
 
+  await page.getByTestId("outliner-item-area-createUnbreakableBox-4-lock").click();
+  await expect(page.getByTestId("inspector-area-name")).toBeDisabled();
+  await expect(page.getByTestId("viewport-area-priority")).toBeDisabled();
+  await page.getByTestId("outliner-item-area-createUnbreakableBox-4-lock").click();
+  await expect(page.getByTestId("inspector-area-name")).toBeEnabled();
+
   await page.keyboard.press("Control+K");
   await expect(page.getByTestId("command-palette")).toBeVisible();
   await page.getByPlaceholder("Run editor command...").fill("delete selected area");
@@ -127,6 +138,34 @@ test("protected area command workflow creates, edits, and deletes an area", asyn
   await expect(page.getByTestId("command-history-latest-id")).toHaveText("editor.area.deleteSelected");
   await expect(outlinerArea).not.toBeVisible();
   await expect(viewportAreaOverlay).not.toBeVisible();
+});
+
+test("advertised editor keyboard shortcuts run commands", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("app-shell")).toBeVisible();
+
+  await page.keyboard.press("Control+S");
+  await expect(page.getByTestId("command-history-latest-id")).toHaveText("editor.file.save");
+
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.keyboard.press("Control+O");
+  await fileChooserPromise;
+  await expect(page.getByTestId("command-history-latest-id")).toHaveText("editor.file.openWorld");
+
+  const initialAreaCount = Number.parseInt((await page.getByTestId("protected-area-count").textContent()) ?? "0", 10);
+  await page.keyboard.press("Control+K");
+  await page.getByPlaceholder("Run editor command...").fill("unbreakable");
+  await page
+    .getByTestId("command-palette")
+    .locator('[data-command-id="editor.area.createUnbreakableBox"]')
+    .click();
+  await expect(page.getByTestId("protected-area-count")).toHaveText(String(initialAreaCount + 1));
+
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByTestId("protected-area-count")).toHaveText(String(initialAreaCount));
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByTestId("protected-area-count")).toHaveText(String(initialAreaCount + 1));
 });
 
 test("texture atlas assignment updates mappings and rebuild state", async ({ page }) => {

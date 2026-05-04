@@ -21,6 +21,7 @@ use voxel_builder::constants::{
     FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
 };
 use voxel_builder::debug_ui::DebugUiPlugin;
+use voxel_builder::editor_bridge::EditorRuntimeBridgePlugin;
 use voxel_builder::entity::EntityPlugin;
 use voxel_builder::environment::AtmospherePlugin;
 use voxel_builder::input::InputPlugin;
@@ -354,6 +355,7 @@ fn main() {
         .add_plugins(RenderingPlugin)
         .add_plugins(WorldRulesPlugin)
         .add_plugins(RuntimeWriteCommandPlugin)
+        .add_plugins(EditorRuntimeBridgePlugin)
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(VegetationPlugin)
