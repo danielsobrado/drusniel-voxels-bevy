@@ -41,7 +41,7 @@ export function AppShell() {
     }
 
     didLoadWorldSummaryRef.current = true;
-    void runCommandById("editor.world.loadSummary");
+    void runCommandById("editor.file.loadDefaultWorld");
   }, [runCommandById]);
 
   useEffect(() => {

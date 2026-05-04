@@ -86,7 +86,9 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
         <StatusPill tone={runtimeState === "connected" || runtimeState === "mock" ? "ok" : runtimeState === "stale" || runtimeState === "error" ? "warn" : "neutral"}>
           {runtimeState.toUpperCase()}
         </StatusPill>
-        <StatusPill tone={dirtyState.hasUnsavedChanges ? "warn" : "ok"}>{dirtyState.hasUnsavedChanges ? "DIRTY" : "SAVED"}</StatusPill>
+        <span data-testid="dirty-state-label">
+          <StatusPill tone={dirtyState.hasUnsavedChanges ? "warn" : "ok"}>{dirtyState.hasUnsavedChanges ? "DIRTY" : "SAVED"}</StatusPill>
+        </span>
         <StatusPill tone="agent">AGENT READY</StatusPill>
       </div>
     </section>

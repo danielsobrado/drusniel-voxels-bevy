@@ -464,6 +464,18 @@ export const editorCommands: readonly EditorCommand[] = [
     run: (ctx) => ctx.openWorldFile(),
   },
   {
+    id: "editor.file.loadDefaultWorld",
+    title: "Load default world",
+    description: "Load the default world through the editor backend client.",
+    category: "File",
+    keywords: ["file", "world", "load", "default", "backend"],
+    run: async (ctx) => {
+      const summary = unwrapBackend(await ctx.backendClient.loadDefaultWorld());
+      ctx.getState().replaceWorldSummary(summary);
+      ctx.toast.success(`Loaded default world: ${summary.name}.`);
+    },
+  },
+  {
     id: "editor.file.save",
     title: "Save",
     description: "Clear mocked dirty state as if the editor saved successfully.",

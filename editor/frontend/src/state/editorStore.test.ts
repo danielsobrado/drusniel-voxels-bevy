@@ -317,6 +317,12 @@ describe("editor command registry", () => {
   it("commands call backend and runtime interfaces", async () => {
     class SpyBackendClient extends MockEditorBackendClient {
       saveDefaultWorldCalled = false;
+      loadDefaultWorldCalled = false;
+
+      override async loadDefaultWorld() {
+        this.loadDefaultWorldCalled = true;
+        return super.loadDefaultWorld();
+      }
 
       override async saveDefaultWorld(): Promise<BackendResult<WorldSaveSummary>> {
         this.saveDefaultWorldCalled = true;
@@ -336,10 +342,12 @@ describe("editor command registry", () => {
     const backendClient = new SpyBackendClient();
     const runtimeClient = new SpyRuntimeClient();
 
+    await runCommand("editor.file.loadDefaultWorld", createContext(backendClient, runtimeClient));
     await runCommand("editor.file.save", createContext(backendClient, runtimeClient));
     useEditorStore.getState().markDirty("chunk-1-0");
     await runCommand("editor.world.rebuildDirtyChunks", createContext(backendClient, runtimeClient));
 
+    expect(backendClient.loadDefaultWorldCalled).toBe(true);
     expect(backendClient.saveDefaultWorldCalled).toBe(true);
     expect(runtimeClient.rebuildDirtyChunksCalled).toBe(true);
   });
