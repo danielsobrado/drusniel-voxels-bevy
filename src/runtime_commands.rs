@@ -839,4 +839,38 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    fn validates_protected_area_command_payloads() {
+        let area = ProtectedArea {
+            id: crate::world_rules::ProtectedAreaId("area-1".to_string()),
+            name: "Area 1".to_string(),
+            kind: crate::world_rules::ProtectedAreaKind::NoBuild,
+            shape: crate::world_rules::ProtectedAreaShape::Box,
+            priority: 1,
+            locked: false,
+            color: "#22d3ee".to_string(),
+            center: [4.0, 4.0, 4.0],
+            size: [8.0, 8.0, 8.0],
+            bounds: crate::world_rules::ProtectedAreaBounds {
+                min: [0.0, 0.0, 0.0],
+                max: [8.0, 8.0, 8.0],
+            },
+            rules: crate::world_rules::ProtectedAreaRuleMatrix::ALLOW_ALL,
+            chunks: Vec::new(),
+            schema_version: crate::world_rules::WORLD_RULES_SCHEMA_VERSION,
+            debug_label: None,
+        };
+
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::CreateProtectedArea { area })
+                .is_ok()
+        );
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::DeleteProtectedArea {
+                area_id: String::new()
+            })
+            .is_err()
+        );
+    }
 }

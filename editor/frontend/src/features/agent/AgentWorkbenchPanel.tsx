@@ -160,6 +160,18 @@ export function AgentWorkbenchPanel() {
             <input type="checkbox" readOnly checked={selected?.kind === "area"} aria-label="Area selected" /> Selected area exists
           </label>
           <label>
+            <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("created and runtime accepted"))} aria-label="Protected area created" /> Protected area created
+          </label>
+          <label>
+            <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("runtime update accepted") || entry.message.includes("runtime accepted"))} aria-label="Runtime accepted" /> Runtime accepted
+          </label>
+          <label>
+            <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("Voxel edit blocked by protected area"))} aria-label="Voxel edit blocked" /> Voxel edit blocked
+          </label>
+          <label>
+            <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("conflict status clear") || entry.message.includes("conflicts clear"))} aria-label="Conflict status clear" /> Conflict status clear
+          </label>
+          <label>
             <input type="checkbox" readOnly checked={generatedTests.length > 0} aria-label="Test generated" /> Mocked test generated
           </label>
         </article>

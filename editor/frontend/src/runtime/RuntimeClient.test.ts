@@ -36,15 +36,22 @@ describe("runtime clients", () => {
     });
   });
 
-  it("browser runtime client keeps protected area writes unsupported", async () => {
+  it("browser runtime client sends protected area commands through the bridge", async () => {
+    const requests: unknown[] = [];
     const client = new BrowserRuntimeClient({
-      executeCommand: async () => runtimeCommandSuccess({}),
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({ areaId: "area-1", deleted: true });
+      },
     });
 
     const result = await client.deleteProtectedArea("area-1");
 
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe("unsupported");
+    expect(result.ok).toBe(true);
+    expect(requests[0]).toMatchObject({
+      type: "runtime.deleteProtectedArea",
+      payload: { areaId: "area-1" },
+    });
   });
 
   it("mock runtime client validates atlas write result shape", async () => {
@@ -57,5 +64,14 @@ describe("runtime clients", () => {
     }
     expect(result.data.mapping.grass.top).toBe(mockAtlasMapping.grass.top);
     expect(result.data.dirty).toBe(true);
+  });
+
+  it("mock runtime client handles protected area validation and rule queries", async () => {
+    const client = new MockRuntimeClient();
+    const validation = await client.validateProtectedAreaConflicts();
+    const query = await client.queryProtectedRulesAtVoxel([64, 24, 64]);
+
+    expect(validation.ok).toBe(true);
+    expect(query.ok).toBe(true);
   });
 });
