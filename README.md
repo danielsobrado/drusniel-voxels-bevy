@@ -6,7 +6,7 @@ Current development version: **v0.5**.
 
 ### Current (v0.5)
 
-*   **Valheim-Style Water Rendering Overhaul**: Complete rewrite of the water shader pipeline with physically-based wave physics, multi-layer foam, caustics, Fresnel reflections, refraction, and interactive displacement.
+*   **Water Rendering Overhaul**: Complete rewrite of the water shader pipeline with physically-based wave physics, multi-layer foam, caustics, Fresnel reflections, refraction, and interactive displacement.
 
     *   **Gerstner Wave Normals**: Replaced the old finite-difference normal approximation with analytical Gerstner wave normals (`gerstner_waves.wgsl`). Four-layer Gerstner summation produces physically accurate wave crests, troughs, and foam buildup — foam accumulates on wave peaks and propagates to shorelines.
 
