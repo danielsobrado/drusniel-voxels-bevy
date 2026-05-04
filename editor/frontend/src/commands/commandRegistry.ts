@@ -491,13 +491,111 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.saveSnapshot",
     title: "Save snapshot",
-    description: "Record a mocked snapshot request without writing files.",
+    description: "Record a mocked runtime snapshot and a frontend editor state checkpoint.",
     category: "File",
     keywords: ["snapshot", "save"],
     run: async (ctx) => {
       const snapshot = unwrapRuntime(await ctx.runtimeClient.saveWorldSnapshot());
-      ctx.getState().markDirty();
+      ctx.getState().saveEditorSnapshot(`Runtime snapshot ${snapshot.snapshotId}`, "editor.file.saveSnapshot");
       ctx.toast.success(`Mock snapshot recorded: ${snapshot.snapshotId}.`);
+    },
+  },
+  {
+    id: "editor.history.undo",
+    title: "Undo",
+    description: "Restore the editor state captured before the last undoable command.",
+    category: "Edit",
+    shortcut: "Ctrl+Z",
+    keywords: ["undo", "history", "edit"],
+    run: (ctx) => {
+      const applied = ctx.getState().undoLastCommand();
+      if (applied) {
+        ctx.toast.success("Undo applied.");
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Undo restored the previous editor snapshot." });
+      } else {
+        ctx.toast.info("Nothing to undo.");
+      }
+    },
+  },
+  {
+    id: "editor.history.redo",
+    title: "Redo",
+    description: "Reapply the editor state reversed by Undo.",
+    category: "Edit",
+    shortcut: "Ctrl+Shift+Z",
+    keywords: ["redo", "history", "edit"],
+    run: (ctx) => {
+      const applied = ctx.getState().redoLastCommand();
+      if (applied) {
+        ctx.toast.success("Redo applied.");
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Redo restored the next editor snapshot." });
+      } else {
+        ctx.toast.info("Nothing to redo.");
+      }
+    },
+  },
+  {
+    id: "editor.snapshot.create",
+    title: "Create editor snapshot",
+    description: "Store a frontend editor state snapshot for later restore.",
+    category: "File",
+    keywords: ["snapshot", "checkpoint", "state"],
+    run: (ctx) => {
+      const snapshot = ctx.getState().saveEditorSnapshot("Manual editor checkpoint", "editor.snapshot.create");
+      ctx.toast.success(`Editor snapshot saved: ${snapshot.id}.`);
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Saved editor state snapshot ${snapshot.id}.` });
+    },
+  },
+  {
+    id: "editor.snapshot.restoreLatest",
+    title: "Restore latest editor snapshot",
+    description: "Restore the most recent frontend editor state snapshot.",
+    category: "File",
+    keywords: ["snapshot", "restore", "state"],
+    run: (ctx) => {
+      const latestSnapshot = ctx.getState().savedSnapshots[0];
+      if (!latestSnapshot) {
+        ctx.toast.info("No editor snapshot is available.");
+        return;
+      }
+
+      const applied = ctx.getState().loadEditorSnapshot(latestSnapshot.id);
+      if (applied) {
+        ctx.toast.success(`Restored snapshot: ${latestSnapshot.note}.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Restored editor state snapshot ${latestSnapshot.id}.` });
+      }
+    },
+  },
+  {
+    id: "editor.performance.loadLargeMockWorld",
+    title: "Load large mock world",
+    description: "Load a high-cardinality mock world to exercise editor panels without Bevy or Tauri.",
+    category: "Tests",
+    keywords: ["large world", "stress", "mock", "outliner", "console"],
+    undoable: true,
+    run: (ctx) => {
+      ctx.getState().loadLargeMockWorld();
+      const stats = ctx.getState().largeWorldStats;
+      ctx.toast.success(`Loaded large mock world: ${stats.chunkCount} chunks, ${stats.propCount} props.`);
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `Large mock world loaded with ${stats.chunkCount} chunks, ${stats.propCount} props, and ${stats.consoleMessageCount} console entries.`,
+      });
+    },
+  },
+  {
+    id: "editor.help.showHandoff",
+    title: "Show editor handoff",
+    description: "Record the current editor implementation handoff summary for agent review.",
+    category: "Help",
+    keywords: ["help", "handoff", "docs", "agent"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "observation",
+        message: `Editor handoff: mock frontend backend, ${state.chunks.length} chunks, ${state.protectedAreas.length} protected areas, ${state.waterBodies.length} water bodies, ${state.props.length} props.`,
+      });
+      ctx.toast.info("Editor handoff summary recorded.");
     },
   },
   {
@@ -1606,11 +1704,40 @@ export const getCommand = (id: string): EditorCommand => {
   return command;
 };
 
+const undoableCommandCategories = new Set(["Areas", "Water", "Props", "Materials"]);
+const nonUndoableCommandIds = new Set([
+  "editor.material.openTextureAtlas",
+  "editor.atlas.selectTile",
+  "editor.atlas.rebuildTextureArray",
+  "editor.atlas.saveMapping",
+]);
+
+const shouldRecordUndoCheckpoint = (command: EditorCommand): boolean => {
+  if (command.undoable === true) {
+    return true;
+  }
+
+  if (command.undoable === false || nonUndoableCommandIds.has(command.id)) {
+    return false;
+  }
+
+  if (command.id.startsWith("editor.atlas.selectTile.")) {
+    return false;
+  }
+
+  return undoableCommandCategories.has(command.category);
+};
+
 export const runCommand = async (id: string, context: EditorCommandContext): Promise<void> => {
   const command = getCommand(id);
   const stateAtStart = context.getState();
+  const recordUndoCheckpoint = shouldRecordUndoCheckpoint(command);
   if (command.runtimeWrite) {
     stateAtStart.beginCommand(command.id);
+  }
+
+  if (recordUndoCheckpoint) {
+    stateAtStart.recordUndoCheckpoint(command.id, command.title);
   }
 
   try {
@@ -1634,6 +1761,9 @@ export const runCommand = async (id: string, context: EditorCommandContext): Pro
         ...state.consoleMessages,
       ],
     });
+    if (recordUndoCheckpoint) {
+      context.getState().discardUndoCheckpoint(command.id);
+    }
     context.pushCommandHistory(command.id, command.title, status, message);
     context.pushAgentTimelineEvent({ kind: "warning", message: `${command.title} failed: ${message}` });
     context.toast.error(`${command.title} failed.`);

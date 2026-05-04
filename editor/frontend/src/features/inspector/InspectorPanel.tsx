@@ -187,7 +187,7 @@ export function InspectorPanel() {
         <div className="inspector-card">
           <span className="inspector-kicker">Mode</span>
           <strong>{editorState.activeMode}</strong>
-          <small>Runtime edits are mocked until Sprint integration completes.</small>
+          <small>Runtime writes route through the active RuntimeClient.</small>
         </div>
         {inspectorContent}
       </div>

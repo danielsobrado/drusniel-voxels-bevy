@@ -28,3 +28,4 @@
 - [Sprint 18 - Save/load, snapshots, and undo/redo](./editor/sprint-18-save-load-snapshots-and-undo-redo.md)
 - [Sprint 19 - Performance and large-world UX](./editor/sprint-19-performance-and-large-world-ux.md)
 - [Sprint 20 - Polish, documentation, and Codex/agent workflow](./editor/sprint-20-polish-documentation-and-llm-agent-workflow.md)
+- [Sprints 18-20 completion handoff](./editor/sprints-18-20-completion-handoff.md)

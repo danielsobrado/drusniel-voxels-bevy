@@ -121,7 +121,7 @@ export function BevyCanvasHost({
       ) : null}
 
       <div className="canvas-reticle" aria-hidden="true" />
-      <div className="canvas-label">Mock voxel viewport. Runtime bridge intentionally disabled.</div>
+      <div className="canvas-label">Mock voxel viewport. Runtime writes route through the active RuntimeClient.</div>
       <div className="minimap-canvas" aria-label="Minimap placeholder">
         <div className="minimap-grid">Minimap</div>
       </div>

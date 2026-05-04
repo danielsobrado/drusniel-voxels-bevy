@@ -63,7 +63,9 @@ export interface DirtyState {
   readonly dirtyChunkIds: readonly string[];
   readonly dirtyAreaIds: readonly string[];
   readonly dirtyWaterBodyIds: readonly string[];
+  readonly dirtyPropIds: readonly string[];
   readonly dirtyAtlas: boolean;
+  readonly layoutDirty: boolean;
   readonly lastSavedAt?: string;
 }
 
@@ -74,3 +76,45 @@ export interface CommandHistoryEntry {
   readonly status?: "success" | "failure" | "validation_error" | "runtime_unavailable" | "unsupported";
   readonly message?: string;
 }
+
+export interface EditorUndoSnapshot {
+  readonly activeMode: EditorMode;
+  readonly activeTool: string;
+  readonly selection: Selection;
+  readonly brushSettings: BrushSettings;
+  readonly propBrushSettings: PropBrushSettings;
+  readonly viewportOverlays: ViewportOverlayState;
+  readonly renderQualityPreset: RenderQualityPreset;
+  readonly chunks: readonly ChunkSummary[];
+  readonly protectedAreas: readonly ProtectedArea[];
+  readonly waterBodies: readonly WaterBody[];
+  readonly props: readonly PropInstance[];
+  readonly materials: readonly MaterialAsset[];
+  readonly atlasMapping: BlockAtlasMap;
+  readonly selectedAtlasTileId: string;
+  readonly selectedPropAssetId: string;
+  readonly dirtyState: DirtyState;
+}
+
+export interface EditorUndoEntry {
+  readonly id: string;
+  readonly commandId: string;
+  readonly label: string;
+  readonly createdAt: string;
+  readonly actor: "user" | "agent" | "system";
+  readonly snapshot: EditorUndoSnapshot;
+}
+
+export interface EditorSavedSnapshot extends EditorUndoEntry {
+  readonly note: string;
+}
+
+export interface LargeWorldStats {
+  readonly enabled: boolean;
+  readonly chunkCount: number;
+  readonly propCount: number;
+  readonly protectedAreaCount: number;
+  readonly waterBodyCount: number;
+  readonly consoleMessageCount: number;
+}
+import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, WaterBody } from "./world";

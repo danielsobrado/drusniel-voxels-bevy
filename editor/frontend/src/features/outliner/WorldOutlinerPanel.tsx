@@ -52,6 +52,7 @@ const iconByKind: Record<OutlinerNode["kind"], string> = {
   material: "[MT]",
   debug_resource: "[DB]",
 };
+const OUTLINER_VISIBLE_NODE_LIMIT = 500;
 
 function OutlinerSection({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
@@ -209,12 +210,14 @@ export function WorldOutlinerPanel() {
     });
   }, [allNodes, filterGroups, filters.areas, filters.chunks, filters.dirtyOnly, filters.lockedOnly, filters.materials, filters.props, filters.search, filters.water]);
 
-  const chunks = visibleNodes.filter((node) => node.kind === "chunk");
+  const displayNodes = visibleNodes.slice(0, OUTLINER_VISIBLE_NODE_LIMIT);
+  const hiddenNodeCount = Math.max(0, visibleNodes.length - displayNodes.length);
+  const chunks = displayNodes.filter((node) => node.kind === "chunk");
   const dirtyChunks = chunks.filter((node) => node.dirty);
-  const areas = visibleNodes.filter((node) => node.kind === "area");
-  const water = visibleNodes.filter((node) => node.kind === "water");
-  const props = visibleNodes.filter((node) => node.kind === "prop");
-  const materials = visibleNodes.filter((node) => node.kind === "material");
+  const areas = displayNodes.filter((node) => node.kind === "area");
+  const water = displayNodes.filter((node) => node.kind === "water");
+  const props = displayNodes.filter((node) => node.kind === "prop");
+  const materials = displayNodes.filter((node) => node.kind === "material");
 
   const chunksByLod = useMemo(() => {
     const map = new Map<number, typeof chunks>();
@@ -358,6 +361,11 @@ export function WorldOutlinerPanel() {
             materials
           </label>
         </div>
+        {hiddenNodeCount > 0 ? (
+          <p className="muted" data-testid="outliner-large-world-cap">
+            {`Showing first ${displayNodes.length} of ${visibleNodes.length} matching objects. Use search or type filters to narrow the list.`}
+          </p>
+        ) : null}
 
         <OutlinerSection title="Drusniel World">
           <OutlinerSection title="Terrain">

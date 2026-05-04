@@ -39,7 +39,7 @@ export function AssetBrowserPanel() {
       <PanelTitleBar title="Asset Browser" />
       <div className="panel-body" data-testid="bottom-dock">
         <h2 id="asset-browser-title" className="placeholder-heading">Asset Browser</h2>
-        <p className="agent-hint">Agent Hint: assets are mocked; atlas and prop editing workflows are intentionally not implemented.</p>
+        <p className="agent-hint">Agent Hint: assets are mocked; atlas mapping and prop brush workflows route through editor commands.</p>
         <div className="asset-card">
           <strong>Prop brush asset</strong>
           <small>

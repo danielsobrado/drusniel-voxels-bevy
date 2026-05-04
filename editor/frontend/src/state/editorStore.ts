@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { castDraft, type Draft } from "immer";
 import { immer } from "zustand/middleware/immer";
 import type { WorldSummary } from "../backend/EditorBackendClient";
 import { getMockRenderQualityReadouts, mockAgentObservation, mockAgentTimeline, mockConsoleMessages, mockRuntimeMetrics } from "../mocks/mockRuntime";
@@ -9,6 +10,10 @@ import type {
   CommandHistoryEntry,
   DirtyState,
   EditorMode,
+  EditorSavedSnapshot,
+  EditorUndoEntry,
+  EditorUndoSnapshot,
+  LargeWorldStats,
   PropBrushSettings,
   RenderQualityPreset,
   RuntimeState,
@@ -23,6 +28,10 @@ type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 type OutlinerNodeState = { readonly visible: boolean; readonly locked: boolean };
 
 const makeOutlinerNodeKey = (kind: Selection["kind"], id: string): OutlinerNodeKey => `${kind}:${id}`;
+const MAX_UNDO_ENTRIES = 50;
+const MAX_SAVED_SNAPSHOTS = 12;
+
+const cloneEditorValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const createOutlinerNodeState = (
   chunks: readonly ChunkSummary[],
@@ -67,6 +76,45 @@ const preserveSelectionWhenReplacingSummary = (summary: WorldSummary, currentSel
   return { kind: "debug_resource", id: "selection-empty", label: "No selection" };
 };
 
+const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
+  activeMode: state.activeMode,
+  activeTool: state.activeTool,
+  selection: cloneEditorValue(state.selection),
+  brushSettings: cloneEditorValue(state.brushSettings),
+  propBrushSettings: cloneEditorValue(state.propBrushSettings),
+  viewportOverlays: cloneEditorValue(state.viewportOverlays),
+  renderQualityPreset: state.renderQualityPreset,
+  chunks: cloneEditorValue(state.chunks),
+  protectedAreas: cloneEditorValue(state.protectedAreas),
+  waterBodies: cloneEditorValue(state.waterBodies),
+  props: cloneEditorValue(state.props),
+  materials: cloneEditorValue(state.materials),
+  atlasMapping: cloneEditorValue(state.atlasMapping),
+  selectedAtlasTileId: state.selectedAtlasTileId,
+  selectedPropAssetId: state.selectedPropAssetId,
+  dirtyState: cloneEditorValue(state.dirtyState),
+});
+
+const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUndoSnapshot): void => {
+  state.activeMode = snapshot.activeMode;
+  state.activeTool = snapshot.activeTool;
+  state.selection = cloneEditorValue(snapshot.selection);
+  state.brushSettings = cloneEditorValue(snapshot.brushSettings);
+  state.propBrushSettings = cloneEditorValue(snapshot.propBrushSettings);
+  state.viewportOverlays = cloneEditorValue(snapshot.viewportOverlays);
+  state.renderQualityPreset = snapshot.renderQualityPreset;
+  state.chunks = [...cloneEditorValue(snapshot.chunks)];
+  state.protectedAreas = [...cloneEditorValue(snapshot.protectedAreas)];
+  state.waterBodies = [...cloneEditorValue(snapshot.waterBodies)];
+  state.props = [...cloneEditorValue(snapshot.props)];
+  state.materials = [...cloneEditorValue(snapshot.materials)];
+  state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.props, state.materials);
+  state.atlasMapping = cloneEditorValue(snapshot.atlasMapping);
+  state.selectedAtlasTileId = snapshot.selectedAtlasTileId;
+  state.selectedPropAssetId = snapshot.selectedPropAssetId;
+  state.dirtyState = castDraft(cloneEditorValue(snapshot.dirtyState));
+};
+
 export interface EditorDataState {
   readonly activeMode: EditorMode;
   readonly activeTool: string;
@@ -93,6 +141,10 @@ export interface EditorDataState {
   readonly selectedAtlasTileId: string;
   readonly dirtyState: DirtyState;
   readonly commandHistory: CommandHistoryEntry[];
+  readonly undoStack: EditorUndoEntry[];
+  readonly redoStack: EditorUndoEntry[];
+  readonly savedSnapshots: EditorSavedSnapshot[];
+  readonly largeWorldStats: LargeWorldStats;
   readonly pendingCommandIds: readonly string[];
   readonly layoutResetRequestId: number;
 }
@@ -122,11 +174,20 @@ interface EditorActions {
   readonly setWaterRuntimeSnapshot: (snapshot: MockWaterRuntimeSnapshot) => void;
   readonly syncWaterReflectionStatus: (patch: Partial<WaterReflectionStatus>) => void;
   readonly markDirty: (chunkId?: string) => void;
+  readonly markPropDirty: (propId: string) => void;
+  readonly markLayoutDirty: () => void;
   readonly clearDirty: () => void;
   readonly clearConsole: () => void;
   readonly pushAgentTimelineEvent: (event: Omit<AgentTimelineEvent, "id" | "createdAt"> & Partial<Pick<AgentTimelineEvent, "id" | "createdAt">>) => void;
   readonly requestLayoutReset: () => void;
   readonly pushCommandHistory: (commandId: string, label: string, status?: CommandHistoryEntry["status"], message?: string) => void;
+  readonly recordUndoCheckpoint: (commandId: string, label: string, actor?: EditorUndoEntry["actor"]) => void;
+  readonly discardUndoCheckpoint: (commandId: string) => void;
+  readonly undoLastCommand: () => boolean;
+  readonly redoLastCommand: () => boolean;
+  readonly saveEditorSnapshot: (note: string, commandId?: string, actor?: EditorUndoEntry["actor"]) => EditorSavedSnapshot;
+  readonly loadEditorSnapshot: (snapshotId: string) => boolean;
+  readonly loadLargeMockWorld: () => void;
   readonly beginCommand: (commandId: string) => void;
   readonly finishCommand: (commandId: string) => void;
   readonly setPropBrushSettings: (settings: Partial<PropBrushSettings>) => void;
@@ -157,6 +218,86 @@ const initialPropBrushSettings: PropBrushSettings = {
   collisionCheck: true,
   seed: 24601,
 };
+
+const createLargeMockChunks = (): ChunkSummary[] =>
+  Array.from({ length: 960 }, (_, index) => {
+    const source = mockChunks[index % mockChunks.length];
+    const x = index % 40;
+    const z = Math.floor(index / 40);
+    const id = `large-chunk-${x}-${z}`;
+
+    return {
+      ...source,
+      id,
+      label: `Chunk ${x},${z}`,
+      coordinate: [x, source.coordinate[1], z],
+      blockCount: source.blockCount + index * 11,
+      dirty: index % 37 === 0,
+      meshStatus: index % 37 === 0 ? "dirty" : index % 19 === 0 ? "queued" : "clean",
+      vertexCount: source.vertexCount + (index % 50) * 29,
+      triangleCount: source.triangleCount + (index % 40) * 17,
+      lodGroup: index % 4,
+    };
+  });
+
+const createLargeMockAreas = (): ProtectedArea[] =>
+  Array.from({ length: 180 }, (_, index) => {
+    const source = mockProtectedAreas[index % mockProtectedAreas.length];
+    const x = 20 + (index % 30) * 18;
+    const z = 20 + Math.floor(index / 30) * 22;
+
+    return {
+      ...source,
+      id: `large-area-${index + 1}`,
+      name: `${source.name} ${index + 1}`,
+      center: [x, source.center[1], z],
+      bounds: {
+        min: [x - source.size[0] / 2, source.bounds.min[1], z - source.size[2] / 2],
+        max: [x + source.size[0] / 2, source.bounds.max[1], z + source.size[2] / 2],
+      },
+      locked: index % 5 === 0,
+      priority: source.priority + (index % 7),
+    };
+  });
+
+const createLargeMockWaterBodies = (): WaterBody[] =>
+  Array.from({ length: 96 }, (_, index) => {
+    const source = mockWaterBodies[index % mockWaterBodies.length];
+    const x = (index % 24) * 28;
+    const z = Math.floor(index / 24) * 42 + 16;
+
+    return {
+      ...source,
+      id: `large-water-${index + 1}`,
+      name: `${source.name} ${index + 1}`,
+      center: [x, source.center[1], z],
+      surfaceY: source.surfaceY + (index % 3),
+    };
+  });
+
+const createLargeMockProps = (chunks: readonly ChunkSummary[]): PropInstance[] =>
+  Array.from({ length: 4200 }, (_, index) => {
+    const source = mockProps[index % mockProps.length];
+    const chunk = chunks[index % chunks.length];
+    const x = (index % 70) * 7 + (index % 3);
+    const z = Math.floor(index / 70) * 6;
+    const y = 15 + (index % 9);
+
+    return {
+      ...source,
+      id: `large-prop-${index + 1}`,
+      name: `${source.name} ${index + 1}`,
+      chunkId: chunk.id,
+      position: [x, y, z],
+      transform: {
+        ...source.transform,
+        position: [x, y, z],
+      },
+      visible: index % 11 !== 0,
+      boundsWarning: index % 97 === 0,
+      generatedAssetAvailable: index % 89 !== 0,
+    };
+  });
 
 export const createInitialEditorState = (): EditorDataState => ({
   activeMode: "select",
@@ -203,9 +344,22 @@ export const createInitialEditorState = (): EditorDataState => ({
     dirtyChunkIds: initialChunkIndex,
     dirtyAreaIds: [],
     dirtyWaterBodyIds: [],
+    dirtyPropIds: [],
     dirtyAtlas: false,
+    layoutDirty: false,
   },
   commandHistory: [],
+  undoStack: [],
+  redoStack: [],
+  savedSnapshots: [],
+  largeWorldStats: {
+    enabled: false,
+    chunkCount: mockChunks.length,
+    propCount: mockProps.length,
+    protectedAreaCount: mockProtectedAreas.length,
+    waterBodyCount: mockWaterBodies.length,
+    consoleMessageCount: mockConsoleMessages.length,
+  },
   pendingCommandIds: [],
   layoutResetRequestId: 0,
 });
@@ -240,14 +394,22 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.props = [...state.props, ...props];
         state.dirtyState.hasUnsavedChanges = true;
+        state.dirtyState.dirtyPropIds = [...new Set([...state.dirtyState.dirtyPropIds, ...props.map((prop) => prop.id)])];
       }),
     removeProp: (propId) =>
       set((state) => {
         state.props = state.props.filter((prop) => prop.id !== propId);
+        state.dirtyState.hasUnsavedChanges = true;
+        state.dirtyState.dirtyPropIds = [...new Set([...state.dirtyState.dirtyPropIds, propId])];
       }),
     removePropsByChunk: (chunkId) =>
       set((state) => {
+        const removedIds = state.props.filter((prop) => prop.chunkId === chunkId).map((prop) => prop.id);
         state.props = state.props.filter((prop) => prop.chunkId !== chunkId);
+        if (removedIds.length > 0) {
+          state.dirtyState.hasUnsavedChanges = true;
+          state.dirtyState.dirtyPropIds = [...new Set([...state.dirtyState.dirtyPropIds, ...removedIds])];
+        }
       }),
     setWaterRuntimeSnapshot: (snapshot) =>
       set((state) => {
@@ -343,6 +505,7 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.protectedAreas = state.protectedAreas.filter((area) => area.id !== id);
         state.dirtyState.dirtyAreaIds = state.dirtyState.dirtyAreaIds.filter((areaId) => areaId !== id);
+        state.dirtyState.hasUnsavedChanges = true;
         state.outlinerNodeState = Object.fromEntries(Object.entries(state.outlinerNodeState).filter(([key]) => key !== `area:${id}`));
         if (state.selection.kind === "area" && state.selection.id === id) {
           state.selection = state.chunks[0]
@@ -372,6 +535,9 @@ export const useEditorStore = create<EditorStore>()(
 
         state.props[index] = { ...state.props[index], ...patch };
         state.dirtyState.hasUnsavedChanges = true;
+        if (!state.dirtyState.dirtyPropIds.includes(id)) {
+          state.dirtyState.dirtyPropIds = [...state.dirtyState.dirtyPropIds, id];
+        }
       }),
     updateAtlasMapping: (block, patch) =>
       set((state) => {
@@ -386,7 +552,12 @@ export const useEditorStore = create<EditorStore>()(
     markAtlasRebuilt: () =>
       set((state) => {
         state.dirtyState.dirtyAtlas = false;
-        state.dirtyState.hasUnsavedChanges = state.dirtyState.dirtyChunkIds.length > 0 || state.dirtyState.dirtyAreaIds.length > 0 || state.dirtyState.dirtyWaterBodyIds.length > 0;
+        state.dirtyState.hasUnsavedChanges =
+          state.dirtyState.dirtyChunkIds.length > 0 ||
+          state.dirtyState.dirtyAreaIds.length > 0 ||
+          state.dirtyState.dirtyWaterBodyIds.length > 0 ||
+          state.dirtyState.dirtyPropIds.length > 0 ||
+          state.dirtyState.layoutDirty;
       }),
     replaceWorldSummary: (summary) =>
       set((state) => {
@@ -401,7 +572,17 @@ export const useEditorStore = create<EditorStore>()(
           dirtyChunkIds: summary.chunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id),
           dirtyAreaIds: [],
           dirtyWaterBodyIds: [],
+          dirtyPropIds: [],
           dirtyAtlas: false,
+          layoutDirty: false,
+        };
+        state.largeWorldStats = {
+          enabled: false,
+          chunkCount: summary.chunks.length,
+          propCount: state.props.length,
+          protectedAreaCount: summary.protectedAreas.length,
+          waterBodyCount: summary.waterBodies.length,
+          consoleMessageCount: state.consoleMessages.length,
         };
       }),
     markDirty: (chunkId) =>
@@ -411,9 +592,30 @@ export const useEditorStore = create<EditorStore>()(
           state.dirtyState.dirtyChunkIds = [...state.dirtyState.dirtyChunkIds, chunkId];
         }
       }),
+    markPropDirty: (propId) =>
+      set((state) => {
+        state.dirtyState.hasUnsavedChanges = true;
+        if (!state.dirtyState.dirtyPropIds.includes(propId)) {
+          state.dirtyState.dirtyPropIds = [...state.dirtyState.dirtyPropIds, propId];
+        }
+      }),
+    markLayoutDirty: () =>
+      set((state) => {
+        state.dirtyState.hasUnsavedChanges = true;
+        state.dirtyState.layoutDirty = true;
+      }),
     clearDirty: () =>
       set((state) => {
-        state.dirtyState = { hasUnsavedChanges: false, dirtyChunkIds: [], dirtyAreaIds: [], dirtyWaterBodyIds: [], dirtyAtlas: false, lastSavedAt: new Date().toISOString() };
+        state.dirtyState = {
+          hasUnsavedChanges: false,
+          dirtyChunkIds: [],
+          dirtyAreaIds: [],
+          dirtyWaterBodyIds: [],
+          dirtyPropIds: [],
+          dirtyAtlas: false,
+          layoutDirty: false,
+          lastSavedAt: new Date().toISOString(),
+        };
         state.chunks = state.chunks.map((chunk) => ({ ...chunk, dirty: false, meshStatus: chunk.meshStatus === "dirty" ? "clean" : chunk.meshStatus }));
       }),
     clearConsole: () =>
@@ -432,11 +634,164 @@ export const useEditorStore = create<EditorStore>()(
     requestLayoutReset: () =>
       set((state) => {
         state.layoutResetRequestId += 1;
+        state.dirtyState.hasUnsavedChanges = true;
+        state.dirtyState.layoutDirty = true;
       }),
     pushCommandHistory: (commandId, label, status = "success", message) =>
       set((state) => {
         state.commandHistory.unshift({ commandId, label, status, message, createdAt: new Date().toISOString() });
         state.commandHistory = state.commandHistory.slice(0, 20);
+      }),
+    recordUndoCheckpoint: (commandId, label, actor = "user") =>
+      set((state) => {
+        state.undoStack.unshift(castDraft({
+          id: `undo-${Date.now()}-${state.undoStack.length + 1}`,
+          commandId,
+          label,
+          actor,
+          createdAt: new Date().toISOString(),
+          snapshot: captureEditorSnapshot(state),
+        }));
+        state.undoStack = state.undoStack.slice(0, MAX_UNDO_ENTRIES);
+        state.redoStack = [];
+      }),
+    discardUndoCheckpoint: (commandId) =>
+      set((state) => {
+        if (state.undoStack[0]?.commandId === commandId) {
+          state.undoStack = state.undoStack.slice(1);
+        }
+      }),
+    undoLastCommand: () => {
+      let applied = false;
+      set((state) => {
+        const entry = state.undoStack[0];
+        if (!entry) {
+          return;
+        }
+
+        state.redoStack.unshift(castDraft({
+          id: `redo-${Date.now()}-${state.redoStack.length + 1}`,
+          commandId: entry.commandId,
+          label: entry.label,
+          actor: entry.actor,
+          createdAt: new Date().toISOString(),
+          snapshot: captureEditorSnapshot(state),
+        }));
+        state.redoStack = state.redoStack.slice(0, MAX_UNDO_ENTRIES);
+        state.undoStack = state.undoStack.slice(1);
+        restoreEditorSnapshot(state, entry.snapshot);
+        state.dirtyState.hasUnsavedChanges = true;
+        applied = true;
+      });
+      return applied;
+    },
+    redoLastCommand: () => {
+      let applied = false;
+      set((state) => {
+        const entry = state.redoStack[0];
+        if (!entry) {
+          return;
+        }
+
+        state.undoStack.unshift(castDraft({
+          id: `undo-${Date.now()}-${state.undoStack.length + 1}`,
+          commandId: entry.commandId,
+          label: entry.label,
+          actor: entry.actor,
+          createdAt: new Date().toISOString(),
+          snapshot: captureEditorSnapshot(state),
+        }));
+        state.undoStack = state.undoStack.slice(0, MAX_UNDO_ENTRIES);
+        state.redoStack = state.redoStack.slice(1);
+        restoreEditorSnapshot(state, entry.snapshot);
+        state.dirtyState.hasUnsavedChanges = true;
+        applied = true;
+      });
+      return applied;
+    },
+    saveEditorSnapshot: (note, commandId = "editor.snapshot.create", actor = "user") => {
+      let entry: EditorSavedSnapshot | undefined;
+      set((state) => {
+        entry = {
+          id: `snapshot-${Date.now()}-${state.savedSnapshots.length + 1}`,
+          commandId,
+          label: note,
+          note,
+          actor,
+          createdAt: new Date().toISOString(),
+          snapshot: captureEditorSnapshot(state),
+        };
+        state.savedSnapshots.unshift(castDraft(entry));
+        state.savedSnapshots = state.savedSnapshots.slice(0, MAX_SAVED_SNAPSHOTS);
+      });
+
+      if (!entry) {
+        throw new Error("Failed to save editor snapshot.");
+      }
+
+      return entry;
+    },
+    loadEditorSnapshot: (snapshotId) => {
+      let applied = false;
+      set((state) => {
+        const entry = state.savedSnapshots.find((candidate) => candidate.id === snapshotId);
+        if (!entry) {
+          return;
+        }
+
+        state.undoStack.unshift(castDraft({
+          id: `undo-${Date.now()}-${state.undoStack.length + 1}`,
+          commandId: "editor.snapshot.restore",
+          label: `Restore ${entry.note}`,
+          actor: "user",
+          createdAt: new Date().toISOString(),
+          snapshot: captureEditorSnapshot(state),
+        }));
+        restoreEditorSnapshot(state, entry.snapshot);
+        state.dirtyState.hasUnsavedChanges = true;
+        applied = true;
+      });
+      return applied;
+    },
+    loadLargeMockWorld: () =>
+      set((state) => {
+        const chunks = createLargeMockChunks();
+        const protectedAreas = createLargeMockAreas();
+        const waterBodies = createLargeMockWaterBodies();
+        const props = createLargeMockProps(chunks);
+        const consoleMessages = Array.from({ length: 1200 }, (_, index): ConsoleMessage => {
+          const source = mockConsoleMessages[index % mockConsoleMessages.length];
+          return {
+            ...source,
+            id: `large-console-${index + 1}`,
+            message: `${source.message} [large world ${index + 1}]`,
+          };
+        });
+
+        state.chunks = chunks;
+        state.protectedAreas = protectedAreas;
+        state.waterBodies = waterBodies;
+        state.props = props;
+        state.outlinerNodeState = createOutlinerNodeState(chunks, protectedAreas, waterBodies, props, state.materials);
+        state.consoleMessages = consoleMessages;
+        state.selection = { kind: "chunk", id: chunks[0].id, label: chunks[0].label };
+        state.dirtyState = {
+          hasUnsavedChanges: true,
+          dirtyChunkIds: chunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id),
+          dirtyAreaIds: [],
+          dirtyWaterBodyIds: [],
+          dirtyPropIds: [],
+          dirtyAtlas: false,
+          layoutDirty: false,
+        };
+        state.largeWorldStats = {
+          enabled: true,
+          chunkCount: chunks.length,
+          propCount: props.length,
+          protectedAreaCount: protectedAreas.length,
+          waterBodyCount: waterBodies.length,
+          consoleMessageCount: consoleMessages.length,
+        };
       }),
     beginCommand: (commandId) =>
       set((state) => {

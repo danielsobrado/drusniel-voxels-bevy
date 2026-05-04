@@ -15,6 +15,12 @@ const agentCommandIds = [
   "editor.agent.compareBeforeAfter",
   "editor.agent.saveSnapshot",
   "editor.agent.copyObservationJson",
+  "editor.history.undo",
+  "editor.history.redo",
+  "editor.snapshot.create",
+  "editor.snapshot.restoreLatest",
+  "editor.performance.loadLargeMockWorld",
+  "editor.help.showHandoff",
 ];
 
 const TEST_RESULTS_HEADER = "Mocked Playwright tests";
@@ -27,6 +33,7 @@ export function AgentWorkbenchPanel() {
   const observation = getAgentObservation(editorState);
   const selected = observation.selected;
   const suggestionList = useMemo(() => observation.suggestedCommands.join(", "), [observation.suggestedCommands]);
+  const latestSnapshot = editorState.savedSnapshots[0];
 
   const generatedTests = timeline
     .filter((entry) => entry.message.toLowerCase().includes("playwright test"))
@@ -93,7 +100,25 @@ export function AgentWorkbenchPanel() {
 
         <article className="agent-card" data-testid="agent-section-dirty-state">
           <h3>Dirty State</h3>
-          <p>{`${observation.dirtyChunks} dirty chunks`}</p>
+          <p>{`${observation.dirtyChunks} dirty chunks | ${editorState.dirtyState.dirtyAreaIds.length} dirty areas | ${editorState.dirtyState.dirtyPropIds.length} dirty props`}</p>
+        </article>
+
+        <article className="agent-card" data-testid="agent-section-history">
+          <h3>History And Snapshots</h3>
+          <p>{`Undo ${editorState.undoStack.length} | Redo ${editorState.redoStack.length} | Snapshots ${editorState.savedSnapshots.length}`}</p>
+          <p>{latestSnapshot ? `Latest: ${latestSnapshot.note}` : "No saved editor snapshots."}</p>
+        </article>
+
+        <article className="agent-card" data-testid="agent-section-large-world">
+          <h3>Large World Readiness</h3>
+          <p>{`Mode: ${editorState.largeWorldStats.enabled ? "large mock world" : "standard mock world"}`}</p>
+          <p>{`${editorState.largeWorldStats.chunkCount} chunks | ${editorState.largeWorldStats.propCount} props | ${editorState.largeWorldStats.consoleMessageCount} console entries`}</p>
+        </article>
+
+        <article className="agent-card" data-testid="agent-section-handoff">
+          <h3>LLM Handoff</h3>
+          <p>Frontend-only editor shell. Bevy/Tauri bridge remains deferred. Current persistence surface is the mock backend client plus state snapshots.</p>
+          <p>World editing coverage includes terrain summaries, protected areas, water parameters, props, atlas mapping, command history, snapshots, and large mock world stress data.</p>
         </article>
 
         <article className="agent-card" data-testid="agent-section-warnings">

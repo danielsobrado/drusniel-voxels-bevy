@@ -9,7 +9,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test:unit": "vitest run src/state/editorStore.test.ts src/runtime/RuntimeClient.test.ts",
-    "test:smoke": "playwright test --config playwright.config.ts"
+    "test:smoke": "playwright test --config playwright.config.ts --grep-invert @visual-review",
+    "test:visual-review": "playwright test --config playwright.config.ts tests/editor-visual-review.spec.ts --project chromium"
   },
   "dependencies": {
     "@radix-ui/react-menubar": "^1.1.2",

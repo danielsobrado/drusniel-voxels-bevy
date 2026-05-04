@@ -58,11 +58,15 @@ describe("editor store actions", () => {
 
   it("clears dirty state", () => {
     useEditorStore.getState().markDirty("chunk-1-0");
+    useEditorStore.getState().markPropDirty("prop-tree-01");
+    useEditorStore.getState().markLayoutDirty();
     useEditorStore.getState().clearDirty();
 
     const state = useEditorStore.getState();
     expect(state.dirtyState.hasUnsavedChanges).toBe(false);
     expect(state.dirtyState.dirtyChunkIds).toEqual([]);
+    expect(state.dirtyState.dirtyPropIds).toEqual([]);
+    expect(state.dirtyState.layoutDirty).toBe(false);
     expect(getDirtyChunks(state)).toEqual([]);
   });
 
@@ -108,6 +112,39 @@ describe("editor store actions", () => {
     }
     expect(state.dirtyState.hasUnsavedChanges).toBe(false);
     expect(state.dirtyState.dirtyChunkIds).toHaveLength(state.chunks.filter((chunk) => chunk.dirty).length);
+  });
+
+  it("records undo, redo, and explicit editor snapshots", () => {
+    useEditorStore.getState().recordUndoCheckpoint("editor.test.rename", "Rename area");
+    useEditorStore.getState().updateProtectedArea("area-spawn-keep", { name: "Undo Me" });
+
+    expect(useEditorStore.getState().protectedAreas[0].name).toBe("Undo Me");
+    expect(useEditorStore.getState().undoStack).toHaveLength(1);
+
+    expect(useEditorStore.getState().undoLastCommand()).toBe(true);
+    expect(useEditorStore.getState().protectedAreas[0].name).toBe("Spawn Keep");
+    expect(useEditorStore.getState().redoStack).toHaveLength(1);
+
+    expect(useEditorStore.getState().redoLastCommand()).toBe(true);
+    expect(useEditorStore.getState().protectedAreas[0].name).toBe("Undo Me");
+
+    const snapshot = useEditorStore.getState().saveEditorSnapshot("Area renamed", "editor.test.snapshot");
+    useEditorStore.getState().updateProtectedArea("area-spawn-keep", { name: "Changed Again" });
+    expect(useEditorStore.getState().loadEditorSnapshot(snapshot.id)).toBe(true);
+    expect(useEditorStore.getState().protectedAreas[0].name).toBe("Undo Me");
+  });
+
+  it("loads a large mock world and exposes capped outliner data", () => {
+    useEditorStore.getState().loadLargeMockWorld();
+
+    const state = useEditorStore.getState();
+    expect(state.largeWorldStats.enabled).toBe(true);
+    expect(state.chunks).toHaveLength(960);
+    expect(state.props).toHaveLength(4200);
+    expect(state.protectedAreas).toHaveLength(180);
+    expect(state.waterBodies).toHaveLength(96);
+    expect(state.consoleMessages).toHaveLength(1200);
+    expect(getVisibleOutlinerNodes(state).length).toBeGreaterThan(500);
   });
 });
 
@@ -435,7 +472,29 @@ describe("editor command registry", () => {
     await runCommand("editor.file.saveSnapshot", createContext(undefined, runtimeClient, toastMessages));
 
     expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.file.saveSnapshot");
+    expect(useEditorStore.getState().savedSnapshots[0].commandId).toBe("editor.file.saveSnapshot");
     expect(toastMessages.some((message) => message.startsWith("success:Mock snapshot recorded: mock-runtime-snapshot-"))).toBe(true);
+  });
+
+  it("runs undo, redo, snapshots, handoff, and large-world commands", async () => {
+    await runCommand("editor.area.createUnbreakableBox", createContext());
+    expect(useEditorStore.getState().undoStack.length).toBeGreaterThan(0);
+
+    const createdCount = useEditorStore.getState().protectedAreas.length;
+    await runCommand("editor.history.undo", createContext());
+    expect(useEditorStore.getState().protectedAreas.length).toBe(createdCount - 1);
+
+    await runCommand("editor.history.redo", createContext());
+    expect(useEditorStore.getState().protectedAreas.length).toBe(createdCount);
+
+    await runCommand("editor.snapshot.create", createContext());
+    expect(useEditorStore.getState().savedSnapshots.length).toBeGreaterThan(0);
+
+    await runCommand("editor.performance.loadLargeMockWorld", createContext());
+    expect(useEditorStore.getState().largeWorldStats.enabled).toBe(true);
+
+    await runCommand("editor.help.showHandoff", createContext());
+    expect(useEditorStore.getState().agentTimeline[0].message).toContain("Editor handoff");
   });
 
   it("runs rendering and debug commands through new command IDs", async () => {

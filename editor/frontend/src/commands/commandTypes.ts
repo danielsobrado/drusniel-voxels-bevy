@@ -32,5 +32,6 @@ export interface EditorCommand {
   readonly keywords?: readonly string[];
   readonly preconditions?: readonly string[];
   readonly runtimeWrite?: boolean;
+  readonly undoable?: boolean;
   readonly run: (ctx: EditorCommandContext) => Promise<void> | void;
 }

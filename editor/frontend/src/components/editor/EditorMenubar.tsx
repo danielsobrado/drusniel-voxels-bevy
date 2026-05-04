@@ -1,5 +1,7 @@
 export const menuCommandIds = [
   "editor.file.save",
+  "editor.file.loadDefaultWorld",
+  "editor.history.undo",
   "editor.voxel.replaceSelected",
   "editor.view.resetLayout",
   "editor.world.rebuildSelectedChunk",
@@ -12,11 +14,13 @@ export const menuCommandIds = [
   "editor.agent.observeScreen",
   "editor.mode.debug",
   "editor.palette.open",
+  "editor.help.showHandoff",
 ] as const;
 
 const menuItems = [
   { label: "File", commandId: "editor.file.save" },
-  { label: "Edit", commandId: "editor.voxel.replaceSelected" },
+  { label: "Load", commandId: "editor.file.loadDefaultWorld" },
+  { label: "Edit", commandId: "editor.history.undo" },
   { label: "View", commandId: "editor.view.resetLayout" },
   { label: "World", commandId: "editor.world.rebuildSelectedChunk" },
   { label: "Voxels", commandId: "editor.voxel.paintMaterial" },
@@ -28,7 +32,7 @@ const menuItems = [
   { label: "Agent", commandId: "editor.agent.observeScreen" },
   { label: "Debug", commandId: "editor.mode.debug" },
   { label: "Window", commandId: "editor.palette.open" },
-  { label: "Help", commandId: "editor.agent.observeScreen" },
+  { label: "Help", commandId: "editor.help.showHandoff" },
 ] as const;
 
 interface EditorMenubarProps {

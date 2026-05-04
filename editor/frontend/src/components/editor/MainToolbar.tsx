@@ -1,4 +1,4 @@
-import { Brush, Boxes, Droplets, Grid3X3, Lightbulb, MousePointer2, Package, Save, Sparkles, SquareDashedMousePointer, TestTube2 } from "lucide-react";
+import { Brush, Boxes, Droplets, Grid3X3, History, Lightbulb, MousePointer2, Package, Redo2, Save, Sparkles, SquareDashedMousePointer, TestTube2, Undo2 } from "lucide-react";
 import { useEditorStore } from "../../state/editorStore";
 import type { EditorMode, RenderQualityPreset } from "../../types/editor";
 import { StatusPill } from "./StatusPill";
@@ -7,6 +7,9 @@ export const modeCommandIds = ["editor.mode.select", "editor.mode.voxelSculpt", 
 export const toolbarCommandIds = [
   "editor.file.save",
   "editor.file.saveSnapshot",
+  "editor.history.undo",
+  "editor.history.redo",
+  "editor.performance.loadLargeMockWorld",
   "editor.view.toggleVoxelGrid",
   "editor.view.toggleChunkBounds",
   ...modeCommandIds,
@@ -34,6 +37,8 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
   const runtimeState = useEditorStore((state) => state.runtimeState);
   const dirtyState = useEditorStore((state) => state.dirtyState);
   const pendingCommandIds = useEditorStore((state) => state.pendingCommandIds);
+  const undoCount = useEditorStore((state) => state.undoStack.length);
+  const redoCount = useEditorStore((state) => state.redoStack.length);
   const setBrushRadius = useEditorStore((state) => state.setBrushRadius);
   const qualityPending = pendingCommandIds.some((commandId) => commandId.startsWith("editor.rendering.setQuality") || commandId.startsWith("editor.quality."));
 
@@ -45,7 +50,18 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
           </button>
           
           <button type="button" className="toolbar-button" aria-label="Save editor snapshot" data-command-id="editor.file.saveSnapshot" onClick={() => void runCommand("editor.file.saveSnapshot")}>
-            Snapshot
+            <History size={14} aria-hidden="true" /> Snapshot
+          </button>
+        </div>
+        <div className="toolbar-group" aria-label="History controls">
+          <button type="button" className="toolbar-button" aria-label="Undo last editor command" data-command-id="editor.history.undo" disabled={undoCount === 0} onClick={() => void runCommand("editor.history.undo")}>
+            <Undo2 size={14} aria-hidden="true" /> Undo
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Redo editor command" data-command-id="editor.history.redo" disabled={redoCount === 0} onClick={() => void runCommand("editor.history.redo")}>
+            <Redo2 size={14} aria-hidden="true" /> Redo
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Load large mock world" data-command-id="editor.performance.loadLargeMockWorld" onClick={() => void runCommand("editor.performance.loadLargeMockWorld")}>
+            <Boxes size={14} aria-hidden="true" /> Large
           </button>
         </div>
         <div className="toolbar-group" aria-label="Viewport overlay controls">

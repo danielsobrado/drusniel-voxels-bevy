@@ -45,5 +45,6 @@ editor/frontend/node_modules/
 editor/frontend/dist/
 editor/frontend/test-results/
 editor/frontend/playwright-report/
+editor/frontend/review-screenshots/
 editor/frontend/vite-dev*.log
 editor/frontend/.tmp-*

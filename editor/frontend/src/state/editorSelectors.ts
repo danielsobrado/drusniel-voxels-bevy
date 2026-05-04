@@ -96,7 +96,7 @@ export const getVisibleOutlinerNodes = (state: EditorDataState): readonly Outlin
         state.dirtyState.dirtyWaterBodyIds.includes(waterBody.id),
       ),
     ),
-    ...state.props.map((prop) => toNode("prop", prop.id, prop.name, `${prop.type} / ${prop.lodState}`, false)),
+    ...state.props.map((prop) => toNode("prop", prop.id, prop.name, `${prop.type} / ${prop.lodState}`, state.dirtyState.dirtyPropIds.includes(prop.id))),
     ...state.materials.map((material) => toNode("material", material.id, material.name, material.kind, false)),
   ];
 };
