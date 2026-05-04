@@ -24,7 +24,7 @@ export interface VoxelBlock {
   readonly defaultMaterialId: string;
 }
 
-export type ProtectedAreaKind = "spawn" | "story_lock" | "no_dig" | "no_build" | "no_prop";
+export type ProtectedAreaKind = "unbreakable" | "spawn" | "spawn_protection" | "story_lock" | "quest_lock" | "no_dig" | "no_build" | "no_prop" | "no_props" | "custom";
 export type ProtectedAreaShape = "box" | "sphere" | "cylinder" | "chunk_set" | "polygon";
 
 export interface ProtectedAreaRuleMatrix {

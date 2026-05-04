@@ -37,6 +37,10 @@ pub enum PlacementError {
     #[error("Cannot edit unbreakable block at {position:?}")]
     Unbreakable { position: IVec3 },
 
+    /// Attempted to place inside a protected area.
+    #[error("Cannot place block inside protected area at {position:?}")]
+    ProtectedArea { position: IVec3 },
+
     /// No valid target surface to place on.
     #[error("No valid placement surface found")]
     NoTarget,
@@ -60,6 +64,10 @@ pub enum BreakError {
     /// Attempted to break a missing chunk inside world bounds.
     #[error("Cannot dig at {position:?}: chunk is not loaded")]
     MissingChunk { position: IVec3 },
+
+    /// Attempted to break inside a protected area.
+    #[error("Cannot dig inside protected area at {position:?}")]
+    ProtectedArea { position: IVec3 },
 
     /// No block targeted for breaking.
     #[error("No block targeted")]

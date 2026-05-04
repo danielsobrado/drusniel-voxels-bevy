@@ -31,6 +31,7 @@ use crate::performance::{AreaTimingCapture, AreaTimingRecorder};
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};
+use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
 use bevy::math::{Isometry3d, primitives::Cuboid};
@@ -132,6 +133,7 @@ pub fn break_block_system(
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
     terrain_tool_state: Res<TerrainToolState>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if edit_mode.enabled {
         return;
@@ -146,7 +148,12 @@ pub fn break_block_system(
         return;
     }
 
-    let result = try_break_block(&targeted_block, &mut world, &mut held);
+    let result = try_break_block(
+        &targeted_block,
+        &mut world,
+        &mut held,
+        protected_areas.as_deref(),
+    );
     match result {
         Ok(pos) => {
             // Spawn particles on successful break
@@ -172,6 +179,7 @@ fn try_break_block(
     targeted_block: &TargetedBlock,
     world: &mut VoxelWorld,
     held: &mut HeldBlock,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Result<IVec3, BreakError> {
     let pos = targeted_block.position.ok_or(BreakError::NoTarget)?;
     let voxel_type = targeted_block.voxel_type.ok_or(BreakError::NoTarget)?;
@@ -183,7 +191,12 @@ fn try_break_block(
     }
 
     held.block_type = voxel_type;
-    match world.set_voxel(pos, VoxelType::Air) {
+    match world.set_voxel_with_rules(
+        pos,
+        VoxelType::Air,
+        ProtectedEditIntent::Mine,
+        protected_areas,
+    ) {
         VoxelEditResult::Applied => {
             editing::mark_neighbors_dirty(world, pos);
             Ok(pos)
@@ -209,6 +222,7 @@ pub fn place_block_system(
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
     terrain_tool_state: Res<TerrainToolState>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if edit_mode.enabled {
         return;
@@ -227,7 +241,13 @@ pub fn place_block_system(
         return;
     }
 
-    let result = try_place_block(&targeted, &mut world, &held, &camera_query);
+    let result = try_place_block(
+        &targeted,
+        &mut world,
+        &held,
+        &camera_query,
+        protected_areas.as_deref(),
+    );
     if let Err(err) = result {
         // Only show error for actual failure (not just no target)
         if !matches!(err, PlacementError::NoTarget) {
@@ -242,6 +262,7 @@ fn try_place_block(
     world: &mut VoxelWorld,
     held: &HeldBlock,
     camera_query: &Query<&Transform, With<PlayerCamera>>,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> Result<IVec3, PlacementError> {
     let block_pos = targeted.position.ok_or(PlacementError::NoTarget)?;
     let normal = targeted.normal.ok_or(PlacementError::NoTarget)?;
@@ -251,6 +272,21 @@ fn try_place_block(
     if let Some(result) = edit_rejection_for_position(world, place_pos) {
         world.record_edit_result(result);
         return Err(placement_error_from_edit_result(place_pos, result));
+    }
+
+    let intent = if held.block_type == VoxelType::Water {
+        ProtectedEditIntent::EditWater
+    } else {
+        ProtectedEditIntent::Place
+    };
+    if protected_areas
+        .map(|registry| registry.edit_blocked(place_pos, intent))
+        .unwrap_or(false)
+    {
+        world.record_edit_result(VoxelEditResult::RejectedProtectedArea);
+        return Err(PlacementError::ProtectedArea {
+            position: place_pos,
+        });
     }
 
     // Check if player is blocking the position
@@ -276,7 +312,7 @@ fn try_place_block(
         });
     }
 
-    match world.set_voxel(place_pos, held.block_type) {
+    match world.set_voxel_with_rules(place_pos, held.block_type, intent, protected_areas) {
         VoxelEditResult::Applied => {
             editing::mark_neighbors_dirty(world, place_pos);
             Ok(place_pos)
@@ -306,11 +342,32 @@ fn is_player_blocking_position(
     place_pos == player_block || place_pos == player_feet
 }
 
-fn can_modify_at(world: &VoxelWorld, world_pos: IVec3) -> bool {
+fn can_modify_at(
+    world: &VoxelWorld,
+    world_pos: IVec3,
+    intent: ProtectedEditIntent,
+    protected_areas: Option<&ProtectedAreaRegistry>,
+) -> bool {
     edit_rejection_for_position(world, world_pos).is_none()
+        && !protected_areas
+            .map(|registry| registry.edit_blocked(world_pos, intent))
+            .unwrap_or(false)
 }
 
-pub(super) fn record_edit_rejection_at(world: &mut VoxelWorld, world_pos: IVec3) {
+pub(super) fn record_edit_rejection_at(
+    world: &mut VoxelWorld,
+    world_pos: IVec3,
+    intent: ProtectedEditIntent,
+    protected_areas: Option<&ProtectedAreaRegistry>,
+) {
+    if protected_areas
+        .map(|registry| registry.edit_blocked(world_pos, intent))
+        .unwrap_or(false)
+    {
+        world.record_edit_result(VoxelEditResult::RejectedProtectedArea);
+        return;
+    }
+
     if let Some(result) = edit_rejection_for_position(world, world_pos) {
         world.record_edit_result(result);
     }
@@ -338,6 +395,7 @@ fn break_error_from_edit_result(position: IVec3, result: VoxelEditResult) -> Bre
         VoxelEditResult::RejectedBelowWorldFloor => BreakError::BelowWorldFloor { position },
         VoxelEditResult::RejectedUnbreakable => BreakError::Unbreakable { position },
         VoxelEditResult::RejectedMissingChunk => BreakError::MissingChunk { position },
+        VoxelEditResult::RejectedProtectedArea => BreakError::ProtectedArea { position },
     }
 }
 
@@ -348,6 +406,7 @@ fn placement_error_from_edit_result(position: IVec3, result: VoxelEditResult) ->
         VoxelEditResult::RejectedBelowWorldFloor => PlacementError::BelowWorldFloor { position },
         VoxelEditResult::RejectedUnbreakable => PlacementError::Unbreakable { position },
         VoxelEditResult::RejectedMissingChunk => PlacementError::MissingChunk { position },
+        VoxelEditResult::RejectedProtectedArea => PlacementError::ProtectedArea { position },
     }
 }
 
@@ -855,7 +914,7 @@ mod tests {
         };
 
         assert!(matches!(
-            try_break_block(&targeted, &mut world, &mut held),
+            try_break_block(&targeted, &mut world, &mut held, None),
             Err(BreakError::Unbreakable { .. })
         ));
     }

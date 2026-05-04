@@ -14,6 +14,10 @@ export type RuntimeCommandRequestType =
   | "runtime.createProtectedArea"
   | "runtime.updateProtectedArea"
   | "runtime.deleteProtectedArea"
+  | "runtime.queryProtectedRulesAtVoxel"
+  | "runtime.validateProtectedAreaConflicts"
+  | "runtime.saveProtectedAreas"
+  | "runtime.loadProtectedAreas"
   | "runtime.saveWorldSnapshot";
 
 interface RuntimeCommandRequestBase<TType extends RuntimeCommandRequestType, TPayload> {
@@ -34,6 +38,10 @@ export type RuntimeSaveAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.
 export type RuntimeCreateProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.createProtectedArea", { readonly area: ProtectedArea }>;
 export type RuntimeUpdateProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.updateProtectedArea", { readonly areaId: string; readonly patch: Partial<Omit<ProtectedArea, "id">> }>;
 export type RuntimeDeleteProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.deleteProtectedArea", { readonly areaId: string }>;
+export type RuntimeQueryProtectedRulesAtVoxelCommand = RuntimeCommandRequestBase<"runtime.queryProtectedRulesAtVoxel", { readonly voxel: readonly [number, number, number] }>;
+export type RuntimeValidateProtectedAreaConflictsCommand = RuntimeCommandRequestBase<"runtime.validateProtectedAreaConflicts", { readonly area?: ProtectedArea }>;
+export type RuntimeSaveProtectedAreasCommand = RuntimeCommandRequestBase<"runtime.saveProtectedAreas", Record<string, never>>;
+export type RuntimeLoadProtectedAreasCommand = RuntimeCommandRequestBase<"runtime.loadProtectedAreas", Record<string, never>>;
 export type RuntimeSaveWorldSnapshotCommand = RuntimeCommandRequestBase<"runtime.saveWorldSnapshot", { readonly reason?: string }>;
 
 export type RuntimeCommandRequest =
@@ -49,4 +57,8 @@ export type RuntimeCommandRequest =
   | RuntimeCreateProtectedAreaCommand
   | RuntimeUpdateProtectedAreaCommand
   | RuntimeDeleteProtectedAreaCommand
+  | RuntimeQueryProtectedRulesAtVoxelCommand
+  | RuntimeValidateProtectedAreaConflictsCommand
+  | RuntimeSaveProtectedAreasCommand
+  | RuntimeLoadProtectedAreasCommand
   | RuntimeSaveWorldSnapshotCommand;

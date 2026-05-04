@@ -10,6 +10,7 @@ use crate::interaction::targeting::TargetedBlock;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};
+use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
@@ -57,7 +58,13 @@ pub fn toggle_edit_mode(
             info!("Edit mode enabled - click and drag a block to move it");
         } else {
             if let Some(dragged) = drag_state.dragged_block.take() {
-                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+                apply_edit_and_mark(
+                    &mut world,
+                    dragged.original_position,
+                    dragged.block_type,
+                    ProtectedEditIntent::Place,
+                    None,
+                );
             }
             drag_state.rotation_degrees = 0.0;
             info!("Edit mode disabled");
@@ -83,7 +90,13 @@ pub fn toggle_delete_mode(
 
         if delete_mode.enabled {
             if let Some(dragged) = drag_state.dragged_block.take() {
-                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+                apply_edit_and_mark(
+                    &mut world,
+                    dragged.original_position,
+                    dragged.block_type,
+                    ProtectedEditIntent::Place,
+                    None,
+                );
             }
             drag_state.rotation_degrees = 0.0;
             info!("Delete mode enabled - left click a block to remove it");
@@ -101,6 +114,7 @@ pub fn start_dragging_block(
     targeted_block: Res<TargetedBlock>,
     mut drag_state: ResMut<DragState>,
     mut world: ResMut<VoxelWorld>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !edit_mode.enabled || delete_mode.enabled || !mouse.just_pressed(MouseButton::Left) {
         return;
@@ -111,18 +125,39 @@ pub fn start_dragging_block(
     }
 
     if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type) {
-        if !super::can_modify_at(&world, pos) {
-            super::record_edit_rejection_at(&mut world, pos);
+        if !super::can_modify_at(
+            &world,
+            pos,
+            ProtectedEditIntent::Mine,
+            protected_areas.as_deref(),
+        ) {
+            super::record_edit_rejection_at(
+                &mut world,
+                pos,
+                ProtectedEditIntent::Mine,
+                protected_areas.as_deref(),
+            );
             return;
         }
 
         if voxel_type == VoxelType::Bedrock {
-            super::record_edit_rejection_at(&mut world, pos);
+            super::record_edit_rejection_at(
+                &mut world,
+                pos,
+                ProtectedEditIntent::Mine,
+                protected_areas.as_deref(),
+            );
             info!("Cannot break bedrock at {:?}", pos);
             return;
         }
 
-        if apply_edit_and_mark(&mut world, pos, VoxelType::Air) {
+        if apply_edit_and_mark(
+            &mut world,
+            pos,
+            VoxelType::Air,
+            ProtectedEditIntent::Mine,
+            protected_areas.as_deref(),
+        ) {
             drag_state.dragged_block = Some(DraggedBlock {
                 block_type: voxel_type,
                 original_position: pos,
@@ -140,6 +175,7 @@ pub fn finish_dragging_block(
     mut drag_state: ResMut<DragState>,
     camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
     mut world: ResMut<VoxelWorld>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !edit_mode.enabled || !mouse.just_released(MouseButton::Left) {
         return;
@@ -152,13 +188,35 @@ pub fn finish_dragging_block(
     if let (Some(block_pos), Some(normal)) = (targeted_block.position, targeted_block.normal) {
         let place_pos = block_pos + normal;
         let Some(grounded_pos) = find_grounded_position(place_pos, &world) else {
-            apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+            apply_edit_and_mark(
+                &mut world,
+                dragged.original_position,
+                dragged.block_type,
+                ProtectedEditIntent::Place,
+                protected_areas.as_deref(),
+            );
             return;
         };
 
-        if !super::can_modify_at(&world, grounded_pos) {
-            super::record_edit_rejection_at(&mut world, grounded_pos);
-            apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+        if !super::can_modify_at(
+            &world,
+            grounded_pos,
+            ProtectedEditIntent::Place,
+            protected_areas.as_deref(),
+        ) {
+            super::record_edit_rejection_at(
+                &mut world,
+                grounded_pos,
+                ProtectedEditIntent::Place,
+                protected_areas.as_deref(),
+            );
+            apply_edit_and_mark(
+                &mut world,
+                dragged.original_position,
+                dragged.block_type,
+                ProtectedEditIntent::Place,
+                protected_areas.as_deref(),
+            );
             return;
         }
 
@@ -175,21 +233,39 @@ pub fn finish_dragging_block(
             );
 
             if grounded_pos == player_block || grounded_pos == player_feet {
-                apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+                apply_edit_and_mark(
+                    &mut world,
+                    dragged.original_position,
+                    dragged.block_type,
+                    ProtectedEditIntent::Place,
+                    protected_areas.as_deref(),
+                );
                 return;
             }
         }
 
         if let VoxelSample::InBounds(existing) = world.sample_voxel_for_interaction(grounded_pos) {
             if existing == VoxelType::Air || existing == VoxelType::Water {
-                apply_edit_and_mark(&mut world, grounded_pos, dragged.block_type);
+                apply_edit_and_mark(
+                    &mut world,
+                    grounded_pos,
+                    dragged.block_type,
+                    ProtectedEditIntent::Place,
+                    protected_areas.as_deref(),
+                );
                 return;
             }
         }
     }
 
     // Restore to the original position if we couldn't place it elsewhere
-    apply_edit_and_mark(&mut world, dragged.original_position, dragged.block_type);
+    apply_edit_and_mark(
+        &mut world,
+        dragged.original_position,
+        dragged.block_type,
+        ProtectedEditIntent::Place,
+        protected_areas.as_deref(),
+    );
     drag_state.rotation_degrees = 0.0;
 }
 
@@ -246,6 +322,7 @@ pub fn delete_block_in_edit_mode(
     mouse: Res<ButtonInput<MouseButton>>,
     targeted_block: Res<TargetedBlock>,
     mut world: ResMut<VoxelWorld>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !edit_mode.enabled || !delete_mode.enabled {
         return;
@@ -254,23 +331,50 @@ pub fn delete_block_in_edit_mode(
     if mouse.just_pressed(MouseButton::Left) {
         if let (Some(pos), Some(voxel_type)) = (targeted_block.position, targeted_block.voxel_type)
         {
-            if !super::can_modify_at(&world, pos) {
-                super::record_edit_rejection_at(&mut world, pos);
+            if !super::can_modify_at(
+                &world,
+                pos,
+                ProtectedEditIntent::Mine,
+                protected_areas.as_deref(),
+            ) {
+                super::record_edit_rejection_at(
+                    &mut world,
+                    pos,
+                    ProtectedEditIntent::Mine,
+                    protected_areas.as_deref(),
+                );
                 return;
             }
 
             if voxel_type != VoxelType::Bedrock {
-                apply_edit_and_mark(&mut world, pos, VoxelType::Air);
+                apply_edit_and_mark(
+                    &mut world,
+                    pos,
+                    VoxelType::Air,
+                    ProtectedEditIntent::Mine,
+                    protected_areas.as_deref(),
+                );
             } else {
-                super::record_edit_rejection_at(&mut world, pos);
+                super::record_edit_rejection_at(
+                    &mut world,
+                    pos,
+                    ProtectedEditIntent::Mine,
+                    protected_areas.as_deref(),
+                );
                 info!("Cannot break bedrock at {:?}", pos);
             }
         }
     }
 }
 
-fn apply_edit_and_mark(world: &mut VoxelWorld, pos: IVec3, voxel: VoxelType) -> bool {
-    match world.set_voxel(pos, voxel) {
+fn apply_edit_and_mark(
+    world: &mut VoxelWorld,
+    pos: IVec3,
+    voxel: VoxelType,
+    intent: ProtectedEditIntent,
+    protected_areas: Option<&ProtectedAreaRegistry>,
+) -> bool {
+    match world.set_voxel_with_rules(pos, voxel, intent, protected_areas) {
         VoxelEditResult::Applied => {
             mark_neighbors_dirty(world, pos);
             true

@@ -5,6 +5,7 @@ import type {
   MockWaterRuntimeSnapshot,
   PropStats,
   ProtectedArea,
+  ProtectedAreaRuleMatrix,
   WaterReflectionDebugViewMode,
   WaterReflectionStatus,
 } from "../types/world";
@@ -129,4 +130,31 @@ export interface RuntimeProtectedAreaMutationResult {
 export interface RuntimeProtectedAreaDeleteResult {
   readonly areaId: string;
   readonly deleted: boolean;
+}
+
+export interface RuntimeProtectedAreaConflict {
+  readonly leftAreaId: string;
+  readonly rightAreaId: string;
+  readonly priority: number;
+  readonly message: string;
+}
+
+export interface RuntimeProtectedAreaValidationResult {
+  readonly clear: boolean;
+  readonly conflicts: readonly RuntimeProtectedAreaConflict[];
+}
+
+export interface RuntimeProtectedRuleQueryResult {
+  readonly position: readonly [number, number, number];
+  readonly blocked: boolean;
+  readonly areaId: string | null;
+  readonly areaName: string | null;
+  readonly kind: string | null;
+  readonly priority: number | null;
+  readonly rules: ProtectedAreaRuleMatrix;
+}
+
+export interface RuntimeProtectedAreaLoadResult {
+  readonly areas: readonly ProtectedArea[];
+  readonly areaCount: number;
 }

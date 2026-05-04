@@ -14,6 +14,10 @@ use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::world::VoxelWorld;
+use crate::world_rules::{
+    ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, WORLD_RULES_PATH,
+    validate_protected_area,
+};
 
 const ATLAS_TILE_COUNT: u32 = 64;
 
@@ -84,6 +88,27 @@ pub enum RuntimeWriteCommand {
     SetAtlasMapping { mapping: FrontendAtlasMapping },
     #[serde(rename = "runtime.saveAtlasMapping")]
     SaveAtlasMapping { mapping: FrontendAtlasMapping },
+    #[serde(rename = "runtime.createProtectedArea")]
+    CreateProtectedArea { area: ProtectedArea },
+    #[serde(rename = "runtime.updateProtectedArea")]
+    UpdateProtectedArea {
+        #[serde(rename = "areaId")]
+        area_id: String,
+        patch: ProtectedAreaPatch,
+    },
+    #[serde(rename = "runtime.deleteProtectedArea")]
+    DeleteProtectedArea {
+        #[serde(rename = "areaId")]
+        area_id: String,
+    },
+    #[serde(rename = "runtime.queryProtectedRulesAtVoxel")]
+    QueryProtectedRulesAtVoxel { voxel: [i32; 3] },
+    #[serde(rename = "runtime.validateProtectedAreaConflicts")]
+    ValidateProtectedAreaConflicts { area: Option<ProtectedArea> },
+    #[serde(rename = "runtime.saveProtectedAreas")]
+    SaveProtectedAreas {},
+    #[serde(rename = "runtime.loadProtectedAreas")]
+    LoadProtectedAreas {},
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -281,8 +306,29 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::SaveAtlasMapping { mapping } => {
             validate_atlas_mapping(mapping, &mut errors);
         }
+        RuntimeWriteCommand::CreateProtectedArea { area } => {
+            if let Err(message) = validate_protected_area(area) {
+                errors.push(message);
+            }
+        }
+        RuntimeWriteCommand::UpdateProtectedArea { area_id, .. }
+        | RuntimeWriteCommand::DeleteProtectedArea { area_id } => {
+            if area_id.trim().is_empty() {
+                errors.push("areaId is required.".to_string());
+            }
+        }
+        RuntimeWriteCommand::QueryProtectedRulesAtVoxel { .. } => {}
+        RuntimeWriteCommand::ValidateProtectedAreaConflicts { area } => {
+            if let Some(area) = area {
+                if let Err(message) = validate_protected_area(area) {
+                    errors.push(message);
+                }
+            }
+        }
         RuntimeWriteCommand::SetRenderQuality { .. }
-        | RuntimeWriteCommand::RunWaterVisualProbe {} => {}
+        | RuntimeWriteCommand::RunWaterVisualProbe {}
+        | RuntimeWriteCommand::SaveProtectedAreas {}
+        | RuntimeWriteCommand::LoadProtectedAreas {} => {}
     }
 
     if errors.is_empty() {
@@ -405,6 +451,113 @@ fn execute_runtime_write_command(
                 Err(errors) => {
                     RuntimeCommandResult::validation("Runtime command validation failed.", errors)
                 }
+            }
+        }
+        RuntimeWriteCommand::CreateProtectedArea { area } => {
+            let Some(mut registry) = world.get_resource_mut::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+
+            match registry.upsert(area) {
+                Ok(area) => RuntimeCommandResult::success(json!({ "area": area })),
+                Err(message) => {
+                    RuntimeCommandResult::validation("Runtime command validation failed.", vec![message])
+                }
+            }
+        }
+        RuntimeWriteCommand::UpdateProtectedArea { area_id, patch } => {
+            let Some(mut registry) = world.get_resource_mut::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+
+            match registry.update(&area_id, patch, false) {
+                Ok(area) => RuntimeCommandResult::success(json!({ "area": area })),
+                Err(message) if message.contains("locked") => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+                Err(message) => {
+                    RuntimeCommandResult::validation("Runtime command validation failed.", vec![message])
+                }
+            }
+        }
+        RuntimeWriteCommand::DeleteProtectedArea { area_id } => {
+            let Some(mut registry) = world.get_resource_mut::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+
+            match registry.delete(&area_id, false) {
+                Ok(deleted) => {
+                    RuntimeCommandResult::success(json!({ "areaId": area_id, "deleted": deleted }))
+                }
+                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+            }
+        }
+        RuntimeWriteCommand::QueryProtectedRulesAtVoxel { voxel } => {
+            let Some(registry) = world.get_resource::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+            RuntimeCommandResult::success(json!(registry.query_rules_at_voxel(IVec3::new(
+                voxel[0], voxel[1], voxel[2],
+            ))))
+        }
+        RuntimeWriteCommand::ValidateProtectedAreaConflicts { area } => {
+            let Some(registry) = world.get_resource::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+            let conflicts = match area {
+                Some(candidate) => registry.conflicts_for_candidate(&candidate),
+                None => registry.conflict_detection(),
+            };
+            RuntimeCommandResult::success(json!({
+                "conflicts": conflicts,
+                "clear": conflicts.is_empty(),
+            }))
+        }
+        RuntimeWriteCommand::SaveProtectedAreas {} => {
+            let Some(registry) = world.get_resource::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+            match registry.save_to_path(WORLD_RULES_PATH) {
+                Ok(()) => RuntimeCommandResult::success(json!({
+                    "worldId": "bevy-runtime",
+                    "savedAt": timestamp_string(),
+                    "snapshotId": "world-rules",
+                    "areaCount": registry.area_count(),
+                })),
+                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+            }
+        }
+        RuntimeWriteCommand::LoadProtectedAreas {} => {
+            let Some(mut registry) = world.get_resource_mut::<ProtectedAreaRegistry>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "ProtectedAreaRegistry resource is not available.",
+                );
+            };
+            match registry.load_from_path(WORLD_RULES_PATH) {
+                Ok(()) => RuntimeCommandResult::success(json!({
+                    "areas": registry.areas().collect::<Vec<_>>(),
+                    "areaCount": registry.area_count(),
+                })),
+                Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
             }
         }
     }

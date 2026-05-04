@@ -404,10 +404,10 @@ const createAreaCommand = (
 ): EditorCommand => ({
   id,
   title,
-  description: `Create a mocked protected area: ${namePrefix}.`,
+  description: `Create a protected area: ${namePrefix}.`,
   category: "Areas",
   keywords: ["protected", "area", "rules", "unbreakable", "no build", "no dig", namePrefix],
-  preconditions: ["mocked-state"],
+  runtimeWrite: true,
   run: async (ctx) => {
     const state = ctx.getState();
     const nextIndex = state.protectedAreas.length + 1;
@@ -429,21 +429,23 @@ const createAreaCommand = (
     };
 
     const warnings = areaConflictWarnings(area, state.protectedAreas);
-    state.addProtectedArea(area);
+    const validation = unwrapRuntime(await ctx.runtimeClient.validateProtectedAreaConflicts(area));
+    const runtimeArea = unwrapRuntime(await ctx.runtimeClient.createProtectedArea(area)).area;
+    state.addProtectedArea(runtimeArea);
     state.setActiveMode("area");
-    state.setSelection({ kind: "area", id: area.id, label: area.name });
+    state.setSelection({ kind: "area", id: runtimeArea.id, label: runtimeArea.name });
     state.setActiveTool("area");
 
-    if (warnings.length > 0) {
+    if (warnings.length > 0 || !validation.clear) {
       ctx.toast.warning(`${area.name} has warnings.`);
       ctx.getState().pushAgentTimelineEvent({
         kind: "warning",
-        message: `${area.name} warning(s): ${warnings.join(", ")}`,
+        message: `${runtimeArea.name} warning(s): ${[...warnings, ...validation.conflicts.map((conflict) => conflict.message)].join(", ")}`,
       });
     } else {
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",
-        message: `${area.name} created.`,
+        message: `${runtimeArea.name} created and runtime accepted.`,
       });
     }
 
@@ -668,6 +670,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Areas",
     keywords: ["protected", "area", "delete", "remove"],
     preconditions: ["selection.kind === area"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
@@ -677,6 +680,7 @@ export const editorCommands: readonly EditorCommand[] = [
 
       const targetId = state.selection.id;
       const targetLabel = state.selection.label;
+      unwrapRuntime(await ctx.runtimeClient.deleteProtectedArea(targetId));
       state.removeProtectedArea(targetId);
       setSelectionToFallbackChunk(ctx);
       state.setActiveMode("select");
@@ -691,6 +695,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Lock the selected mocked protected area.",
     category: "Areas",
     keywords: ["protected", "area", "lock"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
@@ -698,7 +703,8 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateProtectedArea(state.selection.id, { locked: true });
+      const runtimeArea = unwrapRuntime(await ctx.runtimeClient.updateProtectedArea(state.selection.id, { locked: true })).area;
+      state.updateProtectedArea(state.selection.id, runtimeArea);
       state.setActiveTool("area");
       ctx.toast.info(`${state.selection.label} locked.`);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Locked protected area ${state.selection.label}.` });
@@ -710,6 +716,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Unlock the selected mocked protected area.",
     category: "Areas",
     keywords: ["protected", "area", "unlock"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
@@ -717,7 +724,8 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateProtectedArea(state.selection.id, { locked: false });
+      const runtimeArea = unwrapRuntime(await ctx.runtimeClient.updateProtectedArea(state.selection.id, { locked: false })).area;
+      state.updateProtectedArea(state.selection.id, runtimeArea);
       state.setActiveTool("area");
       ctx.toast.info(`${state.selection.label} unlocked.`);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Unlocked protected area ${state.selection.label}.` });
@@ -741,6 +749,92 @@ export const editorCommands: readonly EditorCommand[] = [
       state.setActiveTool("area");
       ctx.toast.success(`Focused ${state.selection.label} in mocked viewport.`);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Focused protected area ${state.selection.label}.` });
+    },
+  },
+  {
+    id: "editor.area.validateSelectedRuntime",
+    title: "Validate selected protected area",
+    description: "Ask the runtime to validate protected area conflicts.",
+    category: "Areas",
+    keywords: ["protected", "area", "validate", "runtime", "conflict"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before validation.");
+        return;
+      }
+      const selectedAreaId = state.selection.id;
+      const area = state.protectedAreas.find((candidate) => candidate.id === selectedAreaId);
+      if (!area) {
+        ctx.toast.warning("Selected protected area no longer exists.");
+        return;
+      }
+      const result = unwrapRuntime(await ctx.runtimeClient.validateProtectedAreaConflicts(area));
+      ctx.getState().pushAgentTimelineEvent({
+        kind: result.clear ? "command" : "warning",
+        message: result.clear ? "Protected area conflict status clear." : `Protected area conflicts: ${result.conflicts.map((conflict) => conflict.message).join(", ")}`,
+      });
+      if (result.clear) {
+        ctx.toast.success("Protected area conflicts clear.");
+      } else {
+        ctx.toast.warning("Protected area conflicts found.");
+      }
+    },
+  },
+  {
+    id: "editor.area.querySelectedCenterRuntime",
+    title: "Query selected area center rules",
+    description: "Query runtime protected rules at the selected area's center voxel.",
+    category: "Areas",
+    keywords: ["protected", "area", "query", "runtime", "rules"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "area") {
+        ctx.toast.warning("Select a protected area before querying rules.");
+        return;
+      }
+      const selectedAreaId = state.selection.id;
+      const area = state.protectedAreas.find((candidate) => candidate.id === selectedAreaId);
+      if (!area) {
+        ctx.toast.warning("Selected protected area no longer exists.");
+        return;
+      }
+      const voxel: [number, number, number] = [Math.floor(area.center[0]), Math.floor(area.center[1]), Math.floor(area.center[2])];
+      const result = unwrapRuntime(await ctx.runtimeClient.queryProtectedRulesAtVoxel(voxel));
+      ctx.getState().pushAgentTimelineEvent({
+        kind: result.blocked ? "command" : "warning",
+        message: result.blocked ? `Voxel edit blocked by protected area ${result.areaName ?? result.areaId ?? "unknown"}.` : "Selected area center has no blocking runtime rules.",
+      });
+      ctx.toast.info(`Runtime protected rule query completed at ${voxel.join(", ")}.`);
+    },
+  },
+  {
+    id: "editor.area.saveProtectedAreas",
+    title: "Save protected areas",
+    description: "Save runtime protected area rules.",
+    category: "Areas",
+    keywords: ["protected", "area", "save", "runtime"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const result = unwrapRuntime(await ctx.runtimeClient.saveProtectedAreas());
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Saved protected areas as ${result.snapshotId ?? "world-rules"}.` });
+      ctx.toast.success("Protected areas saved.");
+    },
+  },
+  {
+    id: "editor.area.loadProtectedAreas",
+    title: "Load protected areas",
+    description: "Load runtime protected area rules.",
+    category: "Areas",
+    keywords: ["protected", "area", "load", "runtime"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const result = unwrapRuntime(await ctx.runtimeClient.loadProtectedAreas());
+      ctx.setState({ protectedAreas: [...result.areas] });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Loaded ${result.areaCount} protected areas from runtime.` });
+      ctx.toast.success("Protected areas loaded.");
     },
   },
   {

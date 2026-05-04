@@ -10,7 +10,10 @@ import type {
   RuntimeConnectionState,
   RuntimeFocusCameraResult,
   RuntimeProtectedAreaDeleteResult,
+  RuntimeProtectedAreaLoadResult,
   RuntimeProtectedAreaMutationResult,
+  RuntimeProtectedAreaValidationResult,
+  RuntimeProtectedRuleQueryResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
@@ -132,19 +135,59 @@ export class BrowserRuntimeClient implements RuntimeClient {
   }
 
   async createProtectedArea(area: ProtectedArea): Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>> {
-    void area;
-    return unsupported("Protected area runtime writes are intentionally not enabled in this sprint.");
+    return this.execute({
+      type: "runtime.createProtectedArea",
+      requestId: makeRequestId("runtime.createProtectedArea"),
+      payload: { area },
+    });
   }
 
   async updateProtectedArea(areaId: string, patch: Partial<Omit<ProtectedArea, "id">>): Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>> {
-    void areaId;
-    void patch;
-    return unsupported("Protected area runtime writes are intentionally not enabled in this sprint.");
+    return this.execute({
+      type: "runtime.updateProtectedArea",
+      requestId: makeRequestId("runtime.updateProtectedArea"),
+      payload: { areaId, patch },
+    });
   }
 
   async deleteProtectedArea(areaId: string): Promise<RuntimeCommandResult<RuntimeProtectedAreaDeleteResult>> {
-    void areaId;
-    return unsupported("Protected area runtime writes are intentionally not enabled in this sprint.");
+    return this.execute({
+      type: "runtime.deleteProtectedArea",
+      requestId: makeRequestId("runtime.deleteProtectedArea"),
+      payload: { areaId },
+    });
+  }
+
+  async queryProtectedRulesAtVoxel(voxel: readonly [number, number, number]): Promise<RuntimeCommandResult<RuntimeProtectedRuleQueryResult>> {
+    return this.execute({
+      type: "runtime.queryProtectedRulesAtVoxel",
+      requestId: makeRequestId("runtime.queryProtectedRulesAtVoxel"),
+      payload: { voxel },
+    });
+  }
+
+  async validateProtectedAreaConflicts(area?: ProtectedArea): Promise<RuntimeCommandResult<RuntimeProtectedAreaValidationResult>> {
+    return this.execute({
+      type: "runtime.validateProtectedAreaConflicts",
+      requestId: makeRequestId("runtime.validateProtectedAreaConflicts"),
+      payload: area ? { area } : {},
+    });
+  }
+
+  async saveProtectedAreas(): Promise<RuntimeCommandResult<RuntimeSaveSummary>> {
+    return this.execute({
+      type: "runtime.saveProtectedAreas",
+      requestId: makeRequestId("runtime.saveProtectedAreas"),
+      payload: {},
+    });
+  }
+
+  async loadProtectedAreas(): Promise<RuntimeCommandResult<RuntimeProtectedAreaLoadResult>> {
+    return this.execute({
+      type: "runtime.loadProtectedAreas",
+      requestId: makeRequestId("runtime.loadProtectedAreas"),
+      payload: {},
+    });
   }
 
   async saveWorldSnapshot(): Promise<RuntimeCommandResult<RuntimeSaveSummary>> {

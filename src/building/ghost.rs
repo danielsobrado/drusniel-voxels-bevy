@@ -7,6 +7,7 @@ use crate::interaction::TargetedBlock;
 use crate::rendering::building_material::{BuildingMaterialHandle, BuildingMesh};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
+use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 
 use super::grid::BuildingGrid;
 use super::types::{
@@ -64,6 +65,7 @@ pub fn update_building_ghost(
     targeted: Res<TargetedBlock>,
     world: Res<VoxelWorld>,
     grid: Res<BuildingGrid>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
     mut ghost_query: Query<(&mut Transform, &mut BuildingGhost, &mut Visibility)>,
     mut gizmos: Gizmos,
 ) {
@@ -101,7 +103,15 @@ pub fn update_building_ghost(
         let rot = state.rotation_quat();
 
         // Check validity
-        let valid = validate_placement(pos, piece_type, state.rotation, &world, &grid, &registry);
+        let valid = validate_placement(
+            pos,
+            piece_type,
+            state.rotation,
+            &world,
+            &grid,
+            &registry,
+            protected_areas.as_deref(),
+        );
 
         (pos, rot, valid, false)
     } else {
@@ -156,6 +166,7 @@ pub fn validate_placement(
     world: &VoxelWorld,
     grid: &BuildingGrid,
     registry: &BuildingPieceRegistry,
+    protected_areas: Option<&ProtectedAreaRegistry>,
 ) -> bool {
     let Some(piece_def) = registry.get(piece_type) else {
         return false;
@@ -163,6 +174,13 @@ pub fn validate_placement(
 
     let rot = Quat::from_rotation_y((rotation as f32) * std::f32::consts::FRAC_PI_2);
     let half_size = piece_def.dimensions * 0.5;
+
+    if protected_areas
+        .map(|registry| registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place))
+        .unwrap_or(false)
+    {
+        return false;
+    }
 
     // Check all corners of the bounding box for collisions
     let corners = [
@@ -219,6 +237,7 @@ pub fn place_building_piece(
     mut meshes: ResMut<Assets<Mesh>>,
     building_mat_handle: Option<Res<BuildingMaterialHandle>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !state.active || !mouse.just_pressed(MouseButton::Right) {
         return;
@@ -242,6 +261,13 @@ pub fn place_building_piece(
     }
 
     let position = transform.translation;
+    if protected_areas
+        .as_deref()
+        .map(|registry| registry.edit_blocked(position.floor().as_ivec3(), ProtectedEditIntent::Place))
+        .unwrap_or(false)
+    {
+        return;
+    }
     let rotation = state.rotation;
     let grid_pos = grid.world_to_cell(position);
 

@@ -8,7 +8,10 @@ import type {
   RuntimeConnectionState,
   RuntimeFocusCameraResult,
   RuntimeProtectedAreaDeleteResult,
+  RuntimeProtectedAreaLoadResult,
   RuntimeProtectedAreaMutationResult,
+  RuntimeProtectedAreaValidationResult,
+  RuntimeProtectedRuleQueryResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
@@ -36,6 +39,10 @@ export interface RuntimeClient {
   readonly createProtectedArea: (area: ProtectedArea) => Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>>;
   readonly updateProtectedArea: (areaId: string, patch: Partial<Omit<ProtectedArea, "id">>) => Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>>;
   readonly deleteProtectedArea: (areaId: string) => Promise<RuntimeCommandResult<RuntimeProtectedAreaDeleteResult>>;
+  readonly queryProtectedRulesAtVoxel: (voxel: readonly [number, number, number]) => Promise<RuntimeCommandResult<RuntimeProtectedRuleQueryResult>>;
+  readonly validateProtectedAreaConflicts: (area?: ProtectedArea) => Promise<RuntimeCommandResult<RuntimeProtectedAreaValidationResult>>;
+  readonly saveProtectedAreas: () => Promise<RuntimeCommandResult<RuntimeSaveSummary>>;
+  readonly loadProtectedAreas: () => Promise<RuntimeCommandResult<RuntimeProtectedAreaLoadResult>>;
   readonly saveWorldSnapshot: () => Promise<RuntimeCommandResult<RuntimeSaveSummary>>;
   readonly onRuntimeEvent: (handler: RuntimeEventHandler) => () => void;
 }

@@ -1,4 +1,5 @@
 import type { ChangeEvent, ReactNode } from "react";
+import { toast } from "sonner";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
@@ -40,6 +41,7 @@ export function InspectorPanel() {
   const dirtyChunkRebuildPending = editorState.pendingCommandIds.includes("editor.world.rebuildDirtyChunks");
   const waterDebugPending = editorState.pendingCommandIds.some((commandId) => commandId.startsWith("editor.water.setDebug") || commandId === "editor.water.toggleReflectionMask");
   const waterProbePending = editorState.pendingCommandIds.includes("editor.water.runVisualProbe");
+  const areaUpdatePending = editorState.pendingCommandIds.includes("editor.area.updateSelected");
   const runRebuildSelectedChunk = () => void runCommandById("editor.world.rebuildSelectedChunk");
   const runRebuildDirtyChunks = () => void runCommandById("editor.world.rebuildDirtyChunks");
 
@@ -62,11 +64,54 @@ export function InspectorPanel() {
 
     if (inspectorKind === "area" && selectedObject && "rules" in selectedObject) {
       const area = selectedObject as ProtectedArea;
+      const updateProtectedArea = async (patch: Partial<ProtectedArea>) => {
+        const commandId = "editor.area.updateSelected";
+        editorState.beginCommand(commandId);
+        try {
+          const candidate = { ...area, ...patch };
+          const validation = await runtimeClient.validateProtectedAreaConflicts(candidate);
+          if (!validation.ok) {
+            throw new Error(validation.message);
+          }
+          const result = await runtimeClient.updateProtectedArea(area.id, patch);
+          if (!result.ok) {
+            throw new Error(result.message);
+          }
+          editorState.updateProtectedArea(area.id, result.data.area);
+          editorState.pushCommandHistory(commandId, "Update selected protected area", "success");
+          editorState.pushAgentTimelineEvent({
+            kind: validation.data.clear ? "command" : "warning",
+            message: validation.data.clear
+              ? `${result.data.area.name} runtime update accepted; conflict status clear.`
+              : `${result.data.area.name} runtime update accepted with conflicts: ${validation.data.conflicts.map((conflict) => conflict.message).join(", ")}`,
+          });
+          toast.success("Protected area updated.");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown protected area update failure.";
+          editorState.pushCommandHistory(commandId, "Update selected protected area", "failure", message);
+          editorState.pushAgentTimelineEvent({ kind: "warning", message: `Protected area runtime update failed: ${message}` });
+          useEditorStore.setState((state) => ({
+            consoleMessages: [
+              {
+                id: `console-area-update-${Date.now()}`,
+                level: "error",
+                message: `editor.area.updateSelected: ${message}`,
+                time: new Date().toLocaleTimeString(),
+              },
+              ...state.consoleMessages,
+            ],
+          }));
+          toast.error("Protected area update failed.");
+        } finally {
+          editorState.finishCommand(commandId);
+        }
+      };
       return (
         <ProtectedAreaInspector
           area={area}
+          pending={areaUpdatePending}
           warnings={getProtectedAreaWarnings(editorState)[area.id] ?? []}
-          onUpdate={(patch) => editorState.updateProtectedArea(area.id, patch)}
+          onUpdate={(patch) => void updateProtectedArea(patch)}
         />
       );
     }
@@ -411,13 +456,14 @@ function SliderRow({
   );
 }
 
-function ColorField({ label, value, onChange, testId, description }: { readonly description?: string; readonly label: string; readonly onChange: (next: string) => void; readonly testId?: string; readonly value: string }) {
+function ColorField({ label, value, onChange, testId, description, disabled }: { readonly description?: string; readonly disabled?: boolean; readonly label: string; readonly onChange: (next: string) => void; readonly testId?: string; readonly value: string }) {
   return (
     <PropertyRow label={label} description={description}>
       <input
         type="color"
         className="inspector-color"
         value={value}
+        disabled={disabled}
         data-testid={testId}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -425,7 +471,7 @@ function ColorField({ label, value, onChange, testId, description }: { readonly 
   );
 }
 
-function RuleMatrix({ rules, onChange, testId }: { readonly onChange: (next: ProtectedArea["rules"]) => void; readonly rules: ProtectedArea["rules"]; readonly testId?: string }) {
+function RuleMatrix({ rules, onChange, testId, disabled }: { readonly disabled?: boolean; readonly onChange: (next: ProtectedArea["rules"]) => void; readonly rules: ProtectedArea["rules"]; readonly testId?: string }) {
   const items: Array<{ readonly key: keyof ProtectedArea["rules"]; readonly label: string }> = [
     { key: "canMine", label: "Can mine" },
     { key: "canPlace", label: "Can place" },
@@ -443,6 +489,7 @@ function RuleMatrix({ rules, onChange, testId }: { readonly onChange: (next: Pro
             key={item.key}
             label={item.label}
             checked={rules[item.key]}
+            disabled={disabled}
             onChange={(next) => onChange({ ...rules, [item.key]: next })}
             testId={testId ? `inspector-area-rules-${item.key}` : undefined}
           />
@@ -528,10 +575,12 @@ function ChunkInspector({
 function ProtectedAreaInspector({
   area,
   onUpdate,
+  pending,
   warnings,
 }: {
   readonly area: ProtectedArea;
   readonly onUpdate: (patch: Partial<ProtectedArea>) => void;
+  readonly pending: boolean;
   readonly warnings: readonly string[];
 }) {
   const shapeOptions: readonly { readonly value: ProtectedArea["shape"]; readonly label: string }[] = [
@@ -543,11 +592,14 @@ function ProtectedAreaInspector({
   ];
 
   const kindOptions: readonly { readonly value: ProtectedArea["kind"]; readonly label: string }[] = [
+    { value: "unbreakable", label: "Unbreakable" },
     { value: "spawn", label: "Spawn" },
     { value: "story_lock", label: "Story Lock" },
+    { value: "quest_lock", label: "Quest Lock" },
     { value: "no_dig", label: "No-Dig" },
     { value: "no_build", label: "No-Build" },
     { value: "no_prop", label: "No-Prop" },
+    { value: "custom", label: "Custom" },
   ];
 
   const areaRulePresets = [
@@ -575,13 +627,14 @@ function ProtectedAreaInspector({
 
   return (
     <div data-testid="inspector-area">
-      <InspectorHeader title={area.name} badge="area" note="Protected area editing updates mocked store state." />
+      <InspectorHeader title={area.name} badge="area" note={pending ? "Runtime update pending." : "Runtime protected area rules are active."} />
       <InspectorSection title="Area properties">
-        <TextField label="Name" value={area.name} testId="inspector-area-name" onChange={(name) => onUpdate({ name })} />
+        <TextField label="Name" value={area.name} readOnly={pending} testId="inspector-area-name" onChange={(name) => onUpdate({ name })} />
         <EnumSelect
           label="Kind"
           value={area.kind}
           options={kindOptions}
+          disabled={pending}
           onChange={(kind) => onUpdate({ kind })}
         />
         <EnumSelect
@@ -589,34 +642,37 @@ function ProtectedAreaInspector({
           value={area.shape}
           options={shapeOptions}
           testId="inspector-area-shape"
+          disabled={pending}
           onChange={(shape) => onUpdate({ shape })}
         />
         <NumericField
           label="Priority"
           value={area.priority}
           min={0}
+          readOnly={pending}
           testId="inspector-area-priority"
           onChange={(priority) => onUpdate({ priority })}
         />
         <BooleanToggle
           label="Locked"
           checked={area.locked}
+          disabled={pending}
           onChange={(locked) => onUpdate({ locked })}
           testId="inspector-area-locked"
         />
-        <ColorField label="Debug Color" value={area.color} onChange={(color) => onUpdate({ color })} testId="inspector-area-color" />
+        <ColorField label="Debug Color" value={area.color} disabled={pending} onChange={(color) => onUpdate({ color })} testId="inspector-area-color" />
         <Vector3Field
           label="Bounds min"
           value={area.bounds.min}
           testId="inspector-area-bounds-min"
-          disabled={false}
+          disabled={pending}
           onChange={(next) => onUpdate({ bounds: { ...area.bounds, min: next } })}
         />
         <Vector3Field
           label="Bounds max"
           value={area.bounds.max}
           testId="inspector-area-bounds-max"
-          disabled={false}
+          disabled={pending}
           onChange={(next) => onUpdate({ bounds: { ...area.bounds, max: next } })}
         />
       </InspectorSection>
@@ -627,6 +683,7 @@ function ProtectedAreaInspector({
               type="button"
               key={preset.id}
               className="toolbar-button"
+              disabled={pending}
               data-testid={`inspector-area-preset-${preset.id}`}
               onClick={() => onUpdate({ rules: preset.rules })}
             >
@@ -635,12 +692,12 @@ function ProtectedAreaInspector({
           ))}
         </div>
       </InspectorSection>
-      <RuleMatrix rules={area.rules} onChange={(rules) => onUpdate({ rules })} testId="inspector-area-rules" />
-      <InspectorSection title="Warnings">
+      <RuleMatrix rules={area.rules} disabled={pending} onChange={(rules) => onUpdate({ rules })} testId="inspector-area-rules" />
+      <InspectorSection title="Runtime validation">
         {warnings.length === 0 ? <p className="inspector-subnote">No active warnings.</p> : warnings.map((warning) => <p key={warning} className="inspector-subnote">?? {warning}</p>)}
       </InspectorSection>
       <InspectorSection title="Audit log">
-        <p className="inspector-subnote">Audit log placeholder: rule and bounds edits are stored to local state only.</p>
+        <p className="inspector-subnote">{pending ? "Waiting for runtime result." : "Runtime accepts updates before local editor state changes."}</p>
       </InspectorSection>
     </div>
   );

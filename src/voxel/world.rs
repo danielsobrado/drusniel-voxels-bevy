@@ -3,6 +3,7 @@ use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::Chunk;
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
+use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -76,6 +77,7 @@ pub enum VoxelEditResult {
     RejectedBelowWorldFloor,
     RejectedUnbreakable,
     RejectedMissingChunk,
+    RejectedProtectedArea,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -86,6 +88,7 @@ pub struct VoxelEditStats {
     pub rejected_below_floor: u64,
     pub rejected_unbreakable: u64,
     pub rejected_missing_chunk: u64,
+    pub rejected_protected_area: u64,
 }
 
 impl VoxelEditStats {
@@ -97,6 +100,7 @@ impl VoxelEditStats {
             VoxelEditResult::RejectedBelowWorldFloor => self.rejected_below_floor += 1,
             VoxelEditResult::RejectedUnbreakable => self.rejected_unbreakable += 1,
             VoxelEditResult::RejectedMissingChunk => self.rejected_missing_chunk += 1,
+            VoxelEditResult::RejectedProtectedArea => self.rejected_protected_area += 1,
         }
     }
 }
@@ -267,6 +271,25 @@ impl VoxelWorld {
         let result = self.apply_voxel_edit(world_pos, voxel);
         self.edit_stats.record(result);
         result
+    }
+
+    pub fn set_voxel_with_rules(
+        &mut self,
+        world_pos: IVec3,
+        voxel: VoxelType,
+        intent: ProtectedEditIntent,
+        protected_areas: Option<&ProtectedAreaRegistry>,
+    ) -> VoxelEditResult {
+        if protected_areas
+            .map(|registry| registry.edit_blocked(world_pos, intent))
+            .unwrap_or(false)
+        {
+            let result = VoxelEditResult::RejectedProtectedArea;
+            self.edit_stats.record(result);
+            return result;
+        }
+
+        self.set_voxel(world_pos, voxel)
     }
 
     pub fn record_edit_result(&mut self, result: VoxelEditResult) {

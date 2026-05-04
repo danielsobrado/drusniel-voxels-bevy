@@ -8,6 +8,7 @@ use crate::props::{Prop, PropAssets, PropConfig, PropType};
 use crate::voxel::types::Voxel;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelEditResult, VoxelWorld};
+use crate::world_rules::ProtectedAreaRegistry;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -675,6 +676,7 @@ pub fn place_prop_from_palette(
     palette: Res<PlacementPaletteState>,
     prop_assets: Res<PropAssets>,
     mut commands: Commands,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !palette.open && palette.active_selection.is_none() {
         return;
@@ -702,6 +704,14 @@ pub fn place_prop_from_palette(
         place_pos.y as f32 + 0.5,
         place_pos.z as f32 + 0.5,
     );
+
+    if protected_areas
+        .as_deref()
+        .map(|registry| registry.prop_position_blocked(translation))
+        .unwrap_or(false)
+    {
+        return;
+    }
 
     let Some(scene) = prop_assets.scenes.get(id) else {
         return;
@@ -748,6 +758,7 @@ pub fn update_ghost_preview(
     world: Res<VoxelWorld>,
     prop_assets: Res<PropAssets>,
     mut state: ResMut<GhostPreviewState>,
+    protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
     if !edit_mode.enabled {
         if let Some(entity) = state.entity.take() {
@@ -789,6 +800,11 @@ pub fn update_ghost_preview(
         place_pos.y as f32 + 0.5,
         place_pos.z as f32 + 0.5,
     );
+    let blocked_by_rules = protected_areas
+        .as_deref()
+        .map(|registry| registry.prop_position_blocked(translation))
+        .unwrap_or(false);
+    let valid = valid && !blocked_by_rules;
     let rotation = Quat::from_rotation_y(drag_state.rotation_degrees.to_radians());
 
     let needs_respawn = state

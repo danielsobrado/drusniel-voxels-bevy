@@ -39,6 +39,7 @@ use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
 use voxel_builder::voxel::plugin::VoxelPlugin;
+use voxel_builder::world_rules::WorldRulesPlugin;
 
 mod input;
 
@@ -351,6 +352,7 @@ fn main() {
         ))
         .add_plugins(VoxelPlugin)
         .add_plugins(RenderingPlugin)
+        .add_plugins(WorldRulesPlugin)
         .add_plugins(RuntimeWriteCommandPlugin)
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
