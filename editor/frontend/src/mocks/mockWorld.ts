@@ -1,4 +1,13 @@
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
+import type {
+  BlockAtlasMap,
+  ChunkSummary,
+  MaterialAsset,
+  PropAsset,
+  PropInstance,
+  ProtectedArea,
+  VoxelBlock,
+  WaterBody,
+} from "../types/world";
 
 const createBounds = (center: [number, number, number], size: [number, number, number]): { readonly min: [number, number, number]; readonly max: [number, number, number] } => {
   const [x, y, z] = center;
@@ -228,32 +237,77 @@ export const mockWaterBodies: readonly WaterBody[] = [
 
 const propTypes = ["tree", "rock", "bush", "flower", "building"] as const;
 const billboardModes = ["SingleAxial", "Directional4", "Directional8"] as const;
+const propBrushAssetSeeds = ["tree", "rock", "bush", "flower", "building"] as const;
+
+export const mockPropAssets: readonly PropAsset[] = [
+  { id: "asset-tree-01", name: "Oak Tree", type: "tree", category: "tree", assetPath: "assets/props/tree_oak.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-tree-02", name: "Pine Tree", type: "tree", category: "tree", assetPath: "assets/props/tree_pine.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-tree-03", name: "Willow Tree", type: "tree", category: "tree", assetPath: "assets/props/tree_willow.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-rock-01", name: "Rock Pillar", type: "rock", category: "rock", assetPath: "assets/props/rock_pillar.ron", defaultMaterial: "mat-rock-block" },
+  { id: "asset-rock-02", name: "Granite Boulder", type: "rock", category: "rock", assetPath: "assets/props/rock_boulder.ron", defaultMaterial: "mat-rock-block" },
+  { id: "asset-bush-01", name: "Berry Bush", type: "bush", category: "bush", assetPath: "assets/props/bush_berry.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-bush-02", name: "Needle Bush", type: "bush", category: "bush", assetPath: "assets/props/bush_needle.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-flower-01", name: "Wild Flower", type: "flower", category: "flower", assetPath: "assets/props/flower_wild.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-flower-02", name: "Blue Flower", type: "flower", category: "flower", assetPath: "assets/props/flower_blue.ron", defaultMaterial: "mat-grass-block" },
+  { id: "asset-building-01", name: "Village House", type: "building", category: "building", assetPath: "assets/props/building_house.ron", defaultMaterial: "mat-building" },
+  { id: "asset-building-02", name: "Lookout Tower", type: "building", category: "building", assetPath: "assets/props/tower_watch.ron", defaultMaterial: "mat-building" },
+];
+
+const buildPlacementRules = (index: number, type: PropType) => {
+  const randomSeed = index * 173 + (type === "tree" ? 19 : type === "rock" ? 41 : type === "bush" ? 53 : type === "flower" ? 67 : 79);
+
+  return {
+    avoidWater: index % 2 === 0,
+    maxSlope: 16 + (index % 5) * 6,
+    minSeparation: 2 + (index % 7) * 0.3,
+    randomRotation: index % 2 === 0,
+    scaleJitter: 0.1 + (index % 5) * 0.05,
+    alignToNormal: index % 3 === 0,
+    terrainConform: index % 3 !== 0,
+    avoidProtectedAreas: index % 4 === 0,
+    collisionCheck: index % 3 !== 2,
+    seed: randomSeed,
+  };
+};
+
+const resolvePropAsset = (index: number): PropAsset => {
+  const indexByType = index % propBrushAssetSeeds.length;
+  const chosenType = propBrushAssetSeeds[indexByType];
+  const typeAssets = mockPropAssets.filter((asset) => asset.type === chosenType);
+  return typeAssets[index % typeAssets.length];
+};
 
 export const mockProps: readonly PropInstance[] = Array.from({ length: 40 }, (_, index) => {
   const type = propTypes[index % propTypes.length];
   const ordinal = String(index + 1).padStart(2, "0");
+  const chunkIndex = index % mockChunks.length;
+  const sourceAsset = resolvePropAsset(index);
 
   return {
     id: `prop-${type}-${ordinal}`,
     name: `${type[0].toUpperCase()}${type.slice(1)} ${ordinal}`,
     type,
     billboardMode: billboardModes[index % billboardModes.length],
+    billboardEnabled: index % 2 === 0,
+    billboardSwitchDistance: 10 + (index % 8) * 2.5,
+    currentLod: (index % 4 === 0 ? "High" : index % 4 === 1 ? "Medium" : index % 4 === 2 ? "Low" : "Culled") as PropInstance["lodState"],
+    visible: index % 6 !== 0,
+    shadowCast: index % 3 !== 0,
+    boundsWarning: index % 8 === 0,
+    generatedAssetAvailable: index % 9 !== 0,
+    chunkId: mockChunks[chunkIndex].id,
     position: [(index % 8) * 18 + 8, 18 + (index % 3), Math.floor(index / 8) * 22 + 12],
-    material: `mat-${type === "building" ? "building" : "grass-block"}`,
+    material: sourceAsset.defaultMaterial,
     transform: {
       position: [(index % 8) * 18 + 8, 18 + (index % 3), Math.floor(index / 8) * 22 + 12],
       rotation: [0, (index % 4) * 90, 0],
       scale: [1 + (index % 4) * 0.1, 1, 1 + (index % 4) * 0.1],
     },
+    assetPath: sourceAsset.assetPath,
     lodState: index % 4 === 3 ? "Culled" : index % 4 === 2 ? "Low" : index % 4 === 1 ? "Medium" : "High",
     collision: index % 5 !== 0,
-    placementRules: {
-      avoidWater: index % 2 === 0,
-      maxSlope: (index % 4) * 8 + 12,
-      minSeparation: 2.2 + (index % 5) * 0.35,
-    },
+    placementRules: buildPlacementRules(index, type),
     terrainConform: index % 3 !== 0,
-    assetPath: `assets/props/mock/${type}_${ordinal}.ron`,
   };
 });
 

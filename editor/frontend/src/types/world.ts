@@ -133,6 +133,15 @@ export type PropType = "tree" | "rock" | "bush" | "flower" | "building";
 export type BillboardMode = "SingleAxial" | "Directional4" | "Directional8";
 export type PropLodState = "High" | "Medium" | "Low" | "Culled";
 
+export interface PropAsset {
+  readonly id: string;
+  readonly name: string;
+  readonly type: PropType;
+  readonly category: PropType;
+  readonly assetPath: string;
+  readonly defaultMaterial: string;
+}
+
 export interface PropTransform {
   readonly position: [number, number, number];
   readonly rotation: [number, number, number];
@@ -143,6 +152,13 @@ export interface PlacementRules {
   readonly avoidWater: boolean;
   readonly maxSlope: number;
   readonly minSeparation: number;
+  readonly randomRotation: boolean;
+  readonly scaleJitter: number;
+  readonly alignToNormal: boolean;
+  readonly terrainConform: boolean;
+  readonly avoidProtectedAreas: boolean;
+  readonly collisionCheck: boolean;
+  readonly seed: number;
 }
 
 export interface PropInstance {
@@ -150,6 +166,14 @@ export interface PropInstance {
   readonly name: string;
   readonly type: PropType;
   readonly billboardMode: BillboardMode;
+  readonly billboardEnabled: boolean;
+  readonly billboardSwitchDistance: number;
+  readonly currentLod: PropLodState;
+  readonly visible: boolean;
+  readonly shadowCast: boolean;
+  readonly boundsWarning: boolean;
+  readonly generatedAssetAvailable: boolean;
+  readonly chunkId: string;
   readonly position: [number, number, number];
   readonly assetPath: string;
   readonly transform: PropTransform;
@@ -157,7 +181,19 @@ export interface PropInstance {
   readonly lodState: PropLodState;
   readonly collision: boolean;
   readonly placementRules: PlacementRules;
-  readonly terrainConform: boolean;
+}
+
+export interface PropStats {
+  readonly totalInstances: number;
+  readonly visibleInstances: number;
+  readonly hiddenInstances: number;
+  readonly billboardedCount: number;
+  readonly threeDCount: number;
+  readonly lodSwitches: number;
+  readonly missingGeneratedAssets: number;
+  readonly boundsWarnings: number;
+  readonly instancedGroups: number;
+  readonly shadowCastCount: number;
 }
 
 export type MaterialKind = "blocky" | "triplanar" | "building" | "props" | "water";

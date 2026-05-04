@@ -1,6 +1,6 @@
 import type { EditorDataState } from "./editorStore";
 import type { Selection } from "../types/editor";
-import type { ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
+import type { ChunkSummary, MaterialAsset, PropInstance, PropStats, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
 
 export type OutlinerNodeKind = Selection["kind"];
 
@@ -98,6 +98,32 @@ export const getVisibleOutlinerNodes = (state: EditorDataState): readonly Outlin
     ...state.props.map((prop) => toNode("prop", prop.id, prop.name, `${prop.type} / ${prop.lodState}`, false)),
     ...state.materials.map((material) => toNode("material", material.id, material.name, material.kind, false)),
   ];
+};
+
+export const getPropStats = (state: EditorDataState): PropStats => {
+  const totalInstances = state.props.length;
+  const visibleInstances = state.props.filter((prop) => prop.visible).length;
+  const hiddenInstances = totalInstances - visibleInstances;
+  const billboardedCount = state.props.filter((prop) => prop.billboardEnabled).length;
+  const threeDCount = state.props.filter((prop) => !prop.billboardEnabled).length;
+  const lodSwitches = state.props.filter((prop) => prop.lodState !== prop.currentLod).length;
+  const missingGeneratedAssets = state.props.filter((prop) => !prop.generatedAssetAvailable).length;
+  const boundsWarnings = state.props.filter((prop) => prop.boundsWarning).length;
+  const instancedGroups = new Set(state.props.map((prop) => prop.type)).size;
+  const shadowCastCount = state.props.filter((prop) => prop.shadowCast).length;
+
+  return {
+    totalInstances,
+    visibleInstances,
+    hiddenInstances,
+    billboardedCount,
+    threeDCount,
+    lodSwitches,
+    missingGeneratedAssets,
+    boundsWarnings,
+    instancedGroups,
+    shadowCastCount,
+  };
 };
 
 const areaBoundsOverlap = (left: ProtectedArea, right: ProtectedArea): boolean =>

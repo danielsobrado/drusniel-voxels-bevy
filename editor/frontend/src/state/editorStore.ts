@@ -2,9 +2,19 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { WorldSummary } from "../backend/EditorBackendClient";
 import { mockAgentObservation, mockAgentTimeline, mockConsoleMessages, mockRuntimeMetrics } from "../mocks/mockRuntime";
-import { mockAtlasMapping, mockChunks, mockMaterials, mockProps, mockProtectedAreas, mockVoxelBlocks, mockWaterBodies } from "../mocks/mockWorld";
+import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockVoxelBlocks, mockWaterBodies } from "../mocks/mockWorld";
 import { mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
-import type { BrushSettings, CommandHistoryEntry, DirtyState, EditorMode, RenderQualityPreset, RuntimeState, Selection, ViewportOverlayState } from "../types/editor";
+import type {
+  BrushSettings,
+  CommandHistoryEntry,
+  DirtyState,
+  EditorMode,
+  PropBrushSettings,
+  RenderQualityPreset,
+  RuntimeState,
+  Selection,
+  ViewportOverlayState,
+} from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
 import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
 
@@ -62,6 +72,7 @@ export interface EditorDataState {
   readonly activeTool: string;
   readonly selection: Selection;
   readonly brushSettings: BrushSettings;
+  readonly propBrushSettings: PropBrushSettings;
   readonly viewportOverlays: ViewportOverlayState;
   readonly runtimeState: RuntimeState;
   readonly renderQualityPreset: RenderQualityPreset;
@@ -74,6 +85,7 @@ export interface EditorDataState {
   readonly outlinerNodeState: Record<OutlinerNodeKey, OutlinerNodeState>;
   readonly atlasMapping: BlockAtlasMap;
   readonly waterRuntimeSnapshot: MockWaterRuntimeSnapshot;
+  readonly selectedPropAssetId: string;
   readonly runtimeMetrics: RuntimeMetrics;
   readonly consoleMessages: ConsoleMessage[];
   readonly agentObservation: AgentObservation;
@@ -113,6 +125,11 @@ interface EditorActions {
   readonly pushAgentTimelineEvent: (event: Omit<AgentTimelineEvent, "id" | "createdAt"> & Partial<Pick<AgentTimelineEvent, "id" | "createdAt">>) => void;
   readonly requestLayoutReset: () => void;
   readonly pushCommandHistory: (commandId: string, label: string) => void;
+  readonly setPropBrushSettings: (settings: Partial<PropBrushSettings>) => void;
+  readonly setSelectedPropAsset: (propAssetId: string) => void;
+  readonly addProps: (props: readonly PropInstance[]) => void;
+  readonly removeProp: (propId: string) => void;
+  readonly removePropsByChunk: (chunkId: string) => void;
 }
 
 export type EditorStore = EditorDataState & EditorActions;
@@ -121,6 +138,20 @@ const dirtyChunkIds = mockChunks.filter((chunk) => chunk.dirty).map((chunk) => c
 
 const initialSelection: Selection = { kind: "chunk", id: "chunk-0-0", label: "Chunk 0,0" };
 const initialChunkIndex = dirtyChunkIds.length ? dirtyChunkIds : [];
+
+const initialPropBrushSettings: PropBrushSettings = {
+  density: 8,
+  spacing: 4,
+  slopeLimit: 35,
+  randomRotation: true,
+  scaleJitter: 0.18,
+  alignToNormal: true,
+  terrainConform: true,
+  avoidProtectedAreas: false,
+  avoidWater: true,
+  collisionCheck: true,
+  seed: 24601,
+};
 
 export const createInitialEditorState = (): EditorDataState => ({
   activeMode: "select",
@@ -154,6 +185,8 @@ export const createInitialEditorState = (): EditorDataState => ({
   props: [...mockProps],
   materials: [...mockMaterials],
   outlinerNodeState: createOutlinerNodeState(mockChunks, mockProtectedAreas, mockWaterBodies, mockProps, mockMaterials),
+  propBrushSettings: initialPropBrushSettings,
+  selectedPropAssetId: mockPropAssets[0]?.id ?? "asset-tree-01",
   atlasMapping: { ...mockAtlasMapping },
   waterRuntimeSnapshot: { ...mockWaterRuntimeSnapshot },
   runtimeMetrics: mockRuntimeMetrics,
@@ -188,6 +221,29 @@ export const useEditorStore = create<EditorStore>()(
         state.selection = selection;
         state.agentObservation = { ...state.agentObservation, selectedObjectLabel: selection.label };
       }),
+    setPropBrushSettings: (settings) =>
+      set((state) => {
+        state.propBrushSettings = { ...state.propBrushSettings, ...settings };
+      }),
+    setSelectedPropAsset: (propAssetId) =>
+      set((state) => {
+        state.selectedPropAssetId = propAssetId;
+        state.activeMode = "props";
+        state.activeTool = "props";
+      }),
+    addProps: (props) =>
+      set((state) => {
+        state.props = [...state.props, ...props];
+        state.dirtyState.hasUnsavedChanges = true;
+      }),
+    removeProp: (propId) =>
+      set((state) => {
+        state.props = state.props.filter((prop) => prop.id !== propId);
+      }),
+    removePropsByChunk: (chunkId) =>
+      set((state) => {
+        state.props = state.props.filter((prop) => prop.chunkId !== chunkId);
+      }),
     setWaterRuntimeSnapshot: (snapshot) =>
       set((state) => {
         state.waterRuntimeSnapshot = snapshot;
@@ -207,14 +263,9 @@ export const useEditorStore = create<EditorStore>()(
         state.dirtyState.hasUnsavedChanges = true;
         state.dirtyState.dirtyAreaIds = [...state.dirtyState.dirtyAreaIds, area.id];
       }),
-    toggleViewportOverlay: (overlay) =>
+  toggleViewportOverlay: (overlay) =>
       set((state) => {
         state.viewportOverlays[overlay] = !state.viewportOverlays[overlay];
-        if (overlay === "propBillboards") {
-          state.viewportOverlays.propBounds = !state.viewportOverlays.propBounds;
-        } else if (overlay === "propBounds") {
-          state.viewportOverlays.propBillboards = !state.viewportOverlays.propBillboards;
-        }
       }),
     setRuntimeState: (runtimeState) =>
       set((state) => {

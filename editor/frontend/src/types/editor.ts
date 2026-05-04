@@ -33,6 +33,20 @@ export interface BrushSettings {
   readonly targetFace: "top" | "side" | "bottom" | "all";
 }
 
+export interface PropBrushSettings {
+  readonly density: number;
+  readonly spacing: number;
+  readonly slopeLimit: number;
+  readonly randomRotation: boolean;
+  readonly scaleJitter: number;
+  readonly alignToNormal: boolean;
+  readonly terrainConform: boolean;
+  readonly avoidProtectedAreas: boolean;
+  readonly avoidWater: boolean;
+  readonly collisionCheck: boolean;
+  readonly seed: number;
+}
+
 export interface ViewportOverlayState {
   readonly chunkBounds: boolean;
   readonly voxelGrid: boolean;

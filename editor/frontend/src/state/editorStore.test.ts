@@ -159,6 +159,54 @@ describe("editor command registry", () => {
     expect(state.commandHistory[0].commandId).toBe("editor.area.createUnbreakableBox");
   });
 
+  it("duplicates the selected protected area", async () => {
+    await runCommand("editor.area.createUnbreakableBox", createContext());
+    const createdState = useEditorStore.getState();
+    if (createdState.selection.kind !== "area") {
+      throw new Error("Expected area selection after creating area.");
+    }
+    const createdAreaId = createdState.selection.id;
+
+    await runCommand("editor.area.duplicateSelected", createContext());
+
+    const state = useEditorStore.getState();
+    expect(state.protectedAreas).toHaveLength(5);
+    expect(state.selection.kind).toBe("area");
+    if (state.selection.kind !== "area") {
+      throw new Error("Expected duplicated area selection.");
+    }
+    expect(state.selection.id).not.toBe(createdAreaId);
+    expect(state.selection.label).toContain("Copy");
+    expect(state.commandHistory[0].commandId).toBe("editor.area.duplicateSelected");
+  });
+
+  it("locks, unlocks, and focuses a protected area through commands", async () => {
+    await runCommand("editor.area.createUnbreakableBox", createContext());
+    const createdState = useEditorStore.getState();
+    if (createdState.selection.kind !== "area") {
+      throw new Error("Expected area selection after creating area.");
+    }
+    const createdAreaId = createdState.selection.id;
+
+    await runCommand("editor.area.lockSelected", createContext());
+    expect(useEditorStore.getState().protectedAreas.find((area) => area.id === createdAreaId)?.locked).toBe(true);
+    expect(useEditorStore.getState().activeMode).toBe("area");
+    expect(useEditorStore.getState().activeTool).toBe("area");
+
+    await runCommand("editor.area.unlockSelected", createContext());
+    expect(useEditorStore.getState().protectedAreas.find((area) => area.id === createdAreaId)?.locked).toBe(false);
+
+    await runCommand("editor.area.focusSelected", createContext());
+    expect(useEditorStore.getState().activeMode).toBe("area");
+    expect(useEditorStore.getState().activeTool).toBe("area");
+    const focusedState = useEditorStore.getState();
+    expect(focusedState.selection.kind).toBe("area");
+    if (focusedState.selection.kind === "area") {
+      expect(focusedState.selection.id).toBe(createdAreaId);
+    }
+    expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.area.focusSelected");
+  });
+
   it("toggles chunk bounds through command registry", async () => {
     expect(useEditorStore.getState().viewportOverlays.chunkBounds).toBe(true);
     await runCommand("editor.view.toggleChunkBounds", createContext());

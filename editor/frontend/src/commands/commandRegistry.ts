@@ -2,7 +2,8 @@ import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset } from "../types/editor";
-import type { BlockType, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode } from "../types/world";
+import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode } from "../types/world";
+import { mockPropAssets } from "../mocks/mockWorld";
 
 const unwrapBackend = <T>(result: BackendResult<T>): T => {
   if (!result.ok) {
@@ -100,6 +101,81 @@ const runSetWaterDebugMode = async (
       ...water.reflectionStatus,
       debugViewMode,
     },
+  });
+};
+
+const toBrushPlacementRules = (state: ReturnType<EditorCommandContext["getState"]>) => ({
+  avoidWater: state.propBrushSettings.avoidWater,
+  maxSlope: state.propBrushSettings.slopeLimit,
+  minSeparation: state.propBrushSettings.spacing,
+  randomRotation: state.propBrushSettings.randomRotation,
+  scaleJitter: state.propBrushSettings.scaleJitter,
+  alignToNormal: state.propBrushSettings.alignToNormal,
+  terrainConform: state.propBrushSettings.terrainConform,
+  avoidProtectedAreas: state.propBrushSettings.avoidProtectedAreas,
+  collisionCheck: state.propBrushSettings.collisionCheck,
+  seed: state.propBrushSettings.seed,
+});
+
+const getActivePropAsset = (state: ReturnType<EditorCommandContext["getState"]>) => {
+  const selected = state.selectedPropAssetId;
+  return mockPropAssets.find((candidate) => candidate.id === selected) ?? mockPropAssets[0];
+};
+
+const buildSeededRandom = (seed: number) => {
+  let next = seed % 2147483647;
+  if (next <= 0) {
+    next += 2147483646;
+  }
+
+  return () => {
+    next = (next * 48271) % 2147483647;
+    return next / 2147483647;
+  };
+};
+
+const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>): readonly PropInstance[] => {
+  const asset = getActivePropAsset(state);
+  const seed = state.propBrushSettings.seed;
+  const random = buildSeededRandom(seed);
+  const baseIndex = state.props.length;
+  const targetChunkId = state.selection.kind === "chunk" ? state.selection.id : state.props[0]?.chunkId ?? "chunk-0-0";
+  const spawnCount = Math.max(2, Math.round(state.propBrushSettings.density + state.propBrushSettings.spacing * 0.5));
+  const chunkId = targetChunkId;
+  const baseX = (chunkId.length * 11 + state.props.length * 3) % 200;
+  const baseZ = (chunkId.length * 13 + state.props.length * 5) % 180;
+
+  return Array.from({ length: spawnCount }, (_, index): ReturnType<ReturnType<EditorCommandContext["getState"]>["props"]>[number] => {
+    const spreadX = ((random() - 0.5) * 10 * state.propBrushSettings.spacing) + (index % 4) * 4;
+    const spreadZ = ((random() - 0.5) * 10 * state.propBrushSettings.spacing) + Math.floor(index / 4) * 4;
+    const scale = 0.85 + state.propBrushSettings.scaleJitter * random();
+    const rotation = state.propBrushSettings.randomRotation ? random() * 360 : (index % 4) * 90;
+
+    return {
+      id: `prop-scatter-${state.props.length + index + 1}`,
+      name: `${asset.name} ${String(baseIndex + index + 1).padStart(3, "0")}`,
+      type: asset.type,
+      billboardMode: "Directional4",
+      billboardEnabled: true,
+      billboardSwitchDistance: 12 + state.propBrushSettings.spacing * 1.3,
+      currentLod: "High",
+      visible: true,
+      shadowCast: index % 2 === 0,
+      boundsWarning: false,
+      generatedAssetAvailable: true,
+      chunkId,
+      position: [baseX + spreadX, 20 + Math.floor(random() * 4), baseZ + spreadZ],
+      assetPath: asset.assetPath,
+      transform: {
+        position: [baseX + spreadX, 20 + Math.floor(random() * 4), baseZ + spreadZ],
+        rotation: [0, rotation, 0],
+        scale: [scale, scale, scale],
+      },
+      material: asset.defaultMaterial,
+      lodState: index % 3 === 0 ? "Medium" : "High",
+      collision: state.propBrushSettings.collisionCheck,
+      placementRules: toBrushPlacementRules(state),
+    };
   });
 };
 
@@ -895,12 +971,112 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.props.scatterOnSelection",
     title: "Scatter props on selection",
-    description: "Record a mocked prop scatter request.",
+    description: "Scatter mocked prop instances at current brush settings.",
     category: "Props",
-    keywords: ["props", "scatter", "selection"],
+    keywords: ["props", "scatter", "selection", "brush", "placement"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Mock prop scatter requested." });
-      ctx.toast.info("Mock prop scatter requested.");
+      const state = ctx.getState();
+      const generated = createScatterProps(state);
+      if (generated.length === 0) {
+        ctx.toast.warning("No prop brush assets selected.");
+        return;
+      }
+
+      state.addProps(generated);
+      const firstGenerated = generated[0];
+      if (firstGenerated) {
+        ctx.getState().setSelection({ kind: "prop", id: firstGenerated.id, label: firstGenerated.name });
+        state.setActiveMode("props");
+        state.setActiveTool("props");
+      }
+      ctx.toast.success(`Scattered ${generated.length} props.`);
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `Scattered ${generated.length} mocked props from ${state.selectedPropAssetId}.`,
+      });
+    },
+  },
+  {
+    id: "editor.props.clearInSelection",
+    title: "Clear props in selection",
+    description: "Remove mocked props constrained by current selection.",
+    category: "Props",
+    keywords: ["props", "delete", "clear", "selection"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind === "chunk") {
+        const before = state.props.length;
+        state.removePropsByChunk(state.selection.id);
+        const removed = before - state.props.length;
+        ctx.toast.info(`Removed ${removed} props from ${state.selection.label}.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Cleared ${removed} props in ${state.selection.label}.` });
+      } else if (state.selection.kind === "prop") {
+        state.removeProp(state.selection.id);
+        ctx.toast.info(`Removed selected prop ${state.selection.label}.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Removed prop ${state.selection.label}.` });
+      } else {
+        ctx.toast.warning("Select a chunk or prop before clearing props.");
+      }
+    },
+  },
+  {
+    id: "editor.props.focusSelectedProp",
+    title: "Focus selected prop",
+    description: "Mock focus a selected prop in the viewport.",
+    category: "Props",
+    keywords: ["props", "focus", "selection", "mocked", "viewport"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "prop") {
+        const firstProp = state.props[0];
+        if (!firstProp) {
+          ctx.toast.warning("No prop available to focus.");
+          return;
+        }
+
+        state.setSelection({ kind: "prop", id: firstProp.id, label: firstProp.name });
+        ctx.toast.info(`Focused ${firstProp.name}.`);
+      } else {
+        ctx.toast.info(`Focused ${state.selection.label}.`);
+      }
+
+      state.setActiveMode("props");
+      state.setActiveTool("props");
+    },
+  },
+  {
+    id: "editor.props.selectPropBrush",
+    title: "Select prop brush",
+    description: "Switch to prop brush mode.",
+    category: "Props",
+    keywords: ["props", "brush", "mode", "tool"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      state.setActiveMode("props");
+      state.setActiveTool("props");
+      ctx.toast.info(`Prop brush ready. Asset ${state.selectedPropAssetId}.`);
+    },
+  },
+  {
+    id: "editor.props.toggleAvoidProtectedAreas",
+    title: "Toggle avoid protected areas",
+    description: "Toggle prop brush protected-area avoidance.",
+    category: "Props",
+    keywords: ["props", "brush", "protected area", "toggle"],
+    run: (ctx) => {
+      const state = ctx.getState();
+      state.setPropBrushSettings({ avoidProtectedAreas: !state.propBrushSettings.avoidProtectedAreas });
+      ctx.toast.success(`Avoid protected areas ${state.propBrushSettings.avoidProtectedAreas ? "off" : "on"}.`);
+    },
+  },
+  {
+    id: "editor.props.toggleBillboardDebug",
+    title: "Toggle billboard debug",
+    description: "Toggle mocked prop billboard debug overlay.",
+    category: "Props",
+    keywords: ["props", "billboard", "debug", "overlay"],
+    run: (ctx) => {
+      ctx.getState().toggleViewportOverlay("propBillboards");
     },
   },
   {
