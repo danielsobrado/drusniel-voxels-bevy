@@ -40,6 +40,9 @@ export function TextureAtlasPanel() {
   const selectedTileIndex = Number.parseInt(selectedTileId.replace("tile-", ""), 10);
   const selectedMaterial = editorState.brushSettings.materialBlockId;
   const atlasMapping = editorState.atlasMapping;
+  const atlasMappingPending = editorState.pendingCommandIds.some((commandId) => commandId.startsWith("editor.atlas.assign"));
+  const atlasRebuildPending = editorState.pendingCommandIds.includes("editor.atlas.rebuildTextureArray");
+  const atlasSavePending = editorState.pendingCommandIds.includes("editor.atlas.saveMapping");
 
   const normalizedTileIndex = Number.isNaN(selectedTileIndex) ? 0 : selectedTileIndex;
 
@@ -64,11 +67,11 @@ export function TextureAtlasPanel() {
         </div>
 
         <div className="atlas-actions-row">
-          <button type="button" className="toolbar-button" data-testid="atlas-rebuild" onClick={() => void runCommandById("editor.atlas.rebuildTextureArray")}>
-            Rebuild Texture Array
+          <button type="button" className="toolbar-button" data-testid="atlas-rebuild" disabled={atlasRebuildPending} onClick={() => void runCommandById("editor.atlas.rebuildTextureArray")}>
+            {atlasRebuildPending ? "Rebuild Queued" : "Rebuild Texture Array"}
           </button>
-          <button type="button" className="toolbar-button" data-testid="atlas-save" onClick={() => void runCommandById("editor.atlas.saveMapping")}>
-            Save Mapping
+          <button type="button" className="toolbar-button" data-testid="atlas-save" disabled={atlasSavePending} onClick={() => void runCommandById("editor.atlas.saveMapping")}>
+            {atlasSavePending ? "Saving Mapping" : "Save Mapping"}
           </button>
           <button type="button" className="toolbar-button" data-testid="atlas-open" onClick={() => void runCommandById("editor.material.openTextureAtlas")}>
             Open Texture Atlas
@@ -86,6 +89,7 @@ export function TextureAtlasPanel() {
               }
             />
             <BlockFaceMappingEditor
+              disabled={atlasMappingPending}
               selectedTileId={selectedTileId}
               onAssign={(block, face) => void runCommandById(materialFaceCommands[block][face])}
             />

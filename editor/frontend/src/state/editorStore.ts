@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { WorldSummary } from "../backend/EditorBackendClient";
-import { mockAgentObservation, mockAgentTimeline, mockConsoleMessages, mockRuntimeMetrics } from "../mocks/mockRuntime";
+import { getMockRenderQualityReadouts, mockAgentObservation, mockAgentTimeline, mockConsoleMessages, mockRuntimeMetrics } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockVoxelBlocks, mockWaterBodies } from "../mocks/mockWorld";
 import { mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import type {
@@ -16,7 +16,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody, WaterReflectionStatus } from "../types/world";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -93,6 +93,7 @@ export interface EditorDataState {
   readonly selectedAtlasTileId: string;
   readonly dirtyState: DirtyState;
   readonly commandHistory: CommandHistoryEntry[];
+  readonly pendingCommandIds: readonly string[];
   readonly layoutResetRequestId: number;
 }
 
@@ -119,17 +120,21 @@ interface EditorActions {
   readonly markAtlasRebuilt: () => void;
   readonly replaceWorldSummary: (summary: WorldSummary) => void;
   readonly setWaterRuntimeSnapshot: (snapshot: MockWaterRuntimeSnapshot) => void;
+  readonly syncWaterReflectionStatus: (patch: Partial<WaterReflectionStatus>) => void;
   readonly markDirty: (chunkId?: string) => void;
   readonly clearDirty: () => void;
   readonly clearConsole: () => void;
   readonly pushAgentTimelineEvent: (event: Omit<AgentTimelineEvent, "id" | "createdAt"> & Partial<Pick<AgentTimelineEvent, "id" | "createdAt">>) => void;
   readonly requestLayoutReset: () => void;
-  readonly pushCommandHistory: (commandId: string, label: string) => void;
+  readonly pushCommandHistory: (commandId: string, label: string, status?: CommandHistoryEntry["status"], message?: string) => void;
+  readonly beginCommand: (commandId: string) => void;
+  readonly finishCommand: (commandId: string) => void;
   readonly setPropBrushSettings: (settings: Partial<PropBrushSettings>) => void;
   readonly setSelectedPropAsset: (propAssetId: string) => void;
   readonly addProps: (props: readonly PropInstance[]) => void;
   readonly removeProp: (propId: string) => void;
   readonly removePropsByChunk: (chunkId: string) => void;
+  readonly updateRuntimeMetrics: (mutator: (runtimeMetrics: RuntimeMetrics) => void) => void;
 }
 
 export type EditorStore = EditorDataState & EditorActions;
@@ -175,7 +180,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     agentTargets: true,
     atlasPreview: false,
   },
-  runtimeState: "mocked",
+  runtimeState: "mock",
   renderQualityPreset: "High",
   selectedAtlasTileId: "tile-0",
   chunks: [...mockChunks],
@@ -201,6 +206,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     dirtyAtlas: false,
   },
   commandHistory: [],
+  pendingCommandIds: [],
   layoutResetRequestId: 0,
 });
 
@@ -219,7 +225,6 @@ export const useEditorStore = create<EditorStore>()(
     setSelection: (selection) =>
       set((state) => {
         state.selection = selection;
-        state.agentObservation = { ...state.agentObservation, selectedObjectLabel: selection.label };
       }),
     setPropBrushSettings: (settings) =>
       set((state) => {
@@ -248,6 +253,16 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.waterRuntimeSnapshot = snapshot;
       }),
+    syncWaterReflectionStatus: (patch) =>
+      set((state) => {
+        state.waterBodies = state.waterBodies.map((waterBody) => ({
+          ...waterBody,
+          reflectionStatus: {
+            ...waterBody.reflectionStatus,
+            ...patch,
+          },
+        }));
+      }),
     updateBrushSettings: (settings) =>
       set((state) => {
         state.brushSettings = { ...state.brushSettings, ...settings };
@@ -275,6 +290,11 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.renderQualityPreset = preset;
         state.runtimeMetrics.renderQualityPreset = preset;
+        state.runtimeMetrics.renderQualityReadouts = getMockRenderQualityReadouts(preset);
+      }),
+    updateRuntimeMetrics: (mutator) =>
+      set((state) => {
+        mutator(state.runtimeMetrics);
       }),
     setOutlinerNodeVisibility: (kind, id, visible) =>
       set((state) => {
@@ -328,10 +348,6 @@ export const useEditorStore = create<EditorStore>()(
           state.selection = state.chunks[0]
             ? { kind: "chunk", id: state.chunks[0].id, label: state.chunks[0].label }
             : { kind: "debug_resource", id: "selection-empty", label: "No selection" };
-          state.agentObservation = {
-            ...state.agentObservation,
-            selectedObjectLabel: state.selection.label,
-          };
         }
       }),
     updateWaterBody: (id, patch) =>
@@ -380,10 +396,6 @@ export const useEditorStore = create<EditorStore>()(
         state.materials = [...summary.materials];
         state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, state.props, summary.materials);
         state.selection = preserveSelectionWhenReplacingSummary(summary, state.selection);
-        state.agentObservation = {
-          ...state.agentObservation,
-          selectedObjectLabel: state.selection.label,
-        };
         state.dirtyState = {
           hasUnsavedChanges: false,
           dirtyChunkIds: summary.chunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id),
@@ -421,10 +433,20 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.layoutResetRequestId += 1;
       }),
-    pushCommandHistory: (commandId, label) =>
+    pushCommandHistory: (commandId, label, status = "success", message) =>
       set((state) => {
-        state.commandHistory.unshift({ commandId, label, createdAt: new Date().toISOString() });
+        state.commandHistory.unshift({ commandId, label, status, message, createdAt: new Date().toISOString() });
         state.commandHistory = state.commandHistory.slice(0, 20);
+      }),
+    beginCommand: (commandId) =>
+      set((state) => {
+        if (!state.pendingCommandIds.includes(commandId)) {
+          state.pendingCommandIds = [...state.pendingCommandIds, commandId];
+        }
+      }),
+    finishCommand: (commandId) =>
+      set((state) => {
+        state.pendingCommandIds = state.pendingCommandIds.filter((pendingCommandId) => pendingCommandId !== commandId);
       }),
   })),
 );

@@ -27,7 +27,7 @@ export function useCommandRunner(options: UseCommandRunnerOptions) {
         },
         backendClient: options.backendClient,
         runtimeClient: options.runtimeClient,
-        pushCommandHistory: (id, title) => useEditorStore.getState().pushCommandHistory(id, title),
+        pushCommandHistory: (id, title, status, message) => useEditorStore.getState().pushCommandHistory(id, title, status, message),
         pushAgentTimelineEvent: (event) => useEditorStore.getState().pushAgentTimelineEvent(event),
         openCommandPalette: options.openCommandPalette ?? (() => undefined),
         openWorldFile: options.openWorldFile ?? (() => undefined),

@@ -3,12 +3,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MockEditorBackendClient } from "../backend/MockEditorBackendClient";
 import type { BackendResult, WorldSaveSummary } from "../backend/EditorBackendClient";
-import { runCommand } from "../commands/commandRegistry";
+import { editorCommands, getCommand, runCommand } from "../commands/commandRegistry";
 import type { EditorCommandContext } from "../commands/commandTypes";
 import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
+import { runtimeCommandFailure } from "../runtime/runtimeSchemas";
 import { mockChunks, mockMaterials, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import { createInitialEditorState, useEditorStore } from "./editorStore";
 import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntimeWarnings, getSelectedObject, getVisibleOutlinerNodes } from "./editorSelectors";
+import { menuCommandIds } from "../components/editor/EditorMenubar";
+import { toolbarCommandIds } from "../components/editor/MainToolbar";
 
 const collectSourceFiles = (directory: string): readonly string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -121,7 +124,7 @@ describe("editor selectors", () => {
     expect(selectedObject && "name" in selectedObject ? selectedObject.name : undefined).toBe("South River");
     expect(getCurrentInspectorKind(state)).toBe("water");
     expect(outlinerNodes).toHaveLength(66);
-    expect(observation.selectedObjectLabel).toBe("South River");
+    expect(observation.selected?.label).toBe("South River");
     expect(warnings).toContain("South River reflection probe is stale.");
     expect(warnings).toContain("Mill Pond reflections are disabled.");
   });
@@ -143,10 +146,23 @@ describe("editor command registry", () => {
     },
     backendClient,
     runtimeClient,
-    pushCommandHistory: (commandId, title) => useEditorStore.getState().pushCommandHistory(commandId, title),
+    pushCommandHistory: (commandId, title, status, message) => useEditorStore.getState().pushCommandHistory(commandId, title, status, message),
     pushAgentTimelineEvent: (event) => useEditorStore.getState().pushAgentTimelineEvent(event),
     openCommandPalette: () => undefined,
     openWorldFile: () => undefined,
+  });
+
+  it("mock runtime client returns a runtime snapshot", async () => {
+    const runtimeClient = new MockRuntimeClient();
+    const result = await runtimeClient.getRuntimeSnapshot();
+
+    expect(result.status).toBe("success");
+    if (!result.ok) {
+      throw new Error("Expected mock runtime snapshot.");
+    }
+    expect(result.data.connectionState).toBe("mock");
+    expect(result.data.capabilities.canRebuildChunks).toBe(true);
+    expect(result.data.metrics.fps).toBeGreaterThan(0);
   });
 
   it("creates unbreakable areas and records command history", async () => {
@@ -225,6 +241,7 @@ describe("editor command registry", () => {
   });
 
   it("runs water visual probe and stores mocked snapshot", async () => {
+    useEditorStore.getState().clearDirty();
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
     await runCommand("editor.water.runVisualProbe", createContext());
 
@@ -233,6 +250,55 @@ describe("editor command registry", () => {
     expect(selectedWater?.reflectionStatus.lastProbeUpdateMs).toBe(3.1);
     expect(state.waterRuntimeSnapshot.probe.nearestBodyKind).toBe("Lake");
     expect(state.waterRuntimeSnapshot.probe.reflectionEligible).toBe(true);
+    expect(state.dirtyState.dirtyWaterBodyIds).toEqual([]);
+    expect(state.dirtyState.hasUnsavedChanges).toBe(false);
+  });
+
+  it("does not apply selected-water commands to the first water body when nothing water is selected", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      setWaterReflectionDebugModeCalled = false;
+
+      override async setWaterReflectionDebugMode(waterBodyId: Parameters<MockRuntimeClient["setWaterReflectionDebugMode"]>[0], mode: Parameters<MockRuntimeClient["setWaterReflectionDebugMode"]>[1]) {
+        this.setWaterReflectionDebugModeCalled = true;
+        return super.setWaterReflectionDebugMode(waterBodyId, mode);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    useEditorStore.getState().clearDirty();
+    useEditorStore.getState().setSelection({ kind: "chunk", id: "chunk-0-0", label: "Chunk 0,0" });
+    await runCommand("editor.water.setDebugMask", createContext(undefined, runtimeClient));
+
+    const state = useEditorStore.getState();
+    expect(runtimeClient.setWaterReflectionDebugModeCalled).toBe(false);
+    expect(state.waterBodies[0].reflectionStatus.debugViewMode).toBe("Off");
+    expect(state.dirtyState.dirtyWaterBodyIds).toEqual([]);
+  });
+
+  it("does not update water debug state when the runtime rejects the command", async () => {
+    class FailingRuntimeClient extends MockRuntimeClient {
+      override async setWaterReflectionDebugMode() {
+        return runtimeCommandFailure("runtime_unavailable", "runtime offline");
+      }
+    }
+
+    useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
+    const beforeMode = useEditorStore.getState().waterBodies.find((candidate) => candidate.id === "water-lk-03")?.reflectionStatus.debugViewMode;
+    const toastMessages: string[] = [];
+    await runCommand("editor.water.setDebugMask", createContext(undefined, new FailingRuntimeClient(), toastMessages));
+
+    const state = useEditorStore.getState();
+    const water = useEditorStore.getState().waterBodies.find((candidate) => candidate.id === "water-lk-03");
+    expect(water?.reflectionStatus.debugViewMode).toBe(beforeMode);
+    expect(state.commandHistory[0]).toMatchObject({
+      commandId: "editor.water.setDebugMask",
+      status: "runtime_unavailable",
+      message: "runtime offline",
+    });
+    expect(state.consoleMessages[0].level).toBe("error");
+    expect(state.consoleMessages[0].message).toContain("runtime offline");
+    expect(state.agentTimeline[0].kind).toBe("warning");
+    expect(toastMessages).toContain("error:Set reflection debug mask failed.");
   });
 
   it("does not import Tauri from commands or UI components", () => {
@@ -279,28 +345,118 @@ describe("editor command registry", () => {
   });
 
   it("runs mocked atlas workflow through command ids", async () => {
-    class SpyBackendClient extends MockEditorBackendClient {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      setAtlasMappingCalled = false;
       saveAtlasMappingCalled = false;
 
-      override async saveAtlasMapping(_atlasMapping: Parameters<MockEditorBackendClient["saveAtlasMapping"]>[0]): Promise<BackendResult<WorldSaveSummary>> {
+      override async setAtlasMapping(mapping: Parameters<MockRuntimeClient["setAtlasMapping"]>[0]) {
+        this.setAtlasMappingCalled = true;
+        return super.setAtlasMapping(mapping);
+      }
+
+      override async saveAtlasMapping(mapping: Parameters<MockRuntimeClient["saveAtlasMapping"]>[0]) {
         this.saveAtlasMappingCalled = true;
-        return super.saveAtlasMapping(_atlasMapping);
+        return super.saveAtlasMapping(mapping);
       }
     }
 
-    const backendClient = new SpyBackendClient();
-    await runCommand("editor.atlas.selectTile.tile-7", createContext(backendClient));
-    await runCommand("editor.atlas.assignGrassSide", createContext(backendClient));
+    const runtimeClient = new SpyRuntimeClient();
+    await runCommand("editor.atlas.selectTile.tile-7", createContext(undefined, runtimeClient));
+    await runCommand("editor.atlas.assignGrassSide", createContext(undefined, runtimeClient));
 
     const assigned = useEditorStore.getState();
     expect(assigned.atlasMapping.grass.side).toBe("tile-7");
     expect(assigned.dirtyState.dirtyAtlas).toBe(true);
+    expect(runtimeClient.setAtlasMappingCalled).toBe(true);
 
-    await runCommand("editor.atlas.rebuildTextureArray", createContext(backendClient));
+    await runCommand("editor.atlas.rebuildTextureArray", createContext(undefined, runtimeClient));
     expect(useEditorStore.getState().dirtyState.dirtyAtlas).toBe(false);
 
-    await runCommand("editor.atlas.saveMapping", createContext(backendClient));
-    expect(backendClient.saveAtlasMappingCalled).toBe(true);
+    await runCommand("editor.atlas.saveMapping", createContext(undefined, runtimeClient));
+    expect(runtimeClient.saveAtlasMappingCalled).toBe(true);
+    expect(useEditorStore.getState().agentTimeline[0].message).toBe("Runtime write succeeded: Save atlas mapping.");
+  });
+
+  it("has no duplicate command IDs", () => {
+    const commandIds = editorCommands.map((command) => command.id);
+    expect(new Set(commandIds).size).toBe(commandIds.length);
+  });
+
+  it("requires title, description, category, and keywords for every command", () => {
+    for (const command of editorCommands) {
+      expect(command.title.length).toBeGreaterThan(0);
+      expect(command.description.length).toBeGreaterThan(0);
+      expect(command.category.length).toBeGreaterThan(0);
+      if (!command.keywords || command.keywords.length === 0) {
+        expect.fail(`Command "${command.id}" is missing keywords.`);
+      }
+    }
+  });
+
+  it("maps toolbar command ids to registered commands", () => {
+    for (const commandId of toolbarCommandIds) {
+      const command = getCommand(commandId);
+      expect(command.id).toBe(commandId);
+    }
+  });
+
+  it("maps menu command ids to registered commands", () => {
+    for (const commandId of menuCommandIds) {
+      const command = getCommand(commandId);
+      expect(command.id).toBe(commandId);
+    }
+  });
+
+  it("serializes AgentObservation payload", () => {
+    const state = useEditorStore.getState();
+    const observation = getAgentObservation(state);
+    const parsed = JSON.parse(JSON.stringify(observation)) as typeof observation;
+
+    expect(parsed.activeMode).toBe(state.activeMode);
+    expect(parsed.activeTool).toBe(state.activeTool);
+    expect(parsed.brush).toEqual(state.brushSettings);
+    expect(Array.isArray(parsed.visiblePanels)).toBe(true);
+    expect(Array.isArray(parsed.warnings)).toBe(true);
+  });
+
+  it("mock mode works without a Bevy bridge", async () => {
+    const runtimeClient = new MockRuntimeClient();
+    const toastMessages: string[] = [];
+
+    expect(runtimeClient.getConnectionState()).toBe("mock");
+    await runCommand("editor.file.saveSnapshot", createContext(undefined, runtimeClient, toastMessages));
+
+    expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.file.saveSnapshot");
+    expect(toastMessages.some((message) => message.startsWith("success:Mock snapshot recorded: mock-runtime-snapshot-"))).toBe(true);
+  });
+
+  it("runs rendering and debug commands through new command IDs", async () => {
+    await runCommand("editor.rendering.setQualityPerformance100", createContext());
+    await runCommand("editor.debug.openRenderTimings", createContext());
+    await runCommand("editor.debug.openGraphicsCapabilities", createContext());
+    await runCommand("editor.debug.toggleGtao", createContext());
+    await runCommand("editor.debug.toggleSsao", createContext());
+    await runCommand("editor.debug.toggleBakedAo", createContext());
+    await runCommand("editor.debug.toggleShadowBudget", createContext());
+    await runCommand("editor.debug.toggleGodRays", createContext());
+    await runCommand("editor.debug.toggleFog", createContext());
+    await runCommand("editor.debug.togglePhotoMode", createContext());
+    await runCommand("editor.debug.toggleCinematicMode", createContext());
+    await runCommand("editor.debug.toggleRayTracingMock", createContext());
+
+    const state = useEditorStore.getState();
+    expect(state.renderQualityPreset).toBe("Performance100");
+    expect(state.runtimeMetrics.renderQualityReadouts.waterReflectionDistance).toBe(220);
+    expect(state.runtimeMetrics.ambientOcclusion.gtaoEnabled).toBe(false);
+    expect(state.runtimeMetrics.ambientOcclusion.ssaoEnabled).toBe(false);
+    expect(state.runtimeMetrics.ambientOcclusion.bakedAoStrength).toBe(0);
+    expect(state.runtimeMetrics.shadowBudget.enabled).toBe(false);
+    expect(state.runtimeMetrics.lightingAtmosphere.godRaysEnabled).toBe(true);
+    expect(state.runtimeMetrics.lightingAtmosphere.fogActive).toBe(false);
+    expect(state.runtimeMetrics.cinematicPhotoMode.photoModeActive).toBe(true);
+    expect(state.runtimeMetrics.cinematicPhotoMode.cinematicModeActive).toBe(true);
+    expect(state.runtimeMetrics.graphicsCapabilities.rayTracingSupported).toBe(true);
+    expect(state.commandHistory[0].commandId).toBe("editor.debug.toggleRayTracingMock");
   });
 
   it("mock backend returns serializable data", async () => {

@@ -36,6 +36,10 @@ export function InspectorPanel() {
   const isEmptySelection = currentSelectionId === "selection-empty" && editorState.selection.label === "No selection";
   const selectedSummary = toDisplaySummary(editorState.selection.label, selectedObject);
   const materials = editorState.materials;
+  const chunkRebuildPending = editorState.pendingCommandIds.includes("editor.world.rebuildSelectedChunk");
+  const dirtyChunkRebuildPending = editorState.pendingCommandIds.includes("editor.world.rebuildDirtyChunks");
+  const waterDebugPending = editorState.pendingCommandIds.some((commandId) => commandId.startsWith("editor.water.setDebug") || commandId === "editor.water.toggleReflectionMask");
+  const waterProbePending = editorState.pendingCommandIds.includes("editor.water.runVisualProbe");
   const runRebuildSelectedChunk = () => void runCommandById("editor.world.rebuildSelectedChunk");
   const runRebuildDirtyChunks = () => void runCommandById("editor.world.rebuildDirtyChunks");
 
@@ -48,8 +52,10 @@ export function InspectorPanel() {
       return (
         <ChunkInspector
           chunk={selectedObject as ChunkSummary}
+          dirtyRebuildPending={dirtyChunkRebuildPending}
           onRebuildSelected={runRebuildSelectedChunk}
           onRebuildDirty={runRebuildDirtyChunks}
+          selectedRebuildPending={chunkRebuildPending}
         />
       );
     }
@@ -72,6 +78,7 @@ export function InspectorPanel() {
         <WaterBodyInspector
           waterBody={waterBody}
           snapshot={snapshot}
+          debugPending={waterDebugPending}
           onFocusNearest={() => void runCommandById("editor.water.focusNearestWaterBody")}
           onApplyPreset={(commandId) => void runCommandById(commandId)}
           onSetDebugMode={(mode) => {
@@ -86,6 +93,7 @@ export function InspectorPanel() {
           }}
           onRunVisualProbe={() => void runCommandById("editor.water.runVisualProbe")}
           onOpenReflectionDebug={() => void runCommandById("editor.water.openReflectionDebug")}
+          probePending={waterProbePending}
           onUpdate={(patch) => {
             editorState.updateWaterBody(waterBody.id, patch);
           }}
@@ -478,12 +486,16 @@ function VoxelInspector({ voxel }: { readonly voxel: VoxelBlock }) {
 
 function ChunkInspector({
   chunk,
+  dirtyRebuildPending,
   onRebuildSelected,
   onRebuildDirty,
+  selectedRebuildPending,
 }: {
   readonly chunk: ChunkSummary;
+  readonly dirtyRebuildPending: boolean;
   readonly onRebuildDirty: () => void;
   readonly onRebuildSelected: () => void;
+  readonly selectedRebuildPending: boolean;
 }) {
   return (
     <div data-testid="inspector-chunk">
@@ -501,11 +513,11 @@ function ChunkInspector({
       </InspectorSection>
       <InspectorSection title="Chunk actions">
         <div className="inspector-action-row">
-          <button type="button" className="toolbar-button" data-testid="inspector-chunk-rebuild-selected" onClick={onRebuildSelected}>
-            Rebuild selected chunk
+          <button type="button" className="toolbar-button" data-testid="inspector-chunk-rebuild-selected" disabled={selectedRebuildPending} onClick={onRebuildSelected}>
+            {selectedRebuildPending ? "Queued selected chunk" : "Rebuild selected chunk"}
           </button>
-          <button type="button" className="toolbar-button" data-testid="inspector-chunk-rebuild-dirty" onClick={onRebuildDirty}>
-            Rebuild dirty chunks
+          <button type="button" className="toolbar-button" data-testid="inspector-chunk-rebuild-dirty" disabled={dirtyRebuildPending} onClick={onRebuildDirty}>
+            {dirtyRebuildPending ? "Queued dirty chunks" : "Rebuild dirty chunks"}
           </button>
         </div>
       </InspectorSection>
@@ -635,6 +647,7 @@ function ProtectedAreaInspector({
 }
 
 function WaterBodyInspector({
+  debugPending,
   waterBody,
   snapshot,
   onApplyPreset,
@@ -643,13 +656,16 @@ function WaterBodyInspector({
   onRunVisualProbe,
   onSetDebugMode,
   onUpdate,
+  probePending,
 }: {
+  readonly debugPending: boolean;
   readonly onApplyPreset: (preset: string) => void;
   readonly onFocusNearest: () => void;
   readonly onOpenReflectionDebug: () => void;
   readonly onRunVisualProbe: () => void;
   readonly onSetDebugMode: (mode: WaterReflectionDebugViewMode) => void;
   readonly onUpdate: (patch: Partial<WaterBody>) => void;
+  readonly probePending: boolean;
   readonly snapshot: MockWaterRuntimeSnapshot;
   readonly waterBody: WaterBody;
 }) {
@@ -673,9 +689,11 @@ function WaterBodyInspector({
       <InspectorHeader title={waterBody.name} badge="water" note="Water inspector edits body fields in local state." />
       <WaterDebugPanel
         debugMode={waterBody.reflectionStatus.debugViewMode}
+        debugPending={debugPending}
         onOpenReflectionDebug={onOpenReflectionDebug}
         onRunVisualProbe={onRunVisualProbe}
         onSetDebugMode={onSetDebugMode}
+        probePending={probePending}
       />
       <WaterReflectionStatusCard status={snapshot.reflectionStatus} presence={snapshot.waterPresence} />
       <WaterVisualProbePanel probe={snapshot.probe} />
@@ -754,14 +772,18 @@ function WaterBodyInspector({
 
 function WaterDebugPanel({
   debugMode,
+  debugPending,
   onOpenReflectionDebug,
   onRunVisualProbe,
   onSetDebugMode,
+  probePending,
 }: {
   readonly debugMode: WaterReflectionDebugViewMode;
+  readonly debugPending: boolean;
   readonly onOpenReflectionDebug: () => void;
   readonly onRunVisualProbe: () => void;
   readonly onSetDebugMode: (mode: WaterReflectionDebugViewMode) => void;
+  readonly probePending: boolean;
 }) {
   const reflectionViewOptions: readonly { readonly value: WaterReflectionDebugViewMode; readonly label: string }[] = [
     { value: "Off", label: "Off" },
@@ -779,11 +801,12 @@ function WaterDebugPanel({
         label="Reflection debug mode"
         value={debugMode}
         options={reflectionViewOptions}
+        disabled={debugPending}
         onChange={onSetDebugMode}
         testId="inspector-water-debug-mode"
       />
-      <button type="button" className="toolbar-button" data-testid="inspector-water-run-probe" onClick={onRunVisualProbe}>
-        Run visual probe
+      <button type="button" className="toolbar-button" data-testid="inspector-water-run-probe" disabled={probePending} onClick={onRunVisualProbe}>
+        {probePending ? "Probe running" : "Run visual probe"}
       </button>
     </InspectorSection>
   );
@@ -927,9 +950,16 @@ function PropInspector({
           testId="inspector-prop-collision"
         />
         <BooleanToggle
-          label="Terrain conform"
-          checked={prop.terrainConform}
-          onChange={(terrainConform) => onUpdate({ terrainConform })}
+          label="Align to normal"
+          checked={prop.placementRules.alignToNormal}
+          onChange={(alignToNormal) =>
+            onUpdate({
+              placementRules: {
+                ...prop.placementRules,
+                alignToNormal,
+              },
+            })
+          }
           testId="inspector-prop-terrain-conform"
         />
       </InspectorSection>

@@ -110,7 +110,7 @@ impl FaceVisibility {
 }
 
 /// Serializable chunk data (voxels and visibility).
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkData {
     pub voxels: Vec<VoxelType>,
     pub position: IVec3,

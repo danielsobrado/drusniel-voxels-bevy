@@ -1,8 +1,8 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
-import type { RuntimeCommandResult } from "../runtime/RuntimeClient";
+import type { RuntimeCommandResult, RuntimeCommandStatus } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset } from "../types/editor";
-import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode } from "../types/world";
+import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import { mockPropAssets } from "../mocks/mockWorld";
 
 const unwrapBackend = <T>(result: BackendResult<T>): T => {
@@ -13,9 +13,19 @@ const unwrapBackend = <T>(result: BackendResult<T>): T => {
   return result.data;
 };
 
+class RuntimeCommandError extends Error {
+  readonly status: Exclude<RuntimeCommandStatus, "success">;
+
+  constructor(status: Exclude<RuntimeCommandStatus, "success">, message: string) {
+    super(message);
+    this.name = "RuntimeCommandError";
+    this.status = status;
+  }
+}
+
 const unwrapRuntime = <T>(result: RuntimeCommandResult<T>): T => {
   if (!result.ok) {
-    throw new Error(result.error);
+    throw new RuntimeCommandError(result.status, result.message);
   }
 
   return result.data;
@@ -40,9 +50,36 @@ const qualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
   description: `Set mocked render quality preset to ${preset}.`,
   category: "View",
   keywords: ["quality", "render", preset],
+  runtimeWrite: true,
   run: async (ctx) => {
-    const snapshot = unwrapRuntime(await ctx.runtimeClient.setRenderQuality(preset));
-    ctx.getState().setRenderQualityPreset(snapshot.metrics.renderQualityPreset);
+    const renderQuality = unwrapRuntime(await ctx.runtimeClient.setRenderQuality(preset));
+    ctx.getState().setRenderQualityPreset(renderQuality.preset);
+  },
+});
+
+const renderingQualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
+  ...qualityCommand(preset),
+  id: `editor.rendering.setQuality${preset}`,
+  keywords: ["debug", "rendering", "quality", preset],
+});
+
+type RuntimeMetricsSnapshot = ReturnType<EditorCommandContext["getState"]>["runtimeMetrics"];
+
+const runtimeSettingCommand = (
+  id: string,
+  title: string,
+  description: string,
+  update: (runtimeMetrics: RuntimeMetricsSnapshot) => RuntimeMetricsSnapshot,
+  keywords: readonly string[] = ["debug", "runtime", "settings"],
+): EditorCommand => ({
+  id,
+  title,
+  description,
+  category: "Debug",
+  keywords,
+  run: (ctx) => {
+    const current = ctx.getState();
+    ctx.setState({ runtimeMetrics: update(current.runtimeMetrics) });
   },
 });
 
@@ -72,7 +109,7 @@ const selectWaterBody = (state: ReturnType<EditorCommandContext["getState"]>): W
     return state.waterBodies.find((waterBody) => waterBody.id === selectedWaterId);
   }
 
-  return state.waterBodies[0];
+  return undefined;
 };
 
 const setSelectedWaterBody = (
@@ -95,7 +132,7 @@ const runSetWaterDebugMode = async (
     return;
   }
 
-  await ctx.runtimeClient.setWaterReflectionDebugMode(water.id, debugViewMode);
+  unwrapRuntime(await ctx.runtimeClient.setWaterReflectionDebugMode(water.id, debugViewMode));
   state.updateWaterBody(water.id, {
     reflectionStatus: {
       ...water.reflectionStatus,
@@ -145,7 +182,7 @@ const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>)
   const baseX = (chunkId.length * 11 + state.props.length * 3) % 200;
   const baseZ = (chunkId.length * 13 + state.props.length * 5) % 180;
 
-  return Array.from({ length: spawnCount }, (_, index): ReturnType<ReturnType<EditorCommandContext["getState"]>["props"]>[number] => {
+  return Array.from({ length: spawnCount }, (_, index): PropInstance => {
     const spreadX = ((random() - 0.5) * 10 * state.propBrushSettings.spacing) + (index % 4) * 4;
     const spreadZ = ((random() - 0.5) * 10 * state.propBrushSettings.spacing) + Math.floor(index / 4) * 4;
     const scale = 0.85 + state.propBrushSettings.scaleJitter * random();
@@ -332,8 +369,17 @@ const createAtlasAssignCommand = (
   category: "Materials",
   keywords: ["atlas", "tile", "mapping", `${block} ${face}`],
   preconditions: ["selectedAtlasTileId"],
-  run: (ctx) => {
+  runtimeWrite: true,
+  run: async (ctx) => {
     const selectedTile = getSelectedTile(ctx);
+    const nextAtlasMapping = {
+      ...ctx.getState().atlasMapping,
+      [block]: {
+        ...ctx.getState().atlasMapping[block],
+        [face]: selectedTile,
+      },
+    };
+    unwrapRuntime(await ctx.runtimeClient.setAtlasMapping(nextAtlasMapping));
     ctx.getState().updateAtlasMapping(block, { [face]: selectedTile });
     ctx.getState().pushAgentTimelineEvent({
       kind: "command",
@@ -362,7 +408,7 @@ const createAreaCommand = (
   category: "Areas",
   keywords: ["protected", "area", "rules", "unbreakable", "no build", "no dig", namePrefix],
   preconditions: ["mocked-state"],
-  run: (ctx) => {
+  run: async (ctx) => {
     const state = ctx.getState();
     const nextIndex = state.protectedAreas.length + 1;
     const center: [number, number, number] = [64 + nextIndex * 4, 24, 64 + nextIndex * 3];
@@ -435,7 +481,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "File",
     keywords: ["snapshot", "save"],
     run: async (ctx) => {
-      const snapshot = unwrapBackend(await ctx.backendClient.saveWorldSnapshot());
+      const snapshot = unwrapRuntime(await ctx.runtimeClient.saveWorldSnapshot());
       ctx.getState().markDirty();
       ctx.toast.success(`Mock snapshot recorded: ${snapshot.snapshotId}.`);
     },
@@ -494,7 +540,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Reset persisted dock layout to the default editor shell.",
     category: "View",
     keywords: ["dock", "layout", "reset"],
-    run: (ctx) => {
+    run: async (ctx) => {
       ctx.getState().requestLayoutReset();
       ctx.toast.info("Dock layout reset requested.");
     },
@@ -528,6 +574,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "World",
     keywords: ["world", "chunk", "mesh", "rebuild"],
     preconditions: ["selection.kind === chunk"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "chunk") {
@@ -547,6 +594,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Queue all dirty mocked chunks for rebuild.",
     category: "World",
     keywords: ["world", "chunk", "dirty", "rebuild"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       const dirtyChunkIds = state.dirtyState.dirtyChunkIds;
@@ -582,7 +630,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Duplicate the currently selected protected area as a mock operation.",
     category: "Areas",
     keywords: ["protected", "area", "duplicate", "copy"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
         ctx.toast.warning("Select a protected area before duplicating.");
@@ -620,7 +668,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Areas",
     keywords: ["protected", "area", "delete", "remove"],
     preconditions: ["selection.kind === area"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
         ctx.toast.warning("Select a protected area before deleting.");
@@ -643,7 +691,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Lock the selected mocked protected area.",
     category: "Areas",
     keywords: ["protected", "area", "lock"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
         ctx.toast.warning("Select a protected area before locking.");
@@ -662,7 +710,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Unlock the selected mocked protected area.",
     category: "Areas",
     keywords: ["protected", "area", "unlock"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
         ctx.toast.warning("Select a protected area before unlocking.");
@@ -681,13 +729,14 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Mock focus the selected protected area in the viewport.",
     category: "Areas",
     keywords: ["protected", "area", "focus", "camera"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
         ctx.toast.warning("Select a protected area before focusing.");
         return;
       }
 
+      unwrapRuntime(await ctx.runtimeClient.focusCamera(state.selection));
       state.setActiveMode("area");
       state.setActiveTool("area");
       ctx.toast.success(`Focused ${state.selection.label} in mocked viewport.`);
@@ -700,7 +749,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Mock paint operation using the active brush material.",
     category: "Voxels",
     keywords: ["voxel", "paint", "material"],
-    run: (ctx) => {
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "chunk") {
         ctx.toast.warning("Select a chunk before painting voxels.");
@@ -776,7 +825,10 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water reflection debug mode to Off.",
     category: "Water",
     keywords: ["water", "reflection", "debug", "off"],
-    run: (ctx) => void runSetWaterDebugMode(ctx, "Off"),
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await runSetWaterDebugMode(ctx, "Off");
+    },
   },
   {
     id: "editor.water.setDebugMask",
@@ -784,7 +836,10 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water reflection debug mode to Mask.",
     category: "Water",
     keywords: ["water", "reflection", "debug", "mask"],
-    run: (ctx) => void runSetWaterDebugMode(ctx, "Mask"),
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await runSetWaterDebugMode(ctx, "Mask");
+    },
   },
   {
     id: "editor.water.setDebugReflectionOnly",
@@ -792,7 +847,10 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water reflection debug mode to ReflectionOnly.",
     category: "Water",
     keywords: ["water", "reflection", "debug", "reflection-only"],
-    run: (ctx) => void runSetWaterDebugMode(ctx, "ReflectionOnly"),
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await runSetWaterDebugMode(ctx, "ReflectionOnly");
+    },
   },
   {
     id: "editor.water.setDebugBlendFactor",
@@ -800,7 +858,10 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water reflection debug mode to BlendFactor.",
     category: "Water",
     keywords: ["water", "reflection", "debug", "blend"],
-    run: (ctx) => void runSetWaterDebugMode(ctx, "BlendFactor"),
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await runSetWaterDebugMode(ctx, "BlendFactor");
+    },
   },
   {
     id: "editor.water.runVisualProbe",
@@ -808,25 +869,23 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Run mocked water visual probe and capture sample results.",
     category: "Water",
     keywords: ["water", "probe", "reflection"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       const snapshot = unwrapRuntime(await ctx.runtimeClient.runWaterVisualProbe());
+      const reflectionStatus: Partial<WaterReflectionStatus> = {
+        probeValid: snapshot.reflectionStatus.probeValid,
+        lastProbeUpdateMs: snapshot.reflectionStatus.lastProbeUpdateMs,
+        active: snapshot.reflectionStatus.active,
+        sampleReflection: snapshot.reflectionStatus.sampleReflection,
+        reason: snapshot.reflectionStatus.reason,
+        resolutionScale: snapshot.reflectionStatus.resolutionScale,
+        effectiveHz: snapshot.reflectionStatus.effectiveHz,
+        enabled: snapshot.reflectionStatus.enabled,
+      };
+
       state.setWaterRuntimeSnapshot(snapshot);
-      for (const waterBody of state.waterBodies) {
-        state.updateWaterBody(waterBody.id, {
-          reflectionStatus: {
-            ...waterBody.reflectionStatus,
-            probeValid: snapshot.reflectionStatus.probeValid,
-            lastProbeUpdateMs: snapshot.reflectionStatus.lastProbeUpdateMs,
-            active: snapshot.reflectionStatus.active,
-            sampleReflection: snapshot.reflectionStatus.sampleReflection,
-            reason: snapshot.reflectionStatus.reason,
-            resolutionScale: snapshot.reflectionStatus.resolutionScale,
-            effectiveHz: snapshot.reflectionStatus.effectiveHz,
-            enabled: snapshot.reflectionStatus.enabled,
-          },
-        });
-      }
+      state.syncWaterReflectionStatus(reflectionStatus);
       if (state.selection.kind === "water") {
         ctx.toast.success(`Mock water visual probe completed for ${state.selection.label}.`);
       } else {
@@ -1144,8 +1203,9 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Clear atlas dirty state and record a mock rebuild.",
     category: "Materials",
     keywords: ["atlas", "rebuild", "texture", "mapping"],
+    runtimeWrite: true,
     run: async (ctx) => {
-      unwrapBackend(await ctx.backendClient.saveAtlasMapping(ctx.getState().atlasMapping));
+      unwrapRuntime(await ctx.runtimeClient.saveAtlasMapping(ctx.getState().atlasMapping));
       ctx.getState().markAtlasRebuilt();
       ctx.toast.success("Atlas texture array rebuild queued.");
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Rebuilt atlas texture array (mock)." });
@@ -1157,23 +1217,156 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Mock save current atlas mapping and emit a YAML preview for review.",
     category: "Materials",
     keywords: ["atlas", "save", "mapping", "yaml"],
+    runtimeWrite: true,
     run: async (ctx) => {
-      const result = await ctx.backendClient.saveAtlasMapping(ctx.getState().atlasMapping);
-      if (!result.ok) {
-        throw new Error(result.error);
-      }
+      const result = unwrapRuntime(await ctx.runtimeClient.saveAtlasMapping(ctx.getState().atlasMapping));
 
-      ctx.toast.success(`Atlas mapping saved as ${result.data.snapshotId ?? "mapping"}.`);
+      ctx.toast.success(`Atlas mapping saved as ${result.snapshotId ?? "mapping"}.`);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Saved atlas mapping (mock).", id: "agent-event-atlas-save" });
     },
   },
+  {
+    id: "editor.debug.openRenderTimings",
+    title: "Open render timing table",
+    description: "Open mocked render timing view in profiler.",
+    category: "Debug",
+    keywords: ["debug", "rendering", "timings", "profiler"],
+    run: (ctx) => {
+      ctx.getState().setActiveMode("debug");
+      ctx.getState().setActiveTool("debug");
+      ctx.toast.info("Render timing table opened in mocked profiler.");
+    },
+  },
+  {
+    id: "editor.debug.openGraphicsCapabilities",
+    title: "Open graphics capabilities",
+    description: "Open mocked graphics capabilities debug data.",
+    category: "Debug",
+    keywords: ["debug", "graphics", "capabilities", "adapter"],
+    run: (ctx) => {
+      ctx.getState().setActiveMode("debug");
+      ctx.getState().setActiveTool("debug");
+      ctx.toast.info("Graphics capabilities panel opened in mocked profiler.");
+    },
+  },
+  runtimeSettingCommand(
+    "editor.debug.toggleGtao",
+    "Toggle GTAO",
+    "Mock toggle GTAO in render debug settings.",
+    (metrics) => ({
+      ...metrics,
+      ambientOcclusion: {
+        ...metrics.ambientOcclusion,
+        gtaoEnabled: !metrics.ambientOcclusion.gtaoEnabled,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleSsao",
+    "Toggle SSAO",
+    "Mock toggle SSAO support state in debug.",
+    (metrics) => ({
+      ...metrics,
+      ambientOcclusion: {
+        ...metrics.ambientOcclusion,
+        ssaoEnabled: !metrics.ambientOcclusion.ssaoEnabled,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleBakedAo",
+    "Toggle baked AO",
+    "Mock toggle baked AO strength.",
+    (metrics) => ({
+      ...metrics,
+      ambientOcclusion: {
+        ...metrics.ambientOcclusion,
+        bakedAoStrength: metrics.ambientOcclusion.bakedAoStrength > 0 ? 0 : 0.35,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleShadowBudget",
+    "Toggle shadow budget",
+    "Mock toggle shadow budget budget state.",
+    (metrics) => ({
+      ...metrics,
+      shadowBudget: {
+        ...metrics.shadowBudget,
+        enabled: !metrics.shadowBudget.enabled,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleGodRays",
+    "Toggle god rays",
+    "Mock toggle directional god rays.",
+    (metrics) => ({
+      ...metrics,
+      lightingAtmosphere: {
+        ...metrics.lightingAtmosphere,
+        godRaysEnabled: !metrics.lightingAtmosphere.godRaysEnabled,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleFog",
+    "Toggle fog",
+    "Mock toggle fog rendering.",
+    (metrics) => ({
+      ...metrics,
+      lightingAtmosphere: {
+        ...metrics.lightingAtmosphere,
+        fogActive: !metrics.lightingAtmosphere.fogActive,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.togglePhotoMode",
+    "Toggle photo mode",
+    "Mock toggle cinematic photo mode.",
+    (metrics) => ({
+      ...metrics,
+      cinematicPhotoMode: {
+        ...metrics.cinematicPhotoMode,
+        photoModeActive: !metrics.cinematicPhotoMode.photoModeActive,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleCinematicMode",
+    "Toggle cinematic mode",
+    "Mock toggle cinematic rendering mode.",
+    (metrics) => ({
+      ...metrics,
+      cinematicPhotoMode: {
+        ...metrics.cinematicPhotoMode,
+        cinematicModeActive: !metrics.cinematicPhotoMode.cinematicModeActive,
+      },
+    }),
+  ),
+  runtimeSettingCommand(
+    "editor.debug.toggleRayTracingMock",
+    "Toggle ray tracing mock",
+    "Mock toggle ray tracing support.",
+    (metrics) => ({
+      ...metrics,
+      graphicsCapabilities: {
+        ...metrics.graphicsCapabilities,
+        rayTracingSupported: !metrics.graphicsCapabilities.rayTracingSupported,
+      },
+    }),
+  ),
   {
     id: "editor.agent.observeScreen",
     title: "Agent observe screen",
     description: "Add a mocked agent observation event.",
     category: "Agent",
     keywords: ["agent", "observe", "screen"],
-    run: (ctx) => ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Agent observed the mocked editor screen." }),
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Observed current mocked editor screen." });
+      ctx.toast.info("Agent observation captured.");
+    },
   },
   {
     id: "editor.agent.runPlan",
@@ -1188,12 +1381,85 @@ export const editorCommands: readonly EditorCommand[] = [
     },
   },
   {
+    id: "editor.agent.approveStep",
+    title: "Approve step",
+    description: "Record a mocked approval decision for the selected plan step.",
+    category: "Agent",
+    keywords: ["agent", "plan", "approve"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent step approved." });
+      ctx.toast.success("Agent step approved (mock).");
+    },
+  },
+  {
+    id: "editor.agent.rejectStep",
+    title: "Reject step",
+    description: "Record a mocked rejection decision for the selected plan step.",
+    category: "Agent",
+    keywords: ["agent", "plan", "reject"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "warning", message: "Agent step rejected." });
+      ctx.toast.warning("Agent step rejected (mock).");
+    },
+  },
+  {
+    id: "editor.agent.revisePlan",
+    title: "Revise plan",
+    description: "Record a mocked revision request for the active plan.",
+    category: "Agent",
+    keywords: ["agent", "plan", "revise"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent plan revision requested." });
+      ctx.toast.info("Agent plan revision requested.");
+    },
+  },
+  {
     id: "editor.agent.generatePlaywrightTest",
     title: "Generate Playwright test",
     description: "Record a mocked Playwright generation request.",
     category: "Agent",
     keywords: ["agent", "playwright", "test"],
-    run: (ctx) => ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Mock Playwright test generation requested." }),
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: "Generated mocked Playwright test: mock-protected-area-workflow.spec.ts",
+      });
+      ctx.toast.info("Mocked Playwright test generated.");
+    },
+  },
+  {
+    id: "editor.agent.compareBeforeAfter",
+    title: "Compare before/after",
+    description: "Record a mocked before/after comparison request.",
+    category: "Agent",
+    keywords: ["agent", "compare", "before", "after"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Compared before/after viewport state (mock)." });
+      ctx.toast.info("Before/after comparison recorded.");
+    },
+  },
+  {
+    id: "editor.agent.saveSnapshot",
+    title: "Save snapshot",
+    description: "Record a mocked workflow snapshot in the agent timeline.",
+    category: "Agent",
+    keywords: ["agent", "snapshot", "save"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent snapshot saved (mock)." });
+      ctx.getState().pushCommandHistory("editor.agent.saveSnapshot", "Save snapshot");
+      ctx.toast.success("Agent snapshot saved.");
+    },
+  },
+  {
+    id: "editor.agent.copyObservationJson",
+    title: "Copy observation JSON",
+    description: "Record a mocked copy action for the current observation payload.",
+    category: "Agent",
+    keywords: ["agent", "observation", "copy", "json"],
+    run: (ctx) => {
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Copied agent observation JSON (mock)." });
+      ctx.toast.success("Agent observation JSON copied.");
+    },
   },
   {
     id: "editor.tests.runViewportSmokeTest",
@@ -1215,6 +1481,10 @@ export const editorCommands: readonly EditorCommand[] = [
     keywords: ["palette", "commands"],
     run: (ctx) => ctx.openCommandPalette(),
   },
+  renderingQualityCommand("Low"),
+  renderingQualityCommand("Medium"),
+  renderingQualityCommand("High"),
+  renderingQualityCommand("Performance100"),
   qualityCommand("Low"),
   qualityCommand("Medium"),
   qualityCommand("High"),
@@ -1232,11 +1502,20 @@ export const getCommand = (id: string): EditorCommand => {
 
 export const runCommand = async (id: string, context: EditorCommandContext): Promise<void> => {
   const command = getCommand(id);
+  const stateAtStart = context.getState();
+  if (command.runtimeWrite) {
+    stateAtStart.beginCommand(command.id);
+  }
+
   try {
     await command.run(context);
-    context.pushCommandHistory(command.id, command.title);
+    context.pushCommandHistory(command.id, command.title, "success");
+    if (command.runtimeWrite) {
+      context.pushAgentTimelineEvent({ kind: "command", message: `Runtime write succeeded: ${command.title}.` });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown command failure.";
+    const status = error instanceof RuntimeCommandError ? error.status : "failure";
     const state = context.getState();
     context.setState({
       consoleMessages: [
@@ -1249,7 +1528,12 @@ export const runCommand = async (id: string, context: EditorCommandContext): Pro
         ...state.consoleMessages,
       ],
     });
+    context.pushCommandHistory(command.id, command.title, status, message);
     context.pushAgentTimelineEvent({ kind: "warning", message: `${command.title} failed: ${message}` });
     context.toast.error(`${command.title} failed.`);
+  } finally {
+    if (command.runtimeWrite) {
+      context.getState().finishCommand(command.id);
+    }
   }
 };

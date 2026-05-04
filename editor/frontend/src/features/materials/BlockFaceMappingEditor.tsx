@@ -1,6 +1,7 @@
 import type { AtlasMapping, BlockType } from "../../types/world";
 
 interface BlockFaceMappingEditorProps {
+  readonly disabled?: boolean;
   readonly selectedTileId: string;
   readonly onAssign: (block: BlockType, face: keyof AtlasMapping) => void;
 }
@@ -32,7 +33,7 @@ const blockFaceMap: readonly {
   },
 ];
 
-export function BlockFaceMappingEditor({ onAssign, selectedTileId }: BlockFaceMappingEditorProps) {
+export function BlockFaceMappingEditor({ disabled = false, onAssign, selectedTileId }: BlockFaceMappingEditorProps) {
   return (
     <section className="atlas-face-editor" data-testid="texture-atlas-face-editor">
       <h3 className="inspector-section-title">Assign selected tile</h3>
@@ -48,6 +49,7 @@ export function BlockFaceMappingEditor({ onAssign, selectedTileId }: BlockFaceMa
                   type="button"
                   className="toolbar-button atlas-face-button"
                   data-testid={`atlas-assign-${block.block}-${face}`}
+                  disabled={disabled}
                   onClick={() => onAssign(block.block, face)}
                 >
                   {face}

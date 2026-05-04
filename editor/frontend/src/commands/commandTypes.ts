@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import type { EditorBackendClient } from "../backend/EditorBackendClient";
+import type { RuntimeCommandStatus } from "../runtime/RuntimeClient";
 import type { RuntimeClient } from "../runtime/RuntimeClient";
 import type { EditorStore } from "../state/editorStore";
 
@@ -16,7 +17,7 @@ export interface EditorCommandContext {
   };
   readonly backendClient: EditorBackendClient;
   readonly runtimeClient: RuntimeClient;
-  readonly pushCommandHistory: (commandId: string, title: string) => void;
+  readonly pushCommandHistory: (commandId: string, title: string, status?: RuntimeCommandStatus, message?: string) => void;
   readonly pushAgentTimelineEvent: EditorStore["pushAgentTimelineEvent"];
   readonly openCommandPalette: () => void;
   readonly openWorldFile: () => void;
@@ -30,5 +31,6 @@ export interface EditorCommand {
   readonly shortcut?: string;
   readonly keywords?: readonly string[];
   readonly preconditions?: readonly string[];
+  readonly runtimeWrite?: boolean;
   readonly run: (ctx: EditorCommandContext) => Promise<void> | void;
 }

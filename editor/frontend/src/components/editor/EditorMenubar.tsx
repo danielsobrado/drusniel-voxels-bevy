@@ -1,3 +1,19 @@
+export const menuCommandIds = [
+  "editor.file.save",
+  "editor.voxel.replaceSelected",
+  "editor.view.resetLayout",
+  "editor.world.rebuildSelectedChunk",
+  "editor.voxel.paintMaterial",
+  "editor.area.createUnbreakableBox",
+  "editor.props.scatterOnSelection",
+  "editor.material.openTextureAtlas",
+  "editor.water.openReflectionDebug",
+  "editor.mode.lighting",
+  "editor.agent.observeScreen",
+  "editor.mode.debug",
+  "editor.palette.open",
+] as const;
+
 const menuItems = [
   { label: "File", commandId: "editor.file.save" },
   { label: "Edit", commandId: "editor.voxel.replaceSelected" },

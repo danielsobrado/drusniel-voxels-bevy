@@ -1,5 +1,6 @@
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
-import type { PropType } from "../../types/world";
+import { mockPropAssets } from "../../mocks/mockWorld";
+import type { PropAsset, PropType } from "../../types/world";
 import { useEditorStore } from "../../state/editorStore";
 
 const propTypeLabels: Record<PropType, string> = {
@@ -10,7 +11,7 @@ const propTypeLabels: Record<PropType, string> = {
   building: "Building",
 };
 
-const groupedPropAssets = (assets: readonly { readonly category: PropType; readonly id: string; readonly name: string }[]) =>
+const groupedPropAssets = (assets: readonly PropAsset[]) =>
   assets.reduce<Record<PropType, typeof assets>>((acc, asset) => {
     const next = [...acc[asset.category]];
     next.push(asset);
@@ -25,14 +26,13 @@ const groupedPropAssets = (assets: readonly { readonly category: PropType; reado
   });
 
 export function AssetBrowserPanel() {
-  const propAssets = useEditorStore((state) => state.props);
   const selectedPropAssetId = useEditorStore((state) => state.selectedPropAssetId);
   const setSelectedPropAsset = useEditorStore((state) => state.setSelectedPropAsset);
   const materials = useEditorStore((state) => state.materials);
   const worldProps = useEditorStore((state) => state.props);
   const atlasMapping = useEditorStore((state) => state.atlasMapping);
 
-  const propAssetCatalog = groupedPropAssets(worldProps);
+  const propAssetCatalog = groupedPropAssets(mockPropAssets);
 
   return (
     <section className="panel-shell" data-testid="panel-asset-browser" aria-labelledby="asset-browser-title">

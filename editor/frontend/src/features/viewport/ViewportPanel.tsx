@@ -40,6 +40,8 @@ export function ViewportPanel() {
   const activeMode = editorState.activeMode;
   const activeTool = editorState.activeTool;
   const overlays = editorState.viewportOverlays;
+  const waterDebugPending = editorState.pendingCommandIds.some((commandId) => commandId.startsWith("editor.water.setDebug") || commandId === "editor.water.toggleReflectionMask");
+  const waterProbePending = editorState.pendingCommandIds.includes("editor.water.runVisualProbe");
   const runtimeMetrics = editorState.runtimeMetrics;
   const runtimeWarnings = getRuntimeWarnings(editorState);
   const selectedObject = getSelectedObject(editorState);
@@ -216,7 +218,7 @@ export function ViewportPanel() {
         <BevyCanvasHost
           areaOverlays={areaOverlays}
           showProtectedAreas={overlays.protectedAreas}
-          waterDebug={overlays.waterDebug || (selectedWaterBody?.reflectionStatus.debugViewMode ?? "Off") !== "Off"}
+          waterDebug={overlays.waterDebug}
           waterDebugMode={
             selectedWaterBody && "reflectionStatus" in selectedWaterBody
               ? selectedWaterBody.reflectionStatus.debugViewMode
@@ -477,6 +479,7 @@ export function ViewportPanel() {
                   <select
                     data-testid="viewport-water-debug-mode"
                     value={selectedWaterBody.reflectionStatus.debugViewMode}
+                    disabled={waterDebugPending}
                     onChange={(event) => {
                       const nextMode = event.target.value as WaterReflectionDebugViewMode;
                       void runCommandById(waterDebugCommandByMode[nextMode]);
@@ -492,9 +495,10 @@ export function ViewportPanel() {
                   type="button"
                   className="toolbar-button"
                   data-testid="viewport-water-run-probe"
+                  disabled={waterProbePending}
                   onClick={() => void runCommandById("editor.water.runVisualProbe")}
                 >
-                  Run visual probe
+                  {waterProbePending ? "Probe running" : "Run visual probe"}
                 </button>
               </div>
             ) : null}

@@ -17,6 +17,7 @@ export function AppShell() {
   const protectedAreaCount = useEditorStore((state) => state.protectedAreas.length);
   const activeMode = useEditorStore((state) => state.activeMode);
   const activeTool = useEditorStore((state) => state.activeTool);
+  const runtimeState = useEditorStore((state) => state.runtimeState);
   const selection = useEditorStore((state) => state.selection);
   const chunkBoundsEnabled = useEditorStore((state) => state.viewportOverlays.chunkBounds);
   const { backendClient, runtimeClient } = useEditorClients();
@@ -42,6 +43,33 @@ export function AppShell() {
     didLoadWorldSummaryRef.current = true;
     void runCommandById("editor.world.loadSummary");
   }, [runCommandById]);
+
+  useEffect(() => {
+    void runtimeClient.getRuntimeSnapshot().then((result) => {
+      if (!result.ok) {
+        useEditorStore.getState().setRuntimeState(result.status === "runtime_unavailable" ? "disconnected" : "error");
+        useEditorStore.setState((state) => ({
+          consoleMessages: [
+            {
+              id: `console-runtime-snapshot-${Date.now()}`,
+              level: "error",
+              message: `runtime.snapshot: ${result.message}`,
+              time: new Date().toLocaleTimeString(),
+            },
+            ...state.consoleMessages,
+          ],
+        }));
+        return;
+      }
+
+      useEditorStore.setState({
+        runtimeState: result.data.connectionState,
+        runtimeMetrics: result.data.metrics,
+        renderQualityPreset: result.data.renderQuality.preset,
+        waterRuntimeSnapshot: result.data.waterVisualProbe,
+      });
+    });
+  }, [runtimeClient]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -77,7 +105,10 @@ export function AppShell() {
       <div className="sr-only" data-testid="current-tool">
         {activeTool}
       </div>
-      <DockLayout resetRequestId={layoutResetRequestId} />
+      <div className="sr-only" data-testid="runtime-connection-state">
+        {runtimeState}
+      </div>
+      <DockLayout resetRequestId={layoutResetRequestId} runCommand={runCommandById} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runCommand={runCommandById} />
       <input
         ref={fileInputRef}

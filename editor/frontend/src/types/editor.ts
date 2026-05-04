@@ -12,7 +12,7 @@ export const EDITOR_MODES = [
 ] as const;
 
 export type EditorMode = (typeof EDITOR_MODES)[number];
-export type RuntimeState = "disconnected" | "mocked" | "playing" | "paused" | "simulating";
+export type RuntimeState = "mock" | "connected" | "disconnected" | "stale" | "error";
 export type RenderQualityPreset = "Low" | "Medium" | "High" | "Performance100";
 
 export type Selection =
@@ -71,4 +71,6 @@ export interface CommandHistoryEntry {
   readonly commandId: string;
   readonly label: string;
   readonly createdAt: string;
+  readonly status?: "success" | "failure" | "validation_error" | "runtime_unavailable" | "unsupported";
+  readonly message?: string;
 }

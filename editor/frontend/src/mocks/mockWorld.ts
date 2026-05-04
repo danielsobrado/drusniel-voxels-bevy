@@ -4,6 +4,7 @@ import type {
   MaterialAsset,
   PropAsset,
   PropInstance,
+  PropType,
   ProtectedArea,
   VoxelBlock,
   WaterBody,
@@ -307,7 +308,6 @@ export const mockProps: readonly PropInstance[] = Array.from({ length: 40 }, (_,
     lodState: index % 4 === 3 ? "Culled" : index % 4 === 2 ? "Low" : index % 4 === 1 ? "Medium" : "High",
     collision: index % 5 !== 0,
     placementRules: buildPlacementRules(index, type),
-    terrainConform: index % 3 !== 0,
   };
 });
 

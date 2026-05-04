@@ -1,6 +1,7 @@
 import type { EditorDataState } from "./editorStore";
 import type { Selection } from "../types/editor";
 import type { ChunkSummary, MaterialAsset, PropInstance, PropStats, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
+import type { AgentObservation } from "../types/runtime";
 
 export type OutlinerNodeKind = Selection["kind"];
 
@@ -176,11 +177,53 @@ export const getSelectedProtectedAreaWarnings = (state: EditorDataState): readon
   return getProtectedAreaWarnings(state)[state.selection.id] ?? [];
 };
 
-export const getAgentObservation = (state: EditorDataState) => ({
-  ...state.agentObservation,
-  selectedObjectLabel: state.selection.label,
-  runtimeWarnings: getRuntimeWarnings(state),
-});
+const AGENT_VISIBLE_PANELS: readonly string[] = [
+  "viewport",
+  "world-outliner",
+  "inspector",
+  "asset-browser",
+  "texture-atlas",
+  "console",
+  "profiler",
+  "agent-workbench",
+  "command-palette",
+];
+
+const AGENT_SUGGESTED_COMMANDS: readonly string[] = [
+  "editor.agent.observeScreen",
+  "editor.agent.runPlan",
+  "editor.agent.approveStep",
+  "editor.agent.rejectStep",
+  "editor.agent.revisePlan",
+  "editor.agent.generatePlaywrightTest",
+  "editor.agent.compareBeforeAfter",
+  "editor.agent.saveSnapshot",
+  "editor.agent.copyObservationJson",
+];
+
+export const getAgentObservation = (state: EditorDataState): AgentObservation => {
+  const selected = state.selection.kind === "voxel" ? null : state.selection;
+  const targetVoxel: readonly [number, number, number] =
+    state.selection.kind === "voxel" ? state.selection.position : [84 + 6, 56 - 12, 112];
+  const runtimeWarnings = [...getRuntimeWarnings(state), ...getSelectedProtectedAreaWarnings(state)];
+  const overlays = Object.entries(state.viewportOverlays).flatMap(([overlay, enabled]) => (enabled ? [overlay] : []));
+
+  return {
+    activeMode: state.activeMode,
+    activeTool: state.activeTool,
+    selected,
+    visiblePanels: AGENT_VISIBLE_PANELS,
+    viewport: {
+      cameraPosition: [84, 56, 112],
+      targetVoxel,
+      overlays,
+    },
+    brush: state.brushSettings,
+    dirtyChunks: getDirtyChunks(state).length,
+    warnings: runtimeWarnings,
+    suggestedCommands: AGENT_SUGGESTED_COMMANDS,
+  };
+};
 
 export const getRuntimeWarnings = (state: EditorDataState): readonly string[] => {
   const selectedWater = state.waterBodies[0];

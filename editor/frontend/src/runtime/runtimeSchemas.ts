@@ -1,0 +1,132 @@
+import type { RenderQualityPreset, Selection } from "../types/editor";
+import type {
+  BlockAtlasMap,
+  ChunkSummary,
+  MockWaterRuntimeSnapshot,
+  PropStats,
+  ProtectedArea,
+  WaterReflectionDebugViewMode,
+  WaterReflectionStatus,
+} from "../types/world";
+import type { ConsoleMessage, GraphicsCapabilities, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
+
+export type RuntimeConnectionState = "mock" | "connected" | "disconnected" | "stale" | "error";
+
+export interface RuntimeCapabilities {
+  readonly canSelectEntity: boolean;
+  readonly canFocusCamera: boolean;
+  readonly canRebuildChunks: boolean;
+  readonly canSetRenderQuality: boolean;
+  readonly canDebugWaterReflections: boolean;
+  readonly canRunWaterVisualProbe: boolean;
+  readonly canEditAtlasMapping: boolean;
+  readonly canEditProtectedAreas: boolean;
+  readonly canSaveWorldSnapshot: boolean;
+}
+
+export interface RuntimeRenderQualityState {
+  readonly preset: RenderQualityPreset;
+  readonly metrics: RuntimeMetrics["renderQualityReadouts"];
+}
+
+export interface RuntimeWaterReflectionState {
+  readonly waterBodyId: string | null;
+  readonly status: WaterReflectionStatus;
+}
+
+export interface RuntimeWaterVisualProbeResult extends MockWaterRuntimeSnapshot {
+  readonly capturedAt: string;
+}
+
+export interface RuntimeAtlasMappingState {
+  readonly mapping: BlockAtlasMap;
+  readonly dirty: boolean;
+  readonly savedAt?: string;
+}
+
+export type RuntimeChunkSummary = ChunkSummary;
+export type RuntimePropStats = PropStats;
+export type RuntimeRenderTimingSample = RenderTimingSample;
+
+export interface RuntimeConsoleEvent extends ConsoleMessage {
+  readonly source: "runtime" | "bridge" | "mock";
+}
+
+export interface RuntimeSnapshot {
+  readonly connectionState: RuntimeConnectionState;
+  readonly capabilities: RuntimeCapabilities;
+  readonly metrics: RuntimeMetrics;
+  readonly renderQuality: RuntimeRenderQualityState;
+  readonly selection: Selection | null;
+  readonly targetedVoxel: readonly [number, number, number] | null;
+  readonly chunks: readonly RuntimeChunkSummary[];
+  readonly dirtyChunkIds: readonly string[];
+  readonly waterReflection: RuntimeWaterReflectionState;
+  readonly waterVisualProbe: RuntimeWaterVisualProbeResult;
+  readonly atlasMapping: RuntimeAtlasMappingState;
+  readonly propStats: RuntimePropStats;
+  readonly timingSamples: readonly RuntimeRenderTimingSample[];
+  readonly consoleEvents: readonly RuntimeConsoleEvent[];
+  readonly capturedAt: string;
+}
+
+export type RuntimeCommandStatus = "success" | "failure" | "validation_error" | "runtime_unavailable" | "unsupported";
+
+export type RuntimeCommandResult<T = void> =
+  | { readonly status: "success"; readonly ok: true; readonly data: T }
+  | {
+      readonly status: Exclude<RuntimeCommandStatus, "success">;
+      readonly ok: false;
+      readonly message: string;
+      readonly code?: string;
+      readonly validationErrors?: readonly string[];
+    };
+
+export const runtimeCommandSuccess = <T>(data: T): RuntimeCommandResult<T> => ({
+  status: "success",
+  ok: true,
+  data,
+});
+
+export const runtimeCommandFailure = (
+  status: Exclude<RuntimeCommandStatus, "success">,
+  message: string,
+  options: { readonly code?: string; readonly validationErrors?: readonly string[] } = {},
+): RuntimeCommandResult<never> => ({
+  status,
+  ok: false,
+  message,
+  ...options,
+});
+
+export interface RuntimeSelectEntityResult {
+  readonly selection: Selection;
+}
+
+export interface RuntimeFocusCameraResult {
+  readonly target: Selection | readonly [number, number, number];
+}
+
+export interface RuntimeChunkRebuildResult {
+  readonly queuedChunkIds: readonly string[];
+}
+
+export interface RuntimeWaterDebugModeResult {
+  readonly waterBodyId: string;
+  readonly mode: WaterReflectionDebugViewMode;
+}
+
+export interface RuntimeSaveSummary {
+  readonly worldId: string;
+  readonly savedAt: string;
+  readonly snapshotId?: string;
+}
+
+export interface RuntimeProtectedAreaMutationResult {
+  readonly area: ProtectedArea;
+}
+
+export interface RuntimeProtectedAreaDeleteResult {
+  readonly areaId: string;
+  readonly deleted: boolean;
+}

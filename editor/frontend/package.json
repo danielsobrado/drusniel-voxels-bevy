@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:unit": "vitest run src/state/editorStore.test.ts",
+    "test:unit": "vitest run src/state/editorStore.test.ts src/runtime/RuntimeClient.test.ts",
     "test:smoke": "playwright test --config playwright.config.ts"
   },
   "dependencies": {

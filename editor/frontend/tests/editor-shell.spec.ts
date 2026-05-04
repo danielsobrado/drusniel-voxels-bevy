@@ -178,3 +178,28 @@ test("voxel paint toolbar is available and updates brush controls", async ({ pag
   await page.getByTestId("viewport-brush-target-face").selectOption("side");
   await expect(page.getByTestId("viewport-brush-target-face")).toHaveValue("side");
 });
+
+test("profiler rendering and graphics debug workflow updates mocked runtime values and command history", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+
+  const profilerTab = page.locator(".dockview-react").getByText("Profiler", { exact: true }).first();
+  await profilerTab.click();
+  await expect(page.getByTestId("panel-profiler")).toBeVisible();
+  await expect(page.getByTestId("render-timing-table")).toBeVisible();
+
+  await page.getByTestId("profiler-render-quality").selectOption("Performance100");
+  await expect(page.getByTestId("profiler-prop-lod-distance-scale")).toContainText("1.8");
+  await expect(page.getByTestId("profiler-water-reflection-distance")).toContainText("220");
+  await expect(page.getByTestId("profiler-shadow-quality-code")).toContainText("4");
+
+  const graphicsTab = page.locator(".dockview-react").getByText("Graphics Capabilities", { exact: true }).first();
+  await graphicsTab.click();
+  await expect(page.getByTestId("panel-graphics-capabilities")).toBeVisible();
+  await expect(page.getByTestId("profiler-ray-tracing")).toBeVisible();
+
+  await profilerTab.click();
+  await page.getByTestId("profiler-toggle-gtao").click();
+  await page.getByTestId("profiler-toggle-god-rays").click();
+
+  await expect(page.getByTestId("command-history-latest-id")).toHaveText("editor.debug.toggleGodRays");
+});

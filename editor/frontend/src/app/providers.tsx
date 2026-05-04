@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import type { EditorBackendClient } from "../backend/EditorBackendClient";
 import { MockEditorBackendClient } from "../backend/MockEditorBackendClient";
 import type { RuntimeClient } from "../runtime/RuntimeClient";
+import { BrowserRuntimeClient, hasBrowserRuntimeBridge } from "../runtime/BrowserRuntimeClient";
 import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
 
 interface EditorClients {
@@ -20,7 +21,7 @@ export function Providers({ children }: ProvidersProps) {
   const clients = useMemo<EditorClients>(
     () => ({
       backendClient: new MockEditorBackendClient(),
-      runtimeClient: new MockRuntimeClient(),
+      runtimeClient: hasBrowserRuntimeBridge() ? new BrowserRuntimeClient() : new MockRuntimeClient(),
     }),
     [],
   );

@@ -5,6 +5,7 @@ import { AssetBrowserPanel } from "../../features/assets/AssetBrowserPanel";
 import { ConsolePanel } from "../../features/console/ConsolePanel";
 import { InspectorPanel } from "../../features/inspector/InspectorPanel";
 import { ProfilerPanel } from "../../features/profiler/ProfilerPanel";
+import { GraphicsCapabilitiesPanel } from "../../features/profiler/GraphicsCapabilitiesPanel";
 import { TextureAtlasPanel } from "../../features/materials/TextureAtlasPanel";
 import { WorldOutlinerPanel } from "../../features/outliner/WorldOutlinerPanel";
 import { ViewportPanel } from "../../features/viewport/ViewportPanel";
@@ -21,7 +22,7 @@ const DEFAULT_LAYOUT = {
           type: "branch",
           data: [
             { type: "leaf", data: { views: ["viewport"], activeView: "viewport", id: "center" }, size: 620 },
-            { type: "leaf", data: { views: ["assets", "atlas", "console", "profiler", "agent"], activeView: "assets", id: "bottom" }, size: 240 },
+            { type: "leaf", data: { views: ["assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "assets", id: "bottom" }, size: 240 },
           ],
           size: 760,
         },
@@ -41,6 +42,7 @@ const DEFAULT_LAYOUT = {
     atlas: { id: "atlas", contentComponent: "atlas", title: "Texture Atlas" },
     console: { id: "console", contentComponent: "console", title: "Console" },
     profiler: { id: "profiler", contentComponent: "profiler", title: "Profiler" },
+    "graphics-capabilities": { id: "graphics-capabilities", contentComponent: "graphics-capabilities", title: "Graphics Capabilities" },
     agent: { id: "agent", contentComponent: "agent", title: "Agent Workbench" },
   },
   activeGroup: "center",
@@ -66,9 +68,10 @@ const persistLayout = (api: DockviewApi): void => {
 
 interface DockLayoutProps {
   readonly resetRequestId: number;
+  readonly runCommand: (commandId: string) => Promise<void>;
 }
 
-export function DockLayout({ resetRequestId }: DockLayoutProps) {
+export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
   const lastResetRequestId = useRef(resetRequestId);
   const components = useMemo(
@@ -80,9 +83,10 @@ export function DockLayout({ resetRequestId }: DockLayoutProps) {
       atlas: (_props: IDockviewPanelProps) => <TextureAtlasPanel />,
       console: (_props: IDockviewPanelProps) => <ConsolePanel />,
       profiler: (_props: IDockviewPanelProps) => <ProfilerPanel />,
+      "graphics-capabilities": (_props: IDockviewPanelProps) => <GraphicsCapabilitiesPanel />,
       agent: (_props: IDockviewPanelProps) => <AgentWorkbenchPanel />,
     }),
-    [],
+    [runCommand],
   );
 
   const handleReady = (event: DockviewReadyEvent) => {

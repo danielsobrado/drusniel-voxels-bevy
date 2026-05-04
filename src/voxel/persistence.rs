@@ -2,20 +2,46 @@
 //!
 //! This module handles serialization of the voxel world to disk using bincode
 //! for efficient binary encoding.
+//!
+//! # Current world save format
+//!
+//! The default world save is `world_data.bin` in the process working directory.
+//! It is a bincode 1.x serialization of [`WorldData`] using serde. The payload
+//! contains the world size in chunks, the terrain-generation fingerprint active
+//! when the save was written, and a list of serialized chunks. Each chunk stores
+//! its chunk-space position, the full 16x16x16 voxel array in `Chunk::index`
+//! order, and the chunk face-visibility mask used by occlusion culling.
+//!
+//! The on-disk payload does not currently include an explicit schema version,
+//! prop placements, runtime mesh entities, LOD state, protected areas, editor
+//! selections, undo history, or water overrides beyond water voxels already
+//! present in the chunk voxel data.
 
+use crate::constants::{CHUNK_SIZE_I32, CHUNK_VOLUME};
 use crate::voxel::chunk::ChunkData;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 use thiserror::Error;
 
 use crate::terrain::generation::config::terrain_config_fingerprint;
 
 /// Default path for world save files.
-const WORLD_SAVE_PATH: &str = "world_data.bin";
+pub const WORLD_SAVE_PATH: &str = "world_data.bin";
+
+/// Stable editor-facing contract version for DTOs in this module.
+///
+/// This is not written into `world_data.bin`; it versions the API shape exposed
+/// to the editor backend.
+pub const EDITOR_PERSISTENCE_CONTRACT_VERSION: u32 = 1;
+
+/// Human-readable name for the current runtime save format.
+pub const WORLD_SAVE_FORMAT_NAME: &str = "drusniel.voxel_world.bincode";
 
 /// Errors that can occur during world persistence operations.
 #[derive(Debug, Error)]
@@ -52,7 +78,7 @@ pub enum PersistenceError {
 }
 
 /// Serializable world data.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldData {
     /// Size of the world in chunks.
     pub world_size_chunks: IVec3,
@@ -60,6 +86,74 @@ pub struct WorldData {
     pub terrain_config_fingerprint: u64,
     /// All chunk data.
     pub chunks: Vec<ChunkData>,
+}
+
+/// Editor-facing metadata for a serialized voxel world.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditorWorldMetadata {
+    pub contract_version: u32,
+    pub format_name: String,
+    /// The existing binary file has no embedded version field.
+    pub on_disk_format_version: Option<u32>,
+    pub save_path: String,
+    pub world_size_chunks: [i32; 3],
+    pub world_size_voxels: [i32; 3],
+    pub chunk_size: i32,
+    pub chunk_volume: usize,
+    pub chunk_count: usize,
+    pub terrain_config_fingerprint: u64,
+    pub current_terrain_config_fingerprint: u64,
+    pub terrain_fingerprint_matches: bool,
+    pub includes_chunk_positions: bool,
+    pub includes_voxels: bool,
+    pub includes_face_visibility: bool,
+    pub includes_props: bool,
+    pub includes_water_overrides: bool,
+    pub includes_protected_areas: bool,
+}
+
+/// Editor-facing summary of the default saved world file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditorWorldSummary {
+    pub exists: bool,
+    pub save_path: String,
+    pub file_size_bytes: Option<u64>,
+    pub modified_unix_ms: Option<u64>,
+    pub metadata: Option<EditorWorldMetadata>,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Editor-facing summary of one persisted chunk.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorChunkSummary {
+    pub position: [i32; 3],
+    pub voxel_count: usize,
+    pub non_air_voxels: usize,
+    pub solid_voxels: usize,
+    pub liquid_voxels: usize,
+    pub water_voxels: usize,
+    pub face_visibility_mask: u16,
+}
+
+/// Editor-facing save command result.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditorSaveResult {
+    pub saved: bool,
+    pub save_path: String,
+    pub metadata: Option<EditorWorldMetadata>,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Editor-facing load command result.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditorLoadResult {
+    pub loaded: bool,
+    pub save_path: String,
+    pub metadata: Option<EditorWorldMetadata>,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
 }
 
 /// Saves the world to disk using bincode for fast serialization.
@@ -70,10 +164,20 @@ pub struct WorldData {
 /// # Returns
 /// `Ok(())` on success, or a `PersistenceError` on failure.
 pub fn save_world(world: &VoxelWorld) -> Result<(), PersistenceError> {
+    save_world_to_path(world, WORLD_SAVE_PATH)
+}
+
+/// Saves the world to a specific path using the existing bincode world format.
+pub fn save_world_to_path(
+    world: &VoxelWorld,
+    path: impl AsRef<Path>,
+) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    let path_string = path_to_string(path);
     let data = world.to_data();
 
-    let file = File::create(WORLD_SAVE_PATH).map_err(|e| PersistenceError::FileAccess {
-        path: WORLD_SAVE_PATH.to_string(),
+    let file = File::create(path).map_err(|e| PersistenceError::FileAccess {
+        path: path_string.clone(),
         source: e,
     })?;
     let writer = BufWriter::new(file);
@@ -82,7 +186,7 @@ pub fn save_world(world: &VoxelWorld) -> Result<(), PersistenceError> {
 
     info!(
         "World saved to {} ({} chunks, terrain fp {:#018x})",
-        WORLD_SAVE_PATH,
+        path_string,
         data.chunks.len(),
         data.terrain_config_fingerprint
     );
@@ -94,19 +198,14 @@ pub fn save_world(world: &VoxelWorld) -> Result<(), PersistenceError> {
 /// # Returns
 /// The loaded `VoxelWorld` on success, or a `PersistenceError` on failure.
 pub fn load_world() -> Result<VoxelWorld, PersistenceError> {
-    let path = Path::new(WORLD_SAVE_PATH);
+    load_world_from_path(WORLD_SAVE_PATH)
+}
 
-    if !path.exists() {
-        return Err(PersistenceError::NotFound(WORLD_SAVE_PATH.to_string()));
-    }
-
-    let file = File::open(path).map_err(|e| PersistenceError::FileAccess {
-        path: WORLD_SAVE_PATH.to_string(),
-        source: e,
-    })?;
-    let reader = BufReader::new(file);
-
-    let data: WorldData = bincode::deserialize_from(reader)?;
+/// Loads a world from a specific path and validates the terrain fingerprint.
+pub fn load_world_from_path(path: impl AsRef<Path>) -> Result<VoxelWorld, PersistenceError> {
+    let path = path.as_ref();
+    let path_string = path_to_string(path);
+    let data = read_world_data_from_path(path)?;
     let current_fingerprint = terrain_config_fingerprint();
     if data.terrain_config_fingerprint != current_fingerprint {
         return Err(PersistenceError::TerrainFingerprintMismatch {
@@ -117,7 +216,7 @@ pub fn load_world() -> Result<VoxelWorld, PersistenceError> {
 
     info!(
         "World loaded from {} ({} chunks, terrain fp {:#018x})",
-        WORLD_SAVE_PATH,
+        path_string,
         data.chunks.len(),
         data.terrain_config_fingerprint
     );
@@ -125,12 +224,38 @@ pub fn load_world() -> Result<VoxelWorld, PersistenceError> {
     Ok(VoxelWorld::from_data(data))
 }
 
+/// Reads serialized world data from disk without validating terrain compatibility.
+///
+/// This is useful for editor metadata and diagnostics. Use [`load_world`] or
+/// [`load_world_from_path`] when the world will be used as runtime terrain.
+pub fn read_world_data_from_path(path: impl AsRef<Path>) -> Result<WorldData, PersistenceError> {
+    let path = path.as_ref();
+    let path_string = path_to_string(path);
+
+    if !path.exists() {
+        return Err(PersistenceError::NotFound(path_string));
+    }
+
+    let file = File::open(path).map_err(|e| PersistenceError::FileAccess {
+        path: path_string,
+        source: e,
+    })?;
+    let reader = BufReader::new(file);
+
+    Ok(bincode::deserialize_from(reader)?)
+}
+
 /// Checks if a saved world exists.
 ///
 /// # Returns
 /// `true` if a save file exists at `WORLD_SAVE_PATH`, `false` otherwise.
 pub fn saved_world_exists() -> bool {
-    Path::new(WORLD_SAVE_PATH).exists()
+    saved_world_exists_at_path(WORLD_SAVE_PATH)
+}
+
+/// Checks if a saved world exists at a specific path.
+pub fn saved_world_exists_at_path(path: impl AsRef<Path>) -> bool {
+    path.as_ref().exists()
 }
 
 /// Deletes the saved world file.
@@ -138,15 +263,256 @@ pub fn saved_world_exists() -> bool {
 /// # Returns
 /// `Ok(())` on success (including if no file existed), or a `PersistenceError` on failure.
 pub fn delete_saved_world() -> Result<(), PersistenceError> {
-    let path = Path::new(WORLD_SAVE_PATH);
+    delete_saved_world_at_path(WORLD_SAVE_PATH)
+}
+
+/// Deletes a saved world file at a specific path.
+pub fn delete_saved_world_at_path(path: impl AsRef<Path>) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    let path_string = path_to_string(path);
     if path.exists() {
         fs::remove_file(path).map_err(|e| PersistenceError::DeleteFailed {
-            path: WORLD_SAVE_PATH.to_string(),
+            path: path_string.clone(),
             source: e,
         })?;
-        info!("Deleted saved world at {}", WORLD_SAVE_PATH);
+        info!("Deleted saved world at {}", path_string);
     }
     Ok(())
+}
+
+/// Editor command foundation: load the default world and return serializable status.
+pub fn editor_load_default_world() -> EditorLoadResult {
+    editor_load_world_from_path(WORLD_SAVE_PATH)
+}
+
+/// Editor command foundation: save the default world and return serializable status.
+pub fn editor_save_default_world(world: &VoxelWorld) -> EditorSaveResult {
+    editor_save_world_to_path(world, WORLD_SAVE_PATH)
+}
+
+/// Editor command foundation: check whether the default saved world exists.
+pub fn editor_saved_world_exists() -> bool {
+    saved_world_exists()
+}
+
+/// Editor command foundation: delete the default saved world.
+pub fn editor_delete_saved_world() -> EditorSaveResult {
+    let save_path = WORLD_SAVE_PATH.to_string();
+    match delete_saved_world() {
+        Ok(()) => EditorSaveResult {
+            saved: false,
+            save_path,
+            metadata: None,
+            error_kind: None,
+            error_message: None,
+        },
+        Err(error) => editor_save_error(save_path, error),
+    }
+}
+
+/// Editor command foundation: export metadata for the default saved world.
+pub fn editor_export_world_metadata() -> Result<EditorWorldMetadata, PersistenceError> {
+    editor_export_world_metadata_from_path(WORLD_SAVE_PATH)
+}
+
+/// Editor command foundation: return summaries for chunks in the default save.
+pub fn editor_get_chunk_summaries() -> Result<Vec<EditorChunkSummary>, PersistenceError> {
+    editor_get_chunk_summaries_from_path(WORLD_SAVE_PATH)
+}
+
+/// Path-aware editor load helper for tests and future backend adapters.
+pub fn editor_load_world_from_path(path: impl AsRef<Path>) -> EditorLoadResult {
+    let path = path.as_ref();
+    let save_path = path_to_string(path);
+    match load_world_from_path(path) {
+        Ok(world) => {
+            let data = world.to_data();
+            EditorLoadResult {
+                loaded: true,
+                metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
+                save_path,
+                error_kind: None,
+                error_message: None,
+            }
+        }
+        Err(error) => editor_load_error(save_path, error),
+    }
+}
+
+/// Path-aware editor save helper for tests and future backend adapters.
+pub fn editor_save_world_to_path(world: &VoxelWorld, path: impl AsRef<Path>) -> EditorSaveResult {
+    let path = path.as_ref();
+    let save_path = path_to_string(path);
+    match save_world_to_path(world, path) {
+        Ok(()) => {
+            let data = world.to_data();
+            EditorSaveResult {
+                saved: true,
+                metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
+                save_path,
+                error_kind: None,
+                error_message: None,
+            }
+        }
+        Err(error) => editor_save_error(save_path, error),
+    }
+}
+
+/// Path-aware editor metadata export helper.
+pub fn editor_export_world_metadata_from_path(
+    path: impl AsRef<Path>,
+) -> Result<EditorWorldMetadata, PersistenceError> {
+    let path = path.as_ref();
+    let save_path = path_to_string(path);
+    let data = read_world_data_from_path(path)?;
+    Ok(editor_world_metadata_from_data(&data, &save_path))
+}
+
+/// Path-aware editor chunk summary helper.
+pub fn editor_get_chunk_summaries_from_path(
+    path: impl AsRef<Path>,
+) -> Result<Vec<EditorChunkSummary>, PersistenceError> {
+    let data = read_world_data_from_path(path)?;
+    Ok(data.chunks.iter().map(editor_chunk_summary).collect())
+}
+
+/// Returns a serializable summary for the default saved world.
+pub fn editor_default_world_summary() -> EditorWorldSummary {
+    editor_world_summary_from_path(WORLD_SAVE_PATH)
+}
+
+/// Returns a serializable summary for a saved world at a specific path.
+pub fn editor_world_summary_from_path(path: impl AsRef<Path>) -> EditorWorldSummary {
+    let path = path.as_ref();
+    let save_path = path_to_string(path);
+    let file_metadata = fs::metadata(path);
+    let exists = file_metadata.is_ok();
+    let file_size_bytes = file_metadata.as_ref().ok().map(|metadata| metadata.len());
+    let modified_unix_ms = file_metadata
+        .as_ref()
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64);
+
+    match editor_export_world_metadata_from_path(path) {
+        Ok(metadata) => EditorWorldSummary {
+            exists: true,
+            save_path,
+            file_size_bytes,
+            modified_unix_ms,
+            metadata: Some(metadata),
+            error_kind: None,
+            error_message: None,
+        },
+        Err(PersistenceError::NotFound(_)) => EditorWorldSummary {
+            exists: false,
+            save_path,
+            file_size_bytes: None,
+            modified_unix_ms: None,
+            metadata: None,
+            error_kind: None,
+            error_message: None,
+        },
+        Err(error) => EditorWorldSummary {
+            exists,
+            save_path,
+            file_size_bytes,
+            modified_unix_ms,
+            metadata: None,
+            error_kind: Some(persistence_error_kind(&error).to_string()),
+            error_message: Some(error.to_string()),
+        },
+    }
+}
+
+fn editor_world_metadata_from_data(data: &WorldData, save_path: &str) -> EditorWorldMetadata {
+    let world_size_voxels = data.world_size_chunks * CHUNK_SIZE_I32;
+    let current_terrain_config_fingerprint = terrain_config_fingerprint();
+    EditorWorldMetadata {
+        contract_version: EDITOR_PERSISTENCE_CONTRACT_VERSION,
+        format_name: WORLD_SAVE_FORMAT_NAME.to_string(),
+        on_disk_format_version: None,
+        save_path: save_path.to_string(),
+        world_size_chunks: ivec3_to_array(data.world_size_chunks),
+        world_size_voxels: ivec3_to_array(world_size_voxels),
+        chunk_size: CHUNK_SIZE_I32,
+        chunk_volume: CHUNK_VOLUME,
+        chunk_count: data.chunks.len(),
+        terrain_config_fingerprint: data.terrain_config_fingerprint,
+        current_terrain_config_fingerprint,
+        terrain_fingerprint_matches: data.terrain_config_fingerprint
+            == current_terrain_config_fingerprint,
+        includes_chunk_positions: true,
+        includes_voxels: true,
+        includes_face_visibility: true,
+        includes_props: false,
+        includes_water_overrides: false,
+        includes_protected_areas: false,
+    }
+}
+
+fn editor_chunk_summary(data: &ChunkData) -> EditorChunkSummary {
+    let non_air_voxels = data
+        .voxels
+        .iter()
+        .filter(|voxel| **voxel != VoxelType::Air)
+        .count();
+    let solid_voxels = data.voxels.iter().filter(|voxel| voxel.is_solid()).count();
+    let liquid_voxels = data.voxels.iter().filter(|voxel| voxel.is_liquid()).count();
+    let water_voxels = data
+        .voxels
+        .iter()
+        .filter(|voxel| **voxel == VoxelType::Water)
+        .count();
+
+    EditorChunkSummary {
+        position: ivec3_to_array(data.position),
+        voxel_count: data.voxels.len(),
+        non_air_voxels,
+        solid_voxels,
+        liquid_voxels,
+        water_voxels,
+        face_visibility_mask: data.face_visibility.0,
+    }
+}
+
+fn editor_load_error(save_path: String, error: PersistenceError) -> EditorLoadResult {
+    EditorLoadResult {
+        loaded: false,
+        save_path,
+        metadata: None,
+        error_kind: Some(persistence_error_kind(&error).to_string()),
+        error_message: Some(error.to_string()),
+    }
+}
+
+fn editor_save_error(save_path: String, error: PersistenceError) -> EditorSaveResult {
+    EditorSaveResult {
+        saved: false,
+        save_path,
+        metadata: None,
+        error_kind: Some(persistence_error_kind(&error).to_string()),
+        error_message: Some(error.to_string()),
+    }
+}
+
+fn persistence_error_kind(error: &PersistenceError) -> &'static str {
+    match error {
+        PersistenceError::FileAccess { .. } => "FileAccess",
+        PersistenceError::Serialization(_) => "Serialization",
+        PersistenceError::TerrainFingerprintMismatch { .. } => "TerrainFingerprintMismatch",
+        PersistenceError::NotFound(_) => "NotFound",
+        PersistenceError::DeleteFailed { .. } => "DeleteFailed",
+    }
+}
+
+fn ivec3_to_array(value: IVec3) -> [i32; 3] {
+    [value.x, value.y, value.z]
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 /// Resource to control world persistence behavior

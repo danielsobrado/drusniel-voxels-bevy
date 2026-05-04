@@ -20,6 +20,7 @@ pub mod physics;
 pub mod player;
 pub mod props;
 pub mod rendering;
+pub mod runtime_commands;
 pub mod terrain;
 pub mod vegetation;
 pub mod viewmodel;

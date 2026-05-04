@@ -34,6 +34,7 @@ use voxel_builder::player::PlayerPlugin;
 use voxel_builder::props::PropsPlugin;
 use voxel_builder::rendering::AdaptiveGIPlugin;
 use voxel_builder::rendering::plugin::RenderingPlugin;
+use voxel_builder::runtime_commands::RuntimeWriteCommandPlugin;
 use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
@@ -350,6 +351,7 @@ fn main() {
         ))
         .add_plugins(VoxelPlugin)
         .add_plugins(RenderingPlugin)
+        .add_plugins(RuntimeWriteCommandPlugin)
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(VegetationPlugin)

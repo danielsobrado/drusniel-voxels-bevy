@@ -21,10 +21,10 @@
 - [Sprint 12 - Agent Workbench MVP](./editor/sprint-12-agent-workbench-mvp.md)
 - [Sprint 13 - Automated tests and regression harness](./editor/sprint-13-automated-tests-and-regression-harness.md)
 - [Sprint 14 - Bevy editor bridge design](./editor/sprint-14-bevy-editor-bridge-design.md)
+- [World persistence contract](./editor/world-persistence-contract.md)
 - [Sprint 15 - First real Bevy connection](./editor/sprint-15-first-real-bevy-connection.md)
 - [Sprint 16 - Runtime write commands](./editor/sprint-16-runtime-write-commands.md)
 - [Sprint 17 - Protected areas runtime implementation](./editor/sprint-17-protected-areas-runtime-implementation.md)
 - [Sprint 18 - Save/load, snapshots, and undo/redo](./editor/sprint-18-save-load-snapshots-and-undo-redo.md)
 - [Sprint 19 - Performance and large-world UX](./editor/sprint-19-performance-and-large-world-ux.md)
 - [Sprint 20 - Polish, documentation, and Codex/agent workflow](./editor/sprint-20-polish-documentation-and-llm-agent-workflow.md)
-
