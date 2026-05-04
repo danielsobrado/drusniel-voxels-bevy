@@ -52,7 +52,7 @@ Current development version: **v0.5**.
 
     *   **Terrain Cull Distance**: High-detail distance reduced from 160m to 128m (aligned with shadow cull). Overall cull distance tightened from 400m to 320m (fog hides terrain beyond ~220m).
 
-### Current (v0.4-dev)
+### v0.4
 *   **Bevy 0.18 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
 *   **Radiance Cascades GI**: Screen-space global illumination using voxel SDF data for efficient ray marching, providing realistic indirect lighting with multi-cascade probe system and temporal reprojection.
 *   **Adaptive GI Enhancements**: Stochastic one-from-eight probe selection (~8x GI performance gain at Low quality), SDF-based terrain shadows leveraging voxel data, and screen-screen contact shadows for vegetation micro-detail. Quality presets (Low/Medium/High/Ultra) with ~15% performance range. Toggle with Alt+1/2/3/4, debug with Alt+P.
