@@ -54,6 +54,59 @@ struct RunRecord {
     screenshots: Vec<ScreenshotRecord>,
     #[serde(default)]
     screenshot: Option<String>,
+    #[serde(default)]
+    startup_trace: Option<StartupTraceRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartupTraceRecord {
+    #[serde(default)]
+    total_startup_secs: f64,
+    #[serde(default)]
+    total_startup_frames: u32,
+    #[serde(default)]
+    phases: Vec<StartupPhaseRecord>,
+    #[serde(default)]
+    final_render_ready_signature: Option<StartupRenderReadySignature>,
+    #[serde(default)]
+    counters: StartupTraceCounters,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartupPhaseRecord {
+    name: String,
+    #[serde(default)]
+    elapsed_secs: f64,
+    #[serde(default)]
+    timed_out: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartupRenderReadySignature {
+    #[serde(default)]
+    water_items: u32,
+    #[serde(default)]
+    instanced_prop_items: u32,
+    #[serde(default)]
+    queued_instanced_draws: u32,
+    #[serde(default)]
+    queued_instanced_instances: u32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct StartupTraceCounters {
+    #[serde(default)]
+    prop_chunks_loaded: usize,
+    #[serde(default)]
+    persisted_props_loaded: usize,
+    #[serde(default)]
+    global_water_tiles: usize,
+    #[serde(default)]
+    voxel_water_meshes: u32,
+    #[serde(default)]
+    queued_instanced_prop_draws: u32,
+    #[serde(default)]
+    queued_instanced_prop_instances: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +187,54 @@ fn run() -> Result<(), String> {
         }
         report.push('\n');
     }
+
+    report.push_str("## Startup\n\n");
+    report.push_str("| scene | checkpoint | run | total | frames | wait-ready | render-ready | settle | timeouts | props chunks/items | queued draws/instances/items | water tiles/meshes/items |\n");
+    report.push_str("|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|\n");
+    let mut startup_rows = 0usize;
+    for (_, summary) in &summaries {
+        for checkpoint in &summary.checkpoints {
+            for (run_index, run) in checkpoint.runs.iter().enumerate() {
+                let Some(trace) = run.startup_trace.as_ref() else {
+                    continue;
+                };
+                startup_rows += 1;
+                let counters = &trace.counters;
+                report.push_str(&format!(
+                    "| {} | {} | {} | {}s | {} | {}s | {}s | {}s | {} | {}/{} | {}/{}/{} | {}/{}/{} |\n",
+                    summary.scene,
+                    checkpoint.name,
+                    run_index,
+                    format_number(trace.total_startup_secs),
+                    trace.total_startup_frames,
+                    format_number(startup_phase_secs(trace, "wait-ready")),
+                    format_number(startup_phase_secs(trace, "render-ready")),
+                    format_number(startup_phase_secs(trace, "settle")),
+                    startup_timeouts(trace),
+                    counters.prop_chunks_loaded,
+                    counters.persisted_props_loaded,
+                    queued_draws(trace),
+                    queued_instances(trace),
+                    trace
+                        .final_render_ready_signature
+                        .as_ref()
+                        .map(|signature| signature.instanced_prop_items)
+                        .unwrap_or_default(),
+                    counters.global_water_tiles,
+                    counters.voxel_water_meshes,
+                    trace
+                        .final_render_ready_signature
+                        .as_ref()
+                        .map(|signature| signature.water_items)
+                        .unwrap_or_default(),
+                ));
+            }
+        }
+    }
+    if startup_rows == 0 {
+        report.push_str("| - | - | - | - | - | - | - | - | no startup trace data | - | - | - |\n");
+    }
+    report.push('\n');
 
     report.push_str("## Guard Counters\n\n");
     report.push_str("| scene | checkpoint | water visible/eligible | water sealed | water triangles removed | LOD full/mid/hidden | shadows disabled | render-ready |\n");
@@ -226,6 +327,45 @@ fn ready_status(checkpoint: &CheckpointSummary) -> String {
     } else {
         parts.join(", ")
     }
+}
+
+fn startup_phase_secs(trace: &StartupTraceRecord, name: &str) -> f64 {
+    trace
+        .phases
+        .iter()
+        .find(|phase| phase.name == name)
+        .map(|phase| phase.elapsed_secs)
+        .unwrap_or_default()
+}
+
+fn startup_timeouts(trace: &StartupTraceRecord) -> String {
+    let timed_out = trace
+        .phases
+        .iter()
+        .filter(|phase| phase.timed_out)
+        .map(|phase| phase.name.as_str())
+        .collect::<Vec<_>>();
+    if timed_out.is_empty() {
+        "none".to_string()
+    } else {
+        timed_out.join(", ")
+    }
+}
+
+fn queued_draws(trace: &StartupTraceRecord) -> u32 {
+    trace
+        .final_render_ready_signature
+        .as_ref()
+        .map(|signature| signature.queued_instanced_draws)
+        .unwrap_or(trace.counters.queued_instanced_prop_draws)
+}
+
+fn queued_instances(trace: &StartupTraceRecord) -> u32 {
+    trace
+        .final_render_ready_signature
+        .as_ref()
+        .map(|signature| signature.queued_instanced_instances)
+        .unwrap_or(trace.counters.queued_instanced_prop_instances)
 }
 
 fn collect_caveats(summaries: &[(PathBuf, BenchSummary)]) -> Vec<String> {

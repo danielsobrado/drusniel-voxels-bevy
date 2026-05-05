@@ -9,6 +9,10 @@ use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
 use crate::player::Player;
+use crate::props::instanced_render::{InstancedPropGroup, PropInstanceGroups};
+use crate::props::instancing::PropMeshCache;
+use crate::props::persistence::PropPersistenceState;
+use crate::props::{Prop, PropAssets};
 use crate::rendering::building_material::BuildingMesh;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
@@ -105,6 +109,26 @@ pub struct BenchRenderToggles {
     pub quality_preset: Option<RenderQualityPreset>,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy)]
+struct StartupTraceConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_true")]
+    capture_csv: bool,
+    #[serde(default = "default_startup_trace_max_phase_frames")]
+    max_phase_frames: u32,
+}
+
+impl Default for StartupTraceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            capture_csv: true,
+            max_phase_frames: default_startup_trace_max_phase_frames(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BenchTerrainMaterialQuality {
@@ -168,6 +192,7 @@ struct BenchState {
     next_screenshot_point: usize,
     current_screenshots: Vec<ScreenshotRecord>,
     current_run: Option<RunRecord>,
+    startup_trace: Option<StartupTraceRunBuilder>,
     gameplay_stall_frames: u32,
     gameplay_stall_events: u32,
     gameplay_min_horizontal_speed: f32,
@@ -193,7 +218,7 @@ enum BenchPhase {
     Done,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 struct BenchReadySignature {
     missing_chunks: u32,
     dirty_chunks: u32,
@@ -211,7 +236,7 @@ struct BenchReadySnapshot {
     chunks_skipped_this_frame: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 struct BenchRenderReadySignature {
     opaque_items: u32,
     alpha_mask_items: u32,
@@ -243,6 +268,8 @@ struct BenchScene {
     chunk_load_radius: i32,
     #[serde(default = "default_freeze_terrain_lod_after_ready")]
     freeze_terrain_lod_after_ready: bool,
+    #[serde(default)]
+    startup_trace: StartupTraceConfig,
     #[serde(default)]
     render_toggles: BenchRenderToggles,
     #[serde(rename = "checkpoint")]
@@ -333,6 +360,8 @@ struct RunRecord {
     csv: String,
     screenshot: Option<String>,
     screenshots: Vec<ScreenshotRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_trace: Option<StartupTraceRecord>,
     ready_wait_frames: u32,
     ready_wait_secs: f32,
     ready_stable_frames: u32,
@@ -349,6 +378,95 @@ struct RunRecord {
 }
 
 #[derive(Serialize, Clone)]
+struct StartupTraceRecord {
+    total_startup_secs: f64,
+    total_startup_frames: u32,
+    events: Vec<StartupTraceEvent>,
+    phases: Vec<StartupPhaseRecord>,
+    final_ready_signature: BenchReadySignature,
+    final_render_ready_signature: Option<BenchRenderReadySignature>,
+    counters: StartupTraceCounters,
+}
+
+#[derive(Serialize, Clone)]
+struct StartupTraceEvent {
+    name: String,
+    frame: u32,
+    elapsed_secs: f64,
+    delta_secs: f64,
+}
+
+#[derive(Serialize, Clone)]
+struct StartupPhaseRecord {
+    name: String,
+    start_frame: u32,
+    end_frame: u32,
+    frames: u32,
+    elapsed_secs: f64,
+    timed_out: bool,
+    csv: Option<String>,
+    areas: BTreeMap<String, AreaSummary>,
+}
+
+#[derive(Serialize, Clone, Default)]
+struct StartupTraceCounters {
+    prop_assets_ready: bool,
+    prop_mesh_cache_ready: bool,
+    prop_chunks_loaded: usize,
+    persisted_props_loaded: usize,
+    instanced_prop_groups: usize,
+    pending_instanced_prop_groups: usize,
+    visible_props: usize,
+    hidden_props: usize,
+    visible_instanced_prop_groups: usize,
+    visible_instanced_prop_instances: usize,
+    queued_instanced_prop_draws: u32,
+    queued_instanced_prop_instances: u32,
+    global_water_tiles: usize,
+    voxel_water_meshes: u32,
+    missing_chunks: u32,
+    dirty_chunks: u32,
+    first_nonzero_render_phase_items: Option<u32>,
+}
+
+struct StartupTraceRunBuilder {
+    config: StartupTraceConfig,
+    bench_started: Instant,
+    run_started_frame: u32,
+    events: Vec<StartupTraceEvent>,
+    phases: Vec<StartupPhaseRecord>,
+    current_phase: Option<StartupTracePhaseBuilder>,
+    seen: StartupTraceSeen,
+    counters: StartupTraceCounters,
+}
+
+struct StartupTracePhaseBuilder {
+    name: String,
+    start: Instant,
+    start_frame: u32,
+}
+
+#[derive(Default)]
+struct StartupTraceSeen {
+    bench_environment_ready: bool,
+    checkpoint_setup: bool,
+    first_update: bool,
+    prop_assets_ready: bool,
+    prop_mesh_cache_ready: bool,
+    props_spawned: bool,
+    first_terrain_mesh: bool,
+    first_water_mesh: bool,
+    first_render_signature: bool,
+    first_nonzero_render_phase_items: bool,
+    terrain_ready: bool,
+    render_ready: bool,
+    settle_start: bool,
+    settle_end: bool,
+    hold_start: bool,
+    max_phase_frames: bool,
+}
+
+#[derive(Serialize, Clone)]
 struct ScreenshotRecord {
     name: String,
     frame: u32,
@@ -361,6 +479,128 @@ struct AreaSummary {
     p99_ms: f64,
     calls_per_frame: f64,
     unit: &'static str,
+}
+
+impl StartupTraceRunBuilder {
+    fn new(config: StartupTraceConfig, bench_started: Instant, frame: u32) -> Self {
+        let mut trace = Self {
+            config,
+            bench_started,
+            run_started_frame: frame,
+            events: Vec::new(),
+            phases: Vec::new(),
+            current_phase: None,
+            seen: StartupTraceSeen::default(),
+            counters: StartupTraceCounters::default(),
+        };
+        trace.event("process_start", frame);
+        trace
+    }
+
+    fn event(&mut self, name: &str, frame: u32) {
+        let elapsed_secs = self.bench_started.elapsed().as_secs_f64();
+        let delta_secs = self
+            .events
+            .last()
+            .map(|event| elapsed_secs - event.elapsed_secs)
+            .unwrap_or(elapsed_secs);
+        self.events.push(StartupTraceEvent {
+            name: name.to_string(),
+            frame,
+            elapsed_secs,
+            delta_secs: delta_secs.max(0.0),
+        });
+    }
+
+    fn start_phase(&mut self, name: &str, frame: u32) {
+        self.current_phase = Some(StartupTracePhaseBuilder {
+            name: name.to_string(),
+            start: Instant::now(),
+            start_frame: frame,
+        });
+    }
+
+    fn finish_phase(
+        &mut self,
+        config: &BenchConfig,
+        checkpoint: &BenchCheckpoint,
+        run_index: u32,
+        frame: u32,
+        timed_out: bool,
+        timing: &AreaTimingRecorder,
+    ) {
+        let Some(phase) = self.current_phase.take() else {
+            return;
+        };
+        let csv = if self.config.capture_csv {
+            let marker = format!("startup-{}", phase.name);
+            let csv_name = run_file_name(
+                &config.scene_path,
+                checkpoint,
+                Some(&marker),
+                run_index,
+                "csv",
+            );
+            let csv_path = config.output_dir.join(&csv_name);
+            match write_area_timing_csv(timing, &csv_path) {
+                Ok(_) => Some(csv_name),
+                Err(err) => {
+                    warn!(
+                        "failed to write startup phase CSV {}: {}",
+                        csv_path.display(),
+                        err
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        self.phases.push(StartupPhaseRecord {
+            name: phase.name,
+            start_frame: phase.start_frame,
+            end_frame: frame,
+            frames: frame.saturating_sub(phase.start_frame),
+            elapsed_secs: phase.start.elapsed().as_secs_f64(),
+            timed_out,
+            csv,
+            areas: timing_area_summaries(timing),
+        });
+    }
+
+    fn record(
+        self,
+        frame: u32,
+        ready: BenchReadySignature,
+        render_ready: Option<BenchRenderReadySignature>,
+    ) -> StartupTraceRecord {
+        StartupTraceRecord {
+            total_startup_secs: self.bench_started.elapsed().as_secs_f64(),
+            total_startup_frames: frame.saturating_sub(self.run_started_frame),
+            events: self.events,
+            phases: self.phases,
+            final_ready_signature: ready,
+            final_render_ready_signature: render_ready,
+            counters: self.counters,
+        }
+    }
+}
+
+fn record_startup_event_once(
+    state: &mut BenchState,
+    seen_field: impl for<'a> FnOnce(&'a mut StartupTraceSeen) -> &'a mut bool,
+    name: &str,
+    frame: u32,
+) {
+    let Some(trace) = state.startup_trace.as_mut() else {
+        return;
+    };
+    let seen = seen_field(&mut trace.seen);
+    if *seen {
+        return;
+    }
+    *seen = true;
+    trace.event(name, frame);
 }
 
 pub struct BenchPlugin;
@@ -381,6 +621,7 @@ impl Plugin for BenchPlugin {
             )
         });
         let (git_sha, git_dirty) = git_info();
+        let started = Instant::now();
 
         if config.headless {
             warn!("--bench-headless requested; falling back to windowed rendering on this backend");
@@ -424,12 +665,16 @@ impl Plugin for BenchPlugin {
                 next_screenshot_point: 0,
                 current_screenshots: Vec::new(),
                 current_run: None,
+                startup_trace: scene
+                    .startup_trace
+                    .enabled
+                    .then(|| StartupTraceRunBuilder::new(scene.startup_trace, started, 0)),
                 gameplay_stall_frames: 0,
                 gameplay_stall_events: 0,
                 gameplay_min_horizontal_speed: 0.0,
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
-                started: Instant::now(),
+                started,
                 run_started_utc: utc_timestamp(SystemTime::now()),
                 git_sha,
                 git_dirty,
@@ -455,7 +700,12 @@ impl Plugin for BenchPlugin {
             )
             .add_systems(
                 Update,
-                (apply_bench_render_toggles, run_bench_state_machine),
+                (
+                    apply_bench_render_toggles,
+                    record_startup_trace_observations_system,
+                    run_bench_state_machine,
+                )
+                    .chain(),
             );
     }
 }
@@ -464,10 +714,18 @@ fn setup_bench_environment(
     mut time: ResMut<Time<Virtual>>,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut timing: ResMut<AreaTimingRecorder>,
+    mut state: ResMut<BenchState>,
+    frame: Res<FrameCount>,
 ) {
     time.set_max_delta(std::time::Duration::from_millis(100));
     atmosphere.cycle_enabled = false;
     timing.set_enabled(true);
+    record_startup_event_once(
+        &mut state,
+        |seen| &mut seen.bench_environment_ready,
+        "bench_environment_ready",
+        frame.0,
+    );
 }
 
 fn apply_bench_render_toggles(
@@ -507,6 +765,168 @@ fn apply_bench_render_toggles(
             config.enabled = false;
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_startup_observations(
+    scene: &BenchScene,
+    state: &mut BenchState,
+    world: &VoxelWorld,
+    chunk_stats: &RuntimeChunkStats,
+    timing: &AreaTimingRecorder,
+    frame: u32,
+    prop_assets: Option<&PropAssets>,
+    prop_mesh_cache: Option<&PropMeshCache>,
+    prop_persistence: Option<&PropPersistenceState>,
+    prop_groups: Option<&PropInstanceGroups>,
+    prop_visibility: &Query<&Visibility, With<Prop>>,
+    instanced_prop_groups: &Query<(&InstancedPropGroup, &Visibility)>,
+    water_tiles: &Query<Entity, With<bevy_water::WaterTiles>>,
+) {
+    let Some(trace) = state.startup_trace.as_mut() else {
+        return;
+    };
+
+    if prop_assets.is_some_and(|assets| assets.loaded) {
+        trace.counters.prop_assets_ready = true;
+        if !trace.seen.prop_assets_ready {
+            trace.seen.prop_assets_ready = true;
+            trace.event("prop_assets_ready", frame);
+        }
+    }
+    if prop_mesh_cache.is_some_and(|cache| cache.is_ready()) {
+        trace.counters.prop_mesh_cache_ready = true;
+        if !trace.seen.prop_mesh_cache_ready {
+            trace.seen.prop_mesh_cache_ready = true;
+            trace.event("prop_mesh_cache_ready", frame);
+        }
+    }
+    if let Some(persistence) = prop_persistence {
+        trace.counters.prop_chunks_loaded = persistence.loaded_chunks.len();
+        trace.counters.persisted_props_loaded =
+            persistence.chunk_prop_data.values().map(Vec::len).sum();
+        if trace.counters.prop_chunks_loaded > 0 && !trace.seen.props_spawned {
+            trace.seen.props_spawned = true;
+            trace.event("props_spawned", frame);
+        }
+    }
+    if let Some(groups) = prop_groups {
+        trace.counters.instanced_prop_groups = groups.group_count();
+        trace.counters.pending_instanced_prop_groups = groups.pending_group_count();
+    }
+
+    let mut visible_props = 0usize;
+    let mut hidden_props = 0usize;
+    for visibility in prop_visibility.iter() {
+        if *visibility == Visibility::Hidden {
+            hidden_props += 1;
+        } else {
+            visible_props += 1;
+        }
+    }
+    trace.counters.visible_props = visible_props;
+    trace.counters.hidden_props = hidden_props;
+
+    let mut visible_groups = 0usize;
+    let mut visible_group_instances = 0usize;
+    for (group, visibility) in instanced_prop_groups.iter() {
+        if *visibility != Visibility::Hidden {
+            visible_groups += 1;
+            visible_group_instances += group.instances.len();
+        }
+    }
+    trace.counters.visible_instanced_prop_groups = visible_groups;
+    trace.counters.visible_instanced_prop_instances = visible_group_instances;
+
+    trace.counters.global_water_tiles = water_tiles.iter().count();
+    trace.counters.voxel_water_meshes = chunk_stats.water_mesh_entities;
+    if chunk_stats.mesh_entities > 0 && !trace.seen.first_terrain_mesh {
+        trace.seen.first_terrain_mesh = true;
+        trace.event("first_terrain_mesh", frame);
+    }
+    if chunk_stats.water_mesh_entities > 0 && !trace.seen.first_water_mesh {
+        trace.seen.first_water_mesh = true;
+        trace.event("first_water_mesh", frame);
+    }
+
+    if let Some(checkpoint) = scene.checkpoints.get(state.checkpoint_index) {
+        let snapshot = bench_ready_snapshot(
+            world,
+            chunk_stats,
+            vec3(checkpoint.position),
+            scene.chunk_load_radius,
+        );
+        trace.counters.missing_chunks = snapshot.signature.missing_chunks;
+        trace.counters.dirty_chunks = snapshot.signature.dirty_chunks;
+    }
+
+    trace.counters.queued_instanced_prop_draws =
+        latest_counter_u32(timing, "Render Instancing Queue Draws").unwrap_or_default();
+    trace.counters.queued_instanced_prop_instances =
+        latest_counter_u32(timing, "Render Instancing Queue Instances").unwrap_or_default();
+
+    if let Some(signature) = bench_render_ready_signature(timing) {
+        if !trace.seen.first_render_signature {
+            trace.seen.first_render_signature = true;
+            trace.event("first_render_signature", frame);
+        }
+        let phase_items = signature.opaque_items
+            + signature.alpha_mask_items
+            + signature.transparent_items
+            + signature.shadow_items;
+        if phase_items > 0 && !trace.seen.first_nonzero_render_phase_items {
+            trace.seen.first_nonzero_render_phase_items = true;
+            trace.counters.first_nonzero_render_phase_items = Some(phase_items);
+            trace.event("first_nonzero_render_phase_items", frame);
+        }
+    }
+
+    if let Some(phase) = trace.current_phase.as_ref() {
+        let frames = frame.saturating_sub(phase.start_frame);
+        if frames >= trace.config.max_phase_frames && !trace.seen.max_phase_frames {
+            trace.seen.max_phase_frames = true;
+            trace.event("startup_trace_max_phase_frames", frame);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_startup_trace_observations_system(
+    scene: Res<BenchSceneResource>,
+    mut state: ResMut<BenchState>,
+    world: Res<VoxelWorld>,
+    chunk_stats: Res<RuntimeChunkStats>,
+    timing: Res<AreaTimingRecorder>,
+    frame: Res<FrameCount>,
+    prop_assets: Option<Res<PropAssets>>,
+    prop_mesh_cache: Option<Res<PropMeshCache>>,
+    prop_persistence: Option<Res<PropPersistenceState>>,
+    prop_groups: Option<Res<PropInstanceGroups>>,
+    prop_visibility: Query<&Visibility, With<Prop>>,
+    instanced_prop_groups: Query<(&InstancedPropGroup, &Visibility)>,
+    water_tiles: Query<Entity, With<bevy_water::WaterTiles>>,
+) {
+    record_startup_event_once(
+        &mut state,
+        |seen| &mut seen.first_update,
+        "first_update",
+        frame.0,
+    );
+    record_startup_observations(
+        &scene.0,
+        &mut state,
+        &world,
+        &chunk_stats,
+        &timing,
+        frame.0,
+        prop_assets.as_deref(),
+        prop_mesh_cache.as_deref(),
+        prop_persistence.as_deref(),
+        prop_groups.as_deref(),
+        &prop_visibility,
+        &instanced_prop_groups,
+        &water_tiles,
+    );
 }
 
 fn apply_bench_gameplay_input(
@@ -579,7 +999,7 @@ fn run_bench_state_machine(
 
     let scene = &scene.0;
     if scene.checkpoints.is_empty() {
-        finish_bench(&config, &scene, &mut state, &mut exit);
+        finish_bench(&config, &scene, &mut state, &mut exit, frame.0);
         return;
     }
 
@@ -661,6 +1081,22 @@ fn run_bench_state_machine(
             state.last_render_ready_stable_frames = 0;
             state.last_render_ready_signature = None;
             state.last_render_ready_timed_out = false;
+            if scene.startup_trace.enabled && state.startup_trace.is_none() {
+                state.startup_trace = Some(StartupTraceRunBuilder::new(
+                    scene.startup_trace,
+                    state.started,
+                    frame.0,
+                ));
+            }
+            record_startup_event_once(
+                &mut state,
+                |seen| &mut seen.checkpoint_setup,
+                "checkpoint_setup",
+                frame.0,
+            );
+            if let Some(trace) = state.startup_trace.as_mut() {
+                trace.start_phase("wait-ready", frame.0);
+            }
             state.phase = BenchPhase::WaitReady;
         }
         BenchPhase::WaitReady => {
@@ -695,7 +1131,9 @@ fn run_bench_state_machine(
             );
 
             let ready = state.ready_stable_frames >= READY_STABLE_FRAMES && min_wait_satisfied;
-            let timed_out = wait_secs >= READY_TIMEOUT_SECS;
+            let trace_frame_limit = scene.startup_trace.enabled
+                && state.ready_wait_frames >= scene.startup_trace.max_phase_frames;
+            let timed_out = wait_secs >= READY_TIMEOUT_SECS || trace_frame_limit;
             if ready || timed_out {
                 if scene.freeze_terrain_lod_after_ready {
                     if let Some(control) = terrain_lod_control.as_deref_mut() {
@@ -758,10 +1196,31 @@ fn run_bench_state_machine(
                         snapshot.signature.low_lod_chunks,
                     );
                 }
+                let run_index = state.run_index;
+                let ready_timed_out = state.last_ready_timed_out;
+                if let Some(trace) = state.startup_trace.as_mut() {
+                    trace.finish_phase(
+                        &config,
+                        checkpoint,
+                        run_index,
+                        frame.0,
+                        ready_timed_out,
+                        &timing,
+                    );
+                }
+                record_startup_event_once(
+                    &mut state,
+                    |seen| &mut seen.terrain_ready,
+                    "terrain_ready",
+                    frame.0,
+                );
                 state.render_ready_started = Some(Instant::now());
                 state.render_ready_wait_frames = 0;
                 state.render_ready_stable_frames = 0;
                 state.render_ready_last_signature = None;
+                if let Some(trace) = state.startup_trace.as_mut() {
+                    trace.start_phase("render-ready", frame.0);
+                }
                 state.phase = BenchPhase::WaitRenderReady;
             }
         }
@@ -807,7 +1266,9 @@ fn run_bench_state_machine(
             let ready = signature.is_some()
                 && state.render_ready_stable_frames >= RENDER_READY_STABLE_FRAMES
                 && min_frames_satisfied;
-            let timed_out = wait_secs >= RENDER_READY_TIMEOUT_SECS;
+            let trace_frame_limit = scene.startup_trace.enabled
+                && state.render_ready_wait_frames >= scene.startup_trace.max_phase_frames;
+            let timed_out = wait_secs >= RENDER_READY_TIMEOUT_SECS || trace_frame_limit;
             if ready || timed_out {
                 state.last_render_ready_wait_frames = state.render_ready_wait_frames;
                 state.last_render_ready_secs = wait_secs;
@@ -854,11 +1315,55 @@ fn run_bench_state_machine(
                         signature,
                     );
                 }
+                let run_index = state.run_index;
+                let render_ready_timed_out = state.last_render_ready_timed_out;
+                if let Some(trace) = state.startup_trace.as_mut() {
+                    trace.finish_phase(
+                        &config,
+                        checkpoint,
+                        run_index,
+                        frame.0,
+                        render_ready_timed_out,
+                        &timing,
+                    );
+                }
+                record_startup_event_once(
+                    &mut state,
+                    |seen| &mut seen.render_ready,
+                    "render_ready",
+                    frame.0,
+                );
+                record_startup_event_once(
+                    &mut state,
+                    |seen| &mut seen.settle_start,
+                    "settle_start",
+                    frame.0,
+                );
+                if let Some(trace) = state.startup_trace.as_mut() {
+                    trace.start_phase("settle", frame.0);
+                }
                 state.phase = BenchPhase::Settle;
             }
         }
         BenchPhase::Settle => {
             if state.settle_frames_left == 0 {
+                let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                let run_index = state.run_index;
+                if let Some(trace) = state.startup_trace.as_mut() {
+                    trace.finish_phase(&config, checkpoint, run_index, frame.0, false, &timing);
+                }
+                record_startup_event_once(
+                    &mut state,
+                    |seen| &mut seen.settle_end,
+                    "settle_end",
+                    frame.0,
+                );
+                record_startup_event_once(
+                    &mut state,
+                    |seen| &mut seen.hold_start,
+                    "hold_start",
+                    frame.0,
+                );
                 timing.clear_window();
                 state.phase = BenchPhase::Hold;
             } else {
@@ -911,6 +1416,13 @@ fn run_bench_state_machine(
                     csv: csv_name,
                     screenshot,
                     screenshots: state.current_screenshots.clone(),
+                    startup_trace: state.startup_trace.take().map(|trace| {
+                        trace.record(
+                            frame.0,
+                            state.last_ready_snapshot.signature,
+                            state.last_render_ready_signature,
+                        )
+                    }),
                     ready_wait_frames: state.last_ready_wait_frames,
                     ready_wait_secs: state.last_ready_wait_secs,
                     ready_stable_frames: state.last_ready_stable_frames,
@@ -995,7 +1507,7 @@ fn run_bench_state_machine(
             let tier = fog_quality.as_deref().map(|quality| quality.tier);
             finish_run(&config, &scene, &mut state, &timing, tier);
             if state.checkpoint_index >= scene.checkpoints.len() {
-                finish_bench(&config, &scene, &mut state, &mut exit);
+                finish_bench(&config, &scene, &mut state, &mut exit, frame.0);
             } else {
                 state.phase = BenchPhase::SetupCheckpoint;
             }
@@ -1025,6 +1537,7 @@ fn finish_run(
         csv: String::new(),
         screenshot: None,
         screenshots: Vec::new(),
+        startup_trace: None,
         ready_wait_frames: 0,
         ready_wait_secs: 0.0,
         ready_stable_frames: 0,
@@ -1103,19 +1616,78 @@ fn finish_run(
     state.checkpoints.push(summary);
 }
 
+fn timing_area_summaries(timing: &AreaTimingRecorder) -> BTreeMap<String, AreaSummary> {
+    let mut areas = BTreeMap::new();
+    if let Some(frame) = timing.frame_total_summary() {
+        areas.insert(
+            frame.area.to_string(),
+            AreaSummary {
+                median_ms: frame.avg_ms,
+                p99_ms: frame.p99_ms,
+                calls_per_frame: frame.calls_per_frame,
+                unit: frame.unit,
+            },
+        );
+    }
+    for area in timing.rolling_summaries() {
+        areas.insert(
+            area.area.to_string(),
+            AreaSummary {
+                median_ms: area.avg_ms,
+                p99_ms: area.p99_ms,
+                calls_per_frame: area.calls_per_frame,
+                unit: area.unit,
+            },
+        );
+    }
+    areas
+}
+
+fn append_summary_write_startup_events(state: &mut BenchState, frame: u32) {
+    let elapsed_secs = state.started.elapsed().as_secs_f64();
+    for checkpoint in &mut state.checkpoints {
+        for run in &mut checkpoint.runs {
+            let Some(trace) = run.startup_trace.as_mut() else {
+                continue;
+            };
+            if trace
+                .events
+                .iter()
+                .any(|event| event.name == "summary_write")
+            {
+                continue;
+            }
+            let delta_secs = trace
+                .events
+                .last()
+                .map(|event| elapsed_secs - event.elapsed_secs)
+                .unwrap_or(elapsed_secs)
+                .max(0.0);
+            trace.events.push(StartupTraceEvent {
+                name: "summary_write".to_string(),
+                frame,
+                elapsed_secs,
+                delta_secs,
+            });
+        }
+    }
+}
+
 fn finish_bench(
     config: &BenchConfig,
     scene: &BenchScene,
     state: &mut BenchState,
     exit: &mut MessageWriter<AppExit>,
+    frame: u32,
 ) {
+    append_summary_write_startup_events(state, frame);
     let gameplay_failed = state
         .checkpoints
         .iter()
         .flat_map(|checkpoint| checkpoint.runs.iter())
         .any(|run| run.gameplay_failed);
     let summary = BenchSummary {
-        schema_version: 2,
+        schema_version: 3,
         scene: config
             .scene_path
             .file_name()
@@ -1739,6 +2311,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_startup_trace_max_phase_frames() -> u32 {
+    12_000
+}
+
 fn median(mut values: Vec<f64>) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -1797,4 +2373,59 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     let month = mp + if mp < 10 { 3 } else { -9 };
     let year = y + if month <= 2 { 1 } else { 0 };
     (year as i32, month as u32, day as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_trace_scene_config_deserializes() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 6
+
+[startup_trace]
+enabled = true
+capture_csv = true
+max_phase_frames = 12000
+
+[[checkpoint]]
+name = "startup"
+position = [0.0, 1.0, 2.0]
+look_at = [3.0, 4.0, 5.0]
+time_of_day = 0.25
+hold_frames = 30
+"#,
+        )
+        .expect("startup trace scene should deserialize");
+
+        assert!(scene.startup_trace.enabled);
+        assert!(scene.startup_trace.capture_csv);
+        assert_eq!(scene.startup_trace.max_phase_frames, 12_000);
+        assert_eq!(scene.checkpoints.len(), 1);
+    }
+
+    #[test]
+    fn startup_trace_events_are_ordered_with_deltas() {
+        let mut trace =
+            StartupTraceRunBuilder::new(StartupTraceConfig::default(), Instant::now(), 7);
+        trace.event("checkpoint_setup", 8);
+        trace.event("hold_start", 10);
+        let record = trace.record(10, BenchReadySignature::default(), None);
+
+        assert_eq!(record.total_startup_frames, 3);
+        assert_eq!(
+            record
+                .events
+                .iter()
+                .map(|event| event.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["process_start", "checkpoint_setup", "hold_start"]
+        );
+        assert!(record.events.iter().all(|event| event.delta_secs >= 0.0));
+    }
 }

@@ -306,6 +306,14 @@ pub struct PropInstanceGroups {
 }
 
 impl PropInstanceGroups {
+    pub fn group_count(&self) -> usize {
+        self.groups.len()
+    }
+
+    pub fn pending_group_count(&self) -> usize {
+        self.pending.len()
+    }
+
     pub fn remove_chunk(&mut self, chunk_pos: IVec2) -> Vec<Entity> {
         let region_pos = prop_group_region_pos(chunk_pos);
         let mut removed = Vec::new();
