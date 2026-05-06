@@ -87,6 +87,7 @@ export interface EditorUndoSnapshot {
   readonly renderQualityPreset: RenderQualityPreset;
   readonly chunks: readonly ChunkSummary[];
   readonly worldViewport: WorldViewportPreview | null;
+  readonly viewportSnapshot: ViewportSnapshot | null;
   readonly protectedAreas: readonly ProtectedArea[];
   readonly waterBodies: readonly WaterBody[];
   readonly props: readonly PropInstance[];
@@ -118,4 +119,4 @@ export interface LargeWorldStats {
   readonly waterBodyCount: number;
   readonly consoleMessageCount: number;
 }
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, WaterBody, WorldViewportPreview } from "./world";
+import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "./world";

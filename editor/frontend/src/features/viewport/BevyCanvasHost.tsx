@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { ChunkSummary, MockWaterRuntimeSnapshot, ProtectedArea, WaterReflectionDebugViewMode, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { ChunkSummary, MockWaterRuntimeSnapshot, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { RuntimeState } from "../../types/editor";
 
 export interface AreaOverlayState {
@@ -14,6 +14,7 @@ export interface AreaOverlayState {
 interface BevyCanvasHostProps {
   readonly chunks: readonly ChunkSummary[];
   readonly worldViewport: WorldViewportPreview | null;
+  readonly viewportSnapshot: ViewportSnapshot | null;
   readonly runtimeState: RuntimeState;
   readonly areaOverlays: readonly AreaOverlayState[];
   readonly showProtectedAreas: boolean;
@@ -148,9 +149,50 @@ const drawDiamond = (ctx: CanvasRenderingContext2D, x: number, y: number, radius
   ctx.stroke();
 };
 
+const projectIso = (position: readonly [number, number, number], view: ViewState) => ({
+  x: view.offsetX + (position[0] - position[2]) * 0.72 * view.zoom,
+  y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
+});
+
+const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer, view: ViewState, fill: string, stroke: string) => {
+  if (!mesh.positions || !mesh.indices || mesh.indices.length < 3) {
+    return false;
+  }
+
+  ctx.save();
+  ctx.lineWidth = Math.max(0.5, 0.8 * view.zoom);
+  ctx.strokeStyle = stroke;
+  ctx.fillStyle = fill;
+
+  const triangleLimit = Math.min(mesh.indices.length - (mesh.indices.length % 3), 18000);
+  for (let index = 0; index < triangleLimit; index += 3) {
+    const a = mesh.positions[mesh.indices[index]];
+    const b = mesh.positions[mesh.indices[index + 1]];
+    const c = mesh.positions[mesh.indices[index + 2]];
+    if (!a || !b || !c) {
+      continue;
+    }
+
+    const pa = projectIso(a, view);
+    const pb = projectIso(b, view);
+    const pc = projectIso(c, view);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.lineTo(pc.x, pc.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  return true;
+};
+
 export function BevyCanvasHost({
   chunks,
   worldViewport,
+  viewportSnapshot,
   runtimeState,
   areaOverlays,
   showProtectedAreas,
@@ -165,6 +207,8 @@ export function BevyCanvasHost({
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
   const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
+  const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
+  const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
   const viewportStateLabel = runtimeState === "mock" ? "offline preview" : runtimeState;
   const waterSampleCount = samples.filter((sample) => sample.water).length;
 
@@ -229,8 +273,21 @@ export function BevyCanvasHost({
     }
     ctx.restore();
 
+    let renderedMesh = false;
+    for (const chunk of meshChunks) {
+      renderedMesh =
+        drawMeshBuffer(ctx, chunk.mesh.terrain, view, "rgba(92, 101, 111, 0.72)", "rgba(15, 18, 24, 0.7)") ||
+        renderedMesh;
+      renderedMesh =
+        drawMeshBuffer(ctx, chunk.mesh.water, view, "rgba(55, 159, 220, 0.55)", "rgba(157, 221, 255, 0.55)") ||
+        renderedMesh;
+    }
+
     const orderedSamples = [...samples].sort((left, right) => left.x + left.z + left.height - (right.x + right.z + right.height));
     for (const sample of orderedSamples) {
+      if (renderedMesh && !sample.water) {
+        continue;
+      }
       const isoX = (sample.x - sample.z) * 0.72;
       const isoY = (sample.x + sample.z) * 0.36 - sample.height * 1.35;
       const screenX = view.offsetX + isoX * view.zoom;
@@ -253,7 +310,7 @@ export function BevyCanvasHost({
       ctx.textAlign = "center";
       ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
     }
-  }, [canvasSize.height, canvasSize.width, hasBackendPreview, samples, view]);
+  }, [canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
 
   return (
     <div ref={hostRef} className="bevy-canvas-host world-viewport-host" data-testid="bevy-canvas-host" aria-label="Runtime world viewport">
@@ -338,13 +395,14 @@ export function BevyCanvasHost({
 
       <div className="canvas-reticle" aria-hidden="true" />
       <div className="canvas-label">
-        {hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {viewportStateLabel}
+        {hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {viewportStateLabel}
       </div>
       <div className="minimap-canvas" aria-label="World viewport summary">
         <div className="minimap-grid">
           <strong>{chunks.length}</strong>
           <span>chunks</span>
           <span>{samples.length} samples</span>
+          <span>{meshChunks.length} mesh payloads</span>
           <span>{waterSampleCount} water</span>
         </div>
       </div>

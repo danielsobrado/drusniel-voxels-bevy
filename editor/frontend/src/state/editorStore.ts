@@ -21,7 +21,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -86,6 +86,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   renderQualityPreset: state.renderQualityPreset,
   chunks: cloneEditorValue(state.chunks),
   worldViewport: cloneEditorValue(state.worldViewport),
+  viewportSnapshot: cloneEditorValue(state.viewportSnapshot),
   protectedAreas: cloneEditorValue(state.protectedAreas),
   waterBodies: cloneEditorValue(state.waterBodies),
   props: cloneEditorValue(state.props),
@@ -106,6 +107,7 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.renderQualityPreset = snapshot.renderQualityPreset;
   state.chunks = [...cloneEditorValue(snapshot.chunks)];
   state.worldViewport = castDraft(cloneEditorValue(snapshot.worldViewport));
+  state.viewportSnapshot = castDraft(cloneEditorValue(snapshot.viewportSnapshot));
   state.protectedAreas = [...cloneEditorValue(snapshot.protectedAreas)];
   state.waterBodies = [...cloneEditorValue(snapshot.waterBodies)];
   state.props = [...cloneEditorValue(snapshot.props)];
@@ -128,6 +130,7 @@ export interface EditorDataState {
   readonly renderQualityPreset: RenderQualityPreset;
   readonly chunks: ChunkSummary[];
   readonly worldViewport: WorldViewportPreview | null;
+  readonly viewportSnapshot: ViewportSnapshot | null;
   readonly voxelBlocks: VoxelBlock[];
   readonly protectedAreas: ProtectedArea[];
   readonly waterBodies: WaterBody[];
@@ -175,6 +178,7 @@ interface EditorActions {
   readonly setSelectedAtlasTile: (tileId: string) => void;
   readonly markAtlasRebuilt: () => void;
   readonly replaceWorldSummary: (summary: WorldSummary) => void;
+  readonly setViewportSnapshot: (snapshot: ViewportSnapshot | null) => void;
   readonly setWaterRuntimeSnapshot: (snapshot: MockWaterRuntimeSnapshot) => void;
   readonly syncWaterReflectionStatus: (patch: Partial<WaterReflectionStatus>) => void;
   readonly markDirty: (chunkId?: string) => void;
@@ -330,6 +334,7 @@ export const createInitialEditorState = (): EditorDataState => ({
   selectedAtlasTileId: "tile-0",
   chunks: [...mockChunks],
   worldViewport: null,
+  viewportSnapshot: null,
   voxelBlocks: [...mockVoxelBlocks],
   protectedAreas: [...mockProtectedAreas],
   waterBodies: [...mockWaterBodies],
@@ -665,6 +670,24 @@ export const useEditorStore = create<EditorStore>()(
           consoleMessageCount: state.consoleMessages.length,
         };
       }),
+    setViewportSnapshot: (snapshot) =>
+      set((state) => {
+        state.viewportSnapshot = castDraft(snapshot);
+        const preview = snapshot
+          ? {
+              chunkSize: snapshot.chunkSize,
+              sampleResolution: snapshot.sampleResolution,
+              chunks: snapshot.chunks.map((chunk) => ({
+                chunkId: chunk.chunkId,
+                coordinate: chunk.coordinate,
+                samples: [...chunk.samples],
+              })),
+            }
+          : null;
+        if (preview) {
+          state.worldViewport = castDraft(preview);
+        }
+      }),
     markDirty: (chunkId) =>
       set((state) => {
         state.dirtyState.hasUnsavedChanges = true;
@@ -850,6 +873,7 @@ export const useEditorStore = create<EditorStore>()(
 
         state.chunks = chunks;
         state.worldViewport = null;
+        state.viewportSnapshot = null;
         state.protectedAreas = protectedAreas;
         state.waterBodies = waterBodies;
         state.props = props;

@@ -159,6 +159,11 @@ export function AppShell() {
             }
 
             useEditorStore.getState().replaceWorldSummary(result.data);
+            void backendClient.getViewportSnapshot().then((snapshot) => {
+              if (snapshot.ok) {
+                useEditorStore.getState().setViewportSnapshot(snapshot.data);
+              }
+            });
             useEditorStore.getState().setRuntimeState("connected");
             toast.success(`Loaded world file: ${result.data.name}.`);
           });

@@ -505,6 +505,7 @@ export function ViewportPanel() {
         <BevyCanvasHost
           chunks={editorState.chunks}
           worldViewport={editorState.worldViewport}
+          viewportSnapshot={editorState.viewportSnapshot}
           runtimeState={editorState.runtimeState}
           areaOverlays={areaOverlays}
           showProtectedAreas={overlays.protectedAreas}

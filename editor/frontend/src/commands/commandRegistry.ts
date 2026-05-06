@@ -473,6 +473,10 @@ export const editorCommands: readonly EditorCommand[] = [
     run: async (ctx) => {
       const summary = unwrapBackend(await ctx.backendClient.loadDefaultWorld());
       ctx.getState().replaceWorldSummary(summary);
+      const snapshot = await ctx.backendClient.getViewportSnapshot();
+      if (snapshot.ok) {
+        ctx.getState().setViewportSnapshot(snapshot.data);
+      }
       ctx.toast.success(`Loaded default world: ${summary.name}.`);
     },
   },
