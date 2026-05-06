@@ -25,6 +25,18 @@ const applyRuntimeSnapshot = (snapshot: RuntimeSnapshot): void => {
     runtimeMetrics: snapshot.metrics,
     renderQualityPreset: snapshot.renderQuality.preset,
     waterRuntimeSnapshot: snapshot.waterVisualProbe,
+    atlasMapping: snapshot.atlasMapping.mapping,
+    dirtyState: {
+      ...state.dirtyState,
+      dirtyAtlas: snapshot.atlasMapping.dirty,
+      hasUnsavedChanges:
+        state.dirtyState.dirtyChunkIds.length > 0 ||
+        state.dirtyState.dirtyAreaIds.length > 0 ||
+        state.dirtyState.dirtyWaterBodyIds.length > 0 ||
+        state.dirtyState.dirtyPropIds.length > 0 ||
+        snapshot.atlasMapping.dirty ||
+        state.dirtyState.layoutDirty,
+    },
     selection:
       nextSelection && selectionKey(nextSelection) !== selectionKey(currentSelection)
         ? nextSelection

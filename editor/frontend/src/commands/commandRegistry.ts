@@ -1355,8 +1355,28 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Materials",
     keywords: ["material", "atlas", "texture", "mapping"],
     run: async (ctx) => {
-      const atlasMapping = unwrapBackend(await ctx.backendClient.loadAtlasMapping());
-      ctx.setState({ atlasMapping });
+      const runtimeSnapshot = await ctx.runtimeClient.getRuntimeSnapshot();
+      if (runtimeSnapshot.ok) {
+        const dirtyAtlas = runtimeSnapshot.data.atlasMapping.dirty;
+        const dirtyState = ctx.getState().dirtyState;
+        ctx.setState({
+          atlasMapping: runtimeSnapshot.data.atlasMapping.mapping,
+          dirtyState: {
+            ...dirtyState,
+            dirtyAtlas,
+            hasUnsavedChanges:
+              dirtyState.dirtyChunkIds.length > 0 ||
+              dirtyState.dirtyAreaIds.length > 0 ||
+              dirtyState.dirtyWaterBodyIds.length > 0 ||
+              dirtyState.dirtyPropIds.length > 0 ||
+              dirtyAtlas ||
+              dirtyState.layoutDirty,
+          },
+        });
+      } else {
+        const atlasMapping = unwrapBackend(await ctx.backendClient.loadAtlasMapping());
+        ctx.setState({ atlasMapping });
+      }
       ctx.getState().setActiveMode("material");
       ctx.getState().setActiveTool("material");
       ctx.getState().setSelection({ kind: "material", id: "mat-grass-block", label: "Grass Block" });

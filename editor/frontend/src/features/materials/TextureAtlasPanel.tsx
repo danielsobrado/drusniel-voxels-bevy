@@ -53,7 +53,7 @@ export function TextureAtlasPanel() {
         <h2 id="texture-atlas-title" className="placeholder-heading">
           Texture Atlas
         </h2>
-        <p className="agent-hint">Mocked texture atlas workflow: click a tile, then assign it to block faces.</p>
+        <p className="agent-hint">Runtime texture atlas workflow: click a tile, then assign it to block faces.</p>
 
         <TextureAtlasGrid selectedTileId={selectedTileId} onSelectTile={(tileId) => editorState.setSelectedAtlasTile(tileId)} />
 

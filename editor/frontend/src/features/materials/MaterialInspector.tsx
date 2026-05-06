@@ -79,21 +79,21 @@ export function MaterialInspector({ atlasMapping, material }: MaterialInspectorP
       {!selectedBlock && material.kind === "building" ? (
         <section className="inspector-section">
           <div className="inspector-section-title">Building material notes</div>
-          <p className="inspector-subnote">This material is mocked as a building material workflow.</p>
+          <p className="inspector-subnote">Building material editing is read-only until runtime material commands are available.</p>
         </section>
       ) : null}
 
       {!selectedBlock && material.kind === "props" ? (
         <section className="inspector-section">
           <div className="inspector-section-title">Prop billboard profile</div>
-          <p className="inspector-subnote">This material uses mocked billboard behavior in this sprint.</p>
+          <p className="inspector-subnote">Prop billboard material data is read-only until prop material commands are available.</p>
         </section>
       ) : null}
 
       {!selectedBlock && material.kind === "water" ? (
         <section className="inspector-section">
           <div className="inspector-section-title">Water material notes</div>
-          <p className="inspector-subnote">This material is mocked and managed by water simulation controls.</p>
+          <p className="inspector-subnote">Water material data is managed by runtime water simulation controls.</p>
         </section>
       ) : null}
     </div>
