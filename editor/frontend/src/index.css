@@ -1564,6 +1564,35 @@ input {
   background: #05070a;
 }
 
+.native-viewport-status {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--editor-fg);
+  text-align: center;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    #05070a;
+  background-size: 28px 28px;
+}
+
+.native-viewport-status strong {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.native-viewport-status span {
+  max-width: 520px;
+  color: var(--editor-fg-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .world-viewport-canvas {
   position: absolute;
   inset: 0;

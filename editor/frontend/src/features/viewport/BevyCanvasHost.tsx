@@ -216,8 +216,11 @@ export function BevyCanvasHost({
   const dragRef = useRef<{ readonly x: number; readonly y: number; readonly view: ViewState } | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
-  const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (hasTauriGlobals() ? "pending" : "unsupported"));
-  const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
+  const desktopRuntime = hasTauriGlobals();
+  const browserPreviewEnabled = !desktopRuntime;
+  const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (desktopRuntime ? "pending" : "unsupported"));
+  const [nativeViewportMessage, setNativeViewportMessage] = useState("Native Bevy viewport is starting.");
+  const samples = useMemo(() => (browserPreviewEnabled ? collectSamples(chunks, worldViewport) : []), [browserPreviewEnabled, chunks, worldViewport]);
   const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
   const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
   const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
@@ -248,8 +251,9 @@ export function BevyCanvasHost({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || runtimeState === "mock") {
-      setNativeViewportState(hasTauriGlobals() ? "fallback" : "unsupported");
+    if (!host || !desktopRuntime) {
+      setNativeViewportState(desktopRuntime ? "fallback" : "unsupported");
+      setNativeViewportMessage(desktopRuntime ? "Native viewport host is not ready." : "Browser preview mode.");
       return;
     }
 
@@ -273,11 +277,13 @@ export function BevyCanvasHost({
         .then((attachment) => {
           if (!cancelled) {
             setNativeViewportState(attachment.attached ? "attached" : "fallback");
+            setNativeViewportMessage(attachment.message);
           }
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!cancelled) {
             setNativeViewportState("fallback");
+            setNativeViewportMessage(error instanceof Error ? error.message : "Native Bevy viewport is not ready.");
           }
         });
     });
@@ -286,7 +292,7 @@ export function BevyCanvasHost({
       cancelled = true;
       window.cancelAnimationFrame(frame);
     };
-  }, [canvasSize.height, canvasSize.width, runtimeState]);
+  }, [canvasSize.height, canvasSize.width, desktopRuntime, runtimeState]);
 
   useEffect(() => {
     return () => {
@@ -296,7 +302,7 @@ export function BevyCanvasHost({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) {
+    if (!canvas || !browserPreviewEnabled) {
       return;
     }
 
@@ -370,7 +376,7 @@ export function BevyCanvasHost({
       ctx.textAlign = "center";
       ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
     }
-  }, [canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
+  }, [browserPreviewEnabled, canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
 
   return (
     <div
@@ -379,58 +385,67 @@ export function BevyCanvasHost({
       data-testid="bevy-canvas-host"
       aria-label="Runtime world viewport"
     >
-      <canvas
-        ref={canvasRef}
-        className="world-viewport-canvas"
-        data-testid="world-viewport-canvas"
-        tabIndex={0}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          dragRef.current = { x: event.clientX, y: event.clientY, view };
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current;
-          if (!drag) {
-            return;
-          }
-          setView({ ...drag.view, offsetX: drag.view.offsetX + event.clientX - drag.x, offsetY: drag.view.offsetY + event.clientY - drag.y });
-        }}
-        onPointerUp={() => {
-          dragRef.current = null;
-        }}
-        onPointerCancel={() => {
-          dragRef.current = null;
-        }}
-        onWheel={(event) => {
-          event.preventDefault();
-          const zoomMultiplier = event.deltaY < 0 ? 1.1 : 0.9;
-          const nextZoom = clamp(view.zoom * zoomMultiplier, 0.18, 8);
-          setView({ ...view, zoom: nextZoom });
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Home" || event.key.toLowerCase() === "f") {
-            fitView();
-          }
-          if (event.key === "+" || event.key === "=") {
-            setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }));
-          }
-          if (event.key === "-" || event.key === "_") {
-            setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }));
-          }
-        }}
-      />
+      {browserPreviewEnabled ? (
+        <>
+          <canvas
+            ref={canvasRef}
+            className="world-viewport-canvas"
+            data-testid="world-viewport-canvas"
+            tabIndex={0}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              dragRef.current = { x: event.clientX, y: event.clientY, view };
+            }}
+            onPointerMove={(event) => {
+              const drag = dragRef.current;
+              if (!drag) {
+                return;
+              }
+              setView({ ...drag.view, offsetX: drag.view.offsetX + event.clientX - drag.x, offsetY: drag.view.offsetY + event.clientY - drag.y });
+            }}
+            onPointerUp={() => {
+              dragRef.current = null;
+            }}
+            onPointerCancel={() => {
+              dragRef.current = null;
+            }}
+            onWheel={(event) => {
+              event.preventDefault();
+              const zoomMultiplier = event.deltaY < 0 ? 1.1 : 0.9;
+              const nextZoom = clamp(view.zoom * zoomMultiplier, 0.18, 8);
+              setView({ ...view, zoom: nextZoom });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Home" || event.key.toLowerCase() === "f") {
+                fitView();
+              }
+              if (event.key === "+" || event.key === "=") {
+                setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }));
+              }
+              if (event.key === "-" || event.key === "_") {
+                setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }));
+              }
+            }}
+          />
 
-      <div className="viewport-canvas-controls" aria-label="Viewport controls">
-        <button type="button" className="icon-button" title="Fit loaded world" aria-label="Fit loaded world" onClick={fitView}>
-          <Maximize2 size={14} aria-hidden="true" />
-        </button>
-        <button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }))}>
-          <ZoomIn size={14} aria-hidden="true" />
-        </button>
-        <button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }))}>
-          <ZoomOut size={14} aria-hidden="true" />
-        </button>
-      </div>
+          <div className="viewport-canvas-controls" aria-label="Viewport controls">
+            <button type="button" className="icon-button" title="Fit loaded world" aria-label="Fit loaded world" onClick={fitView}>
+              <Maximize2 size={14} aria-hidden="true" />
+            </button>
+            <button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }))}>
+              <ZoomIn size={14} aria-hidden="true" />
+            </button>
+            <button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }))}>
+              <ZoomOut size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </>
+      ) : nativeViewportState !== "attached" ? (
+        <div className="native-viewport-status" data-testid="native-viewport-status">
+          <strong>Native Bevy viewport</strong>
+          <span>{nativeViewportMessage}</span>
+        </div>
+      ) : null}
 
       {waterDebug ? (
         <div className="viewport-water-overlay" aria-label="Water debug overlay" data-testid="viewport-water-overlay">
@@ -460,8 +475,10 @@ export function BevyCanvasHost({
 
       <div className="canvas-reticle" aria-hidden="true" />
       <div className="canvas-label">
-        {nativeViewportState === "attached"
-          ? "Native Bevy viewport"
+        {desktopRuntime
+          ? nativeViewportState === "attached"
+            ? "Native Bevy viewport"
+            : "Native viewport pending"
           : hasRenderableMesh
             ? "Runtime mesh viewport"
             : hasBackendPreview
