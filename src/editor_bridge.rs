@@ -9,12 +9,15 @@ use bevy::prelude::*;
 use serde_json::{Value, json};
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
+use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::meshing::{MeshData, MeshSettings, generate_chunk_mesh_with_mode};
 use crate::voxel::persistence::{
     self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
 };
+use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
@@ -489,6 +492,8 @@ fn frontend_world_summary_from_metadata_and_world(
 }
 
 const VIEWPORT_SAMPLE_RESOLUTION: usize = 8;
+const VIEWPORT_MESH_CHUNK_LIMIT: usize = 16;
+const VIEWPORT_MESH_VERTEX_LIMIT: usize = 20_000;
 
 fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Value {
     let bounds = world
@@ -521,7 +526,8 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
         },
         "chunks": voxel_world
             .chunk_entries()
-            .map(|(_, chunk)| {
+            .enumerate()
+            .map(|(index, (_, chunk))| {
                 let data = chunk.to_data();
                 let summary = persistence::editor_chunk_summary_for_bridge(&data);
                 let [x, y, z] = summary.position;
@@ -539,11 +545,112 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
                         "voxelCount": summary.water_voxels,
                         "present": summary.water_voxels > 0,
                     },
+                    "mesh": chunk_mesh_payload(world, voxel_world, chunk.position(), index),
                     "samples": chunk_surface_samples(&data),
                 })
             })
             .collect::<Vec<_>>(),
         "generatedAt": timestamp_string(),
+    })
+}
+
+fn chunk_mesh_payload(
+    world: &World,
+    voxel_world: &VoxelWorld,
+    chunk_pos: IVec3,
+    chunk_index: usize,
+) -> Value {
+    if chunk_index >= VIEWPORT_MESH_CHUNK_LIMIT {
+        return json!({
+            "included": false,
+            "reason": "chunk_limit",
+            "terrain": mesh_stats_payload(None),
+            "water": mesh_stats_payload(None),
+        });
+    }
+
+    let Some(chunk) = voxel_world.get_chunk(chunk_pos) else {
+        return json!({
+            "included": false,
+            "reason": "missing_chunk",
+            "terrain": mesh_stats_payload(None),
+            "water": mesh_stats_payload(None),
+        });
+    };
+
+    let mesh_settings = world
+        .get_resource::<MeshSettings>()
+        .copied()
+        .unwrap_or_default();
+    let skirt_config = world
+        .get_resource::<SkirtConfig>()
+        .cloned()
+        .unwrap_or_default();
+    let ao_config = world
+        .get_resource::<AmbientOcclusionConfig>()
+        .cloned()
+        .unwrap_or_default();
+    let neighbor_lods = NeighborLods {
+        neg_x: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(-1, 0, 0))
+            .map(|neighbor| neighbor.lod_level()),
+        pos_x: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(1, 0, 0))
+            .map(|neighbor| neighbor.lod_level()),
+        neg_z: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(0, 0, -1))
+            .map(|neighbor| neighbor.lod_level()),
+        pos_z: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(0, 0, 1))
+            .map(|neighbor| neighbor.lod_level()),
+    };
+
+    let mesh_result = generate_chunk_mesh_with_mode(
+        chunk,
+        voxel_world,
+        mesh_settings.mode,
+        chunk.lod_level(),
+        neighbor_lods,
+        &skirt_config,
+        &ao_config.baked,
+        mesh_settings.water_air_exposure_mode,
+    );
+
+    let terrain_too_large = mesh_result.solid.positions.len() > VIEWPORT_MESH_VERTEX_LIMIT;
+    let water_too_large = mesh_result.water.positions.len() > VIEWPORT_MESH_VERTEX_LIMIT;
+
+    json!({
+        "included": !(terrain_too_large || water_too_large),
+        "reason": if terrain_too_large || water_too_large { "vertex_limit" } else { "included" },
+        "terrain": mesh_buffer_payload(&mesh_result.solid, terrain_too_large),
+        "water": mesh_buffer_payload(&mesh_result.water, water_too_large),
+        "stats": {
+            "waterAirBoundariesTotal": mesh_result.water_stats.air_boundaries_total,
+            "waterAirBoundariesExposed": mesh_result.water_stats.air_boundaries_exposed,
+            "waterAirBoundariesSealed": mesh_result.water_stats.air_boundaries_sealed,
+            "waterTrianglesRemovedSealed": mesh_result.water_stats.triangles_removed_sealed,
+        },
+    })
+}
+
+fn mesh_stats_payload(mesh: Option<&MeshData>) -> Value {
+    json!({
+        "vertexCount": mesh.map(|mesh| mesh.positions.len()).unwrap_or_default(),
+        "indexCount": mesh.map(|mesh| mesh.indices.len()).unwrap_or_default(),
+        "triangleCount": mesh.map(|mesh| mesh.indices.len() / 3).unwrap_or_default(),
+    })
+}
+
+fn mesh_buffer_payload(mesh: &MeshData, omit_buffers: bool) -> Value {
+    json!({
+        "vertexCount": mesh.positions.len(),
+        "indexCount": mesh.indices.len(),
+        "triangleCount": mesh.indices.len() / 3,
+        "positions": if omit_buffers { Value::Null } else { json!(mesh.positions) },
+        "normals": if omit_buffers { Value::Null } else { json!(mesh.normals) },
+        "uvs": if omit_buffers { Value::Null } else { json!(mesh.uvs) },
+        "colors": if omit_buffers { Value::Null } else { json!(mesh.colors) },
+        "indices": if omit_buffers { Value::Null } else { json!(mesh.indices) },
     })
 }
 

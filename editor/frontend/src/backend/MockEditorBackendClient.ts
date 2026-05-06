@@ -81,6 +81,30 @@ export class MockEditorBackendClient implements EditorBackendClient {
             voxelCount: chunk.waterMeshCount,
             present: chunk.waterMeshCount > 0,
           },
+          mesh: {
+            included: true,
+            reason: "included",
+            terrain: {
+              vertexCount: 0,
+              indexCount: 0,
+              triangleCount: 0,
+              positions: [],
+              normals: [],
+              uvs: [],
+              colors: [],
+              indices: [],
+            },
+            water: {
+              vertexCount: 0,
+              indexCount: 0,
+              triangleCount: 0,
+              positions: [],
+              normals: [],
+              uvs: [],
+              colors: [],
+              indices: [],
+            },
+          },
           samples: [
             {
               x: chunk.coordinate[0] * 16 + 8,

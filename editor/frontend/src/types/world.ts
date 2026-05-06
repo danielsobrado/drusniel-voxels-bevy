@@ -65,6 +65,30 @@ export interface ViewportSnapshotCamera {
   readonly distance: number;
 }
 
+export interface ViewportMeshBuffer {
+  readonly vertexCount: number;
+  readonly indexCount: number;
+  readonly triangleCount: number;
+  readonly positions: readonly [number, number, number][] | null;
+  readonly normals: readonly [number, number, number][] | null;
+  readonly uvs: readonly [number, number][] | null;
+  readonly colors: readonly [number, number, number, number][] | null;
+  readonly indices: readonly number[] | null;
+}
+
+export interface ViewportMeshPayload {
+  readonly included: boolean;
+  readonly reason: "included" | "chunk_limit" | "vertex_limit" | "missing_chunk";
+  readonly terrain: ViewportMeshBuffer;
+  readonly water: ViewportMeshBuffer;
+  readonly stats?: {
+    readonly waterAirBoundariesTotal: number;
+    readonly waterAirBoundariesExposed: number;
+    readonly waterAirBoundariesSealed: number;
+    readonly waterTrianglesRemovedSealed: number;
+  };
+}
+
 export interface ViewportSnapshotChunk extends ChunkViewportPreview {
   readonly payloadId: string;
   readonly dirty: boolean;
@@ -77,6 +101,7 @@ export interface ViewportSnapshotChunk extends ChunkViewportPreview {
     readonly voxelCount: number;
     readonly present: boolean;
   };
+  readonly mesh: ViewportMeshPayload;
 }
 
 export interface ViewportSnapshot {
