@@ -1560,6 +1560,10 @@ input {
   background: #0b0d12;
 }
 
+.world-viewport-host-native {
+  background: #05070a;
+}
+
 .world-viewport-canvas {
   position: absolute;
   inset: 0;
@@ -1567,6 +1571,10 @@ input {
   height: 100%;
   cursor: grab;
   outline: none;
+}
+
+.world-viewport-host-native .world-viewport-canvas {
+  opacity: 0;
 }
 
 .world-viewport-canvas:active {

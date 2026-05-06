@@ -1,6 +1,10 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            attach_native_viewport,
+            detach_native_viewport
+        ])
         .setup(|app| {
             let runtime = EditorRuntimeProcess::start(app.handle());
             app.manage(runtime);
@@ -10,26 +14,41 @@ pub fn run() {
         .expect("failed to run Drusniel Voxels editor");
 }
 
+use serde::{Deserialize, Serialize};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use std::io::Write;
 use std::{fs, fs::OpenOptions};
 use tauri::{AppHandle, Manager};
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
 const SIDECAR_DIR: &str = "binaries";
 const SIDECAR_PREFIX: &str = "drusniel-editor-runtime";
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeViewportRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeViewportAttachment {
+    attached: bool,
+    hwnd: Option<isize>,
+    message: String,
+}
 
 struct EditorRuntimeProcess {
     child: Mutex<Option<Child>>,
+    viewport_hwnd: Mutex<Option<isize>>,
 }
 
 impl EditorRuntimeProcess {
@@ -39,10 +58,15 @@ impl EditorRuntimeProcess {
 
         let child = match spawn_editor_runtime(app, &bridge_addr) {
             Ok(child) => {
+                append_shell_log(app, "editor runtime process spawned");
                 wait_for_runtime_health(&bridge_addr);
                 Some(child)
             }
             Err(error) => {
+                append_shell_log(
+                    app,
+                    &format!("failed to start backend runtime process: {error}"),
+                );
                 eprintln!("[editor-runtime] failed to start backend runtime: {error}");
                 None
             }
@@ -50,7 +74,12 @@ impl EditorRuntimeProcess {
 
         Self {
             child: Mutex::new(child),
+            viewport_hwnd: Mutex::new(None),
         }
+    }
+
+    fn child_id(&self) -> Option<u32> {
+        self.child.lock().ok()?.as_ref().map(Child::id)
     }
 }
 
@@ -70,31 +99,227 @@ impl Drop for EditorRuntimeProcess {
     }
 }
 
+#[cfg(windows)]
+#[tauri::command]
+fn attach_native_viewport(
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<'_, EditorRuntimeProcess>,
+    rect: NativeViewportRect,
+) -> Result<NativeViewportAttachment, String> {
+    let child_pid = runtime
+        .child_id()
+        .ok_or_else(|| "editor runtime process is not running".to_string())?;
+    let parent_hwnd = window
+        .hwnd()
+        .map_err(|error| error.to_string())?
+        .0 as windows_sys::Win32::Foundation::HWND;
+
+    let hwnd = {
+        let cached_hwnd = runtime.viewport_hwnd.lock().ok().and_then(|guard| *guard);
+        if let Some(hwnd) = cached_hwnd {
+            hwnd as windows_sys::Win32::Foundation::HWND
+        } else {
+            find_runtime_window(child_pid)
+                .ok_or_else(|| "native Bevy viewport window is not ready yet".to_string())?
+        }
+    };
+
+    embed_runtime_window(parent_hwnd, hwnd, &rect)?;
+
+    if let Ok(mut cached_hwnd) = runtime.viewport_hwnd.lock() {
+        *cached_hwnd = Some(hwnd as isize);
+    }
+
+    Ok(NativeViewportAttachment {
+        attached: true,
+        hwnd: Some(hwnd as isize),
+        message: "native Bevy viewport attached".to_string(),
+    })
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn attach_native_viewport(
+    _window: tauri::WebviewWindow,
+    _runtime: tauri::State<'_, EditorRuntimeProcess>,
+    _rect: NativeViewportRect,
+) -> Result<NativeViewportAttachment, String> {
+    Ok(NativeViewportAttachment {
+        attached: false,
+        hwnd: None,
+        message: "native viewport embedding is Windows-only".to_string(),
+    })
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn detach_native_viewport(runtime: tauri::State<'_, EditorRuntimeProcess>) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+
+    if let Ok(mut cached_hwnd) = runtime.viewport_hwnd.lock() {
+        if let Some(hwnd) = cached_hwnd.take() {
+            unsafe {
+                ShowWindow(hwnd as windows_sys::Win32::Foundation::HWND, SW_HIDE);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn detach_native_viewport(_runtime: tauri::State<'_, EditorRuntimeProcess>) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn find_runtime_window(pid: u32) -> Option<windows_sys::Win32::Foundation::HWND> {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+        IsWindowVisible,
+    };
+
+    struct SearchContext {
+        pid: u32,
+        hwnd: Option<HWND>,
+    }
+
+    unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let context = unsafe { &mut *(lparam as *mut SearchContext) };
+        let mut window_pid = 0;
+
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut window_pid);
+        }
+
+        if window_pid != context.pid {
+            return 1;
+        }
+
+        let is_visible = unsafe { IsWindowVisible(hwnd) } != 0;
+        if !is_visible {
+            return 1;
+        }
+
+        let title_length = unsafe { GetWindowTextLengthW(hwnd) };
+        if title_length <= 0 {
+            return 1;
+        }
+
+        let mut title = vec![0u16; title_length as usize + 1];
+        let copied = unsafe { GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32) };
+        if copied <= 0 {
+            return 1;
+        }
+
+        let title = String::from_utf16_lossy(&title[..copied as usize]);
+        if title.contains("Drusniel Bevy Viewport") {
+            context.hwnd = Some(hwnd);
+            return 0;
+        }
+
+        1
+    }
+
+    let mut context = SearchContext { pid, hwnd: None };
+    unsafe {
+        EnumWindows(
+            Some(enum_windows_proc),
+            &mut context as *mut SearchContext as LPARAM,
+        );
+    }
+
+    context.hwnd
+}
+
+#[cfg(windows)]
+fn embed_runtime_window(
+    parent_hwnd: windows_sys::Win32::Foundation::HWND,
+    child_hwnd: windows_sys::Win32::Foundation::HWND,
+    rect: &NativeViewportRect,
+) -> Result<(), String> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, WS_CAPTION,
+        WS_CHILD, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+    };
+
+    let width = rect.width.max(1);
+    let height = rect.height.max(1);
+    let child_style = (WS_CHILD | WS_VISIBLE) as isize;
+    let removed_style =
+        (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
+            as isize;
+
+    unsafe {
+        SetParent(child_hwnd, parent_hwnd);
+
+        let style = GetWindowLongPtrW(child_hwnd, GWL_STYLE);
+        SetWindowLongPtrW(child_hwnd, GWL_STYLE, (style & !removed_style) | child_style);
+
+        let positioned = SetWindowPos(
+            child_hwnd,
+            null_mut(),
+            rect.x,
+            rect.y,
+            width,
+            height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+        ) != 0;
+        if !positioned {
+            return Err("failed to position Bevy viewport window".to_string());
+        }
+
+        ShowWindow(child_hwnd, SW_SHOW);
+    }
+
+    Ok(())
+}
+
 fn spawn_editor_runtime(app: &AppHandle, bridge_addr: &str) -> Result<Child, String> {
     let runtime_bin = std::env::var_os("DRUSNIEL_EDITOR_RUNTIME_BIN");
     let mut command = if let Some(runtime_bin) = runtime_bin {
+        append_shell_log(
+            app,
+            &format!(
+                "spawning runtime from DRUSNIEL_EDITOR_RUNTIME_BIN: {}",
+                PathBuf::from(&runtime_bin).display()
+            ),
+        );
         let mut command = Command::new(runtime_bin);
-        command.arg("--editor-runtime");
+        command.arg("--editor-native-viewport");
         command
     } else if let Some(runtime_bin) = packaged_editor_runtime(app) {
+        append_shell_log(
+            app,
+            &format!("spawning packaged runtime: {}", runtime_bin.display()),
+        );
         let mut command = Command::new(runtime_bin);
-        command.arg("--editor-runtime");
+        command.arg("--editor-native-viewport");
         command
     } else {
+        append_shell_log(app, "spawning runtime through cargo fallback");
         let mut command = Command::new("cargo");
         command
             .arg("run")
             .arg("--")
-            .arg("--editor-runtime")
+            .arg("--editor-native-viewport")
             .current_dir(repo_root());
         command
     };
 
     let (stdout, stderr) = runtime_stdio(app);
-    configure_hidden_runtime_process(&mut command);
+    let working_dir = editor_runtime_working_dir(app);
+    let asset_dir = working_dir.join("assets");
 
     command
-        .env("DRUSNIEL_EDITOR_RUNTIME", "1")
+        .current_dir(&working_dir)
+        .env("DRUSNIEL_EDITOR_ASSET_DIR", asset_dir)
+        .env("DRUSNIEL_EDITOR_NATIVE_VIEWPORT", "1")
+        .env("DRUSNIEL_EDITOR_BRIDGE", "1")
         .env("DRUSNIEL_EDITOR_BRIDGE_ADDR", bridge_addr)
         .stdin(Stdio::null())
         .stdout(stdout)
@@ -103,18 +328,19 @@ fn spawn_editor_runtime(app: &AppHandle, bridge_addr: &str) -> Result<Child, Str
         .map_err(|error| error.to_string())
 }
 
-#[cfg(windows)]
-fn configure_hidden_runtime_process(command: &mut Command) {
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn configure_hidden_runtime_process(_command: &mut Command) {}
-
 fn packaged_editor_runtime(app: &AppHandle) -> Option<PathBuf> {
-    let resource_dir = app.path().resource_dir().ok()?;
-    find_editor_runtime_binary(resource_dir.join(SIDECAR_DIR))
-        .or_else(|| find_editor_runtime_binary(resource_dir))
+    let source_sidecar_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SIDECAR_DIR);
+    let resource_dir = app.path().resource_dir().ok();
+    let executable_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from));
+
+    [source_sidecar_dir]
+        .iter()
+        .chain(resource_dir.iter())
+        .chain(executable_dir.iter())
+        .flat_map(|dir| [dir.join(SIDECAR_DIR), dir.to_path_buf()])
+        .find_map(find_editor_runtime_binary)
 }
 
 fn find_editor_runtime_binary(dir: PathBuf) -> Option<PathBuf> {
@@ -170,6 +396,23 @@ fn runtime_stdio(app: &AppHandle) -> (Stdio, Stdio) {
     }
 }
 
+fn append_shell_log(app: &AppHandle, message: &str) {
+    let Ok(log_dir) = app.path().app_log_dir() else {
+        return;
+    };
+    if fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+    let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("editor-shell.log"))
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{message}");
+}
+
 fn open_log_stream(path: PathBuf) -> Result<Stdio, std::io::Error> {
     OpenOptions::new()
         .create(true)
@@ -182,6 +425,26 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
+        .join("..")
+}
+
+fn editor_runtime_working_dir(app: &AppHandle) -> PathBuf {
+    let repo_root = repo_root();
+    if repo_root.join("assets").exists() {
+        return repo_root;
+    }
+
+    app.path()
+        .resource_dir()
+        .ok()
+        .filter(|path| path.join("assets").exists())
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(PathBuf::from))
+                .filter(|path| path.join("assets").exists())
+        })
+        .unwrap_or(repo_root)
 }
 
 fn wait_for_runtime_health(bridge_addr: &str) {

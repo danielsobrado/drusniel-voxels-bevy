@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ChunkSummary, MockWaterRuntimeSnapshot, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { RuntimeState } from "../../types/editor";
@@ -29,6 +30,14 @@ interface ViewState {
   readonly offsetY: number;
 }
 
+type NativeViewportState = "unsupported" | "pending" | "attached" | "fallback";
+
+interface NativeViewportAttachment {
+  readonly attached: boolean;
+  readonly hwnd?: number | null;
+  readonly message: string;
+}
+
 const MATERIAL_COLORS: Record<string, string> = {
   Air: "#171923",
   TopSoil: "#4d8f4e",
@@ -47,6 +56,8 @@ const MATERIAL_COLORS: Record<string, string> = {
 const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const hasTauriGlobals = () => typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
 const boundsToRect = (bounds: ProtectedArea["bounds"]) => {
   const minX = bounds.min[0];
@@ -205,6 +216,7 @@ export function BevyCanvasHost({
   const dragRef = useRef<{ readonly x: number; readonly y: number; readonly view: ViewState } | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
+  const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (hasTauriGlobals() ? "pending" : "unsupported"));
   const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
   const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
   const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
@@ -233,6 +245,54 @@ export function BevyCanvasHost({
   useEffect(() => {
     setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
   }, [canvasSize.height, canvasSize.width, samples]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || runtimeState === "mock") {
+      setNativeViewportState(hasTauriGlobals() ? "fallback" : "unsupported");
+      return;
+    }
+
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      const rect = host.getBoundingClientRect();
+      if (rect.width < 16 || rect.height < 16) {
+        return;
+      }
+
+      const scale = window.devicePixelRatio || 1;
+      setNativeViewportState((current) => (current === "attached" ? current : "pending"));
+      void invoke<NativeViewportAttachment>("attach_native_viewport", {
+        rect: {
+          x: Math.round(rect.left * scale),
+          y: Math.round(rect.top * scale),
+          width: Math.round(rect.width * scale),
+          height: Math.round(rect.height * scale),
+        },
+      })
+        .then((attachment) => {
+          if (!cancelled) {
+            setNativeViewportState(attachment.attached ? "attached" : "fallback");
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setNativeViewportState("fallback");
+          }
+        });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [canvasSize.height, canvasSize.width, runtimeState]);
+
+  useEffect(() => {
+    return () => {
+      void invoke("detach_native_viewport").catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -313,7 +373,12 @@ export function BevyCanvasHost({
   }, [canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
 
   return (
-    <div ref={hostRef} className="bevy-canvas-host world-viewport-host" data-testid="bevy-canvas-host" aria-label="Runtime world viewport">
+    <div
+      ref={hostRef}
+      className={`bevy-canvas-host world-viewport-host ${nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
+      data-testid="bevy-canvas-host"
+      aria-label="Runtime world viewport"
+    >
       <canvas
         ref={canvasRef}
         className="world-viewport-canvas"
@@ -395,7 +460,14 @@ export function BevyCanvasHost({
 
       <div className="canvas-reticle" aria-hidden="true" />
       <div className="canvas-label">
-        {hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {viewportStateLabel}
+        {nativeViewportState === "attached"
+          ? "Native Bevy viewport"
+          : hasRenderableMesh
+            ? "Runtime mesh viewport"
+            : hasBackendPreview
+              ? "Loaded world viewport"
+              : "World summary viewport"}{" "}
+        / {viewportStateLabel}
       </div>
       <div className="minimap-canvas" aria-label="World viewport summary">
         <div className="minimap-grid">

@@ -586,6 +586,33 @@ fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistenc
         return false;
     }
 
+    if env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT") {
+        info!("Loading saved world for native editor viewport...");
+        match persistence::read_world_data_from_path(persistence::WORLD_SAVE_PATH) {
+            Ok(data) => {
+                let loaded_world = VoxelWorld::from_data(data);
+                if loaded_world.world_size_chunks() != world.world_size_chunks() {
+                    warn!(
+                        "Saved world size {:?} does not match configured world size {:?}; regenerating",
+                        loaded_world.world_size_chunks(),
+                        world.world_size_chunks()
+                    );
+                    return false;
+                }
+                *world = loaded_world;
+                info!("World loaded successfully for native editor viewport!");
+                return true;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load saved world for native editor viewport: {}. Generating new world...",
+                    e
+                );
+                return false;
+            }
+        }
+    }
+
     info!("Loading saved world from disk...");
     match persistence::load_world() {
         Ok(loaded_world) => {

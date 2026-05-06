@@ -55,6 +55,8 @@ pub struct BenchCli {
     pub bench_headless: bool,
     #[arg(long)]
     pub editor_runtime: bool,
+    #[arg(long)]
+    pub editor_native_viewport: bool,
 }
 
 #[derive(Resource, Clone)]

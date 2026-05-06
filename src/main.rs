@@ -3,6 +3,7 @@
 //! This is the main entry point that initializes the Bevy app with all plugins.
 
 use bevy::app::ScheduleRunnerPlugin;
+use bevy::asset::AssetPlugin;
 use bevy::diagnostic::{
     EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
 };
@@ -312,6 +313,14 @@ fn editor_runtime_requested(cli: &BenchCli) -> bool {
     cli.editor_runtime || env_flag("DRUSNIEL_EDITOR_RUNTIME")
 }
 
+fn editor_native_viewport_requested(cli: &BenchCli) -> bool {
+    cli.editor_native_viewport || env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT")
+}
+
+fn asset_file_path() -> String {
+    std::env::var("DRUSNIEL_EDITOR_ASSET_DIR").unwrap_or_else(|_| "assets".to_string())
+}
+
 fn run_editor_runtime(log_filter: String) {
     let size_chunks = IVec3::new(
         DEFAULT_WORLD_CHUNKS_X,
@@ -351,8 +360,9 @@ fn run_editor_runtime(log_filter: String) {
 fn main() {
     let cli = BenchCli::parse();
     let editor_runtime = editor_runtime_requested(&cli);
+    let editor_native_viewport = editor_native_viewport_requested(&cli);
     let bench_config = BenchConfig::from_cli(&cli);
-    if editor_runtime && bench_config.is_some() {
+    if (editor_runtime || editor_native_viewport) && bench_config.is_some() {
         eprintln!("--editor-runtime ignores --bench; start benchmark mode separately");
     }
     if cli.bench_headless {
@@ -362,7 +372,7 @@ fn main() {
     // Load logging configuration from YAML
     let log_filter = load_logging_config();
 
-    if editor_runtime {
+    if editor_runtime && !editor_native_viewport {
         run_editor_runtime(log_filter);
         return;
     }
@@ -386,10 +396,25 @@ fn main() {
                 level: bevy::log::Level::TRACE, // Allow all levels, filter controls what shows
                 ..default()
             })
+            .set(AssetPlugin {
+                file_path: asset_file_path(),
+                ..default()
+            })
             .set(ImagePlugin::default_nearest())
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    resolution: WindowResolution::new(1920, 1080),
+                    title: if editor_native_viewport {
+                        "Drusniel Bevy Viewport".to_string()
+                    } else {
+                        "Voxel Builder".to_string()
+                    },
+                    resolution: if editor_native_viewport {
+                        WindowResolution::new(1280, 720)
+                    } else {
+                        WindowResolution::new(1920, 1080)
+                    },
+                    decorations: !editor_native_viewport,
+                    resizable: !editor_native_viewport,
                     present_mode: if bench_config.is_some() {
                         PresentMode::AutoNoVsync
                     } else {
@@ -437,6 +462,19 @@ fn main() {
             app.add_plugins(PhysicsPlugin).add_plugins(PlayerPlugin);
         }
         app.add_plugins(BenchPlugin);
+    } else if editor_native_viewport {
+        app.add_plugins(PhysicsPlugin)
+            .add_plugins(PlayerPlugin)
+            .add_plugins(InteractionPlugin)
+            .add_plugins(PickaxePlugin)
+            .add_plugins(MapPlugin)
+            .add_plugins(InventoryUiPlugin)
+            .add_plugins(ChatPlugin)
+            .add_plugins(PauseMenuPlugin)
+            .add_plugins(DebugUiPlugin)
+            .add_plugins(TerrainToolsPlugin)
+            .add_plugins(InputPlugin)
+            .add_plugins(BuildingPlugin);
     } else {
         app.add_plugins(PhysicsPlugin)
             .add_plugins(PlayerPlugin)
