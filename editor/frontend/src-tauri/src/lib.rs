@@ -19,9 +19,14 @@ use std::time::Duration;
 use std::{fs, fs::OpenOptions};
 use tauri::{AppHandle, Manager};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
 const SIDECAR_DIR: &str = "binaries";
 const SIDECAR_PREFIX: &str = "drusniel-editor-runtime";
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct EditorRuntimeProcess {
     child: Mutex<Option<Child>>,
@@ -86,6 +91,8 @@ fn spawn_editor_runtime(app: &AppHandle, bridge_addr: &str) -> Result<Child, Str
     };
 
     let (stdout, stderr) = runtime_stdio(app);
+    configure_hidden_runtime_process(&mut command);
+
     command
         .env("DRUSNIEL_EDITOR_RUNTIME", "1")
         .env("DRUSNIEL_EDITOR_BRIDGE_ADDR", bridge_addr)
@@ -95,6 +102,14 @@ fn spawn_editor_runtime(app: &AppHandle, bridge_addr: &str) -> Result<Child, Str
         .spawn()
         .map_err(|error| error.to_string())
 }
+
+#[cfg(windows)]
+fn configure_hidden_runtime_process(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_hidden_runtime_process(_command: &mut Command) {}
 
 fn packaged_editor_runtime(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
