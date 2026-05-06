@@ -23,7 +23,7 @@ import type {
 } from "./runtimeSchemas";
 import { runtimeCommandFailure } from "./runtimeSchemas";
 
-interface RuntimeBridge {
+export interface RuntimeBridge {
   readonly executeCommand: (request: RuntimeCommandRequest) => Promise<RuntimeCommandResult<unknown>>;
   readonly getRuntimeSnapshot?: () => Promise<RuntimeCommandResult<RuntimeSnapshot>>;
   readonly getRenderQuality?: () => Promise<RuntimeCommandResult<RuntimeRenderQualityState>>;

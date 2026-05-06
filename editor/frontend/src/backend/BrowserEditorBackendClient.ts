@@ -29,7 +29,7 @@ const getConfiguredBridgeUrl = (): string =>
   readLocalStorage(BRIDGE_URL_STORAGE_KEY) ??
   DEFAULT_LOCAL_BRIDGE_URL;
 
-const isTauriDesktop = (): boolean =>
+export const isTauriDesktop = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const hasBrowserEditorBackendBridge = (): boolean =>

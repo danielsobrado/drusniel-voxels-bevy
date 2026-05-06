@@ -53,6 +53,8 @@ pub struct BenchCli {
     pub bench_out: Option<PathBuf>,
     #[arg(long)]
     pub bench_headless: bool,
+    #[arg(long)]
+    pub editor_runtime: bool,
 }
 
 #[derive(Resource, Clone)]

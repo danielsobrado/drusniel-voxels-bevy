@@ -2,6 +2,7 @@
 //!
 //! This is the main entry point that initializes the Bevy app with all plugins.
 
+use bevy::app::ScheduleRunnerPlugin;
 use bevy::diagnostic::{
     EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
 };
@@ -12,13 +13,15 @@ use bevy::render::settings::{Backends, RenderCreation, WgpuLimits, WgpuSettings}
 use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
 use clap::Parser;
 use std::collections::HashMap;
+use std::time::Duration;
 use voxel_builder::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
 use voxel_builder::bench::{BenchCli, BenchConfig, BenchPlugin, bench_scene_requires_gameplay};
 use voxel_builder::building::BuildingPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
 use voxel_builder::constants::{
-    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
+    DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z, FALLBACK_BIND_GROUPS,
+    FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
 };
 use voxel_builder::debug_ui::DebugUiPlugin;
 use voxel_builder::editor_bridge::EditorRuntimeBridgePlugin;
@@ -34,13 +37,19 @@ use voxel_builder::physics::PhysicsPlugin;
 use voxel_builder::player::PlayerPlugin;
 use voxel_builder::props::PropsPlugin;
 use voxel_builder::rendering::AdaptiveGIPlugin;
+use voxel_builder::rendering::array_loader::AtlasMapping;
 use voxel_builder::rendering::plugin::RenderingPlugin;
+use voxel_builder::rendering::quality::RenderQualityPreset;
 use voxel_builder::runtime_commands::RuntimeWriteCommandPlugin;
 use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
+use voxel_builder::voxel::meshing::MeshMode;
 use voxel_builder::voxel::plugin::VoxelPlugin;
-use voxel_builder::world_rules::WorldRulesPlugin;
+use voxel_builder::voxel::plugin::WorldConfig;
+use voxel_builder::voxel::world::{VoxelWorld, WorldBounds};
+use voxel_builder::weather::WeatherPlugin;
+use voxel_builder::world_rules::{ProtectedAreaRegistry, WorldRulesPlugin};
 
 mod input;
 
@@ -292,15 +301,71 @@ fn load_logging_config() -> String {
     filter
 }
 
+fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name).as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("on")
+    )
+}
+
+fn editor_runtime_requested(cli: &BenchCli) -> bool {
+    cli.editor_runtime || env_flag("DRUSNIEL_EDITOR_RUNTIME")
+}
+
+fn run_editor_runtime(log_filter: String) {
+    let size_chunks = IVec3::new(
+        DEFAULT_WORLD_CHUNKS_X,
+        DEFAULT_WORLD_CHUNKS_Y,
+        DEFAULT_WORLD_CHUNKS_Z,
+    );
+
+    info!("Starting Drusniel editor runtime without a native Bevy window");
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16))))
+        .add_plugins(LogPlugin {
+            filter: log_filter,
+            level: bevy::log::Level::TRACE,
+            ..default()
+        })
+        .insert_resource(WorldConfig {
+            size_chunks,
+            chunk_size: voxel_builder::constants::CHUNK_SIZE_I32,
+            greedy_meshing: true,
+        })
+        .insert_resource(WorldBounds::from_size_chunks(size_chunks))
+        .insert_resource(VoxelWorld::new(size_chunks))
+        .insert_resource(voxel_builder::voxel::meshing::MeshSettings {
+            mode: MeshMode::SurfaceNets,
+            ..default()
+        })
+        .insert_resource(RenderQualityPreset::default())
+        .insert_resource(AtlasMapping::default())
+        .insert_resource(ProtectedAreaRegistry::default())
+        .add_plugins(RuntimeWriteCommandPlugin)
+        .add_plugins(EditorRuntimeBridgePlugin::enabled());
+
+    app.run();
+}
+
 fn main() {
     let cli = BenchCli::parse();
+    let editor_runtime = editor_runtime_requested(&cli);
     let bench_config = BenchConfig::from_cli(&cli);
+    if editor_runtime && bench_config.is_some() {
+        eprintln!("--editor-runtime ignores --bench; start benchmark mode separately");
+    }
     if cli.bench_headless {
         eprintln!("--bench-headless requested; this build falls back to windowed rendering");
     }
 
     // Load logging configuration from YAML
     let log_filter = load_logging_config();
+
+    if editor_runtime {
+        run_editor_runtime(log_filter);
+        return;
+    }
 
     // Pre-flight: detect GPU and get actual limits
     let (limits, backends) = detect_gpu_limits();
@@ -352,10 +417,11 @@ fn main() {
             SystemInformationDiagnosticsPlugin::default(),
         ))
         .add_plugins(VoxelPlugin)
+        .add_plugins(WeatherPlugin)
         .add_plugins(RenderingPlugin)
         .add_plugins(WorldRulesPlugin)
         .add_plugins(RuntimeWriteCommandPlugin)
-        .add_plugins(EditorRuntimeBridgePlugin)
+        .add_plugins(EditorRuntimeBridgePlugin::default())
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(VegetationPlugin)

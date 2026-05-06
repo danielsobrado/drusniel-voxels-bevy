@@ -21,11 +21,20 @@ use crate::voxel::world::{VoxelWorld, WorldBounds};
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub struct EditorRuntimeBridgePlugin;
+#[derive(Default)]
+pub struct EditorRuntimeBridgePlugin {
+    always_on: bool,
+}
+
+impl EditorRuntimeBridgePlugin {
+    pub fn enabled() -> Self {
+        Self { always_on: true }
+    }
+}
 
 impl Plugin for EditorRuntimeBridgePlugin {
     fn build(&self, app: &mut App) {
-        if editor_runtime_bridge_enabled() {
+        if self.always_on || editor_runtime_bridge_enabled() {
             app.init_resource::<EditorBridgeChannel>()
                 .add_systems(Update, service_editor_bridge_requests);
         }

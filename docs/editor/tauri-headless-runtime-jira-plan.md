@@ -25,6 +25,20 @@ Bevy editor runtime
   viewport payload streaming
 ```
 
+## Delivery Status
+
+Completed in the first implementation slice:
+
+- DVX-EDT-101: `--editor-runtime` / `DRUSNIEL_EDITOR_RUNTIME=1` starts a Bevy schedule-runner backend without creating a native Bevy window. The runtime exposes the editor bridge and `/health`.
+- DVX-EDT-102: Tauri starts an editor runtime process, waits for the local bridge, and kills the child process on shutdown. Development mode launches `cargo run -- --editor-runtime`; packaged/runtime binary mode can be supplied through `DRUSNIEL_EDITOR_RUNTIME_BIN`.
+- DVX-EDT-106: Tauri mode no longer falls back to the mock runtime client when the bridge is unavailable. It surfaces a runtime-unavailable client state instead.
+
+Still open:
+
+- Production sidecar bundling with a prebuilt Bevy runtime binary instead of development `cargo run`.
+- Versioned viewport mesh payloads and WebGPU/WebGL viewport rendering.
+- Full desktop unavailable-state UI polish and automated Tauri launch/close process test.
+
 ## JIRA Tickets
 
 ### DVX-EDT-101: Add Bevy Editor Runtime Mode
