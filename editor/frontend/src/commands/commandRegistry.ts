@@ -47,7 +47,7 @@ const modeCommand = (id: string, title: string, mode: EditorMode, shortcut?: str
 const qualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
   id: `editor.quality.${preset}`,
   title: `Quality: ${preset}`,
-  description: `Set mocked render quality preset to ${preset}.`,
+  description: `Set runtime render quality preset to ${preset}.`,
   category: "View",
   keywords: ["quality", "render", preset],
   runtimeWrite: true,
@@ -496,13 +496,13 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.saveSnapshot",
     title: "Save snapshot",
-    description: "Record a mocked runtime snapshot and a frontend editor state checkpoint.",
+    description: "Save a runtime world snapshot and record a frontend editor state checkpoint.",
     category: "File",
     keywords: ["snapshot", "save"],
     run: async (ctx) => {
       const snapshot = unwrapRuntime(await ctx.runtimeClient.saveWorldSnapshot());
       ctx.getState().saveEditorSnapshot(`Runtime snapshot ${snapshot.snapshotId}`, "editor.file.saveSnapshot");
-      ctx.toast.success(`Mock snapshot recorded: ${snapshot.snapshotId}.`);
+      ctx.toast.success(`Runtime snapshot saved: ${snapshot.snapshotId}.`);
     },
   },
   {
@@ -687,7 +687,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.world.rebuildSelectedChunk",
     title: "Rebuild selected chunk",
-    description: "Mark the selected mocked chunk mesh as queued for rebuild.",
+    description: "Queue the selected runtime chunk mesh for rebuild.",
     category: "World",
     keywords: ["world", "chunk", "mesh", "rebuild"],
     preconditions: ["selection.kind === chunk"],
@@ -708,7 +708,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.world.rebuildDirtyChunks",
     title: "Rebuild dirty chunks",
-    description: "Queue all dirty mocked chunks for rebuild.",
+    description: "Queue all dirty runtime chunks for rebuild.",
     category: "World",
     keywords: ["world", "chunk", "dirty", "rebuild"],
     runtimeWrite: true,
@@ -852,6 +852,7 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Focus the selected protected area in the viewport.",
     category: "Areas",
     keywords: ["protected", "area", "focus", "camera"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
@@ -1075,7 +1076,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.water.runVisualProbe",
     title: "Run water visual probe",
-    description: "Run mocked water visual probe and capture sample results.",
+    description: "Run the runtime water visual probe and capture sample results.",
     category: "Water",
     keywords: ["water", "probe", "reflection"],
     runtimeWrite: true,
@@ -1096,9 +1097,9 @@ export const editorCommands: readonly EditorCommand[] = [
       state.setWaterRuntimeSnapshot(snapshot);
       state.syncWaterReflectionStatus(reflectionStatus);
       if (state.selection.kind === "water") {
-        ctx.toast.success(`Mock water visual probe completed for ${state.selection.label}.`);
+        ctx.toast.success(`Water visual probe completed for ${state.selection.label}.`);
       } else {
-        ctx.toast.success("Mock water visual probe completed.");
+        ctx.toast.success("Water visual probe completed.");
       }
     },
   },
@@ -1409,7 +1410,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.atlas.rebuildTextureArray",
     title: "Rebuild texture array",
-    description: "Clear atlas dirty state and record a mock rebuild.",
+    description: "Save atlas mapping and clear atlas dirty state after runtime accepts it.",
     category: "Materials",
     keywords: ["atlas", "rebuild", "texture", "mapping"],
     runtimeWrite: true,
@@ -1417,13 +1418,13 @@ export const editorCommands: readonly EditorCommand[] = [
       unwrapRuntime(await ctx.runtimeClient.saveAtlasMapping(ctx.getState().atlasMapping));
       ctx.getState().markAtlasRebuilt();
       ctx.toast.success("Atlas texture array rebuild queued.");
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Rebuilt atlas texture array (mock)." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Runtime atlas texture array rebuild accepted." });
     },
   },
   {
     id: "editor.atlas.saveMapping",
     title: "Save atlas mapping",
-    description: "Mock save current atlas mapping and emit a YAML preview for review.",
+    description: "Save current atlas mapping through the runtime.",
     category: "Materials",
     keywords: ["atlas", "save", "mapping", "yaml"],
     runtimeWrite: true,
@@ -1431,7 +1432,7 @@ export const editorCommands: readonly EditorCommand[] = [
       const result = unwrapRuntime(await ctx.runtimeClient.saveAtlasMapping(ctx.getState().atlasMapping));
 
       ctx.toast.success(`Atlas mapping saved as ${result.snapshotId ?? "mapping"}.`);
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Saved atlas mapping (mock).", id: "agent-event-atlas-save" });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Saved atlas mapping through runtime.", id: "agent-event-atlas-save" });
     },
   },
   {

@@ -70,12 +70,19 @@ export class BrowserRuntimeClient implements RuntimeClient {
   }
 
   async selectEntity(selection: Selection): Promise<RuntimeCommandResult<RuntimeSelectEntityResult>> {
-    return unsupported(`Runtime selection is not enabled for ${selection.label}.`);
+    return this.execute({
+      type: "runtime.selectEntity",
+      requestId: makeRequestId("runtime.selectEntity"),
+      payload: { selection },
+    });
   }
 
   async focusCamera(target: Selection | readonly [number, number, number]): Promise<RuntimeCommandResult<RuntimeFocusCameraResult>> {
-    void target;
-    return unsupported("Runtime camera focus is not part of the safe write-command bridge.");
+    return this.execute({
+      type: "runtime.focusCamera",
+      requestId: makeRequestId("runtime.focusCamera"),
+      payload: { target },
+    });
   }
 
   async rebuildSelectedChunk(chunkId: string): Promise<RuntimeCommandResult<RuntimeChunkRebuildResult>> {
@@ -191,7 +198,11 @@ export class BrowserRuntimeClient implements RuntimeClient {
   }
 
   async saveWorldSnapshot(): Promise<RuntimeCommandResult<RuntimeSaveSummary>> {
-    return unsupported("Large world save/load is intentionally not enabled in this sprint.");
+    return this.execute({
+      type: "runtime.saveWorldSnapshot",
+      requestId: makeRequestId("runtime.saveWorldSnapshot"),
+      payload: {},
+    });
   }
 
   onRuntimeEvent(handler: RuntimeEventHandler): () => void {

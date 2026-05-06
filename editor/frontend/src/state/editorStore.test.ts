@@ -503,7 +503,7 @@ describe("editor command registry", () => {
 
     expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.file.saveSnapshot");
     expect(useEditorStore.getState().savedSnapshots[0].commandId).toBe("editor.file.saveSnapshot");
-    expect(toastMessages.some((message) => message.startsWith("success:Mock snapshot recorded: mock-runtime-snapshot-"))).toBe(true);
+    expect(toastMessages.some((message) => message.startsWith("success:Runtime snapshot saved: mock-runtime-snapshot-"))).toBe(true);
   });
 
   it("runs undo, redo, snapshots, handoff, and large-world commands", async () => {

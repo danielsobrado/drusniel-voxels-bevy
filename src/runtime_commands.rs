@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::TargetedBlock;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
@@ -15,6 +16,7 @@ use crate::rendering::water_reflection::{
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::persistence;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
@@ -67,6 +69,10 @@ pub struct RuntimeCommandEnvelope {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum RuntimeWriteCommand {
+    #[serde(rename = "runtime.selectEntity")]
+    SelectEntity { selection: Value },
+    #[serde(rename = "runtime.focusCamera")]
+    FocusCamera { target: Value },
     #[serde(rename = "runtime.setRenderQuality")]
     SetRenderQuality { preset: FrontendRenderQualityPreset },
     #[serde(rename = "runtime.setWaterReflectionDebugMode")]
@@ -112,6 +118,8 @@ pub enum RuntimeWriteCommand {
     SaveProtectedAreas {},
     #[serde(rename = "runtime.loadProtectedAreas")]
     LoadProtectedAreas {},
+    #[serde(rename = "runtime.saveWorldSnapshot")]
+    SaveWorldSnapshot { reason: Option<String> },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -300,7 +308,7 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
         "connectionState": "connected",
         "capabilities": {
             "canSelectEntity": true,
-            "canFocusCamera": false,
+            "canFocusCamera": true,
             "canRebuildChunks": true,
             "canSetRenderQuality": true,
             "canDebugWaterReflections": true,
@@ -396,10 +404,133 @@ fn voxel_material_name(voxel: VoxelType) -> &'static str {
     }
 }
 
+fn validate_selection_payload(selection: &Value, errors: &mut Vec<String>) {
+    let Some(kind) = selection.get("kind").and_then(Value::as_str) else {
+        errors.push("selection.kind is required.".to_string());
+        return;
+    };
+
+    match kind {
+        "voxel" => {
+            if value_position(selection.get("position")).is_none() {
+                errors.push("voxel selection requires position [x, y, z].".to_string());
+            }
+        }
+        "chunk" | "area" | "prop" | "water" | "material" | "debug_resource" => {
+            if selection.get("id").and_then(Value::as_str).is_none() {
+                errors.push(format!("{kind} selection requires id."));
+            }
+        }
+        _ => errors.push(format!("selection kind '{kind}' is not supported.")),
+    }
+}
+
+fn resolve_focus_target_preview(target: &Value) -> Option<()> {
+    if value_position(Some(target)).is_some() {
+        return Some(());
+    }
+
+    let kind = target.get("kind").and_then(Value::as_str)?;
+    match kind {
+        "voxel" => value_position(target.get("position")).map(|_| ()),
+        "chunk" | "area" => target.get("id").and_then(Value::as_str).map(|_| ()),
+        _ => None,
+    }
+}
+
+fn focus_runtime_camera(world: &mut World, target: &Value) -> Result<Value, String> {
+    let target_position = resolve_focus_target(world, target)?;
+    let camera_position = target_position + Vec3::new(32.0, 24.0, 32.0);
+    let next_transform =
+        Transform::from_translation(camera_position).looking_at(target_position, Vec3::Y);
+
+    let mut query =
+        world.query_filtered::<(&mut Transform, &mut PlayerCamera), With<PlayerCamera>>();
+    let Ok((mut transform, mut camera)) = query.single_mut(world) else {
+        return Err("PlayerCamera is not available in this runtime.".to_string());
+    };
+
+    let (yaw, pitch, _) = next_transform.rotation.to_euler(EulerRot::YXZ);
+    camera.mode = CameraMode::Fly;
+    camera.yaw = yaw;
+    camera.pitch = pitch;
+    *transform = next_transform;
+
+    Ok(json!({
+        "target": [target_position.x, target_position.y, target_position.z],
+        "camera": [camera_position.x, camera_position.y, camera_position.z],
+        "mode": "Fly",
+    }))
+}
+
+fn resolve_focus_target(world: &World, target: &Value) -> Result<Vec3, String> {
+    if let Some(position) = value_position(Some(target)) {
+        return Ok(position);
+    }
+
+    let kind = target
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Focus target requires kind.".to_string())?;
+
+    match kind {
+        "voxel" => value_position(target.get("position"))
+            .map(|position| position + Vec3::splat(0.5))
+            .ok_or_else(|| "Voxel focus target requires position [x, y, z].".to_string()),
+        "chunk" => {
+            let chunk_id = target
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Chunk focus target requires id.".to_string())?;
+            let chunk = parse_chunk_id(chunk_id).ok_or_else(|| {
+                format!("Chunk id '{chunk_id}' must look like chunk-x-z or chunk-x-y-z.")
+            })?;
+            Ok(chunk.as_vec3() * CHUNK_SIZE_I32 as f32 + Vec3::splat(CHUNK_SIZE_I32 as f32 * 0.5))
+        }
+        "area" => {
+            let area_id = target
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Area focus target requires id.".to_string())?;
+            let registry = world
+                .get_resource::<ProtectedAreaRegistry>()
+                .ok_or_else(|| "ProtectedAreaRegistry resource is not available.".to_string())?;
+            let area = registry.get(area_id).ok_or_else(|| {
+                format!("Protected area '{area_id}' does not exist in the runtime.")
+            })?;
+            Ok(Vec3::new(area.center[0], area.center[1], area.center[2]))
+        }
+        _ => Err(format!("Focus target kind '{kind}' is not supported.")),
+    }
+}
+
+fn value_position(value: Option<&Value>) -> Option<Vec3> {
+    let parts = value?.as_array()?;
+    let [x, y, z] = parts.as_slice() else {
+        return None;
+    };
+    Some(Vec3::new(
+        x.as_f64()? as f32,
+        y.as_f64()? as f32,
+        z.as_f64()? as f32,
+    ))
+}
+
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
     match command {
+        RuntimeWriteCommand::SelectEntity { selection } => {
+            validate_selection_payload(selection, &mut errors);
+        }
+        RuntimeWriteCommand::FocusCamera { target } => {
+            if resolve_focus_target_preview(target).is_none() {
+                errors.push(
+                    "target must be a voxel/chunk/area selection or a [x, y, z] position."
+                        .to_string(),
+                );
+            }
+        }
         RuntimeWriteCommand::SetWaterReflectionDebugMode { water_body_id, .. } => {
             if water_body_id.trim().is_empty() {
                 errors.push("waterBodyId is required.".to_string());
@@ -447,7 +578,8 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         RuntimeWriteCommand::SetRenderQuality { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
         | RuntimeWriteCommand::SaveProtectedAreas {}
-        | RuntimeWriteCommand::LoadProtectedAreas {} => {}
+        | RuntimeWriteCommand::LoadProtectedAreas {}
+        | RuntimeWriteCommand::SaveWorldSnapshot { .. } => {}
     }
 
     if errors.is_empty() {
@@ -466,6 +598,13 @@ fn execute_runtime_write_command(
     }
 
     match command {
+        RuntimeWriteCommand::SelectEntity { selection } => {
+            RuntimeCommandResult::success(json!({ "selection": selection }))
+        }
+        RuntimeWriteCommand::FocusCamera { target } => match focus_runtime_camera(world, &target) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
         RuntimeWriteCommand::SetRenderQuality { preset } => {
             let runtime_preset = preset.as_runtime();
             if let Some(mut quality) = world.get_resource_mut::<RenderQualityPreset>() {
@@ -685,6 +824,33 @@ fn execute_runtime_write_command(
                 Err(message) => {
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
                 }
+            }
+        }
+        RuntimeWriteCommand::SaveWorldSnapshot { reason } => {
+            let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+                return RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    "VoxelWorld resource is not available.",
+                );
+            };
+
+            let result = persistence::editor_save_default_world(voxel_world);
+            if result.saved {
+                RuntimeCommandResult::success(json!({
+                    "worldId": "bevy-runtime",
+                    "savedAt": timestamp_string(),
+                    "snapshotId": "world_data.bin",
+                    "savePath": result.save_path,
+                    "reason": reason,
+                    "metadata": result.metadata,
+                }))
+            } else {
+                RuntimeCommandResult::failure(
+                    RuntimeCommandStatus::Failure,
+                    result
+                        .error_message
+                        .unwrap_or_else(|| "Runtime world snapshot save failed.".to_string()),
+                )
             }
         }
     }
@@ -1067,6 +1233,41 @@ mod tests {
         assert_eq!(data["selection"]["kind"], "voxel");
         assert_eq!(data["selection"]["chunkId"], "chunk-1-1-2");
         assert_eq!(data["selection"]["label"], "Rock (17, 18, 33)");
+    }
+
+    #[test]
+    fn validates_focus_camera_targets() {
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::FocusCamera {
+                target: json!({ "kind": "chunk", "id": "chunk-1-2-3", "label": "Chunk 1,2,3" })
+            })
+            .is_ok()
+        );
+
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::FocusCamera {
+                target: json!({ "kind": "prop", "id": "prop-1", "label": "Prop 1" })
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn decodes_runtime_save_world_snapshot_command() {
+        let value = json!({
+            "type": "runtime.saveWorldSnapshot",
+            "requestId": "request-save",
+            "payload": { "reason": "manual" }
+        });
+
+        let envelope: RuntimeCommandEnvelope = serde_json::from_value(value).unwrap();
+        assert_eq!(envelope.request_id, "request-save");
+        assert!(matches!(
+            envelope.command,
+            RuntimeWriteCommand::SaveWorldSnapshot {
+                reason: Some(reason)
+            } if reason == "manual"
+        ));
     }
 
     #[test]
