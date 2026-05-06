@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
@@ -13,7 +14,7 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
 use crate::terrain::generation::config::terrain_config_fingerprint;
-use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::chunk::{Chunk, MeshDirtyReason};
 use crate::voxel::meshing::{MeshData, MeshSettings, generate_chunk_mesh_with_mode};
 use crate::voxel::persistence::{
     self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
@@ -434,43 +435,18 @@ fn frontend_world_summary_from_metadata_and_world(
     metadata: &EditorWorldMetadata,
     voxel_world: &VoxelWorld,
 ) -> Value {
-    let chunk_previews = voxel_world
-        .chunk_entries()
-        .map(|(_, chunk)| {
-            let data = chunk.to_data();
-            let [x, y, z] = [data.position.x, data.position.y, data.position.z];
-            json!({
-                "chunkId": format!("chunk-{x}-{y}-{z}"),
-                "coordinate": [x, y, z],
-                "samples": chunk_surface_samples(&data),
-            })
-        })
-        .collect::<Vec<_>>();
+    let summary_chunks = selected_editor_chunks(voxel_world, WORLD_SUMMARY_CHUNK_LIMIT);
+    let viewport_chunks = selected_editor_chunks(voxel_world, VIEWPORT_CHUNK_LIMIT);
+    let chunk_previews = chunk_preview_payloads(&viewport_chunks);
 
     json!({
         "worldId": metadata.save_path,
         "name": world_name_from_path(&metadata.save_path),
-        "chunks": voxel_world
-            .chunk_entries()
-            .map(|(_, chunk)| {
-                let data = chunk.to_data();
-                let summary = persistence::editor_chunk_summary_for_bridge(&data);
-                let [x, y, z] = summary.position;
-                json!({
-                    "id": format!("chunk-{x}-{y}-{z}"),
-                    "label": format!("Chunk {x},{y},{z}"),
-                    "coordinate": summary.position,
-                    "blockCount": summary.non_air_voxels,
-                    "dirty": chunk.is_dirty(),
-                    "biome": "loaded world",
-                    "meshStatus": if chunk.is_dirty() { "queued" } else { "clean" },
-                    "meshMode": "Mesher",
-                    "vertexCount": 0,
-                    "triangleCount": 0,
-                    "waterMeshCount": summary.water_voxels,
-                    "lodGroup": 0,
-                })
-            })
+        "chunkCountTotal": metadata.chunk_count,
+        "chunkCountIncluded": summary_chunks.len(),
+        "chunks": summary_chunks
+            .iter()
+            .map(|chunk| chunk_summary_payload(chunk))
             .collect::<Vec<_>>(),
         "protectedAreas": [],
         "waterBodies": [],
@@ -478,13 +454,17 @@ fn frontend_world_summary_from_metadata_and_world(
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,
             "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+            "chunkCountTotal": metadata.chunk_count,
+            "chunkCountIncluded": chunk_previews.len(),
             "chunks": chunk_previews,
         },
         "updatedAt": timestamp_string(),
     })
 }
 
-const VIEWPORT_SAMPLE_RESOLUTION: usize = 8;
+const WORLD_SUMMARY_CHUNK_LIMIT: usize = 512;
+const VIEWPORT_CHUNK_LIMIT: usize = 512;
+const VIEWPORT_SAMPLE_RESOLUTION: usize = 4;
 const VIEWPORT_MESH_CHUNK_LIMIT: usize = 16;
 const VIEWPORT_MESH_VERTEX_LIMIT: usize = 20_000;
 
@@ -493,6 +473,7 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
         .get_resource::<WorldBounds>()
         .copied()
         .unwrap_or_else(|| WorldBounds::from_size_chunks(voxel_world.world_size_chunks()));
+    let viewport_chunks = selected_editor_chunks(voxel_world, VIEWPORT_CHUNK_LIMIT);
 
     json!({
         "protocolVersion": 1,
@@ -517,10 +498,12 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
                 .max(bounds.horizontal_max.y - bounds.horizontal_min.y)
                 .max(CHUNK_SIZE_I32),
         },
-        "chunks": voxel_world
-            .chunk_entries()
+        "chunkCountTotal": voxel_world.chunk_entries().count(),
+        "chunkCountIncluded": viewport_chunks.len(),
+        "chunks": viewport_chunks
+            .iter()
             .enumerate()
-            .map(|(index, (_, chunk))| {
+            .map(|(index, chunk)| {
                 let data = chunk.to_data();
                 let summary = persistence::editor_chunk_summary_for_bridge(&data);
                 let [x, y, z] = summary.position;
@@ -544,6 +527,97 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
             })
             .collect::<Vec<_>>(),
         "generatedAt": timestamp_string(),
+    })
+}
+
+fn selected_editor_chunks(voxel_world: &VoxelWorld, limit: usize) -> Vec<&Chunk> {
+    let mut columns: BTreeMap<(i32, i32), &Chunk> = BTreeMap::new();
+    for (_, chunk) in voxel_world.chunk_entries() {
+        if !chunk_has_visible_voxels(chunk) {
+            continue;
+        }
+
+        let position = chunk.position();
+        columns
+            .entry((position.x, position.z))
+            .and_modify(|existing| {
+                if position.y > existing.position().y {
+                    *existing = chunk;
+                }
+            })
+            .or_insert(chunk);
+    }
+
+    let mut chunks = columns.into_values().collect::<Vec<_>>();
+    if chunks.is_empty() {
+        chunks = voxel_world
+            .chunk_entries()
+            .map(|(_, chunk)| chunk)
+            .collect::<Vec<_>>();
+        chunks.sort_by_key(|chunk| {
+            let position = chunk.position();
+            (position.x, position.z, position.y)
+        });
+    }
+
+    take_evenly(chunks, limit)
+}
+
+fn take_evenly<T>(items: Vec<T>, limit: usize) -> Vec<T> {
+    if limit == 0 || items.len() <= limit {
+        return items;
+    }
+
+    let len = items.len();
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            if index * limit / len != (index + 1) * limit / len {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn chunk_has_visible_voxels(chunk: &Chunk) -> bool {
+    chunk.iter_solid().next().is_some()
+}
+
+fn chunk_preview_payloads(chunks: &[&Chunk]) -> Vec<Value> {
+    chunks
+        .iter()
+        .map(|chunk| {
+            let data = chunk.to_data();
+            let [x, y, z] = [data.position.x, data.position.y, data.position.z];
+            json!({
+                "chunkId": format!("chunk-{x}-{y}-{z}"),
+                "coordinate": [x, y, z],
+                "samples": chunk_surface_samples(&data),
+            })
+        })
+        .collect()
+}
+
+fn chunk_summary_payload(chunk: &Chunk) -> Value {
+    let data = chunk.to_data();
+    let summary = persistence::editor_chunk_summary_for_bridge(&data);
+    let [x, y, z] = summary.position;
+    json!({
+        "id": format!("chunk-{x}-{y}-{z}"),
+        "label": format!("Chunk {x},{y},{z}"),
+        "coordinate": summary.position,
+        "blockCount": summary.non_air_voxels,
+        "dirty": chunk.is_dirty(),
+        "biome": "loaded world",
+        "meshStatus": if chunk.is_dirty() { "queued" } else { "clean" },
+        "meshMode": "Mesher",
+        "vertexCount": 0,
+        "triangleCount": 0,
+        "waterMeshCount": summary.water_voxels,
+        "lodGroup": 0,
     })
 }
 
