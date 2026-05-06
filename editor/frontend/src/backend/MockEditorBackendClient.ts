@@ -1,5 +1,6 @@
 import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
 import { mockAtlasMapping, mockChunks, mockMaterials, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
+import type { ViewportSnapshot } from "../types/world";
 
 const mockWorldSummary = (): WorldSummary => ({
   worldId: "mock-drusniel-world",
@@ -44,6 +45,55 @@ export class MockEditorBackendClient implements EditorBackendClient {
 
   async getWorldSummary(): Promise<BackendResult<WorldSummary>> {
     return { ok: true, data: mockWorldSummary() };
+  }
+
+  async getViewportSnapshot(): Promise<BackendResult<ViewportSnapshot>> {
+    return {
+      ok: true,
+      data: {
+        protocolVersion: 1,
+        worldId: "mock-drusniel-world",
+        chunkSize: 16,
+        sampleResolution: 1,
+        bounds: {
+          minChunk: [0, 0, 0],
+          maxChunk: [3, 0, 3],
+          minWorldY: 0,
+          maxWorldY: 15,
+          horizontalMin: [0, 0],
+          horizontalMax: [63, 63],
+        },
+        camera: {
+          target: [32, 8, 32],
+          distance: 72,
+        },
+        chunks: mockChunks.map((chunk) => ({
+          payloadId: `${chunk.id}-mock`,
+          chunkId: chunk.id,
+          coordinate: chunk.coordinate,
+          dirty: chunk.dirty,
+          meshState: chunk.dirty ? "queued" : "clean",
+          materialStats: {
+            nonAirVoxels: chunk.blockCount,
+            waterVoxels: chunk.waterMeshCount,
+          },
+          water: {
+            voxelCount: chunk.waterMeshCount,
+            present: chunk.waterMeshCount > 0,
+          },
+          samples: [
+            {
+              x: chunk.coordinate[0] * 16 + 8,
+              z: chunk.coordinate[2] * 16 + 8,
+              height: 8,
+              material: chunk.waterMeshCount > 0 ? "Water" : "TopSoil",
+              water: chunk.waterMeshCount > 0,
+            },
+          ],
+        })),
+        generatedAt: new Date().toISOString(),
+      },
+    };
   }
 
   async getChunkSummaries(): Promise<BackendResult<typeof mockChunks>> {

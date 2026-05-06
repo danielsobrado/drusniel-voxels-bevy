@@ -1,4 +1,4 @@
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, ProtectedArea, WaterBody, WorldViewportPreview } from "../types/world";
+import type { BlockAtlasMap, ChunkSummary, MaterialAsset, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "../types/world";
 
 export type BackendResult<T> =
   | { readonly ok: true; readonly data: T }
@@ -31,6 +31,7 @@ export interface EditorBackendClient {
   readonly savedWorldExists: () => Promise<BackendResult<boolean>>;
   readonly deleteSavedWorld: () => Promise<BackendResult<{ readonly deleted: boolean }>>;
   readonly getWorldSummary: () => Promise<BackendResult<WorldSummary>>;
+  readonly getViewportSnapshot: () => Promise<BackendResult<ViewportSnapshot>>;
   readonly getChunkSummaries: () => Promise<BackendResult<readonly ChunkSummary[]>>;
   readonly loadAtlasMapping: () => Promise<BackendResult<AtlasMappingDto>>;
   readonly saveAtlasMapping: (atlasMapping: AtlasMappingDto) => Promise<BackendResult<WorldSaveSummary>>;

@@ -51,6 +51,45 @@ export interface WorldViewportPreview {
   readonly chunks: readonly ChunkViewportPreview[];
 }
 
+export interface ViewportSnapshotBounds {
+  readonly minChunk: [number, number, number];
+  readonly maxChunk: [number, number, number];
+  readonly minWorldY: number;
+  readonly maxWorldY: number;
+  readonly horizontalMin: [number, number];
+  readonly horizontalMax: [number, number];
+}
+
+export interface ViewportSnapshotCamera {
+  readonly target: [number, number, number];
+  readonly distance: number;
+}
+
+export interface ViewportSnapshotChunk extends ChunkViewportPreview {
+  readonly payloadId: string;
+  readonly dirty: boolean;
+  readonly meshState: "queued" | "clean";
+  readonly materialStats: {
+    readonly nonAirVoxels: number;
+    readonly waterVoxels: number;
+  };
+  readonly water: {
+    readonly voxelCount: number;
+    readonly present: boolean;
+  };
+}
+
+export interface ViewportSnapshot {
+  readonly protocolVersion: 1;
+  readonly worldId: string;
+  readonly chunkSize: number;
+  readonly sampleResolution: number;
+  readonly bounds: ViewportSnapshotBounds;
+  readonly camera: ViewportSnapshotCamera;
+  readonly chunks: readonly ViewportSnapshotChunk[];
+  readonly generatedAt: string;
+}
+
 export interface VoxelBlock {
   readonly id: BlockType;
   readonly displayName: string;

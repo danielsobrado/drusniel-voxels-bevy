@@ -1,5 +1,6 @@
 import { mockAtlasMapping } from "../mocks/mockWorld";
 import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
+import type { ViewportSnapshot } from "../types/world";
 
 const DEFAULT_LOCAL_BRIDGE_URL = "http://127.0.0.1:17777";
 const BRIDGE_MODE_STORAGE_KEY = "drusniel.editor.runtimeBridge";
@@ -94,6 +95,10 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
 
   async getWorldSummary(): Promise<BackendResult<WorldSummary>> {
     return this.fetchJson<WorldSummary>("/editor/world/summary");
+  }
+
+  async getViewportSnapshot(): Promise<BackendResult<ViewportSnapshot>> {
+    return this.fetchJson<ViewportSnapshot>("/editor/viewport/snapshot");
   }
 
   async getChunkSummaries(): Promise<BackendResult<WorldSummary["chunks"]>> {

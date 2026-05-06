@@ -68,6 +68,7 @@ enum BridgeOperation {
     EditorLoadUploadedWorld(Vec<u8>),
     EditorSaveDefaultWorld,
     EditorWorldSummary,
+    EditorViewportSnapshot,
     RuntimeCommand(Value),
     RuntimeSnapshot,
 }
@@ -113,6 +114,7 @@ fn service_editor_bridge_requests(world: &mut World) {
             }
             BridgeOperation::EditorSaveDefaultWorld => editor_save_default_world_response(world),
             BridgeOperation::EditorWorldSummary => editor_current_world_summary_response(world),
+            BridgeOperation::EditorViewportSnapshot => editor_viewport_snapshot_response(world),
             BridgeOperation::RuntimeCommand(payload) => {
                 let response = handle_runtime_command_json(world, payload);
                 let body = serde_json::to_value(response).unwrap_or_else(|error| {
@@ -195,6 +197,7 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
         }
         ("POST", "/editor/world/save-default") => BridgeOperation::EditorSaveDefaultWorld,
         ("GET", "/editor/world/summary") => BridgeOperation::EditorWorldSummary,
+        ("GET", "/editor/viewport/snapshot") => BridgeOperation::EditorViewportSnapshot,
         ("POST", "/runtime/command") => match serde_json::from_slice::<Value>(&request.body) {
             Ok(payload) => BridgeOperation::RuntimeCommand(payload),
             Err(error) => {
@@ -322,6 +325,26 @@ fn editor_current_world_summary_response(world: &World) -> BridgeResponse {
             body: json!({
                 "ok": true,
                 "data": frontend_world_summary_from_world(voxel_world, "runtime-world"),
+            }),
+        },
+        None => BridgeResponse {
+            status: 503,
+            body: json!({
+                "ok": false,
+                "error": "VoxelWorld resource is not available.",
+                "code": "WORLD_UNAVAILABLE",
+            }),
+        },
+    }
+}
+
+fn editor_viewport_snapshot_response(world: &World) -> BridgeResponse {
+    match world.get_resource::<VoxelWorld>() {
+        Some(voxel_world) => BridgeResponse {
+            status: 200,
+            body: json!({
+                "ok": true,
+                "data": viewport_snapshot_from_world(world, voxel_world),
             }),
         },
         None => BridgeResponse {
@@ -466,6 +489,63 @@ fn frontend_world_summary_from_metadata_and_world(
 }
 
 const VIEWPORT_SAMPLE_RESOLUTION: usize = 8;
+
+fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Value {
+    let bounds = world
+        .get_resource::<WorldBounds>()
+        .copied()
+        .unwrap_or_else(|| WorldBounds::from_size_chunks(voxel_world.world_size_chunks()));
+
+    json!({
+        "protocolVersion": 1,
+        "worldId": "runtime-world",
+        "chunkSize": CHUNK_SIZE_I32,
+        "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+        "bounds": {
+            "minChunk": [bounds.min_chunk.x, bounds.min_chunk.y, bounds.min_chunk.z],
+            "maxChunk": [bounds.max_chunk.x, bounds.max_chunk.y, bounds.max_chunk.z],
+            "minWorldY": bounds.min_world_y,
+            "maxWorldY": bounds.max_world_y,
+            "horizontalMin": [bounds.horizontal_min.x, bounds.horizontal_min.y],
+            "horizontalMax": [bounds.horizontal_max.x, bounds.horizontal_max.y],
+        },
+        "camera": {
+            "target": [
+                ((bounds.horizontal_min.x + bounds.horizontal_max.x) as f32) * 0.5,
+                ((bounds.min_world_y + bounds.max_world_y) as f32) * 0.5,
+                ((bounds.horizontal_min.y + bounds.horizontal_max.y) as f32) * 0.5,
+            ],
+            "distance": (bounds.horizontal_max.x - bounds.horizontal_min.x)
+                .max(bounds.horizontal_max.y - bounds.horizontal_min.y)
+                .max(CHUNK_SIZE_I32),
+        },
+        "chunks": voxel_world
+            .chunk_entries()
+            .map(|(_, chunk)| {
+                let data = chunk.to_data();
+                let summary = persistence::editor_chunk_summary_for_bridge(&data);
+                let [x, y, z] = summary.position;
+                json!({
+                    "payloadId": format!("chunk-{x}-{y}-{z}-{}", chunk.dirty_reason_flags()),
+                    "chunkId": format!("chunk-{x}-{y}-{z}"),
+                    "coordinate": summary.position,
+                    "dirty": chunk.is_dirty(),
+                    "meshState": if chunk.is_dirty() { "queued" } else { "clean" },
+                    "materialStats": {
+                        "nonAirVoxels": summary.non_air_voxels,
+                        "waterVoxels": summary.water_voxels,
+                    },
+                    "water": {
+                        "voxelCount": summary.water_voxels,
+                        "present": summary.water_voxels > 0,
+                    },
+                    "samples": chunk_surface_samples(&data),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "generatedAt": timestamp_string(),
+    })
+}
 
 fn chunk_surface_samples(data: &crate::voxel::chunk::ChunkData) -> Vec<Value> {
     let stride = CHUNK_SIZE / VIEWPORT_SAMPLE_RESOLUTION;
