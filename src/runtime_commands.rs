@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
-use crate::interaction::TargetedBlock;
+use crate::interaction::{DebugDetailToggles, DebugOverlayState, TargetedBlock};
+use crate::props::instanced_render::PropBoundsDebugSettings;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::water_reflection::{
@@ -32,6 +33,7 @@ impl Plugin for RuntimeWriteCommandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RuntimeCommandQueue>()
             .init_resource::<RuntimeCommandResults>()
+            .init_resource::<RuntimeViewportDebugState>()
             .add_systems(Update, process_runtime_command_queue);
     }
 }
@@ -55,6 +57,39 @@ pub struct RuntimeCommandResults {
 impl RuntimeCommandResults {
     pub fn pop_front(&mut self) -> Option<RuntimeCommandResponse> {
         self.completed.pop_front()
+    }
+}
+
+#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeViewportDebugState {
+    #[serde(skip)]
+    pub editor_controlled: bool,
+    pub chunk_bounds: bool,
+    pub voxel_grid: bool,
+    pub water_debug: bool,
+    pub protected_areas: bool,
+    pub prop_bounds: bool,
+    pub prop_billboards: bool,
+    pub agent_targets: bool,
+    pub atlas_preview: bool,
+    pub wireframe: bool,
+}
+
+impl Default for RuntimeViewportDebugState {
+    fn default() -> Self {
+        Self {
+            editor_controlled: false,
+            chunk_bounds: true,
+            voxel_grid: true,
+            water_debug: false,
+            protected_areas: true,
+            prop_bounds: true,
+            prop_billboards: true,
+            agent_targets: true,
+            atlas_preview: false,
+            wireframe: false,
+        }
     }
 }
 
@@ -83,6 +118,11 @@ pub enum RuntimeWriteCommand {
     },
     #[serde(rename = "runtime.runWaterVisualProbe")]
     RunWaterVisualProbe {},
+    #[serde(rename = "runtime.setViewportDebugOverlay")]
+    SetViewportDebugOverlay {
+        overlay: FrontendViewportDebugOverlay,
+        enabled: bool,
+    },
     #[serde(rename = "runtime.rebuildSelectedChunk")]
     RebuildSelectedChunk {
         #[serde(rename = "chunkId")]
@@ -120,6 +160,20 @@ pub enum RuntimeWriteCommand {
     LoadProtectedAreas {},
     #[serde(rename = "runtime.saveWorldSnapshot")]
     SaveWorldSnapshot { reason: Option<String> },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendViewportDebugOverlay {
+    ChunkBounds,
+    VoxelGrid,
+    WaterDebug,
+    ProtectedAreas,
+    PropBounds,
+    PropBillboards,
+    AgentTargets,
+    AtlasPreview,
+    Wireframe,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -298,6 +352,7 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
         .cloned()
         .unwrap_or_default();
     let water_visual_probe = water_visual_probe_payload(world);
+    let viewport_debug = viewport_debug_payload(world);
     let protected_area_count = world
         .get_resource::<ProtectedAreaRegistry>()
         .map(|registry| registry.area_count())
@@ -335,6 +390,7 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
             "mapping": frontend_atlas_mapping_payload(&atlas_mapping),
             "dirty": atlas_mapping.needs_rebuild,
         },
+        "viewportDebug": viewport_debug,
         "propStats": {
             "totalInstances": 0,
             "visibleInstances": 0,
@@ -362,6 +418,19 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
         ],
         "capturedAt": timestamp_string(),
     }))
+}
+
+fn viewport_debug_payload(world: &World) -> Value {
+    let mut state = world
+        .get_resource::<RuntimeViewportDebugState>()
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(prop_bounds_debug) = world.get_resource::<PropBoundsDebugSettings>() {
+        state.prop_bounds = prop_bounds_debug.enabled;
+    }
+
+    json!(state)
 }
 
 fn runtime_selection_payload(world: &World) -> (Value, Value) {
@@ -576,6 +645,7 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
             }
         }
         RuntimeWriteCommand::SetRenderQuality { .. }
+        | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
         | RuntimeWriteCommand::SaveProtectedAreas {}
         | RuntimeWriteCommand::LoadProtectedAreas {}
@@ -636,6 +706,10 @@ fn execute_runtime_write_command(
         }
         RuntimeWriteCommand::RunWaterVisualProbe {} => {
             RuntimeCommandResult::success(water_visual_probe_payload(world))
+        }
+        RuntimeWriteCommand::SetViewportDebugOverlay { overlay, enabled } => {
+            set_viewport_debug_overlay(world, overlay, enabled);
+            RuntimeCommandResult::success(viewport_debug_payload(world))
         }
         RuntimeWriteCommand::RebuildSelectedChunk { chunk_id } => {
             let Some(chunk_pos) = parse_chunk_id(&chunk_id) else {
@@ -875,6 +949,54 @@ fn set_atlas_mapping(world: &mut World, mut mapping: AtlasMapping) {
     } else {
         world.insert_resource(mapping);
     }
+}
+
+fn set_viewport_debug_overlay(
+    world: &mut World,
+    overlay: FrontendViewportDebugOverlay,
+    enabled: bool,
+) {
+    let mut state = world
+        .get_resource::<RuntimeViewportDebugState>()
+        .cloned()
+        .unwrap_or_default();
+
+    match overlay {
+        FrontendViewportDebugOverlay::ChunkBounds => state.chunk_bounds = enabled,
+        FrontendViewportDebugOverlay::VoxelGrid => state.voxel_grid = enabled,
+        FrontendViewportDebugOverlay::WaterDebug => state.water_debug = enabled,
+        FrontendViewportDebugOverlay::ProtectedAreas => state.protected_areas = enabled,
+        FrontendViewportDebugOverlay::PropBounds => state.prop_bounds = enabled,
+        FrontendViewportDebugOverlay::PropBillboards => state.prop_billboards = enabled,
+        FrontendViewportDebugOverlay::AgentTargets => state.agent_targets = enabled,
+        FrontendViewportDebugOverlay::AtlasPreview => state.atlas_preview = enabled,
+        FrontendViewportDebugOverlay::Wireframe => state.wireframe = enabled,
+    }
+    state.editor_controlled = true;
+
+    if let FrontendViewportDebugOverlay::PropBounds = overlay {
+        if let Some(mut prop_bounds_debug) = world.get_resource_mut::<PropBoundsDebugSettings>() {
+            prop_bounds_debug.enabled = enabled;
+        } else {
+            world.insert_resource(PropBoundsDebugSettings { enabled });
+        }
+    }
+
+    if let Some(mut toggles) = world.get_resource_mut::<DebugDetailToggles>() {
+        match overlay {
+            FrontendViewportDebugOverlay::ChunkBounds => toggles.show_chunk_stats = enabled,
+            FrontendViewportDebugOverlay::PropBounds => toggles.show_prop_details = enabled,
+            _ => {}
+        }
+    }
+
+    if let FrontendViewportDebugOverlay::Wireframe = overlay {
+        if let Some(mut overlay_state) = world.get_resource_mut::<DebugOverlayState>() {
+            overlay_state.visible = enabled;
+        }
+    }
+
+    world.insert_resource(state);
 }
 
 fn render_quality_metrics(preset: RenderQualityPreset) -> Value {
@@ -1268,6 +1390,30 @@ mod tests {
                 reason: Some(reason)
             } if reason == "manual"
         ));
+    }
+
+    #[test]
+    fn viewport_debug_overlay_command_updates_snapshot() {
+        let mut world = World::new();
+        world.insert_resource(RuntimeViewportDebugState::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetViewportDebugOverlay {
+                overlay: FrontendViewportDebugOverlay::Wireframe,
+                enabled: true,
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("viewport debug overlay command should succeed");
+        };
+        assert_eq!(data["wireframe"], json!(true));
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+        assert_eq!(data["viewportDebug"]["wireframe"], json!(true));
     }
 
     #[test]

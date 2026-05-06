@@ -26,6 +26,7 @@ const applyRuntimeSnapshot = (snapshot: RuntimeSnapshot): void => {
     renderQualityPreset: snapshot.renderQuality.preset,
     waterRuntimeSnapshot: snapshot.waterVisualProbe,
     atlasMapping: snapshot.atlasMapping.mapping,
+    viewportOverlays: snapshot.viewportDebug,
     dirtyState: {
       ...state.dirtyState,
       dirtyAtlas: snapshot.atlasMapping.dirty,

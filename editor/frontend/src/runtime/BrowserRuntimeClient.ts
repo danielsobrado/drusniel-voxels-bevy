@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection } from "../types/editor";
+import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
@@ -18,6 +18,7 @@ import type {
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
   RuntimeSnapshot,
+  RuntimeViewportDebugState,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
 } from "./runtimeSchemas";
@@ -122,6 +123,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.runWaterVisualProbe",
       requestId: makeRequestId("runtime.runWaterVisualProbe"),
       payload: {},
+    });
+  }
+
+  async setViewportDebugOverlay(overlay: keyof ViewportOverlayState, enabled: boolean): Promise<RuntimeCommandResult<RuntimeViewportDebugState>> {
+    return this.execute({
+      type: "runtime.setViewportDebugOverlay",
+      requestId: makeRequestId("runtime.setViewportDebugOverlay"),
+      payload: { overlay, enabled },
     });
   }
 

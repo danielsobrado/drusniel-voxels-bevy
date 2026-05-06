@@ -167,6 +167,7 @@ interface EditorActions {
   readonly setBrushRadius: (radius: number) => void;
   readonly addProtectedArea: (area: ProtectedArea) => void;
   readonly toggleViewportOverlay: (overlay: keyof ViewportOverlayState) => void;
+  readonly setViewportOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => void;
   readonly setRuntimeState: (state: RuntimeState) => void;
   readonly setRenderQualityPreset: (preset: RenderQualityPreset) => void;
   readonly setOutlinerNodeVisibility: (kind: Selection["kind"], id: string, visible: boolean) => void;
@@ -332,6 +333,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     propBillboards: true,
     agentTargets: true,
     atlasPreview: false,
+    wireframe: false,
   },
   runtimeState: "mock",
   renderQualityPreset: "High",
@@ -454,9 +456,13 @@ export const useEditorStore = create<EditorStore>()(
         state.dirtyState.hasUnsavedChanges = true;
         state.dirtyState.dirtyAreaIds = [...state.dirtyState.dirtyAreaIds, area.id];
       }),
-  toggleViewportOverlay: (overlay) =>
+    toggleViewportOverlay: (overlay) =>
       set((state) => {
         state.viewportOverlays[overlay] = !state.viewportOverlays[overlay];
+      }),
+    setViewportOverlay: (overlay, enabled) =>
+      set((state) => {
+        state.viewportOverlays[overlay] = enabled;
       }),
     setRuntimeState: (runtimeState) =>
       set((state) => {

@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection } from "../types/editor";
+import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
@@ -16,6 +16,7 @@ import type {
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
   RuntimeSnapshot,
+  RuntimeViewportDebugState,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
 } from "./runtimeSchemas";
@@ -34,6 +35,7 @@ export interface RuntimeClient {
   readonly setRenderQuality: (preset: RenderQualityPreset) => Promise<RuntimeCommandResult<RuntimeRenderQualityState>>;
   readonly setWaterReflectionDebugMode: (waterBodyId: string, mode: WaterReflectionDebugViewMode) => Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>>;
   readonly runWaterVisualProbe: () => Promise<RuntimeCommandResult<RuntimeWaterVisualProbeResult>>;
+  readonly setViewportDebugOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => Promise<RuntimeCommandResult<RuntimeViewportDebugState>>;
   readonly setAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeAtlasMappingState>>;
   readonly saveAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeSaveSummary>>;
   readonly createProtectedArea: (area: ProtectedArea) => Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>>;

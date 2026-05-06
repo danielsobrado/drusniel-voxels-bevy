@@ -1,6 +1,6 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
-import type { RenderQualityPreset, Selection } from "../types/editor";
+import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -53,6 +53,17 @@ export class MockRuntimeClient implements RuntimeClient {
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
   private protectedAreas: ProtectedArea[] = [...mockProtectedAreas];
   private connectionState: RuntimeConnectionState = "mock";
+  private viewportDebug: ViewportOverlayState = {
+    chunkBounds: true,
+    voxelGrid: true,
+    waterDebug: false,
+    protectedAreas: true,
+    propBounds: true,
+    propBillboards: true,
+    agentTargets: true,
+    atlasPreview: false,
+    wireframe: false,
+  };
   private readonly handlers = new Set<RuntimeEventHandler>();
 
   getConnectionState(): RuntimeConnectionState {
@@ -101,6 +112,11 @@ export class MockRuntimeClient implements RuntimeClient {
       waterPresence: { ...mockWaterRuntimeSnapshot.waterPresence, nearestWaterDistance: 4.2 },
       capturedAt: new Date().toISOString(),
     });
+  }
+
+  async setViewportDebugOverlay(overlay: keyof ViewportOverlayState, enabled: boolean) {
+    this.viewportDebug = { ...this.viewportDebug, [overlay]: enabled };
+    return runtimeCommandSuccess(this.viewportDebug);
   }
 
   async rebuildSelectedChunk(chunkId: string) {
@@ -269,6 +285,7 @@ export class MockRuntimeClient implements RuntimeClient {
         mapping: this.atlasMapping,
         dirty: false,
       },
+      viewportDebug: this.viewportDebug,
       propStats: mockPropStats(),
       timingSamples: metrics.timingSamples,
       consoleEvents: [],

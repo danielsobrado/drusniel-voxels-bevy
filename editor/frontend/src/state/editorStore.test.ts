@@ -231,6 +231,7 @@ describe("editor command registry", () => {
     }
     expect(result.data.connectionState).toBe("mock");
     expect(result.data.capabilities.canRebuildChunks).toBe(true);
+    expect(result.data.viewportDebug.wireframe).toBe(false);
     expect(result.data.metrics.fps).toBeGreaterThan(0);
   });
 
@@ -296,6 +297,12 @@ describe("editor command registry", () => {
     expect(useEditorStore.getState().viewportOverlays.chunkBounds).toBe(true);
     await runCommand("editor.view.toggleChunkBounds", createContext());
     expect(useEditorStore.getState().viewportOverlays.chunkBounds).toBe(false);
+  });
+
+  it("toggles wireframe through the runtime debug bridge", async () => {
+    expect(useEditorStore.getState().viewportOverlays.wireframe).toBe(false);
+    await runCommand("editor.view.toggleWireframe", createContext());
+    expect(useEditorStore.getState().viewportOverlays.wireframe).toBe(true);
   });
 
   it("applies a water preset through command registry", async () => {

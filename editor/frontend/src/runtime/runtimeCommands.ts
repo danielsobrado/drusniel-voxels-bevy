@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection } from "../types/editor";
+import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode } from "../types/world";
 
 export type RuntimeCommandRequestType =
@@ -9,6 +9,7 @@ export type RuntimeCommandRequestType =
   | "runtime.setRenderQuality"
   | "runtime.setWaterReflectionDebugMode"
   | "runtime.runWaterVisualProbe"
+  | "runtime.setViewportDebugOverlay"
   | "runtime.setAtlasMapping"
   | "runtime.saveAtlasMapping"
   | "runtime.createProtectedArea"
@@ -33,6 +34,7 @@ export type RuntimeRebuildDirtyChunksCommand = RuntimeCommandRequestBase<"runtim
 export type RuntimeSetRenderQualityCommand = RuntimeCommandRequestBase<"runtime.setRenderQuality", { readonly preset: RenderQualityPreset }>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
+export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
 export type RuntimeSetAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.setAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeSaveAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.saveAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeCreateProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.createProtectedArea", { readonly area: ProtectedArea }>;
@@ -52,6 +54,7 @@ export type RuntimeCommandRequest =
   | RuntimeSetRenderQualityCommand
   | RuntimeSetWaterReflectionDebugModeCommand
   | RuntimeRunWaterVisualProbeCommand
+  | RuntimeSetViewportDebugOverlayCommand
   | RuntimeSetAtlasMappingCommand
   | RuntimeSaveAtlasMappingCommand
   | RuntimeCreateProtectedAreaCommand

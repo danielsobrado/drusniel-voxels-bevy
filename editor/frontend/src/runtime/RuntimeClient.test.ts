@@ -54,6 +54,34 @@ describe("runtime clients", () => {
     });
   });
 
+  it("browser runtime client sends viewport debug overlay commands through the bridge", async () => {
+    const requests: unknown[] = [];
+    const client = new BrowserRuntimeClient({
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({
+          chunkBounds: true,
+          voxelGrid: true,
+          waterDebug: false,
+          protectedAreas: true,
+          propBounds: true,
+          propBillboards: true,
+          agentTargets: true,
+          atlasPreview: false,
+          wireframe: true,
+        });
+      },
+    });
+
+    const result = await client.setViewportDebugOverlay("wireframe", true);
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]).toMatchObject({
+      type: "runtime.setViewportDebugOverlay",
+      payload: { overlay: "wireframe", enabled: true },
+    });
+  });
+
   it("mock runtime client validates atlas write result shape", async () => {
     const client = new MockRuntimeClient();
     const result = await client.setAtlasMapping(mockAtlasMapping);

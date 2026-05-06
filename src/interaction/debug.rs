@@ -22,6 +22,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::shadow_budget::ShadowCullingStats;
 use crate::rendering::water_reflection::{WaterReflectionMaskStats, WaterReflectionStatus};
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
+use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
@@ -758,10 +759,13 @@ pub fn update_debug_overlay(
 
 pub fn render_world_bounds_debug_planes(
     state: Res<DebugOverlayState>,
+    runtime_debug: Option<Res<RuntimeViewportDebugState>>,
     world: Res<VoxelWorld>,
     mut gizmos: Gizmos,
 ) {
-    if !state.visible {
+    if !state.visible
+        && !runtime_debug.is_some_and(|debug| debug.editor_controlled && debug.chunk_bounds)
+    {
         return;
     }
 

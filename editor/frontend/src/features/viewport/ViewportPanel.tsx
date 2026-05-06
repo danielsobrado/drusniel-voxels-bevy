@@ -88,6 +88,7 @@ export function ViewportPanel() {
       },
       { id: "propBounds", label: "Prop bounds", command: "editor.view.togglePropBounds", enabled: overlays.propBounds, testId: "viewport-toggle-prop-bounds" },
       { id: "waterDebug", label: "Water debug", command: "editor.view.toggleWaterDebug", enabled: overlays.waterDebug, testId: "viewport-toggle-water-debug" },
+      { id: "wireframe", label: "Wireframe", command: "editor.view.toggleWireframe", enabled: overlays.wireframe, testId: "viewport-toggle-wireframe" },
       { id: "agentTargets", label: "Agent targets", command: "editor.view.toggleAgentTargets", enabled: overlays.agentTargets, testId: "viewport-toggle-agent-targets" },
     ],
     [
@@ -97,6 +98,7 @@ export function ViewportPanel() {
       overlays.protectedAreas,
       overlays.voxelGrid,
       overlays.waterDebug,
+      overlays.wireframe,
     ],
   );
 

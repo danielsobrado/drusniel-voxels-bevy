@@ -2543,11 +2543,14 @@ fn standard_material_matches(
 
 fn draw_water_body_debug_overlay(
     overlay_state: Option<Res<crate::interaction::DebugOverlayState>>,
+    runtime_debug: Option<Res<crate::runtime_commands::RuntimeViewportDebugState>>,
     registry: Res<WaterBodyRegistry>,
     water_meshes: Query<(&Transform, Option<&WaterBodyId>), With<WaterMesh>>,
     mut gizmos: Gizmos,
 ) {
-    if !overlay_state.is_some_and(|state| state.visible) {
+    if !overlay_state.is_some_and(|state| state.visible)
+        && !runtime_debug.is_some_and(|debug| debug.editor_controlled && debug.water_debug)
+    {
         return;
     }
 

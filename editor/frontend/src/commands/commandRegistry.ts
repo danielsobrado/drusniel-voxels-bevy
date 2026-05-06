@@ -1,7 +1,7 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus } from "../runtime/RuntimeClient";
-import type { EditorMode, RenderQualityPreset } from "../types/editor";
+import type { EditorMode, RenderQualityPreset, ViewportOverlayState } from "../types/editor";
 import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import { mockPropAssets } from "../mocks/mockWorld";
 
@@ -82,6 +82,21 @@ const runtimeSettingCommand = (
     ctx.setState({ runtimeMetrics: update(current.runtimeMetrics) });
   },
 });
+
+const setRuntimeViewportOverlay = async (
+  ctx: EditorCommandContext,
+  overlay: keyof ViewportOverlayState,
+  enabled?: boolean,
+): Promise<void> => {
+  const nextEnabled = enabled ?? !ctx.getState().viewportOverlays[overlay];
+  const viewportDebug = unwrapRuntime(await ctx.runtimeClient.setViewportDebugOverlay(overlay, nextEnabled));
+  ctx.setState((state) => ({
+    viewportOverlays: {
+      ...state.viewportOverlays,
+      ...viewportDebug,
+    },
+  }));
+};
 
 const makeAreaId = (prefix: string, index: number): string => `${prefix}-${index}`;
 
@@ -606,10 +621,11 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.view.toggleVoxelGrid",
     title: "Toggle voxel grid",
-    description: "Toggle the voxel grid viewport overlay.",
+    description: "Toggle the runtime voxel grid viewport overlay.",
     category: "View",
     keywords: ["voxel", "grid", "overlay"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("voxelGrid"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "voxelGrid"),
   },
   {
     id: "editor.view.toggleChunkBounds",
@@ -617,7 +633,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Toggle chunk bounds in the runtime world viewport.",
     category: "View",
     keywords: ["chunk", "bounds", "overlay"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("chunkBounds"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "chunkBounds"),
   },
   {
     id: "editor.view.toggleProtectedAreas",
@@ -625,31 +642,44 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Toggle protected area visibility in the runtime world viewport.",
     category: "View",
     keywords: ["protected", "area", "overlay"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("protectedAreas"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "protectedAreas"),
   },
   {
     id: "editor.view.togglePropBounds",
     title: "Toggle prop bounds",
-    description: "Toggle mocked prop bounds and billboard debug visibility.",
+    description: "Toggle runtime prop bounds debug visibility.",
     category: "View",
     keywords: ["props", "bounds", "billboards"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("propBounds"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "propBounds"),
   },
   {
     id: "editor.view.toggleWaterDebug",
     title: "Toggle water debug",
-    description: "Toggle mock water debug overlay.",
+    description: "Toggle runtime water debug overlay.",
     category: "View",
     keywords: ["water", "debug", "overlay"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("waterDebug"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "waterDebug"),
   },
   {
     id: "editor.view.toggleAgentTargets",
     title: "Toggle agent targets",
-    description: "Toggle mock agent-target markers in the viewport.",
+    description: "Toggle runtime agent-target markers in the viewport.",
     category: "View",
     keywords: ["agent", "targets", "overlay"],
-    run: (ctx) => ctx.getState().toggleViewportOverlay("agentTargets"),
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "agentTargets"),
+  },
+  {
+    id: "editor.view.toggleWireframe",
+    title: "Toggle wireframe",
+    description: "Toggle runtime wireframe debug mode.",
+    category: "View",
+    keywords: ["wireframe", "debug", "overlay"],
+    runtimeWrite: true,
+    run: (ctx) => setRuntimeViewportOverlay(ctx, "wireframe"),
   },
   {
     id: "editor.view.resetLayout",
@@ -989,17 +1019,18 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.water.openReflectionDebug",
     title: "Open reflection debug",
-    description: "Enable mocked water debug overlay.",
+    description: "Enable the runtime water debug overlay.",
     category: "Water",
     keywords: ["water", "reflection", "debug", "viewport", "overlay"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       if (!state.viewportOverlays.waterDebug) {
-        state.toggleViewportOverlay("waterDebug");
+        await setRuntimeViewportOverlay(ctx, "waterDebug", true);
       }
 
-      state.setActiveMode("water");
-      state.setActiveTool("water");
+      ctx.getState().setActiveMode("water");
+      ctx.getState().setActiveTool("water");
       ctx.toast.info("Water reflection debug overlay opened.");
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",

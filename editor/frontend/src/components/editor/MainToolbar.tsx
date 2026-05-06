@@ -12,6 +12,7 @@ export const toolbarCommandIds = [
   "editor.performance.loadLargeMockWorld",
   "editor.view.toggleVoxelGrid",
   "editor.view.toggleChunkBounds",
+  "editor.view.toggleWireframe",
   ...modeCommandIds,
 ] as const;
 
@@ -70,6 +71,9 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
           </button>
         <button type="button" className="toolbar-button" aria-label="Toggle chunk bounds" data-command-id="editor.view.toggleChunkBounds" onClick={() => void runCommand("editor.view.toggleChunkBounds")}>
           <Boxes size={14} aria-hidden="true" /> Chunk Bounds
+        </button>
+        <button type="button" className="toolbar-button" aria-label="Toggle wireframe" data-command-id="editor.view.toggleWireframe" onClick={() => void runCommand("editor.view.toggleWireframe")}>
+          <SquareDashedMousePointer size={14} aria-hidden="true" /> Wireframe
         </button>
       </div>
       <div className="toolbar-group toolbar-modes" aria-label="Editor modes">

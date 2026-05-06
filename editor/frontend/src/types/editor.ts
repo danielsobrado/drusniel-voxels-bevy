@@ -56,6 +56,7 @@ export interface ViewportOverlayState {
   readonly propBillboards: boolean;
   readonly agentTargets: boolean;
   readonly atlasPreview: boolean;
+  readonly wireframe: boolean;
 }
 
 export interface DirtyState {
