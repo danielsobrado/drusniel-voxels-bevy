@@ -36,7 +36,18 @@ export const getSelectedObject = (state: EditorDataState): SelectedObject => {
   const selection = state.selection;
 
   if (selection.kind === "voxel") {
-    return state.voxelBlocks.find((block) => block.id === selection.label.toLowerCase());
+    const knownBlock = state.voxelBlocks.find((block) => block.id === selection.label.toLowerCase());
+    if (knownBlock) {
+      return knownBlock;
+    }
+
+    const materialName = selection.label.replace(/\s+\(.+$/, "");
+    return {
+      id: `runtime-${selection.position.join("-")}`,
+      displayName: selection.label,
+      solid: !["Air", "Water"].includes(materialName),
+      defaultMaterialId: materialName,
+    };
   }
 
   if (selection.kind === "chunk") {

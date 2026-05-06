@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::constants::CHUNK_SIZE_I32;
+use crate::interaction::TargetedBlock;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::water_reflection::{
@@ -13,6 +15,7 @@ use crate::rendering::water_reflection::{
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
     ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, WORLD_RULES_PATH,
@@ -291,11 +294,12 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
         .get_resource::<ProtectedAreaRegistry>()
         .map(|registry| registry.area_count())
         .unwrap_or_default();
+    let (selection, targeted_voxel) = runtime_selection_payload(world);
 
     RuntimeCommandResult::success(json!({
         "connectionState": "connected",
         "capabilities": {
-            "canSelectEntity": false,
+            "canSelectEntity": true,
             "canFocusCamera": false,
             "canRebuildChunks": true,
             "canSetRenderQuality": true,
@@ -310,8 +314,8 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
             "preset": render_quality_preset_to_frontend(preset),
             "metrics": render_quality_metrics(preset),
         },
-        "selection": null,
-        "targetedVoxel": null,
+        "selection": selection,
+        "targetedVoxel": targeted_voxel,
         "chunks": [],
         "dirtyChunkIds": [],
         "waterReflection": {
@@ -350,6 +354,46 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
         ],
         "capturedAt": timestamp_string(),
     }))
+}
+
+fn runtime_selection_payload(world: &World) -> (Value, Value) {
+    let Some(targeted_block) = world.get_resource::<TargetedBlock>() else {
+        return (Value::Null, Value::Null);
+    };
+    let Some(position) = targeted_block.position else {
+        return (Value::Null, Value::Null);
+    };
+
+    let voxel = targeted_block.voxel_type.unwrap_or_default();
+    let material = voxel_material_name(voxel);
+    let chunk = position.div_euclid(IVec3::splat(CHUNK_SIZE_I32));
+
+    (
+        json!({
+            "kind": "voxel",
+            "chunkId": format!("chunk-{}-{}-{}", chunk.x, chunk.y, chunk.z),
+            "position": [position.x, position.y, position.z],
+            "label": format!("{material} ({}, {}, {})", position.x, position.y, position.z),
+        }),
+        json!([position.x, position.y, position.z]),
+    )
+}
+
+fn voxel_material_name(voxel: VoxelType) -> &'static str {
+    match voxel {
+        VoxelType::Air => "Air",
+        VoxelType::TopSoil => "TopSoil",
+        VoxelType::SubSoil => "SubSoil",
+        VoxelType::Rock => "Rock",
+        VoxelType::Bedrock => "Bedrock",
+        VoxelType::Sand => "Sand",
+        VoxelType::Clay => "Clay",
+        VoxelType::Water => "Water",
+        VoxelType::Wood => "Wood",
+        VoxelType::Leaves => "Leaves",
+        VoxelType::DungeonWall => "DungeonWall",
+        VoxelType::DungeonFloor => "DungeonFloor",
+    }
 }
 
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
@@ -1004,6 +1048,25 @@ mod tests {
                 preset: FrontendRenderQualityPreset::Performance100
             }
         ));
+    }
+
+    #[test]
+    fn runtime_snapshot_includes_targeted_voxel_selection() {
+        let mut world = World::new();
+        world.insert_resource(TargetedBlock {
+            position: Some(IVec3::new(17, 18, 33)),
+            normal: Some(IVec3::Y),
+            voxel_type: Some(VoxelType::Rock),
+        });
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+
+        assert_eq!(data["targetedVoxel"], json!([17, 18, 33]));
+        assert_eq!(data["selection"]["kind"], "voxel");
+        assert_eq!(data["selection"]["chunkId"], "chunk-1-1-2");
+        assert_eq!(data["selection"]["label"], "Rock (17, 18, 33)");
     }
 
     #[test]

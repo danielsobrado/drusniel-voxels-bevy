@@ -116,7 +116,7 @@ export interface ViewportSnapshot {
 }
 
 export interface VoxelBlock {
-  readonly id: BlockType;
+  readonly id: string;
   readonly displayName: string;
   readonly solid: boolean;
   readonly defaultMaterialId: string;

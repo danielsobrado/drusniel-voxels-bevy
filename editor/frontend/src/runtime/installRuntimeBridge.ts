@@ -68,7 +68,7 @@ const getConfiguredBridgeUrl = (): string =>
   DEFAULT_LOCAL_BRIDGE_URL;
 
 const isTauriDesktop = (): boolean =>
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
 const normalizeBridgeResponse = <T>(value: unknown): RuntimeCommandResult<T> => {
   if (!value || typeof value !== "object") {

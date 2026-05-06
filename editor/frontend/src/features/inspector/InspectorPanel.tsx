@@ -178,7 +178,7 @@ export function InspectorPanel() {
         <h2 id="inspector-title" className="placeholder-heading">
           Inspector
         </h2>
-        <p className="agent-hint">Agent Hint: selection changes update active inspector and mocked summary state.</p>
+        <p className="agent-hint">Agent Hint: selection follows the active Bevy ray target and updates this inspector from runtime snapshots.</p>
         <div className="inspector-card">
           <span className="inspector-kicker">Selected {inspectorKind}</span>
           <strong data-testid="inspector-selection-header">{editorState.selection.label}</strong>
@@ -520,7 +520,7 @@ function EmptyInspector() {
 function VoxelInspector({ voxel }: { readonly voxel: VoxelBlock }) {
   return (
     <div data-testid="inspector-voxel">
-      <InspectorHeader title={voxel.displayName} badge="voxel" note="Voxel objects are mocked and read-only in Sprint 5." />
+      <InspectorHeader title={voxel.displayName} badge="voxel" note="Runtime voxel target from the Bevy raycast; voxel write commands are not enabled yet." />
       <InspectorSection title="Voxel details">
         <ReadOnlyMetricRow label="Id" value={voxel.id} />
         <ReadOnlyMetricRow label="Display name" value={voxel.displayName} />
@@ -546,7 +546,7 @@ function ChunkInspector({
 }) {
   return (
     <div data-testid="inspector-chunk">
-      <InspectorHeader title={chunk.label} badge="chunk" note="Chunk actions are mocked and mutate local state only." />
+      <InspectorHeader title={chunk.label} badge="chunk" note="Chunk actions route through the active RuntimeClient." />
       <InspectorSection title="Chunk metrics">
         <ReadOnlyMetricRow label="Coordinate" value={`(${formatCoordinates(chunk.coordinate)})`} />
         <ReadOnlyMetricRow label="Dirty" value={chunk.dirty ? "Dirty" : "Clean"} />

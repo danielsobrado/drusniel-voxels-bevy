@@ -7,6 +7,30 @@ import { EditorMenubar } from "../components/editor/EditorMenubar";
 import { MainToolbar } from "../components/editor/MainToolbar";
 import { useCommandRunner } from "../commands/useCommandRunner";
 import { useEditorStore } from "../state/editorStore";
+import type { RuntimeSnapshot } from "../runtime/runtimeSchemas";
+
+const selectionKey = (selection: RuntimeSnapshot["selection"]): string =>
+  selection === null
+    ? "none"
+    : selection.kind === "voxel"
+      ? `voxel:${selection.chunkId}:${selection.position.join(",")}`
+      : `${selection.kind}:${selection.id}`;
+
+const applyRuntimeSnapshot = (snapshot: RuntimeSnapshot): void => {
+  const currentSelection = useEditorStore.getState().selection;
+  const nextSelection = snapshot.selection;
+
+  useEditorStore.setState((state) => ({
+    runtimeState: snapshot.connectionState,
+    runtimeMetrics: snapshot.metrics,
+    renderQualityPreset: snapshot.renderQuality.preset,
+    waterRuntimeSnapshot: snapshot.waterVisualProbe,
+    selection:
+      nextSelection && selectionKey(nextSelection) !== selectionKey(currentSelection)
+        ? nextSelection
+        : state.selection,
+  }));
+};
 
 export function AppShell() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -20,6 +44,7 @@ export function AppShell() {
   const selection = useEditorStore((state) => state.selection);
   const chunkBoundsEnabled = useEditorStore((state) => state.viewportOverlays.chunkBounds);
   const { backendClient, runtimeClient } = useEditorClients();
+  const lastRuntimeSnapshotErrorRef = useRef(0);
 
   const openWorldFile = useCallback(() => {
     fileInputRef.current?.click();
@@ -52,30 +77,47 @@ export function AppShell() {
   }, [runCommandById]);
 
   useEffect(() => {
-    void runtimeClient.getRuntimeSnapshot().then((result) => {
-      if (!result.ok) {
-        useEditorStore.getState().setRuntimeState(result.status === "runtime_unavailable" ? "disconnected" : "error");
-        useEditorStore.setState((state) => ({
-          consoleMessages: [
-            {
-              id: `console-runtime-snapshot-${Date.now()}`,
-              level: "error",
-              message: `runtime.snapshot: ${result.message}`,
-              time: new Date().toLocaleTimeString(),
-            },
-            ...state.consoleMessages,
-          ],
-        }));
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const pollRuntimeSnapshot = async () => {
+      const result = await runtimeClient.getRuntimeSnapshot();
+      if (cancelled) {
         return;
       }
 
-      useEditorStore.setState({
-        runtimeState: result.data.connectionState,
-        runtimeMetrics: result.data.metrics,
-        renderQualityPreset: result.data.renderQuality.preset,
-        waterRuntimeSnapshot: result.data.waterVisualProbe,
-      });
-    });
+      if (!result.ok) {
+        useEditorStore.getState().setRuntimeState(result.status === "runtime_unavailable" ? "disconnected" : "error");
+        const now = Date.now();
+        if (now - lastRuntimeSnapshotErrorRef.current > 10_000) {
+          lastRuntimeSnapshotErrorRef.current = now;
+          useEditorStore.setState((state) => ({
+            consoleMessages: [
+              {
+                id: `console-runtime-snapshot-${now}`,
+                level: "error",
+                message: `runtime.snapshot: ${result.message}`,
+                time: new Date().toLocaleTimeString(),
+              },
+              ...state.consoleMessages,
+            ],
+          }));
+        }
+      } else {
+        applyRuntimeSnapshot(result.data);
+      }
+
+      timeoutId = window.setTimeout(pollRuntimeSnapshot, 750);
+    };
+
+    void pollRuntimeSnapshot();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [runtimeClient]);
 
   useEffect(() => {

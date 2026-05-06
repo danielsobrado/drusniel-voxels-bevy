@@ -31,7 +31,7 @@ const getConfiguredBridgeUrl = (): string =>
   DEFAULT_LOCAL_BRIDGE_URL;
 
 export const isTauriDesktop = (): boolean =>
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
 export const hasBrowserEditorBackendBridge = (): boolean =>
   typeof window !== "undefined" && (isTauriDesktop() || getConfiguredBridgeMode() === "local-http");
