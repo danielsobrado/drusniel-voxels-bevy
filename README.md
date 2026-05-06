@@ -4,6 +4,43 @@
 
 Current development version: **v0.5**.
 
+## Editor
+
+The desktop editor lives in `editor/frontend` and runs as a Tauri app. Tauri owns the editor window and starts the Bevy editor runtime in backend mode automatically.
+
+### Start The Desktop Editor
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run dev:desktop
+```
+
+### Build The Desktop Editor
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run build:desktop
+```
+
+The desktop build creates a release editor runtime sidecar first, then builds the Tauri app with that sidecar configured.
+
+### Run A Built Editor Exe
+
+After a successful production build, run:
+
+```powershell
+C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend\src-tauri\target\release\drusniel_voxels_editor.exe
+```
+
+### Browser-Only Frontend Development
+
+Use this only for frontend work that does not need the desktop runtime lifecycle:
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run dev
+```
+
 ### Current (v0.5)
 
 *   **Water Rendering Overhaul**: Complete rewrite of the water shader pipeline with physically-based wave physics, multi-layer foam, caustics, Fresnel reflections, refraction, and interactive displacement.
