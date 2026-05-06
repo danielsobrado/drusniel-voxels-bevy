@@ -67,6 +67,9 @@ const getConfiguredBridgeUrl = (): string =>
   readLocalStorage(BRIDGE_URL_STORAGE_KEY) ??
   DEFAULT_LOCAL_BRIDGE_URL;
 
+const isTauriDesktop = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 const normalizeBridgeResponse = <T>(value: unknown): RuntimeCommandResult<T> => {
   if (!value || typeof value !== "object") {
     return commandFailure("Runtime bridge returned a non-object response.");
@@ -128,7 +131,7 @@ export const installRuntimeBridge = (): void => {
   }
 
   const bridgeMode = getConfiguredBridgeMode();
-  if (bridgeMode === "local-http") {
+  if (isTauriDesktop() || bridgeMode === "local-http") {
     window.drusnielRuntime = createLocalHttpRuntimeBridge(getConfiguredBridgeUrl());
   }
 };

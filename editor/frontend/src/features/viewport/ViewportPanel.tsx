@@ -220,18 +220,6 @@ export function ViewportPanel() {
         <h2 id="viewport-title" className="sr-only">
           Viewport
         </h2>
-        <BevyCanvasHost
-          areaOverlays={areaOverlays}
-          showProtectedAreas={overlays.protectedAreas}
-          waterDebug={overlays.waterDebug}
-          waterDebugMode={
-            selectedWaterBody && "reflectionStatus" in selectedWaterBody
-              ? selectedWaterBody.reflectionStatus.debugViewMode
-              : editorState.waterRuntimeSnapshot.reflectionStatus.debugViewMode
-          }
-          waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
-        />
-
         <div className="viewport-overlay viewport-overlay-toolbar" data-testid="viewport-tools">
           <div className="viewport-breadcrumbs" data-testid="viewport-breadcrumbs">
             <span>{breadcrumbPath(editorState.selection.kind, editorState.selection.label)}</span>
@@ -513,6 +501,21 @@ export function ViewportPanel() {
             ) : null}
           </div>
         </div>
+
+        <BevyCanvasHost
+          chunks={editorState.chunks}
+          worldViewport={editorState.worldViewport}
+          runtimeState={editorState.runtimeState}
+          areaOverlays={areaOverlays}
+          showProtectedAreas={overlays.protectedAreas}
+          waterDebug={overlays.waterDebug}
+          waterDebugMode={
+            selectedWaterBody && "reflectionStatus" in selectedWaterBody
+              ? selectedWaterBody.reflectionStatus.debugViewMode
+              : editorState.waterRuntimeSnapshot.reflectionStatus.debugViewMode
+          }
+          waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
+        />
 
         <p className="agent-hint viewport-agent-hint">Agent Hint: area editing is mocked; use commands and inspector fields for local state updates.</p>
       </div>

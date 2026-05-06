@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { Toaster } from "sonner";
+import { BrowserEditorBackendClient, hasBrowserEditorBackendBridge } from "../backend/BrowserEditorBackendClient";
 import type { EditorBackendClient } from "../backend/EditorBackendClient";
 import { MockEditorBackendClient } from "../backend/MockEditorBackendClient";
 import type { RuntimeClient } from "../runtime/RuntimeClient";
@@ -20,7 +21,7 @@ interface ProvidersProps {
 export function Providers({ children }: ProvidersProps) {
   const clients = useMemo<EditorClients>(
     () => ({
-      backendClient: new MockEditorBackendClient(),
+      backendClient: hasBrowserEditorBackendBridge() ? new BrowserEditorBackendClient() : new MockEditorBackendClient(),
       runtimeClient: hasBrowserRuntimeBridge() ? new BrowserRuntimeClient() : new MockRuntimeClient(),
     }),
     [],

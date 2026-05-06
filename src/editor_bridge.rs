@@ -3,12 +3,20 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use serde_json::{Value, json};
 
+use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
+use crate::terrain::generation::config::terrain_config_fingerprint;
+use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::persistence::{
+    self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
+};
+use crate::voxel::types::VoxelType;
+use crate::voxel::world::{VoxelWorld, WorldBounds};
 
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,6 +55,10 @@ impl FromWorld for EditorBridgeChannel {
 }
 
 enum BridgeOperation {
+    EditorLoadDefaultWorld,
+    EditorLoadUploadedWorld(Vec<u8>),
+    EditorSaveDefaultWorld,
+    EditorWorldSummary,
     RuntimeCommand(Value),
     RuntimeSnapshot,
 }
@@ -86,6 +98,12 @@ fn service_editor_bridge_requests(world: &mut World) {
 
     for request in requests {
         let response = match request.operation {
+            BridgeOperation::EditorLoadDefaultWorld => editor_load_default_world_response(world),
+            BridgeOperation::EditorLoadUploadedWorld(bytes) => {
+                editor_load_uploaded_world_response(world, &bytes)
+            }
+            BridgeOperation::EditorSaveDefaultWorld => editor_save_default_world_response(world),
+            BridgeOperation::EditorWorldSummary => editor_current_world_summary_response(world),
             BridgeOperation::RuntimeCommand(payload) => {
                 let response = handle_runtime_command_json(world, payload);
                 let body = serde_json::to_value(response).unwrap_or_else(|error| {
@@ -162,6 +180,12 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
     }
 
     let operation = match (request.method.as_str(), request.path.as_str()) {
+        ("POST", "/editor/world/load-default") => BridgeOperation::EditorLoadDefaultWorld,
+        ("POST", "/editor/world/load-upload") => {
+            BridgeOperation::EditorLoadUploadedWorld(request.body)
+        }
+        ("POST", "/editor/world/save-default") => BridgeOperation::EditorSaveDefaultWorld,
+        ("GET", "/editor/world/summary") => BridgeOperation::EditorWorldSummary,
         ("POST", "/runtime/command") => match serde_json::from_slice::<Value>(&request.body) {
             Ok(payload) => BridgeOperation::RuntimeCommand(payload),
             Err(error) => {
@@ -216,6 +240,294 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
             );
         }
     }
+}
+
+fn editor_save_default_world_response(world: &World) -> BridgeResponse {
+    let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+        return BridgeResponse {
+            status: 503,
+            body: json!({
+                "ok": false,
+                "error": "VoxelWorld resource is not available.",
+                "code": "WORLD_UNAVAILABLE",
+            }),
+        };
+    };
+
+    let result = persistence::editor_save_default_world(voxel_world);
+    if result.saved {
+        BridgeResponse {
+            status: 200,
+            body: json!({
+                "ok": true,
+                "data": {
+                    "worldId": result.save_path,
+                    "savedAt": timestamp_string(),
+                },
+            }),
+        }
+    } else {
+        BridgeResponse {
+            status: 400,
+            body: json!({
+                "ok": false,
+                "error": result.error_message.unwrap_or_else(|| "Failed to save default world.".to_string()),
+                "code": result.error_kind.unwrap_or_else(|| "WORLD_SAVE_FAILED".to_string()),
+            }),
+        }
+    }
+}
+
+fn editor_load_default_world_response(world: &mut World) -> BridgeResponse {
+    match persistence::read_world_data_from_path(WORLD_SAVE_PATH) {
+        Ok(data) => load_world_data_into_runtime(world, data, WORLD_SAVE_PATH.to_string()),
+        Err(error) => BridgeResponse {
+            status: 400,
+            body: json!({
+                "ok": false,
+                "error": error.to_string(),
+                "code": "WORLD_LOAD_FAILED",
+            }),
+        },
+    }
+}
+
+fn editor_load_uploaded_world_response(world: &mut World, bytes: &[u8]) -> BridgeResponse {
+    match read_world_data_from_bytes(bytes) {
+        Ok(data) => load_world_data_into_runtime(world, data, "uploaded-world".to_string()),
+        Err(error) => BridgeResponse {
+            status: 400,
+            body: json!({
+                "ok": false,
+                "error": error.to_string(),
+                "code": "WORLD_UPLOAD_INVALID",
+            }),
+        },
+    }
+}
+
+fn editor_current_world_summary_response(world: &World) -> BridgeResponse {
+    match world.get_resource::<VoxelWorld>() {
+        Some(voxel_world) => BridgeResponse {
+            status: 200,
+            body: json!({
+                "ok": true,
+                "data": frontend_world_summary_from_world(voxel_world, "runtime-world"),
+            }),
+        },
+        None => BridgeResponse {
+            status: 503,
+            body: json!({
+                "ok": false,
+                "error": "VoxelWorld resource is not available.",
+                "code": "WORLD_UNAVAILABLE",
+            }),
+        },
+    }
+}
+
+fn load_world_data_into_runtime(
+    world: &mut World,
+    data: WorldData,
+    save_path: String,
+) -> BridgeResponse {
+    let current_fingerprint = terrain_config_fingerprint();
+    if data.terrain_config_fingerprint != current_fingerprint {
+        return BridgeResponse {
+            status: 400,
+            body: json!({
+                "ok": false,
+                "error": format!(
+                    "Saved world terrain fingerprint mismatch: saved {:#018x}, current {:#018x}",
+                    data.terrain_config_fingerprint,
+                    current_fingerprint
+                ),
+                "code": "TERRAIN_FINGERPRINT_MISMATCH",
+            }),
+        };
+    }
+
+    despawn_existing_chunk_entities(world);
+
+    let metadata = persistence::editor_world_metadata_from_data_for_bridge(&data, &save_path);
+    let mut loaded_world = VoxelWorld::from_data(data);
+    for (_, chunk) in loaded_world.chunk_entries_mut() {
+        chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
+    }
+
+    world.insert_resource(WorldBounds::from_size_chunks(
+        loaded_world.world_size_chunks(),
+    ));
+    world.insert_resource(loaded_world);
+
+    let loaded = world
+        .get_resource::<VoxelWorld>()
+        .expect("loaded VoxelWorld should be present immediately after insertion");
+
+    BridgeResponse {
+        status: 200,
+        body: json!({
+            "ok": true,
+            "data": frontend_world_summary_from_metadata_and_world(&metadata, loaded),
+        }),
+    }
+}
+
+fn despawn_existing_chunk_entities(world: &mut World) {
+    let entities = world
+        .get_resource::<VoxelWorld>()
+        .map(|voxel_world| {
+            voxel_world
+                .chunk_entries()
+                .flat_map(|(_, chunk)| {
+                    [
+                        chunk.mesh_entity(),
+                        chunk.water_mesh_entity(),
+                        chunk.water_mask_mesh_entity(),
+                    ]
+                })
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    for entity in entities {
+        let _ = world.despawn(entity);
+    }
+}
+
+fn frontend_world_summary_from_world(voxel_world: &VoxelWorld, save_path: &str) -> Value {
+    let data = voxel_world.to_data();
+    let metadata = persistence::editor_world_metadata_from_data_for_bridge(&data, save_path);
+    frontend_world_summary_from_metadata_and_world(&metadata, voxel_world)
+}
+
+fn frontend_world_summary_from_metadata_and_world(
+    metadata: &EditorWorldMetadata,
+    voxel_world: &VoxelWorld,
+) -> Value {
+    let chunk_previews = voxel_world
+        .chunk_entries()
+        .map(|(_, chunk)| {
+            let data = chunk.to_data();
+            let [x, y, z] = [data.position.x, data.position.y, data.position.z];
+            json!({
+                "chunkId": format!("chunk-{x}-{y}-{z}"),
+                "coordinate": [x, y, z],
+                "samples": chunk_surface_samples(&data),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "worldId": metadata.save_path,
+        "name": world_name_from_path(&metadata.save_path),
+        "chunks": voxel_world
+            .chunk_entries()
+            .map(|(_, chunk)| {
+                let data = chunk.to_data();
+                let summary = persistence::editor_chunk_summary_for_bridge(&data);
+                let [x, y, z] = summary.position;
+                json!({
+                    "id": format!("chunk-{x}-{y}-{z}"),
+                    "label": format!("Chunk {x},{y},{z}"),
+                    "coordinate": summary.position,
+                    "blockCount": summary.non_air_voxels,
+                    "dirty": chunk.is_dirty(),
+                    "biome": "loaded world",
+                    "meshStatus": if chunk.is_dirty() { "queued" } else { "clean" },
+                    "meshMode": "Mesher",
+                    "vertexCount": 0,
+                    "triangleCount": 0,
+                    "waterMeshCount": summary.water_voxels,
+                    "lodGroup": 0,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "protectedAreas": [],
+        "waterBodies": [],
+        "materials": [],
+        "viewport": {
+            "chunkSize": CHUNK_SIZE_I32,
+            "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+            "chunks": chunk_previews,
+        },
+        "updatedAt": timestamp_string(),
+    })
+}
+
+const VIEWPORT_SAMPLE_RESOLUTION: usize = 8;
+
+fn chunk_surface_samples(data: &crate::voxel::chunk::ChunkData) -> Vec<Value> {
+    let stride = CHUNK_SIZE / VIEWPORT_SAMPLE_RESOLUTION;
+    let chunk_origin = data.position * CHUNK_SIZE_I32;
+    let mut samples = Vec::with_capacity(VIEWPORT_SAMPLE_RESOLUTION * VIEWPORT_SAMPLE_RESOLUTION);
+
+    for sample_z in 0..VIEWPORT_SAMPLE_RESOLUTION {
+        for sample_x in 0..VIEWPORT_SAMPLE_RESOLUTION {
+            let local_x = (sample_x * stride).min(CHUNK_SIZE - 1);
+            let local_z = (sample_z * stride).min(CHUNK_SIZE - 1);
+            let mut surface_y = 0_i32;
+            let mut material = VoxelType::Air;
+
+            for local_y in (0..CHUNK_SIZE).rev() {
+                let voxel = data
+                    .voxels
+                    .get(crate::voxel::chunk::Chunk::index(local_x, local_y, local_z))
+                    .copied()
+                    .unwrap_or_default();
+                if voxel != VoxelType::Air {
+                    surface_y = chunk_origin.y + local_y as i32;
+                    material = voxel;
+                    break;
+                }
+            }
+
+            samples.push(json!({
+                "x": chunk_origin.x + local_x as i32,
+                "z": chunk_origin.z + local_z as i32,
+                "height": surface_y,
+                "material": voxel_material_name(material),
+                "water": material == VoxelType::Water,
+            }));
+        }
+    }
+
+    samples
+}
+
+fn voxel_material_name(voxel: VoxelType) -> &'static str {
+    match voxel {
+        VoxelType::Air => "Air",
+        VoxelType::TopSoil => "TopSoil",
+        VoxelType::SubSoil => "SubSoil",
+        VoxelType::Rock => "Rock",
+        VoxelType::Bedrock => "Bedrock",
+        VoxelType::Sand => "Sand",
+        VoxelType::Clay => "Clay",
+        VoxelType::Water => "Water",
+        VoxelType::Wood => "Wood",
+        VoxelType::Leaves => "Leaves",
+        VoxelType::DungeonWall => "DungeonWall",
+        VoxelType::DungeonFloor => "DungeonFloor",
+    }
+}
+
+fn world_name_from_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Loaded voxel world")
+        .to_string()
+}
+
+fn timestamp_string() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    millis.to_string()
 }
 
 struct HttpRequest {

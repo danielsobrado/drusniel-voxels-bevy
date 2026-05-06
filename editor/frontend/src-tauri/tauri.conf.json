@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Drusniel Voxels Editor",
+  "version": "0.1.0",
+  "identifier": "com.drusniel.voxels.editor",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Drusniel Voxels Editor",
+        "width": 1600,
+        "height": 980,
+        "minWidth": 1180,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

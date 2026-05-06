@@ -2,6 +2,7 @@
 /temp
 /perf-dumps
 /bench-runs/
+/references/
 .history/src/voxel/*
 log.txt
 log.err
@@ -48,3 +49,5 @@ editor/frontend/playwright-report/
 editor/frontend/review-screenshots/
 editor/frontend/vite-dev*.log
 editor/frontend/.tmp-*
+editor/frontend/src-tauri/target/
+editor/frontend/src-tauri/gen/

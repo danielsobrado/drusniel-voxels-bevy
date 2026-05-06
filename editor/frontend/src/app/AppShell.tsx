@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { summarizeWorldFileText } from "../domain/worldFile";
 import { useEditorClients } from "./providers";
 import { CommandPalette } from "../components/editor/CommandPalette";
 import { DockLayout } from "../components/editor/DockLayout";
@@ -146,22 +145,23 @@ export function AppShell() {
         aria-label="Open Drusniel world file"
         className="sr-only"
         type="file"
-        accept=".ron,.json,.world"
+        accept=".bin,.world"
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (!file) {
             return;
           }
 
-          void file
-            .text()
-            .then((text) => {
-              const summary = summarizeWorldFileText({ fileName: file.name, text });
-              toast.info(`World file parser preview: ${summary.name} (${summary.payloadType}, ${summary.entityCount} entities).`);
-            })
-            .catch(() => {
-              toast.warning("Failed to parse world file preview.");
-            });
+          void backendClient.loadWorldFile(file).then((result) => {
+            if (!result.ok) {
+              toast.error(`Failed to load world file: ${result.error}`);
+              return;
+            }
+
+            useEditorStore.getState().replaceWorldSummary(result.data);
+            useEditorStore.getState().setRuntimeState("connected");
+            toast.success(`Loaded world file: ${result.data.name}.`);
+          });
           event.target.value = "";
         }}
       />

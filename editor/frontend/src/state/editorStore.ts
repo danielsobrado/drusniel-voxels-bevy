@@ -21,7 +21,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody, WaterReflectionStatus } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -85,6 +85,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   viewportOverlays: cloneEditorValue(state.viewportOverlays),
   renderQualityPreset: state.renderQualityPreset,
   chunks: cloneEditorValue(state.chunks),
+  worldViewport: cloneEditorValue(state.worldViewport),
   protectedAreas: cloneEditorValue(state.protectedAreas),
   waterBodies: cloneEditorValue(state.waterBodies),
   props: cloneEditorValue(state.props),
@@ -104,6 +105,7 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.viewportOverlays = cloneEditorValue(snapshot.viewportOverlays);
   state.renderQualityPreset = snapshot.renderQualityPreset;
   state.chunks = [...cloneEditorValue(snapshot.chunks)];
+  state.worldViewport = castDraft(cloneEditorValue(snapshot.worldViewport));
   state.protectedAreas = [...cloneEditorValue(snapshot.protectedAreas)];
   state.waterBodies = [...cloneEditorValue(snapshot.waterBodies)];
   state.props = [...cloneEditorValue(snapshot.props)];
@@ -125,6 +127,7 @@ export interface EditorDataState {
   readonly runtimeState: RuntimeState;
   readonly renderQualityPreset: RenderQualityPreset;
   readonly chunks: ChunkSummary[];
+  readonly worldViewport: WorldViewportPreview | null;
   readonly voxelBlocks: VoxelBlock[];
   readonly protectedAreas: ProtectedArea[];
   readonly waterBodies: WaterBody[];
@@ -326,6 +329,7 @@ export const createInitialEditorState = (): EditorDataState => ({
   renderQualityPreset: "High",
   selectedAtlasTileId: "tile-0",
   chunks: [...mockChunks],
+  worldViewport: null,
   voxelBlocks: [...mockVoxelBlocks],
   protectedAreas: [...mockProtectedAreas],
   waterBodies: [...mockWaterBodies],
@@ -637,6 +641,7 @@ export const useEditorStore = create<EditorStore>()(
     replaceWorldSummary: (summary) =>
       set((state) => {
         state.chunks = [...summary.chunks];
+        state.worldViewport = castDraft(summary.viewport ?? null);
         state.protectedAreas = [...summary.protectedAreas];
         state.waterBodies = [...summary.waterBodies];
         state.materials = [...summary.materials];
@@ -844,6 +849,7 @@ export const useEditorStore = create<EditorStore>()(
         });
 
         state.chunks = chunks;
+        state.worldViewport = null;
         state.protectedAreas = protectedAreas;
         state.waterBodies = waterBodies;
         state.props = props;

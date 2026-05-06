@@ -458,7 +458,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.openWorld",
     title: "Open world file",
-    description: "Open a mocked world file picker. Parsing remains deferred.",
+    description: "Open a persisted voxel world file and load it through the editor backend.",
     category: "File",
     shortcut: "Ctrl+O",
     keywords: ["file", "world", "open"],
@@ -479,14 +479,14 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.save",
     title: "Save",
-    description: "Clear mocked dirty state as if the editor saved successfully.",
+    description: "Save the current backend world and clear dirty state.",
     category: "File",
     shortcut: "Ctrl+S",
     keywords: ["file", "save", "dirty"],
     run: async (ctx) => {
       unwrapBackend(await ctx.backendClient.saveDefaultWorld());
       ctx.getState().clearDirty();
-      ctx.toast.success("Mock save complete.");
+      ctx.toast.success("World save complete.");
     },
   },
   {
@@ -602,7 +602,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.view.toggleVoxelGrid",
     title: "Toggle voxel grid",
-    description: "Toggle the mocked voxel grid viewport overlay.",
+    description: "Toggle the voxel grid viewport overlay.",
     category: "View",
     keywords: ["voxel", "grid", "overlay"],
     run: (ctx) => ctx.getState().toggleViewportOverlay("voxelGrid"),
@@ -610,7 +610,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.view.toggleChunkBounds",
     title: "Toggle chunk bounds",
-    description: "Toggle chunk bounds in the mocked viewport overlay summary.",
+    description: "Toggle chunk bounds in the runtime world viewport.",
     category: "View",
     keywords: ["chunk", "bounds", "overlay"],
     run: (ctx) => ctx.getState().toggleViewportOverlay("chunkBounds"),
@@ -618,7 +618,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.view.toggleProtectedAreas",
     title: "Toggle protected areas",
-    description: "Toggle protected area visibility in the mocked viewport.",
+    description: "Toggle protected area visibility in the runtime world viewport.",
     category: "View",
     keywords: ["protected", "area", "overlay"],
     run: (ctx) => ctx.getState().toggleViewportOverlay("protectedAreas"),
@@ -845,7 +845,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.area.focusSelected",
     title: "Focus selected protected area",
-    description: "Mock focus the selected protected area in the viewport.",
+    description: "Focus the selected protected area in the viewport.",
     category: "Areas",
     keywords: ["protected", "area", "focus", "camera"],
     run: async (ctx) => {
@@ -858,7 +858,7 @@ export const editorCommands: readonly EditorCommand[] = [
       unwrapRuntime(await ctx.runtimeClient.focusCamera(state.selection));
       state.setActiveMode("area");
       state.setActiveTool("area");
-      ctx.toast.success(`Focused ${state.selection.label} in mocked viewport.`);
+      ctx.toast.success(`Focused ${state.selection.label} in viewport.`);
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Focused protected area ${state.selection.label}.` });
     },
   },
@@ -1286,7 +1286,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.props.focusSelectedProp",
     title: "Focus selected prop",
-    description: "Mock focus a selected prop in the viewport.",
+    description: "Focus a selected prop in the viewport.",
     category: "Props",
     keywords: ["props", "focus", "selection", "mocked", "viewport"],
     run: (ctx) => {
@@ -1669,7 +1669,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.tests.runViewportSmokeTest",
     title: "Run viewport smoke test",
-    description: "Record a mocked viewport smoke test request.",
+    description: "Record a viewport smoke test request.",
     category: "Tests",
     keywords: ["test", "viewport", "smoke"],
     run: (ctx) => {

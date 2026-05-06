@@ -245,6 +245,11 @@ pub fn read_world_data_from_path(path: impl AsRef<Path>) -> Result<WorldData, Pe
     Ok(bincode::deserialize_from(reader)?)
 }
 
+/// Reads serialized world data from an in-memory bincode payload.
+pub fn read_world_data_from_bytes(bytes: &[u8]) -> Result<WorldData, PersistenceError> {
+    Ok(bincode::deserialize(bytes)?)
+}
+
 /// Checks if a saved world exists.
 ///
 /// # Returns
@@ -452,6 +457,14 @@ fn editor_world_metadata_from_data(data: &WorldData, save_path: &str) -> EditorW
     }
 }
 
+/// Internal adapter for the editor bridge HTTP layer.
+pub(crate) fn editor_world_metadata_from_data_for_bridge(
+    data: &WorldData,
+    save_path: &str,
+) -> EditorWorldMetadata {
+    editor_world_metadata_from_data(data, save_path)
+}
+
 fn editor_chunk_summary(data: &ChunkData) -> EditorChunkSummary {
     let non_air_voxels = data
         .voxels
@@ -475,6 +488,11 @@ fn editor_chunk_summary(data: &ChunkData) -> EditorChunkSummary {
         water_voxels,
         face_visibility_mask: data.face_visibility.0,
     }
+}
+
+/// Internal adapter for the editor bridge HTTP layer.
+pub(crate) fn editor_chunk_summary_for_bridge(data: &ChunkData) -> EditorChunkSummary {
+    editor_chunk_summary(data)
 }
 
 fn editor_load_error(save_path: String, error: PersistenceError) -> EditorLoadResult {

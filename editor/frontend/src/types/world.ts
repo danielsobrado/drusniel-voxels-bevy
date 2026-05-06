@@ -17,6 +17,40 @@ export interface ChunkSummary {
   readonly lodGroup: number;
 }
 
+export type ViewportVoxelMaterial =
+  | "Air"
+  | "TopSoil"
+  | "SubSoil"
+  | "Rock"
+  | "Bedrock"
+  | "Sand"
+  | "Clay"
+  | "Water"
+  | "Wood"
+  | "Leaves"
+  | "DungeonWall"
+  | "DungeonFloor";
+
+export interface WorldSurfaceSample {
+  readonly x: number;
+  readonly z: number;
+  readonly height: number;
+  readonly material: ViewportVoxelMaterial;
+  readonly water: boolean;
+}
+
+export interface ChunkViewportPreview {
+  readonly chunkId: string;
+  readonly coordinate: [number, number, number];
+  readonly samples: readonly WorldSurfaceSample[];
+}
+
+export interface WorldViewportPreview {
+  readonly chunkSize: number;
+  readonly sampleResolution: number;
+  readonly chunks: readonly ChunkViewportPreview[];
+}
+
 export interface VoxelBlock {
   readonly id: BlockType;
   readonly displayName: string;

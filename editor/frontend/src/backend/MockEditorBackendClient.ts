@@ -26,6 +26,10 @@ export class MockEditorBackendClient implements EditorBackendClient {
     return { ok: true, data: mockWorldSummary() };
   }
 
+  async loadWorldFile(_file: File): Promise<BackendResult<WorldSummary>> {
+    return { ok: true, data: mockWorldSummary() };
+  }
+
   async saveDefaultWorld(): Promise<BackendResult<WorldSaveSummary>> {
     return { ok: true, data: mockSaveSummary() };
   }
