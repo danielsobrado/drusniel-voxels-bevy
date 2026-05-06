@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
+use log::warn;
 use serde_json::{Value, json};
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
@@ -368,18 +369,10 @@ fn load_world_data_into_runtime(
 ) -> BridgeResponse {
     let current_fingerprint = terrain_config_fingerprint();
     if data.terrain_config_fingerprint != current_fingerprint {
-        return BridgeResponse {
-            status: 400,
-            body: json!({
-                "ok": false,
-                "error": format!(
-                    "Saved world terrain fingerprint mismatch: saved {:#018x}, current {:#018x}",
-                    data.terrain_config_fingerprint,
-                    current_fingerprint
-                ),
-                "code": "TERRAIN_FINGERPRINT_MISMATCH",
-            }),
-        };
+        warn!(
+            "Editor loading world with terrain fingerprint mismatch: saved {:#018x}, current {:#018x}; next editor save will rewrite the current fingerprint",
+            data.terrain_config_fingerprint, current_fingerprint
+        );
     }
 
     despawn_existing_chunk_entities(world);

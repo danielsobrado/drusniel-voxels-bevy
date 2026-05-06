@@ -329,17 +329,14 @@ pub fn editor_get_chunk_summaries() -> Result<Vec<EditorChunkSummary>, Persisten
 pub fn editor_load_world_from_path(path: impl AsRef<Path>) -> EditorLoadResult {
     let path = path.as_ref();
     let save_path = path_to_string(path);
-    match load_world_from_path(path) {
-        Ok(world) => {
-            let data = world.to_data();
-            EditorLoadResult {
-                loaded: true,
-                metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
-                save_path,
-                error_kind: None,
-                error_message: None,
-            }
-        }
+    match read_world_data_from_path(path) {
+        Ok(data) => EditorLoadResult {
+            loaded: true,
+            metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
+            save_path,
+            error_kind: None,
+            error_message: None,
+        },
         Err(error) => editor_load_error(save_path, error),
     }
 }
@@ -548,5 +545,60 @@ impl Default for WorldPersistence {
             force_regenerate: true, // Force regeneration to ensure fresh terrain
             auto_save: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terrain::generation::config::terrain_config_fingerprint;
+    use bevy::prelude::IVec3;
+    use tempfile::NamedTempFile;
+
+    fn mismatched_world_data() -> WorldData {
+        WorldData {
+            world_size_chunks: IVec3::new(1, 1, 1),
+            terrain_config_fingerprint: terrain_config_fingerprint() ^ 0xA5A5_A5A5_A5A5_A5A5,
+            chunks: Vec::new(),
+        }
+    }
+
+    fn write_world_data(data: &WorldData) -> NamedTempFile {
+        let file = NamedTempFile::new().expect("temp save file should be created");
+        bincode::serialize_into(file.as_file(), data).expect("world data should serialize");
+        file
+    }
+
+    #[test]
+    fn strict_runtime_load_rejects_terrain_fingerprint_mismatch() {
+        let data = mismatched_world_data();
+        let file = write_world_data(&data);
+
+        let error = match load_world_from_path(file.path()) {
+            Ok(_) => panic!("strict load should reject mismatch"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            PersistenceError::TerrainFingerprintMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn editor_load_allows_terrain_fingerprint_mismatch_with_metadata_flag() {
+        let data = mismatched_world_data();
+        let file = write_world_data(&data);
+
+        let result = editor_load_world_from_path(file.path());
+
+        assert!(result.loaded);
+        assert_eq!(result.error_kind, None);
+        let metadata = result.metadata.expect("editor load should return metadata");
+        assert_eq!(
+            metadata.terrain_config_fingerprint,
+            data.terrain_config_fingerprint
+        );
+        assert!(!metadata.terrain_fingerprint_matches);
     }
 }
