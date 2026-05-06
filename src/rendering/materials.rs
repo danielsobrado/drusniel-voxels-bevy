@@ -3,7 +3,7 @@ use crate::constants::{
     VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT, VOXEL_WATER_WAVE_UV_SCALE,
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
-use crate::rendering::blocky_material::BlockyMaterial;
+use crate::rendering::blocky_material::{BlockyMaterial, BlockyMaterialHandle};
 use crate::rendering::building_material::{
     BuildingMaterial, BuildingMaterialHandle, BuildingUniforms,
 };
@@ -13,8 +13,10 @@ use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
 };
 use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig};
+use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
 use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
 use crate::voxel::meshing::WaterBodyKind;
+use crate::weather::{WEATHER_FLAG_PUDDLE_DETAIL, WeatherRuntime};
 use bevy::diagnostic::FrameCount;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
@@ -102,10 +104,12 @@ pub fn setup_water_material(
     let _timer = area_timer(&mut timing, frame.0, "Material Setup Water");
     let settings = water_settings.as_deref().cloned().unwrap_or_default();
     let config = water_config.as_deref().cloned().unwrap_or_default();
+    let witchcraft_params = config.witchcraft_finish.params();
     let debug_solid_color = water_debug_solid_color_enabled();
     let ocean = create_body_water_materials(
         WaterBodyKind::Ocean,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -114,6 +118,7 @@ pub fn setup_water_material(
     let lake = create_body_water_materials(
         WaterBodyKind::Lake,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -122,6 +127,7 @@ pub fn setup_water_material(
     let river = create_body_water_materials(
         WaterBodyKind::River,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -130,6 +136,7 @@ pub fn setup_water_material(
     let pond = create_body_water_materials(
         WaterBodyKind::Pond,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -138,6 +145,7 @@ pub fn setup_water_material(
     let shallow_flood = create_body_water_materials(
         WaterBodyKind::ShallowFlood,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -146,6 +154,7 @@ pub fn setup_water_material(
     let unknown = create_body_water_materials(
         WaterBodyKind::Unknown,
         &config,
+        witchcraft_params,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -176,6 +185,7 @@ pub fn setup_water_material(
 fn create_body_water_materials(
     kind: WaterBodyKind,
     config: &WaterConfig,
+    witchcraft_params: WitchcraftWaterFinishParams,
     settings: &WaterSettings,
     debug_solid_color: bool,
     fancy_materials: &mut Assets<StandardWaterMaterial>,
@@ -183,7 +193,14 @@ fn create_body_water_materials(
 ) -> BodyWaterMaterialHandles {
     let preset = config.body_preset(kind);
     let debug_body_colors = water_debug_body_colors_enabled();
-    let base_color = water_base_color(preset, settings, debug_solid_color, debug_body_colors, kind);
+    let base_color = water_base_color(
+        preset,
+        settings,
+        debug_solid_color,
+        debug_body_colors,
+        kind,
+        witchcraft_params,
+    );
     let alpha_mode = if debug_solid_color {
         AlphaMode::Opaque
     } else {
@@ -192,12 +209,18 @@ fn create_body_water_materials(
     let shallow_color = if debug_body_colors && !debug_solid_color {
         water_debug_body_color(kind)
     } else {
-        water_color(preset.shallow_color, debug_solid_color)
+        water_color(
+            witchcraft_params.multiply_rgba(preset.shallow_color),
+            debug_solid_color,
+        )
     };
     let deep_color = if debug_body_colors && !debug_solid_color {
         water_debug_body_color(kind)
     } else {
-        water_color(preset.deep_color, debug_solid_color)
+        water_color(
+            witchcraft_params.multiply_rgba(preset.deep_color),
+            debug_solid_color,
+        )
     };
     let wave_amplitude = if debug_solid_color {
         0.0
@@ -270,7 +293,12 @@ fn create_body_water_materials(
             clarity,
             deep_color,
             shallow_color,
-            edge_color: water_edge_color(shallow_color, preset, debug_solid_color),
+            edge_color: water_edge_color(
+                shallow_color,
+                preset,
+                debug_solid_color,
+                witchcraft_params,
+            ),
             edge_scale,
             coord_offset: Vec2::ZERO,
             coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
@@ -318,6 +346,7 @@ fn water_edge_color(
     shallow_color: Color,
     preset: &WaterBodyPresetConfig,
     debug_solid_color: bool,
+    witchcraft_params: WitchcraftWaterFinishParams,
 ) -> Color {
     if debug_solid_color {
         return shallow_color;
@@ -327,7 +356,7 @@ fn water_edge_color(
         linear.red,
         linear.green,
         linear.blue,
-        preset.lake_ripple_overlay_strength.clamp(0.0, 2.0),
+        witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength),
     )
 }
 
@@ -337,13 +366,14 @@ fn water_base_color(
     debug_solid_color: bool,
     debug_body_colors: bool,
     kind: WaterBodyKind,
+    witchcraft_params: WitchcraftWaterFinishParams,
 ) -> Color {
     if debug_solid_color {
         Color::srgba(0.0, 0.75, 1.0, 1.0)
     } else if debug_body_colors {
         water_debug_body_color(kind)
     } else {
-        let [r, g, b, _] = preset.shallow_color;
+        let [r, g, b, _] = witchcraft_params.multiply_rgba(preset.shallow_color);
         let alpha = preset.base_alpha.clamp(0.05, 1.0);
         let _ = settings;
         Color::srgba(r, g, b, alpha)
@@ -381,6 +411,7 @@ pub fn sync_voxel_water_material_overrides(
     let debug_solid_color = water_debug_solid_color_enabled();
     let debug_body_colors = water_debug_body_colors_enabled();
     let config = water_config.as_deref().cloned().unwrap_or_default();
+    let witchcraft_params = config.witchcraft_finish.params();
     for (kind, handle) in [
         (WaterBodyKind::Ocean, &water_material.ocean.near),
         (WaterBodyKind::Lake, &water_material.lake.near),
@@ -400,6 +431,7 @@ pub fn sync_voxel_water_material_overrides(
                 debug_solid_color,
                 debug_body_colors,
                 kind,
+                witchcraft_params,
             );
             mat.base.alpha_mode = if debug_solid_color {
                 AlphaMode::Opaque
@@ -423,15 +455,25 @@ pub fn sync_voxel_water_material_overrides(
             mat.extension.deep_color = if debug_body_colors && !debug_solid_color {
                 water_debug_body_color(kind)
             } else {
-                water_color(preset.deep_color, debug_solid_color)
+                water_color(
+                    witchcraft_params.multiply_rgba(preset.deep_color),
+                    debug_solid_color,
+                )
             };
             mat.extension.shallow_color = if debug_body_colors && !debug_solid_color {
                 water_debug_body_color(kind)
             } else {
-                water_color(preset.shallow_color, debug_solid_color)
+                water_color(
+                    witchcraft_params.multiply_rgba(preset.shallow_color),
+                    debug_solid_color,
+                )
             };
-            mat.extension.edge_color =
-                water_edge_color(mat.extension.shallow_color, preset, debug_solid_color);
+            mat.extension.edge_color = water_edge_color(
+                mat.extension.shallow_color,
+                preset,
+                debug_solid_color,
+                witchcraft_params,
+            );
             let edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
             mat.extension.edge_scale = if water_ripple_lines_disabled() {
                 -edge_scale.abs()
@@ -481,7 +523,7 @@ pub fn setup_triplanar_material(
                 normal_intensity: 1.0,
                 parallax_scale: 0.0,
                 ao_strength: 0.0,
-                _padding: 0.0,
+                ..Default::default()
             },
             quality: TerrainMaterialQuality::FullTriplanar,
             grass_albedo: None,
@@ -502,7 +544,7 @@ pub fn setup_triplanar_material(
                 normal_intensity: 1.0, // Full normal map strength
                 parallax_scale: 0.04,  // Subtle parallax depth
                 ao_strength: 0.0,      // V0.3 soft shadow look
-                _padding: 0.0,
+                ..Default::default()
             },
             quality: TerrainMaterialQuality::FullTriplanar,
             // Grass textures (for TopSoil top faces)
@@ -903,5 +945,98 @@ pub fn sync_fog_to_materials(
                 mat.uniform_data.aerial_strength = fog.aerial_strength;
             }
         }
+    }
+}
+
+/// Sync the tiny weather uniform into terrain materials.
+///
+/// This only updates material uniforms. It does not spawn CPU particles, mutate voxel terrain,
+/// upload weather textures, or drive water displacement.
+pub fn sync_weather_to_materials(
+    weather: Option<Res<WeatherRuntime>>,
+    triplanar_handles: Option<Res<TriplanarMaterialHandle>>,
+    blocky_handle: Option<Res<BlockyMaterialHandle>>,
+    mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
+    mut blocky_materials: ResMut<Assets<BlockyMaterial>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Sync Weather");
+    let Some(weather) = weather else { return };
+
+    if !weather.is_changed() {
+        return;
+    }
+
+    let uniforms = weather.uniforms;
+    if let Some(handles) = triplanar_handles {
+        let weather_flags = uniforms.flags | terrain_weather_debug_flags();
+        let full_puddle_normals = if uniforms.flags & WEATHER_FLAG_PUDDLE_DETAIL != 0 {
+            0.055
+        } else {
+            0.0
+        };
+        for (handle, puddle_normal_strength) in [
+            (&handles.handle, full_puddle_normals),
+            (&handles.cheap_handle, 0.0),
+            (&handles.single_projection_far_handle, 0.0),
+            (&handles.atlas_only_debug_handle, 0.0),
+        ] {
+            if let Some(material) = triplanar_materials.get_mut(handle) {
+                material.uniforms.rain_factor = uniforms.rain_factor;
+                material.uniforms.wetness = uniforms.wetness;
+                material.uniforms.in_rainy = uniforms.in_rainy;
+                material.uniforms.snow_factor = uniforms.snow_factor;
+                material.uniforms.in_snowy = uniforms.in_snowy;
+                material.uniforms.puddle_strength = uniforms.puddle_strength;
+                material.uniforms.puddle_noise_scale = 0.085;
+                material.uniforms.puddle_normal_strength = puddle_normal_strength;
+                material.uniforms.snow_tint_strength = uniforms.snow_tint_strength;
+                material.uniforms.weather_time = uniforms.time;
+                material.uniforms.weather_flags = weather_flags;
+            }
+        }
+    }
+
+    if let Some(handle) = blocky_handle {
+        if let Some(material) = blocky_materials.get_mut(&handle.handle) {
+            material.uniforms.rain_factor = uniforms.rain_factor;
+            material.uniforms.wetness = uniforms.wetness;
+            material.uniforms.snow_factor = uniforms.snow_tint_strength;
+            material.uniforms.weather_time = uniforms.time;
+            material.uniforms.weather_flags = uniforms.flags | blocky_weather_debug_flags();
+        }
+    }
+}
+
+fn terrain_weather_debug_flags() -> u32 {
+    const DEBUG_PUDDLE: u32 = 1 << 8;
+    const DEBUG_WETNESS: u32 = 1 << 9;
+    const DEBUG_SNOW: u32 = 1 << 10;
+
+    let Ok(value) = std::env::var("VOXEL_TERRAIN_WEATHER_DEBUG") else {
+        return 0;
+    };
+
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "puddle" | "puddles" | "mask" => DEBUG_PUDDLE,
+        "2" | "wet" | "wetness" => DEBUG_WETNESS,
+        "3" | "snow" => DEBUG_SNOW,
+        _ => 0,
+    }
+}
+
+fn blocky_weather_debug_flags() -> u32 {
+    const DEBUG_WETNESS: u32 = 1 << 11;
+    const DEBUG_SNOW: u32 = 1 << 12;
+
+    let Ok(value) = std::env::var("VOXEL_BLOCKY_WEATHER_DEBUG") else {
+        return 0;
+    };
+
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "wet" | "wetness" => DEBUG_WETNESS,
+        "2" | "snow" => DEBUG_SNOW,
+        _ => 0,
     }
 }

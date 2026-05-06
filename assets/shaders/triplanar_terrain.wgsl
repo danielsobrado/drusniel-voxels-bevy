@@ -8,6 +8,7 @@
 #import bevy_pbr::{pbr_fragment, pbr_functions, pbr_types}
 #import bevy_pbr::mesh_view_bindings::globals
 #import water_caustics
+#import weather_common
 
 struct TriplanarUniforms {
     base_color: vec4<f32>,
@@ -16,7 +17,17 @@ struct TriplanarUniforms {
     normal_intensity: f32,
     parallax_scale: f32, // Only used for rock material
     ao_strength: f32,    // 0.0 = V0.3 look (no baked AO), 1.0 = full AO
-    _padding: f32,       // Alignment padding
+    rain_factor: f32,
+    wetness: f32,
+    in_rainy: f32,
+    snow_factor: f32,
+    in_snowy: f32,
+    puddle_strength: f32,
+    puddle_noise_scale: f32,
+    puddle_normal_strength: f32,
+    snow_tint_strength: f32,
+    weather_time: f32,
+    weather_flags: u32,
 };
 
 // Uniform roughness values per terrain material (no texture maps needed)
@@ -33,6 +44,9 @@ const WET_ROUGHNESS: f32 = 0.25;   // Wet surfaces are shinier
 
 const DEBUG_FORCE_ALBEDO: bool = false;
 const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(0.0, 1.0, 0.0, 1.0);
+const WEATHER_DEBUG_PUDDLE: u32 = 1u << 8u;
+const WEATHER_DEBUG_WETNESS: u32 = 1u << 9u;
+const WEATHER_DEBUG_SNOW: u32 = 1u << 10u;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
 
@@ -58,7 +72,12 @@ fn compute_uv(world_coord: vec2<f32>) -> vec2<f32> {
 }
 
 fn triplanar_weights(world_normal: vec3<f32>) -> vec3<f32> {
-    var weights = pow(abs(world_normal), vec3(uniforms.blend_sharpness));
+    let normal_abs = abs(world_normal);
+    var weights = vec3<f32>(
+        pow(normal_abs.x, uniforms.blend_sharpness),
+        pow(normal_abs.y, uniforms.blend_sharpness),
+        pow(normal_abs.z, uniforms.blend_sharpness)
+    );
     return weights / max(weights.x + weights.y + weights.z, 0.001);
 }
 
@@ -175,6 +194,43 @@ fn get_base_material(atlas_idx: i32) -> i32 {
     if (atlas_idx == 2 || atlas_idx == 3) { return 1; }
     if (atlas_idx == 4) { return 2; }
     return 3;
+}
+
+fn terrain_rain_wetness_mask(normal: vec3<f32>) -> f32 {
+    let rain = max(uniforms.rain_factor, uniforms.in_rainy);
+    let upness = weather_common::weather_upness_mask(normal, 0.22);
+    return weather_common::safe_saturate(rain * uniforms.wetness * upness);
+}
+
+fn terrain_puddle_mask(world_xz: vec2<f32>, normal: vec3<f32>, roughness: f32) -> f32 {
+    let rain = max(uniforms.rain_factor, uniforms.in_rainy);
+    let base = rain * uniforms.wetness * uniforms.puddle_strength;
+    let upness = weather_common::weather_upness_mask(normal, 0.38);
+    let roughness_affinity = mix(0.55, 1.0, 1.0 - smoothstep(0.35, 0.95, roughness));
+    let scale = max(uniforms.puddle_noise_scale, 0.001);
+    let drift = vec2<f32>(uniforms.weather_time * 0.018, -uniforms.weather_time * 0.011);
+    let noise = weather_common::weather_fbm_two_octave(world_xz * scale + drift);
+    let breakup = mix(0.65, 1.0, smoothstep(0.42, 0.82, noise));
+    return weather_common::safe_saturate(base * upness * upness * roughness_affinity * breakup);
+}
+
+fn terrain_puddle_normal(base_normal: vec3<f32>, world_xz: vec2<f32>, puddle_mask: f32) -> vec3<f32> {
+    if (uniforms.puddle_normal_strength <= 0.001 || puddle_mask <= 0.001) {
+        return base_normal;
+    }
+
+    let pos = world_xz * max(uniforms.puddle_noise_scale * 2.0, 0.001);
+    let t = uniforms.weather_time;
+    let n0 = weather_common::weather_value_noise(pos + vec2<f32>(t * 0.055, t * 0.021));
+    let n1 = weather_common::weather_value_noise(pos + vec2<f32>(17.3 - t * 0.037, 5.7 + t * 0.049));
+    let ripple = vec3<f32>(n0 - 0.5, 0.0, n1 - 0.5);
+    return normalize(base_normal + ripple * uniforms.puddle_normal_strength * puddle_mask);
+}
+
+fn terrain_snow_mask(normal: vec3<f32>) -> f32 {
+    let snow = max(uniforms.snow_factor, uniforms.in_snowy);
+    let upness = weather_common::weather_upness_mask(normal, 0.30);
+    return weather_common::safe_saturate(snow * uniforms.snow_tint_strength * upness);
 }
 
 @fragment
@@ -294,7 +350,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 #endif
     
     albedo = albedo * uniforms.base_color;
-    let blended_n = normalize(final_normal);
+    var blended_n = normalize(final_normal);
 
     // Baked vertex AO - controlled by ao_strength uniform
     // 0.0 = V0.3 look (soft shadows via SSAO only)
@@ -321,6 +377,42 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 
     // Reduce roughness for wet surfaces (wet = shinier)
     roughness = mix(roughness, WET_ROUGHNESS, wet_strength);
+
+    var rain_wet_strength = 0.0;
+    var puddle_mask = 0.0;
+    var snow_mask = 0.0;
+    if (uniforms.rain_factor > 0.001 || uniforms.wetness > 0.001 || uniforms.snow_factor > 0.001) {
+        rain_wet_strength = terrain_rain_wetness_mask(world_normal);
+        let rain_wet_albedo = final_albedo * vec4<f32>(0.88, 0.91, 0.94, 1.0);
+        final_albedo = mix(final_albedo, rain_wet_albedo, rain_wet_strength * 0.55);
+        roughness = mix(roughness, max(0.24, roughness * 0.72), rain_wet_strength);
+
+        if (rain_wet_strength > 0.001 && uniforms.puddle_strength > 0.001) {
+            puddle_mask = terrain_puddle_mask(world_pos.xz, world_normal, roughness);
+            final_albedo = mix(final_albedo, final_albedo * vec4<f32>(0.82, 0.88, 0.93, 1.0), puddle_mask);
+            roughness = mix(roughness, 0.12, puddle_mask);
+
+            if (!skip_normals) {
+                blended_n = terrain_puddle_normal(blended_n, world_pos.xz, puddle_mask);
+            }
+        }
+
+        snow_mask = terrain_snow_mask(world_normal);
+        let snow_albedo = vec4<f32>(max(final_albedo.rgb, vec3<f32>(0.88, 0.90, 0.94)), final_albedo.a);
+        final_albedo = mix(final_albedo, snow_albedo, snow_mask);
+        roughness = mix(roughness, 0.78, snow_mask);
+    }
+
+    if ((uniforms.weather_flags & WEATHER_DEBUG_PUDDLE) != 0u) {
+        final_albedo = vec4<f32>(vec3<f32>(puddle_mask), 1.0);
+        roughness = 0.9;
+    } else if ((uniforms.weather_flags & WEATHER_DEBUG_WETNESS) != 0u) {
+        final_albedo = vec4<f32>(vec3<f32>(rain_wet_strength), 1.0);
+        roughness = 0.9;
+    } else if ((uniforms.weather_flags & WEATHER_DEBUG_SNOW) != 0u) {
+        final_albedo = vec4<f32>(vec3<f32>(snow_mask), 1.0);
+        roughness = 0.9;
+    }
 
     pbr_input.material.base_color = final_albedo;
     pbr_input.material.perceptual_roughness = clamp(roughness, 0.04, 1.0);

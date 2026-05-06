@@ -199,6 +199,31 @@ displacement:
   # Strength of player water interaction
   player_impulse_strength: -0.3
 
+weather:
+  # Multiplies rain_factor before adding compositor reflection strength.
+  rain_reflection_boost: 0.12
+  # Multiplies rain_factor before increasing compositor UV distortion.
+  rain_distortion_boost: 0.35
+  # Multiplies snow_factor before reducing harsh reflection blend.
+  snow_reflection_soften: 0.18
+
+witchcraft_finish:
+  # Disabled by default; enable with this flag or VOXEL_WATER_WITCHCRAFT_FINISH=1.
+  enabled: false
+  # Shaderpack-style water finish style. Supported values: 1 or 3.
+  style: 1
+  # 3 preserves the source block's green minimum before tinting.
+  watercolor_mode: 3
+  # Legacy pre-1.13 color path from the source block.
+  legacy: false
+  # Optional post-finish RGB multiplier.
+  color_multiplier_enabled: false
+  color_multiplier: [1.0, 1.0, 1.0]
+  # 200 enables the finish reflection multiplier; 160 disables it.
+  reflect_b: 200
+  # 0 normal, 1 color, 2 Fresnel alpha, 3 reflection multiplier.
+  debug: 0
+
 # Quality presets
 quality_presets:
   low:

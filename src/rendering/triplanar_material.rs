@@ -23,8 +23,17 @@ pub struct TriplanarUniforms {
     pub parallax_scale: f32,
     /// Baked ambient occlusion strength (0.0 = V0.3 look, 1.0 = full AO)
     pub ao_strength: f32,
-    /// Padding for 16-byte alignment
-    pub _padding: f32,
+    pub rain_factor: f32,
+    pub wetness: f32,
+    pub in_rainy: f32,
+    pub snow_factor: f32,
+    pub in_snowy: f32,
+    pub puddle_strength: f32,
+    pub puddle_noise_scale: f32,
+    pub puddle_normal_strength: f32,
+    pub snow_tint_strength: f32,
+    pub weather_time: f32,
+    pub weather_flags: u32,
 }
 
 impl Default for TriplanarUniforms {
@@ -37,7 +46,17 @@ impl Default for TriplanarUniforms {
             normal_intensity: 1.0,
             parallax_scale: 0.04,
             ao_strength: 0.0, // Default to V0.3 look (no baked AO)
-            _padding: 0.0,
+            rain_factor: 0.0,
+            wetness: 0.0,
+            in_rainy: 0.0,
+            snow_factor: 0.0,
+            in_snowy: 0.0,
+            puddle_strength: 0.0,
+            puddle_noise_scale: 0.085,
+            puddle_normal_strength: 0.0,
+            snow_tint_strength: 0.0,
+            weather_time: 0.0,
+            weather_flags: 0,
         }
     }
 }

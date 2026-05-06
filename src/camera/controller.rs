@@ -1,10 +1,14 @@
 use crate::atmosphere::{AtmosphereConfig, FogConfig, fog_camera_components};
 use crate::camera::config::{CameraConfig, CameraExposureConfig};
+use crate::constants::WORLD_EDGE_GUARD_MARGIN;
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering, VisualSettings};
-use crate::player::Player;
+use crate::player::{
+    Player, PlayerWorldValidity, SpawnColliderReadiness, SpawnValidationReport,
+    classify_player_world_validity, find_nearest_valid_spawn,
+};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::cinematic::CinematicCamera;
 use crate::rendering::ray_tracing::RayTracingSettings;
@@ -21,7 +25,9 @@ use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
 use bevy::prelude::*;
-use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection, Hdr};
+use bevy::render::view::{
+    ColorGrading, ColorGradingGlobal, ColorGradingSection, Hdr, NoIndirectDrawing,
+};
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_water::ImageReformat;
 
@@ -60,6 +66,70 @@ impl Default for PlayerCamera {
         let config = CameraConfig::default();
         Self::from_config(&config)
     }
+}
+
+fn default_camera_color_grading() -> ColorGrading {
+    ColorGrading {
+        global: ColorGradingGlobal {
+            exposure: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            hue: 0.0,
+            post_saturation: 1.0,
+            ..default()
+        },
+        shadows: ColorGradingSection {
+            saturation: 1.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            gain: 1.0,
+            lift: 0.0,
+        },
+        midtones: ColorGradingSection {
+            saturation: 1.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            gain: 1.0,
+            lift: 0.0,
+        },
+        highlights: ColorGradingSection {
+            saturation: 1.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            gain: 1.0,
+            lift: 0.0,
+        },
+    }
+}
+
+fn apply_color_grading_preset(color_grading: &mut ColorGrading, visual_settings: &VisualSettings) {
+    let saturation = visual_settings.saturation.clamp(0.5, 2.0);
+    let gamma = visual_settings.gamma.clamp(0.5, 1.5);
+    let saturation_bias = saturation - 1.0;
+    let contrast_bias = (1.0 - gamma).clamp(-0.35, 0.35);
+
+    color_grading.global.exposure = visual_settings.exposure.clamp(-1.0, 1.0);
+    color_grading.global.temperature = visual_settings.temperature.clamp(-0.5, 0.5);
+    color_grading.global.tint = (visual_settings.sun_warmth * 0.08).clamp(-0.2, 0.2);
+    color_grading.global.post_saturation = saturation;
+
+    color_grading.shadows.saturation = (1.0 + saturation_bias * 0.18).clamp(0.5, 2.0);
+    color_grading.shadows.contrast = (1.0 + contrast_bias * 0.04).clamp(0.75, 1.25);
+    color_grading.shadows.gamma = lerp(1.0, gamma, 0.35);
+    color_grading.shadows.gain = 1.0;
+    color_grading.shadows.lift = 0.0;
+
+    color_grading.midtones.saturation = (1.0 + saturation_bias * 0.35).clamp(0.5, 2.0);
+    color_grading.midtones.contrast = (1.0 + contrast_bias * 0.08).clamp(0.75, 1.25);
+    color_grading.midtones.gamma = gamma;
+    color_grading.midtones.gain = 1.0;
+    color_grading.midtones.lift = 0.0;
+
+    color_grading.highlights.saturation = (1.0 + saturation_bias * 0.14).clamp(0.5, 2.0);
+    color_grading.highlights.contrast = (1.0 + contrast_bias * 0.04).clamp(0.75, 1.25);
+    color_grading.highlights.gamma = lerp(1.0, gamma, 0.25);
+    color_grading.highlights.gain = visual_settings.highlights_gain.clamp(0.5, 1.5);
+    color_grading.highlights.lift = 0.0;
 }
 
 pub fn spawn_camera(
@@ -136,41 +206,13 @@ pub fn spawn_camera(
 
     // Keep HDR + tonemapping enabled on all GPUs; otherwise custom materials that output HDR-linear
     // end up looking dark due to missing exposure/tonemapping.
+    let mut color_grading = default_camera_color_grading();
+    apply_color_grading_preset(&mut color_grading, &VisualSettings::default());
     camera.insert((
         Hdr,
-        Tonemapping::AcesFitted, // v0.3 tonemapping for natural colors
+        Tonemapping::AcesFitted,
         DebandDither::Enabled,
-        ColorGrading {
-            global: ColorGradingGlobal {
-                exposure: 0.0,    // Neutral exposure (v0.3 style)
-                temperature: 0.0, // Neutral temperature
-                tint: 0.0,        // Neutral tint
-                hue: 0.0,
-                post_saturation: 1.0, // Neutral saturation
-                ..default()
-            },
-            shadows: ColorGradingSection {
-                saturation: 1.0,
-                contrast: 1.0,
-                gamma: 1.0,
-                gain: 1.0,
-                lift: 0.0,
-            },
-            midtones: ColorGradingSection {
-                saturation: 1.0,
-                contrast: 1.0,
-                gamma: 1.0,
-                gain: 1.0,
-                lift: 0.0,
-            },
-            highlights: ColorGradingSection {
-                saturation: 1.0,
-                contrast: 1.0,
-                gamma: 1.0,
-                gain: 1.0,
-                lift: 0.0,
-            },
-        },
+        color_grading,
     ));
     if !capabilities.integrated_gpu {
         camera.insert(Bloom {
@@ -178,6 +220,9 @@ pub fn spawn_camera(
             composite_mode: BloomCompositeMode::EnergyConserving,
             ..default()
         });
+    }
+    if cfg!(debug_assertions) {
+        camera.insert(NoIndirectDrawing);
     }
 
     match settings_state.anti_aliasing {
@@ -401,12 +446,15 @@ pub fn player_camera_system(
         if keys.just_pressed(KeyCode::KeyR) {
             camera.yaw = camera_config.movement.reset_yaw;
             camera.pitch = camera_config.movement.reset_pitch;
-            *transform = Transform::from_xyz(
-                camera_config.spawn.position.x,
-                camera_config.spawn.position.y,
-                camera_config.spawn.position.z,
-            )
-            .looking_at(camera_config.spawn.look_at, Vec3::Y);
+            *transform =
+                surface_safe_camera_transform(&camera_config, &world).unwrap_or_else(|| {
+                    Transform::from_xyz(
+                        camera_config.spawn.position.x,
+                        camera_config.spawn.position.y,
+                        camera_config.spawn.position.z,
+                    )
+                    .looking_at(camera_config.spawn.look_at, Vec3::Y)
+                });
         }
 
         if cursor_options.visible {
@@ -435,6 +483,56 @@ pub fn player_camera_system(
             }
         }
     }
+}
+
+pub fn ensure_camera_above_surface_once(
+    world: Res<VoxelWorld>,
+    camera_config: Res<CameraConfig>,
+    mut camera_query: Query<&mut Transform, With<PlayerCamera>>,
+    mut checked: Local<bool>,
+) {
+    if *checked {
+        return;
+    }
+
+    if world.chunk_positions().next().is_none() {
+        return;
+    }
+
+    let Ok(mut transform) = camera_query.single_mut() else {
+        return;
+    };
+
+    let validity = classify_player_world_validity(&world, transform.translation);
+    if validity == PlayerWorldValidity::InValidWorld {
+        *checked = true;
+        return;
+    }
+
+    let Some(safe_transform) = surface_safe_camera_transform(&camera_config, &world) else {
+        return;
+    };
+
+    warn!(
+        "Camera started in invalid world space ({:?}); moved to {:?}",
+        validity, safe_transform.translation
+    );
+    *transform = safe_transform;
+    *checked = true;
+}
+
+fn surface_safe_camera_transform(config: &CameraConfig, world: &VoxelWorld) -> Option<Transform> {
+    let mut stats = SpawnValidationReport::default();
+    let readiness = SpawnColliderReadiness::default();
+    let preferred = config.spawn.position.xz();
+    let spawn = find_nearest_valid_spawn(world, preferred, &readiness, false, &mut stats)?;
+    let position = spawn.position + Vec3::Y * config.movement.eye_height;
+    let look_at = if config.spawn.look_at.distance_squared(position) > 0.01 {
+        config.spawn.look_at
+    } else {
+        position + Vec3::new(-1.0, -0.2, -1.0)
+    };
+    Some(Transform::from_translation(position).looking_at(look_at, Vec3::Y))
 }
 
 fn fly_movement(
@@ -477,7 +575,9 @@ fn fly_movement(
 
     let desired = transform.translation + velocity.normalize_or_zero() * speed * dt;
     if !camera_intersects_solid(world, desired) {
-        transform.translation = desired;
+        transform.translation = world
+            .bounds()
+            .clamp_horizontal_position(desired, WORLD_EDGE_GUARD_MARGIN);
     }
 }
 
@@ -541,22 +641,17 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 /// System to apply visual settings to camera color grading and skybox
 pub fn apply_visual_settings(
     visual_settings: Res<VisualSettings>,
-    mut camera_query: Query<(&mut ColorGrading, &mut Skybox), With<PlayerCamera>>,
+    mut camera_query: Query<(&mut ColorGrading, Option<&mut Skybox>), With<PlayerCamera>>,
 ) {
     if !visual_settings.is_changed() {
         return;
     }
 
-    for (mut color_grading, mut skybox) in camera_query.iter_mut() {
-        // Apply color grading settings
-        color_grading.global.exposure = visual_settings.exposure;
-        color_grading.global.temperature = visual_settings.temperature;
-        color_grading.global.post_saturation = visual_settings.saturation;
+    for (mut color_grading, skybox) in camera_query.iter_mut() {
+        apply_color_grading_preset(&mut color_grading, &visual_settings);
 
-        color_grading.midtones.gamma = visual_settings.gamma;
-        color_grading.highlights.gain = visual_settings.highlights_gain;
-
-        // Apply skybox brightness
-        skybox.brightness = visual_settings.skybox_brightness;
+        if let Some(mut skybox) = skybox {
+            skybox.brightness = visual_settings.skybox_brightness;
+        }
     }
 }

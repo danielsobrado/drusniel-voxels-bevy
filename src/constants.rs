@@ -75,6 +75,11 @@ pub const VOXEL_SIZE: f32 = 1.0;
 /// vertices to be positioned differently in adjacent chunks, creating seams.
 pub const CHUNK_BOUNDARY_SCALE: f32 = 1.0;
 
+/// Horizontal world-edge margin reserved for hiding finite-map water boundaries.
+/// Gameplay actors are kept outside this strip so they cannot enter water whose
+/// surface has been intentionally suppressed at the map edge.
+pub const WORLD_EDGE_GUARD_MARGIN: i32 = CHUNK_SIZE_I32;
+
 // =============================================================================
 // Terrain Generation
 // =============================================================================

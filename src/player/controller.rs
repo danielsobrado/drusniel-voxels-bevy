@@ -5,9 +5,10 @@ use bevy_tnua_avian3d::*;
 
 use crate::constants::{
     DEFAULT_CAPSULE_HEIGHT, DEFAULT_CAPSULE_RADIUS, DEFAULT_FLOAT_HEIGHT, DEFAULT_JUMP_HEIGHT,
-    DEFAULT_RUN_SPEED, DEFAULT_WALK_SPEED,
+    DEFAULT_RUN_SPEED, DEFAULT_WALK_SPEED, WORLD_EDGE_GUARD_MARGIN,
 };
 use crate::physics::PhysicsLayer;
+use crate::voxel::world::VoxelWorld;
 
 #[derive(TnuaScheme)]
 #[scheme(basis = TnuaBuiltinWalk)]
@@ -18,6 +19,24 @@ pub enum PlayerMovementScheme {
 /// Player marker component.
 #[derive(Component)]
 pub struct Player;
+
+/// Keeps gameplay entities out of the hidden map-edge strip.
+///
+/// Future vehicles such as boats can opt into the same guard by adding this
+/// component, avoiding a mismatch between water voxels and hidden edge water
+/// rendering.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct WorldBoundaryConstrained {
+    pub margin: i32,
+}
+
+impl Default for WorldBoundaryConstrained {
+    fn default() -> Self {
+        Self {
+            margin: WORLD_EDGE_GUARD_MARGIN,
+        }
+    }
+}
 
 /// Player configuration for movement and physics.
 ///
@@ -127,6 +146,7 @@ pub struct PlayerBundle {
     pub tnua_controller: TnuaController<PlayerMovementScheme>,
     pub tnua_config: TnuaConfig<PlayerMovementScheme>,
     pub tnua_sensor: TnuaAvian3dSensorShape,
+    pub world_boundary: WorldBoundaryConstrained,
 }
 
 impl PlayerBundle {
@@ -155,6 +175,35 @@ impl PlayerBundle {
                 config.capsule_radius * 0.9,
                 half_height * 1.8,
             )),
+            world_boundary: WorldBoundaryConstrained::default(),
+        }
+    }
+}
+
+pub fn constrain_world_boundary_entities(
+    world: Res<VoxelWorld>,
+    mut query: Query<(
+        &mut Transform,
+        Option<&mut LinearVelocity>,
+        &WorldBoundaryConstrained,
+    )>,
+) {
+    let bounds = world.bounds();
+    for (mut transform, velocity, guard) in query.iter_mut() {
+        let before = transform.translation;
+        let clamped = bounds.clamp_horizontal_position(before, guard.margin);
+        if before.x == clamped.x && before.z == clamped.z {
+            continue;
+        }
+
+        transform.translation = clamped;
+        if let Some(mut velocity) = velocity {
+            if before.x != clamped.x {
+                velocity.x = 0.0;
+            }
+            if before.z != clamped.z {
+                velocity.z = 0.0;
+            }
         }
     }
 }

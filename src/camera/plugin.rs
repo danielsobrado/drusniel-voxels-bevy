@@ -1,8 +1,9 @@
 use crate::camera::config::{CameraConfig, CameraExposureConfig, load_camera_exposure_config};
 use crate::camera::controller::{
-    apply_visual_settings, camera_follow_player, player_camera_system, spawn_camera,
-    update_camera_anti_aliasing, update_camera_exposure, update_camera_shadow_filtering,
-    update_camera_skybox_from_atmosphere, update_ray_tracing_on_camera,
+    apply_visual_settings, camera_follow_player, ensure_camera_above_surface_once,
+    player_camera_system, spawn_camera, update_camera_anti_aliasing, update_camera_exposure,
+    update_camera_shadow_filtering, update_camera_skybox_from_atmosphere,
+    update_ray_tracing_on_camera,
 };
 use crate::rendering::capabilities::GraphicsDetectionSet;
 use bevy::prelude::*;
@@ -27,6 +28,7 @@ impl Plugin for CameraPlugin {
                 (
                     player_camera_system,
                     camera_follow_player,
+                    ensure_camera_above_surface_once.after(camera_follow_player),
                     update_ray_tracing_on_camera,
                     update_camera_shadow_filtering,
                     update_camera_anti_aliasing,

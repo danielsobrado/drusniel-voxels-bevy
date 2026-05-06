@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
-pub const TERRAIN_GENERATION_VERSION: u64 = 3;
+pub const TERRAIN_GENERATION_VERSION: u64 = 5;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Deserialize)]
@@ -19,11 +19,24 @@ pub struct TerrainConfig {
     pub hills: NoiseLayer,
     pub detail: NoiseLayer,
     #[serde(default)]
+    pub caves: CaveConfig,
+    #[serde(default)]
     pub rivers: RiverConfig,
     #[serde(default)]
     pub water_bodies: WaterBodyGenerationConfig,
     #[serde(default)]
     pub biome_modifiers: HashMap<String, f32>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct CaveConfig {
+    pub enabled: bool,
+}
+
+impl Default for CaveConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
 }
 
 /// Configuration for river generation
@@ -120,7 +133,7 @@ pub struct AquiferConfig {
 impl Default for AquiferConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             max_y: 10,
             noise_scale: 0.045,
             threshold: 0.84,
@@ -158,7 +171,7 @@ impl Default for TerrainConfig {
     fn default() -> Self {
         Self {
             height: HeightConfig {
-                min: -64.0,
+                min: 14.0,
                 max: 88.0,
                 sea_level: 0.0,
             },
@@ -191,6 +204,7 @@ impl Default for TerrainConfig {
                 persistence: 0.5,
                 lacunarity: 2.0,
             },
+            caves: CaveConfig::default(),
             rivers: RiverConfig::default(),
             water_bodies: WaterBodyGenerationConfig::default(),
             biome_modifiers: HashMap::new(),
@@ -263,7 +277,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terrain_yaml_preserves_historical_mountain_scale() {
+    fn terrain_yaml_matches_runtime_defaults() {
         let loaded = TerrainConfig::load(TERRAIN_CONFIG_PATH)
             .expect("terrain_generation.yaml should deserialize");
         let defaults = TerrainConfig::default();
@@ -276,5 +290,10 @@ mod tests {
         assert_eq!(loaded.mountains.octaves, defaults.mountains.octaves);
         assert_eq!(loaded.hills.amplitude, defaults.hills.amplitude);
         assert_eq!(loaded.detail.amplitude, defaults.detail.amplitude);
+        assert_eq!(loaded.caves.enabled, defaults.caves.enabled);
+        assert_eq!(
+            loaded.water_bodies.aquifers.enabled,
+            defaults.water_bodies.aquifers.enabled
+        );
     }
 }

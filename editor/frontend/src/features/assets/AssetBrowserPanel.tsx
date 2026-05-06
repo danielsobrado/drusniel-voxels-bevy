@@ -38,7 +38,23 @@ export function AssetBrowserPanel() {
     <section className="panel-shell" data-testid="panel-asset-browser" aria-labelledby="asset-browser-title">
       <PanelTitleBar title="Asset Browser" />
       <div className="panel-body" data-testid="bottom-dock">
-        <h2 id="asset-browser-title" className="placeholder-heading">Asset Browser</h2>
+        <div className="asset-browser-header">
+          <h2 id="asset-browser-title" className="asset-browser-heading">
+            <span>Asset</span>
+            <span>Explore</span>
+          </h2>
+          <div className="asset-browser-tabs" aria-label="Asset browser filters">
+            <button type="button" className="asset-browser-tab asset-browser-tab-active">
+              Featured
+            </button>
+            <button type="button" className="asset-browser-tab">
+              Mine
+            </button>
+            <button type="button" className="asset-browser-tab">
+              Liked
+            </button>
+          </div>
+        </div>
         <p className="agent-hint">Agent Hint: assets are mocked; atlas mapping and prop brush workflows route through editor commands.</p>
         <div className="asset-card">
           <strong>Prop brush asset</strong>

@@ -8,7 +8,6 @@ use bevy::{
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
 
-// Same structure as Triplanar for convenience, though we might not use all fields in Blocky
 #[derive(Clone, Copy, ShaderType, Debug)]
 pub struct BlockyUniforms {
     pub base_color: LinearRgba,
@@ -16,6 +15,14 @@ pub struct BlockyUniforms {
     pub blend_sharpness: f32,
     pub normal_intensity: f32,
     pub parallax_scale: f32,
+    pub rain_factor: f32,
+    pub wetness: f32,
+    pub snow_factor: f32,
+    pub weather_time: f32,
+    pub weather_flags: u32,
+    pub _weather_padding0: u32,
+    pub _weather_padding1: u32,
+    pub _weather_padding2: u32,
 }
 
 impl Default for BlockyUniforms {
@@ -26,6 +33,14 @@ impl Default for BlockyUniforms {
             blend_sharpness: 1.0,
             normal_intensity: 1.0,
             parallax_scale: 0.0,
+            rain_factor: 0.0,
+            wetness: 0.0,
+            snow_factor: 0.0,
+            weather_time: 0.0,
+            weather_flags: 0,
+            _weather_padding0: 0,
+            _weather_padding1: 0,
+            _weather_padding2: 0,
         }
     }
 }

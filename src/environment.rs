@@ -3,7 +3,9 @@ use bevy::light::{
     VolumetricLight,
 };
 use bevy::prelude::*;
-use bevy_water::*;
+use bevy_water::{
+    GlobalWaveState, ImageUtilsPlugin, WaterSettings, water::material::WaterMaterialPlugin,
+};
 
 use crate::atmosphere::AtmosphereConfig;
 use crate::constants::WATER_LEVEL;
@@ -80,7 +82,7 @@ impl Plugin for AtmospherePlugin {
         app.insert_resource(AtmosphereSettings::default())
             .insert_resource(clear_color)
             .insert_resource(DirectionalLightShadowMap { size: 4096 })
-            // bevy_water for dynamic ocean waves
+            // bevy_water material settings for voxel-owned water meshes.
             .insert_resource(WaterSettings {
                 height: WATER_LEVEL as f32,
                 amplitude: 0.9,
@@ -91,9 +93,12 @@ impl Plugin for AtmospherePlugin {
                 shallow_color: Color::srgba(0.04, 0.18, 0.36, 0.9).into(),
                 edge_color: Color::srgba(0.18, 0.38, 0.55, 0.75).into(),
                 edge_scale: 0.4,
+                // Voxel water owns visible water surfaces; never spawn the finite global tile grid.
+                spawn_tiles: None,
                 ..default()
             })
-            .add_plugins((WaterPlugin, ImageUtilsPlugin))
+            .insert_resource(GlobalWaveState::default())
+            .add_plugins((WaterMaterialPlugin, ImageUtilsPlugin))
             .add_systems(Startup, (setup_atmosphere, seed_atmosphere).chain())
             .add_systems(
                 Update,

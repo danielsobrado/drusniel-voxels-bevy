@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "dev:desktop": "tauri dev",
+    "build:runtime": "node ./scripts/build-editor-runtime.mjs --release",
+    "build:runtime:debug": "node ./scripts/build-editor-runtime.mjs --debug",
     "typecheck": "tsc --noEmit",
     "build": "tsc && vite build",
-    "build:desktop": "tauri build",
+    "build:desktop": "tauri build --config src-tauri/tauri.sidecar.conf.json",
     "preview": "vite preview",
     "tauri": "tauri",
     "test:unit": "vitest run src/state/editorStore.test.ts src/runtime/RuntimeClient.test.ts",

@@ -8,6 +8,7 @@
 //! - Tree placement and generation
 //! - Dungeon structure generation
 
+use crate::constants::MIN_BREAKABLE_Y;
 use crate::constants::{
     BEACH_HEIGHT_OFFSET,
     // Bedrock
@@ -288,6 +289,9 @@ pub struct TerrainGenerator<N: NoiseGenerator = ValueNoise> {
     config: TerrainConfig,
 }
 
+const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;
+const BASE_TERRAIN_ELEVATION: f32 = MIN_NORMAL_TERRAIN_SURFACE_Y as f32;
+
 impl Default for TerrainGenerator<ValueNoise> {
     fn default() -> Self {
         Self::with_config(ValueNoise::default(), TerrainConfig::load_or_default())
@@ -410,7 +414,9 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let z = world_z as f32;
         let cfg = &self.config;
 
-        // Large-scale continent shape
+        // Large-scale continent shape. The source noise is positive, so keep
+        // the contribution scaled rather than letting it clamp the whole world
+        // to mountain height.
         let continent = self.fbm_configurable(
             x,
             z,
@@ -418,7 +424,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             cfg.continent.octaves,
             cfg.continent.persistence,
             cfg.continent.lacunarity,
-        ) * cfg.continent.amplitude;
+        ) * cfg.continent.amplitude
+            * 0.55;
 
         // Mountain mask - determines where mountains appear (using lower frequency)
         let mountain_signal = self.fbm_configurable(
@@ -432,11 +439,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Ridged mountains, masked by mountain regions. The broad uplift keeps
         // mountain ranges tall even when the sharp ridge sample is between peaks.
-        let mountain_region = (mountain_signal * 3.0).clamp(0.0, 1.0).powf(1.15);
-        let mountains = self.ridged_noise(x, z) * mountain_region;
-        let mountain_uplift = cfg.mountains.amplitude * 1.1 * mountain_region;
+        let mountain_region = mountain_signal.clamp(0.0, 1.0).powf(2.0);
+        let mountains = self.ridged_noise(x, z) * mountain_region * 0.8;
+        let mountain_uplift = cfg.mountains.amplitude * 0.20 * mountain_region;
 
-        // Hills everywhere
+        // Hills everywhere, scaled to shape traversal without lifting the
+        // entire map into the camera path.
         let hills = self.fbm_configurable(
             x,
             z,
@@ -444,9 +452,10 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             cfg.hills.octaves,
             cfg.hills.persistence,
             cfg.hills.lacunarity,
-        ) * cfg.hills.amplitude;
+        ) * cfg.hills.amplitude
+            * 0.45;
 
-        // Fine detail
+        // Fine detail.
         let detail = self.fbm_configurable(
             x,
             z,
@@ -456,10 +465,13 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             cfg.detail.lacunarity,
         ) * cfg.detail.amplitude;
 
-        let height = continent + mountains + mountain_uplift + hills + detail;
+        let height =
+            BASE_TERRAIN_ELEVATION + continent + mountains + mountain_uplift + hills + detail;
 
-        // Clamp to world bounds from config
-        height.clamp(cfg.height.min, cfg.height.max) as i32
+        // Normal land columns keep a continuous crust above bedrock. Water
+        // body bathymetry is applied later and may carve beds lower than this.
+        let min_surface = cfg.height.min.max(MIN_NORMAL_TERRAIN_SURFACE_Y as f32);
+        height.clamp(min_surface, cfg.height.max) as i32
     }
 
     /// Calculates terrain height at a given world position.
@@ -474,7 +486,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         } else {
             base_height
         };
-        carved_height.clamp(self.config.height.min as i32, self.config.height.max as i32)
+        carved_height.clamp(MIN_BREAKABLE_Y, self.config.height.max as i32)
     }
 
     pub fn get_water_generation_metadata(
@@ -652,6 +664,10 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
     /// Checks if a position should be a cave.
     pub fn is_cave(&self, world_x: i32, world_y: i32, world_z: i32, terrain_height: i32) -> bool {
+        if !self.config.caves.enabled {
+            return false;
+        }
+
         if world_y <= CAVE_MIN_Y || world_y >= CAVE_MAX_Y {
             return false;
         }
@@ -918,6 +934,7 @@ mod tests {
     use super::*;
     use crate::constants::{
         CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z,
+        MIN_BREAKABLE_Y,
     };
     use crate::terrain::generation::config::TerrainConfig;
 
@@ -978,7 +995,7 @@ mod tests {
             for z in -100..100 {
                 let height = generator.get_height(x, z);
                 assert!(
-                    height >= config.height.min as i32 && height <= config.height.max as i32,
+                    height >= MIN_BREAKABLE_Y && height <= config.height.max as i32,
                     "Height {} out of range at ({}, {})",
                     height,
                     x,
@@ -1004,19 +1021,38 @@ mod tests {
         }
 
         assert!(
-            max_height >= 80,
-            "expected tall mountain peaks, got max height {max_height}"
+            max_height >= 30,
+            "expected visible mountain peaks, got max height {max_height}"
         );
         assert!(
             max_height < DEFAULT_WORLD_CHUNKS_Y * CHUNK_SIZE_I32,
             "world vertical size should contain generated peaks, max height {max_height}"
         );
         assert!(
-            max_height - min_height >= 70,
+            max_height - min_height >= 15,
             "expected mountain/valley relief, got range {}..{}",
             min_height,
             max_height
         );
+    }
+
+    #[test]
+    fn visual_regression_checkpoints_are_above_terrain() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        for (x, z, camera_y) in [
+            (256, 220, 82),
+            (320, 284, 82),
+            (256, 220, 86),
+            (320, 284, 86),
+            (292, 304, 88),
+        ] {
+            let height = generator.get_height(x, z);
+            assert!(
+                height + 6 < camera_y,
+                "checkpoint camera at ({x}, {camera_y}, {z}) should be above terrain height {height}"
+            );
+        }
     }
 
     #[test]
@@ -1178,33 +1214,27 @@ mod tests {
     }
 
     #[test]
-    fn sealed_underground_caves_do_not_default_to_water() {
+    fn default_generation_has_no_underground_voids_or_aquifer_water() {
         let generator =
             TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
-        let mut checked = false;
 
-        'outer: for x in 0..256 {
-            for z in 0..256 {
+        for x in (0..256).step_by(3) {
+            for z in (0..256).step_by(3) {
                 let terrain_height = generator.get_height(x, z);
-                for y in (CAVE_MIN_Y + 1)..WATER_LEVEL {
-                    if generator.is_cave(x, y, z, terrain_height)
-                        && !generator.is_cave_aquifer(x, y, z)
-                    {
-                        assert_eq!(
-                            generator.get_voxel(x, y, z),
-                            VoxelType::Air,
-                            "non-aquifer cave below water level should remain air"
-                        );
-                        checked = true;
-                        break 'outer;
-                    }
+                for y in (MIN_BREAKABLE_Y..terrain_height - CAVE_SURFACE_OFFSET).step_by(2) {
+                    let voxel = generator.get_voxel(x, y, z);
+                    assert_ne!(
+                        voxel,
+                        VoxelType::Air,
+                        "default terrain should not create hidden air void at ({x}, {y}, {z})"
+                    );
+                    assert_ne!(
+                        voxel,
+                        VoxelType::Water,
+                        "default terrain should not create sealed underground water at ({x}, {y}, {z})"
+                    );
                 }
             }
         }
-
-        assert!(
-            checked,
-            "expected to find at least one non-aquifer cave sample"
-        );
     }
 }

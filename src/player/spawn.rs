@@ -142,7 +142,7 @@ impl SpawnColliderReadiness {
         for (chunk_mesh, collider, needs_collider) in chunks {
             if collider.is_some() && needs_collider.is_none() {
                 readiness.ready_chunks.insert(chunk_mesh.chunk_position);
-            } else {
+            } else if needs_collider.is_some() {
                 readiness.pending_chunks.insert(chunk_mesh.chunk_position);
             }
         }
@@ -718,7 +718,9 @@ fn next_lcg(seed: &mut u64) -> u64 {
 mod tests {
     use super::*;
     use crate::constants::MIN_BREAKABLE_Y;
+    use crate::rendering::triplanar_material::TerrainMaterialQuality;
     use crate::voxel::chunk::Chunk;
+    use crate::voxel::meshing::MeshMode;
 
     fn world_with_surface(surface_y: i32, surface: VoxelType) -> VoxelWorld {
         let mut world = VoxelWorld::new(IVec3::new(1, 2, 1));
@@ -839,5 +841,29 @@ mod tests {
         assert_eq!(report.rejected_missing_chunk, 0);
         assert_eq!(report.rejected_water, 0);
         assert_eq!(report.rejected_underground, 0);
+    }
+
+    #[test]
+    fn collider_readiness_ignores_passive_chunk_meshes() {
+        let chunk_position = IVec3::new(1, 0, 1);
+        let ready_mesh = ChunkMesh {
+            chunk_position,
+            vertex_count: 12,
+            triangle_count: 4,
+            mesh_mode: MeshMode::Blocky,
+            material_quality: TerrainMaterialQuality::FullTriplanar,
+        };
+        let passive_mesh = ready_mesh;
+        let collider = ChunkCollider;
+
+        let readiness = SpawnColliderReadiness::from_chunk_meshes(
+            [
+                (&ready_mesh, Some(&collider), None),
+                (&passive_mesh, None, None),
+            ]
+            .into_iter(),
+        );
+
+        assert!(readiness.is_chunk_ready(chunk_position));
     }
 }

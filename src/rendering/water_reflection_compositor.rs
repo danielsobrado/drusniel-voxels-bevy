@@ -8,6 +8,7 @@ use bevy::camera::NormalizedRenderTarget;
 use bevy::core_pipeline::{
     FullscreenShader,
     core_3d::graph::{Core3d, Node3d},
+    prepass::{DepthPrepass, ViewPrepassTextures},
 };
 use bevy::prelude::*;
 use bevy::render::{
@@ -26,14 +27,19 @@ use bevy::render::{
     },
     renderer::{RenderContext, RenderDevice},
     texture::GpuImage,
-    view::ViewTarget,
+    view::{ViewTarget, ViewUniformOffset, ViewUniforms},
 };
 use bevy::shader::Shader;
 
+use crate::camera::controller::PlayerCamera;
+use crate::rendering::render_timing::RenderTimingSink;
+use crate::rendering::water::WaterConfig;
 use crate::rendering::water_reflection::{
-    WaterReflectionBodyParams, WaterReflectionDebugViewMode, WaterReflectionMaskTexture,
-    WaterReflectionStatus, WaterReflectionTexture,
+    WaterReflectionBodyParams, WaterReflectionConfig, WaterReflectionDebugViewMode,
+    WaterReflectionMaskTexture, WaterReflectionStatus, WaterReflectionTexture,
 };
+use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
+use crate::weather::{WeatherRuntime, WeatherShaderUniforms};
 
 const COMPOSITOR_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("f0e1d2c3-b4a5-9678-efab-012345678901");
@@ -56,6 +62,9 @@ struct ExtractedReflectionStatus {
     fresnel_power: f32,
     distortion_strength: f32,
     surface_y: f32,
+    weather: WeatherShaderUniforms,
+    weather_water: [f32; 4],
+    refraction: [f32; 4],
 }
 
 #[repr(C)]
@@ -63,34 +72,115 @@ struct ExtractedReflectionStatus {
 struct ReflectionCompositorUniform {
     flags: [u32; 4],
     params: [f32; 4],
+    weather: WeatherShaderUniforms,
+    weather_water: [f32; 4],
+    refraction: [f32; 4],
+}
+
+fn configure_compositor_depth_prepass(
+    mut commands: Commands,
+    config: Option<Res<WaterReflectionConfig>>,
+    cameras: Query<Entity, (With<PlayerCamera>, Without<DepthPrepass>)>,
+) {
+    if config.is_some_and(|config| !config.enabled) {
+        return;
+    }
+
+    for entity in &cameras {
+        commands.entity(entity).insert(DepthPrepass);
+    }
 }
 
 fn extract_reflection_texture(world: &mut World) {
     let compositor_disabled =
         std::env::var_os("VOXEL_DISABLE_WATER_REFLECTION_COMPOSITOR").is_some();
-    let (handle, mask_handle, sample_reflection, debug_view, params) = world
-        .resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
-            (
-                main_world
-                    .get_resource::<WaterReflectionTexture>()
-                    .map(|r| r.image.clone()),
-                main_world
-                    .get_resource::<WaterReflectionMaskTexture>()
-                    .map(|r| r.image.clone()),
-                main_world
-                    .get_resource::<WaterReflectionStatus>()
-                    .map(|s| s.sample_reflection)
-                    .unwrap_or(false),
-                main_world
-                    .get_resource::<WaterReflectionDebugViewMode>()
-                    .map(|mode| mode.as_u32())
-                    .unwrap_or(0),
-                main_world
-                    .get_resource::<WaterReflectionBodyParams>()
-                    .copied()
-                    .unwrap_or_default(),
-            )
-        });
+    let (
+        handle,
+        mask_handle,
+        sample_reflection,
+        debug_view,
+        params,
+        witchcraft_params,
+        weather,
+        weather_water,
+        refraction,
+    ) = world.resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
+        let water_config = main_world.get_resource::<WaterConfig>();
+        let weather_water = water_config
+            .map(|config| {
+                [
+                    config.weather.rain_distortion_boost.max(0.0),
+                    config.weather.rain_reflection_boost.max(0.0),
+                    config.weather.snow_reflection_soften.clamp(0.0, 1.0),
+                    0.0,
+                ]
+            })
+            .unwrap_or_else(|| {
+                let defaults = crate::rendering::water::WaterWeatherConfig::default();
+                [
+                    defaults.rain_distortion_boost,
+                    defaults.rain_reflection_boost,
+                    defaults.snow_reflection_soften,
+                    0.0,
+                ]
+            });
+        let refraction = water_config
+            .map(|config| {
+                [
+                    if config.refraction.enabled { 1.0 } else { 0.0 },
+                    config.refraction.strength.max(0.0),
+                    config.refraction.ior.max(1.0),
+                    if config.refraction.chromatic_aberration {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                ]
+            })
+            .unwrap_or_else(|| {
+                let defaults = crate::rendering::water::RefractionConfig::default();
+                [
+                    if defaults.enabled { 1.0 } else { 0.0 },
+                    defaults.strength,
+                    defaults.ior,
+                    if defaults.chromatic_aberration {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                ]
+            });
+        (
+            main_world
+                .get_resource::<WaterReflectionTexture>()
+                .map(|r| r.image.clone()),
+            main_world
+                .get_resource::<WaterReflectionMaskTexture>()
+                .map(|r| r.image.clone()),
+            main_world
+                .get_resource::<WaterReflectionStatus>()
+                .map(|s| s.sample_reflection)
+                .unwrap_or(false),
+            main_world
+                .get_resource::<WaterReflectionDebugViewMode>()
+                .map(|mode| mode.as_u32())
+                .unwrap_or(0),
+            main_world
+                .get_resource::<WaterReflectionBodyParams>()
+                .copied()
+                .unwrap_or_default(),
+            main_world
+                .get_resource::<WitchcraftWaterFinishParams>()
+                .copied()
+                .unwrap_or_default(),
+            main_world
+                .get_resource::<WeatherRuntime>()
+                .map(|runtime| runtime.uniforms)
+                .unwrap_or_default(),
+            weather_water,
+            refraction,
+        )
+    });
     let sample_reflection = sample_reflection && !compositor_disabled;
     match (handle, mask_handle) {
         (Some(h), Some(mask)) => {
@@ -99,10 +189,14 @@ fn extract_reflection_texture(world: &mut World) {
             world.insert_resource(ExtractedReflectionStatus {
                 sample_reflection,
                 debug_view,
-                reflection_strength: params.reflection_strength,
+                reflection_strength: params.reflection_strength
+                    * witchcraft_params.reflection_multiplier_base(),
                 fresnel_power: params.fresnel_power,
                 distortion_strength: params.distortion_strength,
                 surface_y: params.surface_y,
+                weather,
+                weather_water,
+                refraction,
             });
         }
         _ => {
@@ -136,6 +230,8 @@ fn init_compositor_pipeline(
                 binding_types::texture_2d(TextureSampleType::Float { filterable: true }),
                 binding_types::texture_2d(TextureSampleType::Float { filterable: true }),
                 binding_types::uniform_buffer::<ReflectionCompositorUniform>(false),
+                binding_types::texture_depth_2d(),
+                binding_types::uniform_buffer::<bevy::render::view::ViewUniform>(true),
             ),
         ),
     );
@@ -169,13 +265,22 @@ fn init_compositor_pipeline(
 pub struct CompositorNode;
 
 impl ViewNode for CompositorNode {
-    type ViewQuery = (&'static ViewTarget, &'static ExtractedCamera);
+    type ViewQuery = (
+        &'static ViewTarget,
+        &'static ExtractedCamera,
+        &'static ViewPrepassTextures,
+        &'static ViewUniformOffset,
+    );
 
     fn run<'w>(
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        (view_target, extracted_camera): bevy::ecs::query::QueryItem<'w, '_, Self::ViewQuery>,
+        (view_target, extracted_camera, prepass_textures, view_offset): bevy::ecs::query::QueryItem<
+            'w,
+            '_,
+            Self::ViewQuery,
+        >,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         if !matches!(
@@ -202,6 +307,13 @@ impl ViewNode for CompositorNode {
             .get_resource::<ExtractedReflectionStatus>()
             .copied()
             .unwrap_or_default();
+        let Some(depth_view) = prepass_textures.depth_view() else {
+            return Ok(());
+        };
+        let view_uniforms = world.resource::<ViewUniforms>();
+        let Some(view_binding) = view_uniforms.uniforms.binding() else {
+            return Ok(());
+        };
 
         let Some(pipeline_res) = world.get_resource::<CompositorPipeline>() else {
             return Ok(());
@@ -221,7 +333,22 @@ impl ViewNode for CompositorNode {
                 status.distortion_strength,
                 status.surface_y,
             ],
+            weather: status.weather,
+            weather_water: status.weather_water,
+            refraction: status.refraction,
         };
+        if let Some(timing) = world.get_resource::<RenderTimingSink>() {
+            timing.push_count(
+                "Water Weather Distortion Boost",
+                (status.weather.rain_factor * status.weather_water[0]) as f64,
+            );
+            timing.push_count(
+                "Water Weather Reflection Boost",
+                (status.weather.rain_factor * status.weather_water[1]) as f64,
+            );
+            timing.push_count("Water Refraction Enabled", status.refraction[0] as f64);
+            timing.push_count("Water Refraction Strength", status.refraction[1] as f64);
+        }
         let uniform_buffer =
             render_context
                 .render_device()
@@ -240,6 +367,8 @@ impl ViewNode for CompositorNode {
                 &refl_gpu.texture_view,
                 &mask_gpu.texture_view,
                 uniform_buffer.as_entire_binding(),
+                depth_view,
+                view_binding.clone(),
             )),
         );
 
@@ -257,7 +386,7 @@ impl ViewNode for CompositorNode {
         });
 
         render_pass.set_render_pipeline(pipeline);
-        render_pass.set_bind_group(0, &bind_group, &[]);
+        render_pass.set_bind_group(0, &bind_group, &[view_offset.offset]);
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -277,6 +406,8 @@ impl Plugin for WaterReflectionCompositorPlugin {
             ),
             Shader::from_wgsl
         );
+
+        app.add_systems(Update, configure_compositor_depth_prepass);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

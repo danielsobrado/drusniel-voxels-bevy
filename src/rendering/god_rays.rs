@@ -13,6 +13,7 @@ use bevy::core_pipeline::{
     core_3d::graph::{Core3d, Node3d},
     prepass::ViewPrepassTextures,
 };
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
     ExtractSchedule, RenderApp, RenderStartup,
@@ -34,7 +35,9 @@ use bevy::shader::Shader;
 use crate::atmosphere::FogConfig;
 use crate::camera::controller::PlayerCamera;
 use crate::environment::Sun;
+use crate::performance::AreaTimingRecorder;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
+use crate::weather::WeatherRuntime;
 
 const GOD_RAYS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
 
@@ -88,7 +91,8 @@ struct GodRayUniforms {
     weight: f32,
     num_samples: i32,
     threshold: f32,
-    _padding: Vec2,
+    rain_factor: f32,
+    snow_factor: f32,
 }
 
 // ─── Main-world sun projection ───────────────────────────────────────────────
@@ -120,6 +124,9 @@ fn sync_god_ray_config(fog_config: Option<Res<FogConfig>>, mut config: ResMut<Go
 fn compute_god_ray_frame_data(
     mut commands: Commands,
     config: Res<GodRayConfig>,
+    weather: Option<Res<WeatherRuntime>>,
+    frame: Res<FrameCount>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
     sun_query: Query<&Transform, With<Sun>>,
     camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
 ) {
@@ -167,9 +174,37 @@ fn compute_god_ray_frame_data(
             weight: config.weight,
             num_samples: config.num_samples as i32,
             threshold: config.threshold,
-            _padding: Vec2::ZERO,
+            rain_factor: weather
+                .as_deref()
+                .map(|weather| weather.uniforms.rain_factor.clamp(0.0, 1.0))
+                .unwrap_or(0.0),
+            snow_factor: weather
+                .as_deref()
+                .map(|weather| weather.uniforms.snow_factor.clamp(0.0, 1.0))
+                .unwrap_or(0.0),
         },
     });
+
+    if let Some(timing) = timing.as_deref_mut() {
+        let rain = weather
+            .as_deref()
+            .map(|weather| weather.uniforms.rain_factor.clamp(0.0, 1.0))
+            .unwrap_or(0.0);
+        let snow = weather
+            .as_deref()
+            .map(|weather| weather.uniforms.snow_factor.clamp(0.0, 1.0))
+            .unwrap_or(0.0);
+        let intensity_mult = weather_god_ray_intensity_mult(rain, snow);
+        timing.record_count(
+            frame.0,
+            "Weather GodRay Intensity Mult",
+            intensity_mult as f64,
+        );
+    }
+}
+
+fn weather_god_ray_intensity_mult(rain: f32, snow: f32) -> f32 {
+    (1.0 - rain * 0.55 - snow * 0.1).clamp(0.35, 1.0)
 }
 
 // ─── Extraction ──────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
-use bevy::render::view::Hdr;
+use bevy::render::view::{Hdr, NoIndirectDrawing};
 use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 
@@ -376,7 +376,7 @@ fn setup_reflection_camera(
     // Only renders entities in REFLECTION_RENDER_LAYER (layer 1) — below-water
     // terrain chunks are not added to that layer, so they're skipped here.
     let water_y = WATER_LEVEL as f32;
-    commands.spawn((
+    let mut reflection_camera = commands.spawn((
         WaterReflectionCamera,
         Camera3d::default(),
         Camera {
@@ -400,8 +400,11 @@ fn setup_reflection_camera(
         Msaa::Off,
         ReflectionUpdateTimer::default(),
     ));
+    if cfg!(debug_assertions) {
+        reflection_camera.insert(NoIndirectDrawing);
+    }
 
-    commands.spawn((
+    let mut mask_camera = commands.spawn((
         WaterMaskCamera,
         Camera3d::default(),
         Camera {
@@ -421,6 +424,9 @@ fn setup_reflection_camera(
         RenderLayers::layer(WATER_MASK_RENDER_LAYER),
         Msaa::Off,
     ));
+    if cfg!(debug_assertions) {
+        mask_camera.insert(NoIndirectDrawing);
+    }
 
     info!(
         "Water reflection camera created at {}x{} (scale: {}), mask {}x{}",

@@ -26,4 +26,5 @@ pub mod terrain;
 pub mod vegetation;
 pub mod viewmodel;
 pub mod voxel;
+pub mod weather;
 pub mod world_rules;

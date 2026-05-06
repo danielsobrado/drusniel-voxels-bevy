@@ -8,6 +8,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
+use crate::weather::WeatherRuntime;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::SystemParam;
 use bevy::light::{
@@ -530,6 +531,7 @@ struct FogUpdateResources<'w> {
     config: Res<'w, FogConfig>,
     quality: Res<'w, FogQuality>,
     runtime: Res<'w, VolumetricFogRuntimeState>,
+    weather: Option<Res<'w, WeatherRuntime>>,
     lod_settings: Option<Res<'w, LodSettings>>,
     atmosphere_sample: ResMut<'w, AtmosphereSample>,
     fog_range: ResMut<'w, FogDistanceState>,
@@ -555,7 +557,7 @@ fn update_fog_from_atmosphere(
     mut smoothing: Local<FogSmoothingState>,
     mut queries: FogUpdateQueries,
 ) {
-    let _timer = area_timer(&mut resources.timing, resources.frame.0, "Fog Submit");
+    let timer = area_timer(&mut resources.timing, resources.frame.0, "Fog Submit");
     let config: &FogConfig = &resources.config;
     let quality: &FogQuality = &resources.quality;
     let lod_settings = &resources.lod_settings;
@@ -583,7 +585,11 @@ fn update_fog_from_atmosphere(
     smoothing.update_timer += time.delta_secs();
     let force_update = resources.config.is_changed()
         || resources.quality.is_changed()
-        || resources.runtime.is_changed();
+        || resources.runtime.is_changed()
+        || resources
+            .weather
+            .as_ref()
+            .is_some_and(|weather| weather.is_changed());
     if smoothing.update_timer < FOG_UPDATE_INTERVAL_SECS && !force_update {
         return;
     }
@@ -607,6 +613,15 @@ fn update_fog_from_atmosphere(
 
     // Compute blend factors from sun altitude
     let (daylight, twilight, night) = fog_light_factors(atmo_settings);
+    let weather_uniforms = resources
+        .weather
+        .as_deref()
+        .map(|weather| weather.uniforms)
+        .unwrap_or_default();
+    let rain_factor = weather_uniforms.rain_factor.clamp(0.0, 1.0);
+    let snow_factor = weather_uniforms.snow_factor.clamp(0.0, 1.0);
+    let weather_fog_mult = 1.0 + rain_factor * 0.28 + snow_factor * 0.12;
+    let weather_ambient_mix = (rain_factor * 0.22 + snow_factor * 0.18).clamp(0.0, 1.0);
 
     let preset_density = lerp(
         atmo_settings.fog_density.y,
@@ -642,7 +657,7 @@ fn update_fog_from_atmosphere(
     );
 
     // Density increases at night/twilight
-    let density_mult = 1.0 + twilight * 0.5 + night * 0.3;
+    let density_mult = (1.0 + twilight * 0.5 + night * 0.3) * weather_fog_mult;
     let preset_scale = (preset_density / BASE_PRESET_DENSITY).clamp(0.5, 2.5);
     let distance_scale =
         (1.0 / (preset_scale * density_mult)).clamp(MIN_DISTANCE_SCALE, MAX_DISTANCE_SCALE);
@@ -671,10 +686,26 @@ fn update_fog_from_atmosphere(
     });
 
     let mods = &config.color_modifiers;
-    let fog_color = apply_color_modifiers4(fog_color, mods);
-    let directional_color = apply_color_modifiers3(directional_color, mods);
-    let extinction_color = apply_color_modifiers3(extinction_color, mods);
-    let inscattering_color = apply_color_modifiers3(inscattering_color, mods);
+    let fog_color = apply_weather_color4(
+        apply_color_modifiers4(fog_color, mods),
+        rain_factor,
+        snow_factor,
+    );
+    let directional_color = apply_weather_color3(
+        apply_color_modifiers3(directional_color, mods),
+        rain_factor,
+        snow_factor,
+    );
+    let extinction_color = apply_weather_color3(
+        apply_color_modifiers3(extinction_color, mods),
+        rain_factor,
+        snow_factor,
+    );
+    let inscattering_color = apply_weather_color3(
+        apply_color_modifiers3(inscattering_color, mods),
+        rain_factor,
+        snow_factor,
+    );
     let use_linear = matches!(config.distance.falloff, FogFalloffMode::Linear)
         || config.distance.near_fade > 0.0;
     let fog_falloff = match config.distance.falloff {
@@ -714,8 +745,9 @@ fn update_fog_from_atmosphere(
     // Update volumetric fog camera settings so night/dim changes take effect.
     let step_count = quality.tier.step_count();
     for mut volumetric in volumetric_query.iter_mut() {
-        volumetric.ambient_color = ambient.color;
-        volumetric.ambient_intensity = ambient_intensity;
+        volumetric.ambient_color = weather_ambient_color(ambient.color, rain_factor, snow_factor);
+        volumetric.ambient_intensity =
+            ambient_intensity * (1.0 - rain_factor * 0.12 + snow_factor * 0.08).clamp(0.75, 1.12);
         volumetric.step_count = step_count;
         volumetric.jitter = config.volumetric.jitter;
     }
@@ -775,8 +807,9 @@ fn update_fog_from_atmosphere(
     // Update volumetric fog volume
     for mut volume in volume_query.iter_mut() {
         // Use config density directly - lower values = more transparent fog
-        let density = (smoothing.current_density * smoothing.current_boost * turbulence)
-            .clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
+        let density =
+            (smoothing.current_density * smoothing.current_boost * turbulence * weather_fog_mult)
+                .clamp(MIN_VOLUME_DENSITY, MAX_VOLUME_DENSITY);
         volume.density_factor = density;
         volume.absorption = smoothing.current_absorption;
         volume.fog_color = Color::srgba(fog_color[0], fog_color[1], fog_color[2], 1.0);
@@ -807,6 +840,18 @@ fn update_fog_from_atmosphere(
     fog_uniforms.sun_dir = sun_dir;
     fog_uniforms.directional_exponent = 30.0 + twilight * 20.0;
     fog_uniforms.aerial_strength = mods.aerial_strength;
+
+    drop(timer);
+    resources.timing.record_count(
+        resources.frame.0,
+        "Weather Fog Mult",
+        weather_fog_mult as f64,
+    );
+    resources.timing.record_count(
+        resources.frame.0,
+        "Weather Ambient Mix",
+        weather_ambient_mix as f64,
+    );
 }
 
 #[derive(Default)]
@@ -1010,6 +1055,42 @@ fn apply_color_modifiers3(color: [f32; 3], mods: &FogColorModifiers) -> [f32; 3]
 fn apply_color_modifiers4(color: [f32; 4], mods: &FogColorModifiers) -> [f32; 4] {
     let rgb = apply_color_modifiers3([color[0], color[1], color[2]], mods);
     [rgb[0], rgb[1], rgb[2], color[3]]
+}
+
+fn apply_weather_color3(color: [f32; 3], rain: f32, snow: f32) -> [f32; 3] {
+    let lum = color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114;
+    let rain_mix = (rain * 0.22).clamp(0.0, 0.35);
+    let rain_dark = 1.0 - rain * 0.1;
+    let mut adjusted = [
+        lerp(color[0], lum, rain_mix) * rain_dark,
+        lerp(color[1], lum, rain_mix) * rain_dark,
+        lerp(color[2], lum, rain_mix) * rain_dark,
+    ];
+
+    let snow_mix = (snow * 0.16).clamp(0.0, 0.25);
+    let snow_bright = 1.0 + snow * 0.06;
+    adjusted = [
+        lerp(adjusted[0], 0.94, snow_mix) * snow_bright,
+        lerp(adjusted[1], 0.97, snow_mix) * snow_bright,
+        lerp(adjusted[2], 1.0, snow_mix) * snow_bright,
+    ];
+
+    [
+        adjusted[0].clamp(0.0, 4.0),
+        adjusted[1].clamp(0.0, 4.0),
+        adjusted[2].clamp(0.0, 4.0),
+    ]
+}
+
+fn apply_weather_color4(color: [f32; 4], rain: f32, snow: f32) -> [f32; 4] {
+    let rgb = apply_weather_color3([color[0], color[1], color[2]], rain, snow);
+    [rgb[0], rgb[1], rgb[2], color[3]]
+}
+
+fn weather_ambient_color(color: Color, rain: f32, snow: f32) -> Color {
+    let linear = color.to_linear();
+    let rgb = apply_weather_color3([linear.red, linear.green, linear.blue], rain, snow);
+    Color::linear_rgba(rgb[0], rgb[1], rgb[2], linear.alpha)
 }
 
 fn indoor_density_boost(world: &VoxelWorld, position: Vec3) -> f32 {

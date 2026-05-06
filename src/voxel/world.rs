@@ -55,6 +55,42 @@ impl WorldBounds {
     }
 
     #[inline]
+    pub fn effective_horizontal_margin(self, requested_margin: i32) -> IVec2 {
+        let x_span = self.horizontal_max.x - self.horizontal_min.x + 1;
+        let z_span = self.horizontal_max.y - self.horizontal_min.y + 1;
+        IVec2::new(
+            requested_margin.max(0).min((x_span - 1).max(0) / 2),
+            requested_margin.max(0).min((z_span - 1).max(0) / 2),
+        )
+    }
+
+    #[inline]
+    pub fn inside_horizontal_edge_margin(self, world_pos: IVec3, requested_margin: i32) -> bool {
+        let margin = self.effective_horizontal_margin(requested_margin);
+        let x_edge_distance =
+            (world_pos.x - self.horizontal_min.x).min(self.horizontal_max.x - world_pos.x);
+        let z_edge_distance =
+            (world_pos.z - self.horizontal_min.y).min(self.horizontal_max.y - world_pos.z);
+
+        x_edge_distance < margin.x || z_edge_distance < margin.y
+    }
+
+    #[inline]
+    pub fn clamp_horizontal_position(self, position: Vec3, requested_margin: i32) -> Vec3 {
+        let margin = self.effective_horizontal_margin(requested_margin);
+        let min_x = (self.horizontal_min.x + margin.x) as f32;
+        let max_x = (self.horizontal_max.x - margin.x) as f32;
+        let min_z = (self.horizontal_min.y + margin.y) as f32;
+        let max_z = (self.horizontal_max.y - margin.y) as f32;
+
+        Vec3::new(
+            position.x.clamp(min_x, max_x),
+            position.y,
+            position.z.clamp(min_z, max_z),
+        )
+    }
+
+    #[inline]
     pub fn is_breakable_y(self, world_y: i32) -> bool {
         world_y >= self.min_breakable_y && world_y <= self.max_world_y
     }
@@ -511,6 +547,25 @@ mod tests {
             world.sample_voxel_for_collision(pos).collision_voxel(),
             VoxelType::Air
         );
+    }
+
+    #[test]
+    fn horizontal_edge_margin_detects_guard_strip() {
+        let bounds = WorldBounds::from_size_chunks(IVec3::new(4, 1, 4));
+
+        assert!(bounds.inside_horizontal_edge_margin(IVec3::new(0, 1, 24), CHUNK_SIZE_I32));
+        assert!(!bounds.inside_horizontal_edge_margin(
+            IVec3::new(CHUNK_SIZE_I32, 1, CHUNK_SIZE_I32),
+            CHUNK_SIZE_I32
+        ));
+    }
+
+    #[test]
+    fn horizontal_clamp_keeps_position_out_of_guard_strip() {
+        let bounds = WorldBounds::from_size_chunks(IVec3::new(4, 1, 4));
+        let clamped = bounds.clamp_horizontal_position(Vec3::new(2.0, 12.0, 63.0), CHUNK_SIZE_I32);
+
+        assert_eq!(clamped, Vec3::new(16.0, 12.0, 47.0));
     }
 
     #[test]

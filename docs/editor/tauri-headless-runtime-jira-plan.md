@@ -32,12 +32,16 @@ Completed in the first implementation slice:
 - DVX-EDT-101: `--editor-runtime` / `DRUSNIEL_EDITOR_RUNTIME=1` starts a Bevy schedule-runner backend without creating a native Bevy window. The runtime exposes the editor bridge and `/health`.
 - DVX-EDT-102: Tauri starts an editor runtime process, waits for the local bridge, and kills the child process on shutdown. Development mode launches `cargo run -- --editor-runtime`; packaged/runtime binary mode can be supplied through `DRUSNIEL_EDITOR_RUNTIME_BIN`.
 - DVX-EDT-106: Tauri mode no longer falls back to the mock runtime client when the bridge is unavailable. It surfaces a runtime-unavailable client state instead.
+- DVX-EDT-103: The runtime exposes a versioned `/editor/viewport/snapshot` payload with bounds, camera defaults, chunk payload IDs, material/water stats, and fallback samples.
+- DVX-EDT-104: Viewport snapshots include bounded terrain/water mesh buffers generated through the runtime meshing path.
+- DVX-EDT-105: The editor viewport consumes runtime mesh snapshots and renders loaded world geometry instead of placeholder blocks.
+- DVX-EDT-107: Tauri packaging now builds a target-suffixed editor runtime sidecar, declares it as `externalBin`, launches it before falling back to the development Cargo path, and writes runtime stdout/stderr to the app log directory.
 
 Still open:
 
-- Production sidecar bundling with a prebuilt Bevy runtime binary instead of development `cargo run`.
-- Versioned viewport mesh payloads and WebGPU/WebGL viewport rendering.
+- WebGPU/WebGL renderer upgrade, camera controls, picking, and automated canvas nonblank checks.
 - Full desktop unavailable-state UI polish and automated Tauri launch/close process test.
+- Release render benchmark and visual signoff.
 
 ## JIRA Tickets
 

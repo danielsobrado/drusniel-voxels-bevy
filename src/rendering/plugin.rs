@@ -1,5 +1,7 @@
+use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
+use bevy::shader::Shader;
 
 use crate::props::billboard::BillboardMaterial;
 use crate::props::lod_material::SimpleLodMaterial;
@@ -17,7 +19,7 @@ use crate::rendering::gtao_noise::GtaoNoisePlugin;
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
     setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
-    sync_fog_to_materials, sync_voxel_water_material_overrides,
+    sync_fog_to_materials, sync_voxel_water_material_overrides, sync_weather_to_materials,
 };
 use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
@@ -36,11 +38,26 @@ use crate::rendering::water_displacement::WaterDisplacementPlugin;
 use crate::rendering::water_reflection::WaterReflectionPlugin;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorPlugin;
 use crate::rendering::water_visual_probe::WaterVisualProbePlugin;
+use crate::rendering::weather_overlay::WeatherOverlayPlugin;
+use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishPlugin;
+
+const WEATHER_PARTICLE_CLASSIFY_HANDLE: Handle<Shader> =
+    uuid_handle!("ab4a4d6a-2a5d-4bc8-87a8-c267789f72cb");
 
 pub struct RenderingPlugin;
 
 impl Plugin for RenderingPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            WEATHER_PARTICLE_CLASSIFY_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/weather_particle_classify.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+
         if render_timing_enabled(app) {
             install_render_timing(app);
         }
@@ -78,10 +95,14 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WaterReflectionCompositorPlugin)
             // Diagnostic-only water visual probe and overlay counters.
             .add_plugins(WaterVisualProbePlugin)
+            // Optional shaderpack-style final color/alpha finish for water.
+            .add_plugins(WitchcraftWaterFinishPlugin)
             // Interactive water displacement (CPU wave physics + GPU texture)
             .add_plugins(WaterDisplacementPlugin)
             // Screen-space god rays (radial blur toward sun, independent of volumetric fog)
             .add_plugins(GodRayPlugin)
+            // Shader-generated precipitation overlay; inactive clear weather exits before a pass.
+            .add_plugins(WeatherOverlayPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
@@ -119,6 +140,7 @@ impl Plugin for RenderingPlugin {
                     configure_props_textures,
                     create_texture_array,
                     sync_fog_to_materials,
+                    sync_weather_to_materials,
                     sync_voxel_water_material_overrides.after(bevy_water::update_materials),
                 ),
             );

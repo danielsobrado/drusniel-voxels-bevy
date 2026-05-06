@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::shader::Shader;
 use serde::Deserialize;
 
+use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishConfig;
 use crate::voxel::meshing::WaterBodyKind;
 
 /// Enhanced water configuration with Gerstner waves, foam, caustics, reflections, and more
@@ -22,6 +23,10 @@ pub struct WaterConfig {
     pub refraction: RefractionConfig,
     #[serde(default)]
     pub displacement: DisplacementConfig,
+    #[serde(default)]
+    pub weather: WaterWeatherConfig,
+    #[serde(default)]
+    pub witchcraft_finish: WitchcraftWaterFinishConfig,
 }
 
 #[derive(Deserialize, Clone)]
@@ -297,6 +302,24 @@ pub struct DisplacementConfig {
     pub player_impulse_strength: f32,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(default)]
+pub struct WaterWeatherConfig {
+    pub rain_reflection_boost: f32,
+    pub rain_distortion_boost: f32,
+    pub snow_reflection_soften: f32,
+}
+
+impl Default for WaterWeatherConfig {
+    fn default() -> Self {
+        Self {
+            rain_reflection_boost: 0.12,
+            rain_distortion_boost: 0.35,
+            snow_reflection_soften: 0.18,
+        }
+    }
+}
+
 impl Default for DisplacementConfig {
     fn default() -> Self {
         Self {
@@ -349,6 +372,8 @@ impl Default for WaterConfig {
             reflections: ReflectionConfig::default(),
             refraction: RefractionConfig::default(),
             displacement: DisplacementConfig::default(),
+            weather: WaterWeatherConfig::default(),
+            witchcraft_finish: WitchcraftWaterFinishConfig::default(),
         }
     }
 }
@@ -378,6 +403,8 @@ pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
 pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
 pub const WATER_CAUSTICS_HANDLE: Handle<Shader> =
     uuid_handle!("c3d4e5f6-a7b8-9012-cdef-012345678901");
+pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
+    uuid_handle!("a42e6f9b-5c81-4a0d-a6f7-6e45e9ef0001");
 pub const WATER_DETAIL_NORMALS_HANDLE: Handle<Shader> =
     uuid_handle!("d4e5f6a7-b8c9-0123-defa-123456789012");
 pub const WATER_DISPLACEMENT_COMPUTE_HANDLE: Handle<Shader> =
@@ -417,6 +444,15 @@ impl Plugin for EnhancedWaterPlugin {
         );
         load_internal_asset!(
             app,
+            WEATHER_COMMON_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/weather_common.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
             WATER_DETAIL_NORMALS_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -439,7 +475,9 @@ impl Plugin for EnhancedWaterPlugin {
             WaterConfig::default()
         });
 
+        let witchcraft_params = config.witchcraft_finish.params();
         app.insert_resource(config)
+            .insert_resource(witchcraft_params)
             .add_systems(Update, update_water_uniforms);
     }
 }

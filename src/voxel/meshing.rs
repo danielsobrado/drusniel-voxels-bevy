@@ -28,6 +28,7 @@ use crate::constants::{
     PADDED_CHUNK_SIZE_U32,
     UV_PADDING,
     VOXEL_SIZE,
+    WORLD_EDGE_GUARD_MARGIN,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
@@ -162,6 +163,7 @@ pub struct WaterMeshingStats {
     pub air_boundaries_sealed: u32,
     pub triangles_removed_sealed: u32,
     pub invalid_meshes_suppressed: u32,
+    pub edge_water_faces_suppressed: u32,
     pub flood_fill_boundary_hits: u32,
     pub exposure_outside_world_rejected: u32,
 }
@@ -943,6 +945,10 @@ fn should_render_water_face(
         stats.invalid_meshes_suppressed += 1;
         return false;
     }
+    if water_surface_near_horizontal_world_edge(world, world_pos) {
+        stats.edge_water_faces_suppressed += 1;
+        return false;
+    }
 
     let Some(air_pos) = water_face_neighbor_air_pos(chunk, world, local, face) else {
         if matches!(
@@ -969,6 +975,12 @@ fn should_render_water_face(
         stats.triangles_removed_sealed += 2;
         false
     }
+}
+
+fn water_surface_near_horizontal_world_edge(world: &VoxelWorld, world_pos: IVec3) -> bool {
+    world
+        .bounds()
+        .inside_horizontal_edge_margin(world_pos, WORLD_EDGE_GUARD_MARGIN)
 }
 
 fn air_open_to_sky_with_stats(
@@ -3609,6 +3621,33 @@ mod tests {
         assert_eq!(mesh.water_stats.air_boundaries_total, 1);
         assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
         assert_eq!(mesh.water_stats.air_boundaries_sealed, 0);
+    }
+
+    #[test]
+    fn map_edge_water_surface_is_not_meshed() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 3, 4));
+        let water_pos = IVec3::new(0, WATER_LEVEL, CHUNK_SIZE_I32 + 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+
+        assert!(mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_total, 0);
+    }
+
+    #[test]
+    fn interior_water_surface_outside_edge_margin_is_still_meshed() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 3, 4));
+        let water_pos = IVec3::new(CHUNK_SIZE_I32 + 8, WATER_LEVEL, CHUNK_SIZE_I32 + 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+
+        assert!(!mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 0);
+        assert_eq!(mesh.water_stats.air_boundaries_total, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
     }
 
     #[test]

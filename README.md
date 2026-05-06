@@ -22,6 +22,10 @@ Current development version: **v0.5**.
 
     *   **Fresnel Reflection Blending**: Schlick Fresnel drives view-angle dependent reflection strength — at glancing angles the water surface becomes a mirror; at steep angles it's transparent. Includes an approximated sun specular highlight in the reflected direction. Alpha also increases at glancing angles (physically correct — water becomes opaque when viewed at a shallow angle).
 
+    #### Witchcraft water finish
+
+    Optional finish pass for water color and alpha, disabled by default. Enable it with `witchcraft_finish.enabled: true` in `assets/config/water.yaml` or `VOXEL_WATER_WITCHCRAFT_FINISH=1`. The pass is intentionally narrow: final water color tinting, optional RGB multiplier, Fresnel-driven alpha shaping, and an optional reflection multiplier for the existing reflection path.
+
     *   **Screen-Space Refraction**: Enabled Bevy's built-in `specular_transmission = 0.2`, `ior = 1.33` (water's physical IOR), and `thickness = 0.5` on the water `StandardMaterial`. The Gerstner wave normals drive the transmission distortion direction, creating the characteristic underwater wobble of light refracted through a moving surface.
 
     *   **Interactive Displacement System** (`water_displacement.rs`): CPU-driven 256×256 wave physics simulation using the discrete 2D wave equation (height + velocity fields, ~0.3 ms/frame). Objects with a `WaterImpulseSource` component (e.g. the player) inject circular impulses when moving through water; the wave equation propagates them outward with configurable speed and damping. The result is uploaded to a `WaterDisplacementTexture` each frame. Also exposes `sample_water_displacement()` for accurate buoyancy height queries from physics code.

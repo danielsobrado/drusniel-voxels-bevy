@@ -17,6 +17,12 @@ pub struct GraphicsCapabilities {
     pub ray_tracing_supported: bool,
 }
 
+impl GraphicsCapabilities {
+    pub fn conservative_weather_path(&self) -> bool {
+        self.integrated_gpu
+    }
+}
+
 /// Determine whether the current adapter can support temporal anti-aliasing (TAA).
 pub fn detect_graphics_capabilities(
     adapter: Option<Res<RenderAdapter>>,

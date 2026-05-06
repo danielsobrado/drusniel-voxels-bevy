@@ -30,7 +30,8 @@ struct GodRayUniforms {
     num_samples: i32,
     // Luminance threshold — only pixels brighter than this contribute to shafts
     threshold: f32,
-    _padding: vec2<f32>,
+    rain_factor: f32,
+    snow_factor: f32,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -62,6 +63,10 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     var uv = in.uv;
     var accumulated = vec3<f32>(0.0);
     var illumination_decay = 1.0;
+    let rain_factor = clamp(uniforms.rain_factor, 0.0, 1.0);
+    let snow_factor = clamp(uniforms.snow_factor, 0.0, 1.0);
+    let weather_intensity_mult = clamp(1.0 - rain_factor * 0.55 - snow_factor * 0.1, 0.35, 1.0);
+    let weather_threshold = max(uniforms.threshold * (1.0 - snow_factor * 0.18), 0.05);
 
     for (var i = 0; i < uniforms.num_samples; i++) {
         uv += delta_uv;
@@ -82,7 +87,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         if depth > 0.001 {
             // Geometry pixel — only contribute if very bright (sun-lit surfaces)
             let lum = luminance(sample_color);
-            let bright_mask = smoothstep(uniforms.threshold, uniforms.threshold + 1.0, lum);
+            let bright_mask = smoothstep(weather_threshold, weather_threshold + 1.0, lum);
             contribution = sample_color * bright_mask;
         }
 
@@ -95,7 +100,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let dist_to_sun = length(in.uv - sun_uv);
     let directional_fade = 1.0 - smoothstep(0.0, 1.5, dist_to_sun);
 
-    let god_rays = accumulated * uniforms.intensity * directional_fade;
+    let god_rays = accumulated * uniforms.intensity * weather_intensity_mult * directional_fade;
 
     // Additive blend onto the scene
     return vec4<f32>(scene.rgb + god_rays, scene.a);

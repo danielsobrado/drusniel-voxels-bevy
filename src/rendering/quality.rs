@@ -6,6 +6,7 @@ use crate::bench::BenchRenderToggles;
 use crate::menu::{GraphicsQuality, SettingsState};
 use crate::performance::AreaTimingRecorder;
 use crate::rendering::water_reflection::WaterReflectionConfig;
+use crate::weather::WeatherQuality;
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -117,6 +118,14 @@ impl RenderQualityPreset {
             Self::Medium => 1.0,
             Self::High => 2.0,
             Self::Performance100 => 2.0,
+        }
+    }
+
+    pub fn weather_quality_cap(self) -> WeatherQuality {
+        match self {
+            Self::Low | Self::Performance100 => WeatherQuality::Low,
+            Self::Medium => WeatherQuality::Medium,
+            Self::High => WeatherQuality::Ultra,
         }
     }
 }

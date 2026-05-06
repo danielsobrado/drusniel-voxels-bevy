@@ -3,6 +3,8 @@
 ## Drusniel Voxels editor roadmap
 
 - [Editor build plan home](./editor/README.md)
+- [Shader weather rendering](./rendering/weather.md)
+- [Witchcraft water finish](./witchcraft-water-finish.md)
 
 ## Editor sprint plan files
 

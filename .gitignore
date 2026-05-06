@@ -51,3 +51,4 @@ editor/frontend/vite-dev*.log
 editor/frontend/.tmp-*
 editor/frontend/src-tauri/target/
 editor/frontend/src-tauri/gen/
+editor/frontend/src-tauri/binaries/

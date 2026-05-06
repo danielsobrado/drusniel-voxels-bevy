@@ -164,6 +164,7 @@ pub struct RuntimeChunkStats {
     pub water_air_boundaries_sealed: u64,
     pub water_triangles_removed_sealed: u64,
     pub invalid_water_meshes_suppressed: u64,
+    pub edge_water_faces_suppressed: u64,
     pub water_flood_fill_boundary_hits: u64,
     pub water_exposure_outside_world_rejected: u64,
     pub terrain_mesh_empty_but_solid_voxels: u64,
@@ -210,6 +211,7 @@ impl RuntimeChunkStats {
         self.terrain_mesh_degenerate_triangles_removed = 0;
         self.terrain_mesh_lod_seam_repairs = 0;
         self.invalid_water_meshes_suppressed = 0;
+        self.edge_water_faces_suppressed = 0;
         self.water_flood_fill_boundary_hits = 0;
         self.water_exposure_outside_world_rejected = 0;
         // Note: vertex counts are tracked during mesh generation, not here
@@ -1184,6 +1186,8 @@ fn mesh_dirty_chunks_system(
             mesh_result.water_stats.triangles_removed_sealed as u64;
         chunk_stats.invalid_water_meshes_suppressed +=
             mesh_result.water_stats.invalid_meshes_suppressed as u64;
+        chunk_stats.edge_water_faces_suppressed +=
+            mesh_result.water_stats.edge_water_faces_suppressed as u64;
         chunk_stats.water_flood_fill_boundary_hits +=
             mesh_result.water_stats.flood_fill_boundary_hits as u64;
         chunk_stats.water_exposure_outside_world_rejected +=
@@ -1541,6 +1545,11 @@ fn mesh_dirty_chunks_system(
         frame.0,
         "Invalid Water Meshes Suppressed",
         chunk_stats.invalid_water_meshes_suppressed as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Edge Water Faces Suppressed",
+        chunk_stats.edge_water_faces_suppressed as f64,
     );
     timing.record_count(
         frame.0,
