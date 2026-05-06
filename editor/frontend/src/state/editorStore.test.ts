@@ -7,7 +7,7 @@ import { editorCommands, getCommand, runCommand } from "../commands/commandRegis
 import type { EditorCommandContext } from "../commands/commandTypes";
 import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
 import { runtimeCommandFailure } from "../runtime/runtimeSchemas";
-import { mockChunks, mockMaterials, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
+import { mockChunks, mockMaterials, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import { createInitialEditorState, useEditorStore } from "./editorStore";
 import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntimeWarnings, getSelectedObject, getVisibleOutlinerNodes } from "./editorSelectors";
 import { menuCommandIds } from "../components/editor/EditorMenubar";
@@ -126,6 +126,7 @@ describe("editor store actions", () => {
       chunks: mockChunks.slice(0, 3),
       protectedAreas: [mockProtectedAreas[0]],
       waterBodies: [mockWaterBodies[0]],
+      props: mockProps.slice(0, 2),
       materials: mockMaterials.slice(0, 1),
       updatedAt: "2026-05-04T00:00:00.000Z",
     });
@@ -134,6 +135,7 @@ describe("editor store actions", () => {
     expect(state.chunks).toHaveLength(3);
     expect(state.protectedAreas).toHaveLength(1);
     expect(state.waterBodies).toHaveLength(1);
+    expect(state.props).toHaveLength(2);
     expect(state.materials).toHaveLength(1);
     if (state.selection.kind === "area") {
       expect(state.selection.id).toBe("area-spawn-keep");

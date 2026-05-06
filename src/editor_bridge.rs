@@ -450,6 +450,7 @@ fn frontend_world_summary_from_metadata_and_world(
             .collect::<Vec<_>>(),
         "protectedAreas": [],
         "waterBodies": [],
+        "props": [],
         "materials": [],
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,

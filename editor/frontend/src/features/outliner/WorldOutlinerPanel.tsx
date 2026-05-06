@@ -301,7 +301,7 @@ export function WorldOutlinerPanel() {
           onToggleVisibility={() => editorState.toggleOutlinerNodeVisibility(node.kind, node.id)}
           onToggleLock={() => editorState.toggleOutlinerNodeLock(node.kind, node.id)}
           onOpenContextMenu={() =>
-            editorState.pushAgentTimelineEvent({ kind: "command", message: `Context menu requested for ${node.label} (mock).` })
+            editorState.pushAgentTimelineEvent({ kind: "command", message: `Context menu requested for ${node.label}.` })
           }
           labelPrefix={options.labelPrefix}
           testIdScope={options.testIdScope}
@@ -370,49 +370,49 @@ export function WorldOutlinerPanel() {
         <OutlinerSection title="Drusniel World">
           <OutlinerSection title="Terrain">
             <OutlinerSection title="Regions">
-                  {Array.from(chunksByBiome.entries()).map(([region, regionChunks]) => (
+              {chunksByBiome.size ? Array.from(chunksByBiome.entries()).map(([region, regionChunks]) => (
                 <div className="outliner-subgroup" key={region}>
                   <div className="outliner-subheading">{region}</div>
                   {renderRows(regionChunks, { labelPrefix: `region ${region}`, testIdScope: `region-${region.replace(/\s+/g, "-")}` })}
                 </div>
-              ))}
+              )) : <OutlinerPlaceholder label="No terrain regions found." />}
             </OutlinerSection>
-            <OutlinerSection title="Chunks">{renderRows(chunks)}</OutlinerSection>
+            <OutlinerSection title="Chunks">{chunks.length ? renderRows(chunks) : <OutlinerPlaceholder label="No chunks found in loaded world." />}</OutlinerSection>
             <OutlinerSection title="Dirty Chunks">
               {dirtyChunks.length ? renderRows(dirtyChunks) : <OutlinerPlaceholder label="No matching dirty chunks." />}
             </OutlinerSection>
             <OutlinerSection title="LOD Groups">
-              {Array.from(chunksByLod.entries()).map(([lod, lodNodes]) => (
+              {chunksByLod.size ? Array.from(chunksByLod.entries()).map(([lod, lodNodes]) => (
                 <div className="outliner-subgroup" key={lod}>
                   <div className="outliner-subheading">LOD {lod}</div>
                   {renderRows(lodNodes, { labelPrefix: `LOD ${lod}`, testIdScope: `lod-${lod}` })}
                 </div>
-              ))}
+              )) : <OutlinerPlaceholder label="No LOD groups found." />}
             </OutlinerSection>
           </OutlinerSection>
 
           <OutlinerSection title="Protected Areas">
-            {Array.from(areasByKind.entries()).map(([label, areaNodes]) => (
+            {areasByKind.size ? Array.from(areasByKind.entries()).map(([label, areaNodes]) => (
               <OutlinerSection title={label} key={label}>
                 {areaNodes.length ? renderRows(areaNodes) : <OutlinerPlaceholder label={`No ${label} areas match current filter.`} />}
               </OutlinerSection>
-            ))}
+            )) : <OutlinerPlaceholder label="No protected areas found in loaded world." />}
           </OutlinerSection>
 
           <OutlinerSection title="Water Bodies">
-            {Array.from(waterByKind.entries()).map(([label, waterNodes]) => (
+            {waterByKind.size ? Array.from(waterByKind.entries()).map(([label, waterNodes]) => (
               <OutlinerSection title={label} key={label}>
                 {waterNodes.length ? renderRows(waterNodes) : <OutlinerPlaceholder label={`No ${label} water bodies match current filter.`} />}
               </OutlinerSection>
-            ))}
+            )) : <OutlinerPlaceholder label="No water bodies found in loaded world." />}
           </OutlinerSection>
 
           <OutlinerSection title="Props">
-            {Array.from(propsByType.entries()).map(([label, propNodes]) => (
+            {propsByType.size ? Array.from(propsByType.entries()).map(([label, propNodes]) => (
               <OutlinerSection title={label} key={label}>
                 {propNodes.length ? renderRows(propNodes) : <OutlinerPlaceholder label={`No ${label} props match current filter.`} />}
               </OutlinerSection>
-            ))}
+            )) : <OutlinerPlaceholder label="No props found in loaded world." />}
           </OutlinerSection>
           <OutlinerSection title="Materials">
             {materials.length ? renderRows(materials) : <OutlinerPlaceholder label="No materials match current filter." />}

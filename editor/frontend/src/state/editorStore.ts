@@ -64,6 +64,10 @@ const preserveSelectionWhenReplacingSummary = (summary: WorldSummary, currentSel
     return currentSelection;
   }
 
+  if (currentSelection.kind === "prop" && summary.props.some((prop) => prop.id === currentSelection.id)) {
+    return currentSelection;
+  }
+
   if (currentSelection.kind === "material" && summary.materials.some((material) => material.id === currentSelection.id)) {
     return currentSelection;
   }
@@ -649,8 +653,9 @@ export const useEditorStore = create<EditorStore>()(
         state.worldViewport = castDraft(summary.viewport ?? null);
         state.protectedAreas = [...summary.protectedAreas];
         state.waterBodies = [...summary.waterBodies];
+        state.props = [...summary.props];
         state.materials = [...summary.materials];
-        state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, state.props, summary.materials);
+        state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, summary.props, summary.materials);
         state.selection = preserveSelectionWhenReplacingSummary(summary, state.selection);
         state.dirtyState = {
           hasUnsavedChanges: false,
@@ -664,7 +669,7 @@ export const useEditorStore = create<EditorStore>()(
         state.largeWorldStats = {
           enabled: false,
           chunkCount: summary.chunks.length,
-          propCount: state.props.length,
+          propCount: summary.props.length,
           protectedAreaCount: summary.protectedAreas.length,
           waterBodyCount: summary.waterBodies.length,
           consoleMessageCount: state.consoleMessages.length,
