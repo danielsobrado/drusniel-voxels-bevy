@@ -4,7 +4,14 @@
       "binaries/drusniel-editor-runtime"
     ],
     "resources": {
-      "binaries/*.dll": ""
+      "binaries/*.dll": "",
+      "../../../assets/config": "assets/config",
+      "../../../assets/fonts": "assets/fonts",
+      "../../../assets/models": "assets/models",
+      "../../../assets/pbr": "assets/pbr",
+      "../../../assets/shaders": "assets/shaders",
+      "../../../assets/textures": "assets/textures",
+      "../../../assets/favicon.ico": "assets/favicon.ico"
     }
   }
 }
