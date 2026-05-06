@@ -2,6 +2,9 @@
   "bundle": {
     "externalBin": [
       "binaries/drusniel-editor-runtime"
-    ]
+    ],
+    "resources": {
+      "binaries/*.dll": ""
+    }
   }
 }

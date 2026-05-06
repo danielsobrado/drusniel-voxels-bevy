@@ -1,4 +1,10 @@
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -29,6 +35,12 @@ const sidecarBinary = join(
 );
 copyFileSync(sourceBinary, sidecarBinary);
 
+if (process.platform === "win32") {
+  copyMatchingFiles(resolve(repoRoot, "target", profile), /^bevy_dylib.*\.dll$/);
+  copyMatchingFiles(resolve(repoRoot, "target", profile, "deps"), /^bevy_dylib.*\.dll$/);
+  copyMatchingFiles(resolve(rustSysroot(), "bin"), /^std-.*\.dll$/);
+}
+
 const sizeMb = (statSync(sidecarBinary).size / 1024 / 1024).toFixed(1);
 console.log(
   `Prepared Tauri editor runtime sidecar ${basename(sidecarBinary)} (${sizeMb} MiB)`,
@@ -48,6 +60,27 @@ function rustHostTriple() {
   }
 
   return hostLine.slice("host: ".length).trim();
+}
+
+function rustSysroot() {
+  const rustc = spawnSync("rustc", ["--print", "sysroot"], { encoding: "utf8" });
+  if (rustc.status !== 0) {
+    throw new Error(rustc.stderr || "failed to query rustc sysroot");
+  }
+
+  return rustc.stdout.trim();
+}
+
+function copyMatchingFiles(sourceDir, pattern) {
+  if (!existsSync(sourceDir)) {
+    return;
+  }
+
+  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
+    if (entry.isFile() && pattern.test(entry.name)) {
+      copyFileSync(resolve(sourceDir, entry.name), join(binariesDir, entry.name));
+    }
+  }
 }
 
 function run(command, args, cwd) {
