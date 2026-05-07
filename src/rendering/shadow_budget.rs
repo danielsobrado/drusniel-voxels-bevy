@@ -18,6 +18,8 @@ use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 /// Configuration for shadow culling behaviour.
 #[derive(Resource)]
 pub struct ShadowBudgetConfig {
+    /// Whether terrain and point light shadow budgeting is active.
+    pub enabled: bool,
     /// Distance beyond which terrain stops casting shadows.
     pub terrain_shadow_distance: f32,
     /// Hysteresis for terrain shadow toggling.
@@ -35,6 +37,7 @@ pub struct ShadowBudgetConfig {
 impl Default for ShadowBudgetConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             terrain_shadow_distance: TERRAIN_SHADOW_DISTANCE,
             terrain_shadow_hysteresis: TERRAIN_SHADOW_HYSTERESIS,
             terrain_update_interval: TERRAIN_SHADOW_UPDATE_INTERVAL,
@@ -80,6 +83,19 @@ pub fn update_terrain_shadow_culling(
         return;
     }
     *last_update = now;
+
+    if !config.enabled {
+        let mut with_shadows = 0usize;
+        for (entity, _chunk_mesh, _transform, has_no_shadow) in chunk_query.iter() {
+            if has_no_shadow.is_some() {
+                commands.entity(entity).remove::<NotShadowCaster>();
+            }
+            with_shadows += 1;
+        }
+        stats.terrain_with_shadows = with_shadows;
+        stats.terrain_without_shadows = 0;
+        return;
+    }
 
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -141,6 +157,21 @@ pub fn manage_point_light_shadow_budget(
         return;
     }
     *last_update = now;
+
+    if !config.enabled {
+        let mut total = 0usize;
+        let mut with_shadows = 0usize;
+        for (_, mut point_light, _) in lights.iter_mut() {
+            total += 1;
+            if !point_light.shadows_enabled {
+                point_light.shadows_enabled = true;
+            }
+            with_shadows += 1;
+        }
+        stats.point_lights_with_shadows = with_shadows;
+        stats.point_lights_total = total;
+        return;
+    }
 
     let Ok(camera_transform) = camera_query.single() else {
         return;

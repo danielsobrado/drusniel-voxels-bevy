@@ -5,7 +5,7 @@ use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
@@ -18,6 +18,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::god_rays::GodRayConfig;
 use crate::rendering::gtao::GtaoSettings;
 use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::shadow_budget::ShadowBudgetConfig;
 use crate::rendering::ssao::SsaoSupported;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water_reflection::{
@@ -31,8 +32,8 @@ use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
-    validate_protected_area, ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry,
-    ProtectedEditIntent, WORLD_RULES_PATH,
+    ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, ProtectedEditIntent,
+    WORLD_RULES_PATH, validate_protected_area,
 };
 
 const ATLAS_TILE_COUNT: u32 = 64;
@@ -272,6 +273,7 @@ pub enum FrontendRenderFeatureFlag {
     Gtao,
     Ssao,
     BakedAo,
+    ShadowBudget,
     Fog,
     GodRays,
 }
@@ -282,6 +284,7 @@ impl FrontendRenderFeatureFlag {
             Self::Gtao => "gtao",
             Self::Ssao => "ssao",
             Self::BakedAo => "bakedAo",
+            Self::ShadowBudget => "shadowBudget",
             Self::Fog => "fog",
             Self::GodRays => "godRays",
         }
@@ -1228,6 +1231,7 @@ fn set_render_feature_flag(
         FrontendRenderFeatureFlag::BakedAo => {
             set_baked_ao_strength(world, if enabled { value.unwrap_or(0.35) } else { 0.0 });
         }
+        FrontendRenderFeatureFlag::ShadowBudget => set_shadow_budget_enabled(world, enabled),
         FrontendRenderFeatureFlag::Fog => set_fog_enabled(world, enabled),
         FrontendRenderFeatureFlag::GodRays => set_god_rays_enabled(world, enabled, value),
     }
@@ -1238,6 +1242,17 @@ fn set_render_feature_flag(
         "value": render_feature_value(world, feature),
         "metrics": render_feature_metrics_payload(world),
     }))
+}
+
+fn set_shadow_budget_enabled(world: &mut World, enabled: bool) {
+    if let Some(mut config) = world.get_resource_mut::<ShadowBudgetConfig>() {
+        config.enabled = enabled;
+    } else {
+        world.insert_resource(ShadowBudgetConfig {
+            enabled,
+            ..default()
+        });
+    }
 }
 
 fn set_gtao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
@@ -1507,9 +1522,7 @@ fn runtime_metrics_payload(
         "chunkMeshMs": 0.0,
         "waterReflectionMs": 0.0,
         "propBillboardMs": 0.0,
-        "shadowBudget": {
-            "enabled": true,
-        },
+        "shadowBudget": render_features["shadowBudget"].clone(),
         "ambientOcclusion": render_features["ambientOcclusion"].clone(),
         "adaptiveGI": {
             "adaptiveGiQuality": 2,
@@ -1555,6 +1568,9 @@ fn render_feature_metrics_payload(world: &World) -> Value {
     let god_rays = world.get_resource::<GodRayConfig>();
 
     json!({
+        "shadowBudget": {
+            "enabled": render_feature_enabled(world, FrontendRenderFeatureFlag::ShadowBudget),
+        },
         "ambientOcclusion": {
             "gtaoEnabled": gtao.is_some_and(|config| config.enabled),
             "gtaoQuality": gtao
@@ -1596,6 +1612,10 @@ fn render_feature_enabled(world: &World, feature: FrontendRenderFeatureFlag) -> 
             .get_resource::<AmbientOcclusionConfig>()
             .is_some_and(|config| config.ssao.enabled),
         FrontendRenderFeatureFlag::BakedAo => baked_ao_strength(world) > 0.0,
+        FrontendRenderFeatureFlag::ShadowBudget => world
+            .get_resource::<ShadowBudgetConfig>()
+            .map(|config| config.enabled)
+            .unwrap_or(true),
         FrontendRenderFeatureFlag::Fog => world
             .get_resource::<FogConfig>()
             .is_some_and(|config| config.distance.enabled || config.volumetric.enabled),
@@ -1614,15 +1634,20 @@ fn render_feature_enabled(world: &World, feature: FrontendRenderFeatureFlag) -> 
 fn render_feature_value(world: &World, feature: FrontendRenderFeatureFlag) -> Value {
     match feature {
         FrontendRenderFeatureFlag::BakedAo => json!(baked_ao_strength(world)),
-        FrontendRenderFeatureFlag::GodRays => json!(world
-            .get_resource::<GodRayConfig>()
-            .map(|config| config.intensity)
-            .or_else(|| {
-                world
-                    .get_resource::<FogConfig>()
-                    .map(|config| config.screen_god_rays.intensity)
-            })
-            .unwrap_or(0.0)),
+        FrontendRenderFeatureFlag::ShadowBudget => {
+            json!(render_feature_enabled(world, feature))
+        }
+        FrontendRenderFeatureFlag::GodRays => json!(
+            world
+                .get_resource::<GodRayConfig>()
+                .map(|config| config.intensity)
+                .or_else(|| {
+                    world
+                        .get_resource::<FogConfig>()
+                        .map(|config| config.screen_god_rays.intensity)
+                })
+                .unwrap_or(0.0)
+        ),
         _ => json!(render_feature_enabled(world, feature)),
     }
 }
@@ -2004,6 +2029,33 @@ mod tests {
             .as_f64()
             .unwrap();
         assert!((strength - 0.35).abs() < 0.0001);
+    }
+
+    #[test]
+    fn shadow_budget_command_updates_runtime_metrics() {
+        let mut world = World::new();
+        world.insert_resource(crate::rendering::shadow_budget::ShadowBudgetConfig::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::ShadowBudget,
+                enabled: false,
+                value: None,
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("shadow budget command should succeed");
+        };
+        assert_eq!(data["feature"], json!("shadowBudget"));
+        assert_eq!(data["enabled"], json!(false));
+        assert_eq!(data["metrics"]["shadowBudget"]["enabled"], json!(false));
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+        assert_eq!(data["metrics"]["shadowBudget"]["enabled"], json!(false));
     }
 
     #[test]

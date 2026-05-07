@@ -145,7 +145,7 @@ export interface RuntimeRenderFeatureFlagResult {
   readonly feature: RenderFeatureFlag;
   readonly enabled: boolean;
   readonly value: boolean | number;
-  readonly metrics: Pick<RuntimeMetrics, "ambientOcclusion" | "lightingAtmosphere">;
+  readonly metrics: Pick<RuntimeMetrics, "shadowBudget" | "ambientOcclusion" | "lightingAtmosphere">;
 }
 
 export interface RuntimeWaterBodyMutationResult {

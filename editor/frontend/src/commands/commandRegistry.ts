@@ -109,6 +109,7 @@ const setRuntimeRenderFeature = async (
   ctx.setState((state) => ({
     runtimeMetrics: {
       ...state.runtimeMetrics,
+      shadowBudget: result.metrics.shadowBudget,
       ambientOcclusion: result.metrics.ambientOcclusion,
       lightingAtmosphere: result.metrics.lightingAtmosphere,
     },
@@ -1635,18 +1636,18 @@ export const editorCommands: readonly EditorCommand[] = [
       await setRuntimeRenderFeature(ctx, "bakedAo", enabled, enabled ? 0.35 : 0);
     },
   },
-  runtimeSettingCommand(
-    "editor.debug.toggleShadowBudget",
-    "Toggle shadow budget",
-    "Mock toggle shadow budget budget state.",
-    (metrics) => ({
-      ...metrics,
-      shadowBudget: {
-        ...metrics.shadowBudget,
-        enabled: !metrics.shadowBudget.enabled,
-      },
-    }),
-  ),
+  {
+    id: "editor.debug.toggleShadowBudget",
+    title: "Toggle shadow budget",
+    description: "Toggle runtime shadow budgeting.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "shadow", "budget"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.shadowBudget.enabled;
+      await setRuntimeRenderFeature(ctx, "shadowBudget", enabled);
+    },
+  },
   {
     id: "editor.debug.toggleGodRays",
     title: "Toggle god rays",

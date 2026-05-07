@@ -133,6 +133,12 @@ export class MockRuntimeClient implements RuntimeClient {
           },
         };
         break;
+      case "shadowBudget":
+        this.runtimeMetrics = {
+          ...metrics,
+          shadowBudget: { ...metrics.shadowBudget, enabled },
+        };
+        break;
       case "fog":
         this.runtimeMetrics = {
           ...metrics,
@@ -156,6 +162,7 @@ export class MockRuntimeClient implements RuntimeClient {
       enabled,
       value: feature === "bakedAo" ? this.runtimeMetrics.ambientOcclusion.bakedAoStrength : feature === "godRays" ? this.runtimeMetrics.lightingAtmosphere.godRayIntensity : enabled,
       metrics: {
+        shadowBudget: this.runtimeMetrics.shadowBudget,
         ambientOcclusion: this.runtimeMetrics.ambientOcclusion,
         lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
       },
