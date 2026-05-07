@@ -1,4 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
 
 export type RuntimeCommandRequestType =
@@ -7,6 +8,8 @@ export type RuntimeCommandRequestType =
   | "runtime.rebuildSelectedChunk"
   | "runtime.rebuildDirtyChunks"
   | "runtime.setRenderQuality"
+  | "runtime.setRenderFeatureFlag"
+  | "runtime.setShaderFeature"
   | "runtime.setWaterReflectionDebugMode"
   | "runtime.updateWaterBody"
   | "runtime.runWaterVisualProbe"
@@ -34,6 +37,14 @@ export type RuntimeFocusCameraCommand = RuntimeCommandRequestBase<"runtime.focus
 export type RuntimeRebuildSelectedChunkCommand = RuntimeCommandRequestBase<"runtime.rebuildSelectedChunk", { readonly chunkId: string }>;
 export type RuntimeRebuildDirtyChunksCommand = RuntimeCommandRequestBase<"runtime.rebuildDirtyChunks", { readonly chunkIds: readonly string[] }>;
 export type RuntimeSetRenderQualityCommand = RuntimeCommandRequestBase<"runtime.setRenderQuality", { readonly preset: RenderQualityPreset }>;
+export type RuntimeSetRenderFeatureFlagCommand = RuntimeCommandRequestBase<
+  "runtime.setRenderFeatureFlag",
+  { readonly feature: RenderFeatureFlag; readonly enabled: boolean; readonly value?: number }
+>;
+export type RuntimeSetShaderFeatureCommand = RuntimeCommandRequestBase<
+  "runtime.setShaderFeature",
+  { readonly feature: RenderFeatureFlag; readonly enabled: boolean; readonly value?: number }
+>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
 export type RuntimeUpdateWaterBodyCommand = RuntimeCommandRequestBase<"runtime.updateWaterBody", { readonly waterBodyId: string; readonly patch: Partial<WaterBody> }>;
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
@@ -56,6 +67,8 @@ export type RuntimeCommandRequest =
   | RuntimeRebuildSelectedChunkCommand
   | RuntimeRebuildDirtyChunksCommand
   | RuntimeSetRenderQualityCommand
+  | RuntimeSetRenderFeatureFlagCommand
+  | RuntimeSetShaderFeatureCommand
   | RuntimeSetWaterReflectionDebugModeCommand
   | RuntimeUpdateWaterBodyCommand
   | RuntimeRunWaterVisualProbeCommand

@@ -1,4 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
@@ -14,6 +15,7 @@ import type {
   RuntimeProtectedAreaMutationResult,
   RuntimeProtectedAreaValidationResult,
   RuntimeProtectedRuleQueryResult,
+  RuntimeRenderFeatureFlagResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
@@ -109,6 +111,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.setRenderQuality",
       requestId: makeRequestId("runtime.setRenderQuality"),
       payload: { preset },
+    });
+  }
+
+  async setRenderFeatureFlag(feature: RenderFeatureFlag, enabled: boolean, value?: number): Promise<RuntimeCommandResult<RuntimeRenderFeatureFlagResult>> {
+    return this.execute({
+      type: "runtime.setRenderFeatureFlag",
+      requestId: makeRequestId("runtime.setRenderFeatureFlag"),
+      payload: value === undefined ? { feature, enabled } : { feature, enabled, value },
     });
   }
 

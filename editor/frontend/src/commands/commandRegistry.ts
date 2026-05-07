@@ -2,6 +2,7 @@ import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import { mockPropAssets } from "../mocks/mockWorld";
 
@@ -94,6 +95,22 @@ const setRuntimeViewportOverlay = async (
     viewportOverlays: {
       ...state.viewportOverlays,
       ...viewportDebug,
+    },
+  }));
+};
+
+const setRuntimeRenderFeature = async (
+  ctx: EditorCommandContext,
+  feature: RenderFeatureFlag,
+  enabled: boolean,
+  value?: number,
+): Promise<void> => {
+  const result = unwrapRuntime(await ctx.runtimeClient.setRenderFeatureFlag(feature, enabled, value));
+  ctx.setState((state) => ({
+    runtimeMetrics: {
+      ...state.runtimeMetrics,
+      ambientOcclusion: result.metrics.ambientOcclusion,
+      lightingAtmosphere: result.metrics.lightingAtmosphere,
     },
   }));
 };
@@ -1581,42 +1598,43 @@ export const editorCommands: readonly EditorCommand[] = [
       ctx.toast.info("Graphics capabilities refreshed from runtime.");
     },
   },
-  runtimeSettingCommand(
-    "editor.debug.toggleGtao",
-    "Toggle GTAO",
-    "Mock toggle GTAO in render debug settings.",
-    (metrics) => ({
-      ...metrics,
-      ambientOcclusion: {
-        ...metrics.ambientOcclusion,
-        gtaoEnabled: !metrics.ambientOcclusion.gtaoEnabled,
-      },
-    }),
-  ),
-  runtimeSettingCommand(
-    "editor.debug.toggleSsao",
-    "Toggle SSAO",
-    "Mock toggle SSAO support state in debug.",
-    (metrics) => ({
-      ...metrics,
-      ambientOcclusion: {
-        ...metrics.ambientOcclusion,
-        ssaoEnabled: !metrics.ambientOcclusion.ssaoEnabled,
-      },
-    }),
-  ),
-  runtimeSettingCommand(
-    "editor.debug.toggleBakedAo",
-    "Toggle baked AO",
-    "Mock toggle baked AO strength.",
-    (metrics) => ({
-      ...metrics,
-      ambientOcclusion: {
-        ...metrics.ambientOcclusion,
-        bakedAoStrength: metrics.ambientOcclusion.bakedAoStrength > 0 ? 0 : 0.35,
-      },
-    }),
-  ),
+  {
+    id: "editor.debug.toggleGtao",
+    title: "Toggle GTAO",
+    description: "Toggle runtime GTAO rendering.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "gtao", "ao"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.ambientOcclusion.gtaoEnabled;
+      await setRuntimeRenderFeature(ctx, "gtao", enabled);
+    },
+  },
+  {
+    id: "editor.debug.toggleSsao",
+    title: "Toggle SSAO",
+    description: "Toggle runtime SSAO rendering.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "ssao", "ao"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.ambientOcclusion.ssaoEnabled;
+      await setRuntimeRenderFeature(ctx, "ssao", enabled);
+    },
+  },
+  {
+    id: "editor.debug.toggleBakedAo",
+    title: "Toggle baked AO",
+    description: "Toggle runtime baked AO strength.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "baked", "ao"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const current = ctx.getState().runtimeMetrics.ambientOcclusion.bakedAoStrength;
+      const enabled = current <= 0;
+      await setRuntimeRenderFeature(ctx, "bakedAo", enabled, enabled ? 0.35 : 0);
+    },
+  },
   runtimeSettingCommand(
     "editor.debug.toggleShadowBudget",
     "Toggle shadow budget",
@@ -1629,30 +1647,30 @@ export const editorCommands: readonly EditorCommand[] = [
       },
     }),
   ),
-  runtimeSettingCommand(
-    "editor.debug.toggleGodRays",
-    "Toggle god rays",
-    "Mock toggle directional god rays.",
-    (metrics) => ({
-      ...metrics,
-      lightingAtmosphere: {
-        ...metrics.lightingAtmosphere,
-        godRaysEnabled: !metrics.lightingAtmosphere.godRaysEnabled,
-      },
-    }),
-  ),
-  runtimeSettingCommand(
-    "editor.debug.toggleFog",
-    "Toggle fog",
-    "Mock toggle fog rendering.",
-    (metrics) => ({
-      ...metrics,
-      lightingAtmosphere: {
-        ...metrics.lightingAtmosphere,
-        fogActive: !metrics.lightingAtmosphere.fogActive,
-      },
-    }),
-  ),
+  {
+    id: "editor.debug.toggleGodRays",
+    title: "Toggle god rays",
+    description: "Toggle runtime directional god rays.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "god rays", "fog"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const metrics = ctx.getState().runtimeMetrics.lightingAtmosphere;
+      await setRuntimeRenderFeature(ctx, "godRays", !metrics.godRaysEnabled, metrics.godRayIntensity);
+    },
+  },
+  {
+    id: "editor.debug.toggleFog",
+    title: "Toggle fog",
+    description: "Toggle runtime fog rendering.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "fog"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.lightingAtmosphere.fogActive;
+      await setRuntimeRenderFeature(ctx, "fog", enabled);
+    },
+  },
   runtimeSettingCommand(
     "editor.debug.togglePhotoMode",
     "Toggle photo mode",

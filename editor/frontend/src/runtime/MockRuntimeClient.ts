@@ -1,6 +1,7 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { RenderFeatureFlag, RuntimeMetrics } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -63,6 +64,7 @@ const blockRuntimeName = (block: BlockType): string => {
 
 export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
+  private runtimeMetrics: RuntimeMetrics = JSON.parse(JSON.stringify(mockRuntimeMetrics)) as RuntimeMetrics;
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
   private protectedAreas: ProtectedArea[] = [...mockProtectedAreas];
   private connectionState: RuntimeConnectionState = "mock";
@@ -96,9 +98,67 @@ export class MockRuntimeClient implements RuntimeClient {
 
   async setRenderQuality(preset: RenderQualityPreset) {
     this.renderQualityPreset = preset;
+    this.runtimeMetrics = {
+      ...this.runtimeMetrics,
+      renderQualityPreset: preset,
+      renderQualityReadouts: getMockRenderQualityReadouts(preset),
+    };
     return runtimeCommandSuccess({
       preset: this.renderQualityPreset,
       metrics: getMockRenderQualityReadouts(this.renderQualityPreset),
+    });
+  }
+
+  async setRenderFeatureFlag(feature: RenderFeatureFlag, enabled: boolean, value?: number) {
+    const metrics = this.runtimeMetrics;
+    switch (feature) {
+      case "gtao":
+        this.runtimeMetrics = {
+          ...metrics,
+          ambientOcclusion: { ...metrics.ambientOcclusion, gtaoEnabled: enabled },
+        };
+        break;
+      case "ssao":
+        this.runtimeMetrics = {
+          ...metrics,
+          ambientOcclusion: { ...metrics.ambientOcclusion, ssaoEnabled: enabled },
+        };
+        break;
+      case "bakedAo":
+        this.runtimeMetrics = {
+          ...metrics,
+          ambientOcclusion: {
+            ...metrics.ambientOcclusion,
+            bakedAoStrength: enabled ? (value ?? 0.35) : 0,
+          },
+        };
+        break;
+      case "fog":
+        this.runtimeMetrics = {
+          ...metrics,
+          lightingAtmosphere: { ...metrics.lightingAtmosphere, fogActive: enabled },
+        };
+        break;
+      case "godRays":
+        this.runtimeMetrics = {
+          ...metrics,
+          lightingAtmosphere: {
+            ...metrics.lightingAtmosphere,
+            godRaysEnabled: enabled,
+            godRayIntensity: value ?? metrics.lightingAtmosphere.godRayIntensity,
+          },
+        };
+        break;
+    }
+
+    return runtimeCommandSuccess({
+      feature,
+      enabled,
+      value: feature === "bakedAo" ? this.runtimeMetrics.ambientOcclusion.bakedAoStrength : feature === "godRays" ? this.runtimeMetrics.lightingAtmosphere.godRayIntensity : enabled,
+      metrics: {
+        ambientOcclusion: this.runtimeMetrics.ambientOcclusion,
+        lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
+      },
     });
   }
 
@@ -294,7 +354,7 @@ export class MockRuntimeClient implements RuntimeClient {
 
   private createSnapshot(): RuntimeSnapshot {
     const metrics = {
-      ...mockRuntimeMetrics,
+      ...this.runtimeMetrics,
       renderQualityPreset: this.renderQualityPreset,
       renderQualityReadouts: getMockRenderQualityReadouts(this.renderQualityPreset),
     };

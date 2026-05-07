@@ -1,5 +1,6 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { RenderFeatureFlag } from "../types/runtime";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
   RuntimeAtlasMappingState,
@@ -12,6 +13,7 @@ import type {
   RuntimeProtectedAreaMutationResult,
   RuntimeProtectedAreaValidationResult,
   RuntimeProtectedRuleQueryResult,
+  RuntimeRenderFeatureFlagResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
@@ -35,6 +37,7 @@ export interface RuntimeClient {
   readonly rebuildSelectedChunk: (chunkId: string) => Promise<RuntimeCommandResult<RuntimeChunkRebuildResult>>;
   readonly rebuildDirtyChunks: (chunkIds: readonly string[]) => Promise<RuntimeCommandResult<RuntimeChunkRebuildResult>>;
   readonly setRenderQuality: (preset: RenderQualityPreset) => Promise<RuntimeCommandResult<RuntimeRenderQualityState>>;
+  readonly setRenderFeatureFlag: (feature: RenderFeatureFlag, enabled: boolean, value?: number) => Promise<RuntimeCommandResult<RuntimeRenderFeatureFlagResult>>;
   readonly setWaterReflectionDebugMode: (waterBodyId: string, mode: WaterReflectionDebugViewMode) => Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>>;
   readonly updateWaterBody: (waterBodyId: string, patch: Partial<WaterBody>) => Promise<RuntimeCommandResult<RuntimeWaterBodyMutationResult>>;
   readonly runWaterVisualProbe: () => Promise<RuntimeCommandResult<RuntimeWaterVisualProbeResult>>;

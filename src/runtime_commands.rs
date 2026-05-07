@@ -1,16 +1,25 @@
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
+use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
+use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::{DebugDetailToggles, DebugOverlayState, TargetedBlock};
 use crate::props::instanced_render::PropBoundsDebugSettings;
+use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
+use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::god_rays::GodRayConfig;
+use crate::rendering::gtao::GtaoSettings;
 use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::ssao::SsaoSupported;
+use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water_reflection::{
     WaterPresence, WaterReflectionConfig, WaterReflectionDebugViewMode, WaterReflectionStatus,
 };
@@ -22,8 +31,8 @@ use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
-    ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, ProtectedEditIntent,
-    WORLD_RULES_PATH, validate_protected_area,
+    validate_protected_area, ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry,
+    ProtectedEditIntent, WORLD_RULES_PATH,
 };
 
 const ATLAS_TILE_COUNT: u32 = 64;
@@ -111,6 +120,18 @@ pub enum RuntimeWriteCommand {
     FocusCamera { target: Value },
     #[serde(rename = "runtime.setRenderQuality")]
     SetRenderQuality { preset: FrontendRenderQualityPreset },
+    #[serde(rename = "runtime.setRenderFeatureFlag")]
+    SetRenderFeatureFlag {
+        feature: FrontendRenderFeatureFlag,
+        enabled: bool,
+        value: Option<f32>,
+    },
+    #[serde(rename = "runtime.setShaderFeature")]
+    SetShaderFeature {
+        feature: FrontendRenderFeatureFlag,
+        enabled: bool,
+        value: Option<f32>,
+    },
     #[serde(rename = "runtime.setWaterReflectionDebugMode")]
     SetWaterReflectionDebugMode {
         #[serde(rename = "waterBodyId")]
@@ -241,6 +262,28 @@ impl FrontendRenderQualityPreset {
             Self::Medium => "Medium",
             Self::High => "High",
             Self::Performance100 => "Performance100",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendRenderFeatureFlag {
+    Gtao,
+    Ssao,
+    BakedAo,
+    Fog,
+    GodRays,
+}
+
+impl FrontendRenderFeatureFlag {
+    fn as_frontend_str(self) -> &'static str {
+        match self {
+            Self::Gtao => "gtao",
+            Self::Ssao => "ssao",
+            Self::BakedAo => "bakedAo",
+            Self::Fog => "fog",
+            Self::GodRays => "godRays",
         }
     }
 }
@@ -443,7 +486,7 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
             "canEditProtectedAreas": true,
             "canSaveWorldSnapshot": false,
         },
-        "metrics": runtime_metrics_payload(preset, &water_visual_probe),
+        "metrics": runtime_metrics_payload(world, preset, &water_visual_probe),
         "renderQuality": {
             "preset": render_quality_preset_to_frontend(preset),
             "metrics": render_quality_metrics(preset),
@@ -676,6 +719,12 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 errors.push("waterBodyId is required.".to_string());
             }
         }
+        RuntimeWriteCommand::SetRenderFeatureFlag { value, .. }
+        | RuntimeWriteCommand::SetShaderFeature { value, .. } => {
+            if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
+                errors.push("value must be a finite non-negative number.".to_string());
+            }
+        }
         RuntimeWriteCommand::UpdateWaterBody {
             water_body_id,
             patch,
@@ -771,6 +820,19 @@ fn execute_runtime_write_command(
                 "metrics": render_quality_metrics(runtime_preset),
             }))
         }
+        RuntimeWriteCommand::SetRenderFeatureFlag {
+            feature,
+            enabled,
+            value,
+        }
+        | RuntimeWriteCommand::SetShaderFeature {
+            feature,
+            enabled,
+            value,
+        } => match set_render_feature_flag(world, feature, enabled, value) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
         RuntimeWriteCommand::SetWaterReflectionDebugMode {
             water_body_id,
             mode,
@@ -1154,6 +1216,210 @@ fn set_atlas_mapping(world: &mut World, mut mapping: AtlasMapping) {
     }
 }
 
+fn set_render_feature_flag(
+    world: &mut World,
+    feature: FrontendRenderFeatureFlag,
+    enabled: bool,
+    value: Option<f32>,
+) -> Result<Value, String> {
+    match feature {
+        FrontendRenderFeatureFlag::Gtao => set_gtao_enabled(world, enabled)?,
+        FrontendRenderFeatureFlag::Ssao => set_ssao_enabled(world, enabled)?,
+        FrontendRenderFeatureFlag::BakedAo => {
+            set_baked_ao_strength(world, if enabled { value.unwrap_or(0.35) } else { 0.0 });
+        }
+        FrontendRenderFeatureFlag::Fog => set_fog_enabled(world, enabled),
+        FrontendRenderFeatureFlag::GodRays => set_god_rays_enabled(world, enabled, value),
+    }
+
+    Ok(json!({
+        "feature": feature.as_frontend_str(),
+        "enabled": render_feature_enabled(world, feature),
+        "value": render_feature_value(world, feature),
+        "metrics": render_feature_metrics_payload(world),
+    }))
+}
+
+fn set_gtao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
+    if enabled && integrated_gpu_ao_disabled(world) {
+        return Err(
+            "GTAO cannot be enabled on an integrated GPU with the current AO config.".to_string(),
+        );
+    }
+
+    let settings = world
+        .get_resource::<AmbientOcclusionConfig>()
+        .map(gtao_settings_from_config)
+        .unwrap_or_default();
+
+    if let Some(mut config) = world.get_resource_mut::<AmbientOcclusionConfig>() {
+        if let Some(gtao) = config.gtao.as_mut() {
+            gtao.enabled = enabled;
+        }
+    }
+
+    let mut query = world.query_filtered::<(Entity, Option<&GtaoSettings>), With<Camera3d>>();
+    let cameras = query
+        .iter(world)
+        .map(|(entity, existing)| (entity, existing.is_some()))
+        .collect::<Vec<_>>();
+
+    for (entity, has_gtao) in cameras {
+        let mut entity_mut = world.entity_mut(entity);
+        if enabled && !has_gtao {
+            entity_mut.insert((settings.clone(), DepthPrepass, NormalPrepass));
+        } else if !enabled && has_gtao {
+            entity_mut.remove::<GtaoSettings>();
+        }
+    }
+
+    Ok(())
+}
+
+fn gtao_settings_from_config(config: &AmbientOcclusionConfig) -> GtaoSettings {
+    let Some(gtao) = config.gtao.as_ref() else {
+        return GtaoSettings::default();
+    };
+
+    GtaoSettings {
+        slice_count: gtao.slice_count,
+        steps_per_slice: gtao.steps_per_slice,
+        radius: gtao.radius,
+        falloff_range: gtao.falloff_range,
+        final_value_power: gtao.final_value_power,
+        sample_distribution_power: gtao.sample_distribution_power,
+        thin_occluder_compensation: gtao.thin_occluder_compensation,
+        depth_mip_sampling_offset: gtao.depth_mip_sampling_offset,
+        enable_denoise: gtao.denoise.enabled,
+        denoise_spatial_radius: gtao.denoise.spatial_radius,
+        denoise_temporal_blend: gtao.denoise.temporal_blend,
+    }
+}
+
+fn set_ssao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
+    if enabled && integrated_gpu_ao_disabled(world) {
+        return Err(
+            "SSAO cannot be enabled on an integrated GPU with the current AO config.".to_string(),
+        );
+    }
+
+    let ssao = world
+        .get_resource::<AmbientOcclusionConfig>()
+        .map(|config| ScreenSpaceAmbientOcclusion {
+            quality_level: config.ssao.quality_level(),
+            constant_object_thickness: config.ssao.constant_object_thickness,
+            ..default()
+        })
+        .unwrap_or_default();
+
+    if let Some(mut config) = world.get_resource_mut::<AmbientOcclusionConfig>() {
+        config.ssao.enabled = enabled;
+    }
+
+    let mut query =
+        world.query_filtered::<(Entity, Option<&ScreenSpaceAmbientOcclusion>), With<Camera3d>>();
+    let cameras = query
+        .iter(world)
+        .map(|(entity, existing)| (entity, existing.is_some()))
+        .collect::<Vec<_>>();
+
+    for (entity, has_ssao) in cameras {
+        let mut entity_mut = world.entity_mut(entity);
+        if enabled && !has_ssao {
+            entity_mut.insert(ssao.clone());
+        } else if !enabled && has_ssao {
+            entity_mut.remove::<ScreenSpaceAmbientOcclusion>();
+        }
+    }
+
+    Ok(())
+}
+
+fn integrated_gpu_ao_disabled(world: &World) -> bool {
+    let integrated = world
+        .get_resource::<GraphicsCapabilities>()
+        .is_some_and(|capabilities| capabilities.integrated_gpu);
+    let disable_on_integrated = world
+        .get_resource::<AmbientOcclusionConfig>()
+        .is_some_and(|config| config.ssao.disable_on_integrated_gpu);
+
+    integrated && disable_on_integrated
+}
+
+fn set_baked_ao_strength(world: &mut World, strength: f32) {
+    let strength = strength.clamp(0.0, 1.0);
+
+    if let Some(mut config) = world.get_resource_mut::<AmbientOcclusionConfig>() {
+        config.baked.enabled = strength > 0.0;
+        config.baked.strength = strength;
+    }
+
+    if let Some(mut terrain_style) =
+        world.get_resource_mut::<crate::debug_ui::TerrainStyleSettings>()
+    {
+        terrain_style.ao_strength = strength;
+    }
+
+    let handles = world
+        .get_resource::<TriplanarMaterialHandle>()
+        .map(|handles| {
+            [
+                handles.handle.clone(),
+                handles.cheap_handle.clone(),
+                handles.single_projection_far_handle.clone(),
+                handles.atlas_only_debug_handle.clone(),
+            ]
+        })
+        .unwrap_or_default();
+
+    if let Some(mut materials) = world.get_resource_mut::<Assets<TriplanarMaterial>>() {
+        for handle in handles {
+            if let Some(material) = materials.get_mut(&handle) {
+                material.uniforms.ao_strength = strength;
+            }
+        }
+    }
+}
+
+fn set_fog_enabled(world: &mut World, enabled: bool) {
+    if let Some(mut config) = world.get_resource_mut::<FogConfig>() {
+        config.distance.enabled = enabled;
+        config.volumetric.enabled = enabled;
+    }
+
+    if let Some(mut quality) = world.get_resource_mut::<FogQuality>() {
+        quality.user_override = true;
+        quality.tier = if enabled && !quality.tier.is_enabled() {
+            FogQualityTier::Medium
+        } else if enabled {
+            quality.tier
+        } else {
+            FogQualityTier::Off
+        };
+    }
+
+    if let Some(mut toggles) = world.get_resource_mut::<DebugDetailToggles>() {
+        toggles.volumetric_fog_enabled = enabled;
+    }
+}
+
+fn set_god_rays_enabled(world: &mut World, enabled: bool, intensity: Option<f32>) {
+    let mut config = world
+        .get_resource::<GodRayConfig>()
+        .cloned()
+        .unwrap_or_default();
+    config.enabled = enabled;
+    if let Some(intensity) = intensity {
+        config.intensity = intensity.clamp(0.0, 2.0);
+    }
+    world.insert_resource(config.clone());
+
+    if let Some(mut fog_config) = world.get_resource_mut::<FogConfig>() {
+        fog_config.screen_god_rays.enabled = enabled;
+        fog_config.screen_god_rays.intensity = config.intensity;
+    }
+}
+
 fn set_viewport_debug_overlay(
     world: &mut World,
     overlay: FrontendViewportDebugOverlay,
@@ -1224,9 +1490,14 @@ fn render_quality_preset_to_frontend(preset: RenderQualityPreset) -> &'static st
     }
 }
 
-fn runtime_metrics_payload(preset: RenderQualityPreset, water_visual_probe: &Value) -> Value {
+fn runtime_metrics_payload(
+    world: &World,
+    preset: RenderQualityPreset,
+    water_visual_probe: &Value,
+) -> Value {
     let reflection_status = &water_visual_probe["reflectionStatus"];
     let water_presence = &water_visual_probe["waterPresence"];
+    let render_features = render_feature_metrics_payload(world);
 
     json!({
         "fps": 60,
@@ -1239,17 +1510,7 @@ fn runtime_metrics_payload(preset: RenderQualityPreset, water_visual_probe: &Val
         "shadowBudget": {
             "enabled": true,
         },
-        "ambientOcclusion": {
-            "gtaoEnabled": true,
-            "gtaoQuality": "medium",
-            "gtaoSliceCount": 18,
-            "gtaoStepsPerSlice": 8,
-            "gtaoRadius": 1.35,
-            "gtaoTemporalDenoise": true,
-            "ssaoSupported": true,
-            "ssaoEnabled": true,
-            "bakedAoStrength": 0.35,
-        },
+        "ambientOcclusion": render_features["ambientOcclusion"].clone(),
         "adaptiveGI": {
             "adaptiveGiQuality": 2,
             "stochasticProbeSelection": true,
@@ -1263,13 +1524,7 @@ fn runtime_metrics_payload(preset: RenderQualityPreset, water_visual_probe: &Val
             "displacementEnabled": true,
             "visualProbeStatus": "runtime",
         },
-        "lightingAtmosphere": {
-            "sunTimeOfDay": "runtime",
-            "fogPreset": "Runtime",
-            "fogActive": true,
-            "godRaysEnabled": false,
-            "godRayIntensity": 0.6,
-        },
+        "lightingAtmosphere": render_features["lightingAtmosphere"].clone(),
         "volumetricClouds": {
             "coverage": 0.4,
             "renderScale": 0.6,
@@ -1285,17 +1540,149 @@ fn runtime_metrics_payload(preset: RenderQualityPreset, water_visual_probe: &Val
             "motionBlurSamples": 8,
             "cinematicModeActive": false,
         },
-        "graphicsCapabilities": {
-            "adapterName": "Bevy runtime",
-            "integratedGPU": false,
-            "taaSupported": true,
-            "rayTracingSupported": false,
-        },
+        "graphicsCapabilities": graphics_capabilities_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
             { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
         ],
     })
+}
+
+fn render_feature_metrics_payload(world: &World) -> Value {
+    let ao = world.get_resource::<AmbientOcclusionConfig>();
+    let gtao = ao.and_then(|config| config.gtao.as_ref());
+    let fog = world.get_resource::<FogConfig>();
+    let god_rays = world.get_resource::<GodRayConfig>();
+
+    json!({
+        "ambientOcclusion": {
+            "gtaoEnabled": gtao.is_some_and(|config| config.enabled),
+            "gtaoQuality": gtao
+                .map(|config| config.quality.to_lowercase())
+                .unwrap_or_else(|| "medium".to_string()),
+            "gtaoSliceCount": gtao.map(|config| config.slice_count).unwrap_or(0),
+            "gtaoStepsPerSlice": gtao.map(|config| config.steps_per_slice).unwrap_or(0),
+            "gtaoRadius": gtao.map(|config| config.radius).unwrap_or(0.0),
+            "gtaoTemporalDenoise": gtao.is_some_and(|config| config.denoise.enabled),
+            "ssaoSupported": ssao_supported(world),
+            "ssaoEnabled": ao.is_some_and(|config| config.ssao.enabled),
+            "bakedAoStrength": baked_ao_strength(world),
+        },
+        "lightingAtmosphere": {
+            "sunTimeOfDay": "runtime",
+            "fogPreset": fog
+                .map(|config| fog_preset_to_frontend(config.current_preset))
+                .unwrap_or("Runtime"),
+            "fogActive": render_feature_enabled(world, FrontendRenderFeatureFlag::Fog),
+            "godRaysEnabled": god_rays
+                .map(|config| config.enabled)
+                .or_else(|| fog.map(|config| config.screen_god_rays.enabled))
+                .unwrap_or(false),
+            "godRayIntensity": god_rays
+                .map(|config| config.intensity)
+                .or_else(|| fog.map(|config| config.screen_god_rays.intensity))
+                .unwrap_or(0.0),
+        },
+    })
+}
+
+fn render_feature_enabled(world: &World, feature: FrontendRenderFeatureFlag) -> bool {
+    match feature {
+        FrontendRenderFeatureFlag::Gtao => world
+            .get_resource::<AmbientOcclusionConfig>()
+            .and_then(|config| config.gtao.as_ref())
+            .is_some_and(|config| config.enabled),
+        FrontendRenderFeatureFlag::Ssao => world
+            .get_resource::<AmbientOcclusionConfig>()
+            .is_some_and(|config| config.ssao.enabled),
+        FrontendRenderFeatureFlag::BakedAo => baked_ao_strength(world) > 0.0,
+        FrontendRenderFeatureFlag::Fog => world
+            .get_resource::<FogConfig>()
+            .is_some_and(|config| config.distance.enabled || config.volumetric.enabled),
+        FrontendRenderFeatureFlag::GodRays => world
+            .get_resource::<GodRayConfig>()
+            .map(|config| config.enabled)
+            .or_else(|| {
+                world
+                    .get_resource::<FogConfig>()
+                    .map(|config| config.screen_god_rays.enabled)
+            })
+            .unwrap_or(false),
+    }
+}
+
+fn render_feature_value(world: &World, feature: FrontendRenderFeatureFlag) -> Value {
+    match feature {
+        FrontendRenderFeatureFlag::BakedAo => json!(baked_ao_strength(world)),
+        FrontendRenderFeatureFlag::GodRays => json!(world
+            .get_resource::<GodRayConfig>()
+            .map(|config| config.intensity)
+            .or_else(|| {
+                world
+                    .get_resource::<FogConfig>()
+                    .map(|config| config.screen_god_rays.intensity)
+            })
+            .unwrap_or(0.0)),
+        _ => json!(render_feature_enabled(world, feature)),
+    }
+}
+
+fn baked_ao_strength(world: &World) -> f32 {
+    let material_strength = world
+        .get_resource::<TriplanarMaterialHandle>()
+        .and_then(|handle| {
+            world
+                .get_resource::<Assets<TriplanarMaterial>>()
+                .and_then(|materials| materials.get(&handle.handle))
+        })
+        .map(|material| material.uniforms.ao_strength);
+
+    material_strength.unwrap_or_else(|| {
+        world
+            .get_resource::<AmbientOcclusionConfig>()
+            .map(|config| {
+                if config.baked.enabled {
+                    config.baked.strength
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(0.0)
+    })
+}
+
+fn ssao_supported(world: &World) -> bool {
+    if let Some(capabilities) = world.get_resource::<GraphicsCapabilities>() {
+        return !capabilities.integrated_gpu;
+    }
+
+    world
+        .get_resource::<SsaoSupported>()
+        .map(|supported| supported.0)
+        .unwrap_or(true)
+}
+
+fn graphics_capabilities_payload(world: &World) -> Value {
+    let capabilities = world.get_resource::<GraphicsCapabilities>();
+    json!({
+        "adapterName": capabilities
+            .and_then(|capabilities| capabilities.adapter_name.as_deref())
+            .unwrap_or("Bevy runtime"),
+        "integratedGPU": capabilities.is_some_and(|capabilities| capabilities.integrated_gpu),
+        "taaSupported": capabilities.map(|capabilities| capabilities.taa_supported).unwrap_or(true),
+        "rayTracingSupported": capabilities
+            .map(|capabilities| capabilities.ray_tracing_supported)
+            .unwrap_or(false),
+    })
+}
+
+fn fog_preset_to_frontend(preset: FogPreset) -> &'static str {
+    match preset {
+        FogPreset::Clear => "Clear",
+        FogPreset::Balanced => "Balanced",
+        FogPreset::Misty => "Misty",
+        FogPreset::GodRays => "GodRays",
+    }
 }
 
 fn water_visual_probe_payload(world: &World) -> Value {
@@ -1564,6 +1951,59 @@ mod tests {
                 preset: FrontendRenderQualityPreset::Performance100
             }
         ));
+    }
+
+    #[test]
+    fn decodes_runtime_render_feature_flag_command() {
+        let value = json!({
+            "type": "runtime.setRenderFeatureFlag",
+            "requestId": "request-feature",
+            "payload": { "feature": "bakedAo", "enabled": true, "value": 0.35 }
+        });
+
+        let envelope: RuntimeCommandEnvelope = serde_json::from_value(value).unwrap();
+        assert_eq!(envelope.request_id, "request-feature");
+        assert!(matches!(
+            envelope.command,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::BakedAo,
+                enabled: true,
+                value: Some(value)
+            } if (value - 0.35).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn render_feature_command_updates_runtime_metrics() {
+        let mut world = World::new();
+        world.insert_resource(crate::rendering::ao_config::AmbientOcclusionConfig::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::BakedAo,
+                enabled: true,
+                value: Some(0.35),
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("render feature command should succeed");
+        };
+        assert_eq!(data["feature"], json!("bakedAo"));
+        assert_eq!(data["enabled"], json!(true));
+        let strength = data["metrics"]["ambientOcclusion"]["bakedAoStrength"]
+            .as_f64()
+            .unwrap();
+        assert!((strength - 0.35).abs() < 0.0001);
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+        let strength = data["metrics"]["ambientOcclusion"]["bakedAoStrength"]
+            .as_f64()
+            .unwrap();
+        assert!((strength - 0.35).abs() < 0.0001);
     }
 
     #[test]

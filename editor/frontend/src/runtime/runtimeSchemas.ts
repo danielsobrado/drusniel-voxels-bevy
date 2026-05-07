@@ -11,7 +11,7 @@ import type {
   WaterReflectionDebugViewMode,
   WaterReflectionStatus,
 } from "../types/world";
-import type { ConsoleMessage, GraphicsCapabilities, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
+import type { ConsoleMessage, GraphicsCapabilities, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
 
 export type RuntimeConnectionState = "mock" | "connected" | "disconnected" | "stale" | "error";
 
@@ -139,6 +139,13 @@ export interface RuntimeVoxelMutationResult {
 export interface RuntimeWaterDebugModeResult {
   readonly waterBodyId: string;
   readonly mode: WaterReflectionDebugViewMode;
+}
+
+export interface RuntimeRenderFeatureFlagResult {
+  readonly feature: RenderFeatureFlag;
+  readonly enabled: boolean;
+  readonly value: boolean | number;
+  readonly metrics: Pick<RuntimeMetrics, "ambientOcclusion" | "lightingAtmosphere">;
 }
 
 export interface RuntimeWaterBodyMutationResult {
