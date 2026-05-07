@@ -19,7 +19,6 @@ const agentCommandIds = [
   "editor.history.redo",
   "editor.snapshot.create",
   "editor.snapshot.restoreLatest",
-  "editor.performance.loadLargeMockWorld",
   "editor.help.showHandoff",
 ];
 
@@ -111,14 +110,14 @@ export function AgentWorkbenchPanel() {
 
         <article className="agent-card" data-testid="agent-section-large-world">
           <h3>Large World Readiness</h3>
-          <p>{`Mode: ${editorState.largeWorldStats.enabled ? "large mock world" : "standard mock world"}`}</p>
+          <p>{`Mode: ${editorState.runtimeState} runtime`}</p>
           <p>{`${editorState.largeWorldStats.chunkCount} chunks | ${editorState.largeWorldStats.propCount} props | ${editorState.largeWorldStats.consoleMessageCount} console entries`}</p>
         </article>
 
         <article className="agent-card" data-testid="agent-section-handoff">
           <h3>LLM Handoff</h3>
           <p>Frontend-only editor shell. Bevy/Tauri bridge remains deferred. Current persistence surface is the mock backend client plus state snapshots.</p>
-          <p>World editing coverage includes terrain summaries, protected areas, water parameters, props, atlas mapping, command history, snapshots, and large mock world stress data.</p>
+          <p>World editing coverage includes terrain summaries, protected areas, water parameters, props, atlas mapping, command history, and snapshots.</p>
         </article>
 
         <article className="agent-card" data-testid="agent-section-warnings">

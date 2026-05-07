@@ -645,23 +645,6 @@ export const editorCommands: readonly EditorCommand[] = [
     },
   },
   {
-    id: "editor.performance.loadLargeMockWorld",
-    title: "Load large mock world",
-    description: "Load a high-cardinality mock world to exercise editor panels without Bevy or Tauri.",
-    category: "Tests",
-    keywords: ["large world", "stress", "mock", "outliner", "console"],
-    undoable: true,
-    run: (ctx) => {
-      ctx.getState().loadLargeMockWorld();
-      const stats = ctx.getState().largeWorldStats;
-      ctx.toast.success(`Loaded large mock world: ${stats.chunkCount} chunks, ${stats.propCount} props.`);
-      ctx.getState().pushAgentTimelineEvent({
-        kind: "command",
-        message: `Large mock world loaded with ${stats.chunkCount} chunks, ${stats.propCount} props, and ${stats.consoleMessageCount} console entries.`,
-      });
-    },
-  },
-  {
     id: "editor.help.showHandoff",
     title: "Show editor handoff",
     description: "Record the current editor implementation handoff summary for agent review.",

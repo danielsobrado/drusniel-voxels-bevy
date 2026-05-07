@@ -752,9 +752,6 @@ describe("editor command registry", () => {
     await runCommand("editor.snapshot.create", createContext());
     expect(useEditorStore.getState().savedSnapshots.length).toBeGreaterThan(0);
 
-    await runCommand("editor.performance.loadLargeMockWorld", createContext());
-    expect(useEditorStore.getState().largeWorldStats.enabled).toBe(true);
-
     await runCommand("editor.help.showHandoff", createContext());
     expect(useEditorStore.getState().agentTimeline[0].message).toContain("Editor handoff");
   });

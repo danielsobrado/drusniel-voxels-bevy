@@ -9,7 +9,6 @@ export const toolbarCommandIds = [
   "editor.file.saveSnapshot",
   "editor.history.undo",
   "editor.history.redo",
-  "editor.performance.loadLargeMockWorld",
   "editor.view.toggleVoxelGrid",
   "editor.view.toggleChunkBounds",
   "editor.view.toggleWireframe",
@@ -60,9 +59,6 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
           </button>
           <button type="button" className="toolbar-button" aria-label="Redo editor command" data-command-id="editor.history.redo" disabled={redoCount === 0} onClick={() => void runCommand("editor.history.redo")}>
             <Redo2 size={14} aria-hidden="true" /> Redo
-          </button>
-          <button type="button" className="toolbar-button" aria-label="Load large mock world" data-command-id="editor.performance.loadLargeMockWorld" onClick={() => void runCommand("editor.performance.loadLargeMockWorld")}>
-            <Boxes size={14} aria-hidden="true" /> Large
           </button>
         </div>
         <div className="toolbar-group" aria-label="Viewport overlay controls">
