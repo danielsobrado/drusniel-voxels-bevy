@@ -327,6 +327,26 @@ describe("editor command registry", () => {
     expect(water?.waveCount).toBe(10);
   });
 
+  it("focuses the nearest water body through the runtime camera", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      focusedTarget: Parameters<MockRuntimeClient["focusCamera"]>[0] | null = null;
+
+      override async focusCamera(target: Parameters<MockRuntimeClient["focusCamera"]>[0]) {
+        this.focusedTarget = target;
+        return super.focusCamera(target);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    useEditorStore.getState().setSelection({ kind: "chunk", id: "chunk-0-0-0", label: "Chunk 0,0,0" });
+
+    await runCommand("editor.water.focusNearestWaterBody", createContext(undefined, runtimeClient));
+
+    const water = useEditorStore.getState().waterBodies.find((candidate) => candidate.id === "water-lk-03");
+    expect(runtimeClient.focusedTarget).toEqual(water?.center);
+    expect(useEditorStore.getState().selection).toMatchObject({ kind: "water", id: "water-lk-03" });
+  });
+
   it("runs water visual probe and stores mocked snapshot", async () => {
     useEditorStore.getState().clearDirty();
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
@@ -579,11 +599,7 @@ describe("editor command registry", () => {
 
     await runCommand("editor.props.focusSelectedProp", createContext(undefined, runtimeClient));
 
-    expect(runtimeClient.focusedTarget).toEqual({
-      kind: "prop",
-      id: mockProps[0].id,
-      label: mockProps[0].name,
-    });
+    expect(runtimeClient.focusedTarget).toEqual(mockProps[0].position);
     expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.props.focusSelectedProp");
   });
 

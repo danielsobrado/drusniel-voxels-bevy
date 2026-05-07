@@ -1,7 +1,7 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus } from "../runtime/RuntimeClient";
-import type { EditorMode, RenderQualityPreset, ViewportOverlayState } from "../types/editor";
+import type { EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import { mockPropAssets } from "../mocks/mockWorld";
 
@@ -1168,10 +1168,11 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.water.focusNearestWaterBody",
     title: "Focus nearest water body",
-    description: "Select the nearest mocked water body.",
+    description: "Focus the nearest runtime water body.",
     category: "Water",
     keywords: ["water", "focus", "selection", "nearest"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const lake = state.waterBodies.find((waterBody) => waterBody.id === "water-lk-03") ?? state.waterBodies[0];
       if (!lake) {
@@ -1180,6 +1181,7 @@ export const editorCommands: readonly EditorCommand[] = [
       }
 
       setSelectedWaterBody(state, lake);
+      unwrapRuntime(await ctx.runtimeClient.focusCamera(lake.center));
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Focused water body ${lake.name}.` });
     },
   },
@@ -1359,7 +1361,7 @@ export const editorCommands: readonly EditorCommand[] = [
     runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
-      let targetSelection = state.selection;
+      let targetSelection: Extract<Selection, { kind: "prop" }>;
       if (state.selection.kind !== "prop") {
         const firstProp = state.props[0];
         if (!firstProp) {
@@ -1371,10 +1373,17 @@ export const editorCommands: readonly EditorCommand[] = [
         state.setSelection(targetSelection);
         ctx.toast.info(`Focused ${firstProp.name}.`);
       } else {
+        targetSelection = state.selection;
         ctx.toast.info(`Focused ${state.selection.label}.`);
       }
 
-      unwrapRuntime(await ctx.runtimeClient.focusCamera(targetSelection));
+      const prop = state.props.find((candidate) => candidate.id === targetSelection.id);
+      if (!prop) {
+        ctx.toast.warning("Selected prop no longer exists.");
+        return;
+      }
+
+      unwrapRuntime(await ctx.runtimeClient.focusCamera(prop.position));
       state.setActiveMode("props");
       state.setActiveTool("props");
     },

@@ -15,10 +15,13 @@ use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
-use crate::voxel::meshing::{MeshData, MeshSettings, generate_chunk_mesh_with_mode};
+use crate::voxel::meshing::{
+    MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode, generate_chunk_mesh_with_mode,
+};
 use crate::voxel::persistence::{
     self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
 };
+use crate::voxel::plugin::{WaterBodyInfo, WaterBodyRegistry};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
@@ -329,7 +332,7 @@ fn editor_current_world_summary_response(world: &World) -> BridgeResponse {
             status: 200,
             body: json!({
                 "ok": true,
-                "data": frontend_world_summary_from_world(voxel_world, "runtime-world"),
+                "data": frontend_world_summary_from_world(world, voxel_world, "runtime-world"),
             }),
         },
         None => BridgeResponse {
@@ -397,7 +400,7 @@ fn load_world_data_into_runtime(
         status: 200,
         body: json!({
             "ok": true,
-            "data": frontend_world_summary_from_metadata_and_world(&metadata, loaded),
+            "data": frontend_world_summary_from_metadata_and_world(world, &metadata, loaded),
         }),
     }
 }
@@ -425,13 +428,18 @@ fn despawn_existing_chunk_entities(world: &mut World) {
     }
 }
 
-fn frontend_world_summary_from_world(voxel_world: &VoxelWorld, save_path: &str) -> Value {
+fn frontend_world_summary_from_world(
+    world: &World,
+    voxel_world: &VoxelWorld,
+    save_path: &str,
+) -> Value {
     let data = voxel_world.to_data();
     let metadata = persistence::editor_world_metadata_from_data_for_bridge(&data, save_path);
-    frontend_world_summary_from_metadata_and_world(&metadata, voxel_world)
+    frontend_world_summary_from_metadata_and_world(world, &metadata, voxel_world)
 }
 
 fn frontend_world_summary_from_metadata_and_world(
+    world: &World,
     metadata: &EditorWorldMetadata,
     voxel_world: &VoxelWorld,
 ) -> Value {
@@ -449,7 +457,7 @@ fn frontend_world_summary_from_metadata_and_world(
             .map(|chunk| chunk_summary_payload(chunk))
             .collect::<Vec<_>>(),
         "protectedAreas": [],
-        "waterBodies": [],
+        "waterBodies": frontend_water_bodies_payload(world),
         "props": [],
         "materials": [],
         "viewport": {
@@ -461,6 +469,134 @@ fn frontend_world_summary_from_metadata_and_world(
         },
         "updatedAt": timestamp_string(),
     })
+}
+
+fn frontend_water_bodies_payload(world: &World) -> Vec<Value> {
+    let Some(registry) = world.get_resource::<WaterBodyRegistry>() else {
+        return Vec::new();
+    };
+
+    let mut bodies = registry.bodies.values().collect::<Vec<_>>();
+    bodies.sort_by_key(|body| body.id.0);
+    bodies
+        .into_iter()
+        .map(frontend_water_body_payload)
+        .collect()
+}
+
+fn frontend_water_body_payload(body: &WaterBodyInfo) -> Value {
+    let center = (body.aabb_min + body.aabb_max) * 0.5;
+    let kind = water_body_kind_to_frontend(body.kind);
+    let (shallow_color, deep_color) = water_body_colors(body.kind);
+    let (wave_amplitude, wave_speed, wave_scale, wave_count) = water_body_wave_defaults(body.kind);
+    json!({
+        "id": format!("water-body-{}", body.id.0),
+        "name": format!("{} {}", water_body_label(body.kind), body.id.0),
+        "kind": kind,
+        "bodyType": water_body_type(body.kind),
+        "center": [center.x, body.surface_y, center.z],
+        "surfaceY": body.surface_y,
+        "waveAmplitude": wave_amplitude,
+        "waveSpeed": wave_speed,
+        "waveScale": wave_scale,
+        "waveCount": wave_count,
+        "reflectionStrength": body.reflection_strength,
+        "fresnelPower": body.fresnel_power,
+        "distortionStrength": body.distortion_strength,
+        "shallowColor": shallow_color,
+        "deepColor": deep_color,
+        "clarity": water_body_clarity(body.kind),
+        "murkiness": water_body_murkiness(body.kind),
+        "foamEnabled": matches!(body.kind, WaterBodyKind::Ocean | WaterBodyKind::River),
+        "shoreFoam": if matches!(body.kind, WaterBodyKind::Ocean | WaterBodyKind::River) { 0.65 } else { 0.25 },
+        "waveCrestFoam": if matches!(body.kind, WaterBodyKind::Ocean | WaterBodyKind::River) { 0.58 } else { 0.2 },
+        "baseAlpha": if matches!(body.kind, WaterBodyKind::Ocean) { 0.91 } else { 0.86 },
+        "detailNormalIntensity": if matches!(body.kind, WaterBodyKind::River) { 0.66 } else { 0.42 },
+        "detailScrollSpeed": if matches!(body.kind, WaterBodyKind::River) { 0.34 } else { 0.18 },
+        "reflectionStatus": {
+            "active": matches!(body.material_mode, WaterBodyMaterialMode::Fancy),
+            "sampleReflection": matches!(body.material_mode, WaterBodyMaterialMode::Fancy),
+            "reason": if matches!(body.material_mode, WaterBodyMaterialMode::Hidden) { "no-water" } else { "active" },
+            "resolutionScale": 1.0,
+            "effectiveHz": 30.0,
+            "enabled": !matches!(body.material_mode, WaterBodyMaterialMode::Hidden),
+            "debugViewMode": "Off",
+            "probeValid": true,
+            "lastProbeUpdateMs": 0.0,
+        },
+    })
+}
+
+fn water_body_kind_to_frontend(kind: WaterBodyKind) -> &'static str {
+    match kind {
+        WaterBodyKind::Ocean => "Ocean",
+        WaterBodyKind::Lake => "Lake",
+        WaterBodyKind::River => "River",
+        WaterBodyKind::Pond | WaterBodyKind::ShallowFlood => "Pond",
+        WaterBodyKind::Unknown => "Unknown",
+    }
+}
+
+fn water_body_label(kind: WaterBodyKind) -> &'static str {
+    match kind {
+        WaterBodyKind::Ocean => "Ocean",
+        WaterBodyKind::Lake => "Lake",
+        WaterBodyKind::River => "River",
+        WaterBodyKind::Pond => "Pond",
+        WaterBodyKind::ShallowFlood => "Shallow Flood",
+        WaterBodyKind::Unknown => "Water Body",
+    }
+}
+
+fn water_body_type(kind: WaterBodyKind) -> &'static str {
+    match kind {
+        WaterBodyKind::Ocean => "open_ocean",
+        WaterBodyKind::Lake => "still_lake",
+        WaterBodyKind::River => "fast_current",
+        WaterBodyKind::Pond => "slow_eddy",
+        WaterBodyKind::ShallowFlood => "shallow_flood",
+        WaterBodyKind::Unknown => "unknown",
+    }
+}
+
+fn water_body_colors(kind: WaterBodyKind) -> (&'static str, &'static str) {
+    match kind {
+        WaterBodyKind::Ocean => ("#82d8ff", "#0d3d8f"),
+        WaterBodyKind::Lake => ("#9ee8ff", "#1d5aa6"),
+        WaterBodyKind::River => ("#6bb0ff", "#2b56ad"),
+        WaterBodyKind::Pond | WaterBodyKind::ShallowFlood => ("#7ad2ff", "#1f4e97"),
+        WaterBodyKind::Unknown => ("#8bdcff", "#214f92"),
+    }
+}
+
+fn water_body_wave_defaults(kind: WaterBodyKind) -> (f32, f32, f32, u32) {
+    match kind {
+        WaterBodyKind::Ocean => (0.72, 0.88, 1.7, 12),
+        WaterBodyKind::Lake => (0.32, 0.42, 1.05, 5),
+        WaterBodyKind::River => (0.64, 1.1, 1.2, 10),
+        WaterBodyKind::Pond | WaterBodyKind::ShallowFlood => (0.18, 0.28, 0.9, 3),
+        WaterBodyKind::Unknown => (0.3, 0.4, 1.0, 4),
+    }
+}
+
+fn water_body_clarity(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.91,
+        WaterBodyKind::Lake => 0.88,
+        WaterBodyKind::River => 0.74,
+        WaterBodyKind::Pond | WaterBodyKind::ShallowFlood => 0.82,
+        WaterBodyKind::Unknown => 0.8,
+    }
+}
+
+fn water_body_murkiness(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.08,
+        WaterBodyKind::Lake => 0.04,
+        WaterBodyKind::River => 0.22,
+        WaterBodyKind::Pond | WaterBodyKind::ShallowFlood => 0.27,
+        WaterBodyKind::Unknown => 0.16,
+    }
 }
 
 const WORLD_SUMMARY_CHUNK_LIMIT: usize = 512;
@@ -905,5 +1041,48 @@ fn status_reason(status: u16) -> &'static str {
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
         _ => "OK",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voxel::meshing::WaterBodyId;
+
+    #[test]
+    fn world_summary_includes_runtime_water_bodies() {
+        let mut world = World::new();
+        let mut registry = WaterBodyRegistry::default();
+        registry.bodies.insert(
+            WaterBodyId(42),
+            WaterBodyInfo {
+                id: WaterBodyId(42),
+                kind: WaterBodyKind::Lake,
+                aabb_min: Vec3::new(10.0, 4.0, 20.0),
+                aabb_max: Vec3::new(30.0, 6.0, 60.0),
+                surface_y: 7.0,
+                surface_area: 800.0,
+                max_depth: 5,
+                average_depth: 2.5,
+                nearest_distance: 12.0,
+                visible_chunks: 3,
+                chunk_count: 4,
+                material_mode: WaterBodyMaterialMode::Fancy,
+                reflection_strength: 0.76,
+                fresnel_power: 4.5,
+                distortion_strength: 0.0045,
+            },
+        );
+        world.insert_resource(registry);
+
+        let water_bodies = frontend_water_bodies_payload(&world);
+
+        assert_eq!(water_bodies.len(), 1);
+        assert_eq!(water_bodies[0]["id"], json!("water-body-42"));
+        assert_eq!(water_bodies[0]["kind"], json!("Lake"));
+        assert_eq!(water_bodies[0]["center"], json!([20.0, 7.0, 40.0]));
+        let reflection_strength = water_bodies[0]["reflectionStrength"].as_f64().unwrap();
+        assert!((reflection_strength - 0.76).abs() < 0.0001);
+        assert_eq!(water_bodies[0]["reflectionStatus"]["active"], json!(true));
     }
 }
