@@ -6,7 +6,7 @@ import type { BackendResult, WorldSaveSummary } from "../backend/EditorBackendCl
 import { editorCommands, getCommand, runCommand } from "../commands/commandRegistry";
 import type { EditorCommandContext } from "../commands/commandTypes";
 import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
-import { runtimeCommandFailure } from "../runtime/runtimeSchemas";
+import { runtimeCommandFailure, runtimeCommandSuccess } from "../runtime/runtimeSchemas";
 import { mockChunks, mockMaterials, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import { createInitialEditorState, useEditorStore } from "./editorStore";
 import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntimeWarnings, getSelectedObject, getVisibleOutlinerNodes } from "./editorSelectors";
@@ -459,6 +459,70 @@ describe("editor command registry", () => {
     await runCommand("editor.atlas.saveMapping", createContext(undefined, runtimeClient));
     expect(runtimeClient.saveAtlasMappingCalled).toBe(true);
     expect(useEditorStore.getState().agentTimeline[0].message).toBe("Runtime write succeeded: Save atlas mapping.");
+  });
+
+  it("paints the selected voxel through the runtime client", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      setVoxelCalls: Array<{
+        readonly position: Parameters<MockRuntimeClient["setVoxel"]>[0];
+        readonly block: Parameters<MockRuntimeClient["setVoxel"]>[1];
+      }> = [];
+
+      override async setVoxel(position: Parameters<MockRuntimeClient["setVoxel"]>[0], block: Parameters<MockRuntimeClient["setVoxel"]>[1]) {
+        this.setVoxelCalls.push({ position, block });
+        return runtimeCommandSuccess({
+          position,
+          chunkId: "chunk-0-0-0",
+          block,
+          voxel: "Rock",
+          previousVoxel: "TopSoil",
+          currentVoxel: "Rock",
+          editResult: "applied" as const,
+        });
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    useEditorStore.getState().setSelection({
+      kind: "voxel",
+      chunkId: "chunk-0-0-0",
+      position: [3, 4, 5],
+      label: "TopSoil (3, 4, 5)",
+    });
+    useEditorStore.getState().updateBrushSettings({ materialBlockId: "rock" });
+
+    await runCommand("editor.voxel.paintMaterial", createContext(undefined, runtimeClient));
+
+    const state = useEditorStore.getState();
+    expect(runtimeClient.setVoxelCalls).toEqual([{ position: [3, 4, 5], block: "rock" }]);
+    expect(state.selection).toEqual({
+      kind: "voxel",
+      chunkId: "chunk-0-0-0",
+      position: [3, 4, 5],
+      label: "Rock (3, 4, 5)",
+    });
+    expect(state.dirtyState.dirtyChunkIds).toContain("chunk-0-0-0");
+    expect(state.commandHistory[0].commandId).toBe("editor.voxel.paintMaterial");
+  });
+
+  it("does not run voxel replacement without a voxel selection", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      setVoxelCalled = false;
+
+      override async setVoxel(position: Parameters<MockRuntimeClient["setVoxel"]>[0], block: Parameters<MockRuntimeClient["setVoxel"]>[1]) {
+        this.setVoxelCalled = true;
+        return super.setVoxel(position, block);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    const toastMessages: string[] = [];
+    useEditorStore.getState().setSelection({ kind: "chunk", id: "chunk-0-0-0", label: "Chunk 0,0,0" });
+
+    await runCommand("editor.voxel.replaceSelected", createContext(undefined, runtimeClient, toastMessages));
+
+    expect(runtimeClient.setVoxelCalled).toBe(false);
+    expect(toastMessages).toContain("warning:Select a runtime voxel before editing voxel material.");
   });
 
   it("has no duplicate command IDs", () => {

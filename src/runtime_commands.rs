@@ -21,8 +21,8 @@ use crate::voxel::persistence;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
-    ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, WORLD_RULES_PATH,
-    validate_protected_area,
+    ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, ProtectedEditIntent,
+    WORLD_RULES_PATH, validate_protected_area,
 };
 
 const ATLAS_TILE_COUNT: u32 = 64;
@@ -118,6 +118,11 @@ pub enum RuntimeWriteCommand {
     },
     #[serde(rename = "runtime.runWaterVisualProbe")]
     RunWaterVisualProbe {},
+    #[serde(rename = "runtime.setVoxel")]
+    SetVoxel {
+        position: [i32; 3],
+        block: FrontendVoxelBlock,
+    },
     #[serde(rename = "runtime.setViewportDebugOverlay")]
     SetViewportDebugOverlay {
         overlay: FrontendViewportDebugOverlay,
@@ -160,6 +165,35 @@ pub enum RuntimeWriteCommand {
     LoadProtectedAreas {},
     #[serde(rename = "runtime.saveWorldSnapshot")]
     SaveWorldSnapshot { reason: Option<String> },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendVoxelBlock {
+    Grass,
+    Dirt,
+    Rock,
+    Sand,
+}
+
+impl FrontendVoxelBlock {
+    fn as_runtime(self) -> VoxelType {
+        match self {
+            Self::Grass => VoxelType::TopSoil,
+            Self::Dirt => VoxelType::SubSoil,
+            Self::Rock => VoxelType::Rock,
+            Self::Sand => VoxelType::Sand,
+        }
+    }
+
+    fn as_frontend_str(self) -> &'static str {
+        match self {
+            Self::Grass => "grass",
+            Self::Dirt => "dirt",
+            Self::Rock => "rock",
+            Self::Sand => "sand",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -645,6 +679,7 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
             }
         }
         RuntimeWriteCommand::SetRenderQuality { .. }
+        | RuntimeWriteCommand::SetVoxel { .. }
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
         | RuntimeWriteCommand::SaveProtectedAreas {}
@@ -706,6 +741,18 @@ fn execute_runtime_write_command(
         }
         RuntimeWriteCommand::RunWaterVisualProbe {} => {
             RuntimeCommandResult::success(water_visual_probe_payload(world))
+        }
+        RuntimeWriteCommand::SetVoxel { position, block } => {
+            match set_runtime_voxel(
+                world,
+                IVec3::new(position[0], position[1], position[2]),
+                block,
+            ) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
         }
         RuntimeWriteCommand::SetViewportDebugOverlay { overlay, enabled } => {
             set_viewport_debug_overlay(world, overlay, enabled);
@@ -940,6 +987,60 @@ fn mark_chunk_dirty(world: &mut World, chunk_pos: IVec3) -> Result<(), String> {
 
     chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
     Ok(())
+}
+
+fn set_runtime_voxel(
+    world: &mut World,
+    position: IVec3,
+    block: FrontendVoxelBlock,
+) -> Result<Value, String> {
+    let voxel = block.as_runtime();
+    let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
+    let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
+        return Err("VoxelWorld resource is not available.".to_string());
+    };
+
+    let previous = voxel_world.get_voxel(position);
+    let result = voxel_world.set_voxel_with_rules(
+        position,
+        voxel,
+        ProtectedEditIntent::Paint,
+        registry.as_ref(),
+    );
+    let current = voxel_world.get_voxel(position);
+
+    if result.rejected() {
+        return Err(format!(
+            "Voxel edit at ({}, {}, {}) was rejected: {}.",
+            position.x,
+            position.y,
+            position.z,
+            voxel_edit_result_to_frontend(result)
+        ));
+    }
+
+    let chunk = VoxelWorld::world_to_chunk(position);
+    Ok(json!({
+        "position": [position.x, position.y, position.z],
+        "chunkId": format!("chunk-{}-{}-{}", chunk.x, chunk.y, chunk.z),
+        "block": block.as_frontend_str(),
+        "voxel": voxel_material_name(voxel),
+        "previousVoxel": previous.map(voxel_material_name),
+        "currentVoxel": current.map(voxel_material_name),
+        "editResult": voxel_edit_result_to_frontend(result),
+    }))
+}
+
+fn voxel_edit_result_to_frontend(result: crate::voxel::world::VoxelEditResult) -> &'static str {
+    match result {
+        crate::voxel::world::VoxelEditResult::Applied => "applied",
+        crate::voxel::world::VoxelEditResult::NoChange => "noChange",
+        crate::voxel::world::VoxelEditResult::RejectedOutOfBounds => "rejectedOutOfBounds",
+        crate::voxel::world::VoxelEditResult::RejectedBelowWorldFloor => "rejectedBelowWorldFloor",
+        crate::voxel::world::VoxelEditResult::RejectedUnbreakable => "rejectedUnbreakable",
+        crate::voxel::world::VoxelEditResult::RejectedMissingChunk => "rejectedMissingChunk",
+        crate::voxel::world::VoxelEditResult::RejectedProtectedArea => "rejectedProtectedArea",
+    }
 }
 
 fn set_atlas_mapping(world: &mut World, mut mapping: AtlasMapping) {
@@ -1275,6 +1376,8 @@ fn timestamp_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::MIN_BREAKABLE_Y;
+    use crate::voxel::chunk::Chunk;
 
     fn valid_mapping() -> FrontendAtlasMapping {
         FrontendAtlasMapping {
@@ -1414,6 +1517,39 @@ mod tests {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(data["viewportDebug"]["wireframe"], json!(true));
+    }
+
+    #[test]
+    fn set_voxel_runtime_command_mutates_voxel_world() {
+        let mut world = World::new();
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        voxel_world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_resource(voxel_world);
+
+        let position = IVec3::new(3, MIN_BREAKABLE_Y, 4);
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetVoxel {
+                position: [position.x, position.y, position.z],
+                block: FrontendVoxelBlock::Rock,
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("set voxel command should succeed");
+        };
+        assert_eq!(
+            data["position"],
+            json!([position.x, position.y, position.z])
+        );
+        assert_eq!(data["chunkId"], json!("chunk-0-0-0"));
+        assert_eq!(data["block"], json!("rock"));
+        assert_eq!(data["currentVoxel"], json!("Rock"));
+        assert_eq!(data["editResult"], json!("applied"));
+        assert_eq!(
+            world.resource::<VoxelWorld>().get_voxel(position),
+            Some(VoxelType::Rock)
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type {
+  BlockType,
   BlockAtlasMap,
   ChunkSummary,
   MockWaterRuntimeSnapshot,
@@ -113,6 +114,25 @@ export interface RuntimeFocusCameraResult {
 
 export interface RuntimeChunkRebuildResult {
   readonly queuedChunkIds: readonly string[];
+}
+
+export type RuntimeVoxelEditResult =
+  | "applied"
+  | "noChange"
+  | "rejectedOutOfBounds"
+  | "rejectedBelowWorldFloor"
+  | "rejectedUnbreakable"
+  | "rejectedMissingChunk"
+  | "rejectedProtectedArea";
+
+export interface RuntimeVoxelMutationResult {
+  readonly position: readonly [number, number, number];
+  readonly chunkId: string;
+  readonly block: BlockType;
+  readonly voxel: string;
+  readonly previousVoxel: string | null;
+  readonly currentVoxel: string | null;
+  readonly editResult: RuntimeVoxelEditResult;
 }
 
 export interface RuntimeWaterDebugModeResult {

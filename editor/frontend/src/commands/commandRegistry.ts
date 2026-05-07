@@ -405,6 +405,35 @@ const createAtlasAssignCommand = (
   },
 });
 
+const setSelectedVoxelMaterial = async (
+  ctx: EditorCommandContext,
+  commandLabel: string,
+  block: BlockType,
+): Promise<void> => {
+  const state = ctx.getState();
+  if (state.selection.kind !== "voxel") {
+    ctx.toast.warning("Select a runtime voxel before editing voxel material.");
+    return;
+  }
+
+  const result = unwrapRuntime(await ctx.runtimeClient.setVoxel(state.selection.position, block));
+  const position: [number, number, number] = [result.position[0], result.position[1], result.position[2]];
+  state.markDirty(result.chunkId);
+  state.setSelection({
+    kind: "voxel",
+    chunkId: result.chunkId,
+    position,
+    label: `${result.voxel} (${position[0]}, ${position[1]}, ${position[2]})`,
+  });
+  state.setActiveMode("voxel_paint");
+  state.setActiveTool("paint");
+  state.pushAgentTimelineEvent({
+    kind: "command",
+    message: `${commandLabel}: set voxel ${position.join(", ")} to ${result.voxel}.`,
+  });
+  ctx.toast.success(`${commandLabel} applied to runtime voxel.`);
+};
+
 const setSelectionToFallbackChunk = (ctx: EditorCommandContext): void => {
   const state = ctx.getState();
   const fallback = state.chunks[0];
@@ -986,34 +1015,25 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.voxel.paintMaterial",
     title: "Paint selected material",
-    description: "Mock paint operation using the active brush material.",
+    description: "Paint the selected runtime voxel with the active brush material.",
     category: "Voxels",
     keywords: ["voxel", "paint", "material"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
-      if (state.selection.kind !== "chunk") {
-        ctx.toast.warning("Select a chunk before painting voxels.");
-        return;
-      }
-
-      state.markDirty(state.selection.id);
-      state.pushAgentTimelineEvent({ kind: "command", message: `Painted ${state.selection.label} with ${state.brushSettings.materialBlockId}.` });
-      ctx.toast.info("Mock voxel material paint applied.");
-      ctx.getState().setActiveMode("voxel_paint");
+      await setSelectedVoxelMaterial(ctx, "Paint material", state.brushSettings.materialBlockId);
     },
   },
   {
     id: "editor.voxel.replaceSelected",
     title: "Replace selected voxel",
-    description: "Mock selected voxel replacement.",
+    description: "Replace the selected runtime voxel with the active brush material.",
     category: "Voxels",
     keywords: ["voxel", "replace", "selection"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
-      state.markDirty();
-      state.pushAgentTimelineEvent({ kind: "command", message: `Replaced selection (${state.selection.label}) via mocked voxel tool.` });
-      ctx.toast.info("Mock selected voxel replaced.");
-      ctx.getState().setActiveMode("voxel_paint");
+      await setSelectedVoxelMaterial(ctx, "Replace voxel", state.brushSettings.materialBlockId);
     },
   },
   {

@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -18,6 +18,7 @@ import type {
   RuntimeSaveSummary,
   RuntimeSelectEntityResult,
   RuntimeSnapshot,
+  RuntimeVoxelMutationResult,
   RuntimeViewportDebugState,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
@@ -123,6 +124,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.runWaterVisualProbe",
       requestId: makeRequestId("runtime.runWaterVisualProbe"),
       payload: {},
+    });
+  }
+
+  async setVoxel(position: readonly [number, number, number], block: BlockType): Promise<RuntimeCommandResult<RuntimeVoxelMutationResult>> {
+    return this.execute({
+      type: "runtime.setVoxel",
+      requestId: makeRequestId("runtime.setVoxel"),
+      payload: { position, block },
     });
   }
 

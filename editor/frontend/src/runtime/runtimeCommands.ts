@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode } from "../types/world";
 
 export type RuntimeCommandRequestType =
   | "runtime.selectEntity"
@@ -9,6 +9,7 @@ export type RuntimeCommandRequestType =
   | "runtime.setRenderQuality"
   | "runtime.setWaterReflectionDebugMode"
   | "runtime.runWaterVisualProbe"
+  | "runtime.setVoxel"
   | "runtime.setViewportDebugOverlay"
   | "runtime.setAtlasMapping"
   | "runtime.saveAtlasMapping"
@@ -34,6 +35,7 @@ export type RuntimeRebuildDirtyChunksCommand = RuntimeCommandRequestBase<"runtim
 export type RuntimeSetRenderQualityCommand = RuntimeCommandRequestBase<"runtime.setRenderQuality", { readonly preset: RenderQualityPreset }>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
+export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel", { readonly position: readonly [number, number, number]; readonly block: BlockType }>;
 export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
 export type RuntimeSetAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.setAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeSaveAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.saveAtlasMapping", { readonly mapping: BlockAtlasMap }>;
@@ -54,6 +56,7 @@ export type RuntimeCommandRequest =
   | RuntimeSetRenderQualityCommand
   | RuntimeSetWaterReflectionDebugModeCommand
   | RuntimeRunWaterVisualProbeCommand
+  | RuntimeSetVoxelCommand
   | RuntimeSetViewportDebugOverlayCommand
   | RuntimeSetAtlasMappingCommand
   | RuntimeSaveAtlasMappingCommand

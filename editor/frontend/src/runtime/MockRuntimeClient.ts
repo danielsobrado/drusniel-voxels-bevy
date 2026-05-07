@@ -1,7 +1,7 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type { RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
@@ -47,6 +47,19 @@ const boundsOverlap = (left: ProtectedArea["bounds"], right: ProtectedArea["boun
   left.max[1] >= right.min[1] &&
   left.min[2] <= right.max[2] &&
   left.max[2] >= right.min[2];
+
+const blockRuntimeName = (block: BlockType): string => {
+  switch (block) {
+    case "grass":
+      return "TopSoil";
+    case "dirt":
+      return "SubSoil";
+    case "rock":
+      return "Rock";
+    case "sand":
+      return "Sand";
+  }
+};
 
 export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
@@ -111,6 +124,19 @@ export class MockRuntimeClient implements RuntimeClient {
       reflectionStatus: { ...mockWaterRuntimeSnapshot.reflectionStatus, lastProbeUpdateMs: 3.1 },
       waterPresence: { ...mockWaterRuntimeSnapshot.waterPresence, nearestWaterDistance: 4.2 },
       capturedAt: new Date().toISOString(),
+    });
+  }
+
+  async setVoxel(position: readonly [number, number, number], block: BlockType) {
+    const chunk = position.map((coordinate) => Math.floor(coordinate / 16));
+    return runtimeCommandSuccess({
+      position,
+      chunkId: `chunk-${chunk[0]}-${chunk[1]}-${chunk[2]}`,
+      block,
+      voxel: blockRuntimeName(block),
+      previousVoxel: "Air",
+      currentVoxel: blockRuntimeName(block),
+      editResult: "applied" as const,
     });
   }
 
