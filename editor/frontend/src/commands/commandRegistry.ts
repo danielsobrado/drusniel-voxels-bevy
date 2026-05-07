@@ -803,9 +803,10 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.area.duplicateSelected",
     title: "Duplicate selected protected area",
-    description: "Duplicate the currently selected protected area as a mock operation.",
+    description: "Duplicate the selected protected area through the runtime rule registry.",
     category: "Areas",
     keywords: ["protected", "area", "duplicate", "copy"],
+    runtimeWrite: true,
     run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind !== "area") {
@@ -829,18 +830,28 @@ export const editorCommands: readonly EditorCommand[] = [
         bounds: createBounds([sourceArea.center[0] + 6, sourceArea.center[1], sourceArea.center[2] + 6], sourceArea.size),
       };
 
-      state.addProtectedArea(duplicate);
+      const validation = unwrapRuntime(await ctx.runtimeClient.validateProtectedAreaConflicts(duplicate));
+      const runtimeArea = unwrapRuntime(await ctx.runtimeClient.createProtectedArea(duplicate)).area;
+      state.addProtectedArea(runtimeArea);
       state.setActiveMode("area");
       state.setActiveTool("area");
-      state.setSelection({ kind: "area", id: duplicate.id, label: duplicate.name });
-      ctx.toast.success(`${sourceArea.name} duplicated.`);
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Duplicated protected area ${sourceArea.name}.` });
+      state.setSelection({ kind: "area", id: runtimeArea.id, label: runtimeArea.name });
+      if (validation.clear) {
+        ctx.toast.success(`${sourceArea.name} duplicated.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Duplicated protected area ${sourceArea.name} through runtime.` });
+      } else {
+        ctx.toast.warning(`${sourceArea.name} duplicated with warnings.`);
+        ctx.getState().pushAgentTimelineEvent({
+          kind: "warning",
+          message: `${runtimeArea.name} duplicate warning(s): ${validation.conflicts.map((conflict) => conflict.message).join(", ")}`,
+        });
+      }
     },
   },
   {
     id: "editor.area.deleteSelected",
     title: "Delete selected protected area",
-    description: "Delete the selected mocked protected area.",
+    description: "Delete the selected protected area from the runtime rule registry.",
     category: "Areas",
     keywords: ["protected", "area", "delete", "remove"],
     preconditions: ["selection.kind === area"],
@@ -866,7 +877,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.area.lockSelected",
     title: "Lock selected protected area",
-    description: "Lock the selected mocked protected area.",
+    description: "Lock the selected protected area in the runtime rule registry.",
     category: "Areas",
     keywords: ["protected", "area", "lock"],
     runtimeWrite: true,
@@ -887,7 +898,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.area.unlockSelected",
     title: "Unlock selected protected area",
-    description: "Unlock the selected mocked protected area.",
+    description: "Unlock the selected protected area in the runtime rule registry.",
     category: "Areas",
     keywords: ["protected", "area", "unlock"],
     runtimeWrite: true,

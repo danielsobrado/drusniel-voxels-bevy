@@ -246,6 +246,16 @@ describe("editor command registry", () => {
   });
 
   it("duplicates the selected protected area", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      createProtectedAreaCalled = false;
+
+      override async createProtectedArea(area: Parameters<MockRuntimeClient["createProtectedArea"]>[0]) {
+        this.createProtectedAreaCalled = true;
+        return super.createProtectedArea(area);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
     await runCommand("editor.area.createUnbreakableBox", createContext());
     const createdState = useEditorStore.getState();
     if (createdState.selection.kind !== "area") {
@@ -253,7 +263,7 @@ describe("editor command registry", () => {
     }
     const createdAreaId = createdState.selection.id;
 
-    await runCommand("editor.area.duplicateSelected", createContext());
+    await runCommand("editor.area.duplicateSelected", createContext(undefined, runtimeClient));
 
     const state = useEditorStore.getState();
     expect(state.protectedAreas).toHaveLength(5);
@@ -264,6 +274,7 @@ describe("editor command registry", () => {
     expect(state.selection.id).not.toBe(createdAreaId);
     expect(state.selection.label).toContain("Copy");
     expect(state.commandHistory[0].commandId).toBe("editor.area.duplicateSelected");
+    expect(runtimeClient.createProtectedAreaCalled).toBe(true);
   });
 
   it("locks, unlocks, and focuses a protected area through commands", async () => {
