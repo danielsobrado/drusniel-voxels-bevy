@@ -113,6 +113,7 @@ const setRuntimeRenderFeature = async (
       ambientOcclusion: result.metrics.ambientOcclusion,
       lightingAtmosphere: result.metrics.lightingAtmosphere,
       graphicsCapabilities: result.metrics.graphicsCapabilities,
+      cinematicPhotoMode: result.metrics.cinematicPhotoMode,
     },
   }));
 };
@@ -1673,30 +1674,30 @@ export const editorCommands: readonly EditorCommand[] = [
       await setRuntimeRenderFeature(ctx, "fog", enabled);
     },
   },
-  runtimeSettingCommand(
-    "editor.debug.togglePhotoMode",
-    "Toggle photo mode",
-    "Mock toggle cinematic photo mode.",
-    (metrics) => ({
-      ...metrics,
-      cinematicPhotoMode: {
-        ...metrics.cinematicPhotoMode,
-        photoModeActive: !metrics.cinematicPhotoMode.photoModeActive,
-      },
-    }),
-  ),
-  runtimeSettingCommand(
-    "editor.debug.toggleCinematicMode",
-    "Toggle cinematic mode",
-    "Mock toggle cinematic rendering mode.",
-    (metrics) => ({
-      ...metrics,
-      cinematicPhotoMode: {
-        ...metrics.cinematicPhotoMode,
-        cinematicModeActive: !metrics.cinematicPhotoMode.cinematicModeActive,
-      },
-    }),
-  ),
+  {
+    id: "editor.debug.togglePhotoMode",
+    title: "Toggle photo mode",
+    description: "Toggle runtime photo mode.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "photo", "cinematic"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.cinematicPhotoMode.photoModeActive;
+      await setRuntimeRenderFeature(ctx, "photoMode", enabled);
+    },
+  },
+  {
+    id: "editor.debug.toggleCinematicMode",
+    title: "Toggle cinematic mode",
+    description: "Toggle runtime cinematic effects.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "cinematic", "photo"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.cinematicPhotoMode.cinematicModeActive;
+      await setRuntimeRenderFeature(ctx, "cinematicMode", enabled);
+    },
+  },
   {
     id: "editor.debug.toggleRayTracingFlag",
     title: "Toggle ray tracing flag",

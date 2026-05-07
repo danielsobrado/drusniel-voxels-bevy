@@ -15,8 +15,13 @@ use crate::props::instanced_render::PropBoundsDebugSettings;
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::cinematic::{
+    CinematicCamera, CinematicState, dof_component, motion_blur_component,
+};
+use crate::rendering::cinematic_config::CinematicConfig;
 use crate::rendering::god_rays::GodRayConfig;
 use crate::rendering::gtao::GtaoSettings;
+use crate::rendering::photo_mode::PhotoModeState;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::shadow_budget::ShadowBudgetConfig;
@@ -276,6 +281,8 @@ pub enum FrontendRenderFeatureFlag {
     BakedAo,
     ShadowBudget,
     RayTracing,
+    PhotoMode,
+    CinematicMode,
     Fog,
     GodRays,
 }
@@ -288,6 +295,8 @@ impl FrontendRenderFeatureFlag {
             Self::BakedAo => "bakedAo",
             Self::ShadowBudget => "shadowBudget",
             Self::RayTracing => "rayTracing",
+            Self::PhotoMode => "photoMode",
+            Self::CinematicMode => "cinematicMode",
             Self::Fog => "fog",
             Self::GodRays => "godRays",
         }
@@ -1236,6 +1245,8 @@ fn set_render_feature_flag(
         }
         FrontendRenderFeatureFlag::ShadowBudget => set_shadow_budget_enabled(world, enabled),
         FrontendRenderFeatureFlag::RayTracing => set_ray_tracing_enabled(world, enabled),
+        FrontendRenderFeatureFlag::PhotoMode => set_photo_mode_enabled(world, enabled),
+        FrontendRenderFeatureFlag::CinematicMode => set_cinematic_mode_enabled(world, enabled),
         FrontendRenderFeatureFlag::Fog => set_fog_enabled(world, enabled),
         FrontendRenderFeatureFlag::GodRays => set_god_rays_enabled(world, enabled, value),
     }
@@ -1246,6 +1257,78 @@ fn set_render_feature_flag(
         "value": render_feature_value(world, feature),
         "metrics": render_feature_metrics_payload(world),
     }))
+}
+
+fn set_photo_mode_enabled(world: &mut World, enabled: bool) {
+    let config = world
+        .get_resource::<CinematicConfig>()
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(mut state) = world.get_resource_mut::<PhotoModeState>() {
+        state.active = enabled;
+        if enabled {
+            state.focal_distance = config.depth_of_field.focal_distance;
+            state.aperture = config.depth_of_field.aperture_f_stops;
+            state.blur_enabled = config.depth_of_field.enabled;
+        }
+    } else {
+        world.insert_resource(PhotoModeState {
+            active: enabled,
+            focal_distance: if enabled {
+                config.depth_of_field.focal_distance
+            } else {
+                0.0
+            },
+            aperture: if enabled {
+                config.depth_of_field.aperture_f_stops
+            } else {
+                0.0
+            },
+            blur_enabled: enabled && config.depth_of_field.enabled,
+        });
+    }
+}
+
+fn set_cinematic_mode_enabled(world: &mut World, enabled: bool) {
+    let config = world
+        .get_resource::<CinematicConfig>()
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(mut state) = world.get_resource_mut::<CinematicState>() {
+        state.active = enabled;
+        state.target_focal_distance = config.depth_of_field.focal_distance;
+        state.current_focal_distance = config.depth_of_field.focal_distance;
+        state.transition_timer = None;
+    } else {
+        world.insert_resource(CinematicState {
+            active: enabled,
+            transition_timer: None,
+            target_focal_distance: config.depth_of_field.focal_distance,
+            current_focal_distance: config.depth_of_field.focal_distance,
+        });
+    }
+
+    let dof = dof_component(&config);
+    let motion_blur = motion_blur_component(&config);
+    let mut cameras = world.query_filtered::<Entity, With<CinematicCamera>>();
+    let camera_entities = cameras.iter(world).collect::<Vec<_>>();
+    for entity in camera_entities {
+        let mut entity_mut = world.entity_mut(entity);
+        if enabled {
+            if let Some(dof) = dof.clone() {
+                entity_mut.insert(dof);
+            }
+            if let Some(motion_blur) = motion_blur.clone() {
+                entity_mut.insert(motion_blur);
+            }
+        } else {
+            entity_mut
+                .remove::<bevy::post_process::dof::DepthOfField>()
+                .remove::<bevy::post_process::motion_blur::MotionBlur>();
+        }
+    }
 }
 
 fn set_ray_tracing_enabled(world: &mut World, enabled: bool) {
@@ -1556,15 +1639,7 @@ fn runtime_metrics_payload(
             "primarySteps": 12,
             "lightSteps": 8,
         },
-        "cinematicPhotoMode": {
-            "photoModeActive": false,
-            "focalDistance": 120,
-            "aperture": 1.8,
-            "blurEnabled": true,
-            "depthOfFieldMode": "Bokeh",
-            "motionBlurSamples": 8,
-            "cinematicModeActive": false,
-        },
+        "cinematicPhotoMode": render_features["cinematicPhotoMode"].clone(),
         "graphicsCapabilities": graphics_capabilities_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
@@ -1584,6 +1659,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
             "enabled": render_feature_enabled(world, FrontendRenderFeatureFlag::ShadowBudget),
         },
         "graphicsCapabilities": graphics_capabilities_payload(world),
+        "cinematicPhotoMode": cinematic_photo_payload(world),
         "ambientOcclusion": {
             "gtaoEnabled": gtao.is_some_and(|config| config.enabled),
             "gtaoQuality": gtao
@@ -1633,6 +1709,14 @@ fn render_feature_enabled(world: &World, feature: FrontendRenderFeatureFlag) -> 
             .get_resource::<RayTracingSettings>()
             .map(|settings| settings.enabled)
             .unwrap_or(false),
+        FrontendRenderFeatureFlag::PhotoMode => world
+            .get_resource::<PhotoModeState>()
+            .map(|state| state.active)
+            .unwrap_or(false),
+        FrontendRenderFeatureFlag::CinematicMode => world
+            .get_resource::<CinematicState>()
+            .map(|state| state.active)
+            .unwrap_or(false),
         FrontendRenderFeatureFlag::Fog => world
             .get_resource::<FogConfig>()
             .is_some_and(|config| config.distance.enabled || config.volumetric.enabled),
@@ -1655,6 +1739,9 @@ fn render_feature_value(world: &World, feature: FrontendRenderFeatureFlag) -> Va
             json!(render_feature_enabled(world, feature))
         }
         FrontendRenderFeatureFlag::RayTracing => json!(render_feature_enabled(world, feature)),
+        FrontendRenderFeatureFlag::PhotoMode | FrontendRenderFeatureFlag::CinematicMode => {
+            json!(render_feature_enabled(world, feature))
+        }
         FrontendRenderFeatureFlag::GodRays => json!(
             world
                 .get_resource::<GodRayConfig>()
@@ -1691,6 +1778,33 @@ fn baked_ao_strength(world: &World) -> f32 {
                 }
             })
             .unwrap_or(0.0)
+    })
+}
+
+fn cinematic_photo_payload(world: &World) -> Value {
+    let photo = world.get_resource::<PhotoModeState>();
+    let cinematic = world.get_resource::<CinematicState>();
+    let config = world
+        .get_resource::<CinematicConfig>()
+        .cloned()
+        .unwrap_or_default();
+
+    json!({
+        "photoModeActive": photo.map(|state| state.active).unwrap_or(false),
+        "focalDistance": photo
+            .map(|state| state.focal_distance)
+            .filter(|distance| *distance > 0.0)
+            .unwrap_or(config.depth_of_field.focal_distance),
+        "aperture": photo
+            .map(|state| state.aperture)
+            .filter(|aperture| *aperture > 0.0)
+            .unwrap_or(config.depth_of_field.aperture_f_stops),
+        "blurEnabled": photo
+            .map(|state| state.blur_enabled)
+            .unwrap_or(config.depth_of_field.enabled),
+        "depthOfFieldMode": config.depth_of_field.mode,
+        "motionBlurSamples": config.motion_blur.samples,
+        "cinematicModeActive": cinematic.map(|state| state.active).unwrap_or(false),
     })
 }
 
@@ -2104,6 +2218,58 @@ mod tests {
         };
         assert_eq!(
             data["metrics"]["graphicsCapabilities"]["rayTracingSupported"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn cinematic_photo_commands_update_runtime_metrics() {
+        let mut world = World::new();
+        world.insert_resource(crate::rendering::photo_mode::PhotoModeState::default());
+        world.insert_resource(crate::rendering::cinematic::CinematicState::default());
+        world.insert_resource(crate::rendering::cinematic_config::CinematicConfig::default());
+
+        let photo_result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::PhotoMode,
+                enabled: true,
+                value: None,
+            },
+        );
+        let RuntimeCommandResult::Success { data, .. } = photo_result else {
+            panic!("photo mode command should succeed");
+        };
+        assert_eq!(
+            data["metrics"]["cinematicPhotoMode"]["photoModeActive"],
+            json!(true)
+        );
+
+        let cinematic_result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::CinematicMode,
+                enabled: true,
+                value: None,
+            },
+        );
+        let RuntimeCommandResult::Success { data, .. } = cinematic_result else {
+            panic!("cinematic command should succeed");
+        };
+        assert_eq!(
+            data["metrics"]["cinematicPhotoMode"]["cinematicModeActive"],
+            json!(true)
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+        assert_eq!(
+            data["metrics"]["cinematicPhotoMode"]["photoModeActive"],
+            json!(true)
+        );
+        assert_eq!(
+            data["metrics"]["cinematicPhotoMode"]["cinematicModeActive"],
             json!(true)
         );
     }

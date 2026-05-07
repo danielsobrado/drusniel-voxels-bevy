@@ -1,7 +1,7 @@
 import type { BrushSettings, EditorMode, RenderQualityPreset, Selection } from "./editor";
 
 export type GtaoQuality = "low" | "medium" | "high";
-export type RenderFeatureFlag = "gtao" | "ssao" | "bakedAo" | "shadowBudget" | "rayTracing" | "fog" | "godRays";
+export type RenderFeatureFlag = "gtao" | "ssao" | "bakedAo" | "shadowBudget" | "rayTracing" | "photoMode" | "cinematicMode" | "fog" | "godRays";
 
 export interface RenderQualityReadouts {
   readonly propLodDistanceScale: number;

@@ -145,6 +145,18 @@ export class MockRuntimeClient implements RuntimeClient {
           graphicsCapabilities: { ...metrics.graphicsCapabilities, rayTracingSupported: enabled },
         };
         break;
+      case "photoMode":
+        this.runtimeMetrics = {
+          ...metrics,
+          cinematicPhotoMode: { ...metrics.cinematicPhotoMode, photoModeActive: enabled },
+        };
+        break;
+      case "cinematicMode":
+        this.runtimeMetrics = {
+          ...metrics,
+          cinematicPhotoMode: { ...metrics.cinematicPhotoMode, cinematicModeActive: enabled },
+        };
+        break;
       case "fog":
         this.runtimeMetrics = {
           ...metrics,
@@ -172,6 +184,7 @@ export class MockRuntimeClient implements RuntimeClient {
         ambientOcclusion: this.runtimeMetrics.ambientOcclusion,
         lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
         graphicsCapabilities: this.runtimeMetrics.graphicsCapabilities,
+        cinematicPhotoMode: this.runtimeMetrics.cinematicPhotoMode,
       },
     });
   }
