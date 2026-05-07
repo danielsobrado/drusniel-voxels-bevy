@@ -347,6 +347,14 @@ pub struct WaterBodyRegistry {
 struct WaterMaskProxy;
 
 impl WaterBodyRegistry {
+    pub fn recount(&mut self) {
+        self.reset_counts();
+        let bodies = self.bodies.values().cloned().collect::<Vec<_>>();
+        for body in &bodies {
+            self.count_body(body);
+        }
+    }
+
     fn reset_counts(&mut self) {
         self.total = 0;
         self.ocean = 0;

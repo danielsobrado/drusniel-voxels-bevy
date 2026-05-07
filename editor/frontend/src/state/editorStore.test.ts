@@ -317,11 +317,26 @@ describe("editor command registry", () => {
   });
 
   it("applies a water preset through command registry", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      waterBodyRequest: Parameters<MockRuntimeClient["updateWaterBody"]> | null = null;
+
+      override async updateWaterBody(
+        waterBodyId: Parameters<MockRuntimeClient["updateWaterBody"]>[0],
+        patch: Parameters<MockRuntimeClient["updateWaterBody"]>[1],
+      ) {
+        this.waterBodyRequest = [waterBodyId, patch];
+        return super.updateWaterBody(waterBodyId, patch);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
-    await runCommand("editor.water.applyRiverPreset", createContext());
+    await runCommand("editor.water.applyRiverPreset", createContext(undefined, runtimeClient));
 
     const state = useEditorStore.getState();
     const water = state.waterBodies.find((candidate) => candidate.id === "water-lk-03");
+    expect(runtimeClient.waterBodyRequest?.[0]).toBe("water-lk-03");
+    expect(runtimeClient.waterBodyRequest?.[1]).toMatchObject({ kind: "River", reflectionStrength: 0.81 });
     expect(water?.kind).toBe("River");
     expect(water?.waveAmplitude).toBe(0.64);
     expect(water?.waveCount).toBe(10);

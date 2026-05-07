@@ -16,8 +16,9 @@ use crate::rendering::water_reflection::{
 };
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::voxel::chunk::MeshDirtyReason;
-use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::meshing::{WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
+use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
@@ -115,6 +116,12 @@ pub enum RuntimeWriteCommand {
         #[serde(rename = "waterBodyId")]
         water_body_id: String,
         mode: FrontendWaterReflectionDebugViewMode,
+    },
+    #[serde(rename = "runtime.updateWaterBody")]
+    UpdateWaterBody {
+        #[serde(rename = "waterBodyId")]
+        water_body_id: String,
+        patch: FrontendWaterBodyPatch,
     },
     #[serde(rename = "runtime.runWaterVisualProbe")]
     RunWaterVisualProbe {},
@@ -244,6 +251,36 @@ pub enum FrontendWaterReflectionDebugViewMode {
     Mask,
     ReflectionOnly,
     BlendFactor,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum FrontendWaterBodyKind {
+    Ocean,
+    Lake,
+    River,
+    Pond,
+    Unknown,
+}
+
+impl FrontendWaterBodyKind {
+    fn as_runtime(self) -> WaterBodyKind {
+        match self {
+            Self::Ocean => WaterBodyKind::Ocean,
+            Self::Lake => WaterBodyKind::Lake,
+            Self::River => WaterBodyKind::River,
+            Self::Pond => WaterBodyKind::Pond,
+            Self::Unknown => WaterBodyKind::Unknown,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendWaterBodyPatch {
+    pub kind: Option<FrontendWaterBodyKind>,
+    pub reflection_strength: Option<f32>,
+    pub fresnel_power: Option<f32>,
+    pub distortion_strength: Option<f32>,
 }
 
 impl FrontendWaterReflectionDebugViewMode {
@@ -639,6 +676,17 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 errors.push("waterBodyId is required.".to_string());
             }
         }
+        RuntimeWriteCommand::UpdateWaterBody {
+            water_body_id,
+            patch,
+        } => {
+            if parse_water_body_id(water_body_id).is_none() {
+                errors.push(format!(
+                    "waterBodyId '{water_body_id}' must look like water-body-n or a numeric id."
+                ));
+            }
+            validate_water_body_patch(patch, &mut errors);
+        }
         RuntimeWriteCommand::RebuildSelectedChunk { chunk_id } => {
             if parse_chunk_id(chunk_id).is_none() {
                 errors.push(format!(
@@ -739,6 +787,13 @@ fn execute_runtime_write_command(
                 "mode": mode.as_frontend_str(),
             }))
         }
+        RuntimeWriteCommand::UpdateWaterBody {
+            water_body_id,
+            patch,
+        } => match update_runtime_water_body(world, &water_body_id, patch) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
         RuntimeWriteCommand::RunWaterVisualProbe {} => {
             RuntimeCommandResult::success(water_visual_probe_payload(world))
         }
@@ -1029,6 +1084,53 @@ fn set_runtime_voxel(
         "currentVoxel": current.map(voxel_material_name),
         "editResult": voxel_edit_result_to_frontend(result),
     }))
+}
+
+fn update_runtime_water_body(
+    world: &mut World,
+    water_body_id: &str,
+    patch: FrontendWaterBodyPatch,
+) -> Result<Value, String> {
+    let Some(id) = parse_water_body_id(water_body_id) else {
+        return Err(format!(
+            "Water body id '{water_body_id}' must look like water-body-n or a numeric id."
+        ));
+    };
+    let Some(mut registry) = world.get_resource_mut::<WaterBodyRegistry>() else {
+        return Err("WaterBodyRegistry resource is not available.".to_string());
+    };
+
+    let Some(body) = registry.bodies.get_mut(&id) else {
+        return Err(format!(
+            "Water body '{water_body_id}' does not exist in the runtime."
+        ));
+    };
+
+    if let Some(kind) = patch.kind {
+        body.kind = kind.as_runtime();
+    }
+    if let Some(reflection_strength) = patch.reflection_strength {
+        body.reflection_strength = reflection_strength;
+    }
+    if let Some(fresnel_power) = patch.fresnel_power {
+        body.fresnel_power = fresnel_power;
+    }
+    if let Some(distortion_strength) = patch.distortion_strength {
+        body.distortion_strength = distortion_strength;
+    }
+
+    let payload = json!({
+        "waterBody": {
+            "id": format!("water-body-{}", body.id.0),
+            "kind": water_kind_to_frontend(body.kind),
+            "reflectionStrength": body.reflection_strength,
+            "fresnelPower": body.fresnel_power,
+            "distortionStrength": body.distortion_strength,
+        },
+    });
+    registry.recount();
+
+    Ok(payload)
 }
 
 fn voxel_edit_result_to_frontend(result: crate::voxel::world::VoxelEditResult) -> &'static str {
@@ -1337,6 +1439,28 @@ fn parse_chunk_id(chunk_id: &str) -> Option<IVec3> {
     }
 }
 
+fn parse_water_body_id(water_body_id: &str) -> Option<WaterBodyId> {
+    let raw = water_body_id
+        .strip_prefix("water-body-")
+        .unwrap_or(water_body_id);
+    let id = raw.parse::<u32>().ok()?;
+    Some(WaterBodyId(id))
+}
+
+fn validate_water_body_patch(patch: &FrontendWaterBodyPatch, errors: &mut Vec<String>) {
+    for (field, value) in [
+        ("reflectionStrength", patch.reflection_strength),
+        ("fresnelPower", patch.fresnel_power),
+        ("distortionStrength", patch.distortion_strength),
+    ] {
+        if let Some(value) = value {
+            if !value.is_finite() || value < 0.0 {
+                errors.push(format!("{field} must be a finite non-negative number."));
+            }
+        }
+    }
+}
+
 fn debug_mode_to_frontend(mode: WaterReflectionDebugViewMode) -> &'static str {
     match mode {
         WaterReflectionDebugViewMode::Off => "Off",
@@ -1378,6 +1502,7 @@ mod tests {
     use super::*;
     use crate::constants::MIN_BREAKABLE_Y;
     use crate::voxel::chunk::Chunk;
+    use crate::voxel::plugin::WaterBodyInfo;
 
     fn valid_mapping() -> FrontendAtlasMapping {
         FrontendAtlasMapping {
@@ -1550,6 +1675,61 @@ mod tests {
             world.resource::<VoxelWorld>().get_voxel(position),
             Some(VoxelType::Rock)
         );
+    }
+
+    #[test]
+    fn update_water_body_runtime_command_mutates_registry() {
+        let mut world = World::new();
+        let mut registry = WaterBodyRegistry::default();
+        registry.bodies.insert(
+            WaterBodyId(42),
+            WaterBodyInfo {
+                id: WaterBodyId(42),
+                kind: WaterBodyKind::Lake,
+                aabb_min: Vec3::ZERO,
+                aabb_max: Vec3::new(16.0, 2.0, 16.0),
+                surface_y: 4.0,
+                surface_area: 256.0,
+                max_depth: 3,
+                average_depth: 1.5,
+                nearest_distance: 10.0,
+                visible_chunks: 1,
+                chunk_count: 1,
+                material_mode: WaterBodyMaterialMode::Fancy,
+                reflection_strength: 0.76,
+                fresnel_power: 4.5,
+                distortion_strength: 0.0045,
+            },
+        );
+        registry.recount();
+        world.insert_resource(registry);
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::UpdateWaterBody {
+                water_body_id: "water-body-42".to_string(),
+                patch: FrontendWaterBodyPatch {
+                    kind: Some(FrontendWaterBodyKind::River),
+                    reflection_strength: Some(0.81),
+                    fresnel_power: Some(3.7),
+                    distortion_strength: Some(0.16),
+                },
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("update water body command should succeed");
+        };
+        assert_eq!(data["waterBody"]["id"], json!("water-body-42"));
+        assert_eq!(data["waterBody"]["kind"], json!("River"));
+        let reflection_strength = data["waterBody"]["reflectionStrength"].as_f64().unwrap();
+        assert!((reflection_strength - 0.81).abs() < 0.0001);
+
+        let registry = world.resource::<WaterBodyRegistry>();
+        let body = registry.bodies.get(&WaterBodyId(42)).unwrap();
+        assert_eq!(body.kind, WaterBodyKind::River);
+        assert_eq!(registry.river, 1);
+        assert_eq!(registry.lake, 0);
     }
 
     #[test]

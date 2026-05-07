@@ -7,6 +7,7 @@ import type {
   PropStats,
   ProtectedArea,
   ProtectedAreaRuleMatrix,
+  WaterBody,
   WaterReflectionDebugViewMode,
   WaterReflectionStatus,
 } from "../types/world";
@@ -138,6 +139,10 @@ export interface RuntimeVoxelMutationResult {
 export interface RuntimeWaterDebugModeResult {
   readonly waterBodyId: string;
   readonly mode: WaterReflectionDebugViewMode;
+}
+
+export interface RuntimeWaterBodyMutationResult {
+  readonly waterBody: Partial<WaterBody> & Pick<WaterBody, "id" | "kind" | "reflectionStrength" | "fresnelPower" | "distortionStrength">;
 }
 
 export interface RuntimeSaveSummary {

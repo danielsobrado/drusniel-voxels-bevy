@@ -1,7 +1,7 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type { RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
@@ -116,6 +116,19 @@ export class MockRuntimeClient implements RuntimeClient {
 
   async setWaterReflectionDebugMode(waterBodyId: string, mode: WaterReflectionDebugViewMode) {
     return runtimeCommandSuccess({ waterBodyId, mode });
+  }
+
+  async updateWaterBody(waterBodyId: string, patch: Partial<WaterBody>) {
+    return runtimeCommandSuccess({
+      waterBody: {
+        id: waterBodyId,
+        kind: patch.kind ?? "Unknown",
+        reflectionStrength: patch.reflectionStrength ?? 0,
+        fresnelPower: patch.fresnelPower ?? 0,
+        distortionStrength: patch.distortionStrength ?? 0,
+        ...patch,
+      },
+    });
   }
 
   async runWaterVisualProbe() {

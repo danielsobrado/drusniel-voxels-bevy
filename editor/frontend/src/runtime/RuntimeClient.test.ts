@@ -82,6 +82,35 @@ describe("runtime clients", () => {
     });
   });
 
+  it("browser runtime client sends water body updates through the bridge", async () => {
+    const requests: unknown[] = [];
+    const client = new BrowserRuntimeClient({
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({
+          waterBody: {
+            id: "water-body-42",
+            kind: "River",
+            reflectionStrength: 0.81,
+            fresnelPower: 3.7,
+            distortionStrength: 0.16,
+          },
+        });
+      },
+    });
+
+    const result = await client.updateWaterBody("water-body-42", { kind: "River", reflectionStrength: 0.81 });
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]).toMatchObject({
+      type: "runtime.updateWaterBody",
+      payload: {
+        waterBodyId: "water-body-42",
+        patch: { kind: "River", reflectionStrength: 0.81 },
+      },
+    });
+  });
+
   it("mock runtime client validates atlas write result shape", async () => {
     const client = new MockRuntimeClient();
     const result = await client.setAtlasMapping(mockAtlasMapping);

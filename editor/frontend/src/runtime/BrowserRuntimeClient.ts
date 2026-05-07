@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -20,6 +20,7 @@ import type {
   RuntimeSnapshot,
   RuntimeVoxelMutationResult,
   RuntimeViewportDebugState,
+  RuntimeWaterBodyMutationResult,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
 } from "./runtimeSchemas";
@@ -116,6 +117,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.setWaterReflectionDebugMode",
       requestId: makeRequestId("runtime.setWaterReflectionDebugMode"),
       payload: { waterBodyId, mode },
+    });
+  }
+
+  async updateWaterBody(waterBodyId: string, patch: Partial<WaterBody>): Promise<RuntimeCommandResult<RuntimeWaterBodyMutationResult>> {
+    return this.execute({
+      type: "runtime.updateWaterBody",
+      requestId: makeRequestId("runtime.updateWaterBody"),
+      payload: { waterBodyId, patch },
     });
   }
 

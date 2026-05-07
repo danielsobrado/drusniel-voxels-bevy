@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
 
 export type RuntimeCommandRequestType =
   | "runtime.selectEntity"
@@ -8,6 +8,7 @@ export type RuntimeCommandRequestType =
   | "runtime.rebuildDirtyChunks"
   | "runtime.setRenderQuality"
   | "runtime.setWaterReflectionDebugMode"
+  | "runtime.updateWaterBody"
   | "runtime.runWaterVisualProbe"
   | "runtime.setVoxel"
   | "runtime.setViewportDebugOverlay"
@@ -34,6 +35,7 @@ export type RuntimeRebuildSelectedChunkCommand = RuntimeCommandRequestBase<"runt
 export type RuntimeRebuildDirtyChunksCommand = RuntimeCommandRequestBase<"runtime.rebuildDirtyChunks", { readonly chunkIds: readonly string[] }>;
 export type RuntimeSetRenderQualityCommand = RuntimeCommandRequestBase<"runtime.setRenderQuality", { readonly preset: RenderQualityPreset }>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
+export type RuntimeUpdateWaterBodyCommand = RuntimeCommandRequestBase<"runtime.updateWaterBody", { readonly waterBodyId: string; readonly patch: Partial<WaterBody> }>;
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
 export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel", { readonly position: readonly [number, number, number]; readonly block: BlockType }>;
 export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
@@ -55,6 +57,7 @@ export type RuntimeCommandRequest =
   | RuntimeRebuildDirtyChunksCommand
   | RuntimeSetRenderQualityCommand
   | RuntimeSetWaterReflectionDebugModeCommand
+  | RuntimeUpdateWaterBodyCommand
   | RuntimeRunWaterVisualProbeCommand
   | RuntimeSetVoxelCommand
   | RuntimeSetViewportDebugOverlayCommand

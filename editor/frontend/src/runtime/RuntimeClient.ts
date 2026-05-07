@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
   RuntimeAtlasMappingState,
@@ -18,6 +18,7 @@ import type {
   RuntimeSnapshot,
   RuntimeVoxelMutationResult,
   RuntimeViewportDebugState,
+  RuntimeWaterBodyMutationResult,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
 } from "./runtimeSchemas";
@@ -35,6 +36,7 @@ export interface RuntimeClient {
   readonly rebuildDirtyChunks: (chunkIds: readonly string[]) => Promise<RuntimeCommandResult<RuntimeChunkRebuildResult>>;
   readonly setRenderQuality: (preset: RenderQualityPreset) => Promise<RuntimeCommandResult<RuntimeRenderQualityState>>;
   readonly setWaterReflectionDebugMode: (waterBodyId: string, mode: WaterReflectionDebugViewMode) => Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>>;
+  readonly updateWaterBody: (waterBodyId: string, patch: Partial<WaterBody>) => Promise<RuntimeCommandResult<RuntimeWaterBodyMutationResult>>;
   readonly runWaterVisualProbe: () => Promise<RuntimeCommandResult<RuntimeWaterVisualProbeResult>>;
   readonly setVoxel: (position: readonly [number, number, number], block: BlockType) => Promise<RuntimeCommandResult<RuntimeVoxelMutationResult>>;
   readonly setViewportDebugOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => Promise<RuntimeCommandResult<RuntimeViewportDebugState>>;

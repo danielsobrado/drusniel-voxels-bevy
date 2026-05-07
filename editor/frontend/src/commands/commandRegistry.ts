@@ -243,7 +243,7 @@ const setReflectionModeCommand = (id: string, title: string, mode: WaterReflecti
   },
 });
 
-const waterPresets: Record<string, Partial<WaterBody>> = {
+const waterPresets: Record<string, Partial<Omit<WaterBody, "id">>> = {
   ocean: {
     kind: "Ocean",
     bodyType: "deep_ocean",
@@ -330,7 +330,20 @@ const waterPresets: Record<string, Partial<WaterBody>> = {
   },
 };
 
-const applyWaterPreset = (ctx: EditorCommandContext, presetKind: WaterBodyKind, values: Partial<WaterBody>) => {
+const updateRuntimeWaterBody = async (
+  ctx: EditorCommandContext,
+  water: WaterBody,
+  patch: Partial<Omit<WaterBody, "id">>,
+): Promise<void> => {
+  const result = unwrapRuntime(await ctx.runtimeClient.updateWaterBody(water.id, patch));
+  const { id: _runtimeId, ...runtimePatch } = result.waterBody;
+  ctx.getState().updateWaterBody(water.id, {
+    ...patch,
+    ...runtimePatch,
+  });
+};
+
+const applyWaterPreset = async (ctx: EditorCommandContext, presetKind: WaterBodyKind, values: Partial<Omit<WaterBody, "id">>) => {
   const state = ctx.getState();
   const water = selectWaterBody(state);
   if (!water) {
@@ -338,7 +351,7 @@ const applyWaterPreset = (ctx: EditorCommandContext, presetKind: WaterBodyKind, 
     return;
   }
 
-  state.updateWaterBody(water.id, {
+  await updateRuntimeWaterBody(ctx, water, {
     kind: presetKind,
     ...values,
   });
@@ -1191,7 +1204,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water kind to Ocean.",
     category: "Water",
     keywords: ["water", "classify", "ocean"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const water = selectWaterBody(state);
       if (!water) {
@@ -1199,7 +1213,7 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateWaterBody(water.id, { kind: "Ocean" });
+      await updateRuntimeWaterBody(ctx, water, { kind: "Ocean" });
       state.setActiveMode("water");
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Ocean.` });
     },
@@ -1210,7 +1224,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water kind to Lake.",
     category: "Water",
     keywords: ["water", "classify", "lake"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const water = selectWaterBody(state);
       if (!water) {
@@ -1218,7 +1233,7 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateWaterBody(water.id, { kind: "Lake" });
+      await updateRuntimeWaterBody(ctx, water, { kind: "Lake" });
       state.setActiveMode("water");
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Lake.` });
     },
@@ -1229,7 +1244,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water kind to River.",
     category: "Water",
     keywords: ["water", "classify", "river"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const water = selectWaterBody(state);
       if (!water) {
@@ -1237,7 +1253,7 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateWaterBody(water.id, { kind: "River" });
+      await updateRuntimeWaterBody(ctx, water, { kind: "River" });
       state.setActiveMode("water");
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as River.` });
     },
@@ -1248,7 +1264,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Set selected water kind to Pond.",
     category: "Water",
     keywords: ["water", "classify", "pond"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const water = selectWaterBody(state);
       if (!water) {
@@ -1256,7 +1273,7 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.updateWaterBody(water.id, { kind: "Pond" });
+      await updateRuntimeWaterBody(ctx, water, { kind: "Pond" });
       state.setActiveMode("water");
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Classified ${water.name} as Pond.` });
     },
@@ -1264,41 +1281,45 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.water.applyOceanPreset",
     title: "Apply ocean preset",
-    description: "Apply mocked ocean water parameter preset.",
+    description: "Apply ocean water parameters through the runtime.",
     category: "Water",
     keywords: ["water", "preset", "ocean"],
-    run: (ctx) => {
-      applyWaterPreset(ctx, "Ocean", waterPresets.ocean);
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await applyWaterPreset(ctx, "Ocean", waterPresets.ocean);
     },
   },
   {
     id: "editor.water.applyLakePreset",
     title: "Apply lake preset",
-    description: "Apply mocked lake water parameter preset.",
+    description: "Apply lake water parameters through the runtime.",
     category: "Water",
     keywords: ["water", "preset", "lake"],
-    run: (ctx) => {
-      applyWaterPreset(ctx, "Lake", waterPresets.lake);
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await applyWaterPreset(ctx, "Lake", waterPresets.lake);
     },
   },
   {
     id: "editor.water.applyRiverPreset",
     title: "Apply river preset",
-    description: "Apply mocked river water parameter preset.",
+    description: "Apply river water parameters through the runtime.",
     category: "Water",
     keywords: ["water", "preset", "river"],
-    run: (ctx) => {
-      applyWaterPreset(ctx, "River", waterPresets.river);
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await applyWaterPreset(ctx, "River", waterPresets.river);
     },
   },
   {
     id: "editor.water.applyPondPreset",
     title: "Apply pond preset",
-    description: "Apply mocked pond water parameter preset.",
+    description: "Apply pond water parameters through the runtime.",
     category: "Water",
     keywords: ["water", "preset", "pond"],
-    run: (ctx) => {
-      applyWaterPreset(ctx, "Pond", waterPresets.pond);
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await applyWaterPreset(ctx, "Pond", waterPresets.pond);
     },
   },
   {
