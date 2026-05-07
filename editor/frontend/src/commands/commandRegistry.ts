@@ -642,7 +642,7 @@ export const editorCommands: readonly EditorCommand[] = [
       const state = ctx.getState();
       ctx.getState().pushAgentTimelineEvent({
         kind: "observation",
-        message: `Editor handoff: mock frontend backend, ${state.chunks.length} chunks, ${state.protectedAreas.length} protected areas, ${state.waterBodies.length} water bodies, ${state.props.length} props.`,
+        message: `Editor handoff: ${state.runtimeState} runtime, ${state.chunks.length} chunks, ${state.protectedAreas.length} protected areas, ${state.waterBodies.length} water bodies, ${state.props.length} props.`,
       });
       ctx.toast.info("Editor handoff summary recorded.");
     },
@@ -734,7 +734,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.world.loadSummary",
     title: "Load world summary",
-    description: "Load a mocked world summary via backend client.",
+    description: "Load the current world summary through the editor backend client.",
     category: "World",
     keywords: ["world", "load", "summary", "backend"],
     run: async (ctx) => {
