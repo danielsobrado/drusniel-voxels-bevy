@@ -22,7 +22,7 @@ export function ProfilerPanel() {
       <PanelTitleBar title="Profiler" />
       <div className="panel-body">
         <h2 id="profiler-title" className="placeholder-heading">Profiler</h2>
-        <p className="agent-hint">Agent Hint: profiler values mirror mocked runtime metrics only.</p>
+        <p className="agent-hint">Agent Hint: profiler values refresh from the active runtime snapshot.</p>
         <dl className="metric-grid">
           <div><dt>FPS</dt><dd>{metrics.fps}</dd></div>
           <div><dt>Frame</dt><dd>{metrics.frameMs} ms</dd></div>

@@ -20,7 +20,7 @@ export function RenderTimingTable({ samples }: RenderTimingTableProps) {
     <section className="inspector-section" data-testid="render-timing-table">
       <div className="inspector-section-title">Render timing table</div>
       <div className="inspector-metric-grid">
-        {samples.length === 0 ? <p className="inspector-subnote">No mocked timing rows.</p> : null}
+        {samples.length === 0 ? <p className="inspector-subnote">No runtime timing rows.</p> : null}
         {samples.map((sample) => (
           <Fragment key={`${sample.label}-${sample.ms}`}>
             <RenderTimingRow sample={sample} />

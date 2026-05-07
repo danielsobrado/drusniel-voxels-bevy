@@ -1,6 +1,6 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
-import type { RuntimeCommandResult, RuntimeCommandStatus } from "../runtime/RuntimeClient";
+import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import { mockPropAssets } from "../mocks/mockWorld";
@@ -96,6 +96,22 @@ const setRuntimeViewportOverlay = async (
       ...viewportDebug,
     },
   }));
+};
+
+const applyRuntimeSnapshot = (ctx: EditorCommandContext, snapshot: RuntimeSnapshot): void => {
+  const state = ctx.getState();
+  ctx.setState({
+    runtimeState: snapshot.connectionState,
+    runtimeMetrics: snapshot.metrics,
+    viewportOverlays: {
+      ...state.viewportOverlays,
+      ...snapshot.viewportDebug,
+    },
+    consoleMessages:
+      snapshot.consoleEvents.length > 0
+        ? [...snapshot.consoleEvents, ...state.consoleMessages].slice(0, 250)
+        : state.consoleMessages,
+  });
 };
 
 const makeAreaId = (prefix: string, index: number): string => `${prefix}-${index}`;
@@ -1557,25 +1573,29 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.debug.openRenderTimings",
     title: "Open render timing table",
-    description: "Open mocked render timing view in profiler.",
+    description: "Refresh render timing rows from the runtime profiler.",
     category: "Debug",
     keywords: ["debug", "rendering", "timings", "profiler"],
-    run: (ctx) => {
+    run: async (ctx) => {
+      const snapshot = unwrapRuntime(await ctx.runtimeClient.getRuntimeSnapshot());
+      applyRuntimeSnapshot(ctx, snapshot);
       ctx.getState().setActiveMode("debug");
       ctx.getState().setActiveTool("debug");
-      ctx.toast.info("Render timing table opened in mocked profiler.");
+      ctx.toast.info("Render timing table refreshed from runtime.");
     },
   },
   {
     id: "editor.debug.openGraphicsCapabilities",
     title: "Open graphics capabilities",
-    description: "Open mocked graphics capabilities debug data.",
+    description: "Refresh graphics capabilities from the runtime profiler.",
     category: "Debug",
     keywords: ["debug", "graphics", "capabilities", "adapter"],
-    run: (ctx) => {
+    run: async (ctx) => {
+      const snapshot = unwrapRuntime(await ctx.runtimeClient.getRuntimeSnapshot());
+      applyRuntimeSnapshot(ctx, snapshot);
       ctx.getState().setActiveMode("debug");
       ctx.getState().setActiveTool("debug");
-      ctx.toast.info("Graphics capabilities panel opened in mocked profiler.");
+      ctx.toast.info("Graphics capabilities refreshed from runtime.");
     },
   },
   runtimeSettingCommand(

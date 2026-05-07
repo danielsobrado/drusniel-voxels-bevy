@@ -645,6 +645,45 @@ describe("editor command registry", () => {
     expect(useEditorStore.getState().viewportOverlays.propBillboards).toBe(true);
   });
 
+  it("refreshes profiler panels from runtime snapshots", async () => {
+    class SnapshotRuntimeClient extends MockRuntimeClient {
+      snapshotReads = 0;
+
+      override async getRuntimeSnapshot() {
+        this.snapshotReads += 1;
+        const snapshot = await super.getRuntimeSnapshot();
+        if (!snapshot.ok) {
+          return snapshot;
+        }
+
+        return runtimeCommandSuccess({
+          ...snapshot.data,
+          connectionState: "connected" as const,
+          metrics: {
+            ...snapshot.data.metrics,
+            fps: 144,
+            timingSamples: [{ label: "frame.runtime", ms: 6.94, category: "frame" as const }],
+          },
+          viewportDebug: {
+            ...snapshot.data.viewportDebug,
+            wireframe: true,
+          },
+        });
+      }
+    }
+
+    const runtimeClient = new SnapshotRuntimeClient();
+
+    await runCommand("editor.debug.openRenderTimings", createContext(undefined, runtimeClient));
+
+    const state = useEditorStore.getState();
+    expect(runtimeClient.snapshotReads).toBe(1);
+    expect(state.runtimeState).toBe("connected");
+    expect(state.runtimeMetrics.fps).toBe(144);
+    expect(state.runtimeMetrics.timingSamples[0]).toEqual({ label: "frame.runtime", ms: 6.94, category: "frame" });
+    expect(state.viewportOverlays.wireframe).toBe(true);
+  });
+
   it("has no duplicate command IDs", () => {
     const commandIds = editorCommands.map((command) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
@@ -721,18 +760,19 @@ describe("editor command registry", () => {
   });
 
   it("runs rendering and debug commands through new command IDs", async () => {
-    await runCommand("editor.rendering.setQualityPerformance100", createContext());
-    await runCommand("editor.debug.openRenderTimings", createContext());
-    await runCommand("editor.debug.openGraphicsCapabilities", createContext());
-    await runCommand("editor.debug.toggleGtao", createContext());
-    await runCommand("editor.debug.toggleSsao", createContext());
-    await runCommand("editor.debug.toggleBakedAo", createContext());
-    await runCommand("editor.debug.toggleShadowBudget", createContext());
-    await runCommand("editor.debug.toggleGodRays", createContext());
-    await runCommand("editor.debug.toggleFog", createContext());
-    await runCommand("editor.debug.togglePhotoMode", createContext());
-    await runCommand("editor.debug.toggleCinematicMode", createContext());
-    await runCommand("editor.debug.toggleRayTracingMock", createContext());
+    const context = createContext();
+    await runCommand("editor.rendering.setQualityPerformance100", context);
+    await runCommand("editor.debug.openRenderTimings", context);
+    await runCommand("editor.debug.openGraphicsCapabilities", context);
+    await runCommand("editor.debug.toggleGtao", context);
+    await runCommand("editor.debug.toggleSsao", context);
+    await runCommand("editor.debug.toggleBakedAo", context);
+    await runCommand("editor.debug.toggleShadowBudget", context);
+    await runCommand("editor.debug.toggleGodRays", context);
+    await runCommand("editor.debug.toggleFog", context);
+    await runCommand("editor.debug.togglePhotoMode", context);
+    await runCommand("editor.debug.toggleCinematicMode", context);
+    await runCommand("editor.debug.toggleRayTracingMock", context);
 
     const state = useEditorStore.getState();
     expect(state.renderQualityPreset).toBe("Performance100");
