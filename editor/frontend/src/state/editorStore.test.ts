@@ -603,6 +603,33 @@ describe("editor command registry", () => {
     expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.props.focusSelectedProp");
   });
 
+  it("toggles prop billboard debug through the runtime overlay command", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      overlayRequest: Parameters<MockRuntimeClient["setViewportDebugOverlay"]> | null = null;
+
+      override async setViewportDebugOverlay(
+        overlay: Parameters<MockRuntimeClient["setViewportDebugOverlay"]>[0],
+        enabled: Parameters<MockRuntimeClient["setViewportDebugOverlay"]>[1],
+      ) {
+        this.overlayRequest = [overlay, enabled];
+        return super.setViewportDebugOverlay(overlay, enabled);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    useEditorStore.setState((state) => ({
+      viewportOverlays: {
+        ...state.viewportOverlays,
+        propBillboards: false,
+      },
+    }));
+
+    await runCommand("editor.props.toggleBillboardDebug", createContext(undefined, runtimeClient));
+
+    expect(runtimeClient.overlayRequest).toEqual(["propBillboards", true]);
+    expect(useEditorStore.getState().viewportOverlays.propBillboards).toBe(true);
+  });
+
   it("has no duplicate command IDs", () => {
     const commandIds = editorCommands.map((command) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);

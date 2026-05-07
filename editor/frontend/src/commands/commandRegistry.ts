@@ -1416,11 +1416,12 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.props.toggleBillboardDebug",
     title: "Toggle billboard debug",
-    description: "Toggle mocked prop billboard debug overlay.",
+    description: "Toggle runtime prop billboard debug overlay.",
     category: "Props",
     keywords: ["props", "billboard", "debug", "overlay"],
-    run: (ctx) => {
-      ctx.getState().toggleViewportOverlay("propBillboards");
+    runtimeWrite: true,
+    run: async (ctx) => {
+      await setRuntimeViewportOverlay(ctx, "propBillboards");
     },
   },
   {
