@@ -536,6 +536,29 @@ describe("editor command registry", () => {
     expect(toastMessages).toContain("warning:Select a runtime voxel before editing voxel material.");
   });
 
+  it("focuses props through the runtime camera", async () => {
+    class SpyRuntimeClient extends MockRuntimeClient {
+      focusedTarget: Parameters<MockRuntimeClient["focusCamera"]>[0] | null = null;
+
+      override async focusCamera(target: Parameters<MockRuntimeClient["focusCamera"]>[0]) {
+        this.focusedTarget = target;
+        return super.focusCamera(target);
+      }
+    }
+
+    const runtimeClient = new SpyRuntimeClient();
+    useEditorStore.getState().setSelection({ kind: "chunk", id: "chunk-0-0-0", label: "Chunk 0,0,0" });
+
+    await runCommand("editor.props.focusSelectedProp", createContext(undefined, runtimeClient));
+
+    expect(runtimeClient.focusedTarget).toEqual({
+      kind: "prop",
+      id: mockProps[0].id,
+      label: mockProps[0].name,
+    });
+    expect(useEditorStore.getState().commandHistory[0].commandId).toBe("editor.props.focusSelectedProp");
+  });
+
   it("has no duplicate command IDs", () => {
     const commandIds = editorCommands.map((command) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);

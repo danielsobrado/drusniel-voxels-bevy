@@ -1353,11 +1353,13 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.props.focusSelectedProp",
     title: "Focus selected prop",
-    description: "Focus a selected prop in the viewport.",
+    description: "Focus a selected prop through the runtime camera.",
     category: "Props",
-    keywords: ["props", "focus", "selection", "mocked", "viewport"],
-    run: (ctx) => {
+    keywords: ["props", "focus", "selection", "runtime", "viewport"],
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
+      let targetSelection = state.selection;
       if (state.selection.kind !== "prop") {
         const firstProp = state.props[0];
         if (!firstProp) {
@@ -1365,12 +1367,14 @@ export const editorCommands: readonly EditorCommand[] = [
           return;
         }
 
-        state.setSelection({ kind: "prop", id: firstProp.id, label: firstProp.name });
+        targetSelection = { kind: "prop", id: firstProp.id, label: firstProp.name };
+        state.setSelection(targetSelection);
         ctx.toast.info(`Focused ${firstProp.name}.`);
       } else {
         ctx.toast.info(`Focused ${state.selection.label}.`);
       }
 
+      unwrapRuntime(await ctx.runtimeClient.focusCamera(targetSelection));
       state.setActiveMode("props");
       state.setActiveTool("props");
     },
