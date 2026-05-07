@@ -14,9 +14,11 @@ use crate::props::instancing::PropMeshCache;
 use crate::props::persistence::PropPersistenceState;
 use crate::props::{Prop, PropAssets};
 use crate::rendering::building_material::BuildingMesh;
+use crate::rendering::cinematic_config::CinematicConfig;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
+use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
@@ -292,8 +294,36 @@ struct BenchCheckpoint {
     #[serde(default)]
     screenshot_points: Vec<ScreenshotPoint>,
     fog_tier: Option<String>,
+    #[serde(default)]
+    render_features: Option<BenchCheckpointRenderFeatures>,
     motion: Option<BenchMotion>,
     gameplay: Option<BenchGameplay>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+struct BenchCheckpointRenderFeatures {
+    #[serde(default)]
+    gtao: Option<bool>,
+    #[serde(default)]
+    ssao: Option<bool>,
+    #[serde(default)]
+    baked_ao_strength: Option<f32>,
+    #[serde(default)]
+    fog: Option<bool>,
+    #[serde(default)]
+    god_rays: Option<bool>,
+    #[serde(default)]
+    god_ray_intensity: Option<f32>,
+    #[serde(default)]
+    motion_blur: Option<bool>,
+    #[serde(default)]
+    shadow_budget: Option<bool>,
+    #[serde(default)]
+    ray_tracing: Option<bool>,
+    #[serde(default)]
+    photo_mode: Option<bool>,
+    #[serde(default)]
+    cinematic_mode: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -352,6 +382,7 @@ struct BenchSummary {
 struct CheckpointSummary {
     name: String,
     fog_tier: Option<String>,
+    render_features: Option<BenchCheckpointRenderFeatures>,
     median_frame_ms: f64,
     p99_frame_ms: f64,
     areas: BTreeMap<String, AreaSummary>,
@@ -771,6 +802,86 @@ fn apply_bench_render_toggles(
     }
 }
 
+fn apply_checkpoint_render_features(world: &mut World, features: &BenchCheckpointRenderFeatures) {
+    apply_checkpoint_bool_render_feature(world, FrontendRenderFeatureFlag::Gtao, features.gtao);
+    apply_checkpoint_bool_render_feature(world, FrontendRenderFeatureFlag::Ssao, features.ssao);
+    if let Some(strength) = features.baked_ao_strength {
+        if let Err(err) = set_render_feature_flag(
+            world,
+            FrontendRenderFeatureFlag::BakedAo,
+            strength > 0.0,
+            Some(strength),
+        ) {
+            warn!(
+                "failed to apply bench baked AO strength {}: {}",
+                strength, err
+            );
+        }
+    }
+    apply_checkpoint_bool_render_feature(world, FrontendRenderFeatureFlag::Fog, features.fog);
+    if let Some(enabled) = features.god_rays {
+        if let Err(err) = set_render_feature_flag(
+            world,
+            FrontendRenderFeatureFlag::GodRays,
+            enabled,
+            features.god_ray_intensity,
+        ) {
+            warn!("failed to apply bench god rays={}: {}", enabled, err);
+        }
+    }
+    if features.motion_blur.is_some()
+        || features.photo_mode == Some(true)
+        || features.cinematic_mode == Some(true)
+    {
+        let enabled = features.motion_blur.unwrap_or(true);
+        if let Some(mut config) = world.get_resource_mut::<CinematicConfig>() {
+            config.motion_blur.enabled = enabled;
+        } else {
+            warn!(
+                "failed to apply bench motion blur={}: missing CinematicConfig",
+                enabled
+            );
+        }
+    }
+    apply_checkpoint_bool_render_feature(
+        world,
+        FrontendRenderFeatureFlag::ShadowBudget,
+        features.shadow_budget,
+    );
+    apply_checkpoint_bool_render_feature(
+        world,
+        FrontendRenderFeatureFlag::RayTracing,
+        features.ray_tracing,
+    );
+    apply_checkpoint_bool_render_feature(
+        world,
+        FrontendRenderFeatureFlag::PhotoMode,
+        features.photo_mode,
+    );
+    apply_checkpoint_bool_render_feature(
+        world,
+        FrontendRenderFeatureFlag::CinematicMode,
+        features.cinematic_mode,
+    );
+}
+
+fn apply_checkpoint_bool_render_feature(
+    world: &mut World,
+    feature: FrontendRenderFeatureFlag,
+    enabled: Option<bool>,
+) {
+    if let Some(enabled) = enabled {
+        if let Err(err) = set_render_feature_flag(world, feature, enabled, None) {
+            warn!(
+                "failed to apply bench render feature {}={}: {}",
+                feature.as_frontend_str(),
+                enabled,
+                err
+            );
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_startup_observations(
     scene: &BenchScene,
@@ -1057,6 +1168,11 @@ fn run_bench_state_machine(
                 fog_quality.as_deref_mut(),
                 &mut state.warned_missing_fog_quality,
             );
+            if let Some(render_features) = checkpoint.render_features.clone() {
+                commands.queue(move |world: &mut World| {
+                    apply_checkpoint_render_features(world, &render_features);
+                });
+            }
             state.settle_frames_left = SETTLE_FRAMES;
             state.hold_frames_left = checkpoint.hold_frames;
             state.hold_elapsed_frames = 0;
@@ -1571,6 +1687,7 @@ fn finish_run(
         CheckpointSummary {
             name: checkpoint.name.clone(),
             fog_tier: checkpoint.fog_tier.clone(),
+            render_features: checkpoint.render_features.clone(),
             median_frame_ms: frame.as_ref().map(|s| s.avg_ms).unwrap_or_default(),
             p99_frame_ms: frame.as_ref().map(|s| s.p99_ms).unwrap_or_default(),
             areas: BTreeMap::new(),

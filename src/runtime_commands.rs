@@ -288,7 +288,7 @@ pub enum FrontendRenderFeatureFlag {
 }
 
 impl FrontendRenderFeatureFlag {
-    fn as_frontend_str(self) -> &'static str {
+    pub(crate) fn as_frontend_str(self) -> &'static str {
         match self {
             Self::Gtao => "gtao",
             Self::Ssao => "ssao",
@@ -1231,7 +1231,7 @@ fn set_atlas_mapping(world: &mut World, mut mapping: AtlasMapping) {
     }
 }
 
-fn set_render_feature_flag(
+pub(crate) fn set_render_feature_flag(
     world: &mut World,
     feature: FrontendRenderFeatureFlag,
     enabled: bool,
