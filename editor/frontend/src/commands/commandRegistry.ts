@@ -1706,7 +1706,7 @@ export const editorCommands: readonly EditorCommand[] = [
     keywords: ["debug", "runtime", "settings", "ray tracing", "graphics"],
     runtimeWrite: true,
     run: async (ctx) => {
-      const enabled = !ctx.getState().runtimeMetrics.graphicsCapabilities.rayTracingSupported;
+      const enabled = !ctx.getState().runtimeMetrics.graphicsCapabilities.rayTracingEnabled;
       await setRuntimeRenderFeature(ctx, "rayTracing", enabled);
     },
   },

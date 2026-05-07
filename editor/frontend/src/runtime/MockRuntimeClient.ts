@@ -142,7 +142,7 @@ export class MockRuntimeClient implements RuntimeClient {
       case "rayTracing":
         this.runtimeMetrics = {
           ...metrics,
-          graphicsCapabilities: { ...metrics.graphicsCapabilities, rayTracingSupported: enabled },
+          graphicsCapabilities: { ...metrics.graphicsCapabilities, rayTracingEnabled: enabled },
         };
         break;
       case "photoMode":

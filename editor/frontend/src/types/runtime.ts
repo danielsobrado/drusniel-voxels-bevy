@@ -75,6 +75,7 @@ export interface GraphicsCapabilities {
   readonly integratedGPU: boolean;
   readonly taaSupported: boolean;
   readonly rayTracingSupported: boolean;
+  readonly rayTracingEnabled: boolean;
 }
 
 export interface RenderTimingSample {

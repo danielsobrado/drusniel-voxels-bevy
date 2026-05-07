@@ -29,7 +29,11 @@ export function GraphicsCapabilitiesPanel() {
           </div>
           <div className="inspector-readonly-row">
             <span>Ray tracing supported</span>
-            <strong data-testid="profiler-ray-tracing">{capabilities.rayTracingSupported ? "yes" : "no"}</strong>
+            <strong>{capabilities.rayTracingSupported ? "yes" : "no"}</strong>
+          </div>
+          <div className="inspector-readonly-row">
+            <span>Ray tracing enabled</span>
+            <strong data-testid="profiler-ray-tracing">{capabilities.rayTracingEnabled ? "yes" : "no"}</strong>
           </div>
         </section>
         <section className="inspector-section">
@@ -37,9 +41,9 @@ export function GraphicsCapabilitiesPanel() {
             type="button"
             className="toolbar-button"
             data-testid="profiler-toggle-ray-tracing"
-            onClick={() => void runCommandById("editor.debug.toggleRayTracingMock")}
+            onClick={() => void runCommandById("editor.debug.toggleRayTracingFlag")}
           >
-            {capabilities.rayTracingSupported ? "Disable ray tracing mock" : "Enable ray tracing mock"}
+            {capabilities.rayTracingEnabled ? "Disable ray tracing flag" : "Enable ray tracing flag"}
           </button>
         </section>
       </div>

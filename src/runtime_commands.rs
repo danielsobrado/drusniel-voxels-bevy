@@ -1828,7 +1828,10 @@ fn graphics_capabilities_payload(world: &World) -> Value {
             .unwrap_or("Bevy runtime"),
         "integratedGPU": capabilities.is_some_and(|capabilities| capabilities.integrated_gpu),
         "taaSupported": capabilities.map(|capabilities| capabilities.taa_supported).unwrap_or(true),
-        "rayTracingSupported": ray_tracing_enabled,
+        "rayTracingSupported": capabilities
+            .map(|capabilities| capabilities.ray_tracing_supported)
+            .unwrap_or(false),
+        "rayTracingEnabled": ray_tracing_enabled,
     })
 }
 
@@ -2209,7 +2212,7 @@ mod tests {
         assert_eq!(data["feature"], json!("rayTracing"));
         assert_eq!(data["enabled"], json!(true));
         assert_eq!(
-            data["metrics"]["graphicsCapabilities"]["rayTracingSupported"],
+            data["metrics"]["graphicsCapabilities"]["rayTracingEnabled"],
             json!(true)
         );
 
@@ -2217,7 +2220,7 @@ mod tests {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(
-            data["metrics"]["graphicsCapabilities"]["rayTracingSupported"],
+            data["metrics"]["graphicsCapabilities"]["rayTracingEnabled"],
             json!(true)
         );
     }

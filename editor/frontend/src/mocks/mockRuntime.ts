@@ -111,6 +111,7 @@ export const mockRuntimeMetrics: RuntimeMetrics = {
     integratedGPU: false,
     taaSupported: true,
     rayTracingSupported: false,
+    rayTracingEnabled: false,
   },
   timingSamples: [
     { label: "frame.total", ms: 16.7, category: "frame" },

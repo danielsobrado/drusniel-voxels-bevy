@@ -769,7 +769,7 @@ describe("editor command registry", () => {
     await runCommand("editor.debug.toggleFog", context);
     await runCommand("editor.debug.togglePhotoMode", context);
     await runCommand("editor.debug.toggleCinematicMode", context);
-    await runCommand("editor.debug.toggleRayTracingMock", context);
+    await runCommand("editor.debug.toggleRayTracingFlag", context);
 
     const state = useEditorStore.getState();
     expect(state.renderQualityPreset).toBe("Performance100");
@@ -782,8 +782,8 @@ describe("editor command registry", () => {
     expect(state.runtimeMetrics.lightingAtmosphere.fogActive).toBe(false);
     expect(state.runtimeMetrics.cinematicPhotoMode.photoModeActive).toBe(true);
     expect(state.runtimeMetrics.cinematicPhotoMode.cinematicModeActive).toBe(true);
-    expect(state.runtimeMetrics.graphicsCapabilities.rayTracingSupported).toBe(true);
-    expect(state.commandHistory[0].commandId).toBe("editor.debug.toggleRayTracingMock");
+    expect(state.runtimeMetrics.graphicsCapabilities.rayTracingEnabled).toBe(true);
+    expect(state.commandHistory[0].commandId).toBe("editor.debug.toggleRayTracingFlag");
   });
 
   it("mock backend returns serializable data", async () => {
