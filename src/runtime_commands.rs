@@ -1288,6 +1288,11 @@ fn set_photo_mode_enabled(world: &mut World, enabled: bool) {
             blur_enabled: enabled && config.depth_of_field.enabled,
         });
     }
+
+    let cinematic_active = render_feature_enabled(world, FrontendRenderFeatureFlag::CinematicMode);
+    if enabled || !cinematic_active {
+        apply_cinematic_camera_effects(world, &config, enabled);
+    }
 }
 
 fn set_cinematic_mode_enabled(world: &mut World, enabled: bool) {
@@ -1310,8 +1315,12 @@ fn set_cinematic_mode_enabled(world: &mut World, enabled: bool) {
         });
     }
 
-    let dof = dof_component(&config);
-    let motion_blur = motion_blur_component(&config);
+    apply_cinematic_camera_effects(world, &config, enabled);
+}
+
+fn apply_cinematic_camera_effects(world: &mut World, config: &CinematicConfig, enabled: bool) {
+    let dof = dof_component(config);
+    let motion_blur = motion_blur_component(config);
     let mut cameras = world.query_filtered::<Entity, With<CinematicCamera>>();
     let camera_entities = cameras.iter(world).collect::<Vec<_>>();
     for entity in camera_entities {
