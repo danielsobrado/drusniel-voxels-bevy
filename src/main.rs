@@ -62,10 +62,14 @@ mod input;
 /// # Returns
 /// A tuple of `(WgpuLimits, Option<Backends>)` where:
 /// - `WgpuLimits` contains the texture/sampler limits to request
-/// - `Option<Backends>` specifies which graphics backend to use (DX12 on Windows, auto elsewhere)
-fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
+/// - `Option<Backends>` specifies which graphics backend to use.
+fn detect_gpu_limits(use_vulkan_on_windows: bool) -> (WgpuLimits, Option<Backends>) {
     #[cfg(target_os = "windows")]
-    let (backends, backend_name) = (wgpu::Backends::DX12, "DX12");
+    let (backends, backend_name) = if use_vulkan_on_windows {
+        (wgpu::Backends::VULKAN, "Vulkan")
+    } else {
+        (wgpu::Backends::DX12, "DX12")
+    };
     #[cfg(target_os = "macos")]
     let (backends, backend_name) = (wgpu::Backends::METAL, "Metal");
     #[cfg(target_os = "linux")]
@@ -193,8 +197,8 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
 
         #[cfg(target_os = "windows")]
         {
-            eprintln!("[GPU] Using DX12 backend for Bevy");
-            return (limits, Some(Backends::DX12));
+            eprintln!("[GPU] Using {} backend for Bevy", backend_name);
+            return (limits, Some(backends));
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -217,7 +221,7 @@ fn detect_gpu_limits() -> (WgpuLimits, Option<Backends>) {
     };
 
     #[cfg(target_os = "windows")]
-    return (limits, Some(Backends::DX12));
+    return (limits, Some(backends));
     #[cfg(not(target_os = "windows"))]
     return (limits, None);
 }
@@ -230,6 +234,13 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{} bytes", bytes)
     }
+}
+
+fn visual_regression_bench_uses_vulkan(bench_config: Option<&BenchConfig>) -> bool {
+    bench_config.is_some_and(|config| {
+        config.scene_path.file_name().and_then(|name| name.to_str())
+            == Some("visual-regression.toml")
+    })
 }
 
 /// Truncates a string to a maximum length, adding "..." if truncated.
@@ -378,7 +389,8 @@ fn main() {
     }
 
     // Pre-flight: detect GPU and get actual limits
-    let (limits, backends) = detect_gpu_limits();
+    let visual_regression_uses_vulkan = visual_regression_bench_uses_vulkan(bench_config.as_ref());
+    let (limits, backends) = detect_gpu_limits(visual_regression_uses_vulkan);
 
     let plugins = {
         let mut wgpu_settings = WgpuSettings {
@@ -454,8 +466,11 @@ fn main() {
         .add_plugins(AtmospherePlugin)
         .add_plugins(AtmosphereIntegrationPlugin) // Physical sky rendering
         .add_plugins(FogPlugin)
-        .add_plugins(EntityPlugin)
-        .add_plugins(ParticlePlugin);
+        .add_plugins(EntityPlugin);
+
+    if !visual_regression_uses_vulkan {
+        app.add_plugins(ParticlePlugin);
+    }
 
     if let Some(config) = bench_config.as_ref() {
         if bench_scene_requires_gameplay(&config.scene_path) {
