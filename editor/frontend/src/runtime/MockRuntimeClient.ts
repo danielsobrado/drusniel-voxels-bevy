@@ -139,6 +139,12 @@ export class MockRuntimeClient implements RuntimeClient {
           shadowBudget: { ...metrics.shadowBudget, enabled },
         };
         break;
+      case "rayTracing":
+        this.runtimeMetrics = {
+          ...metrics,
+          graphicsCapabilities: { ...metrics.graphicsCapabilities, rayTracingSupported: enabled },
+        };
+        break;
       case "fog":
         this.runtimeMetrics = {
           ...metrics,
@@ -165,6 +171,7 @@ export class MockRuntimeClient implements RuntimeClient {
         shadowBudget: this.runtimeMetrics.shadowBudget,
         ambientOcclusion: this.runtimeMetrics.ambientOcclusion,
         lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
+        graphicsCapabilities: this.runtimeMetrics.graphicsCapabilities,
       },
     });
   }

@@ -18,6 +18,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::god_rays::GodRayConfig;
 use crate::rendering::gtao::GtaoSettings;
 use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::shadow_budget::ShadowBudgetConfig;
 use crate::rendering::ssao::SsaoSupported;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
@@ -274,6 +275,7 @@ pub enum FrontendRenderFeatureFlag {
     Ssao,
     BakedAo,
     ShadowBudget,
+    RayTracing,
     Fog,
     GodRays,
 }
@@ -285,6 +287,7 @@ impl FrontendRenderFeatureFlag {
             Self::Ssao => "ssao",
             Self::BakedAo => "bakedAo",
             Self::ShadowBudget => "shadowBudget",
+            Self::RayTracing => "rayTracing",
             Self::Fog => "fog",
             Self::GodRays => "godRays",
         }
@@ -1232,6 +1235,7 @@ fn set_render_feature_flag(
             set_baked_ao_strength(world, if enabled { value.unwrap_or(0.35) } else { 0.0 });
         }
         FrontendRenderFeatureFlag::ShadowBudget => set_shadow_budget_enabled(world, enabled),
+        FrontendRenderFeatureFlag::RayTracing => set_ray_tracing_enabled(world, enabled),
         FrontendRenderFeatureFlag::Fog => set_fog_enabled(world, enabled),
         FrontendRenderFeatureFlag::GodRays => set_god_rays_enabled(world, enabled, value),
     }
@@ -1242,6 +1246,14 @@ fn set_render_feature_flag(
         "value": render_feature_value(world, feature),
         "metrics": render_feature_metrics_payload(world),
     }))
+}
+
+fn set_ray_tracing_enabled(world: &mut World, enabled: bool) {
+    if let Some(mut settings) = world.get_resource_mut::<RayTracingSettings>() {
+        settings.enabled = enabled;
+    } else {
+        world.insert_resource(RayTracingSettings { enabled });
+    }
 }
 
 fn set_shadow_budget_enabled(world: &mut World, enabled: bool) {
@@ -1571,6 +1583,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
         "shadowBudget": {
             "enabled": render_feature_enabled(world, FrontendRenderFeatureFlag::ShadowBudget),
         },
+        "graphicsCapabilities": graphics_capabilities_payload(world),
         "ambientOcclusion": {
             "gtaoEnabled": gtao.is_some_and(|config| config.enabled),
             "gtaoQuality": gtao
@@ -1616,6 +1629,10 @@ fn render_feature_enabled(world: &World, feature: FrontendRenderFeatureFlag) -> 
             .get_resource::<ShadowBudgetConfig>()
             .map(|config| config.enabled)
             .unwrap_or(true),
+        FrontendRenderFeatureFlag::RayTracing => world
+            .get_resource::<RayTracingSettings>()
+            .map(|settings| settings.enabled)
+            .unwrap_or(false),
         FrontendRenderFeatureFlag::Fog => world
             .get_resource::<FogConfig>()
             .is_some_and(|config| config.distance.enabled || config.volumetric.enabled),
@@ -1637,6 +1654,7 @@ fn render_feature_value(world: &World, feature: FrontendRenderFeatureFlag) -> Va
         FrontendRenderFeatureFlag::ShadowBudget => {
             json!(render_feature_enabled(world, feature))
         }
+        FrontendRenderFeatureFlag::RayTracing => json!(render_feature_enabled(world, feature)),
         FrontendRenderFeatureFlag::GodRays => json!(
             world
                 .get_resource::<GodRayConfig>()
@@ -1689,15 +1707,14 @@ fn ssao_supported(world: &World) -> bool {
 
 fn graphics_capabilities_payload(world: &World) -> Value {
     let capabilities = world.get_resource::<GraphicsCapabilities>();
+    let ray_tracing_enabled = render_feature_enabled(world, FrontendRenderFeatureFlag::RayTracing);
     json!({
         "adapterName": capabilities
             .and_then(|capabilities| capabilities.adapter_name.as_deref())
             .unwrap_or("Bevy runtime"),
         "integratedGPU": capabilities.is_some_and(|capabilities| capabilities.integrated_gpu),
         "taaSupported": capabilities.map(|capabilities| capabilities.taa_supported).unwrap_or(true),
-        "rayTracingSupported": capabilities
-            .map(|capabilities| capabilities.ray_tracing_supported)
-            .unwrap_or(false),
+        "rayTracingSupported": ray_tracing_enabled,
     })
 }
 
@@ -2056,6 +2073,39 @@ mod tests {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(data["metrics"]["shadowBudget"]["enabled"], json!(false));
+    }
+
+    #[test]
+    fn ray_tracing_command_updates_runtime_metrics() {
+        let mut world = World::new();
+        world.insert_resource(crate::rendering::ray_tracing::RayTracingSettings::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::SetRenderFeatureFlag {
+                feature: FrontendRenderFeatureFlag::RayTracing,
+                enabled: true,
+                value: None,
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("ray tracing command should succeed");
+        };
+        assert_eq!(data["feature"], json!("rayTracing"));
+        assert_eq!(data["enabled"], json!(true));
+        assert_eq!(
+            data["metrics"]["graphicsCapabilities"]["rayTracingSupported"],
+            json!(true)
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+            panic!("runtime snapshot should succeed");
+        };
+        assert_eq!(
+            data["metrics"]["graphicsCapabilities"]["rayTracingSupported"],
+            json!(true)
+        );
     }
 
     #[test]

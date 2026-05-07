@@ -112,6 +112,7 @@ const setRuntimeRenderFeature = async (
       shadowBudget: result.metrics.shadowBudget,
       ambientOcclusion: result.metrics.ambientOcclusion,
       lightingAtmosphere: result.metrics.lightingAtmosphere,
+      graphicsCapabilities: result.metrics.graphicsCapabilities,
     },
   }));
 };
@@ -1696,18 +1697,18 @@ export const editorCommands: readonly EditorCommand[] = [
       },
     }),
   ),
-  runtimeSettingCommand(
-    "editor.debug.toggleRayTracingMock",
-    "Toggle ray tracing mock",
-    "Mock toggle ray tracing support.",
-    (metrics) => ({
-      ...metrics,
-      graphicsCapabilities: {
-        ...metrics.graphicsCapabilities,
-        rayTracingSupported: !metrics.graphicsCapabilities.rayTracingSupported,
-      },
-    }),
-  ),
+  {
+    id: "editor.debug.toggleRayTracingFlag",
+    title: "Toggle ray tracing flag",
+    description: "Toggle the runtime ray tracing preference flag.",
+    category: "Debug",
+    keywords: ["debug", "runtime", "settings", "ray tracing", "graphics"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.graphicsCapabilities.rayTracingSupported;
+      await setRuntimeRenderFeature(ctx, "rayTracing", enabled);
+    },
+  },
   {
     id: "editor.agent.observeScreen",
     title: "Agent observe screen",
