@@ -439,7 +439,7 @@ describe("editor command registry", () => {
     expect(runtimeClient.rebuildDirtyChunksCalled).toBe(true);
   });
 
-  it("runs mocked atlas workflow through command ids", async () => {
+  it("runs runtime atlas workflow through command ids", async () => {
     class SpyRuntimeClient extends MockRuntimeClient {
       setAtlasMappingCalled = false;
       saveAtlasMappingCalled = false;
@@ -470,6 +470,34 @@ describe("editor command registry", () => {
     await runCommand("editor.atlas.saveMapping", createContext(undefined, runtimeClient));
     expect(runtimeClient.saveAtlasMappingCalled).toBe(true);
     expect(useEditorStore.getState().agentTimeline[0].message).toBe("Runtime write succeeded: Save atlas mapping.");
+  });
+
+  it("does not fall back to backend atlas mapping when connected runtime atlas snapshot fails", async () => {
+    class SpyBackendClient extends MockEditorBackendClient {
+      loadAtlasMappingCalled = false;
+
+      override async loadAtlasMapping() {
+        this.loadAtlasMappingCalled = true;
+        return super.loadAtlasMapping();
+      }
+    }
+
+    class FailingRuntimeClient extends MockRuntimeClient {
+      override getConnectionState() {
+        return "connected" as const;
+      }
+
+      override async getRuntimeSnapshot() {
+        return runtimeCommandFailure("runtime_unavailable", "Runtime snapshot failed.");
+      }
+    }
+
+    const backendClient = new SpyBackendClient();
+    const toastMessages: string[] = [];
+    await runCommand("editor.material.openTextureAtlas", createContext(backendClient, new FailingRuntimeClient(), toastMessages));
+
+    expect(backendClient.loadAtlasMappingCalled).toBe(false);
+    expect(toastMessages).toContain("error:Open texture atlas failed.");
   });
 
   it("paints the selected voxel through the runtime client", async () => {

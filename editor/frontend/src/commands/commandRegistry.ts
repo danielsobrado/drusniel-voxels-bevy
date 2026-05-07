@@ -1417,7 +1417,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.material.openTextureAtlas",
     title: "Open texture atlas",
-    description: "Open the texture atlas editing mode and reload atlas mapping.",
+    description: "Open texture atlas editing mode with runtime atlas mapping.",
     category: "Materials",
     keywords: ["material", "atlas", "texture", "mapping"],
     run: async (ctx) => {
@@ -1439,9 +1439,11 @@ export const editorCommands: readonly EditorCommand[] = [
               dirtyState.layoutDirty,
           },
         });
-      } else {
+      } else if (ctx.runtimeClient.getConnectionState() === "mock") {
         const atlasMapping = unwrapBackend(await ctx.backendClient.loadAtlasMapping());
         ctx.setState({ atlasMapping });
+      } else {
+        unwrapRuntime(runtimeSnapshot);
       }
       ctx.getState().setActiveMode("material");
       ctx.getState().setActiveTool("material");
