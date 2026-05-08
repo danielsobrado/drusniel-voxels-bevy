@@ -224,9 +224,41 @@ test("prop mode places a selected prop directly in the viewport", async ({ page 
   await page.locator('[data-tool-id="props"]').click();
   await expect(page.getByTestId("viewport-active-mode")).toHaveText("Mode props");
 
-  await page.getByTestId("world-viewport-canvas").dblclick({ position: { x: 260, y: 80 } });
+  const canvas = page.getByTestId("world-viewport-canvas");
+  const initialBox = await canvas.boundingBox();
+  if (!initialBox) {
+    throw new Error("Viewport canvas is missing a bounding box.");
+  }
+  const canvasPoint = {
+    x: initialBox.x + Math.min(260, initialBox.width - 20),
+    y: initialBox.y + Math.max(10, initialBox.height - 50),
+  };
+  await page.mouse.dblclick(canvasPoint.x, canvasPoint.y);
   await expect(page.getByTestId("viewport-active-tool")).toHaveText("Tool props");
   await expect(page.getByTestId("viewport-tools")).toContainText("prop:");
+  await expect(page.getByTestId("viewport-prop-toolbar")).toBeVisible();
+  await expect(page.getByTestId("viewport-prop-rotate-key")).toHaveValue("shift");
+
+  await page.getByTestId("viewport-prop-rotate-key").selectOption("alt");
+  await expect(page.getByTestId("viewport-prop-rotate-key")).toHaveValue("alt");
+  await page.getByTestId("viewport-prop-rotate-key").selectOption("shift");
+
+  await page.mouse.move(canvasPoint.x, canvasPoint.y);
+  await page.mouse.wheel(0, -120);
+  await expect(page.getByTestId("viewport-prop-scale-value")).toContainText("Scale 1.19");
+
+  const yawBeforeDrag = await page.getByTestId("viewport-prop-rotation-value").textContent();
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("Viewport canvas is missing a bounding box.");
+  }
+  await page.keyboard.down("Shift");
+  await page.mouse.move(canvasPoint.x, canvasPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(Math.min(box.x + box.width - 20, canvasPoint.x + 100), canvasPoint.y);
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect.poll(async () => page.getByTestId("viewport-prop-rotation-value").textContent()).not.toBe(yawBeforeDrag);
   await expect(page.getByTestId("dirty-state-label")).toHaveText("DIRTY");
 });
 

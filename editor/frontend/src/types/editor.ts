@@ -14,6 +14,7 @@ export const EDITOR_MODES = [
 export type EditorMode = (typeof EDITOR_MODES)[number];
 export type RuntimeState = "mock" | "connected" | "disconnected" | "stale" | "error";
 export type RenderQualityPreset = "Low" | "Medium" | "High" | "Performance100";
+export type ViewportModifierKey = "none" | "shift" | "alt" | "control" | "meta";
 
 export type Selection =
   | { readonly kind: "voxel"; readonly chunkId: string; readonly position: [number, number, number]; readonly label: string }
@@ -45,6 +46,16 @@ export interface PropBrushSettings {
   readonly avoidWater: boolean;
   readonly collisionCheck: boolean;
   readonly seed: number;
+}
+
+export interface PropPlacementSettings {
+  readonly rotateDragModifier: ViewportModifierKey;
+  readonly fineScaleModifier: ViewportModifierKey;
+  readonly rotationSensitivity: number;
+  readonly rotationSnapDegrees: number;
+  readonly scaleStep: number;
+  readonly minScale: number;
+  readonly maxScale: number;
 }
 
 export interface ViewportOverlayState {
@@ -84,6 +95,7 @@ export interface EditorUndoSnapshot {
   readonly selection: Selection;
   readonly brushSettings: BrushSettings;
   readonly propBrushSettings: PropBrushSettings;
+  readonly propPlacementSettings: PropPlacementSettings;
   readonly viewportOverlays: ViewportOverlayState;
   readonly renderQualityPreset: RenderQualityPreset;
   readonly chunks: readonly ChunkSummary[];

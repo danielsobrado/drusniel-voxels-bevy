@@ -15,6 +15,7 @@ import type {
   EditorUndoSnapshot,
   LargeWorldStats,
   PropBrushSettings,
+  PropPlacementSettings,
   RenderQualityPreset,
   RuntimeState,
   Selection,
@@ -86,6 +87,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   selection: cloneEditorValue(state.selection),
   brushSettings: cloneEditorValue(state.brushSettings),
   propBrushSettings: cloneEditorValue(state.propBrushSettings),
+  propPlacementSettings: cloneEditorValue(state.propPlacementSettings),
   viewportOverlays: cloneEditorValue(state.viewportOverlays),
   renderQualityPreset: state.renderQualityPreset,
   chunks: cloneEditorValue(state.chunks),
@@ -108,6 +110,7 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.selection = cloneEditorValue(snapshot.selection);
   state.brushSettings = cloneEditorValue(snapshot.brushSettings);
   state.propBrushSettings = cloneEditorValue(snapshot.propBrushSettings);
+  state.propPlacementSettings = cloneEditorValue(snapshot.propPlacementSettings);
   state.viewportOverlays = cloneEditorValue(snapshot.viewportOverlays);
   state.renderQualityPreset = snapshot.renderQualityPreset;
   state.chunks = [...cloneEditorValue(snapshot.chunks)];
@@ -131,6 +134,7 @@ export interface EditorDataState {
   readonly selection: Selection;
   readonly brushSettings: BrushSettings;
   readonly propBrushSettings: PropBrushSettings;
+  readonly propPlacementSettings: PropPlacementSettings;
   readonly viewportOverlays: ViewportOverlayState;
   readonly runtimeState: RuntimeState;
   readonly renderQualityPreset: RenderQualityPreset;
@@ -207,6 +211,7 @@ interface EditorActions {
   readonly beginCommand: (commandId: string) => void;
   readonly finishCommand: (commandId: string) => void;
   readonly setPropBrushSettings: (settings: Partial<PropBrushSettings>) => void;
+  readonly setPropPlacementSettings: (settings: Partial<PropPlacementSettings>) => void;
   readonly setSelectedPropAsset: (propAssetId: string) => void;
   readonly addProps: (props: readonly PropInstance[]) => void;
   readonly removeProp: (propId: string) => void;
@@ -233,6 +238,16 @@ const initialPropBrushSettings: PropBrushSettings = {
   avoidWater: true,
   collisionCheck: true,
   seed: 24601,
+};
+
+const initialPropPlacementSettings: PropPlacementSettings = {
+  rotateDragModifier: "shift",
+  fineScaleModifier: "alt",
+  rotationSensitivity: 0.45,
+  rotationSnapDegrees: 5,
+  scaleStep: 0.1,
+  minScale: 0.25,
+  maxScale: 4,
 };
 
 const createLargeMockChunks = (): ChunkSummary[] =>
@@ -352,6 +367,7 @@ export const createInitialEditorState = (): EditorDataState => ({
   materials: [...mockMaterials],
   outlinerNodeState: createOutlinerNodeState(mockChunks, mockProtectedAreas, mockWaterBodies, mockProps, mockMaterials),
   propBrushSettings: initialPropBrushSettings,
+  propPlacementSettings: initialPropPlacementSettings,
   selectedPropAssetId: mockPropAssets[0]?.id ?? "asset-tree-01",
   atlasMapping: { ...mockAtlasMapping },
   waterRuntimeSnapshot: { ...mockWaterRuntimeSnapshot },
@@ -403,6 +419,10 @@ export const useEditorStore = create<EditorStore>()(
     setPropBrushSettings: (settings) =>
       set((state) => {
         state.propBrushSettings = { ...state.propBrushSettings, ...settings };
+      }),
+    setPropPlacementSettings: (settings) =>
+      set((state) => {
+        state.propPlacementSettings = { ...state.propPlacementSettings, ...settings };
       }),
     setSelectedPropAsset: (propAssetId) =>
       set((state) => {

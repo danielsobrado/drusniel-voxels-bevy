@@ -1383,6 +1383,23 @@ fn scatter_runtime_props(world: &mut World, props: Vec<Value>) -> Result<Value, 
         })
         .collect::<Result<Vec<_>, String>>()?;
 
+    let replacement_ids = spawn_specs
+        .iter()
+        .map(|(_, _, _, _, instance_id)| instance_id.0.clone())
+        .collect::<HashSet<_>>();
+    if !replacement_ids.is_empty() {
+        let mut query = world.query::<(Entity, &EditorPropInstanceId)>();
+        let existing = query
+            .iter(world)
+            .filter_map(|(entity, instance_id)| {
+                replacement_ids.contains(&instance_id.0).then_some(entity)
+            })
+            .collect::<Vec<_>>();
+        for entity in existing {
+            let _ = world.despawn(entity);
+        }
+    }
+
     let mut accepted = Vec::with_capacity(spawn_specs.len());
     for (prop, handle, transform, marker, instance_id) in spawn_specs {
         let owner = PropChunkOwner(VoxelWorld::world_to_chunk(

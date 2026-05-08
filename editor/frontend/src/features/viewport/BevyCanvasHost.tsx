@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ChunkSummary, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
-import type { RuntimeState } from "../../types/editor";
+import type { RuntimeState, ViewportModifierKey } from "../../types/editor";
 
 export interface AreaOverlayState {
   readonly id: string;
@@ -24,6 +24,16 @@ interface BevyCanvasHostProps {
   readonly waterRuntimeSnapshot: WaterRuntimeSnapshot;
   readonly propPlacementEnabled?: boolean;
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
+  readonly selectedPropRotationY?: number;
+  readonly selectedPropUniformScale?: number;
+  readonly propRotateDragModifier?: ViewportModifierKey;
+  readonly propFineScaleModifier?: ViewportModifierKey;
+  readonly propRotationSensitivity?: number;
+  readonly propRotationSnapDegrees?: number;
+  readonly propScaleStep?: number;
+  readonly propScaleMin?: number;
+  readonly propScaleMax?: number;
+  readonly onAdjustSelectedProp?: (adjustment: { readonly rotationY?: number; readonly uniformScale?: number }) => void;
 }
 
 interface ViewState {
@@ -33,6 +43,17 @@ interface ViewState {
 }
 
 type NativeViewportState = "unsupported" | "pending" | "attached" | "fallback";
+
+type CanvasDragState =
+  | { readonly kind: "pan"; readonly x: number; readonly y: number; readonly view: ViewState }
+  | { readonly kind: "prop-rotate"; readonly x: number; readonly startRotationY: number };
+
+interface ModifierState {
+  readonly shiftKey: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}
 
 interface NativeViewportAttachment {
   readonly attached: boolean;
@@ -58,6 +79,23 @@ const MATERIAL_COLORS: Record<string, string> = {
 const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const normalizeDegrees = (degrees: number) => ((degrees % 360) + 360) % 360;
+
+const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none") => {
+  switch (key) {
+    case "shift":
+      return event.shiftKey;
+    case "alt":
+      return event.altKey;
+    case "control":
+      return event.ctrlKey;
+    case "meta":
+      return event.metaKey;
+    case "none":
+      return true;
+  }
+};
 
 const hasTauriGlobals = () => typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
@@ -244,10 +282,20 @@ export function BevyCanvasHost({
   waterRuntimeSnapshot,
   propPlacementEnabled = false,
   onPlaceProp,
+  selectedPropRotationY,
+  selectedPropUniformScale,
+  propRotateDragModifier = "shift",
+  propFineScaleModifier = "alt",
+  propRotationSensitivity = 0.45,
+  propRotationSnapDegrees = 5,
+  propScaleStep = 0.1,
+  propScaleMin = 0.25,
+  propScaleMax = 4,
+  onAdjustSelectedProp,
 }: BevyCanvasHostProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ readonly x: number; readonly y: number; readonly view: ViewState } | null>(null);
+  const dragRef = useRef<CanvasDragState | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const desktopRuntime = hasTauriGlobals();
@@ -427,13 +475,33 @@ export function BevyCanvasHost({
             tabIndex={0}
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
-              dragRef.current = { x: event.clientX, y: event.clientY, view };
+              if (
+                propPlacementEnabled &&
+                onAdjustSelectedProp &&
+                selectedPropRotationY !== undefined &&
+                modifierMatches(event, propRotateDragModifier)
+              ) {
+                event.preventDefault();
+                dragRef.current = { kind: "prop-rotate", x: event.clientX, startRotationY: selectedPropRotationY };
+                return;
+              }
+
+              dragRef.current = { kind: "pan", x: event.clientX, y: event.clientY, view };
             }}
             onPointerMove={(event) => {
               const drag = dragRef.current;
               if (!drag) {
                 return;
               }
+              if (drag.kind === "prop-rotate") {
+                event.preventDefault();
+                const rawRotation = drag.startRotationY + (event.clientX - drag.x) * propRotationSensitivity;
+                const snappedRotation =
+                  propRotationSnapDegrees > 0 ? Math.round(rawRotation / propRotationSnapDegrees) * propRotationSnapDegrees : rawRotation;
+                onAdjustSelectedProp?.({ rotationY: normalizeDegrees(snappedRotation) });
+                return;
+              }
+
               setView({ ...drag.view, offsetX: drag.view.offsetX + event.clientX - drag.x, offsetY: drag.view.offsetY + event.clientY - drag.y });
             }}
             onPointerUp={() => {
@@ -444,6 +512,14 @@ export function BevyCanvasHost({
             }}
             onWheel={(event) => {
               event.preventDefault();
+              if (propPlacementEnabled && onAdjustSelectedProp && selectedPropUniformScale !== undefined) {
+                const direction = event.deltaY < 0 ? 1 : -1;
+                const fineMultiplier = propFineScaleModifier !== "none" && modifierMatches(event, propFineScaleModifier) ? 0.25 : 1;
+                const nextScale = clamp(selectedPropUniformScale + direction * propScaleStep * fineMultiplier, propScaleMin, propScaleMax);
+                onAdjustSelectedProp({ uniformScale: nextScale });
+                return;
+              }
+
               const zoomMultiplier = event.deltaY < 0 ? 1.1 : 0.9;
               const nextZoom = clamp(view.zoom * zoomMultiplier, 0.18, 8);
               setView({ ...view, zoom: nextZoom });

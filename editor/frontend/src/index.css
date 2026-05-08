@@ -806,6 +806,11 @@ body {
   z-index: 2;
   display: grid;
   gap: 8px;
+  pointer-events: none;
+}
+
+.viewport-overlay-toolbar > * {
+  pointer-events: auto;
 }
 
 .viewport-breadcrumbs {
@@ -892,7 +897,8 @@ body {
   gap: 6px;
 }
 
-.viewport-area-toolbar {
+.viewport-area-toolbar,
+.viewport-prop-toolbar {
   border: 1px solid var(--editor-border);
   border-radius: 12px;
   background: rgba(24, 29, 37, 0.86);
@@ -902,7 +908,8 @@ body {
   gap: 8px;
 }
 
-.viewport-area-toolbar label {
+.viewport-area-toolbar label,
+.viewport-prop-toolbar label {
   display: grid;
   gap: 4px;
   font-size: 11px;
@@ -910,7 +917,9 @@ body {
 }
 
 .viewport-area-toolbar select,
-.viewport-area-toolbar input {
+.viewport-area-toolbar input,
+.viewport-prop-toolbar select,
+.viewport-prop-toolbar input {
   color: var(--editor-fg);
   border: 1px solid var(--editor-border);
   border-radius: 7px;
@@ -1252,9 +1261,32 @@ body {
   accent-color: var(--editor-cyan);
 }
 
+.viewport-prop-toolbar {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: end;
+}
+
+.viewport-prop-toolbar .viewport-section-title {
+  grid-column: 1 / -1;
+}
+
+.viewport-prop-readout {
+  min-height: 30px;
+  border: 1px solid var(--editor-border);
+  border-radius: 7px;
+  background: #141922;
+  color: var(--editor-fg-2);
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 .toolbar-field select,
 .viewport-area-toolbar select,
 .viewport-area-toolbar input,
+.viewport-prop-toolbar select,
+.viewport-prop-toolbar input,
 .viewport-brush-toolbar select,
 .viewport-brush-toolbar input,
 .command-palette-input,
@@ -1470,7 +1502,7 @@ input {
   z-index: 2;
   width: 100%;
   margin: 0;
-  max-height: none;
+  max-height: min(44%, 240px);
   overflow: auto;
   padding: 16px;
   border: 0;

@@ -275,7 +275,8 @@ export class MockRuntimeClient implements RuntimeClient {
   }
 
   async scatterProps(props: readonly PropInstance[]) {
-    this.props = [...this.props, ...props];
+    const incomingIds = new Set(props.map((prop) => prop.id));
+    this.props = [...this.props.filter((prop) => !incomingIds.has(prop.id)), ...props];
     return runtimeCommandSuccess({
       props,
       propStats: mockPropStats(this.props),

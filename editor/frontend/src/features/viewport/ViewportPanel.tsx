@@ -6,6 +6,7 @@ import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import { getProtectedAreaWarnings, getRuntimeWarnings, getSelectedObject } from "../../state/editorSelectors";
 import { BevyCanvasHost, type AreaOverlayState } from "./BevyCanvasHost";
+import type { ViewportModifierKey } from "../../types/editor";
 import type { PropAsset, PropInstance, ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
 import type { WaterReflectionDebugViewMode } from "../../types/world";
 
@@ -35,6 +36,16 @@ const breadcrumbPath = (kind: string, label: string) => {
 
 const chunkIdForPosition = (position: readonly [number, number, number]) =>
   `chunk-${Math.floor(position[0] / 16)}-${Math.floor(position[1] / 16)}-${Math.floor(position[2] / 16)}`;
+
+const modifierKeyOptions: readonly { readonly value: ViewportModifierKey; readonly label: string }[] = [
+  { value: "shift", label: "Shift" },
+  { value: "alt", label: "Alt" },
+  { value: "control", label: "Ctrl" },
+  { value: "meta", label: "Meta" },
+  { value: "none", label: "None" },
+];
+
+const formatPropNumber = (value: number) => Number(value.toFixed(2)).toString();
 
 const buildPlacedProp = (
   asset: PropAsset,
@@ -98,6 +109,7 @@ export function ViewportPanel() {
   const runtimeWarnings = getRuntimeWarnings(editorState);
   const selectedObject = getSelectedObject(editorState);
   const selectedWaterBody = selectedObject && editorState.selection.kind === "water" && "reflectionStatus" in selectedObject ? selectedObject : undefined;
+  const selectedProp = selectedObject && editorState.selection.kind === "prop" && "transform" in selectedObject ? (selectedObject as PropInstance) : undefined;
   const warningsByArea = getProtectedAreaWarnings(editorState);
   const isAreaSelected = editorState.selection.kind === "area";
   const selectedAreaWarnings = isAreaSelected ? warningsByArea[editorState.selection.id] ?? [] : [];
@@ -131,6 +143,44 @@ export function ViewportPanel() {
         kind: "command",
         message: `Placed ${prop.name} in viewport at ${prop.position.map((value) => value.toFixed(1)).join(", ")}.`,
       });
+    },
+    [runtimeClient],
+  );
+
+  const adjustSelectedPropInViewer = useCallback(
+    (adjustment: { readonly rotationY?: number; readonly uniformScale?: number }) => {
+      const state = useEditorStore.getState();
+      if (state.selection.kind !== "prop") {
+        return;
+      }
+
+      const selection = state.selection;
+      const prop = state.props.find((candidate) => candidate.id === selection.id);
+      if (!prop) {
+        return;
+      }
+
+      const rotation: [number, number, number] =
+        adjustment.rotationY === undefined
+          ? [prop.transform.rotation[0], prop.transform.rotation[1], prop.transform.rotation[2]]
+          : [prop.transform.rotation[0], adjustment.rotationY, prop.transform.rotation[2]];
+      const scale: [number, number, number] =
+        adjustment.uniformScale === undefined
+          ? [prop.transform.scale[0], prop.transform.scale[1], prop.transform.scale[2]]
+          : [adjustment.uniformScale, adjustment.uniformScale, adjustment.uniformScale];
+      const nextProp: PropInstance = {
+        ...prop,
+        transform: {
+          ...prop.transform,
+          rotation,
+          scale,
+        },
+      };
+
+      useEditorStore.getState().updateProp(prop.id, {
+        transform: nextProp.transform,
+      });
+      void runtimeClient.scatterProps([nextProp]);
     },
     [runtimeClient],
   );
@@ -450,6 +500,84 @@ export function ViewportPanel() {
               </div>
             ) : null}
 
+            {activeMode === "props" ? (
+              <div className="viewport-prop-toolbar" data-testid="viewport-prop-toolbar">
+                <div className="viewport-section-title">Prop Placement</div>
+                <label>
+                  <span>Rotate drag key</span>
+                  <select
+                    data-testid="viewport-prop-rotate-key"
+                    value={editorState.propPlacementSettings.rotateDragModifier}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                      editorState.setPropPlacementSettings({ rotateDragModifier: event.target.value as ViewportModifierKey })
+                    }
+                  >
+                    {modifierKeyOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Fine size key</span>
+                  <select
+                    data-testid="viewport-prop-fine-scale-key"
+                    value={editorState.propPlacementSettings.fineScaleModifier}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                      editorState.setPropPlacementSettings({ fineScaleModifier: event.target.value as ViewportModifierKey })
+                    }
+                  >
+                    {modifierKeyOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Wheel size step</span>
+                  <input
+                    data-testid="viewport-prop-scale-step"
+                    type="number"
+                    min={0.01}
+                    max={1}
+                    step={0.01}
+                    value={editorState.propPlacementSettings.scaleStep}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                      const scaleStep = Number(event.target.value);
+                      if (Number.isFinite(scaleStep)) {
+                        editorState.setPropPlacementSettings({ scaleStep });
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Rotation snap</span>
+                  <input
+                    data-testid="viewport-prop-rotation-snap"
+                    type="number"
+                    min={0}
+                    max={90}
+                    step={1}
+                    value={editorState.propPlacementSettings.rotationSnapDegrees}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                      const rotationSnapDegrees = Number(event.target.value);
+                      if (Number.isFinite(rotationSnapDegrees)) {
+                        editorState.setPropPlacementSettings({ rotationSnapDegrees });
+                      }
+                    }}
+                  />
+                </label>
+                <span className="viewport-prop-readout" data-testid="viewport-prop-scale-value">
+                  Scale {selectedProp ? formatPropNumber(selectedProp.transform.scale[0]) : "-"}
+                </span>
+                <span className="viewport-prop-readout" data-testid="viewport-prop-rotation-value">
+                  Yaw {selectedProp ? formatPropNumber(selectedProp.transform.rotation[1]) : "-"}
+                </span>
+              </div>
+            ) : null}
+
             {isAreaSelected && selectedAreaForTool ? (
               <div className="viewport-area-toolbar">
                 <div className="viewport-section-title">Area Mode Toolbar</div>
@@ -598,6 +726,16 @@ export function ViewportPanel() {
           waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
           propPlacementEnabled={activeMode === "props"}
           onPlaceProp={placePropInViewer}
+          selectedPropRotationY={selectedProp?.transform.rotation[1]}
+          selectedPropUniformScale={selectedProp?.transform.scale[0]}
+          propRotateDragModifier={editorState.propPlacementSettings.rotateDragModifier}
+          propFineScaleModifier={editorState.propPlacementSettings.fineScaleModifier}
+          propRotationSensitivity={editorState.propPlacementSettings.rotationSensitivity}
+          propRotationSnapDegrees={editorState.propPlacementSettings.rotationSnapDegrees}
+          propScaleStep={editorState.propPlacementSettings.scaleStep}
+          propScaleMin={editorState.propPlacementSettings.minScale}
+          propScaleMax={editorState.propPlacementSettings.maxScale}
+          onAdjustSelectedProp={adjustSelectedPropInViewer}
         />
 
         <p className="agent-hint viewport-agent-hint">Agent Hint: area commands route through the runtime bridge and inspector fields update editor state.</p>
