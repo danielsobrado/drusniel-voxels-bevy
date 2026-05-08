@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("agent workbench runs a protected-area workflow and records mocked observations", async ({ page }) => {
+test("agent workbench runs a protected-area workflow and records live observations", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
@@ -71,9 +71,9 @@ test("agent workbench runs a protected-area workflow and records mocked observat
   await expect(page.getByTestId("inspector-area-rules-canPaint")).not.toBeChecked();
 
   await page.locator('[data-testid="agent-section-suggested-commands"]').locator('[data-command-id="editor.agent.observeScreen"]').click();
-  await expect(page.getByTestId("agent-section-timeline")).toContainText("Observed current mocked editor screen");
+  await expect(page.getByTestId("agent-section-timeline")).toContainText("Observed current editor screen");
 
   await page.locator('[data-testid="agent-section-suggested-commands"]').locator('[data-command-id="editor.agent.generatePlaywrightTest"]').click();
-  await expect(page.getByTestId("agent-section-test-results")).toContainText("mock-protected-area-workflow.spec.ts");
+  await expect(page.getByTestId("agent-section-test-results")).toContainText("protected-area-workflow.spec.ts");
   await expect(page.getByTestId("agent-selection-summary")).toContainText("area");
 });

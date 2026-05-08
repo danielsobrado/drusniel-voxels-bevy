@@ -22,7 +22,22 @@ const agentCommandIds = [
   "editor.help.showHandoff",
 ];
 
-const TEST_RESULTS_HEADER = "Playwright test requests";
+const TEST_RESULTS_HEADER = "Generated Playwright tests";
+
+const snapshotComparisonRows = (snapshots: ReturnType<typeof useEditorStore.getState>["savedSnapshots"]) => {
+  const [after, before] = snapshots;
+  if (!after || !before) {
+    return ["Save two editor snapshots to compare state changes."];
+  }
+
+  return [
+    `Before: ${before.id} (${before.note})`,
+    `After: ${after.id} (${after.note})`,
+    `Selection: ${before.snapshot.selection.kind}:${before.snapshot.selection.label} -> ${after.snapshot.selection.kind}:${after.snapshot.selection.label}`,
+    `Props: ${before.snapshot.props.length} -> ${after.snapshot.props.length}`,
+    `Dirty chunks: ${before.snapshot.dirtyState.dirtyChunkIds.length} -> ${after.snapshot.dirtyState.dirtyChunkIds.length}`,
+  ];
+};
 
 export function AgentWorkbenchPanel() {
   const editorState = useEditorStore();
@@ -40,6 +55,7 @@ export function AgentWorkbenchPanel() {
     .slice(0, 6);
 
   const timelineRows = timeline.slice(0, 6).map((entry) => `${entry.kind.toUpperCase()}: ${entry.message}`);
+  const comparisonRows = snapshotComparisonRows(editorState.savedSnapshots);
 
   const runAgentCommand = async (commandId: string) => {
     await runCommandById(commandId);
@@ -196,7 +212,7 @@ export function AgentWorkbenchPanel() {
             <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("conflict status clear") || entry.message.includes("conflicts clear"))} aria-label="Conflict status clear" /> Conflict status clear
           </label>
           <label>
-            <input type="checkbox" readOnly checked={generatedTests.length > 0} aria-label="Test generated" /> Test request recorded
+            <input type="checkbox" readOnly checked={generatedTests.length > 0} aria-label="Test generated" /> Test generated
           </label>
         </article>
 
@@ -204,7 +220,7 @@ export function AgentWorkbenchPanel() {
           <h3>Test Results</h3>
           <strong>{TEST_RESULTS_HEADER}</strong>
           <ul aria-label="Generated test results">
-            {generatedTests.length > 0 ? generatedTests.map((entry) => <li key={entry}>{entry}</li>) : <li>No tests recorded yet.</li>}
+            {generatedTests.length > 0 ? generatedTests.map((entry) => <li key={entry}>{entry}</li>) : <li>No generated tests yet.</li>}
           </ul>
         </article>
 
@@ -214,9 +230,10 @@ export function AgentWorkbenchPanel() {
         </article>
 
         <article className="agent-card" data-testid="agent-section-screenshot-placeholders">
-          <h3>Before / After Screenshot Notes</h3>
-          <p>Before: no screenshot recorded.</p>
-          <p>After: no screenshot recorded.</p>
+          <h3>Before / After Snapshot Comparison</h3>
+          <ul aria-label="Before after snapshot comparison">
+            {comparisonRows.map((row) => <li key={row}>{row}</li>)}
+          </ul>
         </article>
       </div>
     </section>

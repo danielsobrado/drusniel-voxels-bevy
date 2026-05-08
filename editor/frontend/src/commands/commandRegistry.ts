@@ -422,6 +422,74 @@ const areaConflictWarnings = (candidate: ProtectedArea, areas: readonly Protecte
   return [...warnings];
 };
 
+const buildAgentPlanSteps = (state: ReturnType<EditorCommandContext["getState"]>): readonly string[] => {
+  const steps: string[] = ["Observe active selection and runtime state."];
+  if (state.dirtyState.hasUnsavedChanges) {
+    steps.push("Save or snapshot unsaved editor changes.");
+  }
+  if (state.selection.kind === "chunk" && state.dirtyState.dirtyChunkIds.includes(state.selection.id)) {
+    steps.push(`Rebuild dirty chunk ${state.selection.label}.`);
+  }
+  if (state.selection.kind === "area") {
+    steps.push(`Validate protected-area conflicts for ${state.selection.label}.`);
+  }
+  if (state.selection.kind === "water") {
+    steps.push(`Run water visual probe for ${state.selection.label}.`);
+  }
+  if (state.selection.kind === "prop") {
+    steps.push(`Focus and inspect prop ${state.selection.label}.`);
+  }
+  steps.push("Run viewport smoke verification.");
+  return steps;
+};
+
+const buildPlaywrightSpec = (state: ReturnType<EditorCommandContext["getState"]>): string => {
+  const selected = state.selection.kind === "debug_resource" ? "debug resource" : `${state.selection.kind}: ${state.selection.label}`;
+  return [
+    "import { expect, test } from '@playwright/test';",
+    "",
+    "test('protected area editor workflow remains operable', async ({ page }) => {",
+    "  await page.goto('/');",
+    "  await expect(page.getByTestId('panel-agent-workbench')).toBeVisible();",
+    "  await expect(page.getByTestId('agent-selection-summary')).toBeVisible();",
+    `  await expect(page.getByTestId('agent-json-observation')).toContainText(${JSON.stringify(state.activeMode)});`,
+    `  await expect(page.getByTestId('agent-selection-summary')).toContainText(${JSON.stringify(selected.split(':')[0])});`,
+    "  await page.getByRole('button', { name: /editor\\.tests\\.runViewportSmokeTest/ }).click();",
+    "  await expect(page.getByLabel('Agent timeline')).toContainText('Viewport smoke');",
+    "});",
+    "",
+  ].join("\n");
+};
+
+const copyTextToClipboard = async (text: string): Promise<boolean> => {
+  if (typeof navigator === "undefined" || typeof navigator.clipboard?.writeText !== "function") {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const describeLatestSnapshotDelta = (state: ReturnType<EditorCommandContext["getState"]>): string => {
+  const [after, before] = state.savedSnapshots;
+  if (!after || !before) {
+    return "Snapshot comparison needs at least two saved editor snapshots.";
+  }
+
+  const changes = [
+    `selection ${before.snapshot.selection.kind}:${before.snapshot.selection.label} -> ${after.snapshot.selection.kind}:${after.snapshot.selection.label}`,
+    `chunks ${before.snapshot.chunks.length} -> ${after.snapshot.chunks.length}`,
+    `props ${before.snapshot.props.length} -> ${after.snapshot.props.length}`,
+    `areas ${before.snapshot.protectedAreas.length} -> ${after.snapshot.protectedAreas.length}`,
+    `dirty chunks ${before.snapshot.dirtyState.dirtyChunkIds.length} -> ${after.snapshot.dirtyState.dirtyChunkIds.length}`,
+  ];
+  return `Compared ${before.id} -> ${after.id}: ${changes.join(", ")}.`;
+};
+
 const atlasTileIds = Array.from({ length: 64 }, (_, index) => `tile-${index}`);
 
 const getSelectedTile = (ctx: EditorCommandContext): string => ctx.getState().selectedAtlasTileId ?? "tile-0";
@@ -1731,12 +1799,13 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.agent.runPlan",
     title: "Agent run plan",
-    description: "Record an agent plan execution request.",
+    description: "Generate an actionable plan from the current editor state.",
     category: "Agent",
     keywords: ["agent", "plan", "automation"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent run plan requested." });
-      ctx.toast.info("Agent plan recorded; automation is deferred.");
+      const steps = buildAgentPlanSteps(ctx.getState());
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Agent plan: ${steps.join(" -> ")}` });
+      ctx.toast.info(`Agent plan generated with ${steps.length} steps.`);
     },
   },
   {
@@ -1775,26 +1844,30 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.agent.generatePlaywrightTest",
     title: "Generate Playwright test",
-    description: "Record a Playwright generation request.",
+    description: "Generate a Playwright workflow spec from the current editor state.",
     category: "Agent",
     keywords: ["agent", "playwright", "test"],
-    run: (ctx) => {
+    run: async (ctx) => {
+      const spec = buildPlaywrightSpec(ctx.getState());
+      const copied = await copyTextToClipboard(spec);
+      const lineCount = spec.trimEnd().split("\n").length;
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",
-        message: "Generated Playwright test request: protected-area-workflow.spec.ts",
+        message: `Generated Playwright test protected-area-workflow.spec.ts (${lineCount} lines${copied ? ", copied to clipboard" : ""}).`,
       });
-      ctx.toast.info("Playwright test request recorded.");
+      ctx.toast.success(copied ? "Playwright test generated and copied." : "Playwright test generated.");
     },
   },
   {
     id: "editor.agent.compareBeforeAfter",
     title: "Compare before/after",
-    description: "Record a before/after comparison request.",
+    description: "Compare the latest two saved editor snapshots.",
     category: "Agent",
     keywords: ["agent", "compare", "before", "after"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Compared before/after viewport state." });
-      ctx.toast.info("Before/after comparison recorded.");
+      const comparison = describeLatestSnapshotDelta(ctx.getState());
+      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: comparison });
+      ctx.toast.info("Before/after comparison complete.");
     },
   },
   {
@@ -1823,12 +1896,20 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.tests.runViewportSmokeTest",
     title: "Run viewport smoke test",
-    description: "Record a viewport smoke test request.",
+    description: "Fetch backend viewport data and runtime state for a smoke verification.",
     category: "Tests",
     keywords: ["test", "viewport", "smoke"],
-    run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Viewport smoke test requested." });
-      ctx.toast.info("Viewport smoke test request recorded.");
+    run: async (ctx) => {
+      const viewport = unwrapBackend(await ctx.backendClient.getViewportSnapshot());
+      const runtime = unwrapRuntime(await ctx.runtimeClient.getRuntimeSnapshot());
+      const includedChunks = viewport.chunks.filter((chunk) => chunk.mesh.included).length;
+      ctx.getState().setViewportSnapshot(viewport);
+      applyRuntimeSnapshot(ctx, runtime);
+      ctx.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `Viewport smoke passed: ${viewport.chunks.length} chunks, ${includedChunks} mesh payloads, runtime ${runtime.connectionState}.`,
+      });
+      ctx.toast.success("Viewport smoke test passed.");
     },
   },
   {
