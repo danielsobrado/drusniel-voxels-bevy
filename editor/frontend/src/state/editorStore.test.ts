@@ -362,7 +362,7 @@ describe("editor command registry", () => {
     expect(useEditorStore.getState().selection).toMatchObject({ kind: "water", id: "water-lk-03" });
   });
 
-  it("runs water visual probe and stores mocked snapshot", async () => {
+  it("runs water visual probe and stores runtime snapshot", async () => {
     useEditorStore.getState().clearDirty();
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
     await runCommand("editor.water.runVisualProbe", createContext());

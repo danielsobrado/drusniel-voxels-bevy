@@ -21,7 +21,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -145,7 +145,7 @@ export interface EditorDataState {
   readonly materials: MaterialAsset[];
   readonly outlinerNodeState: Record<OutlinerNodeKey, OutlinerNodeState>;
   readonly atlasMapping: BlockAtlasMap;
-  readonly waterRuntimeSnapshot: MockWaterRuntimeSnapshot;
+  readonly waterRuntimeSnapshot: WaterRuntimeSnapshot;
   readonly selectedPropAssetId: string;
   readonly runtimeMetrics: RuntimeMetrics;
   readonly consoleMessages: ConsoleMessage[];
@@ -187,7 +187,7 @@ interface EditorActions {
   readonly markAtlasRebuilt: () => void;
   readonly replaceWorldSummary: (summary: WorldSummary) => void;
   readonly setViewportSnapshot: (snapshot: ViewportSnapshot | null) => void;
-  readonly setWaterRuntimeSnapshot: (snapshot: MockWaterRuntimeSnapshot) => void;
+  readonly setWaterRuntimeSnapshot: (snapshot: WaterRuntimeSnapshot) => void;
   readonly syncWaterReflectionStatus: (patch: Partial<WaterReflectionStatus>) => void;
   readonly markDirty: (chunkId?: string) => void;
   readonly markPropDirty: (propId: string) => void;

@@ -1,6 +1,6 @@
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
 import type { RenderQualityPreset } from "../types/editor";
-import type { MockWaterRuntimeSnapshot, WaterPresence, WaterReflectionStatus, WaterVisualProbeOutput } from "../types/world";
+import type { WaterPresence, WaterReflectionStatus, WaterRuntimeSnapshot, WaterVisualProbeOutput } from "../types/world";
 import type { RenderQualityReadouts } from "../types/runtime";
 
 const mockRenderQualityReadouts: Record<RenderQualityPreset, RenderQualityReadouts> = {
@@ -156,7 +156,7 @@ export const mockWaterProbeOutput: WaterVisualProbeOutput = {
   compositorPixelMatched: true,
 };
 
-export const mockWaterRuntimeSnapshot: MockWaterRuntimeSnapshot = {
+export const mockWaterRuntimeSnapshot: WaterRuntimeSnapshot = {
   reflectionStatus: mockWaterReflectionStatus,
   waterPresence: mockWaterPresence,
   probe: mockWaterProbeOutput,

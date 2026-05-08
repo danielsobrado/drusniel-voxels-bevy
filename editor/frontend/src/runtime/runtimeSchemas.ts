@@ -3,7 +3,6 @@ import type {
   BlockType,
   BlockAtlasMap,
   ChunkSummary,
-  MockWaterRuntimeSnapshot,
   PropInstance,
   PropStats,
   ProtectedArea,
@@ -11,6 +10,7 @@ import type {
   WaterBody,
   WaterReflectionDebugViewMode,
   WaterReflectionStatus,
+  WaterRuntimeSnapshot,
 } from "../types/world";
 import type { ConsoleMessage, GraphicsCapabilities, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
 
@@ -38,7 +38,7 @@ export interface RuntimeWaterReflectionState {
   readonly status: WaterReflectionStatus;
 }
 
-export interface RuntimeWaterVisualProbeResult extends MockWaterRuntimeSnapshot {
+export interface RuntimeWaterVisualProbeResult extends WaterRuntimeSnapshot {
   readonly capturedAt: string;
 }
 

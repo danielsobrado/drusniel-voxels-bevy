@@ -15,8 +15,8 @@ import type {
   ProtectedArea,
   WaterBody,
   WaterBodyKind,
-  MockWaterRuntimeSnapshot,
   WaterReflectionDebugViewMode,
+  WaterRuntimeSnapshot,
   VoxelBlock,
 } from "../../types/world";
 import type { Selection } from "../../types/editor";
@@ -724,7 +724,7 @@ function WaterBodyInspector({
   readonly onSetDebugMode: (mode: WaterReflectionDebugViewMode) => void;
   readonly onUpdate: (patch: Partial<WaterBody>) => void;
   readonly probePending: boolean;
-  readonly snapshot: MockWaterRuntimeSnapshot;
+  readonly snapshot: WaterRuntimeSnapshot;
   readonly waterBody: WaterBody;
 }) {
   const kindOptions: readonly { readonly value: WaterBodyKind; readonly label: string }[] = [
@@ -874,8 +874,8 @@ function WaterReflectionStatusCard({
   presence,
   status,
 }: {
-  readonly presence: MockWaterRuntimeSnapshot["waterPresence"];
-  readonly status: MockWaterRuntimeSnapshot["reflectionStatus"];
+  readonly presence: WaterRuntimeSnapshot["waterPresence"];
+  readonly status: WaterRuntimeSnapshot["reflectionStatus"];
 }) {
   return (
     <InspectorSection title="Water reflection status" testId="inspector-water-reflection-status">
@@ -893,7 +893,7 @@ function WaterReflectionStatusCard({
   );
 }
 
-function WaterVisualProbePanel({ probe }: { readonly probe: MockWaterRuntimeSnapshot["probe"] }) {
+function WaterVisualProbePanel({ probe }: { readonly probe: WaterRuntimeSnapshot["probe"] }) {
   return (
     <InspectorSection title="Water visual probe output" testId="inspector-water-visual-probe">
       <ReadOnlyMetricRow label="Nearest body" value={probe.nearestBodyKind} />

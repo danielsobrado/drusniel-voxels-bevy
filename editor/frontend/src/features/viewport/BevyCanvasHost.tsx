@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { ChunkSummary, MockWaterRuntimeSnapshot, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { ChunkSummary, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { RuntimeState } from "../../types/editor";
 
 export interface AreaOverlayState {
@@ -21,7 +21,7 @@ interface BevyCanvasHostProps {
   readonly showProtectedAreas: boolean;
   readonly waterDebug: boolean;
   readonly waterDebugMode: WaterReflectionDebugViewMode;
-  readonly waterRuntimeSnapshot: MockWaterRuntimeSnapshot;
+  readonly waterRuntimeSnapshot: WaterRuntimeSnapshot;
 }
 
 interface ViewState {

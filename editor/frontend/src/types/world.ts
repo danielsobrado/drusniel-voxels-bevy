@@ -194,7 +194,7 @@ export interface WaterReflectionStatus {
   readonly lastProbeUpdateMs: number;
 }
 
-export interface MockWaterRuntimeSnapshot {
+export interface WaterRuntimeSnapshot {
   readonly reflectionStatus: WaterReflectionStatus;
   readonly waterPresence: WaterPresence;
   readonly probe: WaterVisualProbeOutput;
