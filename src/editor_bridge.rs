@@ -280,16 +280,18 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
 
     let result = persistence::editor_save_default_world(voxel_world);
     if result.saved {
-        let editor_props = match save_editor_placed_props(world) {
-            Ok((count, path)) => json!({
-                "saved": true,
-                "count": count,
-                "savePath": path,
-            }),
-            Err(message) => json!({
-                "saved": false,
-                "error": message,
-            }),
+        let (editor_prop_count, editor_prop_save_path) = match save_editor_placed_props(world) {
+            Ok(summary) => summary,
+            Err(message) => {
+                return BridgeResponse {
+                    status: 500,
+                    body: json!({
+                        "ok": false,
+                        "error": message,
+                        "code": "EDITOR_PROP_SAVE_FAILED",
+                    }),
+                };
+            }
         };
 
         BridgeResponse {
@@ -299,7 +301,11 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
                 "data": {
                     "worldId": result.save_path,
                     "savedAt": timestamp_string(),
-                    "editorProps": editor_props,
+                    "editorProps": {
+                        "saved": true,
+                        "count": editor_prop_count,
+                        "savePath": editor_prop_save_path,
+                    },
                 },
             }),
         }
