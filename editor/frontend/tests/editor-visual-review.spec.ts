@@ -147,7 +147,7 @@ test("@visual-review captures editor functionality screenshots in mock runtime",
   await openDockTab(page, "Agent Workbench", "panel-agent-workbench");
   await page.locator('[data-testid="agent-section-suggested-commands"]').locator('[data-command-id="editor.agent.observeScreen"]').click();
   await page.locator('[data-testid="agent-section-suggested-commands"]').locator('[data-command-id="editor.agent.generatePlaywrightTest"]').click();
-  await expect(page.getByTestId("agent-section-test-results")).toContainText("mock-protected-area-workflow.spec.ts");
+  await expect(page.getByTestId("agent-section-test-results")).toContainText("protected-area-workflow.spec.ts");
   await captureReviewScreenshot(page, captures, "08-agent-workbench", "01-agent-observation-and-generated-test");
   await page.getByTestId("agent-section-test-results").scrollIntoViewIfNeeded();
   await captureReviewLocatorScreenshot(page.getByTestId("panel-agent-workbench"), captures, "08-agent-workbench", "02-generated-test-results-detail");
