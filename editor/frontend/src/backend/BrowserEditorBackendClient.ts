@@ -1,5 +1,6 @@
-import { mockAtlasMapping } from "../mocks/mockWorld";
 import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
+import type { RuntimeCommandRequest } from "../runtime/runtimeCommands";
+import type { RuntimeCommandResult, RuntimeSaveSummary, RuntimeSnapshot } from "../runtime/runtimeSchemas";
 import type { ViewportSnapshot } from "../types/world";
 
 const DEFAULT_LOCAL_BRIDGE_URL = "http://127.0.0.1:17777";
@@ -49,6 +50,23 @@ const normalizeBackendResult = async <T>(response: Response): Promise<BackendRes
 
   return body;
 };
+
+const normalizeRuntimeResult = async <T>(response: Response): Promise<BackendResult<T>> => {
+  const body = (await response.json().catch(() => null)) as RuntimeCommandResult<T> | null;
+
+  if (!body || typeof body !== "object") {
+    return { ok: false, error: `Runtime bridge returned invalid JSON with HTTP ${response.status}.`, code: "INVALID_RUNTIME_RESPONSE" };
+  }
+
+  if (!response.ok && body.ok) {
+    return { ok: false, error: `Runtime bridge request failed with HTTP ${response.status}.`, code: "HTTP_ERROR" };
+  }
+
+  return body.ok ? { ok: true, data: body.data } : { ok: false, error: body.message, code: body.code ?? body.status };
+};
+
+const makeRequestId = (type: string): string =>
+  `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 export class BrowserEditorBackendClient implements EditorBackendClient {
   private readonly baseUrl: string;
@@ -107,11 +125,25 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
   }
 
   async loadAtlasMapping(): Promise<BackendResult<AtlasMappingDto>> {
-    return { ok: true, data: mockAtlasMapping };
+    const snapshot = await this.fetchRuntimeJson<RuntimeSnapshot>("/runtime/snapshot");
+    return snapshot.ok ? { ok: true, data: snapshot.data.atlasMapping.mapping } : snapshot;
   }
 
-  async saveAtlasMapping(_atlasMapping: AtlasMappingDto): Promise<BackendResult<WorldSaveSummary>> {
-    return this.saveDefaultWorld();
+  async saveAtlasMapping(atlasMapping: AtlasMappingDto): Promise<BackendResult<WorldSaveSummary>> {
+    const request: RuntimeCommandRequest = {
+      type: "runtime.saveAtlasMapping",
+      requestId: makeRequestId("runtime.saveAtlasMapping"),
+      payload: { mapping: atlasMapping },
+    };
+    const result = await this.fetchRuntimeJson<RuntimeSaveSummary>("/runtime/command", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+
+    return result.ok ? { ok: true, data: result.data } : result;
   }
 
   private async fetchJson<T>(path: string, init?: RequestInit): Promise<BackendResult<T>> {
@@ -120,6 +152,15 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown editor backend request failure.";
       return { ok: false, error: `Editor backend unavailable: ${message}`, code: "BACKEND_UNAVAILABLE" };
+    }
+  }
+
+  private async fetchRuntimeJson<T>(path: string, init?: RequestInit): Promise<BackendResult<T>> {
+    try {
+      return await normalizeRuntimeResult<T>(await fetch(`${this.baseUrl}${path}`, init));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown runtime bridge request failure.";
+      return { ok: false, error: `Runtime bridge unavailable: ${message}`, code: "RUNTIME_BRIDGE_UNAVAILABLE" };
     }
   }
 }

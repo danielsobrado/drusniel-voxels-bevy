@@ -1,5 +1,5 @@
 import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
-import { mockAtlasMapping, mockChunks, mockMaterials, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
+import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import type { ViewportSnapshot } from "../types/world";
 
 const mockWorldSummary = (): WorldSummary => ({
@@ -9,6 +9,7 @@ const mockWorldSummary = (): WorldSummary => ({
   protectedAreas: mockProtectedAreas,
   waterBodies: mockWaterBodies,
   props: mockProps,
+  propAssets: mockPropAssets,
   materials: mockMaterials,
   updatedAt: new Date().toISOString(),
 });

@@ -21,7 +21,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, MockWaterRuntimeSnapshot, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WorldViewportPreview } from "../types/world";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -94,6 +94,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   protectedAreas: cloneEditorValue(state.protectedAreas),
   waterBodies: cloneEditorValue(state.waterBodies),
   props: cloneEditorValue(state.props),
+  propAssets: cloneEditorValue(state.propAssets),
   materials: cloneEditorValue(state.materials),
   atlasMapping: cloneEditorValue(state.atlasMapping),
   selectedAtlasTileId: state.selectedAtlasTileId,
@@ -115,6 +116,7 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.protectedAreas = [...cloneEditorValue(snapshot.protectedAreas)];
   state.waterBodies = [...cloneEditorValue(snapshot.waterBodies)];
   state.props = [...cloneEditorValue(snapshot.props)];
+  state.propAssets = [...cloneEditorValue(snapshot.propAssets)];
   state.materials = [...cloneEditorValue(snapshot.materials)];
   state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.props, state.materials);
   state.atlasMapping = cloneEditorValue(snapshot.atlasMapping);
@@ -139,6 +141,7 @@ export interface EditorDataState {
   readonly protectedAreas: ProtectedArea[];
   readonly waterBodies: WaterBody[];
   readonly props: PropInstance[];
+  readonly propAssets: PropAsset[];
   readonly materials: MaterialAsset[];
   readonly outlinerNodeState: Record<OutlinerNodeKey, OutlinerNodeState>;
   readonly atlasMapping: BlockAtlasMap;
@@ -345,6 +348,7 @@ export const createInitialEditorState = (): EditorDataState => ({
   protectedAreas: [...mockProtectedAreas],
   waterBodies: [...mockWaterBodies],
   props: [...mockProps],
+  propAssets: [...mockPropAssets],
   materials: [...mockMaterials],
   outlinerNodeState: createOutlinerNodeState(mockChunks, mockProtectedAreas, mockWaterBodies, mockProps, mockMaterials),
   propBrushSettings: initialPropBrushSettings,
@@ -660,6 +664,10 @@ export const useEditorStore = create<EditorStore>()(
         state.protectedAreas = [...summary.protectedAreas];
         state.waterBodies = [...summary.waterBodies];
         state.props = [...summary.props];
+        state.propAssets = [...(summary.propAssets ?? state.propAssets)];
+        if (!state.propAssets.some((asset) => asset.id === state.selectedPropAssetId)) {
+          state.selectedPropAssetId = state.propAssets[0]?.id ?? "";
+        }
         state.materials = [...summary.materials];
         state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, summary.props, summary.materials);
         state.selection = preserveSelectionWhenReplacingSummary(summary, state.selection);

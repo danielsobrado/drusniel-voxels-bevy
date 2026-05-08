@@ -92,6 +92,7 @@ export interface EditorUndoSnapshot {
   readonly protectedAreas: readonly ProtectedArea[];
   readonly waterBodies: readonly WaterBody[];
   readonly props: readonly PropInstance[];
+  readonly propAssets: readonly PropAsset[];
   readonly materials: readonly MaterialAsset[];
   readonly atlasMapping: BlockAtlasMap;
   readonly selectedAtlasTileId: string;
@@ -120,4 +121,4 @@ export interface LargeWorldStats {
   readonly waterBodyCount: number;
   readonly consoleMessageCount: number;
 }
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "./world";
+import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "./world";

@@ -1,5 +1,4 @@
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
-import { mockPropAssets } from "../../mocks/mockWorld";
 import type { PropAsset, PropType } from "../../types/world";
 import { useEditorStore } from "../../state/editorStore";
 
@@ -30,9 +29,10 @@ export function AssetBrowserPanel() {
   const setSelectedPropAsset = useEditorStore((state) => state.setSelectedPropAsset);
   const materials = useEditorStore((state) => state.materials);
   const worldProps = useEditorStore((state) => state.props);
+  const propAssets = useEditorStore((state) => state.propAssets);
   const atlasMapping = useEditorStore((state) => state.atlasMapping);
 
-  const propAssetCatalog = groupedPropAssets(mockPropAssets);
+  const propAssetCatalog = groupedPropAssets(propAssets);
 
   return (
     <section className="panel-shell" data-testid="panel-asset-browser" aria-labelledby="asset-browser-title">

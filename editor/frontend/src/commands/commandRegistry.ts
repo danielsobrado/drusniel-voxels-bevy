@@ -3,8 +3,7 @@ import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
 import type { EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockType, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
-import { mockPropAssets } from "../mocks/mockWorld";
+import type { BlockType, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 
 const unwrapBackend = <T>(result: BackendResult<T>): T => {
   if (!result.ok) {
@@ -205,9 +204,9 @@ const toBrushPlacementRules = (state: ReturnType<EditorCommandContext["getState"
   seed: state.propBrushSettings.seed,
 });
 
-const getActivePropAsset = (state: ReturnType<EditorCommandContext["getState"]>) => {
+const getActivePropAsset = (state: ReturnType<EditorCommandContext["getState"]>): PropAsset | undefined => {
   const selected = state.selectedPropAssetId;
-  return mockPropAssets.find((candidate) => candidate.id === selected) ?? mockPropAssets[0];
+  return state.propAssets.find((candidate) => candidate.id === selected) ?? state.propAssets[0];
 };
 
 const buildSeededRandom = (seed: number) => {
@@ -224,6 +223,10 @@ const buildSeededRandom = (seed: number) => {
 
 const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>): readonly PropInstance[] => {
   const asset = getActivePropAsset(state);
+  if (!asset) {
+    return [];
+  }
+
   const seed = state.propBrushSettings.seed;
   const random = buildSeededRandom(seed);
   const baseIndex = state.props.length;
@@ -1344,7 +1347,7 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.props.scatterOnSelection",
     title: "Scatter props on selection",
-    description: "Scatter mocked prop instances at current brush settings.",
+    description: "Scatter prop instances at current brush settings.",
     category: "Props",
     keywords: ["props", "scatter", "selection", "brush", "placement"],
     run: (ctx) => {
@@ -1365,14 +1368,14 @@ export const editorCommands: readonly EditorCommand[] = [
       ctx.toast.success(`Scattered ${generated.length} props.`);
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",
-        message: `Scattered ${generated.length} mocked props from ${state.selectedPropAssetId}.`,
+        message: `Scattered ${generated.length} props from ${state.selectedPropAssetId}.`,
       });
     },
   },
   {
     id: "editor.props.clearInSelection",
     title: "Clear props in selection",
-    description: "Remove mocked props constrained by current selection.",
+    description: "Remove props constrained by current selection.",
     category: "Props",
     keywords: ["props", "delete", "clear", "selection"],
     run: (ctx) => {

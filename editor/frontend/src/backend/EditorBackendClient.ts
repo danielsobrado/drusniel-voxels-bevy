@@ -1,4 +1,4 @@
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "../types/world";
+import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "../types/world";
 
 export type BackendResult<T> =
   | { readonly ok: true; readonly data: T }
@@ -11,6 +11,7 @@ export interface WorldSummary {
   readonly protectedAreas: readonly ProtectedArea[];
   readonly waterBodies: readonly WaterBody[];
   readonly props: readonly PropInstance[];
+  readonly propAssets?: readonly PropAsset[];
   readonly materials: readonly MaterialAsset[];
   readonly viewport?: WorldViewportPreview;
   readonly updatedAt: string;

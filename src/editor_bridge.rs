@@ -11,6 +11,7 @@ use log::warn;
 use serde_json::{Value, json};
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
+use crate::props::{PropConfig, PropDefinition};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
 use crate::terrain::generation::config::terrain_config_fingerprint;
@@ -459,6 +460,7 @@ fn frontend_world_summary_from_metadata_and_world(
         "protectedAreas": [],
         "waterBodies": frontend_water_bodies_payload(world),
         "props": [],
+        "propAssets": frontend_prop_assets_payload(world),
         "materials": [],
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,
@@ -469,6 +471,64 @@ fn frontend_world_summary_from_metadata_and_world(
         },
         "updatedAt": timestamp_string(),
     })
+}
+
+fn frontend_prop_assets_payload(world: &World) -> Vec<Value> {
+    let Some(config) = world.get_resource::<PropConfig>() else {
+        return Vec::new();
+    };
+
+    let mut assets = Vec::new();
+    append_prop_assets(&mut assets, "tree", &config.props.trees);
+    append_prop_assets(&mut assets, "rock", &config.props.rocks);
+    append_prop_assets(&mut assets, "bush", &config.props.bushes);
+    append_prop_assets(&mut assets, "flower", &config.props.flowers);
+    assets
+}
+
+fn append_prop_assets(
+    assets: &mut Vec<Value>,
+    prop_type: &'static str,
+    definitions: &[PropDefinition],
+) {
+    for definition in definitions {
+        let category = if definition.id.starts_with("building_") {
+            "building"
+        } else {
+            prop_type
+        };
+
+        assets.push(json!({
+            "id": &definition.id,
+            "name": prop_display_name(&definition.id),
+            "type": category,
+            "category": category,
+            "assetPath": format!("assets/{}", definition.path),
+            "defaultMaterial": default_prop_material(category),
+        }));
+    }
+}
+
+fn prop_display_name(id: &str) -> String {
+    id.split(['_', '-'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn default_prop_material(category: &str) -> &'static str {
+    match category {
+        "rock" => "mat-rock-block",
+        "building" => "mat-village-building",
+        _ => "mat-grass-block",
+    }
 }
 
 fn frontend_water_bodies_payload(world: &World) -> Vec<Value> {
