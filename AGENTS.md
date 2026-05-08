@@ -35,3 +35,52 @@ cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 5. State the measured result plainly, including regressions if they exist.
 
 If you did not profile a performance-sensitive change, say that explicitly instead of implying the result is verified.
+
+## Rule
+
+Always prefix shell commands with `rtk`.
+
+Examples:
+
+```bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+```
+
+## Meta Commands
+
+```bash
+rtk gain            # Token savings analytics
+rtk gain --history  # Recent command savings history
+rtk proxy <cmd>     # Run raw command without filtering
+```
+
+## Verification
+
+```bash
+rtk --version
+rtk gain
+which rtk
+```
+
+Standard commands the agent should use:
+
+```bash
+make dev          # Start local development environment
+make test         # Run full test suite
+make lint         # Run Go and TypeScript linters
+make reconcile   # Run reconciliation harness against Power BI
+make build        # Build production artifacts
+```
+
+Do not invent new commands. Add to Makefile via PR if a new command is needed.
+
+Protect context usage. **Any command with unknown or potentially large output must be byte-capped.**
+
+Default pattern:
+
+```bash
+COMMAND 2>&1 | head -c 4000
+```
