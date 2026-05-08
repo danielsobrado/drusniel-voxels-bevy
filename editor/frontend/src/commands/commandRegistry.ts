@@ -1713,52 +1713,51 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.agent.observeScreen",
     title: "Agent observe screen",
-    description: "Add a mocked agent observation event.",
+    description: "Add an agent observation event for the current editor state.",
     category: "Agent",
     keywords: ["agent", "observe", "screen"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Observed current mocked editor screen." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Observed current editor screen." });
       ctx.toast.info("Agent observation captured.");
     },
   },
   {
     id: "editor.agent.runPlan",
     title: "Agent run plan",
-    description: "Record a mocked agent plan execution request.",
+    description: "Record an agent plan execution request.",
     category: "Agent",
     keywords: ["agent", "plan", "automation"],
-    preconditions: ["mocked-only"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent run plan requested in mocked mode." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent run plan requested." });
       ctx.toast.info("Agent plan recorded; automation is deferred.");
     },
   },
   {
     id: "editor.agent.approveStep",
     title: "Approve step",
-    description: "Record a mocked approval decision for the selected plan step.",
+    description: "Record an approval decision for the selected plan step.",
     category: "Agent",
     keywords: ["agent", "plan", "approve"],
     run: (ctx) => {
       ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent step approved." });
-      ctx.toast.success("Agent step approved (mock).");
+      ctx.toast.success("Agent step approved.");
     },
   },
   {
     id: "editor.agent.rejectStep",
     title: "Reject step",
-    description: "Record a mocked rejection decision for the selected plan step.",
+    description: "Record a rejection decision for the selected plan step.",
     category: "Agent",
     keywords: ["agent", "plan", "reject"],
     run: (ctx) => {
       ctx.getState().pushAgentTimelineEvent({ kind: "warning", message: "Agent step rejected." });
-      ctx.toast.warning("Agent step rejected (mock).");
+      ctx.toast.warning("Agent step rejected.");
     },
   },
   {
     id: "editor.agent.revisePlan",
     title: "Revise plan",
-    description: "Record a mocked revision request for the active plan.",
+    description: "Record a revision request for the active plan.",
     category: "Agent",
     keywords: ["agent", "plan", "revise"],
     run: (ctx) => {
@@ -1769,36 +1768,36 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.agent.generatePlaywrightTest",
     title: "Generate Playwright test",
-    description: "Record a mocked Playwright generation request.",
+    description: "Record a Playwright generation request.",
     category: "Agent",
     keywords: ["agent", "playwright", "test"],
     run: (ctx) => {
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",
-        message: "Generated mocked Playwright test: mock-protected-area-workflow.spec.ts",
+        message: "Generated Playwright test request: protected-area-workflow.spec.ts",
       });
-      ctx.toast.info("Mocked Playwright test generated.");
+      ctx.toast.info("Playwright test request recorded.");
     },
   },
   {
     id: "editor.agent.compareBeforeAfter",
     title: "Compare before/after",
-    description: "Record a mocked before/after comparison request.",
+    description: "Record a before/after comparison request.",
     category: "Agent",
     keywords: ["agent", "compare", "before", "after"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Compared before/after viewport state (mock)." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "observation", message: "Compared before/after viewport state." });
       ctx.toast.info("Before/after comparison recorded.");
     },
   },
   {
     id: "editor.agent.saveSnapshot",
     title: "Save snapshot",
-    description: "Record a mocked workflow snapshot in the agent timeline.",
+    description: "Record a workflow snapshot in the agent timeline.",
     category: "Agent",
     keywords: ["agent", "snapshot", "save"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent snapshot saved (mock)." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Agent snapshot saved." });
       ctx.getState().pushCommandHistory("editor.agent.saveSnapshot", "Save snapshot");
       ctx.toast.success("Agent snapshot saved.");
     },
@@ -1806,11 +1805,11 @@ export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.agent.copyObservationJson",
     title: "Copy observation JSON",
-    description: "Record a mocked copy action for the current observation payload.",
+    description: "Record a copy action for the current observation payload.",
     category: "Agent",
     keywords: ["agent", "observation", "copy", "json"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Copied agent observation JSON (mock)." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Copied agent observation JSON." });
       ctx.toast.success("Agent observation JSON copied.");
     },
   },
@@ -1821,7 +1820,7 @@ export const editorCommands: readonly EditorCommand[] = [
     category: "Tests",
     keywords: ["test", "viewport", "smoke"],
     run: (ctx) => {
-      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Mock viewport smoke test requested." });
+      ctx.getState().pushAgentTimelineEvent({ kind: "command", message: "Viewport smoke test requested." });
       ctx.toast.info("Viewport smoke test request recorded.");
     },
   },

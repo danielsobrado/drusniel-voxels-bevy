@@ -15,7 +15,7 @@ tools/*.html
 assets/*.html
 
 # World save file
-*.bin
+*.bin![1778071754577](image/.gitignore/1778071754577.png)![1778071758337](image/.gitignore/1778071758337.png)
 *.local.json
 *.png
 *.fbx
@@ -52,3 +52,5 @@ editor/frontend/.tmp-*
 editor/frontend/src-tauri/target/
 editor/frontend/src-tauri/gen/
 editor/frontend/src-tauri/binaries/
+assets/temp/
+world_data.bin

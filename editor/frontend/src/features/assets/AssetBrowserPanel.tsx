@@ -55,7 +55,7 @@ export function AssetBrowserPanel() {
             </button>
           </div>
         </div>
-        <p className="agent-hint">Agent Hint: assets are mocked; atlas mapping and prop brush workflows route through editor commands.</p>
+        <p className="agent-hint">Agent Hint: atlas mapping routes through runtime commands; prop brush assets use the editor catalog.</p>
         <div className="asset-card">
           <strong>Prop brush asset</strong>
           <small>

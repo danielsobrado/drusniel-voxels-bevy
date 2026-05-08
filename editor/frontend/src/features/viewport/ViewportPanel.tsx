@@ -520,7 +520,7 @@ export function ViewportPanel() {
           waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
         />
 
-        <p className="agent-hint viewport-agent-hint">Agent Hint: area editing is mocked; use commands and inspector fields for local state updates.</p>
+        <p className="agent-hint viewport-agent-hint">Agent Hint: area commands route through the runtime bridge and inspector fields update editor state.</p>
       </div>
     </section>
   );

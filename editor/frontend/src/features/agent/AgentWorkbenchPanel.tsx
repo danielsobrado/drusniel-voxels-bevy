@@ -22,7 +22,7 @@ const agentCommandIds = [
   "editor.help.showHandoff",
 ];
 
-const TEST_RESULTS_HEADER = "Mocked Playwright tests";
+const TEST_RESULTS_HEADER = "Playwright test requests";
 
 export function AgentWorkbenchPanel() {
   const editorState = useEditorStore();
@@ -116,7 +116,7 @@ export function AgentWorkbenchPanel() {
 
         <article className="agent-card" data-testid="agent-section-handoff">
           <h3>LLM Handoff</h3>
-          <p>Frontend-only editor shell. Bevy/Tauri bridge remains deferred. Current persistence surface is the mock backend client plus state snapshots.</p>
+          <p>Tauri editor shell with runtime bridge commands for world loading, viewport data, atlas mapping, protected areas, water, and voxel edits.</p>
           <p>World editing coverage includes terrain summaries, protected areas, water parameters, props, atlas mapping, command history, and snapshots.</p>
         </article>
 
@@ -157,7 +157,7 @@ export function AgentWorkbenchPanel() {
             <li>Run Observe Screen.</li>
             <li>Run Plan and choose desired operations.</li>
             <li>Act on plan steps and verify timeline updates.</li>
-            <li>Generate checks for mocked test results.</li>
+            <li>Generate checks for recorded test requests.</li>
           </ol>
         </article>
 
@@ -196,7 +196,7 @@ export function AgentWorkbenchPanel() {
             <input type="checkbox" readOnly checked={timeline.some((entry) => entry.message.includes("conflict status clear") || entry.message.includes("conflicts clear"))} aria-label="Conflict status clear" /> Conflict status clear
           </label>
           <label>
-            <input type="checkbox" readOnly checked={generatedTests.length > 0} aria-label="Test generated" /> Mocked test generated
+            <input type="checkbox" readOnly checked={generatedTests.length > 0} aria-label="Test generated" /> Test request recorded
           </label>
         </article>
 
@@ -214,9 +214,9 @@ export function AgentWorkbenchPanel() {
         </article>
 
         <article className="agent-card" data-testid="agent-section-screenshot-placeholders">
-          <h3>Before / After Screenshot Placeholders</h3>
-          <p>Before: [placeholder mock image]</p>
-          <p>After: [placeholder mock image]</p>
+          <h3>Before / After Screenshot Notes</h3>
+          <p>Before: no screenshot recorded.</p>
+          <p>After: no screenshot recorded.</p>
         </article>
       </div>
     </section>

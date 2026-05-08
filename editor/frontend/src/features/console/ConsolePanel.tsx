@@ -11,7 +11,7 @@ export function ConsolePanel() {
       <PanelTitleBar title="Console" />
       <div className="panel-body">
         <h2 id="console-title" className="placeholder-heading">Console</h2>
-        <p className="agent-hint">Agent Hint: console entries are mocked and command-routed clear is available from the palette.</p>
+        <p className="agent-hint">Agent Hint: console entries include runtime bridge events and command errors; clear is available from the palette.</p>
         {hiddenCount > 0 ? <p className="muted" data-testid="console-large-world-cap">{`Showing newest ${visibleMessages.length} of ${messages.length} entries.`}</p> : null}
         {messages.length === 0 ? <p className="muted">Console cleared.</p> : null}
         {visibleMessages.map((message) => (

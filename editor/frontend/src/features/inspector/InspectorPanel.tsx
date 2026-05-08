@@ -957,7 +957,7 @@ function PropInspector({
 
   return (
     <div data-testid="inspector-prop">
-      <InspectorHeader title={prop.name} badge="prop" note="Prop edits affect mock state and dirty flags indirectly." />
+      <InspectorHeader title={prop.name} badge="prop" note="Prop edits update editor state and dirty flags." />
       <InspectorSection title="Prop identity">
         <ReadOnlyMetricRow label="Id" value={prop.id} />
         <ReadOnlyMetricRow label="Type" value={prop.type} />
@@ -1071,7 +1071,7 @@ function LegacyMaterialInspector({ atlasMapping, material }: { readonly atlasMap
 
   return (
     <div data-testid="inspector-material">
-      <InspectorHeader title={material.name} badge="material" note={`${material.kind} material profile is mocked.`} />
+      <InspectorHeader title={material.name} badge="material" note={`${material.kind} material profile is loaded from the editor catalog.`} />
       <InspectorSection title="Material metadata">
         <ReadOnlyMetricRow label="Id" value={material.id} />
         <ReadOnlyMetricRow label="Kind" value={material.kind} />
