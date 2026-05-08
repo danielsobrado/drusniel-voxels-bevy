@@ -4,6 +4,7 @@ import type {
   BlockAtlasMap,
   ChunkSummary,
   MockWaterRuntimeSnapshot,
+  PropInstance,
   PropStats,
   ProtectedArea,
   ProtectedAreaRuleMatrix,
@@ -192,4 +193,14 @@ export interface RuntimeProtectedRuleQueryResult {
 export interface RuntimeProtectedAreaLoadResult {
   readonly areas: readonly ProtectedArea[];
   readonly areaCount: number;
+}
+
+export interface RuntimePropScatterResult {
+  readonly props: readonly PropInstance[];
+  readonly propStats: PropStats;
+}
+
+export interface RuntimePropRemoveResult {
+  readonly removedPropIds: readonly string[];
+  readonly propStats: PropStats;
 }

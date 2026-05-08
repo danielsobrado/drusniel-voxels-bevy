@@ -1,6 +1,6 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
+import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
 
 export type RuntimeCommandRequestType =
   | "runtime.selectEntity"
@@ -17,6 +17,8 @@ export type RuntimeCommandRequestType =
   | "runtime.setViewportDebugOverlay"
   | "runtime.setAtlasMapping"
   | "runtime.saveAtlasMapping"
+  | "runtime.scatterProps"
+  | "runtime.removeProps"
   | "runtime.createProtectedArea"
   | "runtime.updateProtectedArea"
   | "runtime.deleteProtectedArea"
@@ -52,6 +54,8 @@ export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel
 export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
 export type RuntimeSetAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.setAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeSaveAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.saveAtlasMapping", { readonly mapping: BlockAtlasMap }>;
+export type RuntimeScatterPropsCommand = RuntimeCommandRequestBase<"runtime.scatterProps", { readonly props: readonly PropInstance[] }>;
+export type RuntimeRemovePropsCommand = RuntimeCommandRequestBase<"runtime.removeProps", { readonly propIds?: readonly string[]; readonly chunkId?: string }>;
 export type RuntimeCreateProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.createProtectedArea", { readonly area: ProtectedArea }>;
 export type RuntimeUpdateProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.updateProtectedArea", { readonly areaId: string; readonly patch: Partial<Omit<ProtectedArea, "id">> }>;
 export type RuntimeDeleteProtectedAreaCommand = RuntimeCommandRequestBase<"runtime.deleteProtectedArea", { readonly areaId: string }>;
@@ -76,6 +80,8 @@ export type RuntimeCommandRequest =
   | RuntimeSetViewportDebugOverlayCommand
   | RuntimeSetAtlasMappingCommand
   | RuntimeSaveAtlasMappingCommand
+  | RuntimeScatterPropsCommand
+  | RuntimeRemovePropsCommand
   | RuntimeCreateProtectedAreaCommand
   | RuntimeUpdateProtectedAreaCommand
   | RuntimeDeleteProtectedAreaCommand

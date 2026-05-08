@@ -261,6 +261,7 @@ export interface PlacementRules {
 
 export interface PropInstance {
   readonly id: string;
+  readonly assetId?: string;
   readonly name: string;
   readonly type: PropType;
   readonly billboardMode: BillboardMode;

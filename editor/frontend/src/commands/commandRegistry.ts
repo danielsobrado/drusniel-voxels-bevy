@@ -245,6 +245,7 @@ const createScatterProps = (state: ReturnType<EditorCommandContext["getState"]>)
 
     return {
       id: `prop-scatter-${state.props.length + index + 1}`,
+      assetId: asset.id,
       name: `${asset.name} ${String(baseIndex + index + 1).padStart(3, "0")}`,
       type: asset.type,
       billboardMode: "Directional4",
@@ -1350,7 +1351,8 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Scatter prop instances at current brush settings.",
     category: "Props",
     keywords: ["props", "scatter", "selection", "brush", "placement"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       const generated = createScatterProps(state);
       if (generated.length === 0) {
@@ -1358,17 +1360,18 @@ export const editorCommands: readonly EditorCommand[] = [
         return;
       }
 
-      state.addProps(generated);
-      const firstGenerated = generated[0];
+      const result = unwrapRuntime(await ctx.runtimeClient.scatterProps(generated));
+      state.addProps(result.props);
+      const firstGenerated = result.props[0];
       if (firstGenerated) {
         ctx.getState().setSelection({ kind: "prop", id: firstGenerated.id, label: firstGenerated.name });
         state.setActiveMode("props");
         state.setActiveTool("props");
       }
-      ctx.toast.success(`Scattered ${generated.length} props.`);
+      ctx.toast.success(`Scattered ${result.props.length} props.`);
       ctx.getState().pushAgentTimelineEvent({
         kind: "command",
-        message: `Scattered ${generated.length} props from ${state.selectedPropAssetId}.`,
+        message: `Runtime scattered ${result.props.length} props from ${state.selectedPropAssetId}.`,
       });
     },
   },
@@ -1378,18 +1381,19 @@ export const editorCommands: readonly EditorCommand[] = [
     description: "Remove props constrained by current selection.",
     category: "Props",
     keywords: ["props", "delete", "clear", "selection"],
-    run: (ctx) => {
+    runtimeWrite: true,
+    run: async (ctx) => {
       const state = ctx.getState();
       if (state.selection.kind === "chunk") {
-        const before = state.props.length;
+        const result = unwrapRuntime(await ctx.runtimeClient.removeProps({ chunkId: state.selection.id }));
         state.removePropsByChunk(state.selection.id);
-        const removed = before - state.props.length;
-        ctx.toast.info(`Removed ${removed} props from ${state.selection.label}.`);
-        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Cleared ${removed} props in ${state.selection.label}.` });
+        ctx.toast.info(`Removed ${result.removedPropIds.length} props from ${state.selection.label}.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Runtime cleared ${result.removedPropIds.length} props in ${state.selection.label}.` });
       } else if (state.selection.kind === "prop") {
+        const result = unwrapRuntime(await ctx.runtimeClient.removeProps({ propIds: [state.selection.id] }));
         state.removeProp(state.selection.id);
-        ctx.toast.info(`Removed selected prop ${state.selection.label}.`);
-        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Removed prop ${state.selection.label}.` });
+        ctx.toast.info(`Removed ${result.removedPropIds.length} selected prop.`);
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Runtime removed prop ${state.selection.label}.` });
       } else {
         ctx.toast.warning("Select a chunk or prop before clearing props.");
       }

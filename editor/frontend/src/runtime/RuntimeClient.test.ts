@@ -111,6 +111,77 @@ describe("runtime clients", () => {
     });
   });
 
+  it("browser runtime client sends prop mutation commands through the bridge", async () => {
+    const requests: unknown[] = [];
+    const client = new BrowserRuntimeClient({
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({
+          props: [],
+          propStats: {
+            totalInstances: 0,
+            visibleInstances: 0,
+            hiddenInstances: 0,
+            billboardedCount: 0,
+            threeDCount: 0,
+            lodSwitches: 0,
+            missingGeneratedAssets: 0,
+            boundsWarnings: 0,
+            instancedGroups: 0,
+            shadowCastCount: 0,
+          },
+          removedPropIds: [],
+        });
+      },
+    });
+
+    await client.scatterProps([
+      {
+        id: "prop-1",
+        assetId: "oak_tree",
+        name: "Oak Tree 001",
+        type: "tree",
+        billboardMode: "Directional4",
+        billboardEnabled: true,
+        billboardSwitchDistance: 12,
+        currentLod: "High",
+        visible: true,
+        shadowCast: true,
+        boundsWarning: false,
+        generatedAssetAvailable: true,
+        chunkId: "chunk-0-0-0",
+        position: [0, 1, 2],
+        assetPath: "assets/models/oak.glb",
+        transform: { position: [0, 1, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        material: "mat-grass-block",
+        lodState: "High",
+        collision: true,
+        placementRules: {
+          avoidWater: true,
+          maxSlope: 35,
+          minSeparation: 4,
+          randomRotation: true,
+          scaleJitter: 0.2,
+          alignToNormal: true,
+          terrainConform: true,
+          avoidProtectedAreas: false,
+          collisionCheck: true,
+          seed: 1,
+        },
+      },
+    ]);
+    await client.removeProps({ propIds: ["prop-1"] });
+
+    expect(requests[0]).toMatchObject({
+      type: "runtime.scatterProps",
+      payload: { props: [{ id: "prop-1", assetId: "oak_tree" }] },
+    });
+    expect(requests[1]).toMatchObject({
+      type: "runtime.removeProps",
+      payload: { propIds: ["prop-1"] },
+    });
+  });
+
   it("mock runtime client validates atlas write result shape", async () => {
     const client = new MockRuntimeClient();
     const result = await client.setAtlasMapping(mockAtlasMapping);

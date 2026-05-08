@@ -2,7 +2,7 @@ import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnaps
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag, RuntimeMetrics } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type { RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
@@ -20,17 +20,17 @@ const mockCapabilities = {
   canSaveWorldSnapshot: true,
 };
 
-const mockPropStats = () => ({
-  totalInstances: mockProps.length,
-  visibleInstances: mockProps.filter((prop) => prop.visible).length,
-  hiddenInstances: mockProps.filter((prop) => !prop.visible).length,
-  billboardedCount: mockProps.filter((prop) => prop.billboardEnabled).length,
-  threeDCount: mockProps.filter((prop) => !prop.billboardEnabled).length,
-  lodSwitches: mockProps.filter((prop) => prop.currentLod !== prop.lodState).length,
-  missingGeneratedAssets: mockProps.filter((prop) => !prop.generatedAssetAvailable).length,
-  boundsWarnings: mockProps.filter((prop) => prop.boundsWarning).length,
-  instancedGroups: new Set(mockProps.map((prop) => prop.type)).size,
-  shadowCastCount: mockProps.filter((prop) => prop.shadowCast).length,
+const mockPropStats = (props: readonly PropInstance[]) => ({
+  totalInstances: props.length,
+  visibleInstances: props.filter((prop) => prop.visible).length,
+  hiddenInstances: props.filter((prop) => !prop.visible).length,
+  billboardedCount: props.filter((prop) => prop.billboardEnabled).length,
+  threeDCount: props.filter((prop) => !prop.billboardEnabled).length,
+  lodSwitches: props.filter((prop) => prop.currentLod !== prop.lodState).length,
+  missingGeneratedAssets: props.filter((prop) => !prop.generatedAssetAvailable).length,
+  boundsWarnings: props.filter((prop) => prop.boundsWarning).length,
+  instancedGroups: new Set(props.map((prop) => prop.type)).size,
+  shadowCastCount: props.filter((prop) => prop.shadowCast).length,
 });
 
 const pointInsideBounds = (point: readonly [number, number, number], bounds: ProtectedArea["bounds"]): boolean =>
@@ -66,6 +66,7 @@ export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
   private runtimeMetrics: RuntimeMetrics = JSON.parse(JSON.stringify(mockRuntimeMetrics)) as RuntimeMetrics;
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
+  private props: PropInstance[] = [...mockProps];
   private protectedAreas: ProtectedArea[] = [...mockProtectedAreas];
   private connectionState: RuntimeConnectionState = "mock";
   private viewportDebug: ViewportOverlayState = {
@@ -270,6 +271,26 @@ export class MockRuntimeClient implements RuntimeClient {
     });
   }
 
+  async scatterProps(props: readonly PropInstance[]) {
+    this.props = [...this.props, ...props];
+    return runtimeCommandSuccess({
+      props,
+      propStats: mockPropStats(this.props),
+    });
+  }
+
+  async removeProps(filter: { readonly propIds?: readonly string[]; readonly chunkId?: string }) {
+    const propIds = new Set(filter.propIds ?? []);
+    const removed = this.props.filter((prop) => propIds.has(prop.id) || (filter.chunkId !== undefined && prop.chunkId === filter.chunkId));
+    const removedPropIds = removed.map((prop) => prop.id);
+    const removedIdSet = new Set(removedPropIds);
+    this.props = this.props.filter((prop) => !removedIdSet.has(prop.id));
+    return runtimeCommandSuccess({
+      removedPropIds,
+      propStats: mockPropStats(this.props),
+    });
+  }
+
   async createProtectedArea(area: ProtectedArea) {
     this.protectedAreas = [...this.protectedAreas.filter((candidate) => candidate.id !== area.id), area];
     return runtimeCommandSuccess({ area });
@@ -412,7 +433,7 @@ export class MockRuntimeClient implements RuntimeClient {
         dirty: false,
       },
       viewportDebug: this.viewportDebug,
-      propStats: mockPropStats(),
+      propStats: mockPropStats(this.props),
       timingSamples: metrics.timingSamples,
       consoleEvents: [],
       capturedAt: new Date().toISOString(),

@@ -1,6 +1,6 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -15,6 +15,8 @@ import type {
   RuntimeProtectedAreaMutationResult,
   RuntimeProtectedAreaValidationResult,
   RuntimeProtectedRuleQueryResult,
+  RuntimePropRemoveResult,
+  RuntimePropScatterResult,
   RuntimeRenderFeatureFlagResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
@@ -175,6 +177,22 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.saveAtlasMapping",
       requestId: makeRequestId("runtime.saveAtlasMapping"),
       payload: { mapping },
+    });
+  }
+
+  async scatterProps(props: readonly PropInstance[]): Promise<RuntimeCommandResult<RuntimePropScatterResult>> {
+    return this.execute({
+      type: "runtime.scatterProps",
+      requestId: makeRequestId("runtime.scatterProps"),
+      payload: { props },
+    });
+  }
+
+  async removeProps(filter: { readonly propIds?: readonly string[]; readonly chunkId?: string }): Promise<RuntimeCommandResult<RuntimePropRemoveResult>> {
+    return this.execute({
+      type: "runtime.removeProps",
+      requestId: makeRequestId("runtime.removeProps"),
+      payload: filter,
     });
   }
 

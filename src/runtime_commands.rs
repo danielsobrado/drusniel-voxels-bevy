@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
@@ -11,7 +11,10 @@ use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::{DebugDetailToggles, DebugOverlayState, TargetedBlock};
+use crate::props::billboard::{BillboardLod, BillboardStats};
 use crate::props::instanced_render::PropBoundsDebugSettings;
+use crate::props::lod_material::PropLodState;
+use crate::props::{Prop, PropAssets, PropChunkOwner, PropType};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::rendering::array_loader::{AtlasMapping, BlockAtlasMap};
 use crate::rendering::capabilities::GraphicsCapabilities;
@@ -45,6 +48,9 @@ use crate::world_rules::{
 const ATLAS_TILE_COUNT: u32 = 64;
 
 pub struct RuntimeWriteCommandPlugin;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct EditorPropInstanceId(String);
 
 impl Plugin for RuntimeWriteCommandPlugin {
     fn build(&self, app: &mut App) {
@@ -177,6 +183,15 @@ pub enum RuntimeWriteCommand {
     SetAtlasMapping { mapping: FrontendAtlasMapping },
     #[serde(rename = "runtime.saveAtlasMapping")]
     SaveAtlasMapping { mapping: FrontendAtlasMapping },
+    #[serde(rename = "runtime.scatterProps")]
+    ScatterProps { props: Vec<Value> },
+    #[serde(rename = "runtime.removeProps")]
+    RemoveProps {
+        #[serde(rename = "propIds", default)]
+        prop_ids: Vec<String>,
+        #[serde(rename = "chunkId")]
+        chunk_id: Option<String>,
+    },
     #[serde(rename = "runtime.createProtectedArea")]
     CreateProtectedArea { area: ProtectedArea },
     #[serde(rename = "runtime.updateProtectedArea")]
@@ -471,7 +486,7 @@ pub fn handle_runtime_command_json(world: &mut World, request: Value) -> Runtime
     }
 }
 
-pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
+pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
     let preset = world
         .get_resource::<RenderQualityPreset>()
         .copied()
@@ -520,18 +535,7 @@ pub fn runtime_snapshot_json(world: &World) -> RuntimeCommandResult<Value> {
             "dirty": atlas_mapping.needs_rebuild,
         },
         "viewportDebug": viewport_debug,
-        "propStats": {
-            "totalInstances": 0,
-            "visibleInstances": 0,
-            "hiddenInstances": 0,
-            "billboardedCount": 0,
-            "threeDCount": 0,
-            "lodSwitches": 0,
-            "missingGeneratedAssets": 0,
-            "boundsWarnings": 0,
-            "instancedGroups": 0,
-            "shadowCastCount": 0,
-        },
+        "propStats": runtime_prop_stats_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
             { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
@@ -714,6 +718,43 @@ fn value_position(value: Option<&Value>) -> Option<Vec3> {
     ))
 }
 
+fn prop_asset_id(prop: &Value) -> Option<&str> {
+    prop.get("assetId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+}
+
+fn prop_position(prop: &Value) -> Option<Vec3> {
+    value_position(
+        prop.get("transform")
+            .and_then(|transform| transform.get("position")),
+    )
+    .or_else(|| value_position(prop.get("position")))
+}
+
+fn prop_rotation(prop: &Value) -> Option<Vec3> {
+    value_position(
+        prop.get("transform")
+            .and_then(|transform| transform.get("rotation")),
+    )
+}
+
+fn prop_scale(prop: &Value) -> Option<Vec3> {
+    value_position(
+        prop.get("transform")
+            .and_then(|transform| transform.get("scale")),
+    )
+}
+
+fn prop_type_from_value(prop: &Value) -> PropType {
+    match prop.get("type").and_then(Value::as_str) {
+        Some("tree") => PropType::Tree,
+        Some("bush") => PropType::Bush,
+        Some("flower") => PropType::Flower,
+        Some("rock") | Some("building") | _ => PropType::Rock,
+    }
+}
+
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -770,6 +811,36 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         RuntimeWriteCommand::SetAtlasMapping { mapping }
         | RuntimeWriteCommand::SaveAtlasMapping { mapping } => {
             validate_atlas_mapping(mapping, &mut errors);
+        }
+        RuntimeWriteCommand::ScatterProps { props } => {
+            if props.is_empty() {
+                errors.push("props must include at least one prop instance.".to_string());
+            }
+            for prop in props {
+                if prop.get("id").and_then(Value::as_str).is_none() {
+                    errors.push("prop.id is required.".to_string());
+                }
+                if prop_asset_id(prop).is_none() {
+                    errors.push("prop.assetId is required.".to_string());
+                }
+                if prop_position(prop).is_none() {
+                    errors.push(
+                        "prop.position or prop.transform.position must be [x, y, z].".to_string(),
+                    );
+                }
+            }
+        }
+        RuntimeWriteCommand::RemoveProps { prop_ids, chunk_id } => {
+            if prop_ids.is_empty() && chunk_id.is_none() {
+                errors.push("removeProps requires propIds or chunkId.".to_string());
+            }
+            if let Some(chunk_id) = chunk_id {
+                if parse_chunk_id(chunk_id).is_none() {
+                    errors.push(format!(
+                        "chunkId '{chunk_id}' must look like chunk-x-z or chunk-x-y-z."
+                    ));
+                }
+            }
         }
         RuntimeWriteCommand::CreateProtectedArea { area } => {
             if let Err(message) = validate_protected_area(area) {
@@ -961,6 +1032,18 @@ fn execute_runtime_write_command(
                 }
                 Err(errors) => {
                     RuntimeCommandResult::validation("Runtime command validation failed.", errors)
+                }
+            }
+        }
+        RuntimeWriteCommand::ScatterProps { props } => match scatter_runtime_props(world, props) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::RemoveProps { prop_ids, chunk_id } => {
+            match remove_runtime_props(world, prop_ids, chunk_id) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
                 }
             }
         }
@@ -1161,6 +1244,165 @@ fn set_runtime_voxel(
         "currentVoxel": current.map(voxel_material_name),
         "editResult": voxel_edit_result_to_frontend(result),
     }))
+}
+
+fn scatter_runtime_props(world: &mut World, props: Vec<Value>) -> Result<Value, String> {
+    let prop_assets = world
+        .get_resource::<PropAssets>()
+        .ok_or_else(|| "PropAssets resource is not available.".to_string())?;
+
+    let spawn_specs = props
+        .iter()
+        .map(|prop| {
+            let instance_id = prop
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "prop.id is required.".to_string())?;
+            let asset_id = prop_asset_id(prop)
+                .ok_or_else(|| format!("prop '{instance_id}' is missing assetId."))?;
+            let handle =
+                prop_assets.scenes.get(asset_id).cloned().ok_or_else(|| {
+                    format!("Prop asset '{asset_id}' is not loaded in the runtime.")
+                })?;
+            let position = prop_position(prop)
+                .ok_or_else(|| format!("prop '{instance_id}' is missing a valid position."))?;
+            let rotation = prop_rotation(prop).unwrap_or(Vec3::ZERO);
+            let scale = prop_scale(prop).unwrap_or(Vec3::ONE);
+            let prop_type = prop_type_from_value(prop);
+            let transform = Transform::from_translation(position)
+                .with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    rotation.x.to_radians(),
+                    rotation.y.to_radians(),
+                    rotation.z.to_radians(),
+                ))
+                .with_scale(scale);
+
+            Ok((
+                prop.clone(),
+                handle,
+                transform,
+                Prop {
+                    id: asset_id.to_string(),
+                    prop_type,
+                },
+                EditorPropInstanceId(instance_id.to_string()),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let mut accepted = Vec::with_capacity(spawn_specs.len());
+    for (prop, handle, transform, marker, instance_id) in spawn_specs {
+        let owner = PropChunkOwner(VoxelWorld::world_to_chunk(
+            transform.translation.floor().as_ivec3(),
+        ));
+        world.spawn((SceneRoot(handle), transform, marker, owner, instance_id));
+        accepted.push(prop);
+    }
+
+    Ok(json!({
+        "props": accepted,
+        "propStats": runtime_prop_stats_payload(world),
+    }))
+}
+
+fn remove_runtime_props(
+    world: &mut World,
+    prop_ids: Vec<String>,
+    chunk_id: Option<String>,
+) -> Result<Value, String> {
+    let prop_ids = prop_ids.into_iter().collect::<HashSet<_>>();
+    let chunk = chunk_id
+        .as_deref()
+        .map(|chunk_id| {
+            parse_chunk_id(chunk_id).ok_or_else(|| {
+                format!("Chunk id '{chunk_id}' must look like chunk-x-z or chunk-x-y-z.")
+            })
+        })
+        .transpose()?;
+
+    let mut query = world.query::<(
+        Entity,
+        Option<&EditorPropInstanceId>,
+        Option<&PropChunkOwner>,
+    )>();
+    let targets = query
+        .iter(world)
+        .filter_map(|(entity, instance_id, owner)| {
+            let id_match = instance_id.is_some_and(|id| prop_ids.contains(&id.0));
+            let chunk_match =
+                chunk.is_some_and(|chunk| owner.is_some_and(|owner| owner.0 == chunk));
+            (id_match || chunk_match).then(|| {
+                (
+                    entity,
+                    instance_id
+                        .map(|id| id.0.clone())
+                        .unwrap_or_else(|| format!("entity-{}", entity.index())),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for (entity, _) in &targets {
+        let _ = world.despawn(*entity);
+    }
+
+    Ok(json!({
+        "removedPropIds": targets.into_iter().map(|(_, id)| id).collect::<Vec<_>>(),
+        "propStats": runtime_prop_stats_payload(world),
+    }))
+}
+
+fn runtime_prop_stats_payload(world: &mut World) -> Value {
+    let missing_generated_assets = world
+        .get_resource::<BillboardStats>()
+        .map(|stats| stats.missing_generated_assets)
+        .unwrap_or_default();
+    let mut query = world.query::<(
+        &Prop,
+        Option<&Visibility>,
+        Option<&BillboardLod>,
+        Option<&PropLodState>,
+    )>();
+    let mut total = 0_usize;
+    let mut visible = 0_usize;
+    let mut hidden = 0_usize;
+    let mut billboarded = 0_usize;
+    let mut lod_switches = 0_usize;
+    let mut shadow_cast = 0_usize;
+    let mut groups = BTreeSet::new();
+
+    for (prop, visibility, billboard_lod, lod_state) in query.iter(world) {
+        total += 1;
+        groups.insert(prop.id.as_str());
+        if visibility.is_some_and(|visibility| *visibility == Visibility::Hidden) {
+            hidden += 1;
+        } else {
+            visible += 1;
+        }
+        if billboard_lod.is_some_and(|lod| lod.is_billboard) {
+            billboarded += 1;
+        }
+        if billboard_lod.is_some_and(|lod| lod.is_billboard) || lod_state.is_some() {
+            lod_switches += 1;
+        }
+        if lod_state.is_none_or(|state| !state.shadows_disabled) {
+            shadow_cast += 1;
+        }
+    }
+
+    json!({
+        "totalInstances": total,
+        "visibleInstances": visible,
+        "hiddenInstances": hidden,
+        "billboardedCount": billboarded,
+        "threeDCount": total.saturating_sub(billboarded),
+        "lodSwitches": lod_switches,
+        "missingGeneratedAssets": missing_generated_assets,
+        "boundsWarnings": 0,
+        "instancedGroups": groups.len(),
+        "shadowCastCount": shadow_cast,
+    })
 }
 
 fn update_runtime_water_body(
@@ -2058,6 +2300,7 @@ mod tests {
     use crate::constants::MIN_BREAKABLE_Y;
     use crate::voxel::chunk::Chunk;
     use crate::voxel::plugin::WaterBodyInfo;
+    use std::collections::HashMap;
 
     fn valid_mapping() -> FrontendAtlasMapping {
         FrontendAtlasMapping {
@@ -2165,7 +2408,7 @@ mod tests {
             .unwrap();
         assert!((strength - 0.35).abs() < 0.0001);
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
         let strength = data["metrics"]["ambientOcclusion"]["bakedAoStrength"]
@@ -2195,7 +2438,7 @@ mod tests {
         assert_eq!(data["enabled"], json!(false));
         assert_eq!(data["metrics"]["shadowBudget"]["enabled"], json!(false));
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(data["metrics"]["shadowBudget"]["enabled"], json!(false));
@@ -2225,7 +2468,7 @@ mod tests {
             json!(true)
         );
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(
@@ -2273,7 +2516,7 @@ mod tests {
             json!(true)
         );
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(
@@ -2295,7 +2538,7 @@ mod tests {
             voxel_type: Some(VoxelType::Rock),
         });
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
 
@@ -2358,7 +2601,7 @@ mod tests {
         };
         assert_eq!(data["wireframe"], json!(true));
 
-        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&world) else {
+        let RuntimeCommandResult::Success { data, .. } = runtime_snapshot_json(&mut world) else {
             panic!("runtime snapshot should succeed");
         };
         assert_eq!(data["viewportDebug"]["wireframe"], json!(true));
@@ -2395,6 +2638,54 @@ mod tests {
             world.resource::<VoxelWorld>().get_voxel(position),
             Some(VoxelType::Rock)
         );
+    }
+
+    #[test]
+    fn prop_scatter_and_remove_commands_mutate_runtime_entities() {
+        let mut world = World::new();
+        let mut scenes = HashMap::new();
+        scenes.insert("oak_tree".to_string(), Handle::<Scene>::default());
+        world.insert_resource(PropAssets {
+            scenes,
+            loaded: true,
+        });
+
+        let prop = json!({
+            "id": "prop-editor-1",
+            "assetId": "oak_tree",
+            "name": "Oak Tree 001",
+            "type": "tree",
+            "category": "tree",
+            "position": [4.0, 8.0, 12.0],
+            "transform": {
+                "position": [4.0, 8.0, 12.0],
+                "rotation": [0.0, 45.0, 0.0],
+                "scale": [1.0, 1.0, 1.0]
+            }
+        });
+
+        let scatter = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::ScatterProps { props: vec![prop] },
+        );
+        let RuntimeCommandResult::Success { data, .. } = scatter else {
+            panic!("prop scatter should succeed");
+        };
+        assert_eq!(data["props"].as_array().unwrap().len(), 1);
+        assert_eq!(data["propStats"]["totalInstances"], json!(1));
+
+        let remove = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::RemoveProps {
+                prop_ids: vec!["prop-editor-1".to_string()],
+                chunk_id: None,
+            },
+        );
+        let RuntimeCommandResult::Success { data, .. } = remove else {
+            panic!("prop remove should succeed");
+        };
+        assert_eq!(data["removedPropIds"], json!(["prop-editor-1"]));
+        assert_eq!(data["propStats"]["totalInstances"], json!(0));
     }
 
     #[test]

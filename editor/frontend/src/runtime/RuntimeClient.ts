@@ -1,5 +1,5 @@
 import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
@@ -13,6 +13,8 @@ import type {
   RuntimeProtectedAreaMutationResult,
   RuntimeProtectedAreaValidationResult,
   RuntimeProtectedRuleQueryResult,
+  RuntimePropRemoveResult,
+  RuntimePropScatterResult,
   RuntimeRenderFeatureFlagResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
@@ -45,6 +47,8 @@ export interface RuntimeClient {
   readonly setViewportDebugOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => Promise<RuntimeCommandResult<RuntimeViewportDebugState>>;
   readonly setAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeAtlasMappingState>>;
   readonly saveAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeSaveSummary>>;
+  readonly scatterProps: (props: readonly PropInstance[]) => Promise<RuntimeCommandResult<RuntimePropScatterResult>>;
+  readonly removeProps: (filter: { readonly propIds?: readonly string[]; readonly chunkId?: string }) => Promise<RuntimeCommandResult<RuntimePropRemoveResult>>;
   readonly createProtectedArea: (area: ProtectedArea) => Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>>;
   readonly updateProtectedArea: (areaId: string, patch: Partial<Omit<ProtectedArea, "id">>) => Promise<RuntimeCommandResult<RuntimeProtectedAreaMutationResult>>;
   readonly deleteProtectedArea: (areaId: string) => Promise<RuntimeCommandResult<RuntimeProtectedAreaDeleteResult>>;
