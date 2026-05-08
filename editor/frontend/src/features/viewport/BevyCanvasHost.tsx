@@ -264,14 +264,13 @@ export function BevyCanvasHost({
         return;
       }
 
-      const scale = window.devicePixelRatio || 1;
       setNativeViewportState((current) => (current === "attached" ? current : "pending"));
       void invoke<NativeViewportAttachment>("attach_native_viewport", {
         rect: {
-          x: Math.round(rect.left * scale),
-          y: Math.round(rect.top * scale),
-          width: Math.round(rect.width * scale),
-          height: Math.round(rect.height * scale),
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
         },
       })
         .then((attachment) => {

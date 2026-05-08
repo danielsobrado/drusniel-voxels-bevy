@@ -15,13 +15,13 @@ pub fn run() {
 }
 
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use std::io::Write;
 use std::{fs, fs::OpenOptions};
 use tauri::{AppHandle, Manager};
 
@@ -109,10 +109,8 @@ fn attach_native_viewport(
     let child_pid = runtime
         .child_id()
         .ok_or_else(|| "editor runtime process is not running".to_string())?;
-    let parent_hwnd = window
-        .hwnd()
-        .map_err(|error| error.to_string())?
-        .0 as windows_sys::Win32::Foundation::HWND;
+    let parent_hwnd =
+        window.hwnd().map_err(|error| error.to_string())?.0 as windows_sys::Win32::Foundation::HWND;
 
     let hwnd = {
         let cached_hwnd = runtime.viewport_hwnd.lock().ok().and_then(|guard| *guard);
@@ -241,15 +239,15 @@ fn embed_runtime_window(
     rect: &NativeViewportRect,
 ) -> Result<(), String> {
     use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_STYLE,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, WS_CAPTION,
-        WS_CHILD, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
+        WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
 
-    let width = rect.width.max(1);
-    let height = rect.height.max(1);
-    let child_style = (WS_CHILD | WS_VISIBLE) as isize;
+    let child_style = (WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN) as isize;
     let removed_style =
         (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
             as isize;
@@ -258,13 +256,34 @@ fn embed_runtime_window(
         SetParent(child_hwnd, parent_hwnd);
 
         let style = GetWindowLongPtrW(child_hwnd, GWL_STYLE);
-        SetWindowLongPtrW(child_hwnd, GWL_STYLE, (style & !removed_style) | child_style);
+        SetWindowLongPtrW(
+            child_hwnd,
+            GWL_STYLE,
+            (style & !removed_style) | child_style,
+        );
+
+        let mut parent_rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetClientRect(parent_hwnd, &mut parent_rect) == 0 {
+            return Err("failed to read editor window bounds".to_string());
+        }
+
+        let parent_width = (parent_rect.right - parent_rect.left).max(1);
+        let parent_height = (parent_rect.bottom - parent_rect.top).max(1);
+        let x = rect.x.clamp(0, parent_width.saturating_sub(1));
+        let y = rect.y.clamp(0, parent_height.saturating_sub(1));
+        let width = rect.width.max(1).min(parent_width - x);
+        let height = rect.height.max(1).min(parent_height - y);
 
         let positioned = SetWindowPos(
             child_hwnd,
             null_mut(),
-            rect.x,
-            rect.y,
+            x,
+            y,
             width,
             height,
             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
