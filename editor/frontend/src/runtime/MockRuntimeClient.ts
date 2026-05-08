@@ -66,6 +66,7 @@ export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
   private runtimeMetrics: RuntimeMetrics = JSON.parse(JSON.stringify(mockRuntimeMetrics)) as RuntimeMetrics;
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
+  private atlasDirty = false;
   private props: PropInstance[] = [...mockProps];
   private protectedAreas: ProtectedArea[] = [...mockProtectedAreas];
   private connectionState: RuntimeConnectionState = "mock";
@@ -256,14 +257,16 @@ export class MockRuntimeClient implements RuntimeClient {
 
   async setAtlasMapping(mapping: BlockAtlasMap) {
     this.atlasMapping = { ...mapping };
+    this.atlasDirty = true;
     return runtimeCommandSuccess({
       mapping: this.atlasMapping,
-      dirty: true,
+      dirty: this.atlasDirty,
     });
   }
 
   async saveAtlasMapping(mapping: BlockAtlasMap) {
     this.atlasMapping = { ...mapping };
+    this.atlasDirty = false;
     return runtimeCommandSuccess({
       worldId: "mock-drusniel-world",
       savedAt: new Date().toISOString(),
@@ -430,7 +433,7 @@ export class MockRuntimeClient implements RuntimeClient {
       },
       atlasMapping: {
         mapping: this.atlasMapping,
-        dirty: false,
+        dirty: this.atlasDirty,
       },
       viewportDebug: this.viewportDebug,
       propStats: mockPropStats(this.props),

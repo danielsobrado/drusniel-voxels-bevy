@@ -192,6 +192,21 @@ describe("runtime clients", () => {
     }
     expect(result.data.mapping.grass.top).toBe(mockAtlasMapping.grass.top);
     expect(result.data.dirty).toBe(true);
+
+    const dirtySnapshot = await client.getRuntimeSnapshot();
+    expect(dirtySnapshot.ok).toBe(true);
+    if (!dirtySnapshot.ok) {
+      throw new Error("Expected mock runtime snapshot after atlas update.");
+    }
+    expect(dirtySnapshot.data.atlasMapping.dirty).toBe(true);
+
+    await client.saveAtlasMapping(mockAtlasMapping);
+    const cleanSnapshot = await client.getRuntimeSnapshot();
+    expect(cleanSnapshot.ok).toBe(true);
+    if (!cleanSnapshot.ok) {
+      throw new Error("Expected mock runtime snapshot after atlas save.");
+    }
+    expect(cleanSnapshot.data.atlasMapping.dirty).toBe(false);
   });
 
   it("mock runtime client handles protected area validation and rule queries", async () => {
