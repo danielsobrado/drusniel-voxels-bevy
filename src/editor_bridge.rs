@@ -13,7 +13,10 @@ use serde_json::{Value, json};
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::props::{PropConfig, PropDefinition};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
-use crate::runtime_commands::{handle_runtime_command_json, runtime_snapshot_json};
+use crate::runtime_commands::{
+    editor_placed_props_payload, handle_runtime_command_json, runtime_snapshot_json,
+    save_editor_placed_props,
+};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
 use crate::voxel::meshing::{
@@ -277,6 +280,18 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
 
     let result = persistence::editor_save_default_world(voxel_world);
     if result.saved {
+        let editor_props = match save_editor_placed_props(world) {
+            Ok((count, path)) => json!({
+                "saved": true,
+                "count": count,
+                "savePath": path,
+            }),
+            Err(message) => json!({
+                "saved": false,
+                "error": message,
+            }),
+        };
+
         BridgeResponse {
             status: 200,
             body: json!({
@@ -284,6 +299,7 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
                 "data": {
                     "worldId": result.save_path,
                     "savedAt": timestamp_string(),
+                    "editorProps": editor_props,
                 },
             }),
         }
@@ -459,7 +475,7 @@ fn frontend_world_summary_from_metadata_and_world(
             .collect::<Vec<_>>(),
         "protectedAreas": [],
         "waterBodies": frontend_water_bodies_payload(world),
-        "props": [],
+        "props": editor_placed_props_payload(world),
         "propAssets": frontend_prop_assets_payload(world),
         "materials": [],
         "viewport": {

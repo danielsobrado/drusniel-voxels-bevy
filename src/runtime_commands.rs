@@ -1,4 +1,6 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::fs::{self, File};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
@@ -46,18 +48,33 @@ use crate::world_rules::{
 };
 
 const ATLAS_TILE_COUNT: u32 = 64;
+const EDITOR_PLACED_PROPS_SAVE_PATH: &str = "saves/editor_placed_props.json";
 
 pub struct RuntimeWriteCommandPlugin;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct EditorPropInstanceId(String);
 
+#[derive(Resource, Default)]
+struct EditorPlacedProps {
+    props: Vec<Value>,
+    loaded_from_disk: bool,
+}
+
 impl Plugin for RuntimeWriteCommandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RuntimeCommandQueue>()
             .init_resource::<RuntimeCommandResults>()
             .init_resource::<RuntimeViewportDebugState>()
-            .add_systems(Update, process_runtime_command_queue);
+            .init_resource::<EditorPlacedProps>()
+            .add_systems(
+                Update,
+                (
+                    load_saved_editor_placed_props,
+                    process_runtime_command_queue,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -466,6 +483,69 @@ fn process_runtime_command_queue(world: &mut World) {
             .resource_mut::<RuntimeCommandResults>()
             .completed
             .push_back(RuntimeCommandResponse { request_id, result });
+    }
+}
+
+fn load_saved_editor_placed_props(world: &mut World) {
+    let already_loaded = world
+        .get_resource::<EditorPlacedProps>()
+        .is_some_and(|placed| placed.loaded_from_disk);
+    if already_loaded {
+        return;
+    }
+
+    let Some(prop_assets) = world.get_resource::<PropAssets>() else {
+        return;
+    };
+    if !prop_assets.loaded {
+        return;
+    }
+
+    if !world.contains_resource::<EditorPlacedProps>() {
+        world.insert_resource(EditorPlacedProps::default());
+    }
+    world.resource_mut::<EditorPlacedProps>().loaded_from_disk = true;
+
+    let path = Path::new(EDITOR_PLACED_PROPS_SAVE_PATH);
+    if !path.exists() {
+        return;
+    }
+
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            warn!(
+                "Failed to open editor placed prop save '{}': {}",
+                path.display(),
+                error
+            );
+            return;
+        }
+    };
+    let props = match serde_json::from_reader::<_, Vec<Value>>(file) {
+        Ok(props) => props,
+        Err(error) => {
+            warn!(
+                "Failed to read editor placed prop save '{}': {}",
+                path.display(),
+                error
+            );
+            return;
+        }
+    };
+    if props.is_empty() {
+        return;
+    }
+
+    match scatter_runtime_props(world, props) {
+        Ok(data) => {
+            info!(
+                "Loaded {} editor placed props from {}",
+                data["props"].as_array().map(Vec::len).unwrap_or_default(),
+                path.display()
+            );
+        }
+        Err(message) => warn!("Failed to load editor placed props: {}", message),
     }
 }
 
@@ -1172,11 +1252,23 @@ fn execute_runtime_write_command(
 
             let result = persistence::editor_save_default_world(voxel_world);
             if result.saved {
+                let (editor_prop_count, editor_prop_save_path) =
+                    match save_editor_placed_props(world) {
+                        Ok(summary) => summary,
+                        Err(message) => {
+                            return RuntimeCommandResult::failure(
+                                RuntimeCommandStatus::Failure,
+                                message,
+                            );
+                        }
+                    };
                 RuntimeCommandResult::success(json!({
                     "worldId": "bevy-runtime",
                     "savedAt": timestamp_string(),
                     "snapshotId": "world_data.bin",
                     "savePath": result.save_path,
+                    "editorPropCount": editor_prop_count,
+                    "editorPropSavePath": editor_prop_save_path,
                     "reason": reason,
                     "metadata": result.metadata,
                 }))
@@ -1300,6 +1392,19 @@ fn scatter_runtime_props(world: &mut World, props: Vec<Value>) -> Result<Value, 
         accepted.push(prop);
     }
 
+    if !world.contains_resource::<EditorPlacedProps>() {
+        world.insert_resource(EditorPlacedProps::default());
+    }
+    let mut placed_props = world.resource_mut::<EditorPlacedProps>();
+    for prop in &accepted {
+        if let Some(id) = prop.get("id").and_then(Value::as_str) {
+            placed_props
+                .props
+                .retain(|existing| existing.get("id").and_then(Value::as_str) != Some(id));
+        }
+        placed_props.props.push(prop.clone());
+    }
+
     Ok(json!({
         "props": accepted,
         "propStats": runtime_prop_stats_payload(world),
@@ -1347,10 +1452,71 @@ fn remove_runtime_props(
         let _ = world.despawn(*entity);
     }
 
+    let removed_id_list = targets.iter().map(|(_, id)| id.clone()).collect::<Vec<_>>();
+    let removed_ids = removed_id_list.iter().cloned().collect::<HashSet<_>>();
+    if !removed_ids.is_empty() || chunk.is_some() {
+        if !world.contains_resource::<EditorPlacedProps>() {
+            world.insert_resource(EditorPlacedProps::default());
+        }
+        let mut placed_props = world.resource_mut::<EditorPlacedProps>();
+        placed_props.props.retain(|prop| {
+            let id_removed = prop
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| removed_ids.contains(id));
+            let chunk_removed = chunk.is_some_and(|chunk| {
+                prop.get("chunkId")
+                    .and_then(Value::as_str)
+                    .and_then(parse_chunk_id)
+                    .is_some_and(|prop_chunk| prop_chunk == chunk)
+            });
+            !(id_removed || chunk_removed)
+        });
+    }
+
     Ok(json!({
-        "removedPropIds": targets.into_iter().map(|(_, id)| id).collect::<Vec<_>>(),
+        "removedPropIds": removed_id_list,
         "propStats": runtime_prop_stats_payload(world),
     }))
+}
+
+pub fn save_editor_placed_props(world: &World) -> Result<(usize, &'static str), String> {
+    let props = world
+        .get_resource::<EditorPlacedProps>()
+        .map(|placed| placed.props.as_slice())
+        .unwrap_or(&[]);
+
+    let path = Path::new(EDITOR_PLACED_PROPS_SAVE_PATH);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed to create editor prop save directory '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let file = File::create(path).map_err(|error| {
+        format!(
+            "Failed to create editor prop save file '{}': {error}",
+            path.display()
+        )
+    })?;
+    serde_json::to_writer_pretty(file, props).map_err(|error| {
+        format!(
+            "Failed to serialize editor prop save file '{}': {error}",
+            path.display()
+        )
+    })?;
+
+    Ok((props.len(), EDITOR_PLACED_PROPS_SAVE_PATH))
+}
+
+pub fn editor_placed_props_payload(world: &World) -> Vec<Value> {
+    world
+        .get_resource::<EditorPlacedProps>()
+        .map(|placed| placed.props.clone())
+        .unwrap_or_default()
 }
 
 fn runtime_prop_stats_payload(world: &mut World) -> Value {

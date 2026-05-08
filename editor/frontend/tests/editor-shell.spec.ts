@@ -218,6 +218,18 @@ test("voxel paint toolbar is available and updates brush controls", async ({ pag
   await expect(page.getByTestId("viewport-brush-target-face")).toHaveValue("side");
 });
 
+test("prop mode places a selected prop directly in the viewport", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+
+  await page.locator('[data-tool-id="props"]').click();
+  await expect(page.getByTestId("viewport-active-mode")).toHaveText("Mode props");
+
+  await page.getByTestId("world-viewport-canvas").dblclick({ position: { x: 260, y: 80 } });
+  await expect(page.getByTestId("viewport-active-tool")).toHaveText("Tool props");
+  await expect(page.getByTestId("viewport-tools")).toContainText("prop:");
+  await expect(page.getByTestId("dirty-state-label")).toHaveText("DIRTY");
+});
+
 test("profiler rendering and graphics debug workflow updates mocked runtime values and command history", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 

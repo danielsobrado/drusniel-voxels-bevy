@@ -395,6 +395,8 @@ export class MockRuntimeClient implements RuntimeClient {
       worldId: "mock-drusniel-world",
       savedAt: new Date().toISOString(),
       snapshotId: `mock-runtime-snapshot-${Date.now()}`,
+      editorPropCount: this.props.length,
+      editorPropSavePath: "saves/editor_placed_props.json",
     });
   }
 

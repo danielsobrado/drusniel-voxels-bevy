@@ -157,6 +157,8 @@ export interface RuntimeSaveSummary {
   readonly worldId: string;
   readonly savedAt: string;
   readonly snapshotId?: string;
+  readonly editorPropCount?: number;
+  readonly editorPropSavePath?: string;
 }
 
 export interface RuntimeProtectedAreaMutationResult {

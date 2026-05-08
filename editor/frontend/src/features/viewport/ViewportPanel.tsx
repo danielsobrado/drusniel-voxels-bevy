@@ -1,4 +1,4 @@
-﻿import { ChangeEvent, useMemo } from "react";
+﻿import { ChangeEvent, useCallback, useMemo } from "react";
 import { Boxes, Camera, CheckSquare2, Focus, Grid3X3, MousePointer2, Paintbrush, ShieldCheck, TestTube2, TriangleAlert } from "lucide-react";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
@@ -6,7 +6,7 @@ import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import { getProtectedAreaWarnings, getRuntimeWarnings, getSelectedObject } from "../../state/editorSelectors";
 import { BevyCanvasHost, type AreaOverlayState } from "./BevyCanvasHost";
-import type { ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
+import type { PropAsset, PropInstance, ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
 import type { WaterReflectionDebugViewMode } from "../../types/world";
 
 const breadcrumbPath = (kind: string, label: string) => {
@@ -33,6 +33,58 @@ const breadcrumbPath = (kind: string, label: string) => {
   return "World / Selection";
 };
 
+const chunkIdForPosition = (position: readonly [number, number, number]) =>
+  `chunk-${Math.floor(position[0] / 16)}-${Math.floor(position[1] / 16)}-${Math.floor(position[2] / 16)}`;
+
+const buildPlacedProp = (
+  asset: PropAsset,
+  index: number,
+  position: readonly [number, number, number],
+  state: ReturnType<typeof useEditorStore.getState>,
+): PropInstance => {
+  const scale = 1 + state.propBrushSettings.scaleJitter * 0.5;
+  const rotationY = state.propBrushSettings.randomRotation ? (state.propBrushSettings.seed + index * 37) % 360 : 0;
+  const propPosition: [number, number, number] = [position[0], position[1], position[2]];
+
+  return {
+    id: `prop-placed-${index}`,
+    assetId: asset.id,
+    name: `${asset.name} ${String(index).padStart(3, "0")}`,
+    type: asset.type,
+    billboardMode: "Directional4",
+    billboardEnabled: true,
+    billboardSwitchDistance: 12 + state.propBrushSettings.spacing * 1.3,
+    currentLod: "High",
+    visible: true,
+    shadowCast: true,
+    boundsWarning: false,
+    generatedAssetAvailable: true,
+    chunkId: chunkIdForPosition(propPosition),
+    position: propPosition,
+    assetPath: asset.assetPath,
+    transform: {
+      position: propPosition,
+      rotation: [0, rotationY, 0],
+      scale: [scale, scale, scale],
+    },
+    material: asset.defaultMaterial,
+    lodState: "High",
+    collision: state.propBrushSettings.collisionCheck,
+    placementRules: {
+      avoidWater: state.propBrushSettings.avoidWater,
+      maxSlope: state.propBrushSettings.slopeLimit,
+      minSeparation: state.propBrushSettings.spacing,
+      randomRotation: state.propBrushSettings.randomRotation,
+      scaleJitter: state.propBrushSettings.scaleJitter,
+      alignToNormal: state.propBrushSettings.alignToNormal,
+      terrainConform: state.propBrushSettings.terrainConform,
+      avoidProtectedAreas: state.propBrushSettings.avoidProtectedAreas,
+      collisionCheck: state.propBrushSettings.collisionCheck,
+      seed: state.propBrushSettings.seed,
+    },
+  };
+};
+
 export function ViewportPanel() {
   const editorState = useEditorStore();
   const { backendClient, runtimeClient } = useEditorClients();
@@ -56,6 +108,32 @@ export function ViewportPanel() {
     ReflectionOnly: "editor.water.setDebugReflectionOnly",
     BlendFactor: "editor.water.setDebugBlendFactor",
   };
+
+  const placePropInViewer = useCallback(
+    async (position: readonly [number, number, number]) => {
+      const state = useEditorStore.getState();
+      const asset = state.propAssets.find((candidate) => candidate.id === state.selectedPropAssetId) ?? state.propAssets[0];
+      if (!asset) {
+        return;
+      }
+
+      const prop = buildPlacedProp(asset, state.props.length + 1, position, state);
+      const result = await runtimeClient.scatterProps([prop]);
+      if (!result.ok) {
+        return;
+      }
+
+      useEditorStore.getState().addProps(result.data.props);
+      useEditorStore.getState().setSelection({ kind: "prop", id: prop.id, label: prop.name });
+      useEditorStore.getState().setActiveMode("props");
+      useEditorStore.getState().setActiveTool("props");
+      useEditorStore.getState().pushAgentTimelineEvent({
+        kind: "command",
+        message: `Placed ${prop.name} in viewport at ${prop.position.map((value) => value.toFixed(1)).join(", ")}.`,
+      });
+    },
+    [runtimeClient],
+  );
 
   const selectedObjectSummary = selectedObject
     ? "name" in selectedObject
@@ -518,6 +596,8 @@ export function ViewportPanel() {
               : editorState.waterRuntimeSnapshot.reflectionStatus.debugViewMode
           }
           waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
+          propPlacementEnabled={activeMode === "props"}
+          onPlaceProp={placePropInViewer}
         />
 
         <p className="agent-hint viewport-agent-hint">Agent Hint: area commands route through the runtime bridge and inspector fields update editor state.</p>

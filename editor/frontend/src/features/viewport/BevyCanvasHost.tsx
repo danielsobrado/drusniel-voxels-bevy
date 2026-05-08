@@ -22,6 +22,8 @@ interface BevyCanvasHostProps {
   readonly waterDebug: boolean;
   readonly waterDebugMode: WaterReflectionDebugViewMode;
   readonly waterRuntimeSnapshot: WaterRuntimeSnapshot;
+  readonly propPlacementEnabled?: boolean;
+  readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
 }
 
 interface ViewState {
@@ -165,6 +167,36 @@ const projectIso = (position: readonly [number, number, number], view: ViewState
   y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
 });
 
+const nearestPlacementSample = (
+  samples: readonly WorldSurfaceSample[],
+  view: ViewState,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+): readonly [number, number, number] | null => {
+  if (samples.length === 0) {
+    return null;
+  }
+
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  let nearest = samples[0];
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const sample of samples) {
+    const projected = projectIso([sample.x, sample.height, sample.z], view);
+    const dx = projected.x - x;
+    const dy = projected.y - y;
+    const distance = dx * dx + dy * dy;
+    if (distance < nearestDistance) {
+      nearest = sample;
+      nearestDistance = distance;
+    }
+  }
+
+  return [nearest.x, nearest.height + 1, nearest.z];
+};
+
 const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer, view: ViewState, fill: string, stroke: string) => {
   if (!mesh.positions || !mesh.indices || mesh.indices.length < 3) {
     return false;
@@ -210,6 +242,8 @@ export function BevyCanvasHost({
   waterDebug,
   waterDebugMode,
   waterRuntimeSnapshot,
+  propPlacementEnabled = false,
+  onPlaceProp,
 }: BevyCanvasHostProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -413,6 +447,16 @@ export function BevyCanvasHost({
               const zoomMultiplier = event.deltaY < 0 ? 1.1 : 0.9;
               const nextZoom = clamp(view.zoom * zoomMultiplier, 0.18, 8);
               setView({ ...view, zoom: nextZoom });
+            }}
+            onDoubleClick={(event) => {
+              if (!propPlacementEnabled || !onPlaceProp) {
+                return;
+              }
+
+              const position = nearestPlacementSample(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+              if (position) {
+                onPlaceProp(position);
+              }
             }}
             onKeyDown={(event) => {
               if (event.key === "Home" || event.key.toLowerCase() === "f") {
