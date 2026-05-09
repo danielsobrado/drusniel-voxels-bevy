@@ -207,8 +207,8 @@ pub const BEACH_HEIGHT_OFFSET: i32 = 2;
 // =============================================================================
 
 /// Default distance in world units for high detail meshing.
-/// Tuned to align with shadow cull distance (192m) for coherent quality falloff.
-pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 128.0;
+/// Tuned to keep terrain LOD transitions outside the normal inspection view.
+pub const DEFAULT_HIGH_DETAIL_DISTANCE: f32 = 176.0;
 
 /// Default distance in world units at which chunks are culled entirely.
 /// Fog hides terrain beyond ~220m; tightened from 400 to reduce draw calls.

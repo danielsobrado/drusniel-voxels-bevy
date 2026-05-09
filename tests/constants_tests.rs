@@ -106,11 +106,10 @@ fn voxel_size_is_unit() {
 }
 
 #[test]
-fn chunk_boundary_scale_slightly_larger() {
-    assert!(CHUNK_BOUNDARY_SCALE > 1.0);
-    assert!(
-        CHUNK_BOUNDARY_SCALE < 1.1,
-        "Scale should be subtle to avoid visual artifacts"
+fn chunk_boundary_scale_is_neutral() {
+    assert_eq!(
+        CHUNK_BOUNDARY_SCALE, 1.0,
+        "Surface Nets boundary stitching should not use center scaling because adjacent chunks scale from different origins"
     );
 }
 
