@@ -1052,20 +1052,11 @@ fn mesh_dirty_chunks_system(
         .ok()
         .map(|transform| transform.translation);
     let sort_start = timing.enabled.then(Instant::now);
-    // Sort by distance to camera if available
-    if let Some(camera_pos) = camera_pos {
-        dirty_chunks.sort_by(|a, b| {
-            let world_a =
-                VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
-            let world_b =
-                VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
-            let dist_a = world_a.distance_squared(camera_pos);
-            let dist_b = world_b.distance_squared(camera_pos);
-            dist_a
-                .partial_cmp(&dist_b)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
+    let mesh_dirty_sort_window = prioritize_dirty_chunks_for_camera(
+        &mut dirty_chunks,
+        camera_pos,
+        MAX_DIRTY_CHUNKS_VISITED_PER_FRAME,
+    );
     let mesh_dirty_sort_us = sort_start
         .map(|start| start.elapsed().as_micros() as u64)
         .unwrap_or(0);
@@ -1531,6 +1522,11 @@ fn mesh_dirty_chunks_system(
     );
     timing.record_count(
         frame.0,
+        "Mesh Dirty Sort Window",
+        mesh_dirty_sort_window as f64,
+    );
+    timing.record_count(
+        frame.0,
         "Mesh Dirty LOD Churn Only",
         lod_churn_only as u8 as f64,
     );
@@ -1630,6 +1626,40 @@ fn mesh_dirty_chunks_system(
         "Terrain Mesh LOD Seam Repairs",
         terrain_mesh_lod_seam_repairs as f64,
     );
+}
+
+fn prioritize_dirty_chunks_for_camera(
+    dirty_chunks: &mut [IVec3],
+    camera_pos: Option<Vec3>,
+    visit_limit: usize,
+) -> usize {
+    let Some(camera_pos) = camera_pos else {
+        return 0;
+    };
+    if dirty_chunks.is_empty() || visit_limit == 0 {
+        return 0;
+    }
+
+    let sort_window = dirty_chunks.len().min(visit_limit);
+    if sort_window < dirty_chunks.len() {
+        dirty_chunks.select_nth_unstable_by(sort_window, |a, b| {
+            compare_dirty_chunk_distance(a, b, camera_pos)
+        });
+        dirty_chunks[..sort_window].sort_by(|a, b| compare_dirty_chunk_distance(a, b, camera_pos));
+    } else {
+        dirty_chunks.sort_by(|a, b| compare_dirty_chunk_distance(a, b, camera_pos));
+    }
+    sort_window
+}
+
+fn compare_dirty_chunk_distance(a: &IVec3, b: &IVec3, camera_pos: Vec3) -> std::cmp::Ordering {
+    let world_a = VoxelWorld::chunk_to_world(*a).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+    let world_b = VoxelWorld::chunk_to_world(*b).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+    let dist_a = world_a.distance_squared(camera_pos);
+    let dist_b = world_b.distance_squared(camera_pos);
+    dist_a
+        .partial_cmp(&dist_b)
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 fn terrain_material_quality_for_lod(
@@ -3158,5 +3188,22 @@ mod tests {
             desired_water_visibility(false, true, Some(WaterBodyMaterialMode::Hidden)),
             Visibility::Inherited
         );
+    }
+
+    #[test]
+    fn dirty_chunk_priority_sorts_only_nearest_visit_window() {
+        let mut dirty_chunks = vec![
+            IVec3::new(10, 0, 0),
+            IVec3::new(2, 0, 0),
+            IVec3::new(0, 0, 0),
+            IVec3::new(1, 0, 0),
+        ];
+
+        let sort_window =
+            prioritize_dirty_chunks_for_camera(&mut dirty_chunks, Some(Vec3::ZERO), 2);
+
+        assert_eq!(sort_window, 2);
+        assert_eq!(dirty_chunks[0], IVec3::new(0, 0, 0));
+        assert_eq!(dirty_chunks[1], IVec3::new(1, 0, 0));
     }
 }
