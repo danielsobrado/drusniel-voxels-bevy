@@ -43,6 +43,7 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 4;
+const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 1;
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 4;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
@@ -1090,8 +1091,11 @@ fn mesh_dirty_chunks_system(
     let mut terrain_mesh_lod_seam_repairs = 0u32;
 
     for chunk_pos in dirty_chunks {
-        // Throttle: limit chunks meshed per frame to prevent frame spikes
-        if chunks_processed >= chunks_per_frame_limit {
+        // Throttle expensive mesh generation, but let cheap empty/culled clears
+        // drain faster so dirty queues do not stay backed up for hundreds of frames.
+        if chunks_processed >= MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
+            || chunks_meshed as usize >= chunks_per_frame_limit
+        {
             break;
         }
         chunks_processed += 1;
@@ -1513,12 +1517,17 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "MAX_CHUNKS_PER_FRAME Hit",
-        u8::from(dirty_chunks_queued > chunks_per_frame_limit) as f64,
+        u8::from(dirty_chunks_queued > chunks_processed) as f64,
     );
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Frame Limit",
         chunks_per_frame_limit as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Visit Limit",
+        MAX_DIRTY_CHUNKS_VISITED_PER_FRAME as f64,
     );
     timing.record_count(
         frame.0,
