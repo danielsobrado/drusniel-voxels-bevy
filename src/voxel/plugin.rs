@@ -2025,7 +2025,10 @@ fn build_water_body_groups(
 
         while let Some(index) = queue.pop_front() {
             indices.push(index);
-            for neighbor in water_body_neighbors(index, samples, &index_by_chunk) {
+            for neighbor in water_body_neighbors(index, samples, &index_by_chunk)
+                .into_iter()
+                .flatten()
+            {
                 if visited[neighbor] {
                     continue;
                 }
@@ -2050,7 +2053,7 @@ fn water_body_neighbors(
     index: usize,
     samples: &[WaterMeshBodySample],
     index_by_chunk: &HashMap<IVec3, usize>,
-) -> Vec<usize> {
+) -> [Option<usize>; 4] {
     let sample = &samples[index];
     let candidates = [
         (
@@ -2075,25 +2078,26 @@ fn water_body_neighbors(
         ),
     ];
 
-    candidates
-        .into_iter()
-        .filter_map(|(chunk_pos, edge, neighbor_edge)| {
-            let neighbor_index = *index_by_chunk.get(&chunk_pos)?;
-            let neighbor = &samples[neighbor_index];
-            if sample.surface_y != neighbor.surface_y {
-                return None;
-            }
-            let other_edge = match neighbor_edge {
-                WaterBodyEdge::North => &neighbor.edge_north,
-                WaterBodyEdge::South => &neighbor.edge_south,
-                WaterBodyEdge::West => &neighbor.edge_west,
-                WaterBodyEdge::East => &neighbor.edge_east,
-            };
-            edge.iter()
-                .any(|value| other_edge.contains(value))
-                .then_some(neighbor_index)
-        })
-        .collect()
+    let mut neighbors = [None; 4];
+    for (slot, (chunk_pos, edge, neighbor_edge)) in candidates.into_iter().enumerate() {
+        let Some(&neighbor_index) = index_by_chunk.get(&chunk_pos) else {
+            continue;
+        };
+        let neighbor = &samples[neighbor_index];
+        if sample.surface_y != neighbor.surface_y {
+            continue;
+        }
+        let other_edge = match neighbor_edge {
+            WaterBodyEdge::North => &neighbor.edge_north,
+            WaterBodyEdge::South => &neighbor.edge_south,
+            WaterBodyEdge::West => &neighbor.edge_west,
+            WaterBodyEdge::East => &neighbor.edge_east,
+        };
+        if edge.iter().any(|value| other_edge.contains(value)) {
+            neighbors[slot] = Some(neighbor_index);
+        }
+    }
+    neighbors
 }
 
 enum WaterBodyEdge {
