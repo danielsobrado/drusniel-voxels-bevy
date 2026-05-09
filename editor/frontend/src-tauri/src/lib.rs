@@ -240,6 +240,7 @@ fn embed_runtime_window(
 ) -> Result<(), String> {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{GetDeviceCaps, LOGPIXELSX};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
@@ -272,12 +273,35 @@ fn embed_runtime_window(
             return Err("failed to read editor window bounds".to_string());
         }
 
+        let hdc = windows_sys::Win32::Graphics::Gdi::GetDC(parent_hwnd);
+        let dpi_scale = if hdc.is_null() {
+            1.0
+        } else {
+            let dpi = GetDeviceCaps(hdc, LOGPIXELSX as i32);
+            let _ = windows_sys::Win32::Graphics::Gdi::ReleaseDC(parent_hwnd, hdc);
+            if dpi > 0 {
+                dpi as f32 / 96.0
+            } else {
+                1.0
+            }
+        };
+
         let parent_width = (parent_rect.right - parent_rect.left).max(1);
         let parent_height = (parent_rect.bottom - parent_rect.top).max(1);
-        let x = rect.x.clamp(0, parent_width.saturating_sub(1));
-        let y = rect.y.clamp(0, parent_height.saturating_sub(1));
-        let width = rect.width.max(1).min(parent_width - x);
-        let height = rect.height.max(1).min(parent_height - y);
+        let x = ((rect.x as f32) * dpi_scale)
+            .round()
+            .clamp(0.0, parent_width.saturating_sub(1) as f32) as i32;
+        let y = ((rect.y as f32) * dpi_scale)
+            .round()
+            .clamp(0.0, parent_height.saturating_sub(1) as f32) as i32;
+        let width = ((rect.width.max(1) as f32) * dpi_scale)
+            .round()
+            .max(1.0)
+            .min((parent_width - x).max(1) as f32) as i32;
+        let height = ((rect.height.max(1) as f32) * dpi_scale)
+            .round()
+            .max(1.0)
+            .min((parent_height - y).max(1) as f32) as i32;
 
         let positioned = SetWindowPos(
             child_hwnd,

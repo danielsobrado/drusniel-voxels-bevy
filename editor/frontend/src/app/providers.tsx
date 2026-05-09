@@ -1,11 +1,9 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { Toaster } from "sonner";
-import { BrowserEditorBackendClient, hasBrowserEditorBackendBridge, isTauriDesktop } from "../backend/BrowserEditorBackendClient";
+import { BrowserEditorBackendClient } from "../backend/BrowserEditorBackendClient";
 import type { EditorBackendClient } from "../backend/EditorBackendClient";
-import { MockEditorBackendClient } from "../backend/MockEditorBackendClient";
 import type { RuntimeClient } from "../runtime/RuntimeClient";
 import { BrowserRuntimeClient, hasBrowserRuntimeBridge, type RuntimeBridge } from "../runtime/BrowserRuntimeClient";
-import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
 
 interface EditorClients {
   readonly backendClient: EditorBackendClient;
@@ -37,7 +35,7 @@ const createRuntimeClient = (): RuntimeClient => {
     return new BrowserRuntimeClient();
   }
 
-  return isTauriDesktop() ? new BrowserRuntimeClient(runtimeUnavailableBridge()) : new MockRuntimeClient();
+  return new BrowserRuntimeClient(runtimeUnavailableBridge());
 };
 
 interface ProvidersProps {
@@ -47,7 +45,7 @@ interface ProvidersProps {
 export function Providers({ children }: ProvidersProps) {
   const clients = useMemo<EditorClients>(
     () => ({
-      backendClient: hasBrowserEditorBackendBridge() ? new BrowserEditorBackendClient() : new MockEditorBackendClient(),
+      backendClient: new BrowserEditorBackendClient(),
       runtimeClient: createRuntimeClient(),
     }),
     [],

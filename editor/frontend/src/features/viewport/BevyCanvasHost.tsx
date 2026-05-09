@@ -61,6 +61,13 @@ interface NativeViewportAttachment {
   readonly message: string;
 }
 
+interface NativeViewportRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 const MATERIAL_COLORS: Record<string, string> = {
   Air: "#171923",
   TopSoil: "#4d8f4e",
@@ -98,6 +105,23 @@ const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none"
 };
 
 const hasTauriGlobals = () => typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+const NATIVE_VIEWPORT_RESIZE_SETTLE_MS = 1000;
+
+const readNativeViewportRect = (host: HTMLElement): NativeViewportRect => {
+  const rect = host.getBoundingClientRect();
+  const x = Math.floor(rect.left);
+  const y = Math.floor(rect.top);
+
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.ceil(rect.right) - x + 2),
+    height: Math.max(1, Math.ceil(rect.bottom) - y + 2),
+  };
+};
+
+const nativeRectsEqual = (left: NativeViewportRect, right: NativeViewportRect): boolean =>
+  left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
 
 const boundsToRect = (bounds: ProtectedArea["bounds"]) => {
   const minX = bounds.min[0];
@@ -296,7 +320,9 @@ export function BevyCanvasHost({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<CanvasDragState | null>(null);
+  const nativeResizeTimerRef = useRef<number | undefined>(undefined);
   const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
+  const [nativeViewportRect, setNativeViewportRect] = useState<NativeViewportRect | null>(null);
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const desktopRuntime = hasTauriGlobals();
   const browserPreviewEnabled = !desktopRuntime;
@@ -306,7 +332,7 @@ export function BevyCanvasHost({
   const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
   const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
   const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
-  const viewportStateLabel = runtimeState === "mock" ? "offline preview" : runtimeState;
+  const viewportStateLabel = runtimeState;
   const waterSampleCount = samples.filter((sample) => sample.water).length;
 
   const fitView = useCallback(() => {
@@ -319,40 +345,82 @@ export function BevyCanvasHost({
       return;
     }
 
+    const updateNativeRect = () => {
+      if (!desktopRuntime) {
+        return;
+      }
+
+      const nextRect = readNativeViewportRect(host);
+      setNativeViewportRect((current) => (current && nativeRectsEqual(current, nextRect) ? current : nextRect));
+    };
+
+    const scheduleNativeRectUpdate = () => {
+      if (!desktopRuntime) {
+        return;
+      }
+
+      if (nativeResizeTimerRef.current !== undefined) {
+        window.clearTimeout(nativeResizeTimerRef.current);
+      }
+
+      nativeResizeTimerRef.current = window.setTimeout(() => {
+        nativeResizeTimerRef.current = undefined;
+        updateNativeRect();
+      }, NATIVE_VIEWPORT_RESIZE_SETTLE_MS);
+    };
+
     const observer = new ResizeObserver(([entry]) => {
       const rect = entry.contentRect;
       setCanvasSize({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) });
+      scheduleNativeRectUpdate();
     });
     observer.observe(host);
-    return () => observer.disconnect();
-  }, []);
+
+    updateNativeRect();
+    scheduleNativeRectUpdate();
+    window.addEventListener("resize", scheduleNativeRectUpdate);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleNativeRectUpdate);
+      if (nativeResizeTimerRef.current !== undefined) {
+        window.clearTimeout(nativeResizeTimerRef.current);
+        nativeResizeTimerRef.current = undefined;
+      }
+    };
+  }, [desktopRuntime]);
 
   useEffect(() => {
     setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
   }, [canvasSize.height, canvasSize.width, samples]);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !desktopRuntime) {
+    if (!desktopRuntime) {
       setNativeViewportState(desktopRuntime ? "fallback" : "unsupported");
       setNativeViewportMessage(desktopRuntime ? "Native viewport host is not ready." : "Browser preview mode.");
       return;
     }
 
     let cancelled = false;
-    const frame = window.requestAnimationFrame(() => {
-      const rect = host.getBoundingClientRect();
-      if (rect.width < 16 || rect.height < 16) {
+    let retryTimer: number | undefined;
+
+    const attach = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (!nativeViewportRect || nativeViewportRect.width < 16 || nativeViewportRect.height < 16) {
+        setNativeViewportState("fallback");
+        setNativeViewportMessage("Native viewport host is not ready.");
         return;
       }
 
       setNativeViewportState((current) => (current === "attached" ? current : "pending"));
       void invoke<NativeViewportAttachment>("attach_native_viewport", {
         rect: {
-          x: Math.round(rect.left),
-          y: Math.round(rect.top),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
+          x: nativeViewportRect.x,
+          y: nativeViewportRect.y,
+          width: nativeViewportRect.width,
+          height: nativeViewportRect.height,
         },
       })
         .then((attachment) => {
@@ -365,15 +433,21 @@ export function BevyCanvasHost({
           if (!cancelled) {
             setNativeViewportState("fallback");
             setNativeViewportMessage(error instanceof Error ? error.message : "Native Bevy viewport is not ready.");
+            retryTimer = window.setTimeout(attach, 250);
           }
         });
-    });
+    };
+
+    const frame = window.requestAnimationFrame(attach);
 
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
     };
-  }, [canvasSize.height, canvasSize.width, desktopRuntime, runtimeState]);
+  }, [desktopRuntime, nativeViewportRect, runtimeState]);
 
   useEffect(() => {
     return () => {
@@ -592,7 +666,7 @@ export function BevyCanvasHost({
         </svg>
       ) : null}
 
-      <div className="canvas-reticle" aria-hidden="true" />
+      {!desktopRuntime ? <div className="canvas-reticle" aria-hidden="true" /> : null}
       <div className="canvas-label">
         {desktopRuntime
           ? nativeViewportState === "attached"
@@ -605,15 +679,17 @@ export function BevyCanvasHost({
               : "World summary viewport"}{" "}
         / {viewportStateLabel}
       </div>
-      <div className="minimap-canvas" aria-label="World viewport summary">
-        <div className="minimap-grid">
-          <strong>{chunks.length}</strong>
-          <span>chunks</span>
-          <span>{samples.length} samples</span>
-          <span>{meshChunks.length} mesh payloads</span>
-          <span>{waterSampleCount} water</span>
+      {!desktopRuntime ? (
+        <div className="minimap-canvas" aria-label="World viewport summary">
+          <div className="minimap-grid">
+            <strong>{chunks.length}</strong>
+            <span>chunks</span>
+            <span>{samples.length} samples</span>
+            <span>{meshChunks.length} mesh payloads</span>
+            <span>{waterSampleCount} water</span>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

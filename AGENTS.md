@@ -36,6 +36,12 @@ cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 
 If you did not profile a performance-sensitive change, say that explicitly instead of implying the result is verified.
 
+## Editor Runtime Verification
+
+After any task that changes the editor, the Bevy runtime, Tauri integration, viewport behavior, or editor-visible UI, rebuild the editor runtime sidecar and restart the desktop editor so the change can be tested in the running app.
+
+Use the existing editor scripts from `editor/frontend`; do not assume Rust code changes are visible in the editor until the sidecar has been rebuilt and the editor has been restarted.
+
 ## Rule
 
 Always prefix shell commands with `rtk`.

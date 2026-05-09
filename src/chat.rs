@@ -14,6 +14,10 @@ use crate::voxel::world::VoxelWorld;
 
 const MAX_CHAT_MESSAGES: usize = 10;
 
+fn editor_native_viewport_enabled() -> bool {
+    std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
+
 #[derive(Resource, Debug)]
 pub struct ChatState {
     pub active: bool,
@@ -66,9 +70,13 @@ pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChatState>()
-            .add_systems(Startup, spawn_chat_overlay)
-            .add_systems(
+        app.init_resource::<ChatState>();
+
+        if editor_native_viewport_enabled() {
+            return;
+        }
+
+        app.add_systems(Startup, spawn_chat_overlay).add_systems(
                 Update,
                 (
                     toggle_chat_input,

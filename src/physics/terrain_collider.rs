@@ -121,7 +121,7 @@ pub fn generate_chunk_colliders(
             if let Some((collider, collider_kind)) = collider {
                 // Use regular commands (not queue_silenced) so Avian's observers
                 // can detect the collider change and sync physics state properly
-                commands.entity(entity).insert((
+                commands.entity(entity).try_insert((
                     RigidBody::Static,
                     collider,
                     CollisionMargin(TERRAIN_COLLIDER_MARGIN),
@@ -178,6 +178,6 @@ pub fn handle_chunk_modification(
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Collider Update");
     for entity in modified_chunks.iter() {
-        commands.entity(entity).insert(NeedsCollider);
+        commands.entity(entity).try_insert(NeedsCollider);
     }
 }

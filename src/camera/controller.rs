@@ -31,6 +31,10 @@ use bevy::render::view::{
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_water::ImageReformat;
 
+fn editor_native_viewport_enabled() -> bool {
+    std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CameraMode {
     Fly,
@@ -392,6 +396,14 @@ pub fn player_camera_system(
     let dt = time.delta_secs();
 
     let ui_open = pause_menu.open || palette.open || map_state.open || inventory_ui.open;
+
+    if editor_native_viewport_enabled() {
+        *cursor_captured = false;
+        cursor_options.visible = true;
+        cursor_options.grab_mode = CursorGrabMode::None;
+        for _ in mouse_motion.read() {}
+        return;
+    }
 
     // Never keep the cursor grabbed when the window isn't focused.
     // Otherwise alt-tab / clicking other windows can feel like the mouse is "stuck".

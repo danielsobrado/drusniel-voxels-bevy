@@ -8,6 +8,10 @@ use crate::entity::{EquippedItem, ItemType};
 
 pub use config::ViewmodelConfig;
 
+fn editor_native_viewport_enabled() -> bool {
+    std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
+
 /// Component marking the pickaxe viewmodel
 #[derive(Component)]
 pub struct PickaxeViewModel {
@@ -74,6 +78,11 @@ pub fn spawn_pickaxe(
 
     let scene_handle: Handle<Scene> =
         asset_server.load("models/Models/GLB format/Pickaxe.glb#Scene0");
+    let visibility = if editor_native_viewport_enabled() {
+        Visibility::Hidden
+    } else {
+        Visibility::default()
+    };
 
     commands.entity(camera_entity).with_children(|parent| {
         parent
@@ -89,7 +98,7 @@ pub fn spawn_pickaxe(
                     config.position.rotation.y,
                     config.position.rotation.z,
                 )),
-                Visibility::default(),
+                visibility,
                 PickaxeViewModel::default(),
             ))
             .with_children(|pickaxe| {
@@ -113,6 +122,10 @@ pub fn trigger_swing_system(
     mut state: ResMut<PickaxeState>,
     config: Res<ViewmodelConfig>,
 ) {
+    if editor_native_viewport_enabled() {
+        return;
+    }
+
     if mouse.just_pressed(MouseButton::Left) {
         for mut pickaxe in pickaxe_query.iter_mut() {
             if !pickaxe.is_swinging {
@@ -459,10 +472,11 @@ pub fn update_pickaxe_visibility(
         return;
     }
 
-    let visible = matches!(
-        equipped.item,
-        Some(ItemType::Pickaxe) | Some(ItemType::TerrainLower)
-    );
+    let visible = !editor_native_viewport_enabled()
+        && matches!(
+            equipped.item,
+            Some(ItemType::Pickaxe) | Some(ItemType::TerrainLower)
+        );
     let visibility = if visible {
         Visibility::Visible
     } else {

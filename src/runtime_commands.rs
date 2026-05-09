@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
-use crate::interaction::{DebugDetailToggles, DebugOverlayState, TargetedBlock};
+use crate::interaction::{
+    DebugDetailToggles, DebugOverlayState, SelectedBlock, SelectedProp, TargetedBlock,
+};
 use crate::props::billboard::{BillboardLod, BillboardStats};
 use crate::props::instanced_render::PropBoundsDebugSettings;
 use crate::props::lod_material::PropLodState;
@@ -53,7 +55,7 @@ const EDITOR_PLACED_PROPS_SAVE_PATH: &str = "saves/editor_placed_props.json";
 pub struct RuntimeWriteCommandPlugin;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct EditorPropInstanceId(String);
+pub struct EditorPropInstanceId(pub String);
 
 #[derive(Resource, Default)]
 struct EditorPlacedProps {
@@ -647,6 +649,28 @@ fn viewport_debug_payload(world: &World) -> Value {
 }
 
 fn runtime_selection_payload(world: &World) -> (Value, Value) {
+    if let Some(selected_prop) = world.get_resource::<SelectedProp>() {
+        if let (Some(id), Some(label)) = (&selected_prop.id, &selected_prop.label) {
+            return (
+                json!({
+                    "kind": "prop",
+                    "id": id,
+                    "label": label,
+                }),
+                selected_prop
+                    .position
+                    .map(|position| json!([position.x, position.y, position.z]))
+                    .unwrap_or(Value::Null),
+            );
+        }
+    }
+
+    if let Some(selected_block) = world.get_resource::<SelectedBlock>() {
+        if let Some(position) = selected_block.position {
+            return voxel_selection_payload(position, selected_block.voxel_type.unwrap_or_default());
+        }
+    }
+
     let Some(targeted_block) = world.get_resource::<TargetedBlock>() else {
         return (Value::Null, Value::Null);
     };
@@ -654,7 +678,10 @@ fn runtime_selection_payload(world: &World) -> (Value, Value) {
         return (Value::Null, Value::Null);
     };
 
-    let voxel = targeted_block.voxel_type.unwrap_or_default();
+    voxel_selection_payload(position, targeted_block.voxel_type.unwrap_or_default())
+}
+
+fn voxel_selection_payload(position: IVec3, voxel: VoxelType) -> (Value, Value) {
     let material = voxel_material_name(voxel);
     let chunk = position.div_euclid(IVec3::splat(CHUNK_SIZE_I32));
 

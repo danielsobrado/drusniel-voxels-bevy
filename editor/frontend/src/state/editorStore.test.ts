@@ -166,18 +166,6 @@ describe("editor store actions", () => {
     expect(useEditorStore.getState().protectedAreas[0].name).toBe("Undo Me");
   });
 
-  it("loads a large mock world and exposes capped outliner data", () => {
-    useEditorStore.getState().loadLargeMockWorld();
-
-    const state = useEditorStore.getState();
-    expect(state.largeWorldStats.enabled).toBe(true);
-    expect(state.chunks).toHaveLength(960);
-    expect(state.props).toHaveLength(4200);
-    expect(state.protectedAreas).toHaveLength(180);
-    expect(state.waterBodies).toHaveLength(96);
-    expect(state.consoleMessages).toHaveLength(1200);
-    expect(getVisibleOutlinerNodes(state).length).toBeGreaterThan(500);
-  });
 });
 
 describe("editor selectors", () => {

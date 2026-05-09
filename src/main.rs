@@ -426,7 +426,7 @@ fn main() {
                         WindowResolution::new(1920, 1080)
                     },
                     decorations: !editor_native_viewport,
-                    resizable: !editor_native_viewport,
+                    resizable: true,
                     present_mode: if bench_config.is_some() {
                         PresentMode::AutoNoVsync
                     } else {

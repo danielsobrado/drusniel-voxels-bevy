@@ -18,7 +18,9 @@ mod targeting;
 pub use debug::{DebugDetailToggles, DebugOverlay, DebugOverlayState};
 pub use editing::{DeleteMode, DragState, DraggedBlock, EditMode, mark_neighbors_dirty};
 pub use error::{BreakError, CombatError, DragError, LastGameplayError, PlacementError};
-pub use targeting::{TargetedBlock, TargetedEntity, TargetedProp, raycast_blocks};
+pub use targeting::{
+    SelectedBlock, SelectedProp, TargetedBlock, TargetedEntity, TargetedProp, raycast_blocks,
+};
 
 use crate::atmosphere::{FogCamera, FogConfig, GlobalFogVolume};
 use crate::camera::controller::PlayerCamera;
@@ -40,6 +42,10 @@ use palette::PlacementPaletteState;
 
 /// Duration in seconds before gameplay errors are automatically cleared.
 const ERROR_DISPLAY_DURATION: f64 = 3.0;
+
+fn editor_native_viewport_enabled() -> bool {
+    std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
 
 // ============================================================================
 // Components
@@ -84,6 +90,10 @@ pub fn attack_entity_system(
     mut last_error: ResMut<LastGameplayError>,
     time: Res<Time>,
 ) {
+    if editor_native_viewport_enabled() {
+        return;
+    }
+
     if edit_mode.enabled {
         return;
     }
@@ -135,6 +145,10 @@ pub fn break_block_system(
     terrain_tool_state: Res<TerrainToolState>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
+    if editor_native_viewport_enabled() {
+        return;
+    }
+
     if edit_mode.enabled {
         return;
     }
@@ -227,6 +241,10 @@ pub fn place_block_system(
     terrain_tool_state: Res<TerrainToolState>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
 ) {
+    if editor_native_viewport_enabled() {
+        return;
+    }
+
     if edit_mode.enabled {
         return;
     }
@@ -998,6 +1016,8 @@ pub struct InteractionPlugin;
 impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetedBlock>()
+            .init_resource::<SelectedBlock>()
+            .init_resource::<SelectedProp>()
             .init_resource::<TargetedEntity>()
             .init_resource::<TargetedProp>()
             .init_resource::<HeldBlock>()
@@ -1023,6 +1043,8 @@ impl Plugin for InteractionPlugin {
                 Update,
                 (
                     targeting::update_targeted_block,
+                    targeting::select_block_from_cursor_in_editor_viewport
+                        .after(targeting::update_targeted_block),
                     targeting::update_targeted_entity,
                     targeting::update_targeted_prop.run_if(
                         |state: Res<DebugOverlayState>, toggles: Res<DebugDetailToggles>| {

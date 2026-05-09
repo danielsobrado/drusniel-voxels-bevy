@@ -2,9 +2,6 @@ import { create } from "zustand";
 import { castDraft, type Draft } from "immer";
 import { immer } from "zustand/middleware/immer";
 import type { WorldSummary } from "../backend/EditorBackendClient";
-import { getMockRenderQualityReadouts, mockAgentObservation, mockAgentTimeline, mockConsoleMessages, mockRuntimeMetrics } from "../mocks/mockRuntime";
-import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockVoxelBlocks, mockWaterBodies } from "../mocks/mockWorld";
-import { mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import type {
   BrushSettings,
   CommandHistoryEntry,
@@ -207,7 +204,6 @@ interface EditorActions {
   readonly redoLastCommand: () => boolean;
   readonly saveEditorSnapshot: (note: string, commandId?: string, actor?: EditorUndoEntry["actor"]) => EditorSavedSnapshot;
   readonly loadEditorSnapshot: (snapshotId: string) => boolean;
-  readonly loadLargeMockWorld: () => void;
   readonly beginCommand: (commandId: string) => void;
   readonly finishCommand: (commandId: string) => void;
   readonly setPropBrushSettings: (settings: Partial<PropBrushSettings>) => void;
@@ -221,10 +217,149 @@ interface EditorActions {
 
 export type EditorStore = EditorDataState & EditorActions;
 
-const dirtyChunkIds = mockChunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id);
+const initialSelection: Selection = { kind: "debug_resource", id: "selection-empty", label: "No selection" };
 
-const initialSelection: Selection = { kind: "chunk", id: "chunk-0-0", label: "Chunk 0,0" };
-const initialChunkIndex = dirtyChunkIds.length ? dirtyChunkIds : [];
+const defaultVoxelBlocks: readonly VoxelBlock[] = [
+  { id: "grass", displayName: "Grass", solid: true, defaultMaterialId: "mat-grass-block" },
+  { id: "dirt", displayName: "Dirt", solid: true, defaultMaterialId: "mat-dirt-block" },
+  { id: "rock", displayName: "Rock", solid: true, defaultMaterialId: "mat-rock-block" },
+  { id: "sand", displayName: "Sand", solid: true, defaultMaterialId: "mat-sand-block" },
+];
+
+const defaultAtlasMapping: BlockAtlasMap = {
+  grass: { top: "", side: "", bottom: "" },
+  dirt: { top: "", side: "", bottom: "" },
+  rock: { top: "", side: "", bottom: "" },
+  sand: { top: "", side: "", bottom: "" },
+};
+
+const createDefaultRenderQualityReadouts = (): RuntimeMetrics["renderQualityReadouts"] => ({
+  propLodDistanceScale: 0,
+  propShadowDistanceScale: 0,
+  terrainMaterialLodDistance: 0,
+  waterReflectionResolutionScale: 0,
+  waterReflectionUpdateInterval: 0,
+  waterReflectionDistance: 0,
+  waterReflectionQualityCode: 0,
+  shadowQualityCode: 0,
+});
+
+const defaultWaterRuntimeSnapshot: WaterRuntimeSnapshot = {
+  reflectionStatus: {
+    active: false,
+    sampleReflection: false,
+    reason: "disabled",
+    resolutionScale: 0,
+    effectiveHz: 0,
+    enabled: false,
+    debugViewMode: "Off",
+    probeValid: false,
+    lastProbeUpdateMs: 0,
+  },
+  waterPresence: {
+    nearestWaterDistance: null,
+    visibleMeshes: 0,
+    eligibleMeshes: 0,
+    viewVisibleMeshes: 0,
+    totalWaterMeshes: 0,
+  },
+  probe: {
+    nearestBodyKind: "Unknown",
+    materialMode: "Unknown",
+    maxDepth: 0,
+    triangles: 0,
+    reflectionEligible: false,
+    reflectionActive: false,
+    compositorPixelMatched: false,
+  },
+};
+
+const defaultRuntimeMetrics: RuntimeMetrics = {
+  fps: 0,
+  frameMs: 0,
+  renderQualityPreset: "High",
+  renderQualityReadouts: createDefaultRenderQualityReadouts(),
+  chunkMeshMs: 0,
+  waterReflectionMs: 0,
+  propBillboardMs: 0,
+  shadowBudget: { enabled: false },
+  ambientOcclusion: {
+    gtaoEnabled: false,
+    gtaoQuality: "medium",
+    gtaoSliceCount: 0,
+    gtaoStepsPerSlice: 0,
+    gtaoRadius: 0,
+    gtaoTemporalDenoise: false,
+    ssaoSupported: false,
+    ssaoEnabled: false,
+    bakedAoStrength: 0,
+  },
+  adaptiveGI: {
+    adaptiveGiQuality: 0,
+    stochasticProbeSelection: false,
+    probeSelectionCount: 0,
+    sdfShadows: false,
+    contactShadows: false,
+  },
+  waterRenderDebug: {
+    reflectionActive: false,
+    waterMaskPixels: 0,
+    displacementEnabled: false,
+    visualProbeStatus: "unavailable",
+  },
+  lightingAtmosphere: {
+    sunTimeOfDay: "",
+    fogPreset: "",
+    fogActive: false,
+    godRaysEnabled: false,
+    godRayIntensity: 0,
+  },
+  volumetricClouds: {
+    coverage: 0,
+    renderScale: 0,
+    primarySteps: 0,
+    lightSteps: 0,
+  },
+  cinematicPhotoMode: {
+    photoModeActive: false,
+    focalDistance: 0,
+    aperture: 0,
+    blurEnabled: false,
+    depthOfFieldMode: "",
+    motionBlurSamples: 0,
+    cinematicModeActive: false,
+  },
+  graphicsCapabilities: {
+    adapterName: "",
+    integratedGPU: false,
+    taaSupported: false,
+    rayTracingSupported: false,
+    rayTracingEnabled: false,
+  },
+  timingSamples: [],
+};
+
+const defaultAgentObservation: AgentObservation = {
+  activeMode: "select",
+  activeTool: "select",
+  selected: null,
+  visiblePanels: [],
+  viewport: {
+    cameraPosition: [0, 0, 0],
+    overlays: [],
+  },
+  brush: {
+    radius: 4,
+    strength: 0.75,
+    materialBlockId: "grass",
+    falloff: "smooth",
+    brushShape: "cube",
+    targetFace: "all",
+  },
+  dirtyChunks: 0,
+  warnings: [],
+  suggestedCommands: [],
+};
 
 const initialPropBrushSettings: PropBrushSettings = {
   density: 8,
@@ -250,86 +385,6 @@ const initialPropPlacementSettings: PropPlacementSettings = {
   maxScale: 4,
 };
 
-const createLargeMockChunks = (): ChunkSummary[] =>
-  Array.from({ length: 960 }, (_, index) => {
-    const source = mockChunks[index % mockChunks.length];
-    const x = index % 40;
-    const z = Math.floor(index / 40);
-    const id = `large-chunk-${x}-${z}`;
-
-    return {
-      ...source,
-      id,
-      label: `Chunk ${x},${z}`,
-      coordinate: [x, source.coordinate[1], z],
-      blockCount: source.blockCount + index * 11,
-      dirty: index % 37 === 0,
-      meshStatus: index % 37 === 0 ? "dirty" : index % 19 === 0 ? "queued" : "clean",
-      vertexCount: source.vertexCount + (index % 50) * 29,
-      triangleCount: source.triangleCount + (index % 40) * 17,
-      lodGroup: index % 4,
-    };
-  });
-
-const createLargeMockAreas = (): ProtectedArea[] =>
-  Array.from({ length: 180 }, (_, index) => {
-    const source = mockProtectedAreas[index % mockProtectedAreas.length];
-    const x = 20 + (index % 30) * 18;
-    const z = 20 + Math.floor(index / 30) * 22;
-
-    return {
-      ...source,
-      id: `large-area-${index + 1}`,
-      name: `${source.name} ${index + 1}`,
-      center: [x, source.center[1], z],
-      bounds: {
-        min: [x - source.size[0] / 2, source.bounds.min[1], z - source.size[2] / 2],
-        max: [x + source.size[0] / 2, source.bounds.max[1], z + source.size[2] / 2],
-      },
-      locked: index % 5 === 0,
-      priority: source.priority + (index % 7),
-    };
-  });
-
-const createLargeMockWaterBodies = (): WaterBody[] =>
-  Array.from({ length: 96 }, (_, index) => {
-    const source = mockWaterBodies[index % mockWaterBodies.length];
-    const x = (index % 24) * 28;
-    const z = Math.floor(index / 24) * 42 + 16;
-
-    return {
-      ...source,
-      id: `large-water-${index + 1}`,
-      name: `${source.name} ${index + 1}`,
-      center: [x, source.center[1], z],
-      surfaceY: source.surfaceY + (index % 3),
-    };
-  });
-
-const createLargeMockProps = (chunks: readonly ChunkSummary[]): PropInstance[] =>
-  Array.from({ length: 4200 }, (_, index) => {
-    const source = mockProps[index % mockProps.length];
-    const chunk = chunks[index % chunks.length];
-    const x = (index % 70) * 7 + (index % 3);
-    const z = Math.floor(index / 70) * 6;
-    const y = 15 + (index % 9);
-
-    return {
-      ...source,
-      id: `large-prop-${index + 1}`,
-      name: `${source.name} ${index + 1}`,
-      chunkId: chunk.id,
-      position: [x, y, z],
-      transform: {
-        ...source.transform,
-        position: [x, y, z],
-      },
-      visible: index % 11 !== 0,
-      boundsWarning: index % 97 === 0,
-      generatedAssetAvailable: index % 89 !== 0,
-    };
-  });
-
 export const createInitialEditorState = (): EditorDataState => ({
   activeMode: "select",
   activeTool: "select",
@@ -353,31 +408,31 @@ export const createInitialEditorState = (): EditorDataState => ({
     atlasPreview: false,
     wireframe: false,
   },
-  runtimeState: "mock",
+  runtimeState: "disconnected",
   renderQualityPreset: "High",
-  selectedAtlasTileId: "tile-0",
-  chunks: [...mockChunks],
+  selectedAtlasTileId: "",
+  chunks: [],
   worldViewport: null,
   viewportSnapshot: null,
-  voxelBlocks: [...mockVoxelBlocks],
-  protectedAreas: [...mockProtectedAreas],
-  waterBodies: [...mockWaterBodies],
-  props: [...mockProps],
-  propAssets: [...mockPropAssets],
-  materials: [...mockMaterials],
-  outlinerNodeState: createOutlinerNodeState(mockChunks, mockProtectedAreas, mockWaterBodies, mockProps, mockMaterials),
+  voxelBlocks: [...defaultVoxelBlocks],
+  protectedAreas: [],
+  waterBodies: [],
+  props: [],
+  propAssets: [],
+  materials: [],
+  outlinerNodeState: createOutlinerNodeState([], [], [], [], []),
   propBrushSettings: initialPropBrushSettings,
   propPlacementSettings: initialPropPlacementSettings,
-  selectedPropAssetId: mockPropAssets[0]?.id ?? "asset-tree-01",
-  atlasMapping: { ...mockAtlasMapping },
-  waterRuntimeSnapshot: { ...mockWaterRuntimeSnapshot },
-  runtimeMetrics: mockRuntimeMetrics,
-  consoleMessages: [...mockConsoleMessages],
-  agentObservation: mockAgentObservation,
-  agentTimeline: [...mockAgentTimeline],
+  selectedPropAssetId: "",
+  atlasMapping: { ...defaultAtlasMapping },
+  waterRuntimeSnapshot: { ...defaultWaterRuntimeSnapshot },
+  runtimeMetrics: { ...defaultRuntimeMetrics },
+  consoleMessages: [],
+  agentObservation: defaultAgentObservation,
+  agentTimeline: [],
   dirtyState: {
-    hasUnsavedChanges: true,
-    dirtyChunkIds: initialChunkIndex,
+    hasUnsavedChanges: false,
+    dirtyChunkIds: [],
     dirtyAreaIds: [],
     dirtyWaterBodyIds: [],
     dirtyPropIds: [],
@@ -390,11 +445,11 @@ export const createInitialEditorState = (): EditorDataState => ({
   savedSnapshots: [],
   largeWorldStats: {
     enabled: false,
-    chunkCount: mockChunks.length,
-    propCount: mockProps.length,
-    protectedAreaCount: mockProtectedAreas.length,
-    waterBodyCount: mockWaterBodies.length,
-    consoleMessageCount: mockConsoleMessages.length,
+    chunkCount: 0,
+    propCount: 0,
+    protectedAreaCount: 0,
+    waterBodyCount: 0,
+    consoleMessageCount: 0,
   },
   pendingCommandIds: [],
   layoutResetRequestId: 0,
@@ -496,7 +551,7 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.renderQualityPreset = preset;
         state.runtimeMetrics.renderQualityPreset = preset;
-        state.runtimeMetrics.renderQualityReadouts = getMockRenderQualityReadouts(preset);
+        state.runtimeMetrics.renderQualityReadouts = createDefaultRenderQualityReadouts();
       }),
     updateRuntimeMetrics: (mutator) =>
       set((state) => {
@@ -895,48 +950,6 @@ export const useEditorStore = create<EditorStore>()(
       });
       return applied;
     },
-    loadLargeMockWorld: () =>
-      set((state) => {
-        const chunks = createLargeMockChunks();
-        const protectedAreas = createLargeMockAreas();
-        const waterBodies = createLargeMockWaterBodies();
-        const props = createLargeMockProps(chunks);
-        const consoleMessages = Array.from({ length: 1200 }, (_, index): ConsoleMessage => {
-          const source = mockConsoleMessages[index % mockConsoleMessages.length];
-          return {
-            ...source,
-            id: `large-console-${index + 1}`,
-            message: `${source.message} [large world ${index + 1}]`,
-          };
-        });
-
-        state.chunks = chunks;
-        state.worldViewport = null;
-        state.viewportSnapshot = null;
-        state.protectedAreas = protectedAreas;
-        state.waterBodies = waterBodies;
-        state.props = props;
-        state.outlinerNodeState = createOutlinerNodeState(chunks, protectedAreas, waterBodies, props, state.materials);
-        state.consoleMessages = consoleMessages;
-        state.selection = { kind: "chunk", id: chunks[0].id, label: chunks[0].label };
-        state.dirtyState = {
-          hasUnsavedChanges: true,
-          dirtyChunkIds: chunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id),
-          dirtyAreaIds: [],
-          dirtyWaterBodyIds: [],
-          dirtyPropIds: [],
-          dirtyAtlas: false,
-          layoutDirty: false,
-        };
-        state.largeWorldStats = {
-          enabled: true,
-          chunkCount: chunks.length,
-          propCount: props.length,
-          protectedAreaCount: protectedAreas.length,
-          waterBodyCount: waterBodies.length,
-          consoleMessageCount: consoleMessages.length,
-        };
-      }),
     beginCommand: (commandId) =>
       set((state) => {
         if (!state.pendingCommandIds.includes(commandId)) {

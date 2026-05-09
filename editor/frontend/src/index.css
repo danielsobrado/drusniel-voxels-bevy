@@ -200,6 +200,44 @@ body {
   height: 100%;
 }
 
+.docklayout .dv-default-tab {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.docklayout .dv-default-tab-content {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docklayout .dv-default-tab-action {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--editor-fg-3);
+  opacity: 0.72;
+}
+
+.docklayout .dv-default-tab-action:hover {
+  background: rgba(255, 255, 255, 0.11);
+  color: var(--editor-fg);
+  opacity: 1;
+}
+
+.docklayout .dv-default-tab-action svg {
+  width: 12px;
+  height: 12px;
+}
+
 .panel-shell {
   height: 100%;
   width: 100%;
@@ -1590,6 +1628,108 @@ input {
   overflow: hidden;
   touch-action: none;
   background: #0b0d12;
+}
+
+.viewport-body {
+  position: relative;
+  display: block;
+}
+
+.viewport-body > .bevy-canvas-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.viewport-overlay-toolbar {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto minmax(170px, 1fr);
+  align-content: start;
+  align-items: start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.viewport-breadcrumbs {
+  grid-column: 1;
+  justify-self: start;
+  max-width: min(34vw, 420px);
+}
+
+.viewport-top-strip {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.viewport-tool-shelf {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.viewport-overlay-grid {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  width: min(720px, calc(100vw - 420px));
+  grid-template-columns: none;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.viewport-summary-card {
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 6px 8px;
+  border-radius: 9px;
+  font-size: 10px;
+  line-height: 1.2;
+  background: rgba(7, 8, 11, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.viewport-summary-card strong {
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.viewport-summary-card > div:not(.viewport-overlay-title) {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport-overlay-toggle-group {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  max-width: min(42vw, 520px);
+  justify-content: flex-end;
+}
+
+.viewport-bottom-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 46px;
+}
+
+.viewport-agent-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 5;
+  margin: 0;
 }
 
 .world-viewport-host-native {

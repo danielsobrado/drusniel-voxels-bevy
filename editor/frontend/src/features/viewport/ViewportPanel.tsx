@@ -240,6 +240,14 @@ export function ViewportPanel() {
     { id: "measure", label: "Measure", command: "editor.palette.open", icon: <CheckSquare2 size={14} aria-hidden="true" />, iconAria: "Measure" },
     { id: "camera", label: "Camera", command: "editor.mode.lighting", icon: <Camera size={14} aria-hidden="true" />, iconAria: "Camera" },
   ];
+  const activeToolShelfId =
+    activeMode === "voxel_sculpt"
+      ? "sculpt"
+      : activeMode === "voxel_paint"
+        ? "paint"
+        : activeMode === "lighting"
+          ? "camera"
+          : activeMode;
 
   const areaKindOptions: readonly { readonly value: ProtectedAreaKind; readonly label: string }[] = [
     { value: "spawn", label: "Spawn" },
@@ -369,9 +377,10 @@ export function ViewportPanel() {
               <button
                 key={tool.id}
                 type="button"
-                className="toolbar-button viewport-tool-button"
+                className={`toolbar-button viewport-tool-button ${tool.id === activeToolShelfId ? "toolbar-button-active" : ""}`}
                 data-tool-id={tool.id}
                 aria-label={tool.iconAria}
+                aria-pressed={tool.id === activeToolShelfId}
                 onClick={() => void runCommandById(tool.command)}
               >
                 {tool.icon}

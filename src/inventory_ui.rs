@@ -14,6 +14,10 @@ use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
 pub struct InventoryUiPlugin;
 
+fn editor_native_viewport_enabled() -> bool {
+    std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
+
 // Inventory UI constants (6x4 grid)
 const SLOT_SIZE: f32 = 64.0;
 const SLOT_GAP: f32 = 4.0;
@@ -113,8 +117,13 @@ impl Plugin for InventoryUiPlugin {
             .init_resource::<HotbarState>()
             .init_resource::<HotbarUiState>()
             .init_resource::<HotbarIconAssets>()
-            .init_resource::<DraggedItem>()
-            .add_systems(Startup, (setup_hotbar_icons, spawn_hotbar_ui).chain())
+            .init_resource::<DraggedItem>();
+
+        if editor_native_viewport_enabled() {
+            return;
+        }
+
+        app.add_systems(Startup, (setup_hotbar_icons, spawn_hotbar_ui).chain())
             .add_systems(
                 Update,
                 (
