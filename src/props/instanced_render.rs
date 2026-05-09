@@ -345,13 +345,6 @@ impl PropInstanceGroups {
         }
     }
 
-    fn bounds_for_group(&self, entity: Entity) -> Option<(Vec3, Vec3)> {
-        self.groups
-            .values()
-            .find(|record| record.entity == entity)
-            .map(|record| (record.min, record.max))
-    }
-
     fn record_bounds(&mut self, from_mesh: bool, bounds: PropInstanceBounds, bounds_padding: f32) {
         if from_mesh {
             self.bounds_stats.from_mesh += 1;
@@ -739,9 +732,6 @@ fn apply_pending_instances(
 ) {
     let pending = std::mem::take(&mut groups.pending);
     for (entity, update) in pending {
-        let (bounds_min, bounds_max) = groups
-            .bounds_for_group(entity)
-            .unwrap_or((update.min, update.max));
         let Ok(mut group) = group_query.get_mut(entity) else {
             continue;
         };
@@ -760,9 +750,11 @@ fn apply_pending_instances(
             .extend(update.shadow_culled.iter().copied());
         group.diagnostic_prop_type_mask |= update.prop_type_mask;
         rebuild_visible_and_shadow_instances(&mut group);
-        commands
-            .entity(entity)
-            .insert(Aabb::from_min_max(bounds_min, bounds_max));
+        if let Some((bounds_min, bounds_max)) = source_bounds_aabb(&group.source_bounds) {
+            commands
+                .entity(entity)
+                .insert(Aabb::from_min_max(bounds_min, bounds_max));
+        }
     }
 }
 
@@ -1560,11 +1552,14 @@ fn prop_subcluster_visible_mask(subclusters: &[PreparedPropSubcluster], frusta: 
     mask
 }
 
-fn group_instance_sphere_intersects_frusta(group: &InstancedPropGroup, frusta: &[Frustum]) -> bool {
+fn group_visible_instance_sphere_intersects_frusta(
+    group: &InstancedPropGroup,
+    frusta: &[Frustum],
+) -> bool {
     if frusta.is_empty() {
         return false;
     }
-    group.source_bounds.iter().any(|bounds| {
+    group.instance_bounds.iter().any(|bounds| {
         let sphere = Sphere {
             center: Vec3A::from(bounds.sphere_center),
             radius: bounds.sphere_radius,
@@ -1667,7 +1662,7 @@ fn prepare_instance_buffers(
         groups_examined += 1;
         if visibility_filter_active && !visible_entities.contains(&entity) {
             groups_skipped_not_visible += 1;
-            if group_instance_sphere_intersects_frusta(group, &view_frusta) {
+            if group_visible_instance_sphere_intersects_frusta(group, &view_frusta) {
                 groups_culled_but_instance_sphere_intersects += 1;
             }
             continue;
