@@ -2398,6 +2398,7 @@ fn update_water_material_lod(
             Option<&MeshMaterial3d<StandardMaterial>>,
             Option<&WaterMeshDetail>,
             Option<&WaterBodyId>,
+            Option<&Visibility>,
         ),
         With<WaterMesh>,
     >,
@@ -2433,10 +2434,26 @@ fn update_water_material_lod(
     let fancy_distance_sq = WATER_FANCY_DISTANCE * WATER_FANCY_DISTANCE;
     registry.chunks_forced_consistent = 0;
 
-    for (entity, transform, fancy_mat, cheap_mat, detail, body_id) in water_meshes.iter() {
+    for (entity, transform, fancy_mat, cheap_mat, detail, body_id, visibility) in
+        water_meshes.iter()
+    {
         let fallback_kind = body_id
             .and_then(|id| registry.bodies.get(id).map(|body| body.kind))
             .unwrap_or(WaterBodyKind::Unknown);
+        let body_mode_kind = body_id.and_then(|id| {
+            registry
+                .bodies
+                .get(id)
+                .map(|body| (body.material_mode, body.kind))
+        });
+        let desired_visibility = desired_water_visibility(
+            force_cheap,
+            force_fancy,
+            body_mode_kind.map(|(mode, _)| mode),
+        );
+        if !water_visibility_matches(visibility, desired_visibility) {
+            commands.entity(entity).insert(desired_visibility);
+        }
         if force_cheap {
             let desired = water_material.far_handle_for_kind(fallback_kind);
             if !standard_material_matches(cheap_mat, &desired) {
@@ -2457,12 +2474,7 @@ fn update_water_material_lod(
             }
             continue;
         }
-        if let Some((body_mode, body_kind)) = body_id.and_then(|id| {
-            registry
-                .bodies
-                .get(id)
-                .map(|body| (body.material_mode, body.kind))
-        }) {
+        if let Some((body_mode, body_kind)) = body_mode_kind {
             match body_mode {
                 WaterBodyMaterialMode::Fancy => {
                     let desired = water_material.near_handle_for_kind(body_kind);
@@ -2484,9 +2496,7 @@ fn update_water_material_lod(
                             .remove::<MeshMaterial3d<StandardWaterMaterial>>();
                     }
                 }
-                WaterBodyMaterialMode::Hidden => {
-                    commands.entity(entity).insert(Visibility::Hidden);
-                }
+                WaterBodyMaterialMode::Hidden => {}
             }
             continue;
         }
@@ -2546,6 +2556,24 @@ fn update_water_material_lod(
         "Water Chunks Forced Consistent By Body",
         registry.chunks_forced_consistent as f64,
     );
+}
+
+fn desired_water_visibility(
+    force_cheap: bool,
+    force_fancy: bool,
+    body_mode: Option<WaterBodyMaterialMode>,
+) -> Visibility {
+    if force_cheap || force_fancy {
+        return Visibility::Inherited;
+    }
+    match body_mode {
+        Some(WaterBodyMaterialMode::Hidden) => Visibility::Hidden,
+        _ => Visibility::Inherited,
+    }
+}
+
+fn water_visibility_matches(current: Option<&Visibility>, desired: Visibility) -> bool {
+    current.is_some_and(|current| *current == desired)
 }
 
 fn standard_water_material_matches(
@@ -3090,4 +3118,45 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
     lod_transitions.changes_per_second = lod_transitions.changes_this_second as f32 / elapsed;
     lod_transitions.changes_this_second = 0;
     lod_transitions.last_change_second = now;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_material_visibility_restores_renderable_body_modes() {
+        assert_eq!(
+            desired_water_visibility(false, false, Some(WaterBodyMaterialMode::Hidden)),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            desired_water_visibility(false, false, Some(WaterBodyMaterialMode::Fancy)),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            desired_water_visibility(false, false, Some(WaterBodyMaterialMode::Cheap)),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            desired_water_visibility(false, false, Some(WaterBodyMaterialMode::Unknown)),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            desired_water_visibility(false, false, None),
+            Visibility::Inherited
+        );
+    }
+
+    #[test]
+    fn forced_water_material_modes_override_hidden_visibility() {
+        assert_eq!(
+            desired_water_visibility(true, false, Some(WaterBodyMaterialMode::Hidden)),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            desired_water_visibility(false, true, Some(WaterBodyMaterialMode::Hidden)),
+            Visibility::Inherited
+        );
+    }
 }
