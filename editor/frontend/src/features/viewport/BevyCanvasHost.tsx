@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ChunkSummary, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
@@ -294,6 +294,15 @@ const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer,
   return true;
 };
 
+const nativeViewportDebug = (...items: unknown[]) => {
+  const enabled =
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("drusniel.editorDiagnostics") === "1";
+  if (import.meta.env.DEV && enabled) {
+    console.info("[native-viewport]", ...items);
+  }
+};
+
 export function BevyCanvasHost({
   chunks,
   worldViewport,
@@ -351,6 +360,7 @@ export function BevyCanvasHost({
       }
 
       const nextRect = readNativeViewportRect(host);
+      nativeViewportDebug("rect", nextRect);
       setNativeViewportRect((current) => (current && nativeRectsEqual(current, nextRect) ? current : nextRect));
     };
 
@@ -409,11 +419,13 @@ export function BevyCanvasHost({
       }
 
       if (!nativeViewportRect || nativeViewportRect.width < 16 || nativeViewportRect.height < 16) {
+        nativeViewportDebug("attach skipped: host rect not ready", nativeViewportRect);
         setNativeViewportState("fallback");
         setNativeViewportMessage("Native viewport host is not ready.");
         return;
       }
 
+      nativeViewportDebug("attach request", nativeViewportRect);
       setNativeViewportState((current) => (current === "attached" ? current : "pending"));
       void invoke<NativeViewportAttachment>("attach_native_viewport", {
         rect: {
@@ -425,12 +437,14 @@ export function BevyCanvasHost({
       })
         .then((attachment) => {
           if (!cancelled) {
+            nativeViewportDebug("attach result", attachment);
             setNativeViewportState(attachment.attached ? "attached" : "fallback");
             setNativeViewportMessage(attachment.message);
           }
         })
         .catch((error: unknown) => {
           if (!cancelled) {
+            nativeViewportDebug("attach failed", error);
             setNativeViewportState("fallback");
             setNativeViewportMessage(error instanceof Error ? error.message : "Native Bevy viewport is not ready.");
             retryTimer = window.setTimeout(attach, 250);
@@ -640,7 +654,7 @@ export function BevyCanvasHost({
         </div>
       ) : null}
 
-      {waterDebug ? (
+      {browserPreviewEnabled && waterDebug ? (
         <div className="viewport-water-overlay" aria-label="Water debug overlay" data-testid="viewport-water-overlay">
           <div>Mode: {waterDebugMode}</div>
           <div>Reflection active: {waterRuntimeSnapshot.reflectionStatus.active ? "on" : "off"}</div>
@@ -649,7 +663,7 @@ export function BevyCanvasHost({
         </div>
       ) : null}
 
-      {showProtectedAreas ? (
+      {browserPreviewEnabled && showProtectedAreas ? (
         <svg className="viewport-area-overlay-canvas" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240" preserveAspectRatio="none" aria-hidden="true">
           {areaOverlays.map((area) => {
             const rect = boundsToRect(area.bounds);
@@ -666,7 +680,9 @@ export function BevyCanvasHost({
         </svg>
       ) : null}
 
-      {!desktopRuntime ? <div className="canvas-reticle" aria-hidden="true" /> : null}
+      {browserPreviewEnabled ? <div className="canvas-reticle" aria-hidden="true" /> : null}
+      {browserPreviewEnabled ? (
+
       <div className="canvas-label">
         {desktopRuntime
           ? nativeViewportState === "attached"
@@ -679,7 +695,9 @@ export function BevyCanvasHost({
               : "World summary viewport"}{" "}
         / {viewportStateLabel}
       </div>
-      {!desktopRuntime ? (
+
+      ) : null}
+      {browserPreviewEnabled ? (
         <div className="minimap-canvas" aria-label="World viewport summary">
           <div className="minimap-grid">
             <strong>{chunks.length}</strong>

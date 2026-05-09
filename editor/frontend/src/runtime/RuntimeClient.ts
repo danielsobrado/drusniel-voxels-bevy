@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -7,6 +7,7 @@ import type {
   RuntimeChunkRebuildResult,
   RuntimeCommandResult,
   RuntimeConnectionState,
+  RuntimeEditorDiagnosticsState,
   RuntimeFocusCameraResult,
   RuntimeProtectedAreaDeleteResult,
   RuntimeProtectedAreaLoadResult,
@@ -45,6 +46,7 @@ export interface RuntimeClient {
   readonly runWaterVisualProbe: () => Promise<RuntimeCommandResult<RuntimeWaterVisualProbeResult>>;
   readonly setVoxel: (position: readonly [number, number, number], block: BlockType) => Promise<RuntimeCommandResult<RuntimeVoxelMutationResult>>;
   readonly setViewportDebugOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => Promise<RuntimeCommandResult<RuntimeViewportDebugState>>;
+  readonly setEditorDiagnostics: (enabled: boolean, categories?: readonly EditorDiagnosticsCategory[]) => Promise<RuntimeCommandResult<RuntimeEditorDiagnosticsState>>;
   readonly setAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeAtlasMappingState>>;
   readonly saveAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeSaveSummary>>;
   readonly scatterProps: (props: readonly PropInstance[]) => Promise<RuntimeCommandResult<RuntimePropScatterResult>>;

@@ -4,6 +4,9 @@
 //! block or entity the player is looking at.
 
 use crate::constants::{ENTITY_TARGET_CONE, ENTITY_TARGET_RADIUS, INTERACTION_RANGE, RAY_STEP};
+use crate::editor_diagnostics::{
+    EditorDiagnosticsCategory, EditorDiagnosticsState, editor_diagnostics_log,
+};
 use crate::props::{Prop, PropType};
 use crate::runtime_commands::EditorPropInstanceId;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -12,6 +15,29 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 const EDITOR_SELECTION_RANGE: f32 = 512.0;
+
+#[derive(Default)]
+pub(crate) struct EditorHoverDebugState {
+    last_entity: Option<Entity>,
+    last_cursor_available: bool,
+    last_ray_available: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct EditorHighlightDebugState {
+    reported_initial: bool,
+    last_editor_controlled: bool,
+    last_hovered: Option<Entity>,
+    last_selected: Option<Entity>,
+}
+
+fn editor_debug_log(
+    diagnostics: Option<&EditorDiagnosticsState>,
+    category: EditorDiagnosticsCategory,
+    message: impl AsRef<str>,
+) {
+    editor_diagnostics_log(diagnostics, category, message);
+}
 
 /// Resource tracking the currently targeted block.
 #[derive(Resource, Default)]
@@ -38,6 +64,8 @@ pub struct SelectedBlock {
 /// Resource tracking the prop explicitly selected by an editor viewport click.
 #[derive(Resource, Default)]
 pub struct SelectedProp {
+    /// Runtime entity backing this selection.
+    pub entity: Option<Entity>,
     /// Frontend-facing prop id.
     pub id: Option<String>,
     /// Human-readable selection label.
@@ -48,6 +76,7 @@ pub struct SelectedProp {
 
 impl SelectedProp {
     fn clear(&mut self) {
+        self.entity = None;
         self.id = None;
         self.label = None;
         self.position = None;
@@ -76,6 +105,10 @@ pub struct TargetedEntity {
 pub struct TargetedProp {
     /// Prop entity being targeted, if any.
     pub entity: Option<Entity>,
+    /// Frontend-facing prop id.
+    pub id: Option<String>,
+    /// Human-readable hover label.
+    pub label: Option<String>,
     /// Distance to the targeted prop.
     pub distance: f32,
     /// World position of the targeted prop, if any.
@@ -167,6 +200,7 @@ pub fn select_block_from_cursor_in_editor_viewport(
     mut selected: ResMut<SelectedBlock>,
     mut selected_prop: ResMut<SelectedProp>,
     prop_query: Query<(Entity, &Prop, &GlobalTransform, Option<&EditorPropInstanceId>)>,
+    diagnostics: Option<Res<EditorDiagnosticsState>>,
 ) {
     if std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_none()
         || !mouse.just_pressed(MouseButton::Left)
@@ -174,13 +208,35 @@ pub fn select_block_from_cursor_in_editor_viewport(
         return;
     }
 
+    let diagnostics = diagnostics.as_deref();
     let Ok(window) = windows.single() else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            "click ignored: no primary window",
+        );
         return;
     };
     let Ok((camera, camera_transform)) = camera_query.single() else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            "click ignored: no player camera",
+        );
         return;
     };
     let Some(cursor_position) = window.cursor_position() else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            format!(
+            "[editor-selection] click cursor unavailable focused={} camera_pos=({:.2},{:.2},{:.2}); falling back to camera forward ray",
+            window.focused,
+            camera_transform.translation().x,
+            camera_transform.translation().y,
+            camera_transform.translation().z
+            ),
+        );
         if !select_from_editor_ray(
             camera_transform.translation(),
             camera_transform.forward().as_vec3(),
@@ -188,12 +244,42 @@ pub fn select_block_from_cursor_in_editor_viewport(
             &prop_query,
             &mut selected,
             &mut selected_prop,
+            diagnostics,
         ) {
-            select_targeted_block(&targeted, &world, &mut selected, &mut selected_prop);
+            select_targeted_block(
+                &targeted,
+                &world,
+                &mut selected,
+                &mut selected_prop,
+                diagnostics,
+            );
         }
         return;
     };
+    editor_debug_log(
+        diagnostics,
+        EditorDiagnosticsCategory::Selection,
+        format!(
+        "[editor-selection] click cursor=({:.1},{:.1}) window=({:.1}x{:.1}) focused={} camera_pos=({:.2},{:.2},{:.2})",
+        cursor_position.x,
+        cursor_position.y,
+        window.width(),
+        window.height(),
+        window.focused,
+        camera_transform.translation().x,
+        camera_transform.translation().y,
+        camera_transform.translation().z
+        ),
+    );
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            format!(
+            "[editor-selection] cursor ray unavailable; falling back to camera forward ray cursor=({:.1},{:.1})",
+            cursor_position.x, cursor_position.y
+            ),
+        );
         if !select_from_editor_ray(
             camera_transform.translation(),
             camera_transform.forward().as_vec3(),
@@ -201,8 +287,15 @@ pub fn select_block_from_cursor_in_editor_viewport(
             &prop_query,
             &mut selected,
             &mut selected_prop,
+            diagnostics,
         ) {
-            select_targeted_block(&targeted, &world, &mut selected, &mut selected_prop);
+            select_targeted_block(
+                &targeted,
+                &world,
+                &mut selected,
+                &mut selected_prop,
+                diagnostics,
+            );
         }
         return;
     };
@@ -214,7 +307,14 @@ pub fn select_block_from_cursor_in_editor_viewport(
         &prop_query,
         &mut selected,
         &mut selected_prop,
-    ) && !select_targeted_block(&targeted, &world, &mut selected, &mut selected_prop) {
+        diagnostics,
+    ) && !select_targeted_block(
+        &targeted,
+        &world,
+        &mut selected,
+        &mut selected_prop,
+        diagnostics,
+    ) {
         selected.clear();
         selected_prop.clear();
     }
@@ -227,6 +327,7 @@ fn select_from_editor_ray(
     prop_query: &Query<(Entity, &Prop, &GlobalTransform, Option<&EditorPropInstanceId>)>,
     selected: &mut SelectedBlock,
     selected_prop: &mut SelectedProp,
+    diagnostics: Option<&EditorDiagnosticsState>,
 ) -> bool {
     let block_hit = raycast_blocks(origin, direction, world, EDITOR_SELECTION_RANGE).map(|hit| {
         let center = hit.0.as_vec3() + Vec3::splat(0.5);
@@ -238,17 +339,42 @@ fn select_from_editor_ray(
     match (prop_hit, block_hit) {
         (Some(prop), Some((block, block_distance))) if prop.distance <= block_distance => {
             selected.clear();
+            selected_prop.entity = Some(prop.entity);
             selected_prop.id = Some(prop.id);
             selected_prop.label = Some(prop.label);
             selected_prop.position = Some(prop.position);
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Selection,
+                format!(
+                "[editor-selection] selected prop entity={:?} id={} label={} distance={:.2} before_block_distance={:.2}",
+                selected_prop.entity,
+                selected_prop.id.as_deref().unwrap_or("<none>"),
+                selected_prop.label.as_deref().unwrap_or("<none>"),
+                prop.distance,
+                block_distance
+                ),
+            );
             let _ = block;
             true
         }
         (Some(prop), None) => {
             selected.clear();
+            selected_prop.entity = Some(prop.entity);
             selected_prop.id = Some(prop.id);
             selected_prop.label = Some(prop.label);
             selected_prop.position = Some(prop.position);
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Selection,
+                format!(
+                "[editor-selection] selected prop entity={:?} id={} label={} distance={:.2}",
+                selected_prop.entity,
+                selected_prop.id.as_deref().unwrap_or("<none>"),
+                selected_prop.label.as_deref().unwrap_or("<none>"),
+                prop.distance
+                ),
+            );
             true
         }
         (_, Some(((block_pos, normal), _))) => {
@@ -256,15 +382,32 @@ fn select_from_editor_ray(
             selected.position = Some(block_pos);
             selected.normal = Some(normal);
             selected.voxel_type = world.sample_voxel_for_interaction(block_pos).voxel();
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Selection,
+                format!(
+                "[editor-selection] selected voxel pos={:?} normal={:?} voxel={:?}",
+                selected.position, selected.normal, selected.voxel_type
+                ),
+            );
             true
         }
         (None, None) => {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Selection,
+                format!(
+                "[editor-selection] no hit origin=({:.2},{:.2},{:.2}) direction=({:.3},{:.3},{:.3})",
+                origin.x, origin.y, origin.z, direction.x, direction.y, direction.z
+                ),
+            );
             false
         }
     }
 }
 
 struct PropHit {
+    entity: Entity,
     id: String,
     label: String,
     position: Vec3,
@@ -280,7 +423,8 @@ fn nearest_prop_hit(
     let mut nearest: Option<PropHit> = None;
     for (entity, prop, transform, instance_id) in prop_query.iter() {
         let center = transform.translation();
-        let radius = prop_selection_radius(prop.prop_type);
+        let id = prop_runtime_id(entity, instance_id);
+        let radius = prop_selection_radius(prop, &id, transform);
         let Some(distance) = ray_sphere_distance(origin, direction, center, radius) else {
             continue;
         };
@@ -291,11 +435,9 @@ fn nearest_prop_hit(
             continue;
         }
 
-        let id = instance_id
-            .map(|id| id.0.clone())
-            .unwrap_or_else(|| format!("runtime-prop-{}", entity.index()));
-        let label = format!("{:?} {}", prop.prop_type, id);
+        let label = prop_label(prop, &id);
         nearest = Some(PropHit {
+            entity,
             id,
             label,
             position: center,
@@ -306,13 +448,40 @@ fn nearest_prop_hit(
     nearest
 }
 
-fn prop_selection_radius(prop_type: PropType) -> f32 {
-    match prop_type {
+fn prop_runtime_id(entity: Entity, instance_id: Option<&EditorPropInstanceId>) -> String {
+    instance_id
+        .map(|id| id.0.clone())
+        .unwrap_or_else(|| format!("runtime-prop-{}", entity.index()))
+}
+
+fn prop_label(prop: &Prop, id: &str) -> String {
+    if prop.id.is_empty() {
+        format!("{:?} {}", prop.prop_type, id)
+    } else {
+        format!("{} ({:?})", prop.id, prop.prop_type)
+    }
+}
+
+fn prop_selection_radius(prop: &Prop, runtime_id: &str, transform: &GlobalTransform) -> f32 {
+    let id = prop.id.to_lowercase();
+    let max_scale = transform.to_scale_rotation_translation().0.max_element().abs().max(1.0);
+    let base = if id.contains("building")
+        || id.contains("house")
+        || id.contains("hut")
+        || id.contains("inn")
+        || id.contains("stable")
+        || runtime_id.contains("building")
+    {
+        16.0
+    } else {
+        match prop.prop_type {
         PropType::Tree => 4.5,
         PropType::Rock => 2.5,
         PropType::Bush => 2.0,
         PropType::Flower => 1.25,
-    }
+        }
+    };
+    base * max_scale
 }
 
 fn ray_sphere_distance(origin: Vec3, direction: Vec3, center: Vec3, radius: f32) -> Option<f32> {
@@ -343,14 +512,28 @@ fn select_targeted_block(
     world: &VoxelWorld,
     selected: &mut SelectedBlock,
     selected_prop: &mut SelectedProp,
+    diagnostics: Option<&EditorDiagnosticsState>,
 ) -> bool {
     if let Some(block_pos) = targeted.position {
         selected_prop.clear();
         selected.position = Some(block_pos);
         selected.normal = targeted.normal;
         selected.voxel_type = world.sample_voxel_for_interaction(block_pos).voxel();
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            format!(
+            "[editor-selection] selected targeted voxel fallback pos={:?} normal={:?} voxel={:?}",
+            selected.position, selected.normal, selected.voxel_type
+            ),
+        );
         true
     } else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            "targeted voxel fallback had no target",
+        );
         false
     }
 }
@@ -402,4 +585,265 @@ pub fn update_targeted_prop(
             targeted.position = Some(pos);
         }
     }
+}
+
+/// Updates the editor hover target from the actual cursor ray in the native viewport.
+pub fn update_targeted_prop_from_cursor_in_editor_viewport(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<crate::camera::controller::PlayerCamera>>,
+    prop_query: Query<(Entity, &Prop, &GlobalTransform, Option<&EditorPropInstanceId>)>,
+    mut targeted: ResMut<TargetedProp>,
+    diagnostics: Option<Res<EditorDiagnosticsState>>,
+    mut debug_state: Local<EditorHoverDebugState>,
+) {
+    if std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_none() {
+        return;
+    }
+
+    targeted.entity = None;
+    targeted.id = None;
+    targeted.label = None;
+    targeted.distance = f32::MAX;
+    targeted.position = None;
+    let diagnostics = diagnostics.as_deref();
+
+    let Ok(window) = windows.single() else {
+        if debug_state.last_cursor_available {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                "cleared: no primary window",
+            );
+        }
+        debug_state.last_cursor_available = false;
+        debug_state.last_ray_available = false;
+        debug_state.last_entity = None;
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        if debug_state.last_ray_available {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                "cleared: no player camera",
+            );
+        }
+        debug_state.last_cursor_available = window.cursor_position().is_some();
+        debug_state.last_ray_available = false;
+        debug_state.last_entity = None;
+        return;
+    };
+    let Some(cursor_position) = window.cursor_position() else {
+        if debug_state.last_cursor_available {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                format!(
+                "[editor-hover] cursor unavailable focused={}",
+                window.focused
+                ),
+            );
+        }
+        debug_state.last_cursor_available = false;
+        debug_state.last_ray_available = false;
+        debug_state.last_entity = None;
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        if debug_state.last_ray_available {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                format!(
+                "[editor-hover] cursor ray unavailable cursor=({:.1},{:.1})",
+                cursor_position.x, cursor_position.y
+                ),
+            );
+        }
+        debug_state.last_cursor_available = true;
+        debug_state.last_ray_available = false;
+        debug_state.last_entity = None;
+        return;
+    };
+    let hit = nearest_prop_hit(
+        ray.origin,
+        ray.direction.as_vec3(),
+        EDITOR_SELECTION_RANGE,
+        &prop_query,
+    );
+    let next_entity = hit.as_ref().map(|hit| hit.entity);
+    if debug_state.last_entity != next_entity {
+        if let Some(hit) = hit.as_ref() {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                format!(
+                "[editor-hover] prop entity={:?} id={} label={} distance={:.2} cursor=({:.1},{:.1})",
+                hit.entity, hit.id, hit.label, hit.distance, cursor_position.x, cursor_position.y
+                ),
+            );
+        } else {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Hover,
+                format!(
+                "[editor-hover] cleared cursor=({:.1},{:.1})",
+                cursor_position.x, cursor_position.y
+                ),
+            );
+        }
+    }
+    debug_state.last_cursor_available = true;
+    debug_state.last_ray_available = true;
+    debug_state.last_entity = next_entity;
+
+    let Some(hit) = hit else {
+        return;
+    };
+
+    targeted.entity = Some(hit.entity);
+    targeted.id = Some(hit.id);
+    targeted.label = Some(hit.label);
+    targeted.distance = hit.distance;
+    targeted.position = Some(hit.position);
+}
+
+/// Draws a selection/hover outline around the selected or hovered prop root.
+pub fn render_editor_prop_hover_and_selection(
+    runtime_debug: Option<Res<crate::runtime_commands::RuntimeViewportDebugState>>,
+    selected: Res<SelectedProp>,
+    targeted: Res<TargetedProp>,
+    props: Query<(Entity, &Prop, &GlobalTransform, Option<&EditorPropInstanceId>)>,
+    diagnostics: Option<Res<EditorDiagnosticsState>>,
+    mut debug_state: Local<EditorHighlightDebugState>,
+    mut gizmos: Gizmos,
+) {
+    let editor_native_viewport = std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some();
+    let diagnostics = diagnostics.as_deref();
+    if runtime_debug.is_none() && !editor_native_viewport {
+        if !debug_state.reported_initial {
+            editor_debug_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Highlight,
+                "runtime debug state missing",
+            );
+            debug_state.reported_initial = true;
+        }
+        return;
+    }
+    let editor_controlled = editor_native_viewport
+        || runtime_debug
+            .as_ref()
+            .is_some_and(|runtime_debug_state| runtime_debug_state.editor_controlled);
+    if !debug_state.reported_initial
+        || debug_state.last_editor_controlled != editor_controlled
+        || debug_state.last_hovered != targeted.entity
+        || debug_state.last_selected != selected.entity
+    {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Highlight,
+            format!(
+            "[editor-highlight] editor_controlled={} native_viewport={} hovered={:?} selected={:?}",
+            editor_controlled, editor_native_viewport, targeted.entity, selected.entity
+            ),
+        );
+        debug_state.reported_initial = true;
+        debug_state.last_editor_controlled = editor_controlled;
+        debug_state.last_hovered = targeted.entity;
+        debug_state.last_selected = selected.entity;
+    }
+    if !editor_controlled {
+        return;
+    }
+
+    if let Some(entity) = targeted.entity {
+        if Some(entity) != selected.entity {
+            if let Ok((_, prop, transform, instance_id)) = props.get(entity) {
+                draw_prop_selection_box(
+                    &mut gizmos,
+                    prop,
+                    transform,
+                    &prop_runtime_id(entity, instance_id),
+                    Color::srgba(1.0, 1.0, 1.0, 0.55),
+                );
+            }
+        }
+    }
+
+    if let Some(entity) = selected.entity {
+        if let Ok((_, prop, transform, instance_id)) = props.get(entity) {
+            draw_prop_selection_box(
+                &mut gizmos,
+                prop,
+                transform,
+                &prop_runtime_id(entity, instance_id),
+                Color::srgba(1.0, 0.92, 0.24, 0.9),
+            );
+        }
+    }
+}
+
+fn draw_prop_selection_box(
+    gizmos: &mut Gizmos,
+    prop: &Prop,
+    transform: &GlobalTransform,
+    runtime_id: &str,
+    color: Color,
+) {
+    let radius = prop_selection_radius(prop, runtime_id, transform).max(0.5);
+    let size = Vec3::new(radius * 2.0, radius * 1.35, radius * 2.0);
+    let center = transform.translation() + Vec3::Y * (size.y * 0.45);
+    let cuboid = Cuboid::new(size.x, size.y, size.z);
+    gizmos.primitive_3d(&cuboid, Isometry3d::from_translation(center), color);
+}
+
+/// Deletes the selected prop when the native viewport owns keyboard focus.
+pub fn delete_selected_prop_in_editor_viewport(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut selected_prop: ResMut<SelectedProp>,
+    mut selected_block: ResMut<SelectedBlock>,
+    props: Query<Entity, With<Prop>>,
+    diagnostics: Option<Res<EditorDiagnosticsState>>,
+) {
+    if std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_none()
+        || !(keyboard.just_pressed(KeyCode::Delete) || keyboard.just_pressed(KeyCode::Backspace))
+    {
+        return;
+    }
+
+    let diagnostics = diagnostics.as_deref();
+    let Some(entity) = selected_prop.entity else {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            "delete ignored: no selected prop",
+        );
+        return;
+    };
+    if props.get(entity).is_err() {
+        editor_debug_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Selection,
+            format!(
+            "[editor-selection] delete ignored: selected prop entity {:?} no longer exists",
+            entity
+            ),
+        );
+        selected_prop.clear();
+        return;
+    }
+
+    commands.entity(entity).despawn();
+    editor_debug_log(
+        diagnostics,
+        EditorDiagnosticsCategory::Selection,
+        format!(
+        "[editor-selection] deleted selected prop entity={:?}",
+        entity
+        ),
+    );
+    selected_prop.clear();
+    selected_block.clear();
 }

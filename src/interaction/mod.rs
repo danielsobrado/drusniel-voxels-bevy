@@ -13,6 +13,7 @@ pub mod error;
 pub mod palette;
 pub mod radial_menu;
 mod targeting;
+mod wireframe;
 
 // Re-export public types and functions from sub-modules
 pub use debug::{DebugDetailToggles, DebugOverlay, DebugOverlayState};
@@ -440,28 +441,29 @@ fn placement_error_from_edit_result(position: IVec3, result: VoxelEditResult) ->
 /// Also renders a placement arrow when dragging blocks in edit mode.
 pub fn render_block_highlight(
     targeted: Res<TargetedBlock>,
+    selected: Res<SelectedBlock>,
     drag_state: Res<DragState>,
     edit_mode: Res<EditMode>,
     world: Res<VoxelWorld>,
     mut gizmos: Gizmos,
 ) {
-    let Some(pos) = targeted.position else {
-        return;
-    };
+    if let Some(pos) = targeted.position {
+        render_voxel_selection_box(&mut gizmos, pos, 1.01, Color::srgba(1.0, 1.0, 1.0, 0.7));
+    }
 
-    let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
-    let half_size = Vec3::splat(0.505);
-    let cuboid = Cuboid::new(half_size.x * 2.0, half_size.y * 2.0, half_size.z * 2.0);
-
-    gizmos.primitive_3d(
-        &cuboid,
-        Isometry3d::from_translation(center),
-        Color::srgba(1.0, 1.0, 1.0, 0.8),
-    );
+    if let Some(pos) = selected.position {
+        render_voxel_selection_box(&mut gizmos, pos, 1.08, Color::srgba(1.0, 0.92, 0.18, 0.95));
+    }
 
     if edit_mode.enabled && drag_state.dragged_block.is_some() {
         render_placement_arrow(&targeted, &drag_state, &world, &mut gizmos);
     }
+}
+
+fn render_voxel_selection_box(gizmos: &mut Gizmos, pos: IVec3, size: f32, color: Color) {
+    let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
+    let cuboid = Cuboid::new(size, size, size);
+    gizmos.primitive_3d(&cuboid, Isometry3d::from_translation(center), color);
 }
 
 /// Renders an arrow indicating where the dragged block will be placed.
@@ -1072,6 +1074,15 @@ impl Plugin for InteractionPlugin {
             .add_systems(
                 Update,
                 (
+                    targeting::update_targeted_prop_from_cursor_in_editor_viewport,
+                    targeting::delete_selected_prop_in_editor_viewport
+                        .after(targeting::select_block_from_cursor_in_editor_viewport),
+                )
+                    .run_if(|state: Res<PauseMenuState>| !state.open),
+            )
+            .add_systems(
+                Update,
+                (
                     editing::finish_dragging_block,
                     palette::place_prop_from_palette,
                     palette::persist_bookmarks,
@@ -1093,6 +1104,10 @@ impl Plugin for InteractionPlugin {
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::render_world_bounds_debug_planes
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
+                    wireframe::render_editor_wireframe_overlay
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
+                    targeting::render_editor_prop_hover_and_selection
                         .run_if(|state: Res<PauseMenuState>| !state.open),
                     clear_expired_errors.run_if(|state: Res<PauseMenuState>| !state.open),
                 ),

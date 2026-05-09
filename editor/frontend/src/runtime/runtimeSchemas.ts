@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsState, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type {
   BlockType,
   BlockAtlasMap,
@@ -49,6 +49,7 @@ export interface RuntimeAtlasMappingState {
 }
 
 export type RuntimeViewportDebugState = ViewportOverlayState;
+export type RuntimeEditorDiagnosticsState = EditorDiagnosticsState;
 
 export type RuntimeChunkSummary = ChunkSummary;
 export type RuntimePropStats = PropStats;
@@ -71,6 +72,7 @@ export interface RuntimeSnapshot {
   readonly waterVisualProbe: RuntimeWaterVisualProbeResult;
   readonly atlasMapping: RuntimeAtlasMappingState;
   readonly viewportDebug: RuntimeViewportDebugState;
+  readonly editorDiagnostics: RuntimeEditorDiagnosticsState;
   readonly propStats: RuntimePropStats;
   readonly timingSamples: readonly RuntimeRenderTimingSample[];
   readonly consoleEvents: readonly RuntimeConsoleEvent[];

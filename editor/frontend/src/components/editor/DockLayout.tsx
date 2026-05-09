@@ -9,8 +9,9 @@ import { GraphicsCapabilitiesPanel } from "../../features/profiler/GraphicsCapab
 import { TextureAtlasPanel } from "../../features/materials/TextureAtlasPanel";
 import { WorldOutlinerPanel } from "../../features/outliner/WorldOutlinerPanel";
 import { ViewportPanel } from "../../features/viewport/ViewportPanel";
+import { ViewportControlsPanel } from "../../features/viewport/ViewportControlsPanel";
 
-const STORAGE_KEY = "drusniel.editor.dock-layout.v1";
+const STORAGE_KEY = "drusniel.editor.dock-layout.v2";
 
 const DEFAULT_LAYOUT = {
   grid: {
@@ -22,7 +23,7 @@ const DEFAULT_LAYOUT = {
           type: "branch",
           data: [
             { type: "leaf", data: { views: ["viewport"], activeView: "viewport", id: "center" }, size: 620 },
-            { type: "leaf", data: { views: ["assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "assets", id: "bottom" }, size: 240 },
+            { type: "leaf", data: { views: ["viewport-controls", "assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "viewport-controls", id: "bottom" }, size: 240 },
           ],
           size: 760,
         },
@@ -39,6 +40,7 @@ const DEFAULT_LAYOUT = {
     viewport: { id: "viewport", contentComponent: "viewport", title: "Viewport" },
     inspector: { id: "inspector", contentComponent: "inspector", title: "Inspector" },
     assets: { id: "assets", contentComponent: "assets", title: "Asset Browser" },
+    "viewport-controls": { id: "viewport-controls", contentComponent: "viewport-controls", title: "Viewport Controls" },
     atlas: { id: "atlas", contentComponent: "atlas", title: "Texture Atlas" },
     console: { id: "console", contentComponent: "console", title: "Console" },
     profiler: { id: "profiler", contentComponent: "profiler", title: "Profiler" },
@@ -77,6 +79,7 @@ export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
   const components = useMemo(
     () => ({
       viewport: (_props: IDockviewPanelProps) => <ViewportPanel />,
+      "viewport-controls": (_props: IDockviewPanelProps) => <ViewportControlsPanel />,
       outliner: (_props: IDockviewPanelProps) => <WorldOutlinerPanel />,
       inspector: (_props: IDockviewPanelProps) => <InspectorPanel />,
       assets: (_props: IDockviewPanelProps) => <AssetBrowserPanel />,

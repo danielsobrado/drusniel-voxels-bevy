@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
 
@@ -15,6 +15,7 @@ export type RuntimeCommandRequestType =
   | "runtime.runWaterVisualProbe"
   | "runtime.setVoxel"
   | "runtime.setViewportDebugOverlay"
+  | "runtime.setEditorDiagnostics"
   | "runtime.setAtlasMapping"
   | "runtime.saveAtlasMapping"
   | "runtime.scatterProps"
@@ -52,6 +53,7 @@ export type RuntimeUpdateWaterBodyCommand = RuntimeCommandRequestBase<"runtime.u
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
 export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel", { readonly position: readonly [number, number, number]; readonly block: BlockType }>;
 export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
+export type RuntimeSetEditorDiagnosticsCommand = RuntimeCommandRequestBase<"runtime.setEditorDiagnostics", { readonly enabled: boolean; readonly categories?: readonly EditorDiagnosticsCategory[] }>;
 export type RuntimeSetAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.setAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeSaveAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.saveAtlasMapping", { readonly mapping: BlockAtlasMap }>;
 export type RuntimeScatterPropsCommand = RuntimeCommandRequestBase<"runtime.scatterProps", { readonly props: readonly PropInstance[] }>;
@@ -78,6 +80,7 @@ export type RuntimeCommandRequest =
   | RuntimeRunWaterVisualProbeCommand
   | RuntimeSetVoxelCommand
   | RuntimeSetViewportDebugOverlayCommand
+  | RuntimeSetEditorDiagnosticsCommand
   | RuntimeSetAtlasMappingCommand
   | RuntimeSaveAtlasMappingCommand
   | RuntimeScatterPropsCommand

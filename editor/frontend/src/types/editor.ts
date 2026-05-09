@@ -15,6 +15,21 @@ export type EditorMode = (typeof EDITOR_MODES)[number];
 export type RuntimeState = "mock" | "connected" | "disconnected" | "stale" | "error";
 export type RenderQualityPreset = "Low" | "Medium" | "High" | "Performance100";
 export type ViewportModifierKey = "none" | "shift" | "alt" | "control" | "meta";
+export const EDITOR_DIAGNOSTIC_CATEGORIES = [
+  "nativeViewport",
+  "frontend",
+  "input",
+  "selection",
+  "hover",
+  "highlight",
+  "runtime",
+] as const;
+export type EditorDiagnosticsCategory = (typeof EDITOR_DIAGNOSTIC_CATEGORIES)[number];
+
+export interface EditorDiagnosticsState {
+  readonly enabled: boolean;
+  readonly categories: readonly EditorDiagnosticsCategory[];
+}
 
 export type Selection =
   | { readonly kind: "voxel"; readonly chunkId: string; readonly position: [number, number, number]; readonly label: string }

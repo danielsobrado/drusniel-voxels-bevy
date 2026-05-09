@@ -1,4 +1,4 @@
-import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
@@ -9,6 +9,7 @@ import type {
   RuntimeChunkRebuildResult,
   RuntimeCommandResult,
   RuntimeConnectionState,
+  RuntimeEditorDiagnosticsState,
   RuntimeFocusCameraResult,
   RuntimeProtectedAreaDeleteResult,
   RuntimeProtectedAreaLoadResult,
@@ -161,6 +162,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.setViewportDebugOverlay",
       requestId: makeRequestId("runtime.setViewportDebugOverlay"),
       payload: { overlay, enabled },
+    });
+  }
+
+  async setEditorDiagnostics(enabled: boolean, categories?: readonly EditorDiagnosticsCategory[]): Promise<RuntimeCommandResult<RuntimeEditorDiagnosticsState>> {
+    return this.execute({
+      type: "runtime.setEditorDiagnostics",
+      requestId: makeRequestId("runtime.setEditorDiagnostics"),
+      payload: categories === undefined ? { enabled } : { enabled, categories },
     });
   }
 

@@ -183,7 +183,7 @@ pub struct InstancedPropGroup {
     pub shadow_instances: Vec<PropInstance>,
     shadow_culled: Vec<bool>,
     tint_enabled: bool,
-    diagnostic_prop_type_mask: u8,
+    pub diagnostic_prop_type_mask: u8,
     pub version: u64,
     pub shadow_version: u64,
 }

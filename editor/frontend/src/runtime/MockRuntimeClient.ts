@@ -1,6 +1,6 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
-import type { RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, EditorDiagnosticsState, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag, RuntimeMetrics } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
@@ -80,6 +80,10 @@ export class MockRuntimeClient implements RuntimeClient {
     agentTargets: true,
     atlasPreview: false,
     wireframe: false,
+  };
+  private editorDiagnostics: EditorDiagnosticsState = {
+    enabled: false,
+    categories: ["nativeViewport", "frontend", "input", "selection", "hover", "highlight", "runtime"],
   };
   private readonly handlers = new Set<RuntimeEventHandler>();
 
@@ -245,6 +249,17 @@ export class MockRuntimeClient implements RuntimeClient {
   async setViewportDebugOverlay(overlay: keyof ViewportOverlayState, enabled: boolean) {
     this.viewportDebug = { ...this.viewportDebug, [overlay]: enabled };
     return runtimeCommandSuccess(this.viewportDebug);
+  }
+
+  async setEditorDiagnostics(enabled: boolean, categories?: readonly EditorDiagnosticsCategory[]) {
+    this.editorDiagnostics = {
+      enabled,
+      categories:
+        categories && categories.length > 0
+          ? [...categories]
+          : ["nativeViewport", "frontend", "input", "selection", "hover", "highlight", "runtime"],
+    };
+    return runtimeCommandSuccess(this.editorDiagnostics);
   }
 
   async rebuildSelectedChunk(chunkId: string) {
@@ -439,6 +454,7 @@ export class MockRuntimeClient implements RuntimeClient {
         dirty: this.atlasDirty,
       },
       viewportDebug: this.viewportDebug,
+      editorDiagnostics: this.editorDiagnostics,
       propStats: mockPropStats(this.props),
       timingSamples: metrics.timingSamples,
       consoleEvents: [],

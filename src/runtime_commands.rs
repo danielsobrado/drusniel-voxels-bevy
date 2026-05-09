@@ -12,6 +12,9 @@ use serde_json::{Value, json};
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::constants::CHUNK_SIZE_I32;
+use crate::editor_diagnostics::{
+    EditorDiagnosticsCategory, EditorDiagnosticsState, normalize_editor_diagnostics_categories,
+};
 use crate::interaction::{
     DebugDetailToggles, DebugOverlayState, SelectedBlock, SelectedProp, TargetedBlock,
 };
@@ -68,6 +71,7 @@ impl Plugin for RuntimeWriteCommandPlugin {
         app.init_resource::<RuntimeCommandQueue>()
             .init_resource::<RuntimeCommandResults>()
             .init_resource::<RuntimeViewportDebugState>()
+            .init_resource::<EditorDiagnosticsState>()
             .init_resource::<EditorPlacedProps>()
             .add_systems(
                 Update,
@@ -187,6 +191,12 @@ pub enum RuntimeWriteCommand {
     SetViewportDebugOverlay {
         overlay: FrontendViewportDebugOverlay,
         enabled: bool,
+    },
+    #[serde(rename = "runtime.setEditorDiagnostics")]
+    SetEditorDiagnostics {
+        enabled: bool,
+        #[serde(default)]
+        categories: Vec<EditorDiagnosticsCategory>,
     },
     #[serde(rename = "runtime.rebuildSelectedChunk")]
     RebuildSelectedChunk {
@@ -579,6 +589,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
         .unwrap_or_default();
     let water_visual_probe = water_visual_probe_payload(world);
     let viewport_debug = viewport_debug_payload(world);
+    let editor_diagnostics = editor_diagnostics_payload(world);
     let protected_area_count = world
         .get_resource::<ProtectedAreaRegistry>()
         .map(|registry| registry.area_count())
@@ -617,6 +628,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
             "dirty": atlas_mapping.needs_rebuild,
         },
         "viewportDebug": viewport_debug,
+        "editorDiagnostics": editor_diagnostics,
         "propStats": runtime_prop_stats_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
@@ -646,6 +658,13 @@ fn viewport_debug_payload(world: &World) -> Value {
     }
 
     json!(state)
+}
+
+fn editor_diagnostics_payload(world: &World) -> Value {
+    json!(world
+        .get_resource::<EditorDiagnosticsState>()
+        .cloned()
+        .unwrap_or_default())
 }
 
 fn runtime_selection_payload(world: &World) -> (Value, Value) {
@@ -971,6 +990,7 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         RuntimeWriteCommand::SetRenderQuality { .. }
         | RuntimeWriteCommand::SetVoxel { .. }
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
+        | RuntimeWriteCommand::SetEditorDiagnostics { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
         | RuntimeWriteCommand::SaveProtectedAreas {}
         | RuntimeWriteCommand::LoadProtectedAreas {}
@@ -1067,6 +1087,13 @@ fn execute_runtime_write_command(
         RuntimeWriteCommand::SetViewportDebugOverlay { overlay, enabled } => {
             set_viewport_debug_overlay(world, overlay, enabled);
             RuntimeCommandResult::success(viewport_debug_payload(world))
+        }
+        RuntimeWriteCommand::SetEditorDiagnostics {
+            enabled,
+            categories,
+        } => {
+            set_editor_diagnostics(world, enabled, categories);
+            RuntimeCommandResult::success(editor_diagnostics_payload(world))
         }
         RuntimeWriteCommand::RebuildSelectedChunk { chunk_id } => {
             let Some(chunk_pos) = parse_chunk_id(&chunk_id) else {
@@ -1478,7 +1505,9 @@ fn remove_runtime_props(
     let targets = query
         .iter(world)
         .filter_map(|(entity, instance_id, owner)| {
-            let id_match = instance_id.is_some_and(|id| prop_ids.contains(&id.0));
+            let runtime_entity_id = format!("runtime-prop-{}", entity.index());
+            let id_match = instance_id.is_some_and(|id| prop_ids.contains(&id.0))
+                || prop_ids.contains(&runtime_entity_id);
             let chunk_match =
                 chunk.is_some_and(|chunk| owner.is_some_and(|owner| owner.0 == chunk));
             (id_match || chunk_match).then(|| {
@@ -1486,7 +1515,7 @@ fn remove_runtime_props(
                     entity,
                     instance_id
                         .map(|id| id.0.clone())
-                        .unwrap_or_else(|| format!("entity-{}", entity.index())),
+                        .unwrap_or(runtime_entity_id),
                 )
             })
         })
@@ -1499,6 +1528,19 @@ fn remove_runtime_props(
     let removed_id_list = targets.iter().map(|(_, id)| id.clone()).collect::<Vec<_>>();
     let removed_ids = removed_id_list.iter().cloned().collect::<HashSet<_>>();
     if !removed_ids.is_empty() || chunk.is_some() {
+        if let Some(mut selected_prop) = world.get_resource_mut::<SelectedProp>() {
+            if selected_prop
+                .id
+                .as_ref()
+                .is_some_and(|id| removed_ids.contains(id))
+            {
+                selected_prop.entity = None;
+                selected_prop.id = None;
+                selected_prop.label = None;
+                selected_prop.position = None;
+            }
+        }
+
         if !world.contains_resource::<EditorPlacedProps>() {
             world.insert_resource(EditorPlacedProps::default());
         }
@@ -2035,6 +2077,34 @@ fn set_viewport_debug_overlay(
             overlay_state.visible = enabled;
         }
     }
+
+    world.insert_resource(state);
+}
+
+fn set_editor_diagnostics(
+    world: &mut World,
+    enabled: bool,
+    categories: Vec<EditorDiagnosticsCategory>,
+) {
+    let mut state = world
+        .get_resource::<EditorDiagnosticsState>()
+        .cloned()
+        .unwrap_or_default();
+    state.enabled = enabled;
+    state.categories = normalize_editor_diagnostics_categories(categories);
+
+    let category_labels: Vec<_> = state
+        .categories
+        .iter()
+        .map(|category| category.label())
+        .collect();
+    let line = format!(
+        "[editor-diagnostics][runtime] mode={} categories={}",
+        if state.enabled { "enabled" } else { "disabled" },
+        category_labels.join(",")
+    );
+    eprintln!("{line}");
+    info!("{line}");
 
     world.insert_resource(state);
 }

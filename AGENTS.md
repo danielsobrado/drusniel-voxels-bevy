@@ -71,6 +71,24 @@ rtk gain
 which rtk
 ```
 
+## Editor Diagnostics
+
+Use `DRUSNIEL_EDITOR_DIAGNOSTICS=1` when starting the editor/runtime to enable heavy, structured diagnostics for viewport input, targeting, selection, native viewport attach/focus, and bridge behavior. Keep it disabled by default; enable it only for focused debugging sessions and include the relevant log excerpts when reporting findings.
+
+When diagnostics are enabled, the Tauri shell also exposes a local-only screen simulation endpoint at `http://127.0.0.1:17778` for automated verification:
+
+```bash
+curl http://127.0.0.1:17778/health
+curl http://127.0.0.1:17778/focus
+curl "http://127.0.0.1:17778/screenshot?label=viewport-check"
+curl "http://127.0.0.1:17778/move?space=viewport&x=100&y=100"
+curl "http://127.0.0.1:17778/click?space=viewport&x=100&y=100&button=left"
+```
+
+Use `space=viewport` for native Bevy viewport-relative coordinates, `space=window` for editor-window-relative coordinates, and `space=screen` for absolute screen coordinates.
+
+Viewport/window mouse actions intentionally fail if the editor cannot become the foreground window, preventing accidental clicks into another app. Screenshots use the Tauri window capture path first, so they can still verify editor layout when another window is covering the desktop.
+
 Standard commands the agent should use:
 
 ```bash

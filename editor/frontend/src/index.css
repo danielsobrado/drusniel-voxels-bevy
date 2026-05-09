@@ -1050,18 +1050,22 @@ body {
 
 .atlas-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(32px, 1fr));
-  gap: 5px;
+  grid-template-columns: repeat(var(--atlas-column-count, 4), minmax(64px, 1fr));
+  gap: 8px;
 }
 
 .atlas-tile {
-  min-height: 40px;
+  position: relative;
+  min-height: 72px;
   padding: 0;
   border: 1px solid var(--editor-border);
   border-radius: 8px;
   background: #141922;
+  background-repeat: no-repeat;
   color: var(--editor-fg-2);
   font-size: 11px;
+  image-rendering: pixelated;
+  overflow: hidden;
 }
 
 .atlas-tile:hover,
@@ -1073,6 +1077,21 @@ body {
   border-color: var(--editor-cyan);
   color: #eaf2ff;
   box-shadow: 0 0 0 1px rgba(44, 184, 255, 0.45);
+}
+
+.atlas-tile-index {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  min-width: 20px;
+  border-radius: 999px;
+  background: rgba(5, 8, 13, 0.78);
+  color: #f5f8ff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 5px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .atlas-toolbar {
@@ -2009,3 +2028,69 @@ button.asset-card {
   }
 }
 
+
+/* Viewport chrome lives in the docked Viewport Controls tab so the native Bevy viewport stays unobstructed. */
+.viewport-overlay-toolbar,
+.viewport-agent-hint {
+  display: none;
+}
+
+.viewport-controls-panel {
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+}
+
+.viewport-controls-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.viewport-controls-card,
+.viewport-controls-section {
+  border: 1px solid var(--editor-border);
+  border-radius: 12px;
+  background: var(--editor-bg-elev);
+  padding: 10px;
+}
+
+.viewport-controls-card {
+  display: grid;
+  gap: 4px;
+}
+
+.viewport-controls-card span,
+.viewport-controls-section h3 {
+  margin: 0;
+  color: var(--editor-fg-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.viewport-controls-card strong {
+  color: var(--editor-fg);
+  font-size: 13px;
+}
+
+.viewport-controls-card small {
+  color: var(--editor-fg-2);
+  font-size: 11px;
+}
+
+.viewport-controls-section {
+  display: grid;
+  gap: 8px;
+}
+
+.viewport-controls-tool-grid,
+.viewport-controls-toggle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.viewport-controls-toggle-grid .viewport-toggle {
+  position: static;
+}

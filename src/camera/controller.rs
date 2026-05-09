@@ -1,6 +1,9 @@
 use crate::atmosphere::{AtmosphereConfig, FogConfig, fog_camera_components};
 use crate::camera::config::{CameraConfig, CameraExposureConfig};
 use crate::constants::WORLD_EDGE_GUARD_MARGIN;
+use crate::editor_diagnostics::{
+    EditorDiagnosticsCategory, EditorDiagnosticsState, editor_diagnostics_log,
+};
 use crate::interaction::palette::PlacementPaletteState;
 use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
@@ -21,6 +24,7 @@ use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::MouseWheel;
 use bevy::light::ShadowFilteringMethod;
 use bevy::pbr::ScreenSpaceReflections;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
@@ -33,6 +37,18 @@ use bevy_water::ImageReformat;
 
 fn editor_native_viewport_enabled() -> bool {
     std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
+}
+
+#[derive(Default)]
+pub(crate) struct EditorViewportInputDebugState {
+    reported_system_seen: bool,
+    reported_missing_window: bool,
+    reported_initial: bool,
+    last_control_down: bool,
+    last_window_focused: bool,
+    last_active: bool,
+    last_move_intent: bool,
+    seconds_since_report: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -380,6 +396,7 @@ pub fn player_camera_system(
     keys: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut mouse_motion: MessageReader<MouseMotion>,
+    mut mouse_wheel: MessageReader<MouseWheel>,
     time: Res<Time>,
     mut windows: Query<(&mut Window, &mut CursorOptions)>,
     pause_menu: Res<PauseMenuState>,
@@ -388,20 +405,51 @@ pub fn player_camera_system(
     inventory_ui: Res<InventoryUiState>,
     camera_config: Res<CameraConfig>,
     world: Res<VoxelWorld>,
+    diagnostics: Option<Res<EditorDiagnosticsState>>,
     mut cursor_captured: Local<bool>,
+    mut editor_debug: Local<EditorViewportInputDebugState>,
 ) {
+    let editor_native_viewport = editor_native_viewport_enabled();
+    let diagnostics = diagnostics.as_deref();
+    if editor_native_viewport && !editor_debug.reported_system_seen {
+        editor_diagnostics_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Input,
+            "player_camera_system is running",
+        );
+        editor_debug.reported_system_seen = true;
+    }
+
     let Ok((window, mut cursor_options)) = windows.single_mut() else {
+        if editor_native_viewport && !editor_debug.reported_missing_window {
+            editor_diagnostics_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Input,
+                "no single primary window with cursor options",
+            );
+            editor_debug.reported_missing_window = true;
+        }
         return;
     };
     let dt = time.delta_secs();
 
     let ui_open = pause_menu.open || palette.open || map_state.open || inventory_ui.open;
 
-    if editor_native_viewport_enabled() {
+    if editor_native_viewport {
+        editor_viewport_camera_navigation(
+            &mut query,
+            &keys,
+            &mut mouse_motion,
+            &mut mouse_wheel,
+            dt,
+            &mut cursor_options,
+            window.focused,
+            &camera_config,
+            &world,
+            &mut *editor_debug,
+            diagnostics,
+        );
         *cursor_captured = false;
-        cursor_options.visible = true;
-        cursor_options.grab_mode = CursorGrabMode::None;
-        for _ in mouse_motion.read() {}
         return;
     }
 
@@ -495,6 +543,163 @@ pub fn player_camera_system(
             }
         }
     }
+}
+
+fn editor_viewport_camera_navigation(
+    query: &mut Query<(&mut Transform, &mut PlayerCamera)>,
+    keys: &Res<ButtonInput<KeyCode>>,
+    mouse_motion: &mut MessageReader<MouseMotion>,
+    mouse_wheel: &mut MessageReader<MouseWheel>,
+    dt: f32,
+    cursor_options: &mut CursorOptions,
+    window_focused: bool,
+    camera_config: &CameraConfig,
+    world: &VoxelWorld,
+    debug_state: &mut EditorViewportInputDebugState,
+    diagnostics: Option<&EditorDiagnosticsState>,
+) {
+    let control_down = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let key_w = keys.pressed(KeyCode::KeyW);
+    let key_a = keys.pressed(KeyCode::KeyA);
+    let key_s = keys.pressed(KeyCode::KeyS);
+    let key_d = keys.pressed(KeyCode::KeyD);
+    let shift_down = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let mut wheel_delta = 0.0f32;
+    for event in mouse_wheel.read() {
+        wheel_delta += event.y;
+    }
+
+    let active = control_down;
+    let move_intent = key_w || key_a || key_s || key_d || wheel_delta.abs() > f32::EPSILON;
+    let state_changed = !debug_state.reported_initial
+        || debug_state.last_control_down != control_down
+        || debug_state.last_window_focused != window_focused
+        || debug_state.last_active != active
+        || debug_state.last_move_intent != move_intent;
+    debug_state.seconds_since_report += dt;
+
+    if !active {
+        cursor_options.visible = true;
+        cursor_options.grab_mode = CursorGrabMode::None;
+        let drained_motion_events = mouse_motion.read().count();
+        if state_changed || debug_state.seconds_since_report >= 2.0 {
+            editor_diagnostics_log(
+                diagnostics,
+                EditorDiagnosticsCategory::Input,
+                format!(
+                "[editor-viewport-input] inactive focused={} ctrl={} move_intent={} drained_mouse_events={}",
+                window_focused, control_down, move_intent, drained_motion_events
+                ),
+            );
+            debug_state.reported_initial = true;
+            debug_state.seconds_since_report = 0.0;
+        }
+        debug_state.last_control_down = control_down;
+        debug_state.last_window_focused = window_focused;
+        debug_state.last_active = active;
+        debug_state.last_move_intent = move_intent;
+        return;
+    }
+
+    cursor_options.visible = false;
+    cursor_options.grab_mode = CursorGrabMode::Locked;
+
+    let mut camera_count = 0usize;
+    let mut mouse_delta = Vec2::ZERO;
+    let mut mouse_event_count = 0usize;
+    let mut moved = false;
+    let mut blocked = false;
+    let mut camera_position = Vec3::ZERO;
+
+    for (mut transform, mut camera) in query.iter_mut() {
+        camera_count += 1;
+        for event in mouse_motion.read() {
+            mouse_delta += event.delta;
+            mouse_event_count += 1;
+            camera.yaw -= event.delta.x * camera.sensitivity;
+            camera.pitch -= event.delta.y * camera.sensitivity;
+            camera.pitch = camera.pitch.clamp(
+                camera_config.movement.pitch_min,
+                camera_config.movement.pitch_max,
+            );
+        }
+
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, 0.0);
+
+        let forward = transform.forward().as_vec3();
+        let right = transform.right().as_vec3();
+        let mut velocity = Vec3::ZERO;
+        if key_w {
+            velocity += forward;
+        }
+        if key_s {
+            velocity -= forward;
+        }
+        if key_a {
+            velocity -= right;
+        }
+        if key_d {
+            velocity += right;
+        }
+
+        let speed = if shift_down {
+            camera.fly_speed * camera_config.movement.fly_turbo_multiplier
+        } else {
+            camera.fly_speed
+        };
+
+        let movement = velocity.normalize_or_zero() * speed * dt + forward * wheel_delta * speed * 0.12;
+        if movement.length_squared() > 0.0 {
+            let desired = transform.translation + movement;
+            if !camera_intersects_solid(world, desired) {
+                transform.translation = world
+                    .bounds()
+                    .clamp_horizontal_position(desired, WORLD_EDGE_GUARD_MARGIN);
+                moved = true;
+            } else {
+                blocked = true;
+            }
+        }
+        camera_position = transform.translation;
+    }
+
+    let periodic = debug_state.seconds_since_report >= 1.0;
+    if state_changed
+        || periodic
+        || mouse_event_count > 0
+        || wheel_delta.abs() > f32::EPSILON
+    {
+        editor_diagnostics_log(
+            diagnostics,
+            EditorDiagnosticsCategory::Input,
+            format!(
+            "[editor-viewport-input] active focused={} ctrl={} keys=w:{} a:{} s:{} d:{} shift:{} mouse_events={} mouse_delta=({:.1},{:.1}) wheel={:.2} cameras={} moved={} blocked={} pos=({:.2},{:.2},{:.2})",
+            window_focused,
+            control_down,
+            key_w,
+            key_a,
+            key_s,
+            key_d,
+            shift_down,
+            mouse_event_count,
+            mouse_delta.x,
+            mouse_delta.y,
+            wheel_delta,
+            camera_count,
+            moved,
+            blocked,
+            camera_position.x,
+            camera_position.y,
+            camera_position.z
+            ),
+        );
+        debug_state.reported_initial = true;
+        debug_state.seconds_since_report = 0.0;
+    }
+    debug_state.last_control_down = control_down;
+    debug_state.last_window_focused = window_focused;
+    debug_state.last_active = active;
+    debug_state.last_move_intent = move_intent;
 }
 
 pub fn ensure_camera_above_surface_once(
@@ -628,6 +833,10 @@ pub fn camera_follow_player(
     mut camera_query: Query<(&mut Transform, &PlayerCamera), (With<PlayerCamera>, Without<Player>)>,
     camera_config: Res<CameraConfig>,
 ) {
+    if editor_native_viewport_enabled() {
+        return;
+    }
+
     let Ok(player_transform) = player_query.single() else {
         return;
     };

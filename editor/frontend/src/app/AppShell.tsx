@@ -135,6 +135,16 @@ export function AppShell() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        !isEditableKeyboardTarget(event.target) &&
+        (event.key === "Delete" || event.key === "Backspace") &&
+        useEditorStore.getState().selection.kind === "prop"
+      ) {
+        event.preventDefault();
+        void runCommandById("editor.props.clearInSelection");
+        return;
+      }
+
       if (!(event.ctrlKey || event.metaKey) || event.altKey) {
         return;
       }

@@ -3,17 +3,29 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             attach_native_viewport,
-            detach_native_viewport
+            detach_native_viewport,
+            screen_simulation_capture_screenshot,
+            screen_simulation_click_mouse,
+            screen_simulation_focus_editor,
+            screen_simulation_move_mouse,
+            screen_simulation_status
         ])
         .setup(|app| {
             let runtime = EditorRuntimeProcess::start(app.handle());
             app.manage(runtime);
+            screen_simulation::start_screen_simulation_server(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("failed to run Drusniel Voxels editor");
 }
 
+mod screen_simulation;
+
+use screen_simulation::{
+    screen_simulation_capture_screenshot, screen_simulation_click_mouse,
+    screen_simulation_focus_editor, screen_simulation_move_mouse, screen_simulation_status,
+};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::net::TcpStream;
@@ -28,6 +40,17 @@ use tauri::{AppHandle, Manager};
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
 const SIDECAR_DIR: &str = "binaries";
 const SIDECAR_PREFIX: &str = "drusniel-editor-runtime";
+
+fn editor_diagnostics_enabled() -> bool {
+    std::env::var("DRUSNIEL_EDITOR_DIAGNOSTICS")
+        .or_else(|_| std::env::var("DRUSNIEL_EDITOR_HEAVY_DEBUG"))
+        .is_ok_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,8 +135,9 @@ fn attach_native_viewport(
     let parent_hwnd =
         window.hwnd().map_err(|error| error.to_string())?.0 as windows_sys::Win32::Foundation::HWND;
 
+    let cached_hwnd = runtime.viewport_hwnd.lock().ok().and_then(|guard| *guard);
+    let found_from_cache = cached_hwnd.is_some();
     let hwnd = {
-        let cached_hwnd = runtime.viewport_hwnd.lock().ok().and_then(|guard| *guard);
         if let Some(hwnd) = cached_hwnd {
             hwnd as windows_sys::Win32::Foundation::HWND
         } else {
@@ -121,6 +145,23 @@ fn attach_native_viewport(
                 .ok_or_else(|| "native Bevy viewport window is not ready yet".to_string())?
         }
     };
+
+    if editor_diagnostics_enabled() {
+        append_shell_log(
+            window.app_handle(),
+            &format!(
+                "[editor-diagnostics][nativeViewport] attach request pid={} parent_hwnd={} child_hwnd={} cached={} rect=({}, {}, {}, {})",
+                child_pid,
+                parent_hwnd as isize,
+                hwnd as isize,
+                found_from_cache,
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height
+            ),
+        );
+    }
 
     embed_runtime_window(parent_hwnd, hwnd, &rect)?;
 
@@ -241,9 +282,10 @@ fn embed_runtime_window(
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetDeviceCaps, LOGPIXELSX};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
+        GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos,
+        ShowWindow, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
         WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
         WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
@@ -310,13 +352,29 @@ fn embed_runtime_window(
             y,
             width,
             height,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
         ) != 0;
         if !positioned {
             return Err("failed to position Bevy viewport window".to_string());
         }
 
         ShowWindow(child_hwnd, SW_SHOW);
+        let previous_focus = SetFocus(child_hwnd);
+        if editor_diagnostics_enabled() {
+            eprintln!(
+                "[editor-diagnostics][nativeViewport] embedded parent_hwnd={} child_hwnd={} previous_focus={} dpi_scale={:.2} rect=({}, {}, {}, {}) client=({}, {})",
+                parent_hwnd as isize,
+                child_hwnd as isize,
+                previous_focus as isize,
+                dpi_scale,
+                x,
+                y,
+                width,
+                height,
+                parent_width,
+                parent_height
+            );
+        }
     }
 
     Ok(())

@@ -1,7 +1,7 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
-import type { EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockType, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 
@@ -96,6 +96,42 @@ const setRuntimeViewportOverlay = async (
       ...viewportDebug,
     },
   }));
+};
+
+const EDITOR_DIAGNOSTIC_ALL_CATEGORIES: readonly EditorDiagnosticsCategory[] = [
+  "nativeViewport",
+  "frontend",
+  "input",
+  "selection",
+  "hover",
+  "highlight",
+  "runtime",
+];
+
+const EDITOR_DIAGNOSTIC_VIEWPORT_CATEGORIES: readonly EditorDiagnosticsCategory[] = [
+  "nativeViewport",
+  "frontend",
+  "input",
+  "selection",
+  "hover",
+  "highlight",
+];
+
+const setEditorDiagnosticsMode = async (
+  ctx: EditorCommandContext,
+  enabled: boolean,
+  categories: readonly EditorDiagnosticsCategory[] = EDITOR_DIAGNOSTIC_ALL_CATEGORIES,
+): Promise<void> => {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("drusniel.editorDiagnostics", enabled ? "1" : "0");
+  }
+
+  const diagnostics = unwrapRuntime(await ctx.runtimeClient.setEditorDiagnostics(enabled, categories));
+  ctx.toast.info(
+    diagnostics.enabled
+      ? `Editor diagnostics enabled: ${diagnostics.categories.join(", ")}.`
+      : "Editor diagnostics disabled.",
+  );
 };
 
 const setRuntimeRenderFeature = async (
@@ -815,6 +851,33 @@ export const editorCommands: readonly EditorCommand[] = [
     run: (ctx) => setRuntimeViewportOverlay(ctx, "wireframe"),
   },
   {
+    id: "editor.debug.enableViewportDiagnostics",
+    title: "Enable viewport diagnostics",
+    description: "Enable organized heavy diagnostics for native viewport input, hover, selection, and highlighting.",
+    category: "Debug",
+    keywords: ["debug", "diagnostics", "viewport", "input", "selection", "highlight"],
+    runtimeWrite: true,
+    run: (ctx) => setEditorDiagnosticsMode(ctx, true, EDITOR_DIAGNOSTIC_VIEWPORT_CATEGORIES),
+  },
+  {
+    id: "editor.debug.enableAllDiagnostics",
+    title: "Enable all editor diagnostics",
+    description: "Enable all organized heavy editor diagnostics categories.",
+    category: "Debug",
+    keywords: ["debug", "diagnostics", "heavy", "all"],
+    runtimeWrite: true,
+    run: (ctx) => setEditorDiagnosticsMode(ctx, true, EDITOR_DIAGNOSTIC_ALL_CATEGORIES),
+  },
+  {
+    id: "editor.debug.disableDiagnostics",
+    title: "Disable editor diagnostics",
+    description: "Disable organized heavy editor diagnostics.",
+    category: "Debug",
+    keywords: ["debug", "diagnostics", "disable", "off"],
+    runtimeWrite: true,
+    run: (ctx) => setEditorDiagnosticsMode(ctx, false, EDITOR_DIAGNOSTIC_ALL_CATEGORIES),
+  },
+  {
     id: "editor.view.resetLayout",
     title: "Reset dock layout",
     description: "Reset persisted dock layout to the default editor shell.",
@@ -1458,10 +1521,12 @@ export const editorCommands: readonly EditorCommand[] = [
         ctx.toast.info(`Removed ${result.removedPropIds.length} props from ${state.selection.label}.`);
         ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Runtime cleared ${result.removedPropIds.length} props in ${state.selection.label}.` });
       } else if (state.selection.kind === "prop") {
+        const targetLabel = state.selection.label;
         const result = unwrapRuntime(await ctx.runtimeClient.removeProps({ propIds: [state.selection.id] }));
         state.removeProp(state.selection.id);
+        setSelectionToFallbackChunk(ctx);
         ctx.toast.info(`Removed ${result.removedPropIds.length} selected prop.`);
-        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Runtime removed prop ${state.selection.label}.` });
+        ctx.getState().pushAgentTimelineEvent({ kind: "command", message: `Runtime removed prop ${targetLabel}.` });
       } else {
         ctx.toast.warning("Select a chunk or prop before clearing props.");
       }

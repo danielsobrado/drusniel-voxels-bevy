@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -102,6 +104,13 @@ fn editor_runtime_bridge_enabled() -> bool {
     )
 }
 
+fn editor_asset_path(relative: &str) -> PathBuf {
+    std::env::var_os("DRUSNIEL_EDITOR_ASSET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("assets"))
+        .join(relative)
+}
+
 fn service_editor_bridge_requests(world: &mut World) {
     let requests = {
         let channel = world.resource::<EditorBridgeChannel>();
@@ -199,6 +208,27 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
             200,
             json!({ "ok": true, "bridge": "drusniel-runtime" }),
         );
+        return;
+    }
+
+    if request.method == "GET" && request.path == "/assets/textures/atlas.png" {
+        let path = editor_asset_path("textures/atlas.png");
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let _ = write_binary_response(&mut stream, 200, "image/png", &bytes);
+            }
+            Err(error) => {
+                let _ = write_json_response(
+                    &mut stream,
+                    404,
+                    json!({
+                        "status": "failure",
+                        "ok": false,
+                        "message": format!("Texture atlas asset not found at {}: {error}", path.display()),
+                    }),
+                );
+            }
+        }
         return;
     }
 
@@ -1112,6 +1142,21 @@ fn write_empty_response(stream: &mut TcpStream, status: u16) -> std::io::Result<
         stream,
         "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nConnection: close\r\n\r\n"
     )
+}
+
+fn write_binary_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let reason = status_reason(status);
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(body)
 }
 
 fn status_reason(status: u16) -> &'static str {
