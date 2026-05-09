@@ -44,7 +44,7 @@ hold_frames = 180
 screenshot = true
 fog_tier = "off"
 render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
-motion = { kind = "look_sweep", end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
+motion = { kind = "run_look_sweep", end_position = [264.0, 88.0, 277.0], end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
 screenshot_points = [
     { name = "left", frame = 0 },
     { name = "center", frame = 90 },

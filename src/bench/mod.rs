@@ -1932,7 +1932,10 @@ fn transform_for_checkpoint(checkpoint: &BenchCheckpoint, frame: u32) -> Transfo
         .map(|motion| motion.kind.as_str())
         .unwrap_or("static")
         .to_ascii_lowercase();
-    let moves = matches!(kind.as_str(), "run" | "run_jump" | "run_jump_look");
+    let moves = matches!(
+        kind.as_str(),
+        "run" | "run_jump" | "run_jump_look" | "run_look_sweep"
+    );
 
     let mut position = if moves {
         start_position.lerp(end_position, smoothstep(progress))
@@ -1948,7 +1951,10 @@ fn transform_for_checkpoint(checkpoint: &BenchCheckpoint, frame: u32) -> Transfo
         position.y += (std::f32::consts::TAU * progress * 8.0).sin() * bob_amplitude;
     }
 
-    let mut look_at = if matches!(kind.as_str(), "look_sweep" | "run_jump_look") {
+    let mut look_at = if matches!(
+        kind.as_str(),
+        "look_sweep" | "run_jump_look" | "run_look_sweep"
+    ) {
         start_look_at.lerp(end_look_at, smoothstep(progress))
     } else if moves {
         end_look_at
@@ -2548,5 +2554,27 @@ hold_frames = 30
             vec!["process_start", "checkpoint_setup", "hold_start"]
         );
         assert!(record.events.iter().all(|event| event.delta_secs >= 0.0));
+    }
+
+    #[test]
+    fn run_look_sweep_moves_position_and_look_target() {
+        let checkpoint: BenchCheckpoint = toml::from_str(
+            r#"
+name = "forward-sweep"
+position = [0.0, 10.0, 0.0]
+look_at = [0.0, 10.0, 10.0]
+time_of_day = 0.5
+hold_frames = 11
+motion = { kind = "run_look_sweep", end_position = [0.0, 10.0, 10.0], end_look_at = [10.0, 10.0, 10.0] }
+"#,
+        )
+        .expect("checkpoint should deserialize");
+
+        let start = transform_for_checkpoint(&checkpoint, 0);
+        let end = transform_for_checkpoint(&checkpoint, 10);
+
+        assert!(start.translation.z < end.translation.z);
+        assert_eq!(end.translation, Vec3::new(0.0, 10.0, 10.0));
+        assert_ne!(start.forward(), end.forward());
     }
 }
