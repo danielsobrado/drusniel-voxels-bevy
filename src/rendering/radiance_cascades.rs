@@ -6,6 +6,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::*;
+use std::collections::{HashSet, VecDeque};
 
 use crate::voxel::world::VoxelWorld;
 
@@ -96,7 +97,10 @@ pub struct SdfVolumeState {
     pub sdf_texture: Option<Handle<Image>>,
 
     /// Dirty chunks that need SDF update
-    pub dirty_chunks: Vec<IVec3>,
+    pub dirty_chunks: VecDeque<IVec3>,
+
+    /// Membership set for dirty chunk deduplication.
+    dirty_chunk_set: HashSet<IVec3>,
 
     /// Frame counter for temporal jitter
     pub frame_index: u32,
@@ -112,7 +116,8 @@ impl Default for SdfVolumeState {
     fn default() -> Self {
         Self {
             sdf_texture: None,
-            dirty_chunks: Vec::new(),
+            dirty_chunks: VecDeque::new(),
+            dirty_chunk_set: HashSet::new(),
             frame_index: 0,
             initialized: false,
             prev_view_proj: Mat4::IDENTITY,
@@ -359,8 +364,7 @@ fn update_sdf_volume(
     // Process dirty chunks incrementally
     if config.incremental_sdf_updates && !state.dirty_chunks.is_empty() {
         // Would dispatch incremental update compute shader here
-        let chunks_to_update = state.dirty_chunks.len().min(8);
-        state.dirty_chunks.drain(0..chunks_to_update);
+        process_dirty_sdf_chunks(&mut state, 8);
     }
 }
 
@@ -380,9 +384,19 @@ fn update_cascade_params(
 
 /// Mark a chunk as needing SDF update
 pub fn mark_chunk_dirty(state: &mut SdfVolumeState, chunk_pos: IVec3) {
-    if !state.dirty_chunks.contains(&chunk_pos) {
-        state.dirty_chunks.push(chunk_pos);
+    if state.dirty_chunk_set.insert(chunk_pos) {
+        state.dirty_chunks.push_back(chunk_pos);
     }
+}
+
+fn process_dirty_sdf_chunks(state: &mut SdfVolumeState, max_chunks: usize) -> usize {
+    let chunks_to_update = state.dirty_chunks.len().min(max_chunks);
+    for _ in 0..chunks_to_update {
+        if let Some(chunk_pos) = state.dirty_chunks.pop_front() {
+            state.dirty_chunk_set.remove(&chunk_pos);
+        }
+    }
+    chunks_to_update
 }
 
 /// Create uniforms from current state
@@ -565,5 +579,40 @@ pub mod debug {
             ui.label(format!("Dirty Chunks: {}", state.dirty_chunks.len()));
             ui.label(format!("SDF Initialized: {}", state.initialized));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mark_chunk_dirty_deduplicates_queue_entries() {
+        let mut state = SdfVolumeState::default();
+        let chunk = IVec3::new(2, 0, -4);
+
+        mark_chunk_dirty(&mut state, chunk);
+        mark_chunk_dirty(&mut state, chunk);
+
+        assert_eq!(state.dirty_chunks.len(), 1);
+        assert_eq!(state.dirty_chunks.front().copied(), Some(chunk));
+    }
+
+    #[test]
+    fn processing_dirty_chunks_clears_membership_for_requeue() {
+        let mut state = SdfVolumeState::default();
+        let first = IVec3::new(1, 0, 0);
+        let second = IVec3::new(2, 0, 0);
+
+        mark_chunk_dirty(&mut state, first);
+        mark_chunk_dirty(&mut state, second);
+
+        assert_eq!(process_dirty_sdf_chunks(&mut state, 1), 1);
+        assert_eq!(state.dirty_chunks.front().copied(), Some(second));
+
+        mark_chunk_dirty(&mut state, first);
+
+        assert_eq!(state.dirty_chunks.len(), 2);
+        assert_eq!(state.dirty_chunks.back().copied(), Some(first));
     }
 }
