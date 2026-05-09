@@ -771,6 +771,7 @@ fn sync_dirty_prop_transforms(
         With<PropTransformDirty>,
     >,
 ) {
+    let mut touched_groups = HashSet::new();
     for (entity, transform, visual_refs, shadow_culled) in &props {
         for visual in &visual_refs.refs {
             let Ok(mut group) = groups.get_mut(visual.group) else {
@@ -791,14 +792,21 @@ fn sync_dirty_prop_transforms(
             if let Some(culled) = group.shadow_culled.get_mut(slot) {
                 *culled = shadow_culled.is_some();
             }
-            rebuild_visible_and_shadow_instances(&mut group);
-            if let Some((min, max)) = source_bounds_aabb(&group.source_bounds) {
-                commands
-                    .entity(visual.group)
-                    .insert(Aabb::from_min_max(min, max));
-            }
+            touched_groups.insert(visual.group);
         }
         commands.entity(entity).remove::<PropTransformDirty>();
+    }
+
+    for group_entity in touched_groups {
+        let Ok(mut group) = groups.get_mut(group_entity) else {
+            continue;
+        };
+        rebuild_visible_and_shadow_instances(&mut group);
+        if let Some((min, max)) = source_bounds_aabb(&group.source_bounds) {
+            commands
+                .entity(group_entity)
+                .insert(Aabb::from_min_max(min, max));
+        }
     }
 }
 
