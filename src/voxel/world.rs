@@ -187,10 +187,8 @@ impl VoxelSample {
     pub fn terrain_meshing_voxel(self) -> VoxelType {
         match self {
             Self::InBounds(voxel) => voxel,
-            Self::OutsideAboveWorld => VoxelType::Air,
-            Self::OutsideBelowWorld
-            | Self::OutsideHorizontalWorld
-            | Self::MissingChunkInsideBounds => VoxelType::Bedrock,
+            Self::OutsideAboveWorld | Self::OutsideHorizontalWorld => VoxelType::Air,
+            Self::OutsideBelowWorld | Self::MissingChunkInsideBounds => VoxelType::Bedrock,
         }
     }
 
@@ -531,6 +529,33 @@ mod tests {
                 .sample_voxel_for_water_meshing(IVec3::new(0, -1, 0))
                 .water_meshing_voxel(),
             VoxelType::Water
+        );
+    }
+
+    #[test]
+    fn horizontal_out_of_bounds_is_open_for_terrain_meshing_only() {
+        let world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        let pos = IVec3::new(-1, BEDROCK_DEPTH + 1, 0);
+
+        assert_eq!(
+            world.sample_voxel_for_terrain_meshing(pos),
+            VoxelSample::OutsideHorizontalWorld
+        );
+        assert_eq!(
+            world
+                .sample_voxel_for_terrain_meshing(pos)
+                .terrain_meshing_voxel(),
+            VoxelType::Air
+        );
+        assert_eq!(
+            world.sample_voxel_for_collision(pos).collision_voxel(),
+            VoxelType::Bedrock
+        );
+        assert_eq!(
+            world
+                .sample_voxel_for_water_meshing(pos)
+                .water_meshing_voxel(),
+            VoxelType::Bedrock
         );
     }
 

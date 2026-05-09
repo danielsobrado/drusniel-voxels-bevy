@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
-pub const TERRAIN_GENERATION_VERSION: u64 = 5;
+pub const TERRAIN_GENERATION_VERSION: u64 = 7;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Deserialize)]

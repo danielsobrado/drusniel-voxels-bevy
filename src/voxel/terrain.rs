@@ -24,6 +24,9 @@ use crate::constants::{
     // Caves
     CAVE_MIN_Y,
     CAVE_SURFACE_OFFSET,
+    CHUNK_SIZE_I32,
+    DEFAULT_WORLD_CHUNKS_X,
+    DEFAULT_WORLD_CHUNKS_Z,
     MOUNTAIN_THRESHOLD,
     // Terrain generation (fallbacks for biomes/caves/trees)
     TERRAIN_BIOME_FREQUENCY,
@@ -291,6 +294,10 @@ pub struct TerrainGenerator<N: NoiseGenerator = ValueNoise> {
 
 const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;
 const BASE_TERRAIN_ELEVATION: f32 = MIN_NORMAL_TERRAIN_SURFACE_Y as f32;
+const EDGE_OCEAN_START_DISTANCE: i32 = CHUNK_SIZE_I32 * 3;
+const EDGE_OCEAN_FULL_DEPTH_DISTANCE: i32 = CHUNK_SIZE_I32;
+const EDGE_OCEAN_MIN_DEPTH: f32 = 2.0;
+const EDGE_OCEAN_MAX_DEPTH: f32 = 16.0;
 
 impl Default for TerrainGenerator<ValueNoise> {
     fn default() -> Self {
@@ -525,6 +532,9 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         }
 
         if self.config.water_bodies.enabled {
+            if let Some(ocean) = self.sample_edge_ocean(world_x, world_z, base_height) {
+                best = stronger_water_metadata(best, ocean);
+            }
             if let Some(lake) = self.sample_basin(
                 world_x,
                 world_z,
@@ -548,6 +558,46 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         }
 
         best
+    }
+
+    fn sample_edge_ocean(
+        &self,
+        world_x: i32,
+        world_z: i32,
+        base_height: i32,
+    ) -> Option<WaterGenerationMetadata> {
+        let edge_distance = default_world_edge_distance(world_x, world_z);
+        if edge_distance >= EDGE_OCEAN_START_DISTANCE {
+            return None;
+        }
+
+        let blend_width = (EDGE_OCEAN_START_DISTANCE - EDGE_OCEAN_FULL_DEPTH_DISTANCE).max(1);
+        let raw = ((EDGE_OCEAN_START_DISTANCE - edge_distance) as f32 / blend_width as f32)
+            .clamp(0.0, 1.0);
+        let strength = raw * raw * (3.0 - 2.0 * raw);
+        if strength <= f32::EPSILON {
+            return None;
+        }
+
+        let depth = lerp_f32(EDGE_OCEAN_MIN_DEPTH, EDGE_OCEAN_MAX_DEPTH, strength);
+        let target_bed_y = WATER_LEVEL as f32 - depth;
+        let bed_y = lerp_f32(base_height as f32, target_bed_y, strength)
+            .round()
+            .min(base_height as f32) as i32;
+        let bed_y = bed_y.max(MIN_BREAKABLE_Y).min(base_height);
+        if bed_y >= WATER_LEVEL {
+            return None;
+        }
+
+        let local_depth = (WATER_LEVEL - bed_y) as f32;
+        Some(WaterGenerationMetadata {
+            kind: GeneratedWaterBodyKind::Ocean,
+            surface_y: WATER_LEVEL,
+            bed_y,
+            max_depth: EDGE_OCEAN_MAX_DEPTH.ceil() as i32,
+            local_depth,
+            strength,
+        })
     }
 
     fn sample_basin(
@@ -913,6 +963,16 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
 }
 
+#[inline]
+fn default_world_edge_distance(world_x: i32, world_z: i32) -> i32 {
+    let max_x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 - 1;
+    let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - 1;
+    world_x
+        .min(max_x - world_x)
+        .min(world_z)
+        .min(max_z - world_z)
+}
+
 fn stronger_water_metadata(
     current: WaterGenerationMetadata,
     candidate: WaterGenerationMetadata,
@@ -1174,8 +1234,9 @@ mod tests {
         let generator = TerrainGenerator::with_config(ValueNoise::default(), config);
         let mut checked = 0;
 
-        for x in 0..256 {
-            for z in 0..256 {
+        let interior_start = EDGE_OCEAN_START_DISTANCE + CHUNK_SIZE_I32;
+        for x in interior_start..256 {
+            for z in interior_start..256 {
                 let base_height = generator.get_base_height(x, z);
                 if base_height <= WATER_LEVEL + 1 {
                     continue;
@@ -1242,21 +1303,24 @@ mod tests {
     }
 
     #[test]
-    fn low_edge_ground_does_not_create_temporary_ocean_wall() {
+    fn low_edge_ground_becomes_ocean_shoreline() {
         let mut config = TerrainConfig::default();
         config.rivers.enabled = false;
-        config.water_bodies.enabled = false;
+        config.water_bodies.lakes.enabled = false;
+        config.water_bodies.ponds.enabled = false;
         let generator = TerrainGenerator::with_config(FlatLowNoise, config);
         let x = 0;
         let z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 / 2;
         let meta = generator.get_water_generation_metadata(x, z);
 
         assert!(generator.get_base_height(x, z) < WATER_LEVEL);
-        assert_ne!(meta.kind, GeneratedWaterBodyKind::Ocean);
+        assert_eq!(meta.kind, GeneratedWaterBodyKind::Ocean);
+        assert!(meta.bed_y < WATER_LEVEL);
+        assert_eq!(generator.get_height(x, z), meta.bed_y);
         assert_eq!(
             generator.get_voxel(x, WATER_LEVEL, z),
-            VoxelType::Air,
-            "low world-edge ground should not create a vertical temporary ocean wall"
+            VoxelType::Water,
+            "low world-edge ground should become a real ocean surface"
         );
     }
 

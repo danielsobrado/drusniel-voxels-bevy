@@ -610,7 +610,7 @@ fn update_water_presence(
     for (transform, view_visibility, detail, body_id) in water_meshes.iter() {
         presence.water_meshes += 1;
         let body_info = body_id.and_then(|id| water_bodies.as_deref()?.bodies.get(id));
-        if body_info.is_some_and(|body| body.material_mode == WaterBodyMaterialMode::Hidden)
+        if !water_body_allows_reflection_sampling(body_info)
             || !is_valid_water_reflection_candidate(&world, transform)
         {
             presence.invalid_candidates_suppressed += 1;
@@ -1174,6 +1174,15 @@ fn water_air_open_to_sky(world: &VoxelWorld, air_pos: IVec3) -> bool {
     true
 }
 
+fn water_body_allows_reflection_sampling(body_info: Option<&WaterBodyInfo>) -> bool {
+    !body_info.is_some_and(|body| {
+        matches!(
+            body.material_mode,
+            WaterBodyMaterialMode::Cheap | WaterBodyMaterialMode::Hidden
+        )
+    })
+}
+
 fn update_water_mask_camera(
     config: Res<WaterReflectionConfig>,
     presence: Res<WaterPresence>,
@@ -1397,6 +1406,34 @@ mod tests {
             false
         ));
         assert!(water_reflection_has_enough_coverage(0, None, None, true));
+    }
+
+    #[test]
+    fn reflection_sampling_skips_cheap_and_hidden_water_bodies() {
+        let mut body = WaterBodyInfo {
+            id: WaterBodyId(1),
+            kind: WaterBodyKind::Ocean,
+            aabb_min: Vec3::ZERO,
+            aabb_max: Vec3::splat(16.0),
+            surface_y: WATER_LEVEL as f32,
+            surface_area: 256.0,
+            max_depth: 8,
+            average_depth: 8.0,
+            nearest_distance: 96.0,
+            visible_chunks: 1,
+            chunk_count: 1,
+            material_mode: WaterBodyMaterialMode::Fancy,
+            reflection_strength: 0.85,
+            fresnel_power: 5.0,
+            distortion_strength: 0.006,
+        };
+
+        assert!(water_body_allows_reflection_sampling(Some(&body)));
+        body.material_mode = WaterBodyMaterialMode::Cheap;
+        assert!(!water_body_allows_reflection_sampling(Some(&body)));
+        body.material_mode = WaterBodyMaterialMode::Hidden;
+        assert!(!water_body_allows_reflection_sampling(Some(&body)));
+        assert!(water_body_allows_reflection_sampling(None));
     }
 
     #[test]

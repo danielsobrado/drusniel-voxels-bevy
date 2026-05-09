@@ -2164,6 +2164,7 @@ fn build_water_body_group(
     let mut touches_world_edge = false;
     let mut visible_chunks = 0u32;
     let mut surface_y = WATER_LEVEL;
+    let mut nearest_distance = f32::INFINITY;
 
     for index in indices {
         let sample = &samples[*index];
@@ -2177,6 +2178,10 @@ fn build_water_body_group(
         touches_world_edge |= sample.touches_world_edge;
         visible_chunks += u32::from(sample.view_visible);
         surface_y = sample.surface_y;
+        if let Some(pos) = camera_pos {
+            nearest_distance =
+                nearest_distance.min(distance_to_aabb_xz(pos, sample.aabb_min, sample.aabb_max));
+        }
     }
 
     let id = stable_water_body_id(min_chunk, surface_y);
@@ -2194,9 +2199,6 @@ fn build_water_body_group(
         average_depth,
         touches_world_edge,
     );
-    let nearest_distance = camera_pos
-        .map(|pos| distance_to_aabb_xz(pos, aabb_min, aabb_max))
-        .unwrap_or(f32::INFINITY);
     let previous = previous_modes
         .get(&id)
         .copied()
@@ -3226,5 +3228,49 @@ mod tests {
         assert_eq!(west_edge & water_body_edge_bit(2), 0);
         assert_eq!(water_body_edge_bit(-1), 0);
         assert_eq!(water_body_edge_bit(CHUNK_SIZE_I32), 0);
+    }
+
+    #[test]
+    fn water_body_distance_uses_nearest_chunk_not_union_aabb() {
+        let world = VoxelWorld::new(IVec3::new(32, 6, 32));
+        let sample = |chunk_pos: IVec3, aabb_min: Vec3, aabb_max: Vec3| WaterMeshBodySample {
+            entity: Entity::from_bits(1),
+            chunk_pos,
+            surface_y: WATER_LEVEL,
+            surface_area: 256.0,
+            max_depth: 8,
+            average_depth: 8.0,
+            aabb_min,
+            aabb_max,
+            touches_world_edge: true,
+            view_visible: true,
+            edge_north: 0,
+            edge_south: 0,
+            edge_west: 0,
+            edge_east: 0,
+        };
+        let samples = [
+            sample(
+                IVec3::new(0, 1, 0),
+                Vec3::new(0.0, WATER_LEVEL as f32, 0.0),
+                Vec3::new(16.0, WATER_LEVEL as f32 + 1.0, 16.0),
+            ),
+            sample(
+                IVec3::new(31, 1, 31),
+                Vec3::new(496.0, WATER_LEVEL as f32, 496.0),
+                Vec3::new(512.0, WATER_LEVEL as f32 + 1.0, 512.0),
+            ),
+        ];
+
+        let group = build_water_body_group(
+            &[0, 1],
+            &samples,
+            &world,
+            Some(Vec3::new(256.0, WATER_LEVEL as f32, 256.0)),
+            &HashMap::new(),
+        );
+
+        assert!(group.nearest_distance > WATER_FANCY_DISTANCE);
+        assert_eq!(group.material_mode, WaterBodyMaterialMode::Cheap);
     }
 }
