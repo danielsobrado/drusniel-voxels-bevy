@@ -1,7 +1,7 @@
 use crate::constants::VOXEL_SIZE;
 use crate::voxel::chunk::LodLevel;
 use bevy::prelude::{Resource, Vec3};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 /// Flags indicating which chunk faces a vertex touches.
 #[derive(Clone, Copy, Default)]
@@ -148,7 +148,8 @@ pub fn extract_boundary_edges(
     chunk_size: f32,
 ) -> Vec<BoundaryEdge> {
     let mut boundary_edges: Vec<BoundaryEdge> = Vec::new();
-    let mut edge_set: HashSet<EdgeKey> = HashSet::new();
+    let mut edge_indices: HashMap<EdgeKey, usize> = HashMap::new();
+    let mut edge_counts: Vec<u8> = Vec::new();
 
     for tri in indices.chunks(3) {
         if tri.len() < 3 {
@@ -186,7 +187,8 @@ pub fn extract_boundary_edges(
                 let (a, b) = ordered_edge(q0, q1);
                 let key = EdgeKey { a, b, face };
 
-                if !edge_set.insert(key) {
+                if let Some(edge_index) = edge_indices.get(&key).copied() {
+                    edge_counts[edge_index] = edge_counts[edge_index].saturating_add(1);
                     continue;
                 }
 
@@ -199,6 +201,7 @@ pub fn extract_boundary_edges(
                 let v0_weights = *material_weights.get(i0).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
                 let v1_weights = *material_weights.get(i1).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
 
+                let edge_index = boundary_edges.len();
                 boundary_edges.push(BoundaryEdge {
                     v0_pos,
                     v1_pos,
@@ -208,11 +211,17 @@ pub fn extract_boundary_edges(
                     v1_weights,
                     face,
                 });
+                edge_indices.insert(key, edge_index);
+                edge_counts.push(1);
             }
         }
     }
 
     boundary_edges
+        .into_iter()
+        .zip(edge_counts)
+        .filter_map(|(edge, count)| (count == 1).then_some(edge))
+        .collect()
 }
 
 /// Configuration for skirt generation.
@@ -264,9 +273,45 @@ impl NeighborLods {
 
     pub fn needs_transition_apron(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
         match self.lod_for_face(face) {
-            Some(n_lod) => !n_lod.is_higher_detail_than(my_lod),
+            Some(n_lod) => n_lod.is_lower_detail_than(my_lod),
             None => true,
         }
+    }
+}
+
+fn edge_supports_transition_apron(edge: &BoundaryEdge) -> bool {
+    let avg_up = (edge.v0_normal.y + edge.v1_normal.y) * 0.5;
+    let min_up = edge.v0_normal.y.min(edge.v1_normal.y);
+    avg_up > 0.35 || min_up > 0.15
+}
+
+fn upward_biased_normal(normal: Vec3) -> Vec3 {
+    (normal * 0.2 + Vec3::Y * 0.8).normalize_or_zero()
+}
+
+fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx: u32) {
+    match face {
+        ChunkFace::NegX | ChunkFace::PosZ => {
+            indices.extend_from_slice(&[
+                base_idx,
+                base_idx + 2,
+                base_idx + 1,
+                base_idx + 1,
+                base_idx + 2,
+                base_idx + 3,
+            ]);
+        }
+        ChunkFace::PosX | ChunkFace::NegZ => {
+            indices.extend_from_slice(&[
+                base_idx,
+                base_idx + 1,
+                base_idx + 2,
+                base_idx + 1,
+                base_idx + 3,
+                base_idx + 2,
+            ]);
+        }
+        ChunkFace::NegY | ChunkFace::PosY => {}
     }
 }
 
@@ -287,10 +332,16 @@ pub fn generate_skirts(
     }
 
     for edge in boundary_edges {
+        let broad_apron = edge_supports_transition_apron(edge);
         let needs_apron =
             !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
-        let needs_vertical =
+        let needs_vertical_candidate =
             !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
+        let needs_vertical = needs_vertical_candidate;
+        let has_lower_lod_neighbor = neighbor_lods
+            .lod_for_face(edge.face)
+            .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
+        let use_sloped_transition_drop = needs_apron && broad_apron && has_lower_lod_neighbor;
         if !needs_apron && !needs_vertical {
             continue;
         }
@@ -305,73 +356,74 @@ pub fn generate_skirts(
 
         let base_idx = positions.len() as u32;
         let drop = Vec3::new(0.0, -config.depth, 0.0);
+        let apron_factor = if broad_apron { 0.35 } else { 0.08 };
+        let apron_min = if broad_apron { 0.35 } else { 0.08 };
+        let apron_max = if broad_apron { 2.0 } else { 0.30 };
         let apron_width = neighbor_lods
             .lod_for_face(edge.face)
             .map(|lod| {
                 let step = lod.step_size().max(my_lod.step_size()).max(1) as f32;
-                (step * VOXEL_SIZE * 0.5).clamp(VOXEL_SIZE * 0.5, VOXEL_SIZE * 4.0)
+                (step * VOXEL_SIZE * apron_factor)
+                    .clamp(VOXEL_SIZE * apron_min, VOXEL_SIZE * apron_max)
             })
             .unwrap_or_else(|| {
                 let step = my_lod.step_size().max(1) as f32;
-                (step * VOXEL_SIZE * 0.5).clamp(VOXEL_SIZE * 0.5, VOXEL_SIZE * 4.0)
+                (step * VOXEL_SIZE * apron_factor)
+                    .clamp(VOXEL_SIZE * apron_min, VOXEL_SIZE * apron_max)
             });
-        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.02, 0.0);
+        let apron_drop_amount = 0.02;
+        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * apron_drop_amount, 0.0);
 
         let top0 = edge.v0_pos;
         let top1 = edge.v1_pos;
         let apron0 = top0 + skirt_normal * apron_width + apron_drop;
         let apron1 = top1 + skirt_normal * apron_width + apron_drop;
-        let bot0 = apron0 + drop;
-        let bot1 = apron1 + drop;
 
         let blend_factor = 0.2;
         let blended_normal0 =
             (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
         let blended_normal1 =
             (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
+        let vertical_normal0 = if needs_apron {
+            upward_biased_normal(edge.v0_normal)
+        } else {
+            blended_normal0
+        };
+        let vertical_normal1 = if needs_apron {
+            upward_biased_normal(edge.v1_normal)
+        } else {
+            blended_normal1
+        };
 
-        positions.push(top0.to_array());
-        normals.push(edge.v0_normal.to_array());
-        uvs.push([1.0, 0.0]);
-        material_weights.push(edge.v0_weights);
+        let (vertical_top0, vertical_top1) = if needs_apron {
+            positions.push(top0.to_array());
+            normals.push(upward_biased_normal(edge.v0_normal).to_array());
+            uvs.push([1.0, 0.0]);
+            material_weights.push(edge.v0_weights);
 
-        positions.push(top1.to_array());
-        normals.push(edge.v1_normal.to_array());
-        uvs.push([1.0, 0.0]);
-        material_weights.push(edge.v1_weights);
+            positions.push(top1.to_array());
+            normals.push(upward_biased_normal(edge.v1_normal).to_array());
+            uvs.push([1.0, 0.0]);
+            material_weights.push(edge.v1_weights);
 
-        positions.push(apron0.to_array());
-        normals.push(edge.v0_normal.to_array());
-        uvs.push([1.0, 0.0]);
-        material_weights.push(edge.v0_weights);
+            positions.push(apron0.to_array());
+            normals.push(upward_biased_normal(edge.v0_normal).to_array());
+            uvs.push([1.0, 0.0]);
+            material_weights.push(edge.v0_weights);
 
-        positions.push(apron1.to_array());
-        normals.push(edge.v1_normal.to_array());
-        uvs.push([1.0, 0.0]);
-        material_weights.push(edge.v1_weights);
+            positions.push(apron1.to_array());
+            normals.push(upward_biased_normal(edge.v1_normal).to_array());
+            uvs.push([1.0, 0.0]);
+            material_weights.push(edge.v1_weights);
 
-        match edge.face {
-            ChunkFace::NegX | ChunkFace::PosZ => {
-                indices.extend_from_slice(&[
-                    base_idx,
-                    base_idx + 2,
-                    base_idx + 1,
-                    base_idx + 1,
-                    base_idx + 2,
-                    base_idx + 3,
-                ]);
-            }
-            ChunkFace::PosX | ChunkFace::NegZ => {
-                indices.extend_from_slice(&[
-                    base_idx,
-                    base_idx + 1,
-                    base_idx + 2,
-                    base_idx + 1,
-                    base_idx + 3,
-                    base_idx + 2,
-                ]);
-            }
-            ChunkFace::NegY | ChunkFace::PosY => {}
+            push_boundary_quad_indices(indices, edge.face, base_idx);
+            (apron0, apron1)
+        } else {
+            (top0, top1)
+        };
+
+        if needs_apron && !needs_vertical {
+            continue;
         }
 
         if !needs_vertical {
@@ -379,49 +431,35 @@ pub fn generate_skirts(
         }
 
         let vertical_idx = positions.len() as u32;
-        positions.push(apron0.to_array());
-        normals.push(blended_normal0.to_array());
+        let drop_outward = if use_sloped_transition_drop {
+            skirt_normal * apron_width
+        } else {
+            Vec3::ZERO
+        };
+        let bot0 = vertical_top0 + drop + drop_outward;
+        let bot1 = vertical_top1 + drop + drop_outward;
+
+        positions.push(vertical_top0.to_array());
+        normals.push(vertical_normal0.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v0_weights);
 
-        positions.push(apron1.to_array());
-        normals.push(blended_normal1.to_array());
+        positions.push(vertical_top1.to_array());
+        normals.push(vertical_normal1.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
         positions.push(bot0.to_array());
-        normals.push(blended_normal0.to_array());
+        normals.push(vertical_normal0.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v0_weights);
 
         positions.push(bot1.to_array());
-        normals.push(blended_normal1.to_array());
+        normals.push(vertical_normal1.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
-        match edge.face {
-            ChunkFace::NegX | ChunkFace::PosZ => {
-                indices.extend_from_slice(&[
-                    vertical_idx,
-                    vertical_idx + 2,
-                    vertical_idx + 1,
-                    vertical_idx + 1,
-                    vertical_idx + 2,
-                    vertical_idx + 3,
-                ]);
-            }
-            ChunkFace::PosX | ChunkFace::NegZ => {
-                indices.extend_from_slice(&[
-                    vertical_idx,
-                    vertical_idx + 1,
-                    vertical_idx + 2,
-                    vertical_idx + 1,
-                    vertical_idx + 3,
-                    vertical_idx + 2,
-                ]);
-            }
-            ChunkFace::NegY | ChunkFace::PosY => {}
-        }
+        push_boundary_quad_indices(indices, edge.face, vertical_idx);
     }
 }
 
@@ -441,8 +479,54 @@ mod tests {
         }
     }
 
+    fn side_edge_on_pos_x() -> BoundaryEdge {
+        BoundaryEdge {
+            v0_pos: Vec3::new(16.0, 4.0, 2.0),
+            v1_pos: Vec3::new(16.0, 4.5, 6.0),
+            v0_normal: Vec3::X,
+            v1_normal: Vec3::X,
+            v0_weights: [1.0, 0.0, 0.0, 0.0],
+            v1_weights: [1.0, 0.0, 0.0, 0.0],
+            face: ChunkFace::PosX,
+        }
+    }
+
     #[test]
-    fn lod_transition_adds_top_apron_before_vertical_skirt() {
+    fn boundary_extraction_ignores_shared_edges_on_boundary_plane() {
+        let local_positions = vec![
+            Vec3::new(16.0, 0.0, 4.0),
+            Vec3::new(16.0, 1.0, 4.0),
+            Vec3::new(16.0, 0.0, 5.0),
+            Vec3::new(16.0, 1.0, 4.0),
+            Vec3::new(16.0, 1.0, 5.0),
+            Vec3::new(16.0, 0.0, 5.0),
+        ];
+        let positions = local_positions
+            .iter()
+            .map(|position| position.to_array())
+            .collect::<Vec<_>>();
+        let normals = vec![[1.0, 0.0, 0.0]; positions.len()];
+        let weights = vec![[1.0, 0.0, 0.0, 0.0]; positions.len()];
+        let indices = vec![0, 1, 2, 3, 4, 5];
+
+        let edges = extract_boundary_edges(
+            &local_positions,
+            &positions,
+            &normals,
+            &indices,
+            &weights,
+            16.0,
+        );
+
+        assert_eq!(
+            edges.len(),
+            4,
+            "the shared diagonal should not receive a visible skirt or transition apron"
+        );
+    }
+
+    #[test]
+    fn lod_transition_adds_top_apron_with_lit_drop() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -480,12 +564,55 @@ mod tests {
             positions[2][1] < positions[0][1] && positions[3][1] < positions[1][1],
             "transition apron should have a small downward bias to avoid z-fighting"
         );
-        assert_eq!(positions[4], positions[2]);
-        assert_eq!(positions[5], positions[3]);
+        assert!(
+            normals[4][1] > 0.95 && normals[5][1] > 0.95,
+            "transition drop should be lit like nearby top terrain instead of a dark wall"
+        );
+        assert!(
+            positions[6][0] > positions[4][0] && positions[7][0] > positions[5][0],
+            "top-surface transition drops should bevel outward instead of forming visible vertical strips"
+        );
     }
 
     #[test]
-    fn same_lod_neighbor_adds_apron_without_vertical_skirt() {
+    fn lower_lod_side_edge_uses_only_a_narrow_transition_lip() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: Some(LodLevel::Lod1),
+            neg_z: None,
+            pos_z: None,
+        };
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut weights,
+            &mut indices,
+            &[side_edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert_eq!(positions.len(), 8);
+        assert_eq!(indices.len(), 12);
+        assert!(
+            positions[2][0] > 16.0 && positions[2][0] < 16.35,
+            "side edges should only emit a narrow lip, not a broad visible apron"
+        );
+    }
+
+    #[test]
+    fn same_lod_neighbor_keeps_adaptive_skirt_disabled() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -513,11 +640,7 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert_eq!(positions.len(), 4);
-        assert_eq!(indices.len(), 6);
-        assert!(
-            positions[2][0] > 16.0 && positions[3][0] > 16.0,
-            "same-LOD seam apron should cover hairline cracks across the boundary"
-        );
+        assert!(positions.is_empty());
+        assert!(indices.is_empty());
     }
 }
