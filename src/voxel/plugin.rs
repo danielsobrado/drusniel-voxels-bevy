@@ -6,7 +6,7 @@
 //! - Mesh generation and update systems
 //! - Async chunk generation using Bevy's task pool
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -1772,11 +1772,13 @@ struct WaterMeshBodySample {
     aabb_max: Vec3,
     touches_world_edge: bool,
     view_visible: bool,
-    edge_north: HashSet<i32>,
-    edge_south: HashSet<i32>,
-    edge_west: HashSet<i32>,
-    edge_east: HashSet<i32>,
+    edge_north: WaterBodyEdgeMask,
+    edge_south: WaterBodyEdgeMask,
+    edge_west: WaterBodyEdgeMask,
+    edge_east: WaterBodyEdgeMask,
 }
+
+type WaterBodyEdgeMask = u32;
 
 #[derive(Clone, Debug)]
 struct WaterBodyGroup {
@@ -1974,10 +1976,10 @@ fn sample_water_mesh_body(
             aabb_max: transform.translation + Vec3::splat(CHUNK_SIZE_F32),
             touches_world_edge: chunk_touches_world_edge(world, chunk_pos),
             view_visible: view_visibility.is_some_and(|visibility| visibility.get()),
-            edge_north: HashSet::default(),
-            edge_south: HashSet::default(),
-            edge_west: HashSet::default(),
-            edge_east: HashSet::default(),
+            edge_north: 0,
+            edge_south: 0,
+            edge_west: 0,
+            edge_east: 0,
         });
     }
 
@@ -1987,25 +1989,25 @@ fn sample_water_mesh_body(
         .map(|(y, _)| y)
         .unwrap_or(WATER_LEVEL);
 
-    let mut edge_north = HashSet::new();
-    let mut edge_south = HashSet::new();
-    let mut edge_west = HashSet::new();
-    let mut edge_east = HashSet::new();
+    let mut edge_north = 0;
+    let mut edge_south = 0;
+    let mut edge_west = 0;
+    let mut edge_east = 0;
     for (x, z, y, _) in &surface_cells {
         if *y != surface_y {
             continue;
         }
         if *z == 0 {
-            edge_north.insert(*x);
+            edge_north |= water_body_edge_bit(*x);
         }
         if *z == CHUNK_SIZE_I32 - 1 {
-            edge_south.insert(*x);
+            edge_south |= water_body_edge_bit(*x);
         }
         if *x == 0 {
-            edge_west.insert(*z);
+            edge_west |= water_body_edge_bit(*z);
         }
         if *x == CHUNK_SIZE_I32 - 1 {
-            edge_east.insert(*z);
+            edge_east |= water_body_edge_bit(*z);
         }
     }
 
@@ -2030,6 +2032,14 @@ fn sample_water_mesh_body(
         edge_west,
         edge_east,
     })
+}
+
+fn water_body_edge_bit(edge_cell: i32) -> WaterBodyEdgeMask {
+    if (0..CHUNK_SIZE_I32).contains(&edge_cell) {
+        1u32 << edge_cell as u32
+    } else {
+        0
+    }
 }
 
 fn build_water_body_groups(
@@ -2088,22 +2098,22 @@ fn water_body_neighbors(
     let candidates = [
         (
             sample.chunk_pos + IVec3::X,
-            &sample.edge_east,
+            sample.edge_east,
             WaterBodyEdge::West,
         ),
         (
             sample.chunk_pos + IVec3::NEG_X,
-            &sample.edge_west,
+            sample.edge_west,
             WaterBodyEdge::East,
         ),
         (
             sample.chunk_pos + IVec3::Z,
-            &sample.edge_south,
+            sample.edge_south,
             WaterBodyEdge::North,
         ),
         (
             sample.chunk_pos + IVec3::NEG_Z,
-            &sample.edge_north,
+            sample.edge_north,
             WaterBodyEdge::South,
         ),
     ];
@@ -2118,12 +2128,12 @@ fn water_body_neighbors(
             continue;
         }
         let other_edge = match neighbor_edge {
-            WaterBodyEdge::North => &neighbor.edge_north,
-            WaterBodyEdge::South => &neighbor.edge_south,
-            WaterBodyEdge::West => &neighbor.edge_west,
-            WaterBodyEdge::East => &neighbor.edge_east,
+            WaterBodyEdge::North => neighbor.edge_north,
+            WaterBodyEdge::South => neighbor.edge_south,
+            WaterBodyEdge::West => neighbor.edge_west,
+            WaterBodyEdge::East => neighbor.edge_east,
         };
-        if edge.iter().any(|value| other_edge.contains(value)) {
+        if edge & other_edge != 0 {
             neighbors[slot] = Some(neighbor_index);
         }
     }
@@ -3205,5 +3215,16 @@ mod tests {
         assert_eq!(sort_window, 2);
         assert_eq!(dirty_chunks[0], IVec3::new(0, 0, 0));
         assert_eq!(dirty_chunks[1], IVec3::new(1, 0, 0));
+    }
+
+    #[test]
+    fn water_body_edge_masks_track_chunk_edge_cells() {
+        let west_edge = water_body_edge_bit(0) | water_body_edge_bit(3);
+        let east_edge = water_body_edge_bit(3) | water_body_edge_bit(CHUNK_SIZE_I32 - 1);
+
+        assert_ne!(west_edge & east_edge, 0);
+        assert_eq!(west_edge & water_body_edge_bit(2), 0);
+        assert_eq!(water_body_edge_bit(-1), 0);
+        assert_eq!(water_body_edge_bit(CHUNK_SIZE_I32), 0);
     }
 }
