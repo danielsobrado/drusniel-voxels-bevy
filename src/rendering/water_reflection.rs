@@ -21,7 +21,7 @@ use crate::voxel::meshing::{
     WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
 };
 use crate::voxel::octree::OctreeAabb;
-use crate::voxel::plugin::WaterBodyRegistry;
+use crate::voxel::plugin::{WaterBodyInfo, WaterBodyRegistry};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 
@@ -622,11 +622,14 @@ fn update_water_presence(
 
         let water_aabb = water_mesh_aabb(transform);
         let distance = distance_to_aabb_xz(main_transform.translation, water_aabb);
+        let body_distance = body_info
+            .map(|body| body.nearest_distance)
+            .unwrap_or(distance);
         presence.nearest_water_distance = Some(
             presence
                 .nearest_water_distance
-                .map(|nearest| nearest.min(distance))
-                .unwrap_or(distance),
+                .map(|nearest| nearest.min(body_distance))
+                .unwrap_or(body_distance),
         );
         if config.require_water_in_frustum
             && !aabb_in_camera_view(main_transform, projection, water_aabb)
@@ -642,8 +645,8 @@ fn update_water_presence(
         presence.nearest_visible_distance = Some(
             presence
                 .nearest_visible_distance
-                .map(|nearest| nearest.min(distance))
-                .unwrap_or(distance),
+                .map(|nearest| nearest.min(body_distance))
+                .unwrap_or(body_distance),
         );
 
         mask_stats.estimated_mask_pixels =
@@ -655,8 +658,8 @@ fn update_water_presence(
                     water_aabb,
                     window_size,
                 ));
-        if distance < best_params_distance {
-            best_params_distance = distance;
+        if body_distance < best_params_distance {
+            best_params_distance = body_distance;
             *body_params = body_id
                 .and_then(|id| water_bodies.as_deref()?.bodies.get(id))
                 .map(|body| WaterReflectionBodyParams {
@@ -675,14 +678,12 @@ fn update_water_presence(
                 });
         }
 
-        if config.auto_disable_distance > 0.0 && distance > config.auto_disable_distance {
-            continue;
-        }
-
-        let enough_screen_coverage = mask_stats.estimated_mask_pixels > 24
-            || detail
-                .map(|detail| detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES)
-                .unwrap_or(true);
+        let enough_screen_coverage = water_reflection_has_enough_coverage(
+            mask_stats.estimated_mask_pixels,
+            detail,
+            body_info,
+            body_id.is_some(),
+        );
         if !enough_screen_coverage {
             continue;
         }
@@ -711,10 +712,11 @@ fn update_water_presence(
     } else {
         mask_stats.estimated_mask_pixels
     };
-    mask_stats.estimated_skipped_too_far_pixels = if config.auto_disable_distance > 0.0
+    let disable_distance = effective_water_reflection_disable_distance(&config);
+    mask_stats.estimated_skipped_too_far_pixels = if disable_distance > 0.0
         && presence
             .nearest_visible_distance
-            .is_some_and(|distance| distance > config.auto_disable_distance)
+            .is_some_and(|distance| distance > disable_distance)
     {
         mask_stats.estimated_mask_pixels
     } else {
@@ -738,6 +740,22 @@ fn update_water_presence(
         projection,
         &mut presence,
     );
+}
+
+fn water_reflection_has_enough_coverage(
+    estimated_mask_pixels: u32,
+    detail: Option<&WaterMeshDetail>,
+    body_info: Option<&WaterBodyInfo>,
+    has_body_id: bool,
+) -> bool {
+    estimated_mask_pixels > 24
+        || has_body_id
+        || body_info
+            .map(|body| body.surface_area >= WATER_FANCY_MIN_TRIANGLES as f32)
+            .unwrap_or(false)
+        || detail
+            .map(|detail| detail.triangle_count >= WATER_FANCY_MIN_TRIANGLES)
+            .unwrap_or(true)
 }
 
 fn update_startup_fallback_water_presence(
@@ -893,6 +911,7 @@ fn update_reflection_camera(
     >,
     mut status: ResMut<WaterReflectionStatus>,
     mut mask_stats: ResMut<WaterReflectionMaskStats>,
+    body_params: Res<WaterReflectionBodyParams>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -926,11 +945,7 @@ fn update_reflection_camera(
         } else {
             WaterReflectionReason::NoWaterInView
         };
-    } else if config.auto_disable_distance > 0.0
-        && presence
-            .nearest_visible_distance
-            .is_some_and(|distance| distance > config.auto_disable_distance)
-    {
+    } else if reflection_presence_out_of_range(&presence, &config) {
         active = false;
         sample_reflection = false;
         reason = WaterReflectionReason::OutOfRange;
@@ -982,25 +997,7 @@ fn update_reflection_camera(
     };
 
     if active {
-        let water_y = WATER_LEVEL as f32;
-
-        // Mirror position: reflect Y across water plane
-        let mirrored_pos = Vec3::new(
-            main_transform.translation.x,
-            2.0 * water_y - main_transform.translation.y,
-            main_transform.translation.z,
-        );
-
-        // Mirror rotation: flip the pitch (look direction reflected across Y)
-        let main_forward = main_transform.forward().as_vec3();
-        let mirrored_forward = Vec3::new(main_forward.x, -main_forward.y, main_forward.z);
-
-        // Compute the mirrored up direction
-        let main_up = main_transform.up().as_vec3();
-        let mirrored_up = Vec3::new(main_up.x, -main_up.y, main_up.z);
-
-        *refl_transform =
-            Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up);
+        *refl_transform = mirrored_reflection_transform(main_transform, body_params.surface_y);
     }
     drop(_timer);
     timing.record_count(
@@ -1078,6 +1075,48 @@ fn update_reflection_camera(
         "Estimated Water Reflection Compositor Skipped Too Far",
         mask_stats.estimated_skipped_too_far_pixels as f64,
     );
+}
+
+fn effective_water_reflection_disable_distance(config: &WaterReflectionConfig) -> f32 {
+    if config.auto_disable_distance > 0.0 {
+        config.auto_disable_distance + CHUNK_SIZE_I32 as f32
+    } else {
+        0.0
+    }
+}
+
+fn reflection_presence_out_of_range(
+    presence: &WaterPresence,
+    config: &WaterReflectionConfig,
+) -> bool {
+    let disable_distance = effective_water_reflection_disable_distance(config);
+    if disable_distance <= 0.0 {
+        return false;
+    }
+    let nearest = match (
+        presence.nearest_visible_distance,
+        presence.nearest_water_distance,
+    ) {
+        (Some(visible), Some(any_water)) => visible.min(any_water),
+        (Some(visible), None) => visible,
+        (None, Some(any_water)) => any_water,
+        (None, None) => return false,
+    };
+    nearest > disable_distance
+}
+
+fn mirrored_reflection_transform(main_transform: &Transform, water_y: f32) -> Transform {
+    let mirrored_pos = Vec3::new(
+        main_transform.translation.x,
+        2.0 * water_y - main_transform.translation.y,
+        main_transform.translation.z,
+    );
+    let main_forward = main_transform.forward().as_vec3();
+    let mirrored_forward = Vec3::new(main_forward.x, -main_forward.y, main_forward.z);
+    let main_up = main_transform.up().as_vec3();
+    let mirrored_up = Vec3::new(main_up.x, -main_up.y, main_up.z);
+
+    Transform::from_translation(mirrored_pos).looking_to(mirrored_forward, mirrored_up)
 }
 
 fn is_valid_water_reflection_candidate(world: &VoxelWorld, transform: &Transform) -> bool {
@@ -1316,5 +1355,72 @@ mod tests {
         world.set_voxel(water_pos, VoxelType::Water);
 
         assert!(water_voxel_has_valid_reflection_surface(&world, water_pos));
+    }
+
+    #[test]
+    fn reflection_transform_uses_selected_water_surface_y() {
+        let main_transform = Transform::from_translation(Vec3::new(10.0, 20.0, -4.0))
+            .looking_to(Vec3::new(0.25, -0.5, 1.0).normalize(), Vec3::Y);
+
+        let reflected = mirrored_reflection_transform(&main_transform, 7.0);
+
+        assert!((reflected.translation.y - -6.0).abs() < 0.001);
+        assert!((reflected.translation.x - 10.0).abs() < 0.001);
+        assert!((reflected.translation.z - -4.0).abs() < 0.001);
+        assert!(reflected.forward().y > 0.0);
+    }
+
+    #[test]
+    fn reflection_coverage_accepts_registered_visible_body_area() {
+        let body = WaterBodyInfo {
+            id: WaterBodyId(1),
+            kind: WaterBodyKind::Lake,
+            aabb_min: Vec3::ZERO,
+            aabb_max: Vec3::splat(16.0),
+            surface_y: WATER_LEVEL as f32,
+            surface_area: WATER_FANCY_MIN_TRIANGLES as f32,
+            max_depth: 1,
+            average_depth: 1.0,
+            nearest_distance: 32.0,
+            visible_chunks: 1,
+            chunk_count: 1,
+            material_mode: WaterBodyMaterialMode::Cheap,
+            reflection_strength: 0.5,
+            fresnel_power: 4.0,
+            distortion_strength: 0.004,
+        };
+
+        assert!(water_reflection_has_enough_coverage(
+            0,
+            None,
+            Some(&body),
+            false
+        ));
+        assert!(water_reflection_has_enough_coverage(0, None, None, true));
+    }
+
+    #[test]
+    fn reflection_auto_disable_distance_has_chunk_grace() {
+        let config = WaterReflectionConfig {
+            auto_disable_distance: 120.0,
+            ..default()
+        };
+
+        assert_eq!(effective_water_reflection_disable_distance(&config), 136.0);
+    }
+
+    #[test]
+    fn reflection_range_uses_nearest_water_when_visible_chunk_is_farther() {
+        let config = WaterReflectionConfig {
+            auto_disable_distance: 120.0,
+            ..default()
+        };
+        let presence = WaterPresence {
+            nearest_visible_distance: Some(148.0),
+            nearest_water_distance: Some(116.0),
+            ..default()
+        };
+
+        assert!(!reflection_presence_out_of_range(&presence, &config));
     }
 }
