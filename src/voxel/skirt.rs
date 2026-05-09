@@ -255,9 +255,16 @@ impl NeighborLods {
         }
     }
 
-    pub fn needs_skirt(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
+    pub fn needs_vertical_skirt(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
         match self.lod_for_face(face) {
             Some(n_lod) => n_lod.is_lower_detail_than(my_lod),
+            None => true,
+        }
+    }
+
+    pub fn needs_transition_apron(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
+        match self.lod_for_face(face) {
+            Some(n_lod) => !n_lod.is_higher_detail_than(my_lod),
             None => true,
         }
     }
@@ -280,7 +287,11 @@ pub fn generate_skirts(
     }
 
     for edge in boundary_edges {
-        if config.adaptive && !neighbor_lods.needs_skirt(edge.face, my_lod) {
+        let needs_apron =
+            !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
+        let needs_vertical =
+            !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
+        if !needs_apron && !needs_vertical {
             continue;
         }
 
@@ -297,19 +308,23 @@ pub fn generate_skirts(
         let apron_width = neighbor_lods
             .lod_for_face(edge.face)
             .map(|lod| {
-                (lod.step_size() as f32 * VOXEL_SIZE * 0.125).clamp(VOXEL_SIZE * 0.25, VOXEL_SIZE)
+                let step = lod.step_size().max(my_lod.step_size()).max(1) as f32;
+                (step * VOXEL_SIZE * 0.5).clamp(VOXEL_SIZE * 0.5, VOXEL_SIZE * 4.0)
             })
-            .unwrap_or(VOXEL_SIZE * 0.25);
-        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.01, 0.0);
+            .unwrap_or_else(|| {
+                let step = my_lod.step_size().max(1) as f32;
+                (step * VOXEL_SIZE * 0.5).clamp(VOXEL_SIZE * 0.5, VOXEL_SIZE * 4.0)
+            });
+        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.02, 0.0);
 
         let top0 = edge.v0_pos;
         let top1 = edge.v1_pos;
         let apron0 = top0 + skirt_normal * apron_width + apron_drop;
         let apron1 = top1 + skirt_normal * apron_width + apron_drop;
-        let bot0 = top0 + drop;
-        let bot1 = top1 + drop;
+        let bot0 = apron0 + drop;
+        let bot1 = apron1 + drop;
 
-        let blend_factor = 0.3;
+        let blend_factor = 0.2;
         let blended_normal0 =
             (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
         let blended_normal1 =
@@ -335,12 +350,41 @@ pub fn generate_skirts(
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
-        positions.push(top0.to_array());
+        match edge.face {
+            ChunkFace::NegX | ChunkFace::PosZ => {
+                indices.extend_from_slice(&[
+                    base_idx,
+                    base_idx + 2,
+                    base_idx + 1,
+                    base_idx + 1,
+                    base_idx + 2,
+                    base_idx + 3,
+                ]);
+            }
+            ChunkFace::PosX | ChunkFace::NegZ => {
+                indices.extend_from_slice(&[
+                    base_idx,
+                    base_idx + 1,
+                    base_idx + 2,
+                    base_idx + 1,
+                    base_idx + 3,
+                    base_idx + 2,
+                ]);
+            }
+            ChunkFace::NegY | ChunkFace::PosY => {}
+        }
+
+        if !needs_vertical {
+            continue;
+        }
+
+        let vertical_idx = positions.len() as u32;
+        positions.push(apron0.to_array());
         normals.push(blended_normal0.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v0_weights);
 
-        positions.push(top1.to_array());
+        positions.push(apron1.to_array());
         normals.push(blended_normal1.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
@@ -358,34 +402,22 @@ pub fn generate_skirts(
         match edge.face {
             ChunkFace::NegX | ChunkFace::PosZ => {
                 indices.extend_from_slice(&[
-                    base_idx,
-                    base_idx + 2,
-                    base_idx + 1,
-                    base_idx + 1,
-                    base_idx + 2,
-                    base_idx + 3,
-                    base_idx + 4,
-                    base_idx + 6,
-                    base_idx + 5,
-                    base_idx + 5,
-                    base_idx + 6,
-                    base_idx + 7,
+                    vertical_idx,
+                    vertical_idx + 2,
+                    vertical_idx + 1,
+                    vertical_idx + 1,
+                    vertical_idx + 2,
+                    vertical_idx + 3,
                 ]);
             }
             ChunkFace::PosX | ChunkFace::NegZ => {
                 indices.extend_from_slice(&[
-                    base_idx,
-                    base_idx + 1,
-                    base_idx + 2,
-                    base_idx + 1,
-                    base_idx + 3,
-                    base_idx + 2,
-                    base_idx + 4,
-                    base_idx + 5,
-                    base_idx + 6,
-                    base_idx + 5,
-                    base_idx + 7,
-                    base_idx + 6,
+                    vertical_idx,
+                    vertical_idx + 1,
+                    vertical_idx + 2,
+                    vertical_idx + 1,
+                    vertical_idx + 3,
+                    vertical_idx + 2,
                 ]);
             }
             ChunkFace::NegY | ChunkFace::PosY => {}
@@ -448,10 +480,12 @@ mod tests {
             positions[2][1] < positions[0][1] && positions[3][1] < positions[1][1],
             "transition apron should have a small downward bias to avoid z-fighting"
         );
+        assert_eq!(positions[4], positions[2]);
+        assert_eq!(positions[5], positions[3]);
     }
 
     #[test]
-    fn same_lod_neighbor_keeps_adaptive_skirt_disabled() {
+    fn same_lod_neighbor_adds_apron_without_vertical_skirt() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -479,7 +513,11 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert!(positions.is_empty());
-        assert!(indices.is_empty());
+        assert_eq!(positions.len(), 4);
+        assert_eq!(indices.len(), 6);
+        assert!(
+            positions[2][0] > 16.0 && positions[3][0] > 16.0,
+            "same-LOD seam apron should cover hairline cracks across the boundary"
+        );
     }
 }

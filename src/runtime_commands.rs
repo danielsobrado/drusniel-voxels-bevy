@@ -661,10 +661,12 @@ fn viewport_debug_payload(world: &World) -> Value {
 }
 
 fn editor_diagnostics_payload(world: &World) -> Value {
-    json!(world
-        .get_resource::<EditorDiagnosticsState>()
-        .cloned()
-        .unwrap_or_default())
+    json!(
+        world
+            .get_resource::<EditorDiagnosticsState>()
+            .cloned()
+            .unwrap_or_default()
+    )
 }
 
 fn runtime_selection_payload(world: &World) -> (Value, Value) {
@@ -686,7 +688,10 @@ fn runtime_selection_payload(world: &World) -> (Value, Value) {
 
     if let Some(selected_block) = world.get_resource::<SelectedBlock>() {
         if let Some(position) = selected_block.position {
-            return voxel_selection_payload(position, selected_block.voxel_type.unwrap_or_default());
+            return voxel_selection_payload(
+                position,
+                selected_block.voxel_type.unwrap_or_default(),
+            );
         }
     }
 

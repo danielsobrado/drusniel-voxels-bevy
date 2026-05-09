@@ -825,9 +825,9 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     fn get_biome_voxel(&self, biome: Biome, depth: i32, near_water: bool) -> VoxelType {
         match biome {
             Biome::Sandy => {
-                if depth <= 4 {
+                if depth <= 2 {
                     VoxelType::Sand
-                } else if depth <= 8 {
+                } else if depth <= 5 {
                     VoxelType::SubSoil
                 } else {
                     VoxelType::Rock
@@ -836,7 +836,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             Biome::Rocky => {
                 if depth <= 1 {
                     VoxelType::Rock
-                } else if depth <= 3 {
+                } else if depth <= 2 {
                     VoxelType::SubSoil
                 } else {
                     VoxelType::Rock
@@ -844,18 +844,18 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             }
             Biome::Clay => {
                 if near_water {
-                    if depth <= 2 {
+                    if depth <= 1 {
                         VoxelType::Sand
-                    } else if depth <= 6 {
+                    } else if depth <= 4 {
                         VoxelType::Clay
                     } else {
                         VoxelType::Rock
                     }
-                } else if depth <= 2 {
+                } else if depth <= 1 {
                     VoxelType::TopSoil
-                } else if depth <= 6 {
+                } else if depth <= 4 {
                     VoxelType::Clay
-                } else if depth <= 10 {
+                } else if depth <= 7 {
                     VoxelType::SubSoil
                 } else {
                     VoxelType::Rock
@@ -865,14 +865,14 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
                 if near_water {
                     if depth <= BEACH_HEIGHT_OFFSET {
                         VoxelType::Sand
-                    } else if depth <= 5 {
+                    } else if depth <= 3 {
                         VoxelType::SubSoil
                     } else {
                         VoxelType::Rock
                     }
                 } else if depth == 0 {
                     VoxelType::TopSoil
-                } else if depth <= 4 {
+                } else if depth <= 2 {
                     VoxelType::SubSoil
                 } else {
                     VoxelType::Rock
@@ -1063,6 +1063,53 @@ mod tests {
         assert_eq!(generator.get_biome(1000, 0), Biome::Grassland);
         assert_eq!(generator.get_biome(2000, 0), Biome::Rocky);
         assert_eq!(generator.get_biome(3000, 0), Biome::Clay);
+    }
+
+    #[test]
+    fn biome_soil_layers_are_shallow() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Grassland, 0, false),
+            VoxelType::TopSoil
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Grassland, 2, false),
+            VoxelType::SubSoil
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Grassland, 3, false),
+            VoxelType::Rock
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Sandy, 2, false),
+            VoxelType::Sand
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Sandy, 5, false),
+            VoxelType::SubSoil
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Sandy, 6, false),
+            VoxelType::Rock
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Clay, 1, false),
+            VoxelType::TopSoil
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Clay, 4, false),
+            VoxelType::Clay
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Clay, 7, false),
+            VoxelType::SubSoil
+        );
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Clay, 8, false),
+            VoxelType::Rock
+        );
     }
 
     #[test]

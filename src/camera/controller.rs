@@ -587,8 +587,8 @@ fn editor_viewport_camera_navigation(
                 diagnostics,
                 EditorDiagnosticsCategory::Input,
                 format!(
-                "[editor-viewport-input] inactive focused={} ctrl={} move_intent={} drained_mouse_events={}",
-                window_focused, control_down, move_intent, drained_motion_events
+                    "[editor-viewport-input] inactive focused={} ctrl={} move_intent={} drained_mouse_events={}",
+                    window_focused, control_down, move_intent, drained_motion_events
                 ),
             );
             debug_state.reported_initial = true;
@@ -648,7 +648,8 @@ fn editor_viewport_camera_navigation(
             camera.fly_speed
         };
 
-        let movement = velocity.normalize_or_zero() * speed * dt + forward * wheel_delta * speed * 0.12;
+        let movement =
+            velocity.normalize_or_zero() * speed * dt + forward * wheel_delta * speed * 0.12;
         if movement.length_squared() > 0.0 {
             let desired = transform.translation + movement;
             if !camera_intersects_solid(world, desired) {
@@ -664,33 +665,29 @@ fn editor_viewport_camera_navigation(
     }
 
     let periodic = debug_state.seconds_since_report >= 1.0;
-    if state_changed
-        || periodic
-        || mouse_event_count > 0
-        || wheel_delta.abs() > f32::EPSILON
-    {
+    if state_changed || periodic || mouse_event_count > 0 || wheel_delta.abs() > f32::EPSILON {
         editor_diagnostics_log(
             diagnostics,
             EditorDiagnosticsCategory::Input,
             format!(
-            "[editor-viewport-input] active focused={} ctrl={} keys=w:{} a:{} s:{} d:{} shift:{} mouse_events={} mouse_delta=({:.1},{:.1}) wheel={:.2} cameras={} moved={} blocked={} pos=({:.2},{:.2},{:.2})",
-            window_focused,
-            control_down,
-            key_w,
-            key_a,
-            key_s,
-            key_d,
-            shift_down,
-            mouse_event_count,
-            mouse_delta.x,
-            mouse_delta.y,
-            wheel_delta,
-            camera_count,
-            moved,
-            blocked,
-            camera_position.x,
-            camera_position.y,
-            camera_position.z
+                "[editor-viewport-input] active focused={} ctrl={} keys=w:{} a:{} s:{} d:{} shift:{} mouse_events={} mouse_delta=({:.1},{:.1}) wheel={:.2} cameras={} moved={} blocked={} pos=({:.2},{:.2},{:.2})",
+                window_focused,
+                control_down,
+                key_w,
+                key_a,
+                key_s,
+                key_d,
+                shift_down,
+                mouse_event_count,
+                mouse_delta.x,
+                mouse_delta.y,
+                wheel_delta,
+                camera_count,
+                moved,
+                blocked,
+                camera_position.x,
+                camera_position.y,
+                camera_position.z
             ),
         );
         debug_state.reported_initial = true;

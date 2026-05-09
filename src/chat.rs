@@ -77,15 +77,15 @@ impl Plugin for ChatPlugin {
         }
 
         app.add_systems(Startup, spawn_chat_overlay).add_systems(
-                Update,
-                (
-                    toggle_chat_input,
-                    process_chat_characters,
-                    submit_chat_message,
-                    update_chat_log,
-                    update_chat_prompt,
-                ),
-            );
+            Update,
+            (
+                toggle_chat_input,
+                process_chat_characters,
+                submit_chat_message,
+                update_chat_log,
+                update_chat_prompt,
+            ),
+        );
     }
 }
 

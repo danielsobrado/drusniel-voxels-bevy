@@ -1,11 +1,11 @@
-use bevy::math::Isometry3d;
 use bevy::camera::primitives::Aabb;
+use bevy::math::Isometry3d;
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
 
 use crate::building::types::BuildingPiece;
-use crate::props::{Prop, PropType};
 use crate::props::instanced_render::{InstancedPropGroup, PropVisualRefs};
+use crate::props::{Prop, PropType};
 use crate::rendering::building_material::BuildingMaterialType;
 use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
@@ -93,8 +93,13 @@ pub fn render_editor_wireframe_overlay(
 
     for (transform, group, bounds) in &instanced_groups {
         let prop_cluster_color = prop_group_wire_color(group.diagnostic_prop_type_mask);
-        let drew_group_mesh =
-            draw_instanced_prop_group_wireframe(&mut gizmos, &meshes, transform, group, prop_cluster_color);
+        let drew_group_mesh = draw_instanced_prop_group_wireframe(
+            &mut gizmos,
+            &meshes,
+            transform,
+            group,
+            prop_cluster_color,
+        );
         if let Some(bounds) = bounds {
             if !drew_group_mesh {
                 let center = transform.transform_point(bounds.center.into());
@@ -107,7 +112,12 @@ pub fn render_editor_wireframe_overlay(
     for (transform, mesh, building) in &building_pieces {
         let color = building_wire_color(building.material);
         if !draw_mesh_wireframe(&mut gizmos, &meshes, transform, mesh, color) {
-            draw_centered_box(&mut gizmos, transform.translation(), Vec3::splat(2.0), color);
+            draw_centered_box(
+                &mut gizmos,
+                transform.translation(),
+                Vec3::splat(2.0),
+                color,
+            );
         }
     }
 }
@@ -122,7 +132,8 @@ fn draw_terrain_wireframe(
     let Some(mesh) = mesh.and_then(|mesh| meshes.get(&mesh.0)) else {
         return false;
     };
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return false;
     };
@@ -234,7 +245,9 @@ fn sample_triangle_wire_color(
 ) -> Color {
     let centroid = (world_a + world_b + world_c) / 3.0;
     let normal = averaged_normal(normals, a, b, c);
-    let primary_sample = (centroid - normal * SURFACE_SAMPLE_INSET).floor().as_ivec3();
+    let primary_sample = (centroid - normal * SURFACE_SAMPLE_INSET)
+        .floor()
+        .as_ivec3();
     if let Some(voxel) = world.get_voxel(primary_sample) {
         return voxel_wire_color(voxel);
     }
@@ -269,7 +282,8 @@ fn draw_mesh_wireframe(
     let Some(mesh) = mesh.and_then(|mesh| meshes.get(&mesh.0)) else {
         return false;
     };
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return false;
     };
@@ -281,7 +295,15 @@ fn draw_mesh_wireframe(
                 if edges >= MAX_WIREFRAME_EDGES_PER_MESH {
                     break;
                 }
-                draw_triangle_edges(gizmos, transform, positions, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize, color);
+                draw_triangle_edges(
+                    gizmos,
+                    transform,
+                    positions,
+                    triangle[0] as usize,
+                    triangle[1] as usize,
+                    triangle[2] as usize,
+                    color,
+                );
                 edges += 3;
             }
         }
@@ -290,7 +312,15 @@ fn draw_mesh_wireframe(
                 if edges >= MAX_WIREFRAME_EDGES_PER_MESH {
                     break;
                 }
-                draw_triangle_edges(gizmos, transform, positions, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize, color);
+                draw_triangle_edges(
+                    gizmos,
+                    transform,
+                    positions,
+                    triangle[0] as usize,
+                    triangle[1] as usize,
+                    triangle[2] as usize,
+                    color,
+                );
                 edges += 3;
             }
         }
@@ -323,7 +353,8 @@ fn draw_instanced_prop_group_wireframe(
     let Some(mesh) = meshes.get(&group.mesh) else {
         return false;
     };
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return false;
     };
