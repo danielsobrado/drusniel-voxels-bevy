@@ -219,11 +219,11 @@ pub fn resolve_initial_player_spawn(
         return;
     };
 
-    freeze_player_at_standby(&world, &mut transform, velocity);
-    state.initial_spawn_wait_frames = state.initial_spawn_wait_frames.saturating_add(1);
-
     let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
     let center = world_center_xz(&world);
+    freeze_player_at_standby(&world, &readiness, &mut transform, velocity);
+    state.initial_spawn_wait_frames = state.initial_spawn_wait_frames.saturating_add(1);
+
     match find_nearest_valid_spawn(&world, center, &readiness, true, &mut state.stats) {
         Some(spawn) => {
             transform.translation = spawn.position;
@@ -851,14 +851,25 @@ fn world_center_xz(world: &VoxelWorld) -> Vec2 {
 
 fn freeze_player_at_standby(
     world: &VoxelWorld,
+    collider_readiness: &SpawnColliderReadiness,
     transform: &mut Transform,
     velocity: Option<Mut<LinearVelocity>>,
 ) {
-    let center = world_center_xz(world);
-    transform.translation = Vec3::new(center.x, world.bounds().max_world_y as f32 + 4.0, center.y);
+    transform.translation = initial_standby_position(world, collider_readiness);
     if let Some(mut velocity) = velocity {
         velocity.0 = Vec3::ZERO;
     }
+}
+
+fn initial_standby_position(
+    world: &VoxelWorld,
+    collider_readiness: &SpawnColliderReadiness,
+) -> Vec3 {
+    let center = world_center_xz(world);
+    let mut ignored_stats = SpawnValidationReport::default();
+    find_nearest_valid_spawn(world, center, collider_readiness, false, &mut ignored_stats)
+        .map(|spawn| spawn.position)
+        .unwrap_or_else(|| Vec3::new(center.x, world.bounds().max_world_y as f32 + 4.0, center.y))
 }
 
 fn teleport_player(
@@ -977,6 +988,16 @@ mod tests {
         let spawn =
             find_nearest_valid_spawn(&world, origin, &readiness, false, &mut stats).expect("spawn");
         assert_eq!(spawn.surface_block, IVec3::new(4, MIN_BREAKABLE_Y + 4, 4));
+    }
+
+    #[test]
+    fn initial_standby_position_uses_terrain_before_colliders() {
+        let world = world_with_surface(MIN_BREAKABLE_Y + 4, VoxelType::TopSoil);
+        let readiness = SpawnColliderReadiness::default();
+
+        let position = initial_standby_position(&world, &readiness);
+
+        assert_eq!(position, Vec3::new(4.5, (MIN_BREAKABLE_Y + 5) as f32, 4.5));
     }
 
     #[test]
