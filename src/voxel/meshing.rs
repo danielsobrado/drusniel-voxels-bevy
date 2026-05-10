@@ -45,10 +45,10 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::{ConstShape, ConstShape3u32};
 
-const WATER_SHORELINE_EXTENSION: f32 = 0.0;
+const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
@@ -3687,7 +3687,7 @@ mod tests {
     }
 
     #[test]
-    fn water_surface_does_not_extend_onto_shoreline() {
+    fn water_surface_extends_one_voxel_for_shoreline_fade() {
         let mut world = world_with_vertical_chunks();
         let water_pos = IVec3::new(8, WATER_LEVEL - 2, 8);
         world.set_voxel(water_pos, VoxelType::Water);
@@ -3720,10 +3720,14 @@ mod tests {
             .fold(f32::NEG_INFINITY, f32::max);
 
         assert!(!mesh.water.indices.is_empty());
-        assert!((min_x - water_pos.x as f32).abs() < 0.001);
-        assert!((max_x - (water_pos.x as f32 + VOXEL_SIZE)).abs() < 0.001);
-        assert!((min_z - water_pos.z as f32).abs() < 0.001);
-        assert!((max_z - (water_pos.z as f32 + VOXEL_SIZE)).abs() < 0.001);
+        assert!((min_x - (water_pos.x as f32 - WATER_SHORELINE_EXTENSION)).abs() < 0.001);
+        assert!(
+            (max_x - (water_pos.x as f32 + VOXEL_SIZE + WATER_SHORELINE_EXTENSION)).abs() < 0.001
+        );
+        assert!((min_z - (water_pos.z as f32 - WATER_SHORELINE_EXTENSION)).abs() < 0.001);
+        assert!(
+            (max_z - (water_pos.z as f32 + VOXEL_SIZE + WATER_SHORELINE_EXTENSION)).abs() < 0.001
+        );
     }
 
     #[test]
