@@ -98,7 +98,7 @@ impl WaterConfig {
             WaterBodyKind::River => &self.body_presets.river,
             WaterBodyKind::Pond => &self.body_presets.pond,
             WaterBodyKind::ShallowFlood => &self.body_presets.shallow_flood,
-            WaterBodyKind::Unknown => &self.body_presets.lake,
+            WaterBodyKind::Unknown => &self.body_presets.ocean,
         }
     }
 }
@@ -286,6 +286,25 @@ impl Default for WaterWeatherConfig {
             rain_distortion_boost: 0.35,
             snow_reflection_soften: 0.18,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_water_uses_ocean_preset_as_transient_fallback() {
+        let config = WaterConfig::default();
+
+        assert_eq!(
+            config.body_preset(WaterBodyKind::Unknown).deep_color,
+            config.body_preset(WaterBodyKind::Ocean).deep_color
+        );
+        assert_eq!(
+            config.body_preset(WaterBodyKind::Unknown).wave_amplitude,
+            config.body_preset(WaterBodyKind::Ocean).wave_amplitude
+        );
     }
 }
 

@@ -74,7 +74,10 @@ impl WaterMaterial {
             WaterBodyKind::River => &self.river,
             WaterBodyKind::Pond => &self.pond,
             WaterBodyKind::ShallowFlood => &self.shallow_flood,
-            WaterBodyKind::Unknown => &self.unknown,
+            // Unknown is the short-lived state before the water-body registry
+            // connects chunk meshes. Prefer ocean so horizon chunks do not flash
+            // as grey/lake water while classification catches up.
+            WaterBodyKind::Unknown => &self.ocean,
         }
     }
 }
