@@ -758,14 +758,11 @@ pub fn update_debug_overlay(
 }
 
 pub fn render_world_bounds_debug_planes(
-    state: Res<DebugOverlayState>,
     runtime_debug: Option<Res<RuntimeViewportDebugState>>,
     world: Res<VoxelWorld>,
     mut gizmos: Gizmos,
 ) {
-    if !state.visible
-        && !runtime_debug.is_some_and(|debug| debug.editor_controlled && debug.chunk_bounds)
-    {
+    if !should_render_world_bounds_debug_planes(runtime_debug.as_deref()) {
         return;
     }
 
@@ -802,6 +799,12 @@ pub fn render_world_bounds_debug_planes(
         bounds.kill_y as f32,
         Color::srgba(1.0, 0.05, 0.05, 0.65),
     );
+}
+
+fn should_render_world_bounds_debug_planes(
+    runtime_debug: Option<&RuntimeViewportDebugState>,
+) -> bool {
+    runtime_debug.is_some_and(|debug| debug.editor_controlled && debug.chunk_bounds)
 }
 
 fn draw_debug_plane(
@@ -1604,4 +1607,29 @@ fn append_control_hints(
         "\n[Alt+Shift+R] Timing trace: {}",
         if timing_capture.active { "REC" } else { "OFF" }
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_bounds_debug_planes_are_hidden_in_normal_play_mode() {
+        assert!(!should_render_world_bounds_debug_planes(None));
+        assert!(!should_render_world_bounds_debug_planes(Some(
+            &RuntimeViewportDebugState::default()
+        )));
+    }
+
+    #[test]
+    fn world_bounds_debug_planes_follow_editor_chunk_bounds_toggle() {
+        let mut debug_state = RuntimeViewportDebugState {
+            editor_controlled: true,
+            ..default()
+        };
+        assert!(should_render_world_bounds_debug_planes(Some(&debug_state)));
+
+        debug_state.chunk_bounds = false;
+        assert!(!should_render_world_bounds_debug_planes(Some(&debug_state)));
+    }
 }
