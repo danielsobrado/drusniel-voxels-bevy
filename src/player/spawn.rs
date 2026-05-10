@@ -15,7 +15,7 @@ use crate::voxel::world::{VoxelSample, VoxelWorld, WorldBounds};
 const SPAWN_HEADROOM_BLOCKS: i32 = 3;
 const SPAWN_RING_STEP: i32 = 4;
 const SPAWN_MAX_RADIUS: i32 = 160;
-const INITIAL_SPAWN_COLLIDER_WAIT_FRAMES: u32 = 120;
+const INITIAL_SPAWN_WAIT_LOG_FRAMES: u32 = 300;
 const LAST_SAFE_VERTICAL_TOLERANCE: f32 = 1.75;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,7 +109,6 @@ pub struct PlayerSpawnState {
     pub last_safe_grounded_position: Option<Vec3>,
     pub last_safe_ground_valid: bool,
     pub stats: SpawnValidationReport,
-    pub initial_spawn_terrain_fallbacks: u64,
     pub void_recovery_terrain_fallbacks: u64,
     pub void_recoveries: u64,
 }
@@ -122,17 +121,10 @@ impl Default for PlayerSpawnState {
             last_safe_grounded_position: None,
             last_safe_ground_valid: false,
             stats: SpawnValidationReport::default(),
-            initial_spawn_terrain_fallbacks: 0,
             void_recovery_terrain_fallbacks: 0,
             void_recoveries: 0,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct InitialSpawnResolution {
-    spawn: ValidSpawnLocation,
-    used_terrain_only_fallback: bool,
 }
 
 #[derive(Default)]
@@ -226,29 +218,13 @@ pub fn resolve_initial_player_spawn(
 
     let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
     let center = world_center_xz(&world);
-    let allow_terrain_only_fallback =
-        state.initial_spawn_wait_frames >= INITIAL_SPAWN_COLLIDER_WAIT_FRAMES;
-    match choose_initial_spawn(
-        &world,
-        center,
-        &readiness,
-        allow_terrain_only_fallback,
-        &mut state.stats,
-    ) {
-        Some(resolution) => {
-            let spawn = resolution.spawn;
+    match find_nearest_valid_spawn(&world, center, &readiness, true, &mut state.stats) {
+        Some(spawn) => {
             transform.translation = spawn.position;
             state.last_safe_grounded_position = Some(spawn.position);
             state.last_safe_ground_valid = true;
             state.initial_spawn_pending = false;
             state.initial_spawn_wait_frames = 0;
-            if resolution.used_terrain_only_fallback {
-                state.initial_spawn_terrain_fallbacks += 1;
-                warn!(
-                    "Initial player spawn used terrain-only fallback at {:?} on surface {:?}; colliders are still catching up",
-                    spawn.position, spawn.surface_block
-                );
-            }
             info!(
                 "Initial player spawn resolved at {:?} on surface {:?}",
                 spawn.position, spawn.surface_block
@@ -256,6 +232,14 @@ pub fn resolve_initial_player_spawn(
         }
         None => {
             state.last_safe_ground_valid = false;
+            if state.initial_spawn_wait_frames % INITIAL_SPAWN_WAIT_LOG_FRAMES == 0 {
+                warn!(
+                    "Initial player spawn is waiting for terrain colliders near {:?} ({} frames, collider rejections={})",
+                    center,
+                    state.initial_spawn_wait_frames,
+                    state.stats.rejected_collider_not_ready
+                );
+            }
         }
     }
 }
@@ -452,11 +436,6 @@ pub fn record_spawn_diagnostics(
     );
     timing.record_count(
         frame.0,
-        "Initial Spawn Terrain Fallbacks",
-        state.initial_spawn_terrain_fallbacks as f64,
-    );
-    timing.record_count(
-        frame.0,
         "Void Recovery Terrain Fallbacks",
         state.void_recovery_terrain_fallbacks as f64,
     );
@@ -584,35 +563,6 @@ pub fn find_nearest_valid_spawn(
     }
 
     None
-}
-
-fn choose_initial_spawn(
-    world: &VoxelWorld,
-    origin: Vec2,
-    collider_readiness: &SpawnColliderReadiness,
-    allow_terrain_only_fallback: bool,
-    stats: &mut SpawnValidationReport,
-) -> Option<InitialSpawnResolution> {
-    let collider_rejections_before = stats.rejected_collider_not_ready;
-    if let Some(spawn) = find_nearest_valid_spawn(world, origin, collider_readiness, true, stats) {
-        return Some(InitialSpawnResolution {
-            spawn,
-            used_terrain_only_fallback: false,
-        });
-    }
-
-    let terrain_exists_but_colliders_are_late =
-        stats.rejected_collider_not_ready > collider_rejections_before;
-    if allow_terrain_only_fallback && terrain_exists_but_colliders_are_late {
-        find_nearest_valid_spawn(world, origin, collider_readiness, false, stats).map(|spawn| {
-            InitialSpawnResolution {
-                spawn,
-                used_terrain_only_fallback: true,
-            }
-        })
-    } else {
-        None
-    }
 }
 
 pub fn run_random_spawn_test(world: &VoxelWorld, sample_count: usize) -> SpawnValidationReport {
@@ -913,23 +863,18 @@ mod tests {
     }
 
     #[test]
-    fn initial_spawn_waits_for_colliders_then_falls_back_to_terrain() {
+    fn nearest_spawn_requires_colliders_when_requested() {
         let world = world_with_surface(MIN_BREAKABLE_Y + 4, VoxelType::TopSoil);
         let origin = Vec2::new(4.0, 4.0);
         let readiness = SpawnColliderReadiness::default();
         let mut stats = SpawnValidationReport::default();
 
-        assert!(choose_initial_spawn(&world, origin, &readiness, false, &mut stats).is_none());
+        assert!(find_nearest_valid_spawn(&world, origin, &readiness, true, &mut stats).is_none());
         assert!(stats.rejected_collider_not_ready > 0);
 
-        let resolution =
-            choose_initial_spawn(&world, origin, &readiness, true, &mut stats).expect("spawn");
-
-        assert!(resolution.used_terrain_only_fallback);
-        assert_eq!(
-            resolution.spawn.surface_block,
-            IVec3::new(4, MIN_BREAKABLE_Y + 4, 4)
-        );
+        let spawn =
+            find_nearest_valid_spawn(&world, origin, &readiness, false, &mut stats).expect("spawn");
+        assert_eq!(spawn.surface_block, IVec3::new(4, MIN_BREAKABLE_Y + 4, 4));
     }
 
     #[test]
