@@ -2,6 +2,8 @@
 
 Game based on https://www.drusniel.com/ lore.
 
+![Loader](docs/images/loader.jpg)
+
 ## Version History
 
 Current development version: **v0.5**.

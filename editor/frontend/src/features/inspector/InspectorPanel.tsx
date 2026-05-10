@@ -27,7 +27,7 @@ const toDisplaySummary = (selectionLabel: string, selectedObject: unknown): stri
 const formatCoordinates = (values: readonly number[]): string => values.join(", ");
 const selectionId = (selection: Selection): string => (selection.kind === "voxel" ? selection.chunkId : selection.id);
 
-export function InspectorPanel() {
+export function InspectorPanel({ onClose }: { readonly onClose?: () => void } = {}) {
   const editorState = useEditorStore();
   const { backendClient, runtimeClient } = useEditorClients();
   const { runCommandById } = useCommandRunner({ backendClient, runtimeClient });
@@ -173,12 +173,8 @@ export function InspectorPanel() {
 
   return (
     <section className="panel-shell" data-testid="panel-inspector" aria-labelledby="inspector-title">
-      <PanelTitleBar title="Inspector" />
+      <PanelTitleBar title="Inspector" titleId="inspector-title" onClose={onClose} />
       <div className="panel-body">
-        <h2 id="inspector-title" className="placeholder-heading">
-          Inspector
-        </h2>
-        <p className="agent-hint">Agent Hint: selection follows the active Bevy ray target and updates this inspector from runtime snapshots.</p>
         <div className="inspector-card">
           <span className="inspector-kicker">Selected {inspectorKind}</span>
           <strong data-testid="inspector-selection-header">{editorState.selection.label}</strong>

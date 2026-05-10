@@ -78,10 +78,10 @@ export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
   const lastResetRequestId = useRef(resetRequestId);
   const components = useMemo(
     () => ({
-      viewport: (_props: IDockviewPanelProps) => <ViewportPanel />,
+      viewport: (props: IDockviewPanelProps) => <ViewportPanel onClose={() => props.api.close()} />,
       "viewport-controls": (_props: IDockviewPanelProps) => <ViewportControlsPanel />,
-      outliner: (_props: IDockviewPanelProps) => <WorldOutlinerPanel />,
-      inspector: (_props: IDockviewPanelProps) => <InspectorPanel />,
+      outliner: (props: IDockviewPanelProps) => <WorldOutlinerPanel onClose={() => props.api.close()} />,
+      inspector: (props: IDockviewPanelProps) => <InspectorPanel onClose={() => props.api.close()} />,
       assets: (_props: IDockviewPanelProps) => <AssetBrowserPanel />,
       atlas: (_props: IDockviewPanelProps) => <TextureAtlasPanel />,
       console: (_props: IDockviewPanelProps) => <ConsolePanel />,

@@ -96,7 +96,7 @@ const buildPlacedProp = (
   };
 };
 
-export function ViewportPanel() {
+export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {}) {
   const editorState = useEditorStore();
   const { backendClient, runtimeClient } = useEditorClients();
   const { runCommandById } = useCommandRunner({ backendClient, runtimeClient });
@@ -353,12 +353,8 @@ export function ViewportPanel() {
 
   return (
     <section className="panel-shell viewport-panel" data-testid="panel-viewport" aria-labelledby="viewport-title">
-      <PanelTitleBar title="Viewport" />
+      <PanelTitleBar title="Viewport" titleId="viewport-title" onClose={onClose} />
       <div className="panel-body viewport-body">
-        <h2 id="viewport-title" className="sr-only">
-          Viewport
-        </h2>
-
         <BevyCanvasHost
           chunks={editorState.chunks}
           worldViewport={editorState.worldViewport}

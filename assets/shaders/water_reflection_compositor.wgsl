@@ -78,17 +78,14 @@ fn occlusion_aware_mask(raw_mask: f32, uv: vec2<f32>, surface_y: f32) -> f32 {
     }
 
     let scene_delta = scene_world_y_from_depth(uv, depth) - surface_y;
-    let camera_delta = view.world_position.y - surface_y;
-    let clearance = 0.08;
+    let clearance = 0.02;
 
-    if camera_delta > clearance && scene_delta > clearance {
-        return 0.0;
-    }
-    if camera_delta < -clearance && scene_delta < -clearance {
+    if scene_delta > clearance + 0.25 {
         return 0.0;
     }
 
-    return raw_mask;
+    let terrain_occlusion = smoothstep(0.0, 0.25, scene_delta);
+    return raw_mask * (1.0 - terrain_occlusion);
 }
 
 fn wave_distortion(uv: vec2<f32>, surface_y: f32, strength: f32) -> vec2<f32> {

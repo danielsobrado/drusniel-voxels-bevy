@@ -152,7 +152,7 @@ function OutlinerPlaceholder({ label }: { readonly label: string }) {
   return <div className="outliner-placeholder">{label}</div>;
 }
 
-export function WorldOutlinerPanel() {
+export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void } = {}) {
   const editorState = useEditorStore();
   const allNodes = getVisibleOutlinerNodes(editorState);
 
@@ -313,12 +313,8 @@ export function WorldOutlinerPanel() {
 
   return (
     <section className="panel-shell" data-testid="panel-world-outliner" aria-labelledby="outliner-title">
-      <PanelTitleBar title="World Outliner" />
+      <PanelTitleBar title="World Outliner" titleId="outliner-title" onClose={onClose} />
       <div className="panel-body">
-        <h2 id="outliner-title" className="placeholder-heading">
-          World Outliner
-        </h2>
-        <p className="agent-hint">Agent Hint: select any item below to switch inspector and update the contextual agent summary.</p>
         <div className="outliner-toolbar">
           <label className="outliner-search">
             <Search size={14} aria-hidden="true" />
