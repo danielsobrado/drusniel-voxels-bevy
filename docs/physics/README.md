@@ -14,6 +14,9 @@ The source plan was written for a standalone JavaScript physics engine. In this 
 - [Plan 1: Foundation](plan-01-foundation.md) - stabilize the Bevy/Avian physics foundation, authoring helpers, collider generation, diagnostics, fixed-step policy, and query facade.
 - [Plan 2: Contacts, Solver Behavior, and Gameplay Physics](plan-02-contacts-queries-gameplay.md) - wire contact events, solver behavior tests, sensors, spatial queries, materials, collision filtering, and gameplay behaviors.
 - [Plan 3: Physics Features, Editor, and Performance Polish](plan-03-runtime-editor-performance.md) - harden sleep/wake, spawn validation, filtering, sensors, queries, debug overlays, performance budgets, collider caching, smoke scenes, and documentation.
+- [Plan 4: Terrain Collider Overhaul](plan-04-terrain-collider-overhaul.md) - replace render-mesh-derived terrain collision with authoritative occupancy-derived collision, async double-buffered swaps, player readiness/fallback logic, and collider route benchmarks.
+
+Plan 4 supersedes the terrain-collider portions of Plans 1 and 3 where they conflict. The earlier plans still apply to general physics authoring, contacts, queries, sensors, and editor-facing polish.
 
 ## Rules For Implementation
 

@@ -17,9 +17,11 @@ assets/*.html
 # World save file
 *.bin![1778071754577](image/.gitignore/1778071754577.png)![1778071758337](image/.gitignore/1778071758337.png)
 *.local.json
-*.png
 *.fbx
 *.gltf
+assets/models/*/*.png
+assets/models/*.png
+assets/textures/*/*/*.png
 assets/models/_downloads/*.zip
 assets/models/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/obj/*
 assets/models/Models/DAE format/*
@@ -54,3 +56,16 @@ editor/frontend/src-tauri/gen/
 editor/frontend/src-tauri/binaries/
 assets/temp/
 world_data.bin
+
+!assets\images\
+assets\models\glTF\*.png
+editor/frontend/src-tauri/icons/ios/*.png
+editor/frontend/src-tauri/icons/android/mipmap-mdpi/*.png
+editor/frontend/src-tauri/icons/android/mipmap-xhdpi/*.png
+editor/frontend/src-tauri/icons/*.png
+assets/models/vegetation/trees/ultimate_stylized_nature/*.png
+editor/frontend/src-tauri/icons/android/mipmap-xxhdpi/*.png
+assets/models/vegetation/plants_flowers/ultimate_stylized_nature/*.png
+editor/frontend/src-tauri/icons/android/mipmap-xxxhdpi/*.png
+editor/frontend/src-tauri/icons/android/mipmap-hdpi/*.png
+assets/models/vegetation/grass_bushes/ultimate_stylized_nature/*.png
