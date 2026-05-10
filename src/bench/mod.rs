@@ -8,7 +8,10 @@ use crate::inventory_ui::InventoryUiState;
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
-use crate::player::Player;
+use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::player::{
+    Player, SpawnColliderReadiness, classify_player_world_validity, find_surface_spawn,
+};
 use crate::props::instanced_render::{InstancedPropGroup, PropInstanceGroups};
 use crate::props::instancing::PropMeshCache;
 use crate::props::persistence::PropPersistenceState;
@@ -19,7 +22,7 @@ use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
-use crate::voxel::meshing::WaterMesh;
+use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
 use crate::voxel::world::VoxelWorld;
 use avian3d::prelude::{LinearVelocity, Position};
@@ -202,6 +205,10 @@ struct BenchState {
     gameplay_stall_frames: u32,
     gameplay_stall_events: u32,
     gameplay_min_horizontal_speed: f32,
+    gameplay_min_y: f32,
+    gameplay_fall_events: u32,
+    gameplay_was_falling_through: bool,
+    gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
     started: Instant,
@@ -254,6 +261,29 @@ struct BenchRenderReadySignature {
     queued_instanced_draws: u32,
     queued_instanced_instances: u32,
     water_reflection_sampled: u32,
+}
+
+#[derive(Clone, Serialize)]
+struct GameplayTraceSample {
+    frame: u32,
+    run_index: u32,
+    checkpoint: String,
+    position_x: f32,
+    position_y: f32,
+    position_z: f32,
+    velocity_x: f32,
+    velocity_y: f32,
+    velocity_z: f32,
+    horizontal_speed: f32,
+    chunk_x: i32,
+    chunk_y: i32,
+    chunk_z: i32,
+    expected_surface_y: Option<f32>,
+    surface_delta: Option<f32>,
+    validity: String,
+    falling_through: bool,
+    collider_ready: bool,
+    collider_pending: bool,
 }
 
 impl BenchReadySnapshot {
@@ -408,6 +438,10 @@ struct RunRecord {
     gameplay_stall_events: u32,
     gameplay_failed: bool,
     gameplay_min_horizontal_speed: f32,
+    gameplay_min_y: f32,
+    gameplay_fall_events: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gameplay_trace_csv: Option<String>,
     ready_mesh_entities: u32,
     ready_water_mesh_entities: u32,
 }
@@ -707,6 +741,10 @@ impl Plugin for BenchPlugin {
                 gameplay_stall_frames: 0,
                 gameplay_stall_events: 0,
                 gameplay_min_horizontal_speed: 0.0,
+                gameplay_min_y: f32::MAX,
+                gameplay_fall_events: 0,
+                gameplay_was_falling_through: false,
+                gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
                 started,
@@ -1106,6 +1144,7 @@ fn run_bench_state_machine(
     mut terrain_lod_control: Option<ResMut<TerrainLodControl>>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
+    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if state.phase == BenchPhase::Done {
@@ -1182,6 +1221,10 @@ fn run_bench_state_machine(
             state.gameplay_stall_frames = 0;
             state.gameplay_stall_events = 0;
             state.gameplay_min_horizontal_speed = f32::MAX;
+            state.gameplay_min_y = f32::MAX;
+            state.gameplay_fall_events = 0;
+            state.gameplay_was_falling_through = false;
+            state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
             state.ready_stable_frames = 0;
@@ -1499,6 +1542,26 @@ fn run_bench_state_machine(
                 if let Err(err) = write_area_timing_csv(&timing, &csv_path) {
                     warn!("failed to write bench CSV {}: {}", csv_path.display(), err);
                 }
+                let gameplay_trace_csv = if checkpoint.gameplay.is_some() {
+                    let trace_name = run_file_name(
+                        &config.scene_path,
+                        checkpoint,
+                        Some("gameplay-path"),
+                        state.run_index,
+                        "csv",
+                    );
+                    let trace_path = config.output_dir.join(&trace_name);
+                    if let Err(err) = write_gameplay_trace_csv(&state.gameplay_trace, &trace_path) {
+                        warn!(
+                            "failed to write gameplay trace CSV {}: {}",
+                            trace_path.display(),
+                            err
+                        );
+                    }
+                    Some(trace_name)
+                } else {
+                    None
+                };
                 let frame_ms = timing
                     .frame_total_summary()
                     .map(|s| s.avg_ms)
@@ -1561,6 +1624,13 @@ fn run_bench_state_machine(
                     } else {
                         0.0
                     },
+                    gameplay_min_y: if state.gameplay_min_y.is_finite() {
+                        state.gameplay_min_y
+                    } else {
+                        0.0
+                    },
+                    gameplay_fall_events: state.gameplay_fall_events,
+                    gameplay_trace_csv,
                     ready_mesh_entities: state.last_ready_snapshot.signature.mesh_entities,
                     ready_water_mesh_entities: state
                         .last_ready_snapshot
@@ -1594,6 +1664,8 @@ fn run_bench_state_machine(
                     checkpoint,
                     &mut state,
                     &mut player,
+                    &world,
+                    &collider_query,
                 );
                 if checkpoint.gameplay.is_none()
                     && let Ok((mut transform, _player_camera)) = camera.single_mut()
@@ -1644,6 +1716,56 @@ fn screenshots_exist(config: &BenchConfig, screenshots: &[ScreenshotRecord]) -> 
         .all(|screenshot| config.output_dir.join(&screenshot.path).exists())
 }
 
+fn write_gameplay_trace_csv(
+    samples: &[GameplayTraceSample],
+    path: &Path,
+) -> Result<(), std::io::Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut csv = String::from(
+        "frame,run_index,checkpoint,position_x,position_y,position_z,velocity_x,velocity_y,velocity_z,horizontal_speed,chunk_x,chunk_y,chunk_z,expected_surface_y,surface_delta,validity,falling_through,collider_ready,collider_pending\n",
+    );
+    for sample in samples {
+        csv.push_str(&format!(
+            "{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{},{},{},{},{}\n",
+            sample.frame,
+            sample.run_index,
+            csv_escape(&sample.checkpoint),
+            sample.position_x,
+            sample.position_y,
+            sample.position_z,
+            sample.velocity_x,
+            sample.velocity_y,
+            sample.velocity_z,
+            sample.horizontal_speed,
+            sample.chunk_x,
+            sample.chunk_y,
+            sample.chunk_z,
+            csv_optional_f32(sample.expected_surface_y),
+            csv_optional_f32(sample.surface_delta),
+            csv_escape(&sample.validity),
+            sample.falling_through as u8,
+            sample.collider_ready as u8,
+            sample.collider_pending as u8,
+        ));
+    }
+    std::fs::write(path, csv)
+}
+
+fn csv_optional_f32(value: Option<f32>) -> String {
+    value.map(|value| format!("{value:.4}")).unwrap_or_default()
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
 fn finish_run(
     config: &BenchConfig,
     scene: &BenchScene,
@@ -1669,6 +1791,9 @@ fn finish_run(
         gameplay_stall_events: 0,
         gameplay_failed: false,
         gameplay_min_horizontal_speed: 0.0,
+        gameplay_min_y: 0.0,
+        gameplay_fall_events: 0,
+        gameplay_trace_csv: None,
         ready_mesh_entities: 0,
         ready_water_mesh_entities: 0,
     });
@@ -2226,19 +2351,23 @@ fn record_bench_gameplay_counts(
         ),
         (With<Player>, Without<PlayerCamera>),
     >,
+    world: &VoxelWorld,
+    collider_query: &Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
 ) {
     let Some(gameplay) = checkpoint.gameplay.as_ref() else {
         return;
     };
 
-    let horizontal_speed = player
-        .single_mut()
-        .ok()
-        .and_then(|(_transform, _position, velocity)| {
-            velocity.map(|velocity| Vec2::new(velocity.x, velocity.z).length())
-        })
-        .unwrap_or(0.0);
+    let Ok((transform, _position, velocity)) = player.single_mut() else {
+        return;
+    };
+    let velocity = velocity
+        .as_deref()
+        .map(|velocity| velocity.0)
+        .unwrap_or(Vec3::ZERO);
+    let horizontal_speed = Vec2::new(velocity.x, velocity.z).length();
     state.gameplay_min_horizontal_speed = state.gameplay_min_horizontal_speed.min(horizontal_speed);
+    state.gameplay_min_y = state.gameplay_min_y.min(transform.translation.y);
 
     let input_active =
         Vec2::new(gameplay.movement[0], gameplay.movement[1]).length_squared() > 0.25;
@@ -2265,6 +2394,39 @@ fn record_bench_gameplay_counts(
         state.gameplay_failed = true;
     }
 
+    let sample = gameplay_trace_sample(
+        checkpoint,
+        state.run_index,
+        state.hold_elapsed_frames,
+        transform.translation,
+        velocity,
+        horizontal_speed,
+        world,
+        collider_query,
+    );
+    if sample.falling_through && !state.gameplay_was_falling_through {
+        state.gameplay_fall_events += 1;
+        state.gameplay_failed = true;
+        warn!(
+            "Bench gameplay fall-through: checkpoint='{}' run={} frame={} pos=({:.2},{:.2},{:.2}) vel=({:.2},{:.2},{:.2}) validity={} surface_delta={:?} collider_ready={} collider_pending={}",
+            checkpoint.name,
+            state.run_index,
+            state.hold_elapsed_frames,
+            sample.position_x,
+            sample.position_y,
+            sample.position_z,
+            sample.velocity_x,
+            sample.velocity_y,
+            sample.velocity_z,
+            sample.validity,
+            sample.surface_delta,
+            sample.collider_ready,
+            sample.collider_pending,
+        );
+    }
+    state.gameplay_was_falling_through = sample.falling_through;
+    state.gameplay_trace.push(sample);
+
     timing.record_count(
         frame,
         "Bench Gameplay Input Active",
@@ -2290,6 +2452,75 @@ fn record_bench_gameplay_counts(
         "Bench Gameplay Failed",
         state.gameplay_failed as u8 as f64,
     );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Fall Events",
+        state.gameplay_fall_events as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Player Y",
+        transform.translation.y as f64,
+    );
+    timing.record_count(frame, "Bench Gameplay Min Y", state.gameplay_min_y as f64);
+}
+
+fn gameplay_trace_sample(
+    checkpoint: &BenchCheckpoint,
+    run_index: u32,
+    frame: u32,
+    position: Vec3,
+    velocity: Vec3,
+    horizontal_speed: f32,
+    world: &VoxelWorld,
+    collider_query: &Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+) -> GameplayTraceSample {
+    let block = position.floor().as_ivec3();
+    let chunk = VoxelWorld::world_to_chunk(block);
+    let expected_surface_y = find_surface_spawn(
+        world,
+        block.x,
+        block.z,
+        &SpawnColliderReadiness::default(),
+        false,
+    )
+    .ok()
+    .map(|spawn| spawn.position.y);
+    let surface_delta = expected_surface_y.map(|surface_y| position.y - surface_y);
+    let validity = classify_player_world_validity(world, position);
+    let falling_through = !validity.is_valid()
+        || position.y < world.bounds().min_breakable_y as f32
+        || surface_delta.is_some_and(|delta| delta < -2.0);
+    let mut collider_ready = false;
+    let mut collider_pending = false;
+    for (chunk_mesh, collider, needs_collider) in collider_query.iter() {
+        if chunk_mesh.chunk_position == chunk {
+            collider_ready |= collider.is_some() && needs_collider.is_none();
+            collider_pending |= needs_collider.is_some();
+        }
+    }
+
+    GameplayTraceSample {
+        frame,
+        run_index,
+        checkpoint: checkpoint.name.clone(),
+        position_x: position.x,
+        position_y: position.y,
+        position_z: position.z,
+        velocity_x: velocity.x,
+        velocity_y: velocity.y,
+        velocity_z: velocity.z,
+        horizontal_speed,
+        chunk_x: chunk.x,
+        chunk_y: chunk.y,
+        chunk_z: chunk.z,
+        expected_surface_y,
+        surface_delta,
+        validity: validity.label().to_string(),
+        falling_through,
+        collider_ready,
+        collider_pending,
+    }
 }
 
 fn apply_fog_tier_if_supported(

@@ -1,0 +1,65 @@
+seed = 12345
+duration_warmup_secs = 3.0
+median_runs = 1
+chunk_load_radius = 8
+freeze_terrain_lod_after_ready = false
+
+[[checkpoint]]
+name = "spawn-north-walk"
+position = [256.5, 34.0, 256.5]
+look_at = [256.5, 31.0, 332.5]
+time_of_day = 0.45
+hold_frames = 1200
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [256.5, 28.0, 256.5]
+start_look_at = [256.5, 31.0, 332.5]
+movement = [0.0, 1.0]
+sprint = true
+jump_every_frames = 180
+min_horizontal_speed = 2.0
+stall_after_frames = 24
+max_stall_events = 2
+fail_on_stall = true
+
+[[checkpoint]]
+name = "spawn-east-walk"
+position = [256.5, 34.0, 256.5]
+look_at = [332.5, 31.0, 256.5]
+time_of_day = 0.45
+hold_frames = 1200
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [256.5, 28.0, 256.5]
+start_look_at = [332.5, 31.0, 256.5]
+movement = [0.0, 1.0]
+sprint = true
+jump_every_frames = 180
+min_horizontal_speed = 2.0
+stall_after_frames = 24
+max_stall_events = 2
+fail_on_stall = true
+
+[[checkpoint]]
+name = "old-hole-route"
+position = [389.6, 54.0, 172.6]
+look_at = [430.0, 49.0, 215.0]
+time_of_day = 0.45
+hold_frames = 1200
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [389.6, 50.5, 172.6]
+start_look_at = [430.0, 49.0, 215.0]
+movement = [0.0, 1.0]
+sprint = true
+jump_every_frames = 180
+min_horizontal_speed = 2.0
+stall_after_frames = 24
+max_stall_events = 2
+fail_on_stall = true
