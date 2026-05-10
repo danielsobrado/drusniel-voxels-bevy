@@ -974,7 +974,9 @@ fn start_pending_world_generation(
     begin_world_generation(&mut commands, &world, &mut gen_state);
 }
 
-fn spawn_world_startup_overlay(mut commands: Commands) {
+fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let background_image = asset_server.load("images/DrunsielShyntara.png");
+
     commands
         .spawn((
             Node {
@@ -990,60 +992,94 @@ fn spawn_world_startup_overlay(mut commands: Commands) {
                 padding: UiRect::all(Val::Px(24.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.015, 0.018, 0.02, 0.92)),
+            BackgroundColor(Color::srgb(0.015, 0.018, 0.02)),
             WorldStartupOverlay,
         ))
         .with_children(|root| {
             root.spawn((
-                Text::new("Loading existing world"),
-                TextFont {
-                    font_size: 28.0,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
                     ..default()
                 },
-                TextColor(Color::srgba(0.92, 0.96, 1.0, 1.0)),
-                WorldStartupTitleText,
-            ));
-
-            root.spawn((
-                Text::new("Checking saved world"),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.72, 0.78, 0.82, 1.0)),
-                WorldStartupDetailText,
+                ImageNode::new(background_image),
             ));
 
             root.spawn((
                 Node {
-                    width: Val::Px(420.0),
-                    max_width: Val::Percent(82.0),
-                    height: Val::Px(10.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.14, 0.17, 0.19, 1.0)),
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    Node {
-                        width: Val::Percent(8.0),
-                        height: Val::Percent(100.0),
+                BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.58)),
+            ));
+
+            root.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(12.0),
+                ..default()
+            })
+            .with_children(|content| {
+                content.spawn((
+                    Text::new("Loading existing world"),
+                    TextFont {
+                        font_size: 28.0,
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.36, 0.66, 0.48, 1.0)),
-                    WorldStartupProgressFill,
+                    TextColor(Color::srgba(0.95, 0.97, 0.96, 1.0)),
+                    WorldStartupTitleText,
+                ));
+
+                content.spawn((
+                    Text::new("Checking saved world"),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.82, 0.88, 0.86, 1.0)),
+                    WorldStartupDetailText,
+                ));
+
+                content
+                    .spawn((
+                        Node {
+                            width: Val::Px(420.0),
+                            max_width: Val::Percent(82.0),
+                            height: Val::Px(10.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.08, 0.1, 0.09, 0.9)),
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Node {
+                                width: Val::Percent(8.0),
+                                height: Val::Percent(100.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.47, 0.76, 0.46, 1.0)),
+                            WorldStartupProgressFill,
+                        ));
+                    });
+
+                content.spawn((
+                    Text::new("Loading..."),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.9, 0.94, 0.92, 1.0)),
+                    WorldStartupPercentText,
                 ));
             });
-
-            root.spawn((
-                Text::new("Loading..."),
-                TextFont {
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.84, 0.88, 0.9, 1.0)),
-                WorldStartupPercentText,
-            ));
         });
 }
 
