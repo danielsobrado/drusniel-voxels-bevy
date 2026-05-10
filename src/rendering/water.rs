@@ -1,70 +1,81 @@
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
 use bevy::shader::Shader;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishConfig;
 use crate::voxel::meshing::WaterBodyKind;
 
-/// Enhanced water configuration with Gerstner waves, foam, caustics, reflections, and more
-#[derive(Resource, Deserialize, Clone)]
+/// Water configuration. Per-body wave/colour/reflection tuning lives in
+/// `body_presets`; the rest are toggles for reflections, refraction,
+/// displacement, weather coupling, the optional witchcraft finish, and the
+/// optional Noble shader paths.
+#[derive(Resource, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct WaterConfig {
-    pub gerstner: GerstnerConfig,
-    pub foam: FoamConfig,
-    pub caustics: CausticsConfig,
-    pub visual: WaterVisualConfig,
-    #[serde(default)]
     pub body_presets: WaterBodyPresetsConfig,
-    #[serde(default)]
-    pub detail_normals: DetailNormalConfig,
-    #[serde(default)]
     pub reflections: ReflectionConfig,
-    #[serde(default)]
     pub refraction: RefractionConfig,
-    #[serde(default)]
     pub displacement: DisplacementConfig,
-    #[serde(default)]
     pub weather: WaterWeatherConfig,
-    #[serde(default)]
     pub witchcraft_finish: WitchcraftWaterFinishConfig,
+    #[serde(alias = "noble_shaders")]
+    pub shader_toggles: WaterShaderToggles,
 }
 
-#[derive(Deserialize, Clone)]
-pub struct GerstnerConfig {
-    pub enabled: bool,
-    pub amplitude: f32,
-    pub wave_scale: f32,
-    pub wave_speed: f32,
-    pub wave_count: u32,
+#[derive(Resource, Deserialize, Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct WaterShaderToggles {
+    pub gerstner: bool,
+    pub voronoi_foam: bool,
+    pub detail_normals: bool,
+    pub water_parallax: bool,
 }
 
-#[derive(Deserialize, Clone)]
-pub struct FoamConfig {
-    pub enabled: bool,
-    pub color: [f32; 3],
-    pub intensity: f32,
-    pub scale: f32,
-    pub persistence: f32,
-    pub shore_foam: bool,
-    pub wave_crest_foam: bool,
+impl WaterShaderToggles {
+    /// Magnitude added to `material.edge_color.a` to mark Gerstner enabled.
+    /// Disjoint from the witchcraft alpha encoding (which lives in 0..=200).
+    pub const GERSTNER_BIT: f32 = 10_000.0;
+    /// Magnitude added to `material.edge_color.a` to mark Voronoi foam enabled.
+    pub const VORONOI_FOAM_BIT: f32 = 20_000.0;
+
+    pub fn with_env_overrides(self) -> Self {
+        Self {
+            gerstner: self.gerstner || env_flag("VOXEL_WATER_GERSTNER"),
+            voronoi_foam: self.voronoi_foam || env_flag("VOXEL_WATER_VORONOI_FOAM"),
+            // detail_normals and water_parallax are placeholders — they read from the YAML
+            // and env (`VOXEL_WATER_DETAIL_NORMALS`, `VOXEL_WATER_PARALLAX`) so the config
+            // schema is stable, but no shader code reads them yet (pending the Noble port).
+            detail_normals: self.detail_normals || env_flag("VOXEL_WATER_DETAIL_NORMALS"),
+            water_parallax: self.water_parallax || env_flag("VOXEL_WATER_PARALLAX"),
+        }
+    }
+
+    pub fn any(self) -> bool {
+        self.gerstner || self.voronoi_foam || self.detail_normals || self.water_parallax
+    }
+
+    /// Add toggle bits on top of the witchcraft alpha encoding so the WGSL
+    /// fragment can branch on them without forking `bevy_water`.
+    pub fn encode_alpha(self, alpha: f32) -> f32 {
+        let mut out = alpha;
+        if self.gerstner {
+            out += Self::GERSTNER_BIT;
+        }
+        if self.voronoi_foam {
+            out += Self::VORONOI_FOAM_BIT;
+        }
+        out
+    }
 }
 
-#[derive(Deserialize, Clone)]
-pub struct CausticsConfig {
-    pub enabled: bool,
-    pub intensity: f32,
-    pub scale: f32,
-    pub speed: f32,
-    pub max_depth: f32,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct WaterVisualConfig {
-    pub deep_color: [f32; 4],
-    pub shallow_color: [f32; 4],
-    pub clarity: f32,
-    pub reflectivity: f32,
-    pub fresnel_power: f32,
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 #[derive(Deserialize, Clone)]
@@ -229,27 +240,6 @@ fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
 }
 
 #[derive(Deserialize, Clone)]
-pub struct DetailNormalConfig {
-    pub enabled: bool,
-    pub scale_a: f32,
-    pub scale_b: f32,
-    pub intensity: f32,
-    pub scroll_speed: f32,
-}
-
-impl Default for DetailNormalConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            scale_a: 0.3,
-            scale_b: 0.17,
-            intensity: 0.8,
-            scroll_speed: 0.04,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
 pub struct ReflectionConfig {
     pub enabled: bool,
     pub resolution_scale: f32,
@@ -334,50 +324,6 @@ impl Default for DisplacementConfig {
     }
 }
 
-impl Default for WaterConfig {
-    fn default() -> Self {
-        Self {
-            gerstner: GerstnerConfig {
-                enabled: true,
-                amplitude: 0.5,
-                wave_scale: 1.0,
-                wave_speed: 1.0,
-                wave_count: 4,
-            },
-            foam: FoamConfig {
-                enabled: true,
-                color: [1.0, 1.0, 1.0],
-                intensity: 1.0,
-                scale: 1.0,
-                persistence: 0.9,
-                shore_foam: true,
-                wave_crest_foam: true,
-            },
-            caustics: CausticsConfig {
-                enabled: true,
-                intensity: 0.5,
-                scale: 1.0,
-                speed: 1.0,
-                max_depth: 10.0,
-            },
-            visual: WaterVisualConfig {
-                deep_color: [0.0, 0.1, 0.2, 0.9],
-                shallow_color: [0.0, 0.3, 0.4, 0.7],
-                clarity: 0.3,
-                reflectivity: 0.8,
-                fresnel_power: 5.0,
-            },
-            body_presets: WaterBodyPresetsConfig::default(),
-            detail_normals: DetailNormalConfig::default(),
-            reflections: ReflectionConfig::default(),
-            refraction: RefractionConfig::default(),
-            displacement: DisplacementConfig::default(),
-            weather: WaterWeatherConfig::default(),
-            witchcraft_finish: WitchcraftWaterFinishConfig::default(),
-        }
-    }
-}
-
 pub fn load_water_config() -> Result<WaterConfig, Box<dyn std::error::Error>> {
     let config_str = std::fs::read_to_string("assets/config/water.yaml")?;
     let config: WaterConfig = serde_yaml::from_str(&config_str)?;
@@ -397,42 +343,19 @@ pub struct WaterVolume {
     pub bounds_max: Vec3,
 }
 
-// Shader handles for custom water modules (registered as imports via load_internal_asset!)
-pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
-    uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
-pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
+// WGSL modules registered via `load_internal_asset!` so other shaders can `#import` them.
 pub const WATER_CAUSTICS_HANDLE: Handle<Shader> =
     uuid_handle!("c3d4e5f6-a7b8-9012-cdef-012345678901");
 pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
     uuid_handle!("a42e6f9b-5c81-4a0d-a6f7-6e45e9ef0001");
-pub const WATER_DETAIL_NORMALS_HANDLE: Handle<Shader> =
-    uuid_handle!("d4e5f6a7-b8c9-0123-defa-123456789012");
-pub const WATER_DISPLACEMENT_COMPUTE_HANDLE: Handle<Shader> =
-    uuid_handle!("e5f6a7b8-c9d0-1234-efab-234567890123");
+pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
+    uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
+pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
 
 pub struct EnhancedWaterPlugin;
 
 impl Plugin for EnhancedWaterPlugin {
     fn build(&self, app: &mut App) {
-        // Register custom water shader modules so they can be #imported by water_fragment.wgsl
-        load_internal_asset!(
-            app,
-            GERSTNER_WAVES_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/gerstner_waves.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            WATER_FOAM_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/water_foam.wgsl"
-            ),
-            Shader::from_wgsl
-        );
         load_internal_asset!(
             app,
             WATER_CAUSTICS_HANDLE,
@@ -453,19 +376,19 @@ impl Plugin for EnhancedWaterPlugin {
         );
         load_internal_asset!(
             app,
-            WATER_DETAIL_NORMALS_HANDLE,
+            GERSTNER_WAVES_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/water_detail_normals.wgsl"
+                "/assets/shaders/gerstner_waves.wgsl"
             ),
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            WATER_DISPLACEMENT_COMPUTE_HANDLE,
+            WATER_FOAM_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/water_displacement_compute.wgsl"
+                "/assets/shaders/water_foam.wgsl"
             ),
             Shader::from_wgsl
         );
@@ -476,60 +399,9 @@ impl Plugin for EnhancedWaterPlugin {
         });
 
         let witchcraft_params = config.witchcraft_finish.params();
+        let shader_toggles = config.shader_toggles.with_env_overrides();
         app.insert_resource(config)
             .insert_resource(witchcraft_params)
-            .add_systems(Update, update_water_uniforms);
+            .insert_resource(shader_toggles);
     }
-}
-
-/// Uniform buffer data sent to water shaders
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct WaterUniforms {
-    pub time: f32,
-    pub amplitude: f32,
-    pub wave_scale: f32,
-    pub foam_intensity: f32,
-    pub caustic_intensity: f32,
-    pub caustic_scale: f32,
-    pub clarity: f32,
-    pub fresnel_power: f32,
-    pub deep_color: [f32; 4],
-    pub shallow_color: [f32; 4],
-    pub foam_color: [f32; 4],
-}
-
-fn update_water_uniforms(
-    time: Res<Time>,
-    config: Res<WaterConfig>,
-    // This would update shader uniforms in a real implementation
-) {
-    let _uniforms = WaterUniforms {
-        time: time.elapsed_secs(),
-        amplitude: config.gerstner.amplitude,
-        wave_scale: config.gerstner.wave_scale,
-        foam_intensity: if config.foam.enabled {
-            config.foam.intensity
-        } else {
-            0.0
-        },
-        caustic_intensity: if config.caustics.enabled {
-            config.caustics.intensity
-        } else {
-            0.0
-        },
-        caustic_scale: config.caustics.scale,
-        clarity: config.visual.clarity,
-        fresnel_power: config.visual.fresnel_power,
-        deep_color: config.visual.deep_color,
-        shallow_color: config.visual.shallow_color,
-        foam_color: [
-            config.foam.color[0],
-            config.foam.color[1],
-            config.foam.color[2],
-            1.0,
-        ],
-    };
-
-    // Uniform buffer would be updated here
 }

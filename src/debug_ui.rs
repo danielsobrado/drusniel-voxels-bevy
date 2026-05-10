@@ -1,6 +1,7 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::array_loader::AtlasMapping;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+use crate::rendering::water::WaterShaderToggles;
 use crate::vegetation::VegetationConfig;
 use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
 use crate::voxel::meshing::WaterMesh;
@@ -93,6 +94,7 @@ fn debug_settings_ui(
     veg_config: Option<ResMut<VegetationConfig>>,
     prop_fade: Option<ResMut<FoliageFadeSettings>>,
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
+    mut water_shader_toggles: ResMut<WaterShaderToggles>,
     mut sun_query: Query<&mut DirectionalLight>,
     time: Res<Time>,
     mut save_status: Local<AtlasMappingSaveStatus>,
@@ -120,6 +122,14 @@ fn debug_settings_ui(
                     .text("Baked AO Strength"),
             );
             ui.label("0 = V0.3 soft look, 1 = full baked AO");
+
+            ui.separator();
+            ui.heading("Water Shaders");
+            ui.checkbox(&mut water_shader_toggles.gerstner, "Gerstner wave normals + displacement");
+            ui.checkbox(&mut water_shader_toggles.voronoi_foam, "Multi-scale Voronoi foam");
+            ui.add_enabled(false, egui::Checkbox::new(&mut water_shader_toggles.detail_normals, "Detail normals (pending Noble port)"));
+            ui.add_enabled(false, egui::Checkbox::new(&mut water_shader_toggles.water_parallax, "Water parallax (pending Noble port)"));
+            ui.label("Toggles affect render perf — rerun bench after changes");
 
             // Atlas Mapping UI moved to Pause Menu > Settings > Textures
             if let Some(_mapping) = atlas_mapping {

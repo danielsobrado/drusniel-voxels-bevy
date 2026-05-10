@@ -12,7 +12,7 @@ use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, Props
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
 };
-use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig};
+use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig, WaterShaderToggles};
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
 use crate::vegetation::grass_material::{GrassMaterial, GrassMaterialHandles};
 use crate::voxel::meshing::WaterBodyKind;
@@ -100,6 +100,7 @@ pub fn setup_water_material(
     mut cheap_materials: ResMut<Assets<StandardMaterial>>,
     water_settings: Option<Res<WaterSettings>>,
     water_config: Option<Res<WaterConfig>>,
+    shader_toggles: Option<Res<WaterShaderToggles>>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -107,11 +108,13 @@ pub fn setup_water_material(
     let settings = water_settings.as_deref().cloned().unwrap_or_default();
     let config = water_config.as_deref().cloned().unwrap_or_default();
     let witchcraft_params = config.witchcraft_finish.params();
+    let toggles = shader_toggles.as_deref().copied().unwrap_or_default();
     let debug_solid_color = water_debug_solid_color_enabled();
     let ocean = create_body_water_materials(
         WaterBodyKind::Ocean,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -121,6 +124,7 @@ pub fn setup_water_material(
         WaterBodyKind::Lake,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -130,6 +134,7 @@ pub fn setup_water_material(
         WaterBodyKind::River,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -139,6 +144,7 @@ pub fn setup_water_material(
         WaterBodyKind::Pond,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -148,6 +154,7 @@ pub fn setup_water_material(
         WaterBodyKind::ShallowFlood,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -157,6 +164,7 @@ pub fn setup_water_material(
         WaterBodyKind::Unknown,
         &config,
         witchcraft_params,
+        toggles,
         &settings,
         debug_solid_color,
         &mut fancy_materials,
@@ -188,6 +196,7 @@ fn create_body_water_materials(
     kind: WaterBodyKind,
     config: &WaterConfig,
     witchcraft_params: WitchcraftWaterFinishParams,
+    toggles: WaterShaderToggles,
     settings: &WaterSettings,
     debug_solid_color: bool,
     fancy_materials: &mut Assets<StandardWaterMaterial>,
@@ -249,6 +258,19 @@ fn create_body_water_materials(
         edge_scale
     };
 
+    let water_extension = BevyWaterMaterial {
+        amplitude: wave_amplitude,
+        clarity,
+        deep_color,
+        shallow_color,
+        edge_color: water_edge_color(shallow_color, preset, debug_solid_color, witchcraft_params, toggles),
+        edge_scale,
+        coord_offset: Vec2::ZERO,
+        coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
+        quality: settings.water_quality.into(),
+        ..default()
+    };
+
     let near = fancy_materials.add(StandardWaterMaterial {
         base: StandardMaterial {
             base_color,
@@ -290,23 +312,7 @@ fn create_body_water_materials(
             },
             ..default()
         },
-        extension: BevyWaterMaterial {
-            amplitude: wave_amplitude,
-            clarity,
-            deep_color,
-            shallow_color,
-            edge_color: water_edge_color(
-                shallow_color,
-                preset,
-                debug_solid_color,
-                witchcraft_params,
-            ),
-            edge_scale,
-            coord_offset: Vec2::ZERO,
-            coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
-            quality: settings.water_quality.into(),
-            ..default()
-        },
+        extension: water_extension,
     });
 
     let far = cheap_materials.add(StandardMaterial {
@@ -349,16 +355,19 @@ fn water_edge_color(
     preset: &WaterBodyPresetConfig,
     debug_solid_color: bool,
     witchcraft_params: WitchcraftWaterFinishParams,
+    toggles: WaterShaderToggles,
 ) -> Color {
     if debug_solid_color {
         return shallow_color;
     }
     let linear = shallow_color.to_linear();
+    let witchcraft_alpha =
+        witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength);
     Color::linear_rgba(
         linear.red,
         linear.green,
         linear.blue,
-        witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength),
+        toggles.encode_alpha(witchcraft_alpha),
     )
 }
 
@@ -396,6 +405,7 @@ fn water_debug_body_color(kind: WaterBodyKind) -> Color {
 pub fn sync_voxel_water_material_overrides(
     water_settings: Option<Res<WaterSettings>>,
     water_config: Option<Res<WaterConfig>>,
+    shader_toggles: Option<Res<WaterShaderToggles>>,
     water_material: Option<Res<WaterMaterial>>,
     mut materials: ResMut<Assets<StandardWaterMaterial>>,
     frame: Res<FrameCount>,
@@ -406,7 +416,11 @@ pub fn sync_voxel_water_material_overrides(
         return;
     };
 
-    if !settings.is_changed() {
+    let toggles_changed = shader_toggles
+        .as_ref()
+        .map(|r| r.is_changed())
+        .unwrap_or(false);
+    if !settings.is_changed() && !toggles_changed {
         return;
     }
 
@@ -414,6 +428,7 @@ pub fn sync_voxel_water_material_overrides(
     let debug_body_colors = water_debug_body_colors_enabled();
     let config = water_config.as_deref().cloned().unwrap_or_default();
     let witchcraft_params = config.witchcraft_finish.params();
+    let toggles = shader_toggles.as_deref().copied().unwrap_or_default();
     for (kind, handle) in [
         (WaterBodyKind::Ocean, &water_material.ocean.near),
         (WaterBodyKind::Lake, &water_material.lake.near),
@@ -475,6 +490,7 @@ pub fn sync_voxel_water_material_overrides(
                 preset,
                 debug_solid_color,
                 witchcraft_params,
+                toggles,
             );
             let edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
             mat.extension.edge_scale = if water_ripple_lines_disabled() {

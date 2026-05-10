@@ -22,9 +22,18 @@
 #import bevy_pbr::meshlet_visibility_buffer_resolve::resolve_vertex_output
 #endif
 
+#import bevy_pbr::mesh_view_bindings::globals
+
 #import bevy_water::water_bindings
 #import bevy_water::water_functions as water_fn
 #import witchcraft_water_finish
+#import gerstner_waves
+#import water_foam as voronoi_foam_mod
+
+// Toggle bit magnitudes — must match `WaterShaderToggles` in `src/rendering/water.rs`.
+// The witchcraft alpha encoding lives in 0..=200; toggles use disjoint higher bands.
+const WATER_TOGGLE_VORONOI_FOAM: f32 = 20000.0;
+const WATER_TOGGLE_GERSTNER: f32 = 10000.0;
 
 @fragment
 fn fragment(
@@ -44,8 +53,14 @@ fn fragment(
   var world_position: vec4<f32> = in.world_position;
   let w_pos = water_fn::uv_to_coord(in.uv);
   let raw_edge_alpha = water_bindings::material.edge_color.a;
-  let witchcraft_reflect_b_200 = raw_edge_alpha >= 100.0;
-  let witchcraft_without_reflect = select(raw_edge_alpha, raw_edge_alpha - 100.0, witchcraft_reflect_b_200);
+  // Decode water shader toggles (Voronoi foam, Gerstner) before stripping into
+  // the witchcraft_water_finish alpha encoding.
+  let voronoi_foam_enabled = raw_edge_alpha >= WATER_TOGGLE_VORONOI_FOAM;
+  let edge_after_foam = select(raw_edge_alpha, raw_edge_alpha - WATER_TOGGLE_VORONOI_FOAM, voronoi_foam_enabled);
+  let gerstner_enabled = edge_after_foam >= WATER_TOGGLE_GERSTNER;
+  let edge_for_witchcraft = select(edge_after_foam, edge_after_foam - WATER_TOGGLE_GERSTNER, gerstner_enabled);
+  let witchcraft_reflect_b_200 = edge_for_witchcraft >= 100.0;
+  let witchcraft_without_reflect = select(edge_for_witchcraft, edge_for_witchcraft - 100.0, witchcraft_reflect_b_200);
   let witchcraft_legacy = witchcraft_without_reflect >= 50.0;
   let witchcraft_local_code = select(
     witchcraft_without_reflect,
@@ -63,17 +78,36 @@ fn fragment(
 
   // Calculate normal.
   let height = water_fn::get_wave_height(w_pos);
+  if (gerstner_enabled) {
+    // Analytical Gerstner-derived normal — replaces the QUALITY>2 finite
+    // difference path and the dpdx/dpdy fallback. `wave_count` reuses the
+    // existing bevy_water `quality` (1..=4) so layer count tracks render quality.
+    let g_amp = max(water_bindings::material.amplitude, 0.05);
+    let g_scale = max(water_bindings::material.coord_scale.x, 0.001);
+    // bevy_water's `quality` is a shader_def, not a uniform field — pin Gerstner
+    // wave_count at the max (4) when this branch runs.
+    let g_count = 4u;
+    let g_result = gerstner_waves::sum_gerstner_waves_limited(
+      w_pos,
+      globals.time,
+      g_amp,
+      g_scale,
+      g_count,
+    );
+    in.world_normal = g_result.normal;
+  } else {
 #if QUALITY > 2
-  let delta = 0.5;
-  let height_dx = water_fn::get_wave_height(w_pos + vec2<f32>(delta, 0.0));
-  let height_dz = water_fn::get_wave_height(w_pos + vec2<f32>(0.0, delta));
-  in.world_normal = normalize(vec3<f32>(height - height_dx, delta, height - height_dz));
+    let delta = 0.5;
+    let height_dx = water_fn::get_wave_height(w_pos + vec2<f32>(delta, 0.0));
+    let height_dz = water_fn::get_wave_height(w_pos + vec2<f32>(0.0, delta));
+    in.world_normal = normalize(vec3<f32>(height - height_dx, delta, height - height_dz));
 #else
-  let pos = world_position.xyz + (in.world_normal * height);
-  let pos_dx = dpdx(pos);
-  let pos_dy = dpdy(pos);
-  in.world_normal = normalize(cross(pos_dy, pos_dx));
+    let pos = world_position.xyz + (in.world_normal * height);
+    let pos_dx = dpdx(pos);
+    let pos_dy = dpdy(pos);
+    in.world_normal = normalize(cross(pos_dy, pos_dx));
 #endif
+  }
 
   // If we're in the crossfade section of a visibility range, conditionally
   // discard the fragment according to the visibility pattern.
@@ -86,6 +120,9 @@ fn fragment(
 
   let deep_color = water_bindings::material.deep_color;
   var water_color = deep_color;
+  // Track shore proximity for the optional Voronoi foam mix below; default to
+  // "no edge" when the depth-diff path doesn't run (e.g. prepass / WebGL2).
+  var edge_t: f32 = 1.0;
 #ifdef DEPTH_PREPASS
 #ifndef PREPASS_PIPELINE
 #ifndef WEBGL2
@@ -103,10 +140,42 @@ fn fragment(
   let depth_diff_view = z_fragment_view - z_depth_buffer_view;
   let beers_law = exp(-depth_diff_view * water_clarity);
   let depth_color = vec4<f32>(mix(deep_color.xyz, shallow_color.xyz, beers_law), 1.0 - beers_law);
-  water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
+  let edge_blend = smoothstep(0.0, edge_scale, depth_diff_view);
+  edge_t = edge_blend;
+  water_color = mix(edge_color, depth_color, edge_blend);
 #endif
 #endif
 #endif
+
+  if (voronoi_foam_enabled) {
+    // Multi-scale Voronoi foam — boosted at shorelines and at wave crests
+    // (Gerstner Jacobian when available, otherwise surface tilt).
+    let foam_uv = w_pos * 0.18 + vec2<f32>(globals.time * 0.05, globals.time * 0.03);
+    let foam_pattern = voronoi_foam_mod::foam_noise(foam_uv, 3);
+    let shore_mask = 1.0 - clamp(edge_t, 0.0, 1.0);
+    var crest_mask = clamp(1.0 - in.world_normal.y, 0.0, 1.0);
+    if (gerstner_enabled) {
+      let g_amp_for_foam = max(water_bindings::material.amplitude, 0.05);
+      let g_scale_for_foam = max(water_bindings::material.coord_scale.x, 0.001);
+      let g_count_for_foam = clamp(water_bindings::material.quality, 1u, 4u);
+      let g_for_foam = gerstner_waves::sum_gerstner_waves_limited(
+        w_pos,
+        globals.time,
+        g_amp_for_foam,
+        g_scale_for_foam,
+        g_count_for_foam,
+      );
+      crest_mask = max(crest_mask, g_for_foam.foam);
+    }
+    let foam_amount = clamp(max(shore_mask * 0.85, crest_mask * 0.6), 0.0, 1.0);
+    let foam_strength = clamp(foam_pattern * foam_amount, 0.0, 1.0);
+    let foam_tint = vec3<f32>(0.92, 0.96, 1.0);
+    water_color = vec4<f32>(
+      mix(water_color.rgb, foam_tint, foam_strength * 0.65),
+      clamp(water_color.a + foam_strength * 0.25, 0.0, 1.0),
+    );
+  }
+
   pbr_input.material.base_color *= water_color;
 
   if (witchcraft_finish_enabled) {
@@ -135,15 +204,11 @@ fn fragment(
     pbr_input.material.base_color = finish.color;
   }
 
-  // alpha discard
   pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
 #ifdef PREPASS_PIPELINE
-  // write the gbuffer, lighting pass id, and optionally normal and motion_vector textures
   let out = deferred_output(in, pbr_input);
 #else
-  // in forward mode, we calculate the lit color immediately, and then apply some post-lighting effects here.
-  // in deferred mode the lit color and these effects will be calculated in the deferred lighting shader
   var out: FragmentOutput;
   if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
     out.color = apply_pbr_lighting(pbr_input);
@@ -151,15 +216,7 @@ fn fragment(
     out.color = pbr_input.material.base_color;
   }
 
-  // apply in-shader post processing (fog, alpha-premultiply, and also tonemapping, debanding if the camera is non-hdr)
-  // note this does not include fullscreen postprocessing effects like bloom.
   out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-
-  // show grid
-  // 3.938... = WATER_SIZE / ((WATER_SIZE / 4) + 1)
-  //let f_pos = step(fract((w_pos / 3.9384615384615)), vec2<f32>(0.995));
-  //let grid = step(f_pos.x + f_pos.y, 1.00);
-  //out.color += vec4<f32>(grid, grid, grid, 0.00);
 #endif
 
   return out;

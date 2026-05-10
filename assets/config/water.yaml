@@ -1,54 +1,11 @@
-# Enhanced Water Rendering Configuration
-# Gerstner waves, foam, and caustics
-
-gerstner:
-  enabled: true
-  # Base wave height (meters)
-  amplitude: 0.9
-  # Scale of wave patterns (larger = longer wavelengths)
-  wave_scale: 0.85
-  # Wave animation speed multiplier
-  wave_speed: 1.3
-  # Number of wave layers (1-4, more = better quality but slower)
-  wave_count: 4
-
-foam:
-  enabled: true
-  # Foam color (RGB, 0-1)
-  color: [1.0, 1.0, 1.0]
-  # Foam brightness multiplier
-  intensity: 1.3
-  # Foam texture scale
-  scale: 1.2
-  # How long foam persists (0-1)
-  persistence: 0.9
-  # Generate foam at shorelines
-  shore_foam: true
-  # Generate foam at wave crests
-  wave_crest_foam: true
-
-caustics:
-  enabled: true
-  # Caustic light intensity
-  intensity: 0.85
-  # Caustic pattern scale
-  scale: 1.2
-  # Animation speed
-  speed: 1.0
-  # Maximum depth for caustic visibility (meters)
-  max_depth: 10.0
-
-visual:
-  # Deep water color (RGBA)
-  deep_color: [0.01, 0.04, 0.12, 0.98]
-  # Shallow water color (RGBA)
-  shallow_color: [0.04, 0.18, 0.36, 0.9]
-  # Water clarity (0 = murky, 1 = crystal clear)
-  clarity: 0.14
-  # Surface reflectivity (0-1)
-  reflectivity: 0.88
-  # Fresnel effect power (higher = more edge reflection)
-  fresnel_power: 5.6
+# Water rendering configuration.
+#
+# Per-body wave/colour/reflection tuning lives in `body_presets`. The water
+# fragment shader reads those values via `WaterMaterial`'s uniform binding.
+# `reflections`, `refraction`, `displacement`, `weather`, and
+# `witchcraft_finish` configure the planar reflection camera, screen-space
+# refraction, the CPU wave-displacement sim, weather coupling, and the
+# optional Aurora/Complementary-style colour finish respectively.
 
 body_presets:
   ocean:
@@ -151,17 +108,6 @@ body_presets:
     detail_scroll_speed: 0.006
     lake_ripple_overlay_strength: 0.0
 
-detail_normals:
-  enabled: true
-  # UV scale for primary ripple normal map
-  scale_a: 0.3
-  # UV scale for secondary ripple normal map
-  scale_b: 0.17
-  # Normal map influence strength (0-1)
-  intensity: 0.8
-  # Scroll speed for animated ripples
-  scroll_speed: 0.04
-
 reflections:
   enabled: true
   # Render resolution as fraction of main camera (0.35 = ~672x378)
@@ -186,7 +132,7 @@ refraction:
 
 displacement:
   enabled: true
-  # Compute shader texture resolution (NxN pixels)
+  # CPU wave-equation grid resolution (NxN cells)
   resolution: 1024
   # World area covered by the displacement texture (meters)
   world_size: 128.0
@@ -207,6 +153,13 @@ weather:
   # Multiplies snow_factor before reducing harsh reflection blend.
   snow_reflection_soften: 0.18
 
+shader_toggles:
+  # Noble shader ports are off by default to preserve the visual baseline.
+  gerstner: false
+  voronoi_foam: false
+  detail_normals: false
+  water_parallax: false
+
 witchcraft_finish:
   # Disabled by default; enable with this flag or VOXEL_WATER_WITCHCRAFT_FINISH=1.
   enabled: false
@@ -223,43 +176,3 @@ witchcraft_finish:
   reflect_b: 200
   # 0 normal, 1 color, 2 Fresnel alpha, 3 reflection multiplier.
   debug: 0
-
-# Quality presets
-quality_presets:
-  low:
-    gerstner:
-      wave_count: 2
-    foam:
-      enabled: false
-    caustics:
-      enabled: false
-  
-  medium:
-    gerstner:
-      wave_count: 3
-    foam:
-      enabled: true
-      shore_foam: true
-      wave_crest_foam: false
-    caustics:
-      enabled: true
-      intensity: 0.3
-  
-  high:
-    gerstner:
-      wave_count: 4
-    foam:
-      enabled: true
-    caustics:
-      enabled: true
-  
-  ultra:
-    gerstner:
-      wave_count: 4
-      amplitude: 0.6
-    foam:
-      enabled: true
-      intensity: 1.2
-    caustics:
-      enabled: true
-      intensity: 0.7
