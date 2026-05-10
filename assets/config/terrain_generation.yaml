@@ -1,8 +1,8 @@
 terrain:
-  # Vertical range (world is 6 chunks = 96 voxels tall, Y: 0-95)
+  # Vertical range (world is 8 chunks = 128 voxels tall, Y: 0-127)
   height:
     min: 14           # Keeps normal land columns above the bedrock crust.
-    max: 88
+    max: 118
     sea_level: 0
 
   # Base continental shape
@@ -21,6 +21,10 @@ terrain:
     persistence: 0.48
     lacunarity: 2.3
     ridge_power: 1.8  # Sharper peaks (1.0 = smooth, 2.0+ = sharp ridges)
+    massif_scale: 0.0035
+    massif_amplitude: 68.0
+    massif_threshold: 0.28
+    massif_power: 1.35
 
   # Hills and local variation
   hills:

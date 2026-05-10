@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
-pub const TERRAIN_GENERATION_VERSION: u64 = 8;
+pub const TERRAIN_GENERATION_VERSION: u64 = 9;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Deserialize)]
@@ -165,6 +165,30 @@ pub struct MountainConfig {
     pub persistence: f32,
     pub lacunarity: f32,
     pub ridge_power: f32,
+    #[serde(default = "default_massif_scale")]
+    pub massif_scale: f32,
+    #[serde(default = "default_massif_amplitude")]
+    pub massif_amplitude: f32,
+    #[serde(default = "default_massif_threshold")]
+    pub massif_threshold: f32,
+    #[serde(default = "default_massif_power")]
+    pub massif_power: f32,
+}
+
+fn default_massif_scale() -> f32 {
+    0.0035
+}
+
+fn default_massif_amplitude() -> f32 {
+    68.0
+}
+
+fn default_massif_threshold() -> f32 {
+    0.28
+}
+
+fn default_massif_power() -> f32 {
+    1.35
 }
 
 impl Default for TerrainConfig {
@@ -172,7 +196,7 @@ impl Default for TerrainConfig {
         Self {
             height: HeightConfig {
                 min: 14.0,
-                max: 88.0,
+                max: 118.0,
                 sea_level: 0.0,
             },
             continent: NoiseLayer {
@@ -189,6 +213,10 @@ impl Default for TerrainConfig {
                 persistence: 0.48,
                 lacunarity: 2.3,
                 ridge_power: 1.8,
+                massif_scale: default_massif_scale(),
+                massif_amplitude: default_massif_amplitude(),
+                massif_threshold: default_massif_threshold(),
+                massif_power: default_massif_power(),
             },
             hills: NoiseLayer {
                 scale: 0.025,
