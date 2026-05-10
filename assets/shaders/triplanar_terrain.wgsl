@@ -40,6 +40,7 @@ const DIRT_ROUGHNESS: f32 = 0.92;
 const WATER_LEVEL: f32 = 18.0;
 const WET_SAND_HEIGHT: f32 = 5.0;  // How far above water level gets wet
 const WET_SAND_DARKEN: f32 = 0.85; // Subtle darkening only - closer to V0.3 look
+const WET_SAND_MAX_STRENGTH: f32 = 0.55;
 const WET_ROUGHNESS: f32 = 0.25;   // Wet surfaces are shinier
 
 const DEBUG_FORCE_ALBEDO: bool = false;
@@ -355,7 +356,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     // Baked vertex AO - controlled by ao_strength uniform
     // 0.0 = V0.3 look (soft shadows via SSAO only)
     // 1.0 = full baked AO (darker shadows in crevices)
-    let vertex_ao = in.color.r; // AO baked into vertex red channel
+    let vertex_ao = clamp(in.uv.x, 0.0, 1.0);
     let ao_factor = mix(1.0, vertex_ao, uniforms.ao_strength);
 
     // Calculate uniform roughness based on material blend
@@ -364,12 +365,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
                     w.z * SAND_ROUGHNESS +
                     w.w * DIRT_ROUGHNESS;
 
-    // Wet sand effect: darken and smooth terrain near water level
+    // Wet sand effect: darken and smooth shoreline sand/dirt near water level.
     let height_above_water = world_pos.y - WATER_LEVEL;
-    // Smooth gradient from water level up to WET_SAND_HEIGHT
     let wet_factor = clamp(1.0 - (height_above_water / WET_SAND_HEIGHT), 0.0, 1.0);
-    // Apply to all terrain near water (sand, dirt, grass at shoreline)
-    let wet_strength = wet_factor * wet_factor; // Quadratic falloff for natural look
+    let wet_material_mask = clamp(w.z + w.w * 0.35, 0.0, 1.0);
+    let wet_surface_mask = smoothstep(0.18, 0.62, world_normal.y);
+    let wet_strength = wet_factor * wet_factor * wet_material_mask * wet_surface_mask * WET_SAND_MAX_STRENGTH;
 
     // Darken the albedo for wet terrain
     let wet_albedo = albedo * vec4<f32>(WET_SAND_DARKEN, WET_SAND_DARKEN, WET_SAND_DARKEN, 1.0);
