@@ -15,6 +15,7 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
+use bevy::window::PrimaryWindow;
 
 use crate::bench::BenchRenderToggles;
 use crate::camera::controller::PlayerCamera;
@@ -61,6 +62,7 @@ const WATER_BODY_LAKE_MIN_AVG_DEPTH: f32 = 1.5;
 const WATER_BODY_SHALLOW_FLOOD_MAX_DEPTH: usize = 1;
 const WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH: f32 = 1.25;
 const WORLD_STARTUP_READY_HOLD_SECONDS: f32 = 1.0;
+const WORLD_STARTUP_BACKGROUND_ZOOM: f32 = 1.12;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -472,6 +474,9 @@ struct PendingWorldGeneration {
 struct WorldStartupOverlay;
 
 #[derive(Component)]
+struct WorldStartupBackgroundImage;
+
+#[derive(Component)]
 struct WorldStartupTitleText;
 
 #[derive(Component)]
@@ -601,6 +606,7 @@ impl Plugin for VoxelPlugin {
                 draw_water_body_debug_overlay.after(update_water_body_registry),
                 update_terrain_material_lod.after(update_chunk_lod_system),
                 record_voxel_edit_counters,
+                update_world_startup_background_cover,
                 update_world_startup_overlay.after(mesh_dirty_chunks_system),
             ),
         );
@@ -990,6 +996,7 @@ fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetSe
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(12.0),
                 padding: UiRect::all(Val::Px(24.0)),
+                overflow: Overflow::clip(),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.015, 0.018, 0.02)),
@@ -1005,7 +1012,8 @@ fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetSe
                     bottom: Val::Px(0.0),
                     ..default()
                 },
-                ImageNode::new(background_image),
+                ImageNode::new(background_image).with_mode(NodeImageMode::Stretch),
+                WorldStartupBackgroundImage,
             ));
 
             root.spawn((
@@ -1081,6 +1089,50 @@ fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetSe
                 ));
             });
         });
+}
+
+fn update_world_startup_background_cover(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    images: Res<Assets<Image>>,
+    mut background_query: Query<(&mut Node, &ImageNode), With<WorldStartupBackgroundImage>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let window_size = Vec2::new(window.width(), window.height());
+
+    for (mut node, image_node) in background_query.iter_mut() {
+        let Some(image) = images.get(&image_node.image) else {
+            continue;
+        };
+        let Some(draw_size) = world_startup_background_cover_size(
+            window_size,
+            image.size().as_vec2(),
+            WORLD_STARTUP_BACKGROUND_ZOOM,
+        ) else {
+            continue;
+        };
+
+        node.width = Val::Px(draw_size.x);
+        node.height = Val::Px(draw_size.y);
+        node.left = Val::Px((window_size.x - draw_size.x) * 0.5);
+        node.top = Val::Px((window_size.y - draw_size.y) * 0.5);
+        node.right = Val::Auto;
+        node.bottom = Val::Auto;
+    }
+}
+
+fn world_startup_background_cover_size(
+    window_size: Vec2,
+    image_size: Vec2,
+    zoom: f32,
+) -> Option<Vec2> {
+    if window_size.x <= 0.0 || window_size.y <= 0.0 || image_size.x <= 0.0 || image_size.y <= 0.0 {
+        return None;
+    }
+
+    let cover_scale = (window_size.x / image_size.x).max(window_size.y / image_size.y);
+    Some(image_size * cover_scale * zoom.max(1.0))
 }
 
 fn update_world_startup_overlay(
@@ -3594,6 +3646,20 @@ mod tests {
         let ready = world_startup_snapshot(&gen_state, &chunk_stats);
         assert_eq!(ready.stage, WorldStartupStage::Ready);
         assert!(ready.complete);
+    }
+
+    #[test]
+    fn startup_background_cover_size_preserves_aspect_and_overfills_window() {
+        let draw_size = world_startup_background_cover_size(
+            Vec2::new(1920.0, 1080.0),
+            Vec2::new(1024.0, 1024.0),
+            1.1,
+        )
+        .expect("cover size");
+
+        assert!(draw_size.x >= 1920.0);
+        assert!(draw_size.y >= 1080.0);
+        assert!((draw_size.x / draw_size.y - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
