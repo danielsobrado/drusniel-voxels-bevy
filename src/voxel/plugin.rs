@@ -60,6 +60,7 @@ const WATER_BODY_LAKE_MIN_DEPTH: usize = 3;
 const WATER_BODY_LAKE_MIN_AVG_DEPTH: f32 = 1.5;
 const WATER_BODY_SHALLOW_FLOOD_MAX_DEPTH: usize = 1;
 const WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH: f32 = 1.25;
+const WORLD_STARTUP_READY_HOLD_SECONDS: f32 = 1.0;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -451,6 +452,58 @@ struct ChunkGenerationTask {
     chunk_pos: IVec3,
 }
 
+/// Component to hold an asynchronous saved-world load task.
+#[derive(Component)]
+struct WorldLoadTask {
+    task: Task<Result<VoxelWorld, String>>,
+}
+
+#[derive(Resource, Default, Debug)]
+struct WorldStartupOverlayState {
+    ready_seconds: f32,
+}
+
+#[derive(Component)]
+struct WorldStartupOverlay;
+
+#[derive(Component)]
+struct WorldStartupTitleText;
+
+#[derive(Component)]
+struct WorldStartupDetailText;
+
+#[derive(Component)]
+struct WorldStartupPercentText;
+
+#[derive(Component)]
+struct WorldStartupProgressFill;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorldStartupStage {
+    LoadingSavedWorld,
+    GeneratingTerrain,
+    PreparingMeshes,
+    Ready,
+}
+
+struct WorldStartupSnapshot {
+    stage: WorldStartupStage,
+    progress: f32,
+    detail: String,
+    complete: bool,
+}
+
+impl WorldStartupStage {
+    fn title(self) -> &'static str {
+        match self {
+            Self::LoadingSavedWorld => "Loading existing world",
+            Self::GeneratingTerrain => "Generating world",
+            Self::PreparingMeshes => "Preparing terrain",
+            Self::Ready => "World ready",
+        }
+    }
+}
+
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -487,6 +540,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(WaterBodyRegistry::default())
         // Async chunk generation state
         .insert_resource(ChunkGenerationState::default())
+        .insert_resource(WorldStartupOverlayState::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -503,12 +557,19 @@ impl Plugin for VoxelPlugin {
             ..default()
         })
         .insert_resource(OcclusionUpdateTimer::default())
-        .add_systems(Startup, setup_voxel_world)
+        .add_systems(
+            Startup,
+            (
+                spawn_world_startup_overlay,
+                setup_voxel_world.after(spawn_world_startup_overlay),
+            ),
+        )
         .add_systems(
             Update,
             (
+                poll_world_load_task,
                 // Stage 1: Pull newly-generated chunks into VoxelWorld
-                poll_chunk_generation_tasks,
+                poll_chunk_generation_tasks.after(poll_world_load_task),
                 update_enclosure_state.after(poll_chunk_generation_tasks),
                 sync_occlusion_config_from_enclosure.after(update_enclosure_state),
                 toggle_enclosure_culling,
@@ -533,6 +594,7 @@ impl Plugin for VoxelPlugin {
                 draw_water_body_debug_overlay.after(update_water_body_registry),
                 update_terrain_material_lod.after(update_chunk_lod_system),
                 record_voxel_edit_counters,
+                update_world_startup_overlay.after(mesh_dirty_chunks_system),
             ),
         );
         // .add_plugins(GravityPlugin); // Deactivated due to performance impact
@@ -570,10 +632,7 @@ fn record_voxel_edit_counters(
 /// Debug flag to generate a flat world for testing. Disabled by default.
 const DEBUG_FLAT_WORLD: bool = false;
 
-/// Attempts to load an existing world from disk.
-///
-/// Returns `true` if loading succeeded, `false` otherwise.
-fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistence) -> bool {
+fn should_attempt_saved_world_load(persistence_settings: &WorldPersistence) -> bool {
     if env_flag("VOXEL_REGENERATE_WATER_BODIES")
         || env_flag("VOXEL_FORCE_REGENERATE_WORLD")
         || env_flag("VOXEL_FORCE_REGENERATE_WATER")
@@ -595,53 +654,27 @@ fn try_load_world(world: &mut VoxelWorld, persistence_settings: &WorldPersistenc
         return false;
     }
 
+    true
+}
+
+fn load_saved_world_for_runtime() -> Result<VoxelWorld, String> {
     if env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT") {
         info!("Loading saved world for native editor viewport...");
-        match persistence::read_world_data_from_path(persistence::WORLD_SAVE_PATH) {
-            Ok(data) => {
-                let loaded_world = VoxelWorld::from_data(data);
-                if loaded_world.world_size_chunks() != world.world_size_chunks() {
-                    warn!(
-                        "Saved world size {:?} does not match configured world size {:?}; regenerating",
-                        loaded_world.world_size_chunks(),
-                        world.world_size_chunks()
-                    );
-                    return false;
-                }
-                *world = loaded_world;
-                info!("World loaded successfully for native editor viewport!");
-                return true;
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to load saved world for native editor viewport: {}. Generating new world...",
-                    e
-                );
-                return false;
-            }
-        }
+        return persistence::read_world_data_from_path(persistence::WORLD_SAVE_PATH)
+            .map(VoxelWorld::from_data)
+            .map_err(|err| err.to_string());
     }
 
     info!("Loading saved world from disk...");
-    match persistence::load_world() {
-        Ok(loaded_world) => {
-            if loaded_world.world_size_chunks() != world.world_size_chunks() {
-                warn!(
-                    "Saved world size {:?} does not match configured world size {:?}; regenerating",
-                    loaded_world.world_size_chunks(),
-                    world.world_size_chunks()
-                );
-                return false;
-            }
-            *world = loaded_world;
-            info!("World loaded successfully!");
-            true
-        }
-        Err(e) => {
-            warn!("Failed to load saved world: {}. Generating new world...", e);
-            false
-        }
+    persistence::load_world().map_err(|err| err.to_string())
+}
+
+fn expected_world_chunk_count(size_chunks: IVec3) -> usize {
+    if size_chunks.x <= 0 || size_chunks.y <= 0 || size_chunks.z <= 0 {
+        return 0;
     }
+
+    size_chunks.x as usize * size_chunks.y as usize * size_chunks.z as usize
 }
 
 fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
@@ -783,21 +816,31 @@ fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
 /// Main world setup system - spawns async chunk generation tasks.
 fn setup_voxel_world(
     mut commands: Commands,
-    mut world: ResMut<VoxelWorld>,
+    world: Res<VoxelWorld>,
     mut gen_state: ResMut<ChunkGenerationState>,
     persistence_settings: Res<WorldPersistence>,
 ) {
-    // Try to load existing world from disk (synchronous, fast)
-    if try_load_world(&mut world, &persistence_settings) {
+    if should_attempt_saved_world_load(&persistence_settings) {
+        gen_state.total_chunks = 0;
+        gen_state.chunks_completed = 0;
+        gen_state.is_complete = false;
         gen_state.loading_from_disk = true;
-        gen_state.is_complete = true;
-        if enforce_bedrock_floor(&mut world) {
-            info!("Enforced bedrock floor at y={}", BEDROCK_DEPTH);
-            try_save_world(&world, &persistence_settings);
-        }
+        gen_state.world_stats = WorldStats::default();
+        gen_state.start_time = Some(std::time::Instant::now());
+
+        let task = AsyncComputeTaskPool::get().spawn(async { load_saved_world_for_runtime() });
+        commands.spawn(WorldLoadTask { task });
         return;
     }
 
+    begin_world_generation(&mut commands, &world, &mut gen_state);
+}
+
+fn begin_world_generation(
+    commands: &mut Commands,
+    world: &VoxelWorld,
+    gen_state: &mut ChunkGenerationState,
+) {
     // Spawn async chunk generation tasks
     info!("Generating new world (async)...");
 
@@ -830,6 +873,244 @@ fn setup_voxel_world(
     }
 
     info!("Spawned {} async chunk generation tasks", total_chunks);
+}
+
+/// Polls the asynchronous saved-world load before starting generation fallback.
+fn poll_world_load_task(
+    mut commands: Commands,
+    mut world: ResMut<VoxelWorld>,
+    mut gen_state: ResMut<ChunkGenerationState>,
+    mut tasks: Query<(Entity, &mut WorldLoadTask)>,
+    persistence_settings: Res<WorldPersistence>,
+) {
+    for (entity, mut task) in tasks.iter_mut() {
+        let Some(result) = block_on(poll_once(&mut task.task)) else {
+            continue;
+        };
+
+        commands.entity(entity).despawn();
+
+        match result {
+            Ok(loaded_world) => {
+                if loaded_world.world_size_chunks() != world.world_size_chunks() {
+                    warn!(
+                        "Saved world size {:?} does not match configured world size {:?}; regenerating",
+                        loaded_world.world_size_chunks(),
+                        world.world_size_chunks()
+                    );
+                    begin_world_generation(&mut commands, &world, &mut gen_state);
+                    continue;
+                }
+
+                let loaded_chunks = loaded_world.chunk_entries().count();
+                let expected_chunks = expected_world_chunk_count(loaded_world.world_size_chunks());
+                if loaded_chunks != expected_chunks {
+                    warn!(
+                        "Saved world contains {}/{} chunks; regenerating incomplete save",
+                        loaded_chunks, expected_chunks
+                    );
+                    begin_world_generation(&mut commands, &world, &mut gen_state);
+                    continue;
+                }
+
+                *world = loaded_world;
+                gen_state.total_chunks = loaded_chunks as u32;
+                gen_state.chunks_completed = gen_state.total_chunks;
+                gen_state.is_complete = true;
+                gen_state.loading_from_disk = true;
+                gen_state.start_time = None;
+                gen_state.world_stats = WorldStats::default();
+
+                if enforce_bedrock_floor(&mut world) {
+                    info!("Enforced bedrock floor at y={}", BEDROCK_DEPTH);
+                    try_save_world(&world, &persistence_settings);
+                }
+
+                info!("World loaded successfully!");
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to load saved world: {}. Generating new world...",
+                    err
+                );
+                begin_world_generation(&mut commands, &world, &mut gen_state);
+            }
+        }
+    }
+}
+
+fn spawn_world_startup_overlay(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(12.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.015, 0.018, 0.02, 0.92)),
+            WorldStartupOverlay,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new("Loading existing world"),
+                TextFont {
+                    font_size: 28.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.92, 0.96, 1.0, 1.0)),
+                WorldStartupTitleText,
+            ));
+
+            root.spawn((
+                Text::new("Checking saved world"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.72, 0.78, 0.82, 1.0)),
+                WorldStartupDetailText,
+            ));
+
+            root.spawn((
+                Node {
+                    width: Val::Px(420.0),
+                    max_width: Val::Percent(82.0),
+                    height: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.14, 0.17, 0.19, 1.0)),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    Node {
+                        width: Val::Percent(8.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.36, 0.66, 0.48, 1.0)),
+                    WorldStartupProgressFill,
+                ));
+            });
+
+            root.spawn((
+                Text::new("Loading..."),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.84, 0.88, 0.9, 1.0)),
+                WorldStartupPercentText,
+            ));
+        });
+}
+
+fn update_world_startup_overlay(
+    mut commands: Commands,
+    time: Res<Time>,
+    gen_state: Res<ChunkGenerationState>,
+    chunk_stats: Res<RuntimeChunkStats>,
+    mut overlay_state: ResMut<WorldStartupOverlayState>,
+    root_query: Query<Entity, With<WorldStartupOverlay>>,
+    mut text_queries: ParamSet<(
+        Query<&mut Text, With<WorldStartupTitleText>>,
+        Query<&mut Text, With<WorldStartupDetailText>>,
+        Query<&mut Text, With<WorldStartupPercentText>>,
+    )>,
+    mut fill_query: Query<&mut Node, With<WorldStartupProgressFill>>,
+) {
+    let Ok(root_entity) = root_query.single() else {
+        return;
+    };
+
+    let snapshot = world_startup_snapshot(&gen_state, &chunk_stats);
+    if snapshot.complete {
+        overlay_state.ready_seconds += time.delta_secs();
+    } else {
+        overlay_state.ready_seconds = 0.0;
+    }
+
+    if overlay_state.ready_seconds >= WORLD_STARTUP_READY_HOLD_SECONDS {
+        commands.entity(root_entity).despawn();
+        return;
+    }
+
+    if let Ok(mut text) = text_queries.p0().single_mut() {
+        text.0 = snapshot.stage.title().to_string();
+    }
+    if let Ok(mut text) = text_queries.p1().single_mut() {
+        text.0 = snapshot.detail;
+    }
+    if let Ok(mut text) = text_queries.p2().single_mut() {
+        text.0 = if snapshot.stage == WorldStartupStage::LoadingSavedWorld {
+            "Loading...".to_string()
+        } else {
+            format!("{:.0}%", snapshot.progress * 100.0)
+        };
+    }
+    if let Ok(mut node) = fill_query.single_mut() {
+        node.width = Val::Percent((snapshot.progress * 100.0).clamp(0.0, 100.0));
+    }
+}
+
+fn world_startup_snapshot(
+    gen_state: &ChunkGenerationState,
+    chunk_stats: &RuntimeChunkStats,
+) -> WorldStartupSnapshot {
+    if !gen_state.is_complete && gen_state.loading_from_disk {
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::LoadingSavedWorld,
+            progress: 0.12,
+            detail: "Reading saved terrain data".to_string(),
+            complete: false,
+        };
+    }
+
+    if gen_state.is_generating() {
+        let progress = gen_state.progress().clamp(0.0, 1.0);
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::GeneratingTerrain,
+            progress: progress * 0.9,
+            detail: format!(
+                "Generated {} of {} chunks",
+                gen_state.chunks_completed, gen_state.total_chunks
+            ),
+            complete: false,
+        };
+    }
+
+    if chunk_stats.mesh_entities == 0 && chunk_stats.chunks_meshed_this_frame == 0 {
+        let detail = if gen_state.loading_from_disk {
+            "Saved world loaded; building visible terrain meshes"
+        } else {
+            "Terrain chunks complete; building visible meshes"
+        };
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::PreparingMeshes,
+            progress: 0.95,
+            detail: detail.to_string(),
+            complete: false,
+        };
+    }
+
+    WorldStartupSnapshot {
+        stage: WorldStartupStage::Ready,
+        progress: 1.0,
+        detail: format!(
+            "Prepared {} terrain mesh chunks",
+            chunk_stats
+                .mesh_entities
+                .max(chunk_stats.chunks_meshed_this_frame)
+        ),
+        complete: true,
+    }
 }
 
 /// Generates a single chunk using the terrain generator (for async execution).
@@ -3200,6 +3481,55 @@ mod tests {
             desired_water_visibility(false, true, Some(WaterBodyMaterialMode::Hidden)),
             Visibility::Inherited
         );
+    }
+
+    #[test]
+    fn world_startup_snapshot_reports_generation_progress() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 25,
+            is_complete: false,
+            loading_from_disk: false,
+            world_stats: WorldStats::default(),
+            start_time: None,
+        };
+        let chunk_stats = RuntimeChunkStats::default();
+
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats);
+
+        assert_eq!(snapshot.stage, WorldStartupStage::GeneratingTerrain);
+        assert_eq!(snapshot.progress, 0.225);
+        assert!(snapshot.detail.contains("25 of 100"));
+        assert!(!snapshot.complete);
+    }
+
+    #[test]
+    fn world_startup_snapshot_keeps_loaded_world_visible_until_meshed() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 100,
+            is_complete: true,
+            loading_from_disk: true,
+            world_stats: WorldStats::default(),
+            start_time: None,
+        };
+        let mut chunk_stats = RuntimeChunkStats::default();
+
+        let preparing = world_startup_snapshot(&gen_state, &chunk_stats);
+        assert_eq!(preparing.stage, WorldStartupStage::PreparingMeshes);
+        assert!(!preparing.complete);
+
+        chunk_stats.chunks_meshed_this_frame = 1;
+        let ready = world_startup_snapshot(&gen_state, &chunk_stats);
+        assert_eq!(ready.stage, WorldStartupStage::Ready);
+        assert!(ready.complete);
+    }
+
+    #[test]
+    fn expected_world_chunk_count_rejects_invalid_sizes() {
+        assert_eq!(expected_world_chunk_count(IVec3::new(32, 6, 32)), 6144);
+        assert_eq!(expected_world_chunk_count(IVec3::new(0, 6, 32)), 0);
+        assert_eq!(expected_world_chunk_count(IVec3::new(32, -1, 32)), 0);
     }
 
     #[test]
