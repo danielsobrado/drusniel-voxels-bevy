@@ -258,18 +258,19 @@ fn create_body_water_materials(
         edge_scale
     };
 
-    let water_extension = BevyWaterMaterial {
+    let mut water_extension = BevyWaterMaterial {
         amplitude: wave_amplitude,
         clarity,
         deep_color,
         shallow_color,
-        edge_color: water_edge_color(shallow_color, preset, debug_solid_color, witchcraft_params, toggles),
+        edge_color: water_edge_color(shallow_color, preset, debug_solid_color, witchcraft_params),
         edge_scale,
         coord_offset: Vec2::ZERO,
         coord_scale: Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE),
         quality: settings.water_quality.into(),
         ..default()
     };
+    apply_noble_water_shader_params(&mut water_extension, preset, toggles);
 
     let near = fancy_materials.add(StandardWaterMaterial {
         base: StandardMaterial {
@@ -355,7 +356,6 @@ fn water_edge_color(
     preset: &WaterBodyPresetConfig,
     debug_solid_color: bool,
     witchcraft_params: WitchcraftWaterFinishParams,
-    toggles: WaterShaderToggles,
 ) -> Color {
     if debug_solid_color {
         return shallow_color;
@@ -363,12 +363,33 @@ fn water_edge_color(
     let linear = shallow_color.to_linear();
     let witchcraft_alpha =
         witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength);
-    Color::linear_rgba(
-        linear.red,
-        linear.green,
-        linear.blue,
-        toggles.encode_alpha(witchcraft_alpha),
-    )
+    Color::linear_rgba(linear.red, linear.green, linear.blue, witchcraft_alpha)
+}
+
+fn apply_noble_water_shader_params(
+    extension: &mut BevyWaterMaterial,
+    preset: &WaterBodyPresetConfig,
+    toggles: WaterShaderToggles,
+) {
+    let default_dir = Vec2::new(1.0, 2.0).normalize();
+    if toggles.any() {
+        extension.coord_scale =
+            Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE * preset.wave_scale.max(0.01));
+        extension.wave_dir_a = Vec2::new(
+            preset.wave_speed.max(0.01),
+            preset.wave_count.clamp(1, 32) as f32,
+        );
+        extension.wave_dir_b = Vec2::new(
+            preset.detail_normal_intensity.max(0.0),
+            preset.detail_scroll_speed.max(0.0),
+        );
+        extension.wave_blend = preset.wave_scale.max(0.01);
+    } else {
+        extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);
+        extension.wave_dir_a = default_dir;
+        extension.wave_dir_b = default_dir;
+        extension.wave_blend = 1.0;
+    }
 }
 
 fn water_base_color(
@@ -490,7 +511,6 @@ pub fn sync_voxel_water_material_overrides(
                 preset,
                 debug_solid_color,
                 witchcraft_params,
-                toggles,
             );
             let edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
             mat.extension.edge_scale = if water_ripple_lines_disabled() {
@@ -501,6 +521,7 @@ pub fn sync_voxel_water_material_overrides(
             mat.extension.coord_offset = Vec2::ZERO;
             mat.extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);
             mat.extension.quality = settings.water_quality.into();
+            apply_noble_water_shader_params(&mut mat.extension, preset, toggles);
         }
     }
 }

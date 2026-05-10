@@ -459,8 +459,21 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         // Ridged mountains, masked by mountain regions. The broad uplift keeps
         // mountain ranges tall even when the sharp ridge sample is between peaks.
         let mountain_region = mountain_signal.clamp(0.0, 1.0).powf(1.35);
-        let mountains = self.ridged_noise(x, z) * mountain_region * 1.1;
-        let mountain_uplift = cfg.mountains.amplitude * 0.28 * mountain_region;
+        let massif_signal = self.fbm_configurable(
+            x + 4096.0,
+            z - 2048.0,
+            cfg.mountains.massif_scale,
+            3,
+            0.52,
+            2.0,
+        );
+        let massif_mask = smoothstep_range(cfg.mountains.massif_threshold, 1.0, massif_signal)
+            .powf(cfg.mountains.massif_power.max(0.25))
+            .max(self.massif_cell_mask(x, z));
+        let mountain_region = (mountain_region * 0.55 + massif_mask * 0.8).clamp(0.0, 1.0);
+        let mountains = self.ridged_noise(x, z) * mountain_region * (1.0 + massif_mask * 0.55);
+        let mountain_uplift = cfg.mountains.amplitude * 0.18 * mountain_region
+            + cfg.mountains.massif_amplitude * massif_mask;
 
         let valley_signal = self.fbm_configurable(
             x + 1375.0,
@@ -505,6 +518,36 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         // body bathymetry is applied later and may carve beds lower than this.
         let min_surface = cfg.height.min.max(MIN_NORMAL_TERRAIN_SURFACE_Y as f32);
         height.clamp(min_surface, cfg.height.max) as i32
+    }
+
+    fn massif_cell_mask(&self, x: f32, z: f32) -> f32 {
+        let spacing = (1.0 / self.config.mountains.massif_scale.max(0.001)).clamp(128.0, 384.0);
+        let cell_x = (x / spacing).floor() as i32;
+        let cell_z = (z / spacing).floor() as i32;
+        let mut strongest = 0.0f32;
+
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let cx = cell_x + dx;
+                let cz = cell_z + dz;
+                let offset_x = hash_position(cx.wrapping_mul(43), cz.wrapping_mul(59)) - 0.5;
+                let offset_z = hash_position(cx.wrapping_mul(71), cz.wrapping_mul(37)) - 0.5;
+                let height_t =
+                    0.55 + hash_position(cx.wrapping_mul(97), cz.wrapping_mul(83)) * 0.45;
+                let radius_t = hash_position(cx.wrapping_mul(113), cz.wrapping_mul(131));
+                let center_x = (cx as f32 + 0.5 + offset_x * 0.55) * spacing;
+                let center_z = (cz as f32 + 0.5 + offset_z * 0.55) * spacing;
+                let radius = spacing * (0.42 + radius_t * 0.22);
+                let dist_x = x - center_x;
+                let dist_z = z - center_z;
+                let dist = (dist_x * dist_x + dist_z * dist_z).sqrt();
+                let falloff = (1.0f32 - dist / radius.max(1.0)).clamp(0.0, 1.0);
+                let mask = smoothstep(falloff).powf(self.config.mountains.massif_power.max(0.25));
+                strongest = strongest.max(mask * height_t);
+            }
+        }
+
+        strongest
     }
 
     /// Calculates terrain height at a given world position.
@@ -676,7 +719,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
                     dry_beach
                 } else {
                     let inland_target = inland_height.max(waterline);
-                    lerp_f32(dry_beach, inland_target, smoothstep(backshore_t))
+                    let beach_shelf = (CHUNK_SIZE_I32 / 2) as f32;
+                    let blend_width = (EDGE_SHORE_BACKSHORE_DISTANCE as f32 - beach_shelf).max(1.0);
+                    let delayed_backshore_t =
+                        ((profile.edge_distance - EDGE_OCEAN_START_DISTANCE) as f32 - beach_shelf)
+                            / blend_width;
+                    lerp_f32(dry_beach, inland_target, smoothstep(delayed_backshore_t))
                 }
             }
             ShorelineKind::Cliff => {
@@ -1213,18 +1261,45 @@ mod tests {
         }
 
         assert!(
-            max_height >= 30,
-            "expected visible mountain peaks, got max height {max_height}"
+            max_height >= 100,
+            "expected large mountain peaks, got max height {max_height}"
         );
         assert!(
             max_height < DEFAULT_WORLD_CHUNKS_Y * CHUNK_SIZE_I32,
             "world vertical size should contain generated peaks, max height {max_height}"
         );
         assert!(
-            max_height - min_height >= 15,
+            max_height - min_height >= 70,
             "expected mountain/valley relief, got range {}..{}",
             min_height,
             max_height
+        );
+    }
+
+    #[test]
+    fn default_terrain_generates_broad_high_massifs() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut high_massif_samples = 0;
+        let mut peak_height = i32::MIN;
+
+        for x in (96..416).step_by(4) {
+            for z in (96..416).step_by(4) {
+                let height = generator.get_base_height(x, z);
+                peak_height = peak_height.max(height);
+                if height >= 96 {
+                    high_massif_samples += 1;
+                }
+            }
+        }
+
+        assert!(
+            peak_height >= 108,
+            "expected very tall generated mountain peaks, got max height {peak_height}"
+        );
+        assert!(
+            high_massif_samples >= 24,
+            "expected broad high massif coverage, got {high_massif_samples} samples"
         );
     }
 

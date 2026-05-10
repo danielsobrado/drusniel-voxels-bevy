@@ -125,10 +125,28 @@ fn debug_settings_ui(
 
             ui.separator();
             ui.heading("Water Shaders");
-            ui.checkbox(&mut water_shader_toggles.gerstner, "Gerstner wave normals + displacement");
-            ui.checkbox(&mut water_shader_toggles.voronoi_foam, "Multi-scale Voronoi foam");
-            ui.add_enabled(false, egui::Checkbox::new(&mut water_shader_toggles.detail_normals, "Detail normals (pending Noble port)"));
-            ui.add_enabled(false, egui::Checkbox::new(&mut water_shader_toggles.water_parallax, "Water parallax (pending Noble port)"));
+            ui.checkbox(
+                &mut water_shader_toggles.gerstner,
+                "Gerstner wave normals + displacement",
+            );
+            ui.checkbox(
+                &mut water_shader_toggles.voronoi_foam,
+                "Multi-scale Voronoi foam",
+            );
+            ui.add_enabled(
+                false,
+                egui::Checkbox::new(
+                    &mut water_shader_toggles.detail_normals,
+                    "Detail normals (pending Noble port)",
+                ),
+            );
+            ui.add_enabled(
+                false,
+                egui::Checkbox::new(
+                    &mut water_shader_toggles.water_parallax,
+                    "Water parallax (pending Noble port)",
+                ),
+            );
             ui.label("Toggles affect render perf — rerun bench after changes");
 
             // Atlas Mapping UI moved to Pause Menu > Settings > Textures

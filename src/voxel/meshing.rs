@@ -28,13 +28,14 @@ use crate::constants::{
     PADDED_CHUNK_SIZE_U32,
     UV_PADDING,
     VOXEL_SIZE,
-    WORLD_EDGE_GUARD_MARGIN,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
-use crate::voxel::skirt::{NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts};
+use crate::voxel::skirt::{
+    ChunkFace, NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts,
+};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::asset::RenderAssetUsages;
@@ -45,10 +46,11 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE;
+const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
@@ -987,7 +989,7 @@ fn should_render_water_face(
 fn water_surface_near_horizontal_world_edge(world: &VoxelWorld, world_pos: IVec3) -> bool {
     world
         .bounds()
-        .inside_horizontal_edge_margin(world_pos, WORLD_EDGE_GUARD_MARGIN)
+        .inside_horizontal_edge_margin(world_pos, WATER_EDGE_SURFACE_SUPPRESSION_MARGIN)
 }
 
 fn air_open_to_sky_with_stats(
@@ -2233,10 +2235,89 @@ fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] 
     smoothed
 }
 
+fn neighbor_lod_for_face(neighbor_lods: &NeighborLods, face: ChunkFace) -> Option<LodLevel> {
+    match face {
+        ChunkFace::NegX => neighbor_lods.neg_x,
+        ChunkFace::PosX => neighbor_lods.pos_x,
+        ChunkFace::NegZ => neighbor_lods.neg_z,
+        ChunkFace::PosZ => neighbor_lods.pos_z,
+        ChunkFace::NegY | ChunkFace::PosY => None,
+    }
+}
+
+fn lower_detail_transition_step(
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    px: u32,
+    pz: u32,
+) -> Option<i32> {
+    let mut transition_step = my_lod.step_size();
+
+    for (face, on_boundary_sample_row) in [
+        (ChunkFace::NegX, px == 1),
+        (ChunkFace::PosX, px == LOD0_PADDED_SIZE - 1),
+        (ChunkFace::NegZ, pz == 1),
+        (ChunkFace::PosZ, pz == LOD0_PADDED_SIZE - 1),
+    ] {
+        if !on_boundary_sample_row {
+            continue;
+        }
+
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        if neighbor_lod.is_lower_detail_than(my_lod) {
+            transition_step = transition_step.max(neighbor_lod.step_size());
+        }
+    }
+
+    (transition_step > my_lod.step_size()).then_some(transition_step as i32)
+}
+
+fn sample_lod_density_at_world_pos(world: &VoxelWorld, base_world_pos: IVec3, step: i32) -> f32 {
+    let mut solid_count = 0;
+    let sample_count = step * step * step;
+
+    for dz in 0..step {
+        for dy in 0..step {
+            for dx in 0..step {
+                let world_pos = base_world_pos + IVec3::new(dx, dy, dz);
+                if sample_voxel_at_world_pos(world, world_pos) {
+                    solid_count += 1;
+                }
+            }
+        }
+    }
+
+    let density = solid_count as f32 / sample_count as f32;
+    1.0 - 2.0 * density
+}
+
+fn coarse_aligned_lod_sample_base(
+    chunk_origin: IVec3,
+    px: u32,
+    py: u32,
+    pz: u32,
+    step: i32,
+) -> IVec3 {
+    let local = IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
+    let aligned = IVec3::new(
+        local.x.div_euclid(step) * step,
+        local.y.div_euclid(step) * step,
+        local.z.div_euclid(step) * step,
+    );
+    chunk_origin + aligned
+}
+
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
 /// This is the LOD0 (high detail) version - samples every voxel.
-fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
+fn generate_sdf(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> [f32; 5832] {
     // 18^3 = 5832
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_pos = chunk.position();
@@ -2245,9 +2326,14 @@ fn generate_sdf(chunk: &Chunk, world: &VoxelWorld) -> [f32; 5832] {
     // First pass: set binary solid/air values
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        let is_solid = sample_voxel_solid(chunk, world, chunk_origin, px, py, pz);
-        // SDF: negative inside solid, positive in air
-        sdf[i] = if is_solid { -1.0 } else { 1.0 };
+        if let Some(step) = lower_detail_transition_step(my_lod, neighbor_lods, px, pz) {
+            let base_world_pos = coarse_aligned_lod_sample_base(chunk_origin, px, py, pz, step);
+            sdf[i] = sample_lod_density_at_world_pos(world, base_world_pos, step);
+        } else {
+            let is_solid = sample_voxel_solid(chunk, world, chunk_origin, px, py, pz);
+            // SDF: negative inside solid, positive in air
+            sdf[i] = if is_solid { -1.0 } else { 1.0 };
+        }
     }
 
     // Skip smoothing - it causes boundary vertices to differ between chunks, creating seams.
@@ -2811,7 +2897,7 @@ pub fn generate_chunk_mesh_surface_nets(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate SDF from voxel data
-    let sdf = generate_sdf(chunk, world);
+    let sdf = generate_sdf(chunk, world, my_lod, &neighbor_lods);
 
     // Run surface nets on the SDF
     // Extract the full padded region [0,0,0] to [17,17,17)
@@ -3582,6 +3668,43 @@ mod tests {
         )
     }
 
+    #[test]
+    fn lod0_transition_boundary_sdf_matches_lower_lod_neighbor_sample() {
+        let chunk_pos = IVec3::new(1, 0, 2);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
+        world.set_voxel(chunk_origin + IVec3::new(17, 5, 5), VoxelType::Rock);
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
+        let no_transition_lods = NeighborLods {
+            neg_x: None,
+            pos_x: None,
+            neg_z: None,
+            pos_z: None,
+        };
+        let transition_lods = NeighborLods {
+            neg_x: None,
+            pos_x: Some(LodLevel::Lod1),
+            neg_z: None,
+            pos_z: None,
+        };
+
+        let boundary_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 1, 5, 5]) as usize;
+        let neighbor_boundary_idx = LodShape1::linearize([1, 3, 3]) as usize;
+
+        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods);
+        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
+        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world);
+
+        assert_eq!(raw_sdf[boundary_idx], 1.0);
+        assert_eq!(
+            transition_sdf[boundary_idx],
+            neighbor_lod1_sdf[neighbor_boundary_idx]
+        );
+        assert_eq!(transition_sdf[boundary_idx], 0.75);
+    }
+
     fn set_column(
         world: &mut VoxelWorld,
         x: i32,
@@ -3754,6 +3877,19 @@ mod tests {
         assert!(!mesh.water.indices.is_empty());
         assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 0);
         assert_eq!(mesh.water_stats.air_boundaries_total, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
+    }
+
+    #[test]
+    fn shore_water_inside_gameplay_edge_guard_is_still_meshed() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 3, 4));
+        let water_pos = IVec3::new(CHUNK_SIZE_I32 / 2, WATER_LEVEL, CHUNK_SIZE_I32 + 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+
+        assert!(!mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 0);
         assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
     }
 
