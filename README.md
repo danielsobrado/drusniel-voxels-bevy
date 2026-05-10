@@ -40,7 +40,7 @@ Current development version: **v0.5**.
 
 *   **Performance Optimization Sweep**: Systematic GPU/CPU cost reduction across all major rendering and simulation systems, using distance-based culling, budget limiting, and quality scaling.
 
-*   **Gameplay & Collider Bench Validation**: Added a collider-walk bench path that drives the player through spawn-adjacent routes and a historical fall-through route while logging coordinates, validity, collider readiness, stall events, and fall-through events. The bench now turns at world borders and uses terrain height/collider readiness checks to steer around missing ground or blocking terrain, making spawn and movement regressions reproducible in v0.5.
+*   **Gameplay & Collider Bench Validation**: Added a collider-walk bench path that drives the player through spawn-adjacent routes, a historical fall-through route, and a dig-crust checkpoint that removes terrain below the player and verifies the hard crust rejects below-floor/bedrock edits. It logs coordinates, validity, collider readiness, stall events, fall-through events, and dig/crust rejection counters. The bench now turns at world borders and uses terrain height/collider readiness checks to steer around missing ground or blocking terrain, making spawn and movement regressions reproducible in v0.5.
 
 *   **Shadow Budget System** (`rendering/shadow_budget.rs`): New distance-based shadow culling for terrain chunks — chunks beyond 192m get `NotShadowCaster` added (with 16m hysteresis). Point light shadow budget limits concurrent shadow-casting lights to the 4 closest within 80m. Water meshes permanently marked `NotShadowCaster` (translucent surfaces shouldn't cast opaque shadows). Shadow stats shown in F3 debug overlay.
 

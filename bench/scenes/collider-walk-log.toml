@@ -63,3 +63,29 @@ min_horizontal_speed = 2.0
 stall_after_frames = 24
 max_stall_events = 2
 fail_on_stall = false
+
+[[checkpoint]]
+name = "spawn-dig-crust"
+position = [256.5, 34.0, 256.5]
+look_at = [256.5, 20.0, 258.5]
+time_of_day = 0.45
+hold_frames = 900
+screenshot = false
+fog_tier = "off"
+
+[checkpoint.gameplay]
+start_position = [256.5, 28.0, 256.5]
+start_look_at = [256.5, 20.0, 258.5]
+movement = [0.0, 0.0]
+sprint = false
+min_horizontal_speed = 0.0
+stall_after_frames = 60
+max_stall_events = 0
+fail_on_stall = false
+
+[checkpoint.gameplay.dig_probe]
+enabled = true
+start_frame = 60
+interval_frames = 0
+radius = 1
+require_crust_rejection = true

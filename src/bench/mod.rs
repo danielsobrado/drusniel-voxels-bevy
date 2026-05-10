@@ -25,7 +25,8 @@ use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
-use crate::voxel::world::{VoxelWorld, WorldBounds};
+use crate::voxel::types::VoxelType;
+use crate::voxel::world::{VoxelEditResult, VoxelWorld, WorldBounds};
 use avian3d::prelude::{LinearVelocity, Position};
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
@@ -218,6 +219,10 @@ struct BenchState {
     gameplay_fall_events: u32,
     gameplay_fall_through_frames: u32,
     gameplay_was_falling_through: bool,
+    gameplay_dig_attempts: u32,
+    gameplay_dig_applied: u32,
+    gameplay_dig_rejected_crust: u32,
+    gameplay_dig_failed: bool,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
@@ -407,6 +412,22 @@ struct BenchGameplay {
     max_stall_events: u32,
     #[serde(default = "default_true")]
     fail_on_stall: bool,
+    #[serde(default)]
+    dig_probe: Option<BenchDigProbe>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchDigProbe {
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default = "default_dig_probe_start_frame")]
+    start_frame: u32,
+    #[serde(default = "default_dig_probe_interval_frames")]
+    interval_frames: u32,
+    #[serde(default = "default_dig_probe_radius")]
+    radius: i32,
+    #[serde(default = "default_true")]
+    require_crust_rejection: bool,
 }
 
 #[derive(Serialize)]
@@ -456,6 +477,10 @@ struct RunRecord {
     gameplay_min_horizontal_speed: f32,
     gameplay_min_y: f32,
     gameplay_fall_events: u32,
+    gameplay_dig_attempts: u32,
+    gameplay_dig_applied: u32,
+    gameplay_dig_rejected_crust: u32,
+    gameplay_dig_failed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     gameplay_trace_csv: Option<String>,
     ready_mesh_entities: u32,
@@ -761,6 +786,10 @@ impl Plugin for BenchPlugin {
                 gameplay_fall_events: 0,
                 gameplay_fall_through_frames: 0,
                 gameplay_was_falling_through: false,
+                gameplay_dig_attempts: 0,
+                gameplay_dig_applied: 0,
+                gameplay_dig_rejected_crust: 0,
+                gameplay_dig_failed: false,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
@@ -786,6 +815,7 @@ impl Plugin for BenchPlugin {
                 (
                     crate::performance::reset_area_timing_frame,
                     apply_bench_gameplay_input,
+                    apply_bench_gameplay_dig_probe.after(apply_bench_gameplay_input),
                 ),
             )
             .add_systems(
@@ -1167,6 +1197,114 @@ fn apply_bench_gameplay_input(
     actions.set_pressed(GameAction::Jump, jump_pressed);
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BenchDigProbeResult {
+    attempts: u32,
+    applied: u32,
+    rejected_crust: u32,
+}
+
+fn apply_bench_gameplay_dig_probe(
+    scene: Option<Res<BenchSceneResource>>,
+    mut state: Option<ResMut<BenchState>>,
+    world: Option<ResMut<VoxelWorld>>,
+    player: Query<&Transform, With<Player>>,
+) {
+    let (Some(scene), Some(state), Some(mut world)) = (scene, state.as_deref_mut(), world)
+    else {
+        return;
+    };
+    if state.phase != BenchPhase::Hold {
+        return;
+    }
+    let Some(checkpoint) = scene.0.checkpoints.get(state.checkpoint_index) else {
+        return;
+    };
+    let Some(dig_probe) = checkpoint.gameplay.as_ref().and_then(|gameplay| {
+        gameplay
+            .dig_probe
+            .as_ref()
+            .filter(|probe| probe.enabled)
+    }) else {
+        return;
+    };
+    if state.hold_elapsed_frames < dig_probe.start_frame {
+        return;
+    }
+    let elapsed = state.hold_elapsed_frames - dig_probe.start_frame;
+    if dig_probe.interval_frames == 0 {
+        if elapsed != 0 {
+            return;
+        }
+    } else if elapsed % dig_probe.interval_frames != 0 {
+        return;
+    }
+    let Ok(player_transform) = player.single() else {
+        return;
+    };
+
+    let result = apply_bench_dig_probe(&mut world, player_transform.translation, dig_probe);
+    state.gameplay_dig_attempts += result.attempts;
+    state.gameplay_dig_applied += result.applied;
+    state.gameplay_dig_rejected_crust += result.rejected_crust;
+    if dig_probe.require_crust_rejection && result.rejected_crust == 0 {
+        state.gameplay_dig_failed = true;
+        state.gameplay_failed = true;
+        warn!(
+            "Bench dig probe failed: checkpoint='{}' run={} frame={} pos=({:.2},{:.2},{:.2}) attempts={} applied={} rejected_crust={}",
+            checkpoint.name,
+            state.run_index,
+            state.hold_elapsed_frames,
+            player_transform.translation.x,
+            player_transform.translation.y,
+            player_transform.translation.z,
+            result.attempts,
+            result.applied,
+            result.rejected_crust,
+        );
+    }
+}
+
+fn apply_bench_dig_probe(
+    world: &mut VoxelWorld,
+    player_position: Vec3,
+    dig_probe: &BenchDigProbe,
+) -> BenchDigProbeResult {
+    let bounds = world.bounds();
+    let radius = dig_probe.radius.max(0);
+    let center = player_position.floor().as_ivec3();
+    let start_y = (center.y - 1).clamp(bounds.min_breakable_y, bounds.max_world_y);
+    let mut result = BenchDigProbeResult::default();
+
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            let x = center.x + dx;
+            let z = center.z + dz;
+            for y in (bounds.min_breakable_y..=start_y).rev() {
+                result.attempts += 1;
+                match world.set_voxel(IVec3::new(x, y, z), VoxelType::Air) {
+                    VoxelEditResult::Applied => result.applied += 1,
+                    VoxelEditResult::RejectedUnbreakable
+                    | VoxelEditResult::RejectedBelowWorldFloor => result.rejected_crust += 1,
+                    _ => {}
+                }
+            }
+
+            for y in [bounds.min_breakable_y - 1, bounds.bedrock_floor_y] {
+                result.attempts += 1;
+                match world.set_voxel(IVec3::new(x, y, z), VoxelType::Air) {
+                    VoxelEditResult::Applied => result.applied += 1,
+                    VoxelEditResult::RejectedUnbreakable
+                    | VoxelEditResult::RejectedBelowWorldFloor => result.rejected_crust += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    result
+}
+
 fn maybe_steer_bench_camera(
     gameplay: &BenchGameplay,
     world: &VoxelWorld,
@@ -1512,6 +1650,10 @@ fn run_bench_state_machine(
             state.gameplay_fall_events = 0;
             state.gameplay_fall_through_frames = 0;
             state.gameplay_was_falling_through = false;
+            state.gameplay_dig_attempts = 0;
+            state.gameplay_dig_applied = 0;
+            state.gameplay_dig_rejected_crust = 0;
+            state.gameplay_dig_failed = false;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
@@ -1918,6 +2060,10 @@ fn run_bench_state_machine(
                         0.0
                     },
                     gameplay_fall_events: state.gameplay_fall_events,
+                    gameplay_dig_attempts: state.gameplay_dig_attempts,
+                    gameplay_dig_applied: state.gameplay_dig_applied,
+                    gameplay_dig_rejected_crust: state.gameplay_dig_rejected_crust,
+                    gameplay_dig_failed: state.gameplay_dig_failed,
                     gameplay_trace_csv,
                     ready_mesh_entities: state.last_ready_snapshot.signature.mesh_entities,
                     ready_water_mesh_entities: state
@@ -2081,6 +2227,10 @@ fn finish_run(
         gameplay_min_horizontal_speed: 0.0,
         gameplay_min_y: 0.0,
         gameplay_fall_events: 0,
+        gameplay_dig_attempts: 0,
+        gameplay_dig_applied: 0,
+        gameplay_dig_rejected_crust: 0,
+        gameplay_dig_failed: false,
         gameplay_trace_csv: None,
         ready_mesh_entities: 0,
         ready_water_mesh_entities: 0,
@@ -2759,6 +2909,26 @@ fn record_bench_gameplay_counts(
     );
     timing.record_count(
         frame,
+        "Bench Gameplay Dig Attempts",
+        state.gameplay_dig_attempts as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Dig Applied",
+        state.gameplay_dig_applied as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Dig Rejected Crust",
+        state.gameplay_dig_rejected_crust as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Dig Failed",
+        state.gameplay_dig_failed as u8 as f64,
+    );
+    timing.record_count(
+        frame,
         "Bench Gameplay Player Y",
         transform.translation.y as f64,
     );
@@ -2969,6 +3139,18 @@ fn default_gameplay_stall_after_frames() -> u32 {
     18
 }
 
+fn default_dig_probe_start_frame() -> u32 {
+    60
+}
+
+fn default_dig_probe_interval_frames() -> u32 {
+    0
+}
+
+fn default_dig_probe_radius() -> i32 {
+    1
+}
+
 fn default_true() -> bool {
     true
 }
@@ -3042,6 +3224,7 @@ mod tests {
     use super::*;
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
+    use crate::voxel::world::VoxelSample;
 
     #[test]
     fn startup_trace_scene_config_deserializes() {
@@ -3113,6 +3296,38 @@ motion = { kind = "run_look_sweep", end_position = [0.0, 10.0, 10.0], end_look_a
         assert!(start.translation.z < end.translation.z);
         assert_eq!(end.translation, Vec3::new(0.0, 10.0, 10.0));
         assert_ne!(start.forward(), end.forward());
+    }
+
+    #[test]
+    fn gameplay_dig_probe_config_deserializes() {
+        let checkpoint: BenchCheckpoint = toml::from_str(
+            r#"
+name = "dig-crust"
+position = [0.0, 10.0, 0.0]
+look_at = [0.0, 8.0, 1.0]
+time_of_day = 0.5
+hold_frames = 120
+
+[gameplay]
+movement = [0.0, 0.0]
+
+[gameplay.dig_probe]
+enabled = true
+start_frame = 12
+radius = 2
+"#,
+        )
+        .expect("checkpoint should deserialize");
+
+        let dig_probe = checkpoint
+            .gameplay
+            .and_then(|gameplay| gameplay.dig_probe)
+            .expect("dig probe");
+        assert!(dig_probe.enabled);
+        assert_eq!(dig_probe.start_frame, 12);
+        assert_eq!(dig_probe.radius, 2);
+        assert_eq!(dig_probe.interval_frames, 0);
+        assert!(dig_probe.require_crust_rejection);
     }
 
     #[test]
@@ -3194,6 +3409,31 @@ motion = { kind = "run_look_sweep", end_position = [0.0, 10.0, 10.0], end_look_a
                 8.0,
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn bench_dig_probe_removes_breakable_column_but_rejects_crust() {
+        let mut world = flat_test_world(IVec3::new(2, 2, 2), 8);
+        let probe = BenchDigProbe {
+            enabled: true,
+            start_frame: 0,
+            interval_frames: 0,
+            radius: 0,
+            require_crust_rejection: true,
+        };
+
+        let result = apply_bench_dig_probe(&mut world, Vec3::new(8.5, 9.5, 8.5), &probe);
+
+        assert!(result.applied > 0);
+        assert!(result.rejected_crust >= 2);
+        assert_eq!(
+            world.sample_voxel(IVec3::new(8, world.bounds().min_breakable_y - 1, 8)),
+            VoxelSample::InBounds(VoxelType::Bedrock)
+        );
+        assert_eq!(
+            world.sample_voxel(IVec3::new(8, world.bounds().bedrock_floor_y, 8)),
+            VoxelSample::InBounds(VoxelType::Bedrock)
         );
     }
 

@@ -44,7 +44,7 @@ Use the collider walk bench when changing spawn placement, player movement, terr
 rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
 ```
 
-This bench drives spawn-adjacent routes and a historical fall-through route, logs player coordinates, validity, collider readiness, stall events, and fall-through events, and uses simple path steering to turn at borders and avoid missing ground or steep/blocking terrain.
+This bench drives spawn-adjacent routes, a historical fall-through route, and a dig-crust checkpoint that digs beneath the player and verifies the hard crust rejects below-floor/bedrock edits. It logs player coordinates, validity, collider readiness, stall events, fall-through events, and dig/crust rejection counters, and uses simple path steering to turn at borders and avoid missing ground or steep/blocking terrain.
 
 ## Editor Runtime Verification
 
