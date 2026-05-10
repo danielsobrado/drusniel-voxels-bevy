@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
 use super::*;
+use crate::input::manager::update_action_state;
 
 pub struct PlayerPlugin;
 
@@ -17,7 +18,7 @@ impl Plugin for PlayerPlugin {
             Update,
             (
                 resolve_initial_player_spawn,
-                read_player_input,
+                read_player_input.after(update_action_state),
                 apply_player_movement.in_set(TnuaUserControlsSystems),
                 recover_player_from_void,
                 constrain_world_boundary_entities,
