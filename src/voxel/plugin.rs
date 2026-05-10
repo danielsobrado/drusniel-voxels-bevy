@@ -463,6 +463,11 @@ struct WorldStartupOverlayState {
     ready_seconds: f32,
 }
 
+#[derive(Resource, Default, Debug)]
+struct PendingWorldGeneration {
+    requested: bool,
+}
+
 #[derive(Component)]
 struct WorldStartupOverlay;
 
@@ -541,6 +546,7 @@ impl Plugin for VoxelPlugin {
         // Async chunk generation state
         .insert_resource(ChunkGenerationState::default())
         .insert_resource(WorldStartupOverlayState::default())
+        .insert_resource(PendingWorldGeneration::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -568,8 +574,9 @@ impl Plugin for VoxelPlugin {
             Update,
             (
                 poll_world_load_task,
+                start_pending_world_generation.after(poll_world_load_task),
                 // Stage 1: Pull newly-generated chunks into VoxelWorld
-                poll_chunk_generation_tasks.after(poll_world_load_task),
+                poll_chunk_generation_tasks.after(start_pending_world_generation),
                 update_enclosure_state.after(poll_chunk_generation_tasks),
                 sync_occlusion_config_from_enclosure.after(update_enclosure_state),
                 toggle_enclosure_culling,
@@ -880,6 +887,7 @@ fn poll_world_load_task(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
     mut gen_state: ResMut<ChunkGenerationState>,
+    mut pending_generation: ResMut<PendingWorldGeneration>,
     mut tasks: Query<(Entity, &mut WorldLoadTask)>,
     persistence_settings: Res<WorldPersistence>,
 ) {
@@ -898,7 +906,7 @@ fn poll_world_load_task(
                         loaded_world.world_size_chunks(),
                         world.world_size_chunks()
                     );
-                    begin_world_generation(&mut commands, &world, &mut gen_state);
+                    request_world_generation(&mut gen_state, &mut pending_generation);
                     continue;
                 }
 
@@ -909,7 +917,7 @@ fn poll_world_load_task(
                         "Saved world contains {}/{} chunks; regenerating incomplete save",
                         loaded_chunks, expected_chunks
                     );
-                    begin_world_generation(&mut commands, &world, &mut gen_state);
+                    request_world_generation(&mut gen_state, &mut pending_generation);
                     continue;
                 }
 
@@ -933,10 +941,37 @@ fn poll_world_load_task(
                     "Failed to load saved world: {}. Generating new world...",
                     err
                 );
-                begin_world_generation(&mut commands, &world, &mut gen_state);
+                request_world_generation(&mut gen_state, &mut pending_generation);
             }
         }
     }
+}
+
+fn request_world_generation(
+    gen_state: &mut ChunkGenerationState,
+    pending_generation: &mut PendingWorldGeneration,
+) {
+    gen_state.total_chunks = 0;
+    gen_state.chunks_completed = 0;
+    gen_state.is_complete = false;
+    gen_state.loading_from_disk = false;
+    gen_state.world_stats = WorldStats::default();
+    gen_state.start_time = Some(std::time::Instant::now());
+    pending_generation.requested = true;
+}
+
+fn start_pending_world_generation(
+    mut commands: Commands,
+    world: Res<VoxelWorld>,
+    mut gen_state: ResMut<ChunkGenerationState>,
+    mut pending_generation: ResMut<PendingWorldGeneration>,
+) {
+    if !pending_generation.requested {
+        return;
+    }
+
+    pending_generation.requested = false;
+    begin_world_generation(&mut commands, &world, &mut gen_state);
 }
 
 fn spawn_world_startup_overlay(mut commands: Commands) {
