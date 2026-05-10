@@ -10,7 +10,7 @@ use crate::map::MapState;
 use crate::menu::{AntiAliasing, PauseMenuState, SettingsState, ShadowFiltering, VisualSettings};
 use crate::player::{
     Player, PlayerWorldValidity, SpawnColliderReadiness, SpawnValidationReport,
-    classify_player_world_validity, find_nearest_valid_spawn,
+    classify_player_world_validity, find_nearest_valid_spawn, find_surface_spawn,
 };
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::cinematic::CinematicCamera;
@@ -829,6 +829,7 @@ pub fn camera_follow_player(
     player_query: Query<&Transform, With<Player>>,
     mut camera_query: Query<(&mut Transform, &PlayerCamera), (With<PlayerCamera>, Without<Player>)>,
     camera_config: Res<CameraConfig>,
+    world: Res<VoxelWorld>,
 ) {
     if editor_native_viewport_enabled() {
         return;
@@ -842,9 +843,24 @@ pub fn camera_follow_player(
     };
 
     if camera.mode == CameraMode::Walk {
-        camera_transform.translation =
-            player_transform.translation + Vec3::Y * camera_config.movement.eye_height;
+        camera_transform.translation = walk_camera_position(
+            &world,
+            player_transform.translation,
+            camera_config.movement.eye_height,
+        );
     }
+}
+
+fn walk_camera_position(world: &VoxelWorld, player_position: Vec3, eye_height: f32) -> Vec3 {
+    let mut position = player_position + Vec3::Y * eye_height;
+    let x = position.x.floor() as i32;
+    let z = position.z.floor() as i32;
+    if let Ok(surface) = find_surface_spawn(world, x, z, &SpawnColliderReadiness::default(), false)
+    {
+        let min_eye_y = surface.position.y + eye_height;
+        position.y = position.y.max(min_eye_y);
+    }
+    position
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -854,6 +870,56 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constants::MIN_BREAKABLE_Y;
+    use crate::voxel::chunk::Chunk;
+    use crate::voxel::types::VoxelType;
+
+    fn world_with_surface(surface_y: i32) -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 2, 1));
+        for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
+            world.insert_chunk(Chunk::new(chunk_pos));
+        }
+        for y in MIN_BREAKABLE_Y..=surface_y {
+            let voxel = if y == surface_y {
+                VoxelType::TopSoil
+            } else {
+                VoxelType::Rock
+            };
+            assert!(world.set_voxel(IVec3::new(4, y, 4), voxel).applied());
+        }
+        world
+    }
+
+    #[test]
+    fn walk_camera_keeps_normal_eye_height_above_surface() {
+        let surface_y = MIN_BREAKABLE_Y + 4;
+        let world = world_with_surface(surface_y);
+        let eye_height = 1.7;
+        let player_position = Vec3::new(4.5, surface_y as f32 + 1.0, 4.5);
+
+        let camera_position = walk_camera_position(&world, player_position, eye_height);
+
+        assert_eq!(camera_position, player_position + Vec3::Y * eye_height);
+    }
+
+    #[test]
+    fn walk_camera_clamps_above_surface_when_player_origin_sinks() {
+        let surface_y = MIN_BREAKABLE_Y + 4;
+        let world = world_with_surface(surface_y);
+        let eye_height = 1.7;
+        let player_position = Vec3::new(4.5, surface_y as f32 + 0.2, 4.5);
+
+        let camera_position = walk_camera_position(&world, player_position, eye_height);
+
+        assert_eq!(camera_position.x, player_position.x);
+        assert_eq!(camera_position.z, player_position.z);
+        assert_eq!(camera_position.y, surface_y as f32 + 1.0 + eye_height);
+    }
 }
 
 /// System to apply visual settings to camera color grading and skybox
