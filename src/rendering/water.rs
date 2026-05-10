@@ -1,6 +1,7 @@
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
-use bevy::shader::Shader;
+use bevy::shader::{Shader, ShaderDefVal};
+use bevy_water::water::material::{WATER_FRAGMENT_SHADER_HANDLE, WATER_VERTEX_SHADER_HANDLE};
 use serde::{Deserialize, Serialize};
 
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishConfig;
@@ -33,19 +34,10 @@ pub struct WaterShaderToggles {
 }
 
 impl WaterShaderToggles {
-    /// Magnitude added to `material.edge_color.a` to mark Gerstner enabled.
-    /// Disjoint from the witchcraft alpha encoding (which lives in 0..=200).
-    pub const GERSTNER_BIT: f32 = 10_000.0;
-    /// Magnitude added to `material.edge_color.a` to mark Voronoi foam enabled.
-    pub const VORONOI_FOAM_BIT: f32 = 20_000.0;
-
     pub fn with_env_overrides(self) -> Self {
         Self {
             gerstner: self.gerstner || env_flag("VOXEL_WATER_GERSTNER"),
             voronoi_foam: self.voronoi_foam || env_flag("VOXEL_WATER_VORONOI_FOAM"),
-            // detail_normals and water_parallax are placeholders — they read from the YAML
-            // and env (`VOXEL_WATER_DETAIL_NORMALS`, `VOXEL_WATER_PARALLAX`) so the config
-            // schema is stable, but no shader code reads them yet (pending the Noble port).
             detail_normals: self.detail_normals || env_flag("VOXEL_WATER_DETAIL_NORMALS"),
             water_parallax: self.water_parallax || env_flag("VOXEL_WATER_PARALLAX"),
         }
@@ -53,19 +45,6 @@ impl WaterShaderToggles {
 
     pub fn any(self) -> bool {
         self.gerstner || self.voronoi_foam || self.detail_normals || self.water_parallax
-    }
-
-    /// Add toggle bits on top of the witchcraft alpha encoding so the WGSL
-    /// fragment can branch on them without forking `bevy_water`.
-    pub fn encode_alpha(self, alpha: f32) -> f32 {
-        let mut out = alpha;
-        if self.gerstner {
-            out += Self::GERSTNER_BIT;
-        }
-        if self.voronoi_foam {
-            out += Self::VORONOI_FOAM_BIT;
-        }
-        out
     }
 }
 
@@ -351,6 +330,13 @@ pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
 pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
     uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
 pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
+pub const NOBLE_GERSTNER_HANDLE: Handle<Shader> =
+    uuid_handle!("e8a0c196-9db0-4db7-a623-3c8f57c20e01");
+pub const NOBLE_FOAM_HANDLE: Handle<Shader> = uuid_handle!("d301db2d-50ef-4f6f-a22e-704278a756d1");
+pub const NOBLE_DETAIL_NORMALS_HANDLE: Handle<Shader> =
+    uuid_handle!("b6e30d80-517f-4e8e-bd35-e4e54f653fa1");
+pub const NOBLE_PARALLAX_HANDLE: Handle<Shader> =
+    uuid_handle!("ad3c6724-8f1d-4643-9504-790f9506700b");
 
 pub struct EnhancedWaterPlugin;
 
@@ -392,6 +378,42 @@ impl Plugin for EnhancedWaterPlugin {
             ),
             Shader::from_wgsl
         );
+        load_internal_asset!(
+            app,
+            NOBLE_GERSTNER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/noble_gerstner.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            NOBLE_FOAM_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/noble_foam.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            NOBLE_DETAIL_NORMALS_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/noble_detail_normals.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            NOBLE_PARALLAX_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/noble_parallax.wgsl"
+            ),
+            Shader::from_wgsl
+        );
 
         let config = load_water_config().unwrap_or_else(|e| {
             warn!("Failed to load water config: {}, using defaults", e);
@@ -402,6 +424,67 @@ impl Plugin for EnhancedWaterPlugin {
         let shader_toggles = config.shader_toggles.with_env_overrides();
         app.insert_resource(config)
             .insert_resource(witchcraft_params)
-            .insert_resource(shader_toggles);
+            .insert_resource(shader_toggles)
+            .add_systems(Startup, sync_water_shader_defs)
+            .add_systems(Update, sync_water_shader_defs);
+    }
+}
+
+fn sync_water_shader_defs(
+    toggles: Res<WaterShaderToggles>,
+    asset_server: Res<AssetServer>,
+    mut shaders: ResMut<Assets<Shader>>,
+    mut last_applied: Local<Option<WaterShaderToggles>>,
+) {
+    let shader_toggles = *toggles;
+    let should_apply = last_applied.is_none_or(|last| last != shader_toggles);
+    let vertex_asset: Handle<Shader> = asset_server.load("shaders/water_vertex.wgsl");
+    let fragment_asset: Handle<Shader> = asset_server.load("shaders/water_fragment.wgsl");
+    let mut all_loaded = true;
+
+    for handle in [
+        &WATER_VERTEX_SHADER_HANDLE,
+        &WATER_FRAGMENT_SHADER_HANDLE,
+        &vertex_asset,
+        &fragment_asset,
+    ] {
+        if let Some(shader) = shaders.get_mut(handle) {
+            if should_apply {
+                set_noble_shader_defs(shader, shader_toggles);
+            }
+        } else {
+            all_loaded = false;
+        }
+    }
+
+    if all_loaded {
+        *last_applied = Some(shader_toggles);
+    }
+}
+
+fn set_noble_shader_defs(shader: &mut Shader, toggles: WaterShaderToggles) {
+    const NOBLE_DEFS: [&str; 4] = [
+        "USE_NOBLE_GERSTNER",
+        "USE_NOBLE_FOAM",
+        "USE_NOBLE_DETAIL_NORMALS",
+        "USE_NOBLE_PARALLAX",
+    ];
+    shader.shader_defs.retain(|def| match def {
+        ShaderDefVal::Bool(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
+        ShaderDefVal::Int(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
+        ShaderDefVal::UInt(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
+    });
+
+    if toggles.gerstner {
+        shader.shader_defs.push("USE_NOBLE_GERSTNER".into());
+    }
+    if toggles.voronoi_foam {
+        shader.shader_defs.push("USE_NOBLE_FOAM".into());
+    }
+    if toggles.detail_normals {
+        shader.shader_defs.push("USE_NOBLE_DETAIL_NORMALS".into());
+    }
+    if toggles.water_parallax {
+        shader.shader_defs.push("USE_NOBLE_PARALLAX".into());
     }
 }

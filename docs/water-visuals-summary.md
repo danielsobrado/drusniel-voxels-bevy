@@ -145,3 +145,37 @@ Added shore foam to water edges where water meets terrain.
 - River generation creates varied water channels
 - Wet sand darkens terrain near water level
 - Shore foam appears at water edges
+
+## Noble Port
+
+Added an opt-in Noble water shader port, disabled by default for baseline stability.
+
+### Toggles
+Configured in `assets/config/water.yaml` under `shader_toggles` and exposed in the Shift+F4 settings window under "Water Shaders (Noble)":
+- `gerstner` -> `USE_NOBLE_GERSTNER`
+- `voronoi_foam` -> `USE_NOBLE_FOAM`
+- `detail_normals` -> `USE_NOBLE_DETAIL_NORMALS`
+- `water_parallax` -> `USE_NOBLE_PARALLAX`
+
+The toggles also accept env overrides: `VOXEL_WATER_GERSTNER`, `VOXEL_WATER_VORONOI_FOAM`, `VOXEL_WATER_DETAIL_NORMALS`, and `VOXEL_WATER_PARALLAX`.
+
+### Shader Files
+- `assets/shaders/noble_gerstner.wgsl`: ports Noble's `gerstnerWaves`, multi-octave `calculateWaveHeightGerstner`, and both water-normal variants. Noble's FBM is replaced with a local 2-octave value-noise FBM because `bevy_water` exposes no texture bindings.
+- `assets/shaders/noble_foam.wgsl`: multi-scale procedural Voronoi foam, used where the existing depth edge foam is calculated.
+- `assets/shaders/noble_detail_normals.wgsl`: procedural scrolling FBM detail normals with UDN-style blending and view-distance fade.
+- `assets/shaders/noble_parallax.wgsl`: ports Noble's iterative water parallax over the procedural Gerstner height field. It uses an approximate world-horizontal tangent direction because no extra tangent/depth bindings are available.
+
+Each Noble-derived WGSL file credits "Noble Shaders by Belmu (GPL-3.0)". This repo has no explicit license file, so distributing these ports may impose GPL-3.0 obligations on the combined shader work.
+
+### Bench Notes
+Attempted `cargo run --release -- --bench bench/scenes/visual-regression.toml`:
+- Toggles off run: `bench-runs/2026-05-10T10-20-42Z`
+- Toggles on run via env vars: `bench-runs/2026-05-10T10-30-44Z`
+- No `summary.json` was written because the bench hit readiness/render-ready timeouts. The off run timed out on `ridge-run-noon` and `jump-water-sunset`; the on run produced checkpoint CSVs/screenshots but was stopped by the command timeout before summary finalization.
+- The common CSV checkpoints also reported `Counter Water Body Fancy Count = 0` and `Counter Water Body Cheap Count = 4`, so the default visual-regression scene did not exercise the custom water shader path without forcing fancy water.
+
+Common CSV snapshot, not a replacement for `summary.json`:
+- `ridge-run-noon`: `__frame_total` 17.510 ms off vs 6.581 ms on; `Render Graph CPU` 8.498 ms off vs 6.053 ms on.
+- `jump-water-sunset`: `__frame_total` 13.108 ms off vs 16.901 ms on; `Render Graph CPU` 7.254 ms off vs 5.129 ms on.
+
+Because the required summaries were not produced and the common runs used cheap water, these numbers are diagnostic only. A valid before/after needs the bench ready-state issue fixed or a forced-fancy water bench variant that completes and writes `summary.json`.
