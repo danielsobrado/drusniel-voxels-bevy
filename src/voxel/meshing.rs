@@ -48,6 +48,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
+const WATER_SHORELINE_EXTENSION: f32 = 0.0;
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
     pub chunk_position: IVec3,
@@ -712,7 +714,12 @@ pub fn generate_chunk_mesh(
             );
             greedy_mesh_slice(&mut mask, depth, &mut water_quads);
             for quad in &water_quads {
-                add_greedy_water_face(&mut water_mesh, quad, face);
+                add_greedy_water_face(
+                    &mut water_mesh,
+                    quad,
+                    face,
+                    VoxelWorld::chunk_to_world(chunk.position()),
+                );
             }
         }
     }
@@ -1088,7 +1095,18 @@ fn air_connected_to_exterior_with_stats(
 
 /// Emit a greedy-merged water quad. Produces the same geometry as `add_water_face`
 /// but covers `quad.size` voxels, drastically reducing triangle count for oceans.
-fn add_greedy_water_face(mesh_data: &mut MeshData, quad: &GreedyQuad, face: Face) {
+#[inline]
+fn water_surface_local_y(chunk_origin: IVec3) -> f32 {
+    crate::constants::WATER_LEVEL as f32 + crate::constants::WATER_SURFACE_OFFSET
+        - chunk_origin.y as f32
+}
+
+fn add_greedy_water_face(
+    mesh_data: &mut MeshData,
+    quad: &GreedyQuad,
+    face: Face,
+    chunk_origin: IVec3,
+) {
     // Reconstruct local-space position and size from quad
     let (x, y, z, sx, sy, sz) = match face {
         Face::Top | Face::Bottom => (
@@ -1119,13 +1137,20 @@ fn add_greedy_water_face(mesh_data: &mut MeshData, quad: &GreedyQuad, face: Face
 
     let s = VOXEL_SIZE; // single-voxel edge length
     let (v0, v1, v2, v3, normal) = match face {
-        Face::Top => (
-            [x, y + s, z + sz],
-            [x + sx, y + s, z + sz],
-            [x + sx, y + s, z],
-            [x, y + s, z],
-            [0.0, 1.0, 0.0],
-        ),
+        Face::Top => {
+            let surface_y = water_surface_local_y(chunk_origin);
+            let x0 = x - WATER_SHORELINE_EXTENSION;
+            let x1 = x + sx + WATER_SHORELINE_EXTENSION;
+            let z0 = z - WATER_SHORELINE_EXTENSION;
+            let z1 = z + sz + WATER_SHORELINE_EXTENSION;
+            (
+                [x0, surface_y, z1],
+                [x1, surface_y, z1],
+                [x1, surface_y, z0],
+                [x0, surface_y, z0],
+                [0.0, 1.0, 0.0],
+            )
+        }
         Face::Bottom => (
             [x, y, z],
             [x + sx, y, z],
@@ -1182,7 +1207,14 @@ fn add_greedy_water_face(mesh_data: &mut MeshData, quad: &GreedyQuad, face: Face
 
     // UVs: use local-space coords (water shader uses coord_offset + uv * coord_scale)
     let (uv0, uv1, uv2, uv3) = match face {
-        Face::Top | Face::Bottom => ([x, z + sz], [x + sx, z + sz], [x + sx, z], [x, z]),
+        Face::Top => {
+            let x0 = x - WATER_SHORELINE_EXTENSION;
+            let x1 = x + sx + WATER_SHORELINE_EXTENSION;
+            let z0 = z - WATER_SHORELINE_EXTENSION;
+            let z1 = z + sz + WATER_SHORELINE_EXTENSION;
+            ([x0, z1], [x1, z1], [x1, z0], [x0, z0])
+        }
+        Face::Bottom => ([x, z + sz], [x + sx, z + sz], [x + sx, z], [x, z]),
         Face::North | Face::South => ([x, y], [x + sx, y], [x + sx, y + sy], [x, y + sy]),
         Face::East | Face::West => ([z, y], [z + sz, y], [z + sz, y + sy], [z, y + sy]),
     };
@@ -1822,13 +1854,20 @@ fn add_greedy_water_face_world(
 
     let s = VOXEL_SIZE;
     let (v0, v1, v2, v3, normal) = match face {
-        Face::Top => (
-            [x, y + s, z + sz],
-            [x + sx, y + s, z + sz],
-            [x + sx, y + s, z],
-            [x, y + s, z],
-            [0.0, 1.0, 0.0],
-        ),
+        Face::Top => {
+            let surface_y = water_surface_local_y(chunk_origin);
+            let x0 = x - WATER_SHORELINE_EXTENSION;
+            let x1 = x + sx + WATER_SHORELINE_EXTENSION;
+            let z0 = z - WATER_SHORELINE_EXTENSION;
+            let z1 = z + sz + WATER_SHORELINE_EXTENSION;
+            (
+                [x0, surface_y, z1],
+                [x1, surface_y, z1],
+                [x1, surface_y, z0],
+                [x0, surface_y, z0],
+                [0.0, 1.0, 0.0],
+            )
+        }
         Face::Bottom => (
             [x, y, z],
             [x + sx, y, z],
@@ -1879,9 +1918,10 @@ fn add_greedy_water_face_world(
     mesh_data.normals.push(normal);
 
     let color = if std::env::var_os("VOXEL_WATER_DEPTH_DEBUG_COLORS").is_some() {
+        let surface_y = water_surface_local_y(chunk_origin).floor() as i32;
         water_depth_debug_color(
             world,
-            chunk_origin + IVec3::new(x as i32, y as i32, z as i32),
+            chunk_origin + IVec3::new(x as i32, surface_y, z as i32),
         )
     } else {
         [1.0, 1.0, 1.0, 1.0]
@@ -1895,7 +1935,14 @@ fn add_greedy_water_face_world(
     let world_z = chunk_origin.z as f32 + z;
 
     let (uv0, uv1, uv2, uv3) = match face {
-        Face::Top | Face::Bottom => (
+        Face::Top => {
+            let x0 = world_x - WATER_SHORELINE_EXTENSION;
+            let x1 = world_x + sx + WATER_SHORELINE_EXTENSION;
+            let z0 = world_z - WATER_SHORELINE_EXTENSION;
+            let z1 = world_z + sz + WATER_SHORELINE_EXTENSION;
+            ([x0, z1], [x1, z1], [x1, z0], [x0, z0])
+        }
+        Face::Bottom => (
             [world_x, world_z + sz],
             [world_x + sx, world_z + sz],
             [world_x + sx, world_z],
@@ -3621,6 +3668,62 @@ mod tests {
         assert_eq!(mesh.water_stats.air_boundaries_total, 1);
         assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
         assert_eq!(mesh.water_stats.air_boundaries_sealed, 0);
+    }
+
+    #[test]
+    fn water_surface_below_sea_level_is_clamped_to_water_level() {
+        let mut world = world_with_vertical_chunks();
+        let water_pos = IVec3::new(8, WATER_LEVEL - 2, 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+        let chunk_origin = VoxelWorld::chunk_to_world(VoxelWorld::world_to_chunk(water_pos));
+
+        assert!(!mesh.water.indices.is_empty());
+        assert!(mesh.water.positions.iter().all(|position| {
+            let world_y = chunk_origin.y as f32 + position[1];
+            (world_y - crate::constants::WATER_LEVEL as f32).abs() < 0.001
+        }));
+    }
+
+    #[test]
+    fn water_surface_does_not_extend_onto_shoreline() {
+        let mut world = world_with_vertical_chunks();
+        let water_pos = IVec3::new(8, WATER_LEVEL - 2, 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+        let chunk_origin = VoxelWorld::chunk_to_world(VoxelWorld::world_to_chunk(water_pos));
+        let min_x = mesh
+            .water
+            .positions
+            .iter()
+            .map(|position| chunk_origin.x as f32 + position[0])
+            .fold(f32::INFINITY, f32::min);
+        let max_x = mesh
+            .water
+            .positions
+            .iter()
+            .map(|position| chunk_origin.x as f32 + position[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_z = mesh
+            .water
+            .positions
+            .iter()
+            .map(|position| chunk_origin.z as f32 + position[2])
+            .fold(f32::INFINITY, f32::min);
+        let max_z = mesh
+            .water
+            .positions
+            .iter()
+            .map(|position| chunk_origin.z as f32 + position[2])
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(!mesh.water.indices.is_empty());
+        assert!((min_x - water_pos.x as f32).abs() < 0.001);
+        assert!((max_x - (water_pos.x as f32 + VOXEL_SIZE)).abs() < 0.001);
+        assert!((min_z - water_pos.z as f32).abs() < 0.001);
+        assert!((max_z - (water_pos.z as f32 + VOXEL_SIZE)).abs() < 0.001);
     }
 
     #[test]
