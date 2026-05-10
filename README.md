@@ -2,7 +2,7 @@
 
 Game based on https://www.drusniel.com/ lore.
 
-![Loader](docs/images/loader.jpg)
+![Loader](docs/images/Loader.jpg)
 
 ## Version History
 
