@@ -19,6 +19,12 @@ use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 pub use grass_material::{GrassMaterial, GrassMaterialHandles, GrassMaterialPlugin};
 pub use wind::{WindAffected, WindAnimationType, WindConfig, WindPlugin, WindState};
 
+const GRASS_LOOKAHEAD_HEIGHT_START: f32 = 8.0;
+const GRASS_LOOKAHEAD_HEIGHT_RANGE: f32 = 48.0;
+const GRASS_LOOKAHEAD_FRONT_COS: f32 = 0.25;
+const GRASS_LOOKAHEAD_MAX_EXTRA_DISTANCE: f32 = 64.0;
+const GRASS_LOOKAHEAD_MAX_COUNT_DIVISOR: usize = 3;
+
 /// Minimal info for a single grass blade instance
 struct GrassInstance {
     position: Vec3,
@@ -156,30 +162,23 @@ pub fn attach_procedural_grass_to_chunks(
     let mut chunks_spawned = 0usize;
     let mut instances_spawned = 0usize;
 
-    let camera_pos = camera_query
+    let (camera_pos, camera_forward) = camera_query
         .single()
-        .map(|t| t.translation)
-        .unwrap_or(Vec3::ZERO);
+        .map(|t| (t.translation, t.forward().as_vec3()))
+        .unwrap_or((Vec3::ZERO, Vec3::NEG_Z));
 
     // Process blocky chunks
     for (entity, chunk, chunk_mesh, transform) in blocky_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
+        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
 
-        // Skip chunks beyond grass cull distance
-        if distance > GRASS_CULL_DISTANCE {
+        let Some((density, max_count)) =
+            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count)
+        else {
             continue;
-        }
-        chunks_considered += 1;
-
-        // Reduce density for medium-distance chunks
-        let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
-            (base_density.max(1) / 2, base_max_count / 2)
-        } else if distance > GRASS_FULL_DISTANCE {
-            (base_density, (base_max_count * 3) / 4)
-        } else {
-            (base_density, base_max_count)
         };
+        chunks_considered += 1;
 
         let spawned = process_chunk_for_grass(
             &mut commands,
@@ -202,19 +201,14 @@ pub fn attach_procedural_grass_to_chunks(
     for (entity, chunk, chunk_mesh, _material, transform) in triplanar_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
+        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
 
-        if distance > GRASS_CULL_DISTANCE {
+        let Some((density, max_count)) =
+            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count)
+        else {
             continue;
-        }
-        chunks_considered += 1;
-
-        let (density, max_count) = if distance > GRASS_HALF_DISTANCE {
-            (base_density.max(1) / 2, base_max_count / 2)
-        } else if distance > GRASS_FULL_DISTANCE {
-            (base_density, (base_max_count * 3) / 4)
-        } else {
-            (base_density, base_max_count)
         };
+        chunks_considered += 1;
 
         let spawned = process_chunk_for_grass(
             &mut commands,
@@ -236,6 +230,61 @@ pub fn attach_procedural_grass_to_chunks(
     timing.record_count(frame.0, "Grass Chunks Considered", chunks_considered as f64);
     timing.record_count(frame.0, "Grass Chunks Spawned", chunks_spawned as f64);
     timing.record_count(frame.0, "Grass Instances Spawned", instances_spawned as f64);
+}
+
+fn grass_spawn_budget(
+    distance: f32,
+    lookahead_distance: f32,
+    base_density: u32,
+    base_max_count: usize,
+) -> Option<(u32, usize)> {
+    if distance > GRASS_CULL_DISTANCE + lookahead_distance {
+        return None;
+    }
+
+    let budget = if distance > GRASS_CULL_DISTANCE {
+        (
+            1,
+            (base_max_count / GRASS_LOOKAHEAD_MAX_COUNT_DIVISOR).max(1),
+        )
+    } else if distance > GRASS_HALF_DISTANCE {
+        (base_density.max(1) / 2, base_max_count / 2)
+    } else if distance > GRASS_FULL_DISTANCE {
+        (base_density, (base_max_count * 3) / 4)
+    } else {
+        (base_density, base_max_count)
+    };
+
+    Some((budget.0.max(1), budget.1.max(1)))
+}
+
+fn grass_lookahead_distance(camera_pos: Vec3, camera_forward: Vec3, chunk_center: Vec3) -> f32 {
+    let mut forward_xz = Vec2::new(camera_forward.x, camera_forward.z);
+    if forward_xz.length_squared() < 0.0001 {
+        return 0.0;
+    }
+    forward_xz = forward_xz.normalize();
+
+    let to_chunk = Vec2::new(chunk_center.x - camera_pos.x, chunk_center.z - camera_pos.z);
+    let distance_sq = to_chunk.length_squared();
+    if distance_sq < 0.0001 {
+        return 0.0;
+    }
+
+    let alignment = (to_chunk / distance_sq.sqrt()).dot(forward_xz);
+    if alignment <= GRASS_LOOKAHEAD_FRONT_COS {
+        return 0.0;
+    }
+
+    let camera_height_above_chunk = camera_pos.y - chunk_center.y - GRASS_LOOKAHEAD_HEIGHT_START;
+    let height_t = smoothstep01(camera_height_above_chunk / GRASS_LOOKAHEAD_HEIGHT_RANGE);
+    if height_t <= 0.0 {
+        return 0.0;
+    }
+
+    let alignment_t =
+        smoothstep01((alignment - GRASS_LOOKAHEAD_FRONT_COS) / (1.0 - GRASS_LOOKAHEAD_FRONT_COS));
+    GRASS_LOOKAHEAD_MAX_EXTRA_DISTANCE * height_t * alignment_t
 }
 
 /// Helper function to spawn grass on a chunk
@@ -538,6 +587,12 @@ fn build_grass_patch_mesh(
     mesh.insert_indices(Indices::U32(out_indices));
 
     Some(mesh)
+}
+
+#[inline]
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Component for floating particles (pollen, dust, etc)
@@ -1112,6 +1167,7 @@ pub fn cull_distant_grass(
         return;
     };
     let camera_pos = camera_tf.translation;
+    let camera_forward = camera_tf.forward().as_vec3();
 
     // Use hysteresis: despawn only beyond cull + hysteresis
     let cull_threshold = GRASS_CULL_DISTANCE + GRASS_CULL_HYSTERESIS;
@@ -1126,8 +1182,9 @@ pub fn cull_distant_grass(
         };
         let chunk_center = chunk_tf.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
+        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
 
-        if distance > cull_threshold {
+        if distance > cull_threshold + lookahead_distance {
             despawned += 1;
             commands.entity(grass_entity).despawn();
             // Remove marker so grass can be re-spawned when player returns
@@ -1165,5 +1222,53 @@ impl Plugin for VegetationPlugin {
                     animate_particles,
                 ),
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grass_lookahead_requires_elevated_forward_chunk() {
+        let camera_pos = Vec3::new(0.0, 56.0, 0.0);
+        let forward = Vec3::NEG_Z;
+        let ahead = grass_lookahead_distance(
+            camera_pos,
+            forward,
+            Vec3::new(0.0, 8.0, -GRASS_CULL_DISTANCE),
+        );
+        assert!(
+            ahead > 24.0,
+            "expected forward grass lookahead, got {ahead}"
+        );
+
+        let side = grass_lookahead_distance(
+            camera_pos,
+            forward,
+            Vec3::new(GRASS_CULL_DISTANCE, 8.0, 0.0),
+        );
+        assert_eq!(side, 0.0);
+
+        let low_camera = grass_lookahead_distance(
+            Vec3::new(0.0, 12.0, 0.0),
+            forward,
+            Vec3::new(0.0, 8.0, -GRASS_CULL_DISTANCE),
+        );
+        assert_eq!(low_camera, 0.0);
+    }
+
+    #[test]
+    fn grass_spawn_budget_prewarms_forward_chunks_at_low_density() {
+        assert!(grass_spawn_budget(GRASS_CULL_DISTANCE + 12.0, 0.0, 2, 200).is_none());
+
+        let Some((density, max_count)) =
+            grass_spawn_budget(GRASS_CULL_DISTANCE + 12.0, 48.0, 2, 200)
+        else {
+            panic!("expected lookahead grass spawn budget");
+        };
+
+        assert_eq!(density, 1);
+        assert_eq!(max_count, 66);
     }
 }
