@@ -17,6 +17,8 @@ const SPAWN_RING_STEP: i32 = 4;
 const SPAWN_MAX_RADIUS: i32 = 160;
 const INITIAL_SPAWN_WAIT_LOG_FRAMES: u32 = 300;
 const LAST_SAFE_VERTICAL_TOLERANCE: f32 = 1.75;
+const GROUND_GUARD_HEIGHT_TOLERANCE: f32 = 2.75;
+const GROUND_GUARD_LOG_INTERVAL_FRAMES: u32 = 60;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValidSpawnLocation {
@@ -111,6 +113,8 @@ pub struct PlayerSpawnState {
     pub stats: SpawnValidationReport,
     pub void_recovery_terrain_fallbacks: u64,
     pub void_recoveries: u64,
+    pub ground_guard_recoveries: u64,
+    pub last_ground_guard_log_frame: u32,
 }
 
 impl Default for PlayerSpawnState {
@@ -123,6 +127,8 @@ impl Default for PlayerSpawnState {
             stats: SpawnValidationReport::default(),
             void_recovery_terrain_fallbacks: 0,
             void_recoveries: 0,
+            ground_guard_recoveries: 0,
+            last_ground_guard_log_frame: 0,
         }
     }
 }
@@ -267,29 +273,13 @@ pub fn recover_player_from_void(
     }
 
     let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
-    let collider_ready_recovery_target = state
-        .last_safe_grounded_position
-        .and_then(|position| {
-            validate_existing_spawn_position(&world, position, &readiness, true).ok()
-        })
-        .or_else(|| {
-            find_nearest_valid_spawn(
-                &world,
-                transform.translation.xz(),
-                &readiness,
-                true,
-                &mut state.stats,
-            )
-        })
-        .or_else(|| {
-            find_nearest_valid_spawn(
-                &world,
-                world_center_xz(&world),
-                &readiness,
-                true,
-                &mut state.stats,
-            )
-        });
+    let collider_ready_recovery_target = find_collider_ready_recovery_target(
+        &world,
+        transform.translation.xz(),
+        &readiness,
+        state.last_safe_grounded_position,
+        &mut state.stats,
+    );
 
     let (recovery_target, used_terrain_only_fallback) =
         if let Some(spawn) = collider_ready_recovery_target {
@@ -350,6 +340,80 @@ pub fn recover_player_from_void(
             "Void recovery needed at {:?}, but no valid spawn with ready collider was found",
             transform.translation
         );
+    }
+}
+
+pub fn recover_player_from_invalid_ground(
+    world: Res<VoxelWorld>,
+    frame: Res<FrameCount>,
+    mut state: ResMut<PlayerSpawnState>,
+    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<super::Player>>,
+) {
+    if state.initial_spawn_pending {
+        return;
+    }
+
+    let Ok((mut transform, velocity)) = player_query.single_mut() else {
+        return;
+    };
+
+    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+    let validity = classify_player_world_validity(&world, transform.translation);
+    let surface_without_collider =
+        validate_existing_spawn_position(&world, transform.translation, &readiness, false).ok();
+    let falling_or_grounded = velocity.as_ref().map(|v| v.y <= 0.5).unwrap_or(true);
+    let near_pending_ground = surface_without_collider.is_some_and(|surface| {
+        !spawn_collider_ready(&readiness, surface.chunk_pos)
+            && transform.translation.y <= surface.position.y + GROUND_GUARD_HEIGHT_TOLERANCE
+            && falling_or_grounded
+    });
+
+    if validity.is_valid() && !near_pending_ground {
+        return;
+    }
+
+    let recovery_target = find_collider_ready_recovery_target(
+        &world,
+        transform.translation.xz(),
+        &readiness,
+        state.last_safe_grounded_position,
+        &mut state.stats,
+    );
+
+    if let Some(spawn) = recovery_target {
+        let reason = if validity.is_valid() {
+            "current ground collider is still pending"
+        } else {
+            validity.label()
+        };
+        let previous_position = transform.translation;
+        teleport_player(&mut transform, velocity, spawn.position);
+        state.ground_guard_recoveries += 1;
+        state.last_safe_grounded_position = Some(spawn.position);
+        state.last_safe_ground_valid = true;
+
+        let should_log = state.ground_guard_recoveries == 1
+            || frame.0.saturating_sub(state.last_ground_guard_log_frame)
+                >= GROUND_GUARD_LOG_INTERVAL_FRAMES;
+        if should_log {
+            state.last_ground_guard_log_frame = frame.0;
+            warn!(
+                "Ground guard recovery ({reason}): moved player from {:?} to {:?} on surface {:?}",
+                previous_position, spawn.position, spawn.surface_block
+            );
+        }
+    } else {
+        state.last_safe_ground_valid = false;
+        let should_log = frame.0.saturating_sub(state.last_ground_guard_log_frame)
+            >= GROUND_GUARD_LOG_INTERVAL_FRAMES;
+        if should_log {
+            state.last_ground_guard_log_frame = frame.0;
+            warn!(
+                "Ground guard needed at {:?} ({:?}), but no collider-ready recovery target was found",
+                transform.translation, validity
+            );
+        }
     }
 }
 
@@ -440,6 +504,11 @@ pub fn record_spawn_diagnostics(
         state.void_recovery_terrain_fallbacks as f64,
     );
     timing.record_count(frame.0, "Void Recoveries", state.void_recoveries as f64);
+    timing.record_count(
+        frame.0,
+        "Ground Guard Recoveries",
+        state.ground_guard_recoveries as f64,
+    );
     timing.record_count(
         frame.0,
         "Player Recovered From Void",
@@ -635,6 +704,24 @@ pub fn classify_player_world_validity(world: &VoxelWorld, position: Vec3) -> Pla
     }
 }
 
+pub fn can_player_enter_ground_column(
+    world: &VoxelWorld,
+    position: Vec3,
+    collider_readiness: &SpawnColliderReadiness,
+) -> bool {
+    if !classify_player_world_validity(world, position).is_valid() {
+        return false;
+    }
+
+    let Ok(surface) = validate_existing_spawn_position(world, position, collider_readiness, false)
+    else {
+        return false;
+    };
+
+    position.y > surface.position.y + GROUND_GUARD_HEIGHT_TOLERANCE
+        || spawn_collider_ready(collider_readiness, surface.chunk_pos)
+}
+
 fn validate_surface_spawn(
     world: &VoxelWorld,
     surface_block: IVec3,
@@ -712,6 +799,21 @@ fn validate_existing_spawn_position(
     let x = position.x.floor() as i32;
     let z = position.z.floor() as i32;
     find_surface_spawn(world, x, z, collider_readiness, require_collider)
+}
+
+fn find_collider_ready_recovery_target(
+    world: &VoxelWorld,
+    origin: Vec2,
+    readiness: &SpawnColliderReadiness,
+    last_safe_grounded_position: Option<Vec3>,
+    stats: &mut SpawnValidationReport,
+) -> Option<ValidSpawnLocation> {
+    last_safe_grounded_position
+        .and_then(|position| {
+            validate_existing_spawn_position(world, position, readiness, true).ok()
+        })
+        .or_else(|| find_nearest_valid_spawn(world, origin, readiness, true, stats))
+        .or_else(|| find_nearest_valid_spawn(world, world_center_xz(world), readiness, true, stats))
 }
 
 fn spawn_collider_ready(readiness: &SpawnColliderReadiness, surface_chunk: IVec3) -> bool {

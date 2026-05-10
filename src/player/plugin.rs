@@ -20,6 +20,7 @@ impl Plugin for PlayerPlugin {
                 resolve_initial_player_spawn,
                 read_player_input.after(update_action_state),
                 apply_player_movement.in_set(TnuaUserControlsSystems),
+                recover_player_from_invalid_ground,
                 recover_player_from_void,
                 constrain_world_boundary_entities,
                 track_last_safe_grounded_position,

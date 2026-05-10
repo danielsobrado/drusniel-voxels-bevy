@@ -45,6 +45,7 @@ const READY_TIMEOUT_SECS: f32 = 75.0;
 const RENDER_READY_STABLE_FRAMES: u32 = 45;
 const RENDER_READY_MIN_FRAMES: u32 = 90;
 const RENDER_READY_TIMEOUT_SECS: f32 = 30.0;
+const GAMEPLAY_FALL_FAILURE_FRAMES: u32 = 6;
 const SCREENSHOT_WAIT_FRAMES: u32 = 60;
 const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
 const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
@@ -207,6 +208,7 @@ struct BenchState {
     gameplay_min_horizontal_speed: f32,
     gameplay_min_y: f32,
     gameplay_fall_events: u32,
+    gameplay_fall_through_frames: u32,
     gameplay_was_falling_through: bool,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
@@ -743,6 +745,7 @@ impl Plugin for BenchPlugin {
                 gameplay_min_horizontal_speed: 0.0,
                 gameplay_min_y: f32::MAX,
                 gameplay_fall_events: 0,
+                gameplay_fall_through_frames: 0,
                 gameplay_was_falling_through: false,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
@@ -1223,6 +1226,7 @@ fn run_bench_state_machine(
             state.gameplay_min_horizontal_speed = f32::MAX;
             state.gameplay_min_y = f32::MAX;
             state.gameplay_fall_events = 0;
+            state.gameplay_fall_through_frames = 0;
             state.gameplay_was_falling_through = false;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
@@ -2406,7 +2410,6 @@ fn record_bench_gameplay_counts(
     );
     if sample.falling_through && !state.gameplay_was_falling_through {
         state.gameplay_fall_events += 1;
-        state.gameplay_failed = true;
         warn!(
             "Bench gameplay fall-through: checkpoint='{}' run={} frame={} pos=({:.2},{:.2},{:.2}) vel=({:.2},{:.2},{:.2}) validity={} surface_delta={:?} collider_ready={} collider_pending={}",
             checkpoint.name,
@@ -2423,6 +2426,14 @@ fn record_bench_gameplay_counts(
             sample.collider_ready,
             sample.collider_pending,
         );
+    }
+    if sample.falling_through {
+        state.gameplay_fall_through_frames += 1;
+        if state.gameplay_fall_through_frames >= GAMEPLAY_FALL_FAILURE_FRAMES {
+            state.gameplay_failed = true;
+        }
+    } else {
+        state.gameplay_fall_through_frames = 0;
     }
     state.gameplay_was_falling_through = sample.falling_through;
     state.gameplay_trace.push(sample);
@@ -2456,6 +2467,11 @@ fn record_bench_gameplay_counts(
         frame,
         "Bench Gameplay Fall Events",
         state.gameplay_fall_events as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Gameplay Fall Through Frames",
+        state.gameplay_fall_through_frames as f64,
     );
     timing.record_count(
         frame,

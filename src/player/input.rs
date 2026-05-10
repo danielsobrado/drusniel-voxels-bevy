@@ -8,6 +8,13 @@ use crate::camera::controller::PlayerCamera;
 use crate::input::config::GameAction;
 use crate::input::manager::ActionState;
 use crate::performance::AreaTimingRecorder;
+use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::voxel::meshing::ChunkMesh;
+use crate::voxel::world::VoxelWorld;
+
+use super::{SpawnColliderReadiness, can_player_enter_ground_column};
+
+const MOVEMENT_GROUND_PROBE_DISTANCE: f32 = 1.25;
 
 /// Player input state.
 #[derive(Resource, Default)]
@@ -47,16 +54,20 @@ pub fn apply_player_movement(
             &mut TnuaController<PlayerMovementScheme>,
             &PlayerConfig,
             &TnuaConfig<PlayerMovementScheme>,
+            &Transform,
         ),
         With<Player>,
     >,
     mut movement_configs: ResMut<Assets<PlayerMovementSchemeConfig>>,
+    world: Res<VoxelWorld>,
+    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
 
-    let Ok((mut controller, config, movement_config)) = player_query.single_mut() else {
+    let Ok((mut controller, config, movement_config, player_transform)) = player_query.single_mut()
+    else {
         return;
     };
 
@@ -64,7 +75,15 @@ pub fn apply_player_movement(
     let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
     let right = Vec3::new(-forward.z, 0.0, forward.x);
 
-    let direction = forward * input.movement.y + right * input.movement.x;
+    let mut direction = forward * input.movement.y + right * input.movement.x;
+    if direction.length_squared() > 0.0 {
+        let collider_readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+        let probe_position =
+            player_transform.translation + direction.normalize() * MOVEMENT_GROUND_PROBE_DISTANCE;
+        if !can_player_enter_ground_column(&world, probe_position, &collider_readiness) {
+            direction = Vec3::ZERO;
+        }
+    }
 
     let speed = if input.sprint {
         config.run_speed

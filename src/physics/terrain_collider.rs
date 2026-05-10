@@ -5,14 +5,17 @@ use bevy::prelude::*;
 use crate::camera::controller::PlayerCamera;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::physics::PhysicsLayer;
-use crate::player::PlayerSpawnState;
+use crate::player::{Player, PlayerSpawnState};
 
 const TERRAIN_COLLIDER_VOXEL_SIZE: f32 = 1.0;
 const TERRAIN_COLLIDER_MARGIN: f32 = 0.05;
-/// Maximum colliders generated per frame to avoid gameplay hitching during terrain LOD churn.
-const MAX_COLLIDERS_PER_FRAME: usize = 2;
+/// Maximum colliders generated per frame during normal idle terrain churn.
+const MAX_COLLIDERS_PER_FRAME: usize = 4;
+/// Collider budget while the player is near pending terrain.
+const MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME: usize = 24;
 /// Startup can safely spend more work preparing the local terrain before player release.
-const MAX_STARTUP_COLLIDERS_PER_FRAME: usize = 24;
+const MAX_STARTUP_COLLIDERS_PER_FRAME: usize = 48;
+const PLAYER_COLLIDER_CATCHUP_RADIUS: f32 = 128.0;
 use crate::voxel::meshing::ChunkMesh;
 
 /// Marker for chunks that need collider generation.
@@ -85,36 +88,46 @@ pub fn generate_chunk_colliders(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     camera_query: Query<&Transform, (With<PlayerCamera>, Without<ChunkMesh>)>,
+    player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>, Without<ChunkMesh>)>,
     spawn_state: Option<Res<PlayerSpawnState>>,
 ) {
     let mode = terrain_collider_mode();
     let startup_collider_catchup = spawn_state.is_some_and(|state| state.initial_spawn_pending);
-    let collider_budget = if startup_collider_catchup {
-        MAX_STARTUP_COLLIDERS_PER_FRAME
-    } else {
-        MAX_COLLIDERS_PER_FRAME
-    };
-    let (pending_count, generated, generated_trimesh, generated_voxelized) = {
+    let (
+        pending_count,
+        generated,
+        generated_trimesh,
+        generated_voxelized,
+        collider_budget,
+        player_near_pending,
+    ) = {
         let _timer = area_timer(&mut timing, frame.0, "Collider Build");
 
         let camera_pos = camera_query
             .single()
             .map(|t| t.translation)
             .unwrap_or(Vec3::ZERO);
+        let priority_pos = player_query
+            .single()
+            .map(|t| t.translation)
+            .unwrap_or(camera_pos);
 
         // Collect and sort by distance to camera (nearest first)
         let mut pending: Vec<_> = chunks.iter().collect();
+        let catchup_radius_sq = PLAYER_COLLIDER_CATCHUP_RADIUS * PLAYER_COLLIDER_CATCHUP_RADIUS;
+        let player_near_pending = pending.iter().any(|(_, _, transform, _)| {
+            horizontal_distance_sq(transform.translation, priority_pos) <= catchup_radius_sq
+        });
+        let collider_budget = if startup_collider_catchup {
+            MAX_STARTUP_COLLIDERS_PER_FRAME
+        } else if player_near_pending {
+            MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME
+        } else {
+            MAX_COLLIDERS_PER_FRAME
+        };
         pending.sort_by(|a, b| {
-            let da = collider_priority_distance_sq(
-                a.2.translation,
-                camera_pos,
-                startup_collider_catchup,
-            );
-            let db = collider_priority_distance_sq(
-                b.2.translation,
-                camera_pos,
-                startup_collider_catchup,
-            );
+            let da = collider_priority_distance_sq(a.2.translation, priority_pos);
+            let db = collider_priority_distance_sq(b.2.translation, priority_pos);
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -165,12 +178,19 @@ pub fn generate_chunk_colliders(
             generated,
             generated_trimesh,
             generated_voxelized,
+            collider_budget,
+            player_near_pending,
         )
     };
 
     timing.record_count(frame.0, "Terrain Colliders Pending", pending_count as f64);
     timing.record_count(frame.0, "Terrain Colliders Generated", generated as f64);
     timing.record_count(frame.0, "Terrain Collider Budget", collider_budget as f64);
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Player Near Pending",
+        player_near_pending as u8 as f64,
+    );
     timing.record_count(
         frame.0,
         "Terrain Colliders Generated Trimesh",
@@ -188,18 +208,17 @@ pub fn generate_chunk_colliders(
     );
 }
 
-fn collider_priority_distance_sq(
-    chunk_position: Vec3,
-    camera_pos: Vec3,
-    startup_catchup: bool,
-) -> f32 {
-    if startup_catchup {
-        let dx = chunk_position.x - camera_pos.x;
-        let dz = chunk_position.z - camera_pos.z;
-        dx * dx + dz * dz
-    } else {
-        chunk_position.distance_squared(camera_pos)
-    }
+fn collider_priority_distance_sq(chunk_position: Vec3, priority_pos: Vec3) -> f32 {
+    let dx = chunk_position.x - priority_pos.x;
+    let dz = chunk_position.z - priority_pos.z;
+    let dy = (chunk_position.y - priority_pos.y) * 0.25;
+    dx * dx + dz * dz + dy * dy
+}
+
+fn horizontal_distance_sq(chunk_position: Vec3, priority_pos: Vec3) -> f32 {
+    let dx = chunk_position.x - priority_pos.x;
+    let dz = chunk_position.z - priority_pos.z;
+    dx * dx + dz * dz
 }
 
 /// System to mark colliders for regeneration when chunk meshes change.

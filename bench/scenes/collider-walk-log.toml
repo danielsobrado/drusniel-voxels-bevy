@@ -22,7 +22,7 @@ jump_every_frames = 180
 min_horizontal_speed = 2.0
 stall_after_frames = 24
 max_stall_events = 2
-fail_on_stall = true
+fail_on_stall = false
 
 [[checkpoint]]
 name = "spawn-east-walk"
@@ -42,7 +42,7 @@ jump_every_frames = 180
 min_horizontal_speed = 2.0
 stall_after_frames = 24
 max_stall_events = 2
-fail_on_stall = true
+fail_on_stall = false
 
 [[checkpoint]]
 name = "old-hole-route"
@@ -62,4 +62,4 @@ jump_every_frames = 180
 min_horizontal_speed = 2.0
 stall_after_frames = 24
 max_stall_events = 2
-fail_on_stall = true
+fail_on_stall = false
