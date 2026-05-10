@@ -1,45 +1,10 @@
 # Drusniel Voxels
 
+Game based on https://www.drusniel.com/ lore.
+
 ## Version History
 
 Current development version: **v0.5**.
-
-## Editor
-
-The desktop editor lives in `editor/frontend` and runs as a Tauri app. Tauri owns the editor window and starts the Bevy editor runtime in backend mode automatically.
-
-### Start The Desktop Editor
-
-```powershell
-cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
-npm.cmd run dev:desktop
-```
-
-### Build The Desktop Editor
-
-```powershell
-cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
-npm.cmd run build:desktop
-```
-
-The desktop build creates a release editor runtime sidecar first, then builds the Tauri app with that sidecar configured.
-
-### Run A Built Editor Exe
-
-After a successful production build, run:
-
-```powershell
-C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend\src-tauri\target\release\drusniel_voxels_editor.exe
-```
-
-### Browser-Only Frontend Development
-
-Use this only for frontend work that does not need the desktop runtime lifecycle:
-
-```powershell
-cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
-npm.cmd run dev
-```
 
 ### Current (v0.5)
 
@@ -93,6 +58,10 @@ npm.cmd run dev
 
     *   **Terrain Cull Distance**: High-detail distance reduced from 160m to 128m (aligned with shadow cull). Overall cull distance tightened from 400m to 320m (fog hides terrain beyond ~220m).
 
+*   **New Editor**: Initial Draft of the editor, most functioanlity is Mock 
+    *   **Embedded Bevy view with Debug Bridge**
+    *   **Initial Wireframe view** 
+  
 ### v0.4
 *   **Bevy 0.18 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
 *   **Radiance Cascades GI**: Screen-space global illumination using voxel SDF data for efficient ray marching, providing realistic indirect lighting with multi-cascade probe system and temporal reprojection.
@@ -682,4 +651,41 @@ Colors -> Hue-Saturation -> Saturation: -25
 Colors -> Curves -> S-curve for contrast
 Filters -> Blur -> Gaussian Blur -> 0.8px
 Image -> Scale Image -> 512x512
+```
+
+## Editor
+
+The desktop editor lives in `editor/frontend` and runs as a Tauri app. Tauri owns the editor window and starts the Bevy editor runtime in backend mode automatically.
+
+### Start The Desktop Editor
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run dev:desktop
+```
+
+### Build The Desktop Editor
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run build:desktop
+```
+
+The desktop build creates a release editor runtime sidecar first, then builds the Tauri app with that sidecar configured.
+
+### Run A Built Editor Exe
+
+After a successful production build, run:
+
+```powershell
+C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend\src-tauri\target\release\drusniel_voxels_editor.exe
+```
+
+### Browser-Only Frontend Development
+
+Use this only for frontend work that does not need the desktop runtime lifecycle:
+
+```powershell
+cd C:\Development\workspace\GitHub\drusniel-voxels\editor\frontend
+npm.cmd run dev
 ```

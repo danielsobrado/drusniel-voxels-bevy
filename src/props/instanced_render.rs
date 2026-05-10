@@ -67,10 +67,16 @@ const FOLIAGE_FULL_LOD_DISTANCE: f32 = 96.0;
 const FOLIAGE_HIDDEN_LOD_DISTANCE: f32 = 160.0;
 const TINY_CLUTTER_FULL_LOD_DISTANCE: f32 = 64.0;
 const TINY_CLUTTER_HIDDEN_LOD_DISTANCE: f32 = 80.0;
+const TINY_CLUTTER_LOOKAHEAD_HEIGHT_START: f32 = 8.0;
+const TINY_CLUTTER_LOOKAHEAD_HEIGHT_RANGE: f32 = 40.0;
+const TINY_CLUTTER_LOOKAHEAD_FRONT_COS: f32 = 0.35;
+const TINY_CLUTTER_LOOKAHEAD_MAX_EXTRA_DISTANCE: f32 = 48.0;
+const TINY_CLUTTER_LOOKAHEAD_FULL_FRACTION: f32 = 0.5;
 const PROP_SUBCLUSTER_MIN_GROUP_INSTANCES: usize = 24;
 const PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES: usize = 8;
 const PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP: usize = 3;
-const PROP_SUBCLUSTER_BOUNDS_PADDING: f32 = 8.0;
+const DEFAULT_PROP_SUBCLUSTER_GRID: u8 = 4;
+const PROP_SUBCLUSTER_BOUNDS_PADDING: f32 = 16.0;
 
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct PropBoundsConfig {
@@ -1015,6 +1021,7 @@ fn update_instanced_prop_lod(
         return;
     };
     let camera_pos = camera_transform.translation();
+    let camera_forward = camera_transform.forward().as_vec3();
     let disable_hiding = bench_toggles
         .as_deref()
         .is_some_and(|toggles| toggles.disable_prop_lod_hiding);
@@ -1043,19 +1050,23 @@ fn update_instanced_prop_lod(
                 .get(index)
                 .copied()
                 .unwrap_or(PropInstanceLod::Full);
+            let center = group
+                .source_bounds
+                .get(index)
+                .map(|bounds| bounds.sphere_center)
+                .unwrap_or_else(|| instance_translation(&group.source_instances[index]));
             let distance = group
                 .source_bounds
                 .get(index)
-                .map(|bounds| {
-                    (camera_pos.distance(bounds.sphere_center) - bounds.sphere_radius).max(0.0)
-                })
-                .unwrap_or_else(|| {
-                    camera_pos.distance(instance_translation(&group.source_instances[index]))
-                });
+                .map(|bounds| (camera_pos.distance(center) - bounds.sphere_radius).max(0.0))
+                .unwrap_or_else(|| camera_pos.distance(center));
+            let lookahead_distance =
+                tiny_ground_clutter_lookahead_distance(class, camera_pos, camera_forward, center);
             let next = classify_instance_lod(
                 class,
                 current,
                 distance,
+                lookahead_distance,
                 disable_hiding,
                 disable_shadow_lod,
                 lod_distance_scale,
@@ -1115,6 +1126,7 @@ fn classify_instance_lod(
     class: PropRenderClass,
     current: PropInstanceLod,
     distance: f32,
+    lookahead_distance: f32,
     disable_hiding: bool,
     disable_shadow_lod: bool,
     lod_distance_scale: f32,
@@ -1141,8 +1153,9 @@ fn classify_instance_lod(
         PropRenderClass::TinyGroundClutter => classify_visible_lod(
             current,
             distance,
-            TINY_CLUTTER_FULL_LOD_DISTANCE * lod_distance_scale,
-            TINY_CLUTTER_HIDDEN_LOD_DISTANCE * lod_distance_scale,
+            TINY_CLUTTER_FULL_LOD_DISTANCE * lod_distance_scale
+                + lookahead_distance * TINY_CLUTTER_LOOKAHEAD_FULL_FRACTION,
+            TINY_CLUTTER_HIDDEN_LOD_DISTANCE * lod_distance_scale + lookahead_distance,
         ),
     };
 
@@ -1152,6 +1165,46 @@ fn classify_instance_lod(
         PropInstanceLod::Mid if disable_shadow_lod => PropInstanceLod::Full,
         other => other,
     }
+}
+
+fn tiny_ground_clutter_lookahead_distance(
+    class: PropRenderClass,
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    prop_center: Vec3,
+) -> f32 {
+    if class != PropRenderClass::TinyGroundClutter {
+        return 0.0;
+    }
+
+    let mut forward_xz = Vec2::new(camera_forward.x, camera_forward.z);
+    if forward_xz.length_squared() < 0.0001 {
+        return 0.0;
+    }
+    forward_xz = forward_xz.normalize();
+
+    let to_prop = Vec2::new(prop_center.x - camera_pos.x, prop_center.z - camera_pos.z);
+    let distance_sq = to_prop.length_squared();
+    if distance_sq < 0.0001 {
+        return 0.0;
+    }
+
+    let alignment = (to_prop / distance_sq.sqrt()).dot(forward_xz);
+    if alignment <= TINY_CLUTTER_LOOKAHEAD_FRONT_COS {
+        return 0.0;
+    }
+
+    let height = (camera_pos.y - prop_center.y - TINY_CLUTTER_LOOKAHEAD_HEIGHT_START)
+        / TINY_CLUTTER_LOOKAHEAD_HEIGHT_RANGE;
+    let height_t = height.clamp(0.0, 1.0);
+    if height_t <= 0.0 {
+        return 0.0;
+    }
+
+    let alignment_t = ((alignment - TINY_CLUTTER_LOOKAHEAD_FRONT_COS)
+        / (1.0 - TINY_CLUTTER_LOOKAHEAD_FRONT_COS))
+        .clamp(0.0, 1.0);
+    TINY_CLUTTER_LOOKAHEAD_MAX_EXTRA_DISTANCE * height_t * alignment_t
 }
 
 fn classify_visible_lod(
@@ -1388,7 +1441,7 @@ fn normalized_prop_subcluster_grid(bench_toggles: Option<&BenchRenderToggles>) -
     match bench_toggles.map(|toggles| toggles.prop_subcluster_grid) {
         Some(2) => 2,
         Some(4) => 4,
-        _ => 0,
+        _ => DEFAULT_PROP_SUBCLUSTER_GRID,
     }
 }
 
@@ -3124,5 +3177,75 @@ mod tests {
         assert_vec3_close(bounds.max, Vec3::new(40.0, 18.0, 39.0));
         assert_vec3_close(bounds.sphere_center, Vec3::new(33.0, 10.0, 32.0));
         assert!((bounds.sphere_radius - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn tiny_ground_clutter_lookahead_requires_elevated_forward_view() {
+        let camera_pos = Vec3::new(0.0, 48.0, 0.0);
+        let forward = Vec3::NEG_Z;
+        let ahead = tiny_ground_clutter_lookahead_distance(
+            PropRenderClass::TinyGroundClutter,
+            camera_pos,
+            forward,
+            Vec3::new(0.0, 0.0, -120.0),
+        );
+        assert!(
+            ahead > 24.0,
+            "expected forward elevated lookahead, got {ahead}"
+        );
+
+        let side = tiny_ground_clutter_lookahead_distance(
+            PropRenderClass::TinyGroundClutter,
+            camera_pos,
+            forward,
+            Vec3::new(120.0, 0.0, 0.0),
+        );
+        assert_eq!(side, 0.0);
+
+        let low_camera = tiny_ground_clutter_lookahead_distance(
+            PropRenderClass::TinyGroundClutter,
+            Vec3::new(0.0, 4.0, 0.0),
+            forward,
+            Vec3::new(0.0, 0.0, -120.0),
+        );
+        assert_eq!(low_camera, 0.0);
+    }
+
+    #[test]
+    fn tiny_ground_clutter_lookahead_prevents_forward_hidden_pop() {
+        let no_lookahead = classify_instance_lod(
+            PropRenderClass::TinyGroundClutter,
+            PropInstanceLod::Full,
+            110.0,
+            0.0,
+            false,
+            false,
+            1.0,
+            1.0,
+        );
+        assert_eq!(no_lookahead, PropInstanceLod::Hidden);
+
+        let with_lookahead = classify_instance_lod(
+            PropRenderClass::TinyGroundClutter,
+            PropInstanceLod::Full,
+            110.0,
+            TINY_CLUTTER_LOOKAHEAD_MAX_EXTRA_DISTANCE,
+            false,
+            false,
+            1.0,
+            1.0,
+        );
+        assert_eq!(with_lookahead, PropInstanceLod::Mid);
+    }
+
+    #[test]
+    fn prop_subcluster_grid_defaults_on_for_runtime() {
+        assert_eq!(
+            normalized_prop_subcluster_grid(None),
+            DEFAULT_PROP_SUBCLUSTER_GRID
+        );
+        let mut toggles = BenchRenderToggles::default();
+        toggles.prop_subcluster_grid = 2;
+        assert_eq!(normalized_prop_subcluster_grid(Some(&toggles)), 2);
     }
 }
