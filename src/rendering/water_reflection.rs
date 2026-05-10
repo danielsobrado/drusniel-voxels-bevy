@@ -1175,12 +1175,7 @@ fn water_air_open_to_sky(world: &VoxelWorld, air_pos: IVec3) -> bool {
 }
 
 fn water_body_allows_reflection_sampling(body_info: Option<&WaterBodyInfo>) -> bool {
-    !body_info.is_some_and(|body| {
-        matches!(
-            body.material_mode,
-            WaterBodyMaterialMode::Cheap | WaterBodyMaterialMode::Hidden
-        )
-    })
+    !body_info.is_some_and(|body| body.material_mode == WaterBodyMaterialMode::Hidden)
 }
 
 fn update_water_mask_camera(
@@ -1409,7 +1404,7 @@ mod tests {
     }
 
     #[test]
-    fn reflection_sampling_skips_cheap_and_hidden_water_bodies() {
+    fn reflection_sampling_skips_hidden_water_bodies_only() {
         let mut body = WaterBodyInfo {
             id: WaterBodyId(1),
             kind: WaterBodyKind::Ocean,
@@ -1430,7 +1425,7 @@ mod tests {
 
         assert!(water_body_allows_reflection_sampling(Some(&body)));
         body.material_mode = WaterBodyMaterialMode::Cheap;
-        assert!(!water_body_allows_reflection_sampling(Some(&body)));
+        assert!(water_body_allows_reflection_sampling(Some(&body)));
         body.material_mode = WaterBodyMaterialMode::Hidden;
         assert!(!water_body_allows_reflection_sampling(Some(&body)));
         assert!(water_body_allows_reflection_sampling(None));
