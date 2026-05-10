@@ -1208,45 +1208,49 @@ pub fn spawn_landmark_buildings(
         1.57,
     ));
 
-    let house_ratios = [
-        (0.18, 0.2),
-        (0.28, 0.22),
-        (0.38, 0.2),
-        (0.48, 0.23),
-        (0.58, 0.2),
-        (0.68, 0.24),
-        (0.78, 0.22),
-        (0.25, 0.35),
-        (0.45, 0.38),
-        (0.65, 0.36),
-    ];
-    for (idx, (x_ratio, z_ratio)) in house_ratios.iter().enumerate() {
-        placements.push((
-            "building_house",
-            Vec2::new(world_width * x_ratio, world_depth * z_ratio),
-            rotation_from_index(idx),
-        ));
-    }
+    // Temporarily disabled: fixed house landmarks are too noisy while terrain
+    // generation is being retuned.
+    // let house_ratios = [
+    //     (0.18, 0.2),
+    //     (0.28, 0.22),
+    //     (0.38, 0.2),
+    //     (0.48, 0.23),
+    //     (0.58, 0.2),
+    //     (0.68, 0.24),
+    //     (0.78, 0.22),
+    //     (0.25, 0.35),
+    //     (0.45, 0.38),
+    //     (0.65, 0.36),
+    // ];
+    // for (idx, (x_ratio, z_ratio)) in house_ratios.iter().enumerate() {
+    //     placements.push((
+    //         "building_house",
+    //         Vec2::new(world_width * x_ratio, world_depth * z_ratio),
+    //         rotation_from_index(idx),
+    //     ));
+    // }
 
-    let hut_ratios = [
-        (0.2, 0.6),
-        (0.3, 0.65),
-        (0.4, 0.6),
-        (0.5, 0.66),
-        (0.6, 0.6),
-        (0.7, 0.66),
-        (0.8, 0.6),
-        (0.25, 0.8),
-        (0.5, 0.8),
-        (0.75, 0.8),
-    ];
-    for (idx, (x_ratio, z_ratio)) in hut_ratios.iter().enumerate() {
-        placements.push((
-            "building_hut",
-            Vec2::new(world_width * x_ratio, world_depth * z_ratio),
-            rotation_from_index(idx + house_ratios.len()),
-        ));
-    }
+    // Temporarily disabled: fixed hut landmarks are too noisy while terrain
+    // generation is being retuned.
+    // let hut_ratios = [
+    //     (0.2, 0.6),
+    //     (0.3, 0.65),
+    //     (0.4, 0.6),
+    //     (0.5, 0.66),
+    //     (0.6, 0.6),
+    //     (0.7, 0.66),
+    //     (0.8, 0.6),
+    //     (0.25, 0.8),
+    //     (0.5, 0.8),
+    //     (0.75, 0.8),
+    // ];
+    // for (idx, (x_ratio, z_ratio)) in hut_ratios.iter().enumerate() {
+    //     placements.push((
+    //         "building_hut",
+    //         Vec2::new(world_width * x_ratio, world_depth * z_ratio),
+    //         rotation_from_index(idx + house_ratios.len()),
+    //     ));
+    // }
 
     let mut spawned_count = 0;
     let mut terrain_modified = false;
@@ -1332,9 +1336,9 @@ pub fn spawn_landmark_buildings(
     }
 }
 
-fn rotation_from_index(index: usize) -> f32 {
-    (index as f32) * 0.7 % std::f32::consts::TAU
-}
+// fn rotation_from_index(index: usize) -> f32 {
+//     (index as f32) * 0.7 % std::f32::consts::TAU
+// }
 
 fn find_def<'a>(config: &'a PropConfig, id: &str) -> Option<&'a PropDefinition> {
     config

@@ -227,6 +227,18 @@ pub enum GeneratedWaterBodyKind {
     None,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShorelineKind {
+    Beach,
+    Cliff,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ShorelineProfile {
+    edge_distance: i32,
+    kind: ShorelineKind,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WaterGenerationMetadata {
     pub kind: GeneratedWaterBodyKind,
@@ -296,8 +308,11 @@ const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;
 const BASE_TERRAIN_ELEVATION: f32 = MIN_NORMAL_TERRAIN_SURFACE_Y as f32;
 const EDGE_OCEAN_START_DISTANCE: i32 = CHUNK_SIZE_I32 * 3;
 const EDGE_OCEAN_FULL_DEPTH_DISTANCE: i32 = CHUNK_SIZE_I32;
+const EDGE_SHORE_BACKSHORE_DISTANCE: i32 = CHUNK_SIZE_I32 * 2;
 const EDGE_OCEAN_MIN_DEPTH: f32 = 2.0;
 const EDGE_OCEAN_MAX_DEPTH: f32 = 16.0;
+const BEACH_BACKSHORE_HEIGHT: f32 = WATER_LEVEL as f32 + 5.0;
+const CLIFF_MIN_HEIGHT_ABOVE_WATER: f32 = 16.0;
 
 impl Default for TerrainGenerator<ValueNoise> {
     fn default() -> Self {
@@ -421,18 +436,15 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let z = world_z as f32;
         let cfg = &self.config;
 
-        // Large-scale continent shape. The source noise is positive, so keep
-        // the contribution scaled rather than letting it clamp the whole world
-        // to mountain height.
-        let continent = self.fbm_configurable(
+        let continent_noise = self.fbm_configurable(
             x,
             z,
             cfg.continent.scale,
             cfg.continent.octaves,
             cfg.continent.persistence,
             cfg.continent.lacunarity,
-        ) * cfg.continent.amplitude
-            * 0.55;
+        );
+        let continent = continent_noise * cfg.continent.amplitude * 0.55;
 
         // Mountain mask - determines where mountains appear (using lower frequency)
         let mountain_signal = self.fbm_configurable(
@@ -446,34 +458,48 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
         // Ridged mountains, masked by mountain regions. The broad uplift keeps
         // mountain ranges tall even when the sharp ridge sample is between peaks.
-        let mountain_region = mountain_signal.clamp(0.0, 1.0).powf(2.0);
-        let mountains = self.ridged_noise(x, z) * mountain_region * 0.8;
-        let mountain_uplift = cfg.mountains.amplitude * 0.20 * mountain_region;
+        let mountain_region = mountain_signal.clamp(0.0, 1.0).powf(1.35);
+        let mountains = self.ridged_noise(x, z) * mountain_region * 1.1;
+        let mountain_uplift = cfg.mountains.amplitude * 0.28 * mountain_region;
+
+        let valley_signal = self.fbm_configurable(
+            x + 1375.0,
+            z - 911.0,
+            cfg.continent.scale * 2.2,
+            3,
+            0.55,
+            2.0,
+        );
+        let valley_mask = smoothstep_range(0.22, 0.08, valley_signal);
+        let valley_carve = valley_mask * 14.0 * (1.0 - mountain_region * 0.75);
 
         // Hills everywhere, scaled to shape traversal without lifting the
         // entire map into the camera path.
-        let hills = self.fbm_configurable(
+        let hill_noise = self.fbm_configurable(
             x,
             z,
             cfg.hills.scale,
             cfg.hills.octaves,
             cfg.hills.persistence,
             cfg.hills.lacunarity,
-        ) * cfg.hills.amplitude
-            * 0.45;
+        );
+        let hills = hill_noise * cfg.hills.amplitude * 0.45;
 
         // Fine detail.
-        let detail = self.fbm_configurable(
+        let detail_noise = self.fbm_configurable(
             x,
             z,
             cfg.detail.scale,
             cfg.detail.octaves,
             cfg.detail.persistence,
             cfg.detail.lacunarity,
-        ) * cfg.detail.amplitude;
+        );
+        let detail = detail_noise * cfg.detail.amplitude;
 
         let height =
-            BASE_TERRAIN_ELEVATION + continent + mountains + mountain_uplift + hills + detail;
+            BASE_TERRAIN_ELEVATION + continent + mountains + mountain_uplift + hills + detail
+                - valley_carve;
+        let height = self.apply_edge_shoreline_shape(world_x, world_z, height);
 
         // Normal land columns keep a continuous crust above bedrock. Water
         // body bathymetry is applied later and may carve beds lower than this.
@@ -584,6 +610,11 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let bed_y = lerp_f32(base_height as f32, target_bed_y, strength)
             .round()
             .min(base_height as f32) as i32;
+        let bed_y = if edge_distance < EDGE_OCEAN_START_DISTANCE {
+            bed_y.min(WATER_LEVEL - 1)
+        } else {
+            bed_y
+        };
         let bed_y = bed_y.max(MIN_BREAKABLE_Y).min(base_height);
         if bed_y >= WATER_LEVEL {
             return None;
@@ -598,6 +629,66 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             local_depth,
             strength,
         })
+    }
+
+    fn shoreline_profile(&self, world_x: i32, world_z: i32) -> Option<ShorelineProfile> {
+        let edge_distance = default_world_edge_distance(world_x, world_z);
+        if edge_distance < 0
+            || edge_distance >= EDGE_OCEAN_START_DISTANCE + EDGE_SHORE_BACKSHORE_DISTANCE
+        {
+            return None;
+        }
+
+        let shoreline_cell = CHUNK_SIZE_I32 * 2;
+        let cell_x = world_x.div_euclid(shoreline_cell);
+        let cell_z = world_z.div_euclid(shoreline_cell);
+        let headland_noise = hash_position(cell_x.wrapping_add(19), cell_z.wrapping_sub(31));
+        let kind = if cell_x == 0 && cell_z == 0 {
+            ShorelineKind::Beach
+        } else if headland_noise >= 0.58 || (cell_x + cell_z).rem_euclid(7) == 0 {
+            ShorelineKind::Cliff
+        } else {
+            ShorelineKind::Beach
+        };
+
+        Some(ShorelineProfile {
+            edge_distance,
+            kind,
+        })
+    }
+
+    fn apply_edge_shoreline_shape(&self, world_x: i32, world_z: i32, inland_height: f32) -> f32 {
+        let Some(profile) = self.shoreline_profile(world_x, world_z) else {
+            return inland_height;
+        };
+
+        let shore_t =
+            (profile.edge_distance as f32 / EDGE_OCEAN_START_DISTANCE as f32).clamp(0.0, 1.0);
+        let backshore_t = ((profile.edge_distance - EDGE_OCEAN_START_DISTANCE) as f32
+            / EDGE_SHORE_BACKSHORE_DISTANCE as f32)
+            .clamp(0.0, 1.0);
+
+        match profile.kind {
+            ShorelineKind::Beach => {
+                let waterline = WATER_LEVEL as f32 + 1.0;
+                let dry_beach = lerp_f32(waterline, BEACH_BACKSHORE_HEIGHT, smoothstep(shore_t));
+                if profile.edge_distance < EDGE_OCEAN_START_DISTANCE {
+                    dry_beach
+                } else {
+                    let inland_target = inland_height.max(waterline);
+                    lerp_f32(dry_beach, inland_target, smoothstep(backshore_t))
+                }
+            }
+            ShorelineKind::Cliff => {
+                let cliff_cap =
+                    (WATER_LEVEL as f32 + CLIFF_MIN_HEIGHT_ABOVE_WATER).max(inland_height + 4.0);
+                if profile.edge_distance < EDGE_OCEAN_START_DISTANCE {
+                    cliff_cap
+                } else {
+                    lerp_f32(cliff_cap, inland_height, smoothstep(backshore_t))
+                }
+            }
+        }
     }
 
     fn sample_basin(
@@ -687,6 +778,13 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
     /// Determines the biome at a given world position.
     pub fn get_biome(&self, world_x: i32, world_z: i32) -> Biome {
+        if let Some(profile) = self.shoreline_profile(world_x, world_z) {
+            return match profile.kind {
+                ShorelineKind::Beach => Biome::Sandy,
+                ShorelineKind::Cliff => Biome::Rocky,
+            };
+        }
+
         let x = world_x as f32;
         let z = world_z as f32;
 
@@ -964,6 +1062,21 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 #[inline]
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+#[inline]
+fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
+    let denominator = edge1 - edge0;
+    if denominator.abs() <= f32::EPSILON {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+    smoothstep((value - edge0) / denominator)
+}
+
+#[inline]
 fn default_world_edge_distance(world_x: i32, world_z: i32) -> i32 {
     let max_x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 - 1;
     let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - 1;
@@ -1032,6 +1145,25 @@ mod tests {
         }
     }
 
+    fn find_shoreline_sample<N: NoiseGenerator>(
+        generator: &TerrainGenerator<N>,
+        kind: ShorelineKind,
+        edge_distance: i32,
+    ) -> Option<(i32, i32)> {
+        let min_z = edge_distance + 1;
+        let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - edge_distance - 1;
+        for z in min_z..max_z {
+            let x = edge_distance;
+            if generator
+                .shoreline_profile(x, z)
+                .is_some_and(|profile| profile.kind == kind)
+            {
+                return Some((x, z));
+            }
+        }
+        None
+    }
+
     #[test]
     fn test_value_noise_range() {
         let noise = ValueNoise::default();
@@ -1093,6 +1225,35 @@ mod tests {
             "expected mountain/valley relief, got range {}..{}",
             min_height,
             max_height
+        );
+    }
+
+    #[test]
+    fn default_terrain_has_lowlands_and_mountain_peaks() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let mut lowland_samples = 0;
+        let mut mountain_samples = 0;
+
+        for x in (96..416).step_by(4) {
+            for z in (96..416).step_by(4) {
+                let height = generator.get_base_height(x, z);
+                if height <= WATER_LEVEL + 2 {
+                    lowland_samples += 1;
+                }
+                if height >= WATER_LEVEL + 16 {
+                    mountain_samples += 1;
+                }
+            }
+        }
+
+        assert!(
+            lowland_samples >= 32,
+            "expected broad lowland/valley samples, got {lowland_samples}"
+        );
+        assert!(
+            mountain_samples >= 16,
+            "expected elevated mountain samples, got {mountain_samples}"
         );
     }
 
@@ -1309,11 +1470,11 @@ mod tests {
         config.water_bodies.lakes.enabled = false;
         config.water_bodies.ponds.enabled = false;
         let generator = TerrainGenerator::with_config(FlatLowNoise, config);
-        let x = 0;
-        let z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 / 2;
+        let (x, z) = find_shoreline_sample(&generator, ShorelineKind::Beach, 0)
+            .expect("expected beach shoreline sample");
         let meta = generator.get_water_generation_metadata(x, z);
 
-        assert!(generator.get_base_height(x, z) < WATER_LEVEL);
+        assert!(generator.get_base_height(x, z) <= WATER_LEVEL + 1);
         assert_eq!(meta.kind, GeneratedWaterBodyKind::Ocean);
         assert!(meta.bed_y < WATER_LEVEL);
         assert_eq!(generator.get_height(x, z), meta.bed_y);
@@ -1322,6 +1483,62 @@ mod tests {
             VoxelType::Water,
             "low world-edge ground should become a real ocean surface"
         );
+    }
+
+    #[test]
+    fn edge_ocean_has_beach_and_cliff_shoreline_profiles() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        let beach = find_shoreline_sample(
+            &generator,
+            ShorelineKind::Beach,
+            EDGE_OCEAN_START_DISTANCE + 4,
+        )
+        .expect("expected a beach shoreline section");
+        let cliff = find_shoreline_sample(
+            &generator,
+            ShorelineKind::Cliff,
+            EDGE_OCEAN_START_DISTANCE + 4,
+        )
+        .expect("expected a cliff shoreline section");
+
+        let beach_height = generator.get_height(beach.0, beach.1);
+        assert!(
+            (WATER_LEVEL..=WATER_LEVEL + 6).contains(&beach_height),
+            "beach shoreline should form a shallow ramp, got height {beach_height}"
+        );
+        assert_eq!(
+            generator.get_voxel(beach.0, beach_height, beach.1),
+            VoxelType::Sand
+        );
+
+        let cliff_height = generator.get_height(cliff.0, cliff.1);
+        assert!(
+            cliff_height >= WATER_LEVEL + CLIFF_MIN_HEIGHT_ABOVE_WATER as i32 - 1,
+            "cliff shoreline should hold a high headland, got height {cliff_height}"
+        );
+        assert_eq!(
+            generator.get_voxel(cliff.0, cliff_height, cliff.1),
+            VoxelType::Rock
+        );
+    }
+
+    #[test]
+    fn ocean_water_reaches_the_classified_shoreline() {
+        let generator =
+            TerrainGenerator::with_config(ValueNoise::default(), TerrainConfig::default());
+        for kind in [ShorelineKind::Beach, ShorelineKind::Cliff] {
+            let (x, z) = find_shoreline_sample(&generator, kind, EDGE_OCEAN_START_DISTANCE - 1)
+                .expect("expected shoreline sample just inside ocean");
+            let meta = generator.get_water_generation_metadata(x, z);
+            assert_eq!(meta.kind, GeneratedWaterBodyKind::Ocean);
+            assert!(
+                meta.bed_y < WATER_LEVEL,
+                "ocean bed should remain below water at {kind:?}, got {}",
+                meta.bed_y
+            );
+            assert_eq!(generator.get_voxel(x, WATER_LEVEL, z), VoxelType::Water);
+        }
     }
 
     #[test]
