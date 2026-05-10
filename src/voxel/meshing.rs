@@ -28,7 +28,6 @@ use crate::constants::{
     PADDED_CHUNK_SIZE_U32,
     UV_PADDING,
     VOXEL_SIZE,
-    WORLD_EDGE_GUARD_MARGIN,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
@@ -49,6 +48,7 @@ use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE;
+const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
@@ -987,7 +987,7 @@ fn should_render_water_face(
 fn water_surface_near_horizontal_world_edge(world: &VoxelWorld, world_pos: IVec3) -> bool {
     world
         .bounds()
-        .inside_horizontal_edge_margin(world_pos, WORLD_EDGE_GUARD_MARGIN)
+        .inside_horizontal_edge_margin(world_pos, WATER_EDGE_SURFACE_SUPPRESSION_MARGIN)
 }
 
 fn air_open_to_sky_with_stats(
@@ -3754,6 +3754,19 @@ mod tests {
         assert!(!mesh.water.indices.is_empty());
         assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 0);
         assert_eq!(mesh.water_stats.air_boundaries_total, 1);
+        assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
+    }
+
+    #[test]
+    fn shore_water_inside_gameplay_edge_guard_is_still_meshed() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 3, 4));
+        let water_pos = IVec3::new(CHUNK_SIZE_I32 / 2, WATER_LEVEL, CHUNK_SIZE_I32 + 8);
+        world.set_voxel(water_pos, VoxelType::Water);
+
+        let mesh = meshed_chunk(&world, VoxelWorld::world_to_chunk(water_pos));
+
+        assert!(!mesh.water.indices.is_empty());
+        assert_eq!(mesh.water_stats.edge_water_faces_suppressed, 0);
         assert_eq!(mesh.water_stats.air_boundaries_exposed, 1);
     }
 
