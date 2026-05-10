@@ -63,6 +63,7 @@ const WATER_BODY_SHALLOW_FLOOD_MAX_DEPTH: usize = 1;
 const WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH: f32 = 1.25;
 const WORLD_STARTUP_READY_HOLD_SECONDS: f32 = 1.0;
 const WORLD_STARTUP_BACKGROUND_ZOOM: f32 = 1.12;
+const WORLD_STARTUP_SETUP_DELAY_FRAMES: u8 = 1;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -466,6 +467,12 @@ struct WorldStartupOverlayState {
 }
 
 #[derive(Resource, Default, Debug)]
+struct WorldStartupSetupState {
+    frames_waited: u8,
+    started: bool,
+}
+
+#[derive(Resource, Default, Debug)]
 struct PendingWorldGeneration {
     requested: bool,
 }
@@ -551,6 +558,7 @@ impl Plugin for VoxelPlugin {
         // Async chunk generation state
         .insert_resource(ChunkGenerationState::default())
         .insert_resource(WorldStartupOverlayState::default())
+        .insert_resource(WorldStartupSetupState::default())
         .insert_resource(PendingWorldGeneration::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
@@ -568,12 +576,10 @@ impl Plugin for VoxelPlugin {
             ..default()
         })
         .insert_resource(OcclusionUpdateTimer::default())
+        .add_systems(Startup, spawn_world_startup_overlay)
         .add_systems(
-            Startup,
-            (
-                spawn_world_startup_overlay,
-                setup_voxel_world.after(spawn_world_startup_overlay),
-            ),
+            Update,
+            start_voxel_world_after_overlay_frame.before(poll_world_load_task),
         )
         .add_systems(
             Update,
@@ -600,6 +606,11 @@ impl Plugin for VoxelPlugin {
                     .after(adjust_lod_for_integrated_gpu),
                 // Stage 5: Meshing (needs LOD from stage 4)
                 mesh_dirty_chunks_system.after(update_chunk_lod_system),
+            ),
+        )
+        .add_systems(
+            Update,
+            (
                 // Stage 5b: Water material LOD (independent of meshing, can be parallel)
                 update_water_body_registry.after(mesh_dirty_chunks_system),
                 update_water_material_lod.after(update_water_body_registry),
@@ -827,12 +838,24 @@ fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
 }
 
 /// Main world setup system - spawns async chunk generation tasks.
-fn setup_voxel_world(
+fn start_voxel_world_after_overlay_frame(
     mut commands: Commands,
     world: Res<VoxelWorld>,
     mut gen_state: ResMut<ChunkGenerationState>,
     persistence_settings: Res<WorldPersistence>,
+    mut setup_state: ResMut<WorldStartupSetupState>,
 ) {
+    if setup_state.started {
+        return;
+    }
+
+    if setup_state.frames_waited < WORLD_STARTUP_SETUP_DELAY_FRAMES {
+        setup_state.frames_waited += 1;
+        return;
+    }
+
+    setup_state.started = true;
+
     if should_attempt_saved_world_load(&persistence_settings) {
         gen_state.total_chunks = 0;
         gen_state.chunks_completed = 0;
@@ -1140,6 +1163,7 @@ fn update_world_startup_overlay(
     time: Res<Time>,
     gen_state: Res<ChunkGenerationState>,
     chunk_stats: Res<RuntimeChunkStats>,
+    setup_state: Res<WorldStartupSetupState>,
     mut overlay_state: ResMut<WorldStartupOverlayState>,
     root_query: Query<Entity, With<WorldStartupOverlay>>,
     mut text_queries: ParamSet<(
@@ -1153,7 +1177,7 @@ fn update_world_startup_overlay(
         return;
     };
 
-    let snapshot = world_startup_snapshot(&gen_state, &chunk_stats);
+    let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, setup_state.started);
     if snapshot.complete {
         overlay_state.ready_seconds += time.delta_secs();
     } else {
@@ -1186,7 +1210,17 @@ fn update_world_startup_overlay(
 fn world_startup_snapshot(
     gen_state: &ChunkGenerationState,
     chunk_stats: &RuntimeChunkStats,
+    setup_started: bool,
 ) -> WorldStartupSnapshot {
+    if !setup_started {
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::LoadingSavedWorld,
+            progress: 0.05,
+            detail: "Starting world load".to_string(),
+            complete: false,
+        };
+    }
+
     if !gen_state.is_complete && gen_state.loading_from_disk {
         return WorldStartupSnapshot {
             stage: WorldStartupStage::LoadingSavedWorld,
@@ -3622,7 +3656,7 @@ mod tests {
         };
         let chunk_stats = RuntimeChunkStats::default();
 
-        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats);
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
 
         assert_eq!(snapshot.stage, WorldStartupStage::GeneratingTerrain);
         assert_eq!(snapshot.progress, 0.225);
@@ -3642,14 +3676,26 @@ mod tests {
         };
         let mut chunk_stats = RuntimeChunkStats::default();
 
-        let preparing = world_startup_snapshot(&gen_state, &chunk_stats);
+        let preparing = world_startup_snapshot(&gen_state, &chunk_stats, true);
         assert_eq!(preparing.stage, WorldStartupStage::PreparingMeshes);
         assert!(!preparing.complete);
 
         chunk_stats.chunks_meshed_this_frame = 1;
-        let ready = world_startup_snapshot(&gen_state, &chunk_stats);
+        let ready = world_startup_snapshot(&gen_state, &chunk_stats, true);
         assert_eq!(ready.stage, WorldStartupStage::Ready);
         assert!(ready.complete);
+    }
+
+    #[test]
+    fn world_startup_snapshot_waits_for_overlay_before_generation() {
+        let gen_state = ChunkGenerationState::default();
+        let chunk_stats = RuntimeChunkStats::default();
+
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, false);
+
+        assert_eq!(snapshot.stage, WorldStartupStage::LoadingSavedWorld);
+        assert!(snapshot.detail.contains("Starting world load"));
+        assert!(!snapshot.complete);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use bevy_mesh::VertexAttributeValues;
 const TERRAIN_COLLIDER_VOXEL_SIZE: f32 = 1.0;
 const TERRAIN_COLLIDER_MARGIN: f32 = 0.05;
 const TERRAIN_HEIGHTFIELD_GRID: usize = 9;
-const TERRAIN_HEIGHTFIELD_PADDING: f32 = 0.35;
+const TERRAIN_HEIGHTFIELD_PADDING: f32 = 0.05;
 /// Maximum colliders generated per frame during normal idle terrain churn.
 const MAX_COLLIDERS_PER_FRAME: usize = 4;
 /// Collider budget while the player is near pending terrain.
@@ -83,12 +83,13 @@ fn build_terrain_collider(
         TerrainColliderMode::Heightfield => heightfield().or_else(trimesh),
         TerrainColliderMode::Trimesh => trimesh(),
         TerrainColliderMode::Voxelized => voxelized().or_else(trimesh),
-        TerrainColliderMode::Auto => heightfield().or_else(trimesh).or_else(voxelized),
+        TerrainColliderMode::Auto => trimesh().or_else(heightfield).or_else(voxelized),
     }
 }
 
 fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return None;
     };
@@ -112,7 +113,8 @@ fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
     }
 
     let center = (min + max) * 0.5;
-    let mut heights = vec![vec![f32::NEG_INFINITY; TERRAIN_HEIGHTFIELD_GRID]; TERRAIN_HEIGHTFIELD_GRID];
+    let mut heights =
+        vec![vec![f32::NEG_INFINITY; TERRAIN_HEIGHTFIELD_GRID]; TERRAIN_HEIGHTFIELD_GRID];
     let max_index = (TERRAIN_HEIGHTFIELD_GRID - 1) as f32;
 
     for position in positions {
@@ -121,15 +123,7 @@ fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
         let z = (((p.z - min.z) / depth) * max_index).round() as usize;
         let height = p.y - center.y + TERRAIN_HEIGHTFIELD_PADDING;
 
-        let x_min = x.saturating_sub(1);
-        let x_max = (x + 1).min(TERRAIN_HEIGHTFIELD_GRID - 1);
-        let z_min = z.saturating_sub(1);
-        let z_max = (z + 1).min(TERRAIN_HEIGHTFIELD_GRID - 1);
-        for row in heights.iter_mut().take(x_max + 1).skip(x_min) {
-            for cell in row.iter_mut().take(z_max + 1).skip(z_min) {
-                *cell = (*cell).max(height);
-            }
-        }
+        heights[x][z] = heights[x][z].max(height);
     }
 
     let fallback_height = max.y - center.y + TERRAIN_HEIGHTFIELD_PADDING;
@@ -344,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn terrain_collider_auto_prefers_heightfield() {
+    fn terrain_collider_auto_prefers_trimesh() {
         let mesh = simple_terrain_mesh();
         let chunk_mesh = simple_chunk_mesh();
 
@@ -354,7 +348,7 @@ mod tests {
             panic!("expected simple terrain mesh to produce a collider");
         };
 
-        assert_eq!(kind, GeneratedColliderKind::Heightfield);
+        assert_eq!(kind, GeneratedColliderKind::Trimesh);
     }
 }
 
