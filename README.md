@@ -60,7 +60,9 @@ Current development version: **v0.5**.
 
 *   **New Editor**: Initial Draft of the editor, most functioanlity is Mock 
     *   **Embedded Bevy view with Debug Bridge**
+![Editor 1 - Preview](docs/images/editor1.jpg)
     *   **Initial Wireframe view** 
+![Editor 1 - Preview](docs/images/editor2.jpg)
   
 ### v0.4
 *   **Bevy 0.18 Rendering Stack**: HDR pipeline with tonemapping, bloom, debanding, and color grading on the main camera.
