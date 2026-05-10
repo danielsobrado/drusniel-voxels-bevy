@@ -354,8 +354,8 @@ pub const DEFAULT_CAPSULE_HEIGHT: f32 = 1.8;
 /// Maximum Y level for cave generation.
 pub const CAVE_MAX_Y: i32 = 45;
 
-/// Minimum Y level for cave generation (above bedrock).
-pub const CAVE_MIN_Y: i32 = 2;
+/// Minimum Y level for cave generation, leaving room above the bedrock crust.
+pub const CAVE_MIN_Y: i32 = 4;
 
 /// Minimum depth below terrain surface for caves.
 pub const CAVE_SURFACE_OFFSET: i32 = 3;
@@ -364,8 +364,11 @@ pub const CAVE_SURFACE_OFFSET: i32 = 3;
 // Bedrock Generation
 // =============================================================================
 
-/// World Y coordinate for the bedrock floor.
-pub const BEDROCK_DEPTH: i32 = 0;
+/// Highest world Y coordinate occupied by the unbreakable bedrock crust.
+///
+/// Bedrock spans from world bottom through this Y level, giving gameplay a
+/// physical safety crust instead of a single fragile boundary layer.
+pub const BEDROCK_DEPTH: i32 = 3;
 
 /// Lowest world Y coordinate that gameplay voxel edits may modify.
 pub const MIN_BREAKABLE_Y: i32 = BEDROCK_DEPTH + 1;

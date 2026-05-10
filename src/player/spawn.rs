@@ -110,6 +110,7 @@ pub struct PlayerSpawnState {
     pub last_safe_ground_valid: bool,
     pub stats: SpawnValidationReport,
     pub initial_spawn_terrain_fallbacks: u64,
+    pub void_recovery_terrain_fallbacks: u64,
     pub void_recoveries: u64,
 }
 
@@ -122,6 +123,7 @@ impl Default for PlayerSpawnState {
             last_safe_ground_valid: false,
             stats: SpawnValidationReport::default(),
             initial_spawn_terrain_fallbacks: 0,
+            void_recovery_terrain_fallbacks: 0,
             void_recoveries: 0,
         }
     }
@@ -281,7 +283,7 @@ pub fn recover_player_from_void(
     }
 
     let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
-    let recovery_target = state
+    let collider_ready_recovery_target = state
         .last_safe_grounded_position
         .and_then(|position| {
             validate_existing_spawn_position(&world, position, &readiness, true).ok()
@@ -305,6 +307,36 @@ pub fn recover_player_from_void(
             )
         });
 
+    let (recovery_target, used_terrain_only_fallback) =
+        if let Some(spawn) = collider_ready_recovery_target {
+            (Some(spawn), false)
+        } else {
+            let fallback_target = state
+                .last_safe_grounded_position
+                .and_then(|position| {
+                    validate_existing_spawn_position(&world, position, &readiness, false).ok()
+                })
+                .or_else(|| {
+                    find_nearest_valid_spawn(
+                        &world,
+                        transform.translation.xz(),
+                        &readiness,
+                        false,
+                        &mut state.stats,
+                    )
+                })
+                .or_else(|| {
+                    find_nearest_valid_spawn(
+                        &world,
+                        world_center_xz(&world),
+                        &readiness,
+                        false,
+                        &mut state.stats,
+                    )
+                });
+            (fallback_target, fallback_target.is_some())
+        };
+
     if let Some(spawn) = recovery_target {
         let reason = if below_kill_y {
             "below kill_y"
@@ -313,11 +345,20 @@ pub fn recover_player_from_void(
         };
         teleport_player(&mut transform, velocity, spawn.position);
         state.void_recoveries += 1;
+        if used_terrain_only_fallback {
+            state.void_recovery_terrain_fallbacks += 1;
+        }
         state.last_safe_grounded_position = Some(spawn.position);
         state.last_safe_ground_valid = true;
         warn!(
-            "Void recovery ({reason}): moved player to {:?} on surface {:?}",
-            spawn.position, spawn.surface_block
+            "Void recovery ({reason}): moved player to {:?} on surface {:?}{}",
+            spawn.position,
+            spawn.surface_block,
+            if used_terrain_only_fallback {
+                " using terrain-only fallback"
+            } else {
+                ""
+            }
         );
     } else {
         state.last_safe_ground_valid = false;
@@ -413,6 +454,11 @@ pub fn record_spawn_diagnostics(
         frame.0,
         "Initial Spawn Terrain Fallbacks",
         state.initial_spawn_terrain_fallbacks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Void Recovery Terrain Fallbacks",
+        state.void_recovery_terrain_fallbacks as f64,
     );
     timing.record_count(frame.0, "Void Recoveries", state.void_recoveries as f64);
     timing.record_count(

@@ -562,7 +562,11 @@ mod tests {
     #[test]
     fn missing_chunk_inside_bounds_is_not_air() {
         let world = VoxelWorld::new(IVec3::new(2, 1, 2));
-        let pos = IVec3::new(CHUNK_SIZE_I32 + 1, 1, CHUNK_SIZE_I32 + 1);
+        let pos = IVec3::new(
+            CHUNK_SIZE_I32 + 1,
+            world.bounds().min_breakable_y,
+            CHUNK_SIZE_I32 + 1,
+        );
 
         assert_eq!(
             world.sample_voxel_for_collision(pos),
@@ -597,9 +601,10 @@ mod tests {
     fn loaded_air_is_distinct_from_missing_chunk() {
         let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
         world.insert_chunk(Chunk::new(IVec3::ZERO));
+        let pos = IVec3::new(1, world.bounds().min_breakable_y, 1);
 
         assert_eq!(
-            world.sample_voxel(IVec3::new(1, 1, 1)),
+            world.sample_voxel(pos),
             VoxelSample::InBounds(VoxelType::Air)
         );
     }
@@ -616,11 +621,29 @@ mod tests {
     }
 
     #[test]
+    fn bedrock_crust_layers_are_virtual_and_unbreakable() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+
+        for y in 0..=BEDROCK_DEPTH {
+            let pos = IVec3::new(1, y, 1);
+            assert_eq!(
+                world.sample_voxel(pos),
+                VoxelSample::InBounds(VoxelType::Bedrock)
+            );
+            assert_eq!(
+                world.set_voxel(pos, VoxelType::Air),
+                VoxelEditResult::RejectedUnbreakable
+            );
+        }
+    }
+
+    #[test]
     fn voxel_edit_cannot_place_below_floor() {
         let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
 
         assert_eq!(
-            world.set_voxel(IVec3::new(1, BEDROCK_DEPTH - 1, 1), VoxelType::Rock),
+            world.set_voxel(IVec3::new(1, -1, 1), VoxelType::Rock),
             VoxelEditResult::RejectedBelowWorldFloor
         );
     }
@@ -669,7 +692,10 @@ mod tests {
         }
 
         assert_eq!(
-            world.set_voxel(IVec3::new(CHUNK_SIZE_I32 - 1, 1, 1), VoxelType::Rock),
+            world.set_voxel(
+                IVec3::new(CHUNK_SIZE_I32 - 1, world.bounds().min_breakable_y, 1),
+                VoxelType::Rock
+            ),
             VoxelEditResult::Applied
         );
         assert!(world.get_chunk(IVec3::ZERO).unwrap().is_dirty());
