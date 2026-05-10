@@ -5,7 +5,7 @@ chunk_load_radius = 6
 freeze_terrain_lod_after_ready = true
 
 [[checkpoint]]
-name = "landmark-building-materials"
+name = "former-landmark-building-site"
 position = [188.0, 72.0, 220.0]
 look_at = [112.0, 30.0, 138.0]
 time_of_day = 0.45
@@ -13,5 +13,5 @@ hold_frames = 180
 screenshot = true
 fog_tier = "off"
 screenshot_points = [
-    { name = "buildings", frame = 179 },
+    { name = "clear-site", frame = 179 },
 ]

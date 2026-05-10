@@ -48,6 +48,7 @@ const BUSH_CLUSTER_BASE: f32 = 0.4;
 const BUSH_CLUSTER_PEAK: f32 = 1.8;
 const MAX_BUILDING_SLOPE: f32 = 0.45;
 const BUILDING_SEARCH_RADIUS: i32 = 20;
+const LANDMARK_BUILDINGS_ENABLED: bool = false;
 
 const DENSE_ZONE_MIN: IVec2 = IVec2::new(60, 60);
 const DENSE_ZONE_MAX: IVec2 = IVec2::new(180, 180);
@@ -1174,7 +1175,7 @@ pub fn spawn_debug_custom_props_near_player(
     info!("Spawned debug custom props around player");
 }
 
-/// Spawn fixed landmark buildings across the world so players can visit them.
+/// Spawn fixed landmark buildings across the world when they are enabled.
 pub fn spawn_landmark_buildings(
     mut commands: Commands,
     prop_assets: Res<PropAssets>,
@@ -1189,6 +1190,13 @@ pub fn spawn_landmark_buildings(
     }
 
     if world.get_chunk(IVec3::ZERO).is_none() {
+        return;
+    }
+
+    if !LANDMARK_BUILDINGS_ENABLED {
+        landmarks.positions.clear();
+        spawned.0 = true;
+        info!("Landmark buildings disabled; skipped fixed building placement");
         return;
     }
 
