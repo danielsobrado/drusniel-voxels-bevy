@@ -169,7 +169,7 @@ fn tweak_material(
         PropType::Rock => {
             // Rocks: use GLTF values, just ensure no transmission
             mat.diffuse_transmission = 0.0;
-            if mat.base_color_texture.is_none() {
+            if mat.base_color_texture.is_none() && !is_building_prop(prop_id) {
                 let tint = style.rock_tint;
                 let alpha = mat.base_color.alpha();
                 mat.base_color = Color::srgba(
@@ -189,6 +189,11 @@ fn tweak_material(
     if is_foliage_prop(prop_type) && style.foliage_brightness_max > 0.0 {
         mat.base_color = clamp_luminance(mat.base_color, style.foliage_brightness_max);
     }
+}
+
+fn is_building_prop(prop_id: &str) -> bool {
+    let id = prop_id.to_lowercase();
+    id.contains("building") || id.contains("house") || id.contains("hut") || id.contains("stable")
 }
 
 fn apply_common_style(mat: &mut StandardMaterial, style: &super::StyleConfig) {
@@ -267,4 +272,53 @@ fn clamp_luminance(color: Color, max_luma: f32) -> Color {
     let green = (linear.green * scale).clamp(0.0, 1.0);
     let blue = (linear.blue * scale).clamp(0.0, 1.0);
     Color::linear_rgba(red, green, blue, linear.alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn style_without_saturation() -> super::super::StyleConfig {
+        super::super::StyleConfig {
+            saturation_boost: 0.0,
+            ..default()
+        }
+    }
+
+    #[test]
+    fn untextured_building_material_keeps_gltf_base_color() {
+        let mut material = StandardMaterial {
+            base_color: Color::srgb(0.15, 0.45, 0.8),
+            base_color_texture: None,
+            ..default()
+        };
+        let original = material.base_color;
+
+        tweak_material(
+            &mut material,
+            &style_without_saturation(),
+            PropType::Rock,
+            "building_house",
+        );
+
+        assert_eq!(material.base_color, original);
+    }
+
+    #[test]
+    fn untextured_rock_material_still_uses_global_rock_tint() {
+        let mut material = StandardMaterial {
+            base_color: Color::srgb(0.15, 0.45, 0.8),
+            base_color_texture: None,
+            ..default()
+        };
+
+        tweak_material(
+            &mut material,
+            &style_without_saturation(),
+            PropType::Rock,
+            "round_rock",
+        );
+
+        assert_eq!(material.base_color, Color::srgba(0.45, 0.43, 0.4, 1.0));
+    }
 }

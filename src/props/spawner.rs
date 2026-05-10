@@ -1579,6 +1579,9 @@ fn should_apply_grass_wind(id: &str, prop_type: PropType) -> bool {
 #[cfg(not(feature = "legacy_prop_spawn"))]
 fn prop_tint(id: &str, prop_type: PropType) -> Vec4 {
     let id_lower = id.to_lowercase();
+    if is_building_id(&id_lower) {
+        return Vec4::ONE;
+    }
     match prop_type {
         PropType::Tree => Vec4::new(0.7, 0.85, 0.65, 1.0),
         PropType::Rock => Vec4::new(0.62, 0.6, 0.56, 1.0),
