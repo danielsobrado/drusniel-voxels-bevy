@@ -2081,7 +2081,7 @@ fn terrain_material_quality_for_lod(
     match lod_level {
         LodLevel::Lod0 => TerrainMaterialQuality::FullTriplanar,
         LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 | LodLevel::Culled => {
-            TerrainMaterialQuality::SingleProjectionFar
+            TerrainMaterialQuality::CheapTriplanar
         }
     }
 }
@@ -2106,12 +2106,16 @@ fn terrain_material_quality_for_distance(
     let switch_out = lod_distance + TERRAIN_MATERIAL_LOD_HYSTERESIS;
     match current {
         TerrainMaterialQuality::FullTriplanar if distance > switch_out => {
-            TerrainMaterialQuality::SingleProjectionFar
+            TerrainMaterialQuality::CheapTriplanar
         }
-        TerrainMaterialQuality::SingleProjectionFar if distance < switch_in => {
+        TerrainMaterialQuality::CheapTriplanar | TerrainMaterialQuality::SingleProjectionFar
+            if distance < switch_in =>
+        {
             TerrainMaterialQuality::FullTriplanar
         }
-        TerrainMaterialQuality::CheapTriplanar | TerrainMaterialQuality::AtlasOnlyDebug => current,
+        TerrainMaterialQuality::CheapTriplanar
+        | TerrainMaterialQuality::SingleProjectionFar
+        | TerrainMaterialQuality::AtlasOnlyDebug => current,
         _ => current,
     }
 }
@@ -3739,5 +3743,22 @@ mod tests {
 
         assert!(group.nearest_distance > WATER_FANCY_DISTANCE);
         assert_eq!(group.material_mode, WaterBodyMaterialMode::Cheap);
+    }
+
+    #[test]
+    fn terrain_lod_uses_triplanar_material_for_far_meshes() {
+        assert_eq!(
+            terrain_material_quality_for_lod(LodLevel::Lod1, None),
+            TerrainMaterialQuality::CheapTriplanar
+        );
+        assert_eq!(
+            terrain_material_quality_for_distance(
+                TERRAIN_MATERIAL_LOD_DISTANCE + TERRAIN_MATERIAL_LOD_HYSTERESIS + 1.0,
+                TerrainMaterialQuality::FullTriplanar,
+                None,
+                RenderQualityPreset::High,
+            ),
+            TerrainMaterialQuality::CheapTriplanar
+        );
     }
 }
