@@ -10,7 +10,8 @@ use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
 use crate::physics::{ChunkCollider, NeedsCollider};
 use crate::player::{
-    Player, SpawnColliderReadiness, classify_player_world_validity, find_surface_spawn,
+    Player, SpawnColliderReadiness, can_player_enter_ground_column, classify_player_world_validity,
+    find_surface_spawn,
 };
 use crate::props::instanced_render::{InstancedPropGroup, PropInstanceGroups};
 use crate::props::instancing::PropMeshCache;
@@ -24,7 +25,7 @@ use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelWorld, WorldBounds};
 use avian3d::prelude::{LinearVelocity, Position};
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
@@ -49,6 +50,13 @@ const GAMEPLAY_FALL_FAILURE_FRAMES: u32 = 6;
 const SCREENSHOT_WAIT_FRAMES: u32 = 60;
 const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
 const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
+const BENCH_BORDER_TURN_MIN_DIRECTION: f32 = 0.05;
+const BENCH_PATH_SAMPLE_DISTANCES: [f32; 4] = [3.0, 6.0, 12.0, 20.0];
+const BENCH_PATH_SAMPLE_ANGLES_DEGREES: [f32; 7] = [0.0, 35.0, -35.0, 70.0, -70.0, 90.0, -90.0];
+const BENCH_PATH_MAX_STEP_UP: f32 = 2.25;
+const BENCH_PATH_MAX_DROP: f32 = 5.0;
+const BENCH_PATH_COLLIDER_PENALTY: f32 = 25.0;
+const BENCH_PATH_HEIGHT_PENALTY: f32 = 3.0;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
@@ -381,6 +389,12 @@ struct BenchGameplay {
     start_look_at: Option<[f32; 3]>,
     #[serde(default = "default_gameplay_movement")]
     movement: [f32; 2],
+    #[serde(default = "default_true")]
+    turn_at_world_border: bool,
+    #[serde(default = "default_gameplay_border_turn_margin")]
+    border_turn_margin: f32,
+    #[serde(default = "default_true")]
+    pathfind_around_blockers: bool,
     #[serde(default)]
     sprint: bool,
     #[serde(default)]
@@ -1089,6 +1103,10 @@ fn apply_bench_gameplay_input(
     scene: Option<Res<BenchSceneResource>>,
     state: Option<Res<BenchState>>,
     mut actions: ResMut<ActionState>,
+    world: Option<Res<VoxelWorld>>,
+    mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    player: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
+    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
 ) {
     let Some(scene) = scene else {
         actions.release_all();
@@ -1112,6 +1130,29 @@ fn apply_bench_gameplay_input(
     }
 
     let movement = Vec2::new(gameplay.movement[0], gameplay.movement[1]).normalize_or_zero();
+    if let (Some(world), Ok(mut camera_transform), Ok(player_transform)) =
+        (world.as_deref(), camera.single_mut(), player.single())
+    {
+        let collider_readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+        if maybe_steer_bench_camera(
+            gameplay,
+            &world,
+            &collider_readiness,
+            player_transform.translation,
+            &mut camera_transform,
+            movement,
+        ) {
+            debug!(
+                "Bench gameplay path steer: checkpoint='{}' run={} frame={} pos=({:.2},{:.2},{:.2})",
+                checkpoint.name,
+                state.run_index,
+                state.hold_elapsed_frames,
+                player_transform.translation.x,
+                player_transform.translation.y,
+                player_transform.translation.z,
+            );
+        }
+    }
     actions.set_pressed(GameAction::MoveLeft, movement.x < -0.25);
     actions.set_pressed(GameAction::MoveRight, movement.x > 0.25);
     actions.set_pressed(GameAction::MoveBackward, movement.y < -0.25);
@@ -1124,6 +1165,249 @@ fn apply_bench_gameplay_input(
         .map(|frames| state.hold_elapsed_frames % frames < 2)
         .unwrap_or(false);
     actions.set_pressed(GameAction::Jump, jump_pressed);
+}
+
+fn maybe_steer_bench_camera(
+    gameplay: &BenchGameplay,
+    world: &VoxelWorld,
+    collider_readiness: &SpawnColliderReadiness,
+    player_position: Vec3,
+    camera_transform: &mut Transform,
+    movement: Vec2,
+) -> bool {
+    if !gameplay.turn_at_world_border && !gameplay.pathfind_around_blockers {
+        return false;
+    }
+
+    let current_direction = bench_world_movement_direction(camera_transform, movement);
+    let turn_direction = if gameplay.turn_at_world_border {
+        bench_border_turn_direction(
+            world.bounds(),
+            player_position,
+            current_direction,
+            gameplay.border_turn_margin,
+        )
+    } else {
+        None
+    };
+    let path_direction = gameplay
+        .pathfind_around_blockers
+        .then(|| {
+            bench_best_walk_direction(
+                world,
+                collider_readiness,
+                player_position,
+                current_direction,
+                gameplay.border_turn_margin,
+            )
+        })
+        .flatten();
+    let Some(steer_direction) = turn_direction.or(path_direction) else {
+        return false;
+    };
+    let Some(new_camera_forward) =
+        bench_camera_forward_for_world_movement(steer_direction, movement)
+    else {
+        return false;
+    };
+
+    let current_forward = camera_transform.forward().as_vec3();
+    let vertical = current_forward.y.clamp(-0.95, 0.95);
+    let horizontal_scale = (1.0 - vertical * vertical).sqrt();
+    let new_look_direction =
+        (new_camera_forward * horizontal_scale + Vec3::Y * vertical).normalize_or_zero();
+    if new_look_direction.length_squared() == 0.0 {
+        return false;
+    }
+
+    *camera_transform = Transform::from_translation(camera_transform.translation)
+        .looking_at(camera_transform.translation + new_look_direction, Vec3::Y);
+    true
+}
+
+fn bench_best_walk_direction(
+    world: &VoxelWorld,
+    collider_readiness: &SpawnColliderReadiness,
+    position: Vec3,
+    direction: Vec3,
+    border_margin: f32,
+) -> Option<Vec3> {
+    let direction = Vec3::new(direction.x, 0.0, direction.z).normalize_or_zero();
+    if direction.length_squared() == 0.0 {
+        return None;
+    }
+
+    let current_surface_y = find_surface_spawn(
+        world,
+        position.x.floor() as i32,
+        position.z.floor() as i32,
+        collider_readiness,
+        false,
+    )
+    .ok()
+    .map(|spawn| spawn.position.y)
+    .unwrap_or(position.y);
+    let forward_score = bench_walk_direction_score(
+        world,
+        collider_readiness,
+        position,
+        current_surface_y,
+        direction,
+        border_margin,
+        0.0,
+    );
+    if forward_score.is_some_and(|score| score <= 0.25) {
+        return None;
+    }
+
+    BENCH_PATH_SAMPLE_ANGLES_DEGREES
+        .into_iter()
+        .filter_map(|angle_degrees| {
+            let candidate = rotate_horizontal(direction, angle_degrees.to_radians());
+            let score = bench_walk_direction_score(
+                world,
+                collider_readiness,
+                position,
+                current_surface_y,
+                candidate,
+                border_margin,
+                angle_degrees.abs(),
+            )?;
+            Some((score, angle_degrees.abs(), candidate))
+        })
+        .min_by(|(score_a, angle_a, _), (score_b, angle_b, _)| {
+            score_a
+                .total_cmp(score_b)
+                .then_with(|| angle_a.total_cmp(angle_b))
+        })
+        .and_then(|(score, _, candidate)| {
+            let should_steer = match forward_score {
+                Some(forward) => score + 1.0 < forward,
+                None => true,
+            };
+            should_steer.then_some(candidate)
+        })
+}
+
+fn bench_walk_direction_score(
+    world: &VoxelWorld,
+    collider_readiness: &SpawnColliderReadiness,
+    position: Vec3,
+    current_surface_y: f32,
+    direction: Vec3,
+    border_margin: f32,
+    angle_penalty_degrees: f32,
+) -> Option<f32> {
+    if bench_direction_leaves_world_bounds(world.bounds(), position, direction, border_margin) {
+        return None;
+    }
+
+    let mut score = angle_penalty_degrees / 90.0;
+    let mut previous_surface_y = current_surface_y;
+    for distance in BENCH_PATH_SAMPLE_DISTANCES {
+        let sample_position = position + direction * distance;
+        if bench_direction_leaves_world_bounds(world.bounds(), sample_position, direction, 1.0) {
+            return None;
+        }
+        let surface = find_surface_spawn(
+            world,
+            sample_position.x.floor() as i32,
+            sample_position.z.floor() as i32,
+            collider_readiness,
+            false,
+        )
+        .ok()?;
+        let height_delta = surface.position.y - previous_surface_y;
+        if height_delta > BENCH_PATH_MAX_STEP_UP || height_delta < -BENCH_PATH_MAX_DROP {
+            return None;
+        }
+        let player_sample = Vec3::new(
+            sample_position.x,
+            surface.position.y + 0.25,
+            sample_position.z,
+        );
+        if !can_player_enter_ground_column(world, player_sample, collider_readiness) {
+            score += BENCH_PATH_COLLIDER_PENALTY;
+        }
+        score += height_delta.abs() * BENCH_PATH_HEIGHT_PENALTY;
+        previous_surface_y = surface.position.y;
+    }
+    Some(score)
+}
+
+fn rotate_horizontal(direction: Vec3, radians: f32) -> Vec3 {
+    let (sin, cos) = radians.sin_cos();
+    Vec3::new(
+        direction.x * cos - direction.z * sin,
+        0.0,
+        direction.x * sin + direction.z * cos,
+    )
+    .normalize_or_zero()
+}
+
+fn bench_world_movement_direction(camera_transform: &Transform, movement: Vec2) -> Vec3 {
+    let forward = camera_transform.forward().as_vec3();
+    let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let right = Vec3::new(-forward.z, 0.0, forward.x);
+    (forward * movement.y + right * movement.x).normalize_or_zero()
+}
+
+fn bench_camera_forward_for_world_movement(direction: Vec3, movement: Vec2) -> Option<Vec3> {
+    if direction.length_squared() == 0.0 || movement.length_squared() == 0.0 {
+        return None;
+    }
+
+    let direction = Vec3::new(direction.x, 0.0, direction.z).normalize_or_zero();
+    let movement = movement.normalize_or_zero();
+    let forward = Vec3::new(
+        movement.y * direction.x + movement.x * direction.z,
+        0.0,
+        -movement.x * direction.x + movement.y * direction.z,
+    )
+    .normalize_or_zero();
+    (forward.length_squared() > 0.0).then_some(forward)
+}
+
+fn bench_border_turn_direction(
+    bounds: WorldBounds,
+    position: Vec3,
+    direction: Vec3,
+    requested_margin: f32,
+) -> Option<Vec3> {
+    let direction = Vec3::new(direction.x, 0.0, direction.z).normalize_or_zero();
+    if direction.length_squared() == 0.0 {
+        return None;
+    }
+
+    let margin = requested_margin.max(1.0);
+    if !bench_direction_leaves_world_bounds(bounds, position, direction, margin) {
+        return None;
+    }
+
+    let right_turn = Vec3::new(direction.z, 0.0, -direction.x).normalize_or_zero();
+    let left_turn = Vec3::new(-direction.z, 0.0, direction.x).normalize_or_zero();
+    [right_turn, left_turn].into_iter().find(|candidate| {
+        !bench_direction_leaves_world_bounds(bounds, position, *candidate, margin)
+    })
+}
+
+fn bench_direction_leaves_world_bounds(
+    bounds: WorldBounds,
+    position: Vec3,
+    direction: Vec3,
+    margin: f32,
+) -> bool {
+    let min_x = bounds.horizontal_min.x as f32 + margin;
+    let max_x = bounds.horizontal_max.x as f32 + 1.0 - margin;
+    let min_z = bounds.horizontal_min.y as f32 + margin;
+    let max_z = bounds.horizontal_max.y as f32 + 1.0 - margin;
+    let next_x = position.x + direction.x * margin;
+    let next_z = position.z + direction.z * margin;
+
+    (direction.x < -BENCH_BORDER_TURN_MIN_DIRECTION && next_x <= min_x)
+        || (direction.x > BENCH_BORDER_TURN_MIN_DIRECTION && next_x >= max_x)
+        || (direction.z < -BENCH_BORDER_TURN_MIN_DIRECTION && next_z <= min_z)
+        || (direction.z > BENCH_BORDER_TURN_MIN_DIRECTION && next_z >= max_z)
 }
 
 fn run_bench_state_machine(
@@ -2673,6 +2957,10 @@ fn default_gameplay_movement() -> [f32; 2] {
     [0.0, 1.0]
 }
 
+fn default_gameplay_border_turn_margin() -> f32 {
+    8.0
+}
+
 fn default_gameplay_min_horizontal_speed() -> f32 {
     2.0
 }
@@ -2752,6 +3040,8 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxel::chunk::Chunk;
+    use crate::voxel::types::VoxelType;
 
     #[test]
     fn startup_trace_scene_config_deserializes() {
@@ -2823,5 +3113,112 @@ motion = { kind = "run_look_sweep", end_position = [0.0, 10.0, 10.0], end_look_a
         assert!(start.translation.z < end.translation.z);
         assert_eq!(end.translation, Vec3::new(0.0, 10.0, 10.0));
         assert_ne!(start.forward(), end.forward());
+    }
+
+    #[test]
+    fn bench_border_turn_rotates_clockwise_when_edge_is_ahead() {
+        let bounds = WorldBounds::from_size_chunks(IVec3::new(32, 4, 32));
+        let turn = bench_border_turn_direction(
+            bounds,
+            Vec3::new(256.5, 32.0, bounds.horizontal_max.y as f32 - 2.0),
+            Vec3::Z,
+            8.0,
+        )
+        .expect("north edge should request a turn");
+
+        assert!(turn.x > 0.99);
+        assert!(turn.z.abs() < 0.01);
+    }
+
+    #[test]
+    fn bench_border_turn_uses_open_side_at_corner() {
+        let bounds = WorldBounds::from_size_chunks(IVec3::new(32, 4, 32));
+        let turn = bench_border_turn_direction(
+            bounds,
+            Vec3::new(
+                bounds.horizontal_max.x as f32 - 2.0,
+                32.0,
+                bounds.horizontal_max.y as f32 - 2.0,
+            ),
+            Vec3::Z,
+            8.0,
+        )
+        .expect("corner edge should request a turn");
+
+        assert!(turn.x < -0.99);
+        assert!(turn.z.abs() < 0.01);
+    }
+
+    #[test]
+    fn bench_border_turn_ignores_safe_mid_world_direction() {
+        let bounds = WorldBounds::from_size_chunks(IVec3::new(32, 4, 32));
+
+        assert!(
+            bench_border_turn_direction(bounds, Vec3::new(256.5, 32.0, 256.5), Vec3::Z, 8.0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bench_pathfinder_steers_around_missing_ground_ahead() {
+        let mut world = flat_test_world(IVec3::new(4, 2, 4), 8);
+        for x in 0..64 {
+            for z in 22..64 {
+                clear_test_column(&mut world, x, z, 8);
+            }
+        }
+
+        let direction = bench_best_walk_direction(
+            &world,
+            &SpawnColliderReadiness::default(),
+            Vec3::new(32.5, 9.5, 12.5),
+            Vec3::Z,
+            8.0,
+        )
+        .expect("missing ground ahead should produce a side route");
+
+        assert!(direction.x.abs() > 0.75);
+        assert!(direction.z < 0.5);
+    }
+
+    #[test]
+    fn bench_pathfinder_keeps_forward_route_when_height_is_safe() {
+        let world = flat_test_world(IVec3::new(4, 2, 4), 8);
+
+        assert!(
+            bench_best_walk_direction(
+                &world,
+                &SpawnColliderReadiness::default(),
+                Vec3::new(32.5, 9.5, 12.5),
+                Vec3::Z,
+                8.0,
+            )
+            .is_none()
+        );
+    }
+
+    fn flat_test_world(size_chunks: IVec3, floor_y: i32) -> VoxelWorld {
+        let mut world = VoxelWorld::new(size_chunks);
+        for chunk_x in 0..size_chunks.x {
+            for chunk_y in 0..size_chunks.y {
+                for chunk_z in 0..size_chunks.z {
+                    world.insert_chunk(Chunk::new(IVec3::new(chunk_x, chunk_y, chunk_z)));
+                }
+            }
+        }
+        for x in world.bounds().horizontal_min.x..=world.bounds().horizontal_max.x {
+            for z in world.bounds().horizontal_min.y..=world.bounds().horizontal_max.y {
+                for y in world.bounds().min_breakable_y..=floor_y {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::TopSoil);
+                }
+            }
+        }
+        world
+    }
+
+    fn clear_test_column(world: &mut VoxelWorld, x: i32, z: i32, floor_y: i32) {
+        for y in world.bounds().min_breakable_y..=floor_y {
+            world.set_voxel(IVec3::new(x, y, z), VoxelType::Air);
+        }
     }
 }
