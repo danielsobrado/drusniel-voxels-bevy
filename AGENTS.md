@@ -36,6 +36,16 @@ cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 
 If you did not profile a performance-sensitive change, say that explicitly instead of implying the result is verified.
 
+## Gameplay, Spawn, And Collider Benches
+
+Use the collider walk bench when changing spawn placement, player movement, terrain colliders, terrain readiness, or fall-through guards:
+
+```powershell
+rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
+```
+
+This bench drives spawn-adjacent routes and a historical fall-through route, logs player coordinates, validity, collider readiness, stall events, and fall-through events, and uses simple path steering to turn at borders and avoid missing ground or steep/blocking terrain.
+
 ## Editor Runtime Verification
 
 After any task that changes the editor, the Bevy runtime, Tauri integration, viewport behavior, or editor-visible UI, rebuild the editor runtime sidecar and restart the desktop editor so the change can be tested in the running app.
