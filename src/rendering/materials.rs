@@ -24,6 +24,8 @@ use bevy_water::WaterSettings;
 use bevy_water::water::material::{StandardWaterMaterial, WaterMaterial as BevyWaterMaterial};
 use std::path::Path;
 
+const WATER_SURFACE_DEPTH_BIAS: f32 = 0.0;
+
 fn water_debug_solid_color_enabled() -> bool {
     std::env::var_os("VOXEL_WATER_DEBUG_SOLID_COLOR").is_some()
 }
@@ -272,7 +274,7 @@ fn create_body_water_materials(
             },
             double_sided: true,
             cull_mode: None,
-            depth_bias: 4.0,
+            depth_bias: WATER_SURFACE_DEPTH_BIAS,
             specular_transmission: if matches!(kind, WaterBodyKind::Ocean) {
                 0.18
             } else if matches!(kind, WaterBodyKind::ShallowFlood) {
@@ -327,7 +329,7 @@ fn create_body_water_materials(
         clearcoat_perceptual_roughness: 0.12,
         double_sided: true,
         cull_mode: None,
-        depth_bias: 4.0,
+        depth_bias: WATER_SURFACE_DEPTH_BIAS,
         ..default()
     });
 
@@ -440,7 +442,7 @@ pub fn sync_voxel_water_material_overrides(
             };
             mat.base.double_sided = true;
             mat.base.cull_mode = None;
-            mat.base.depth_bias = 4.0;
+            mat.base.depth_bias = WATER_SURFACE_DEPTH_BIAS;
 
             mat.extension.amplitude = if debug_solid_color {
                 0.0
