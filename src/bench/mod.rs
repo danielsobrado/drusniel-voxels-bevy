@@ -872,6 +872,7 @@ fn setup_bench_environment(
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut state: ResMut<BenchState>,
+    scene: Res<BenchSceneResource>,
     persistence: Res<WorldPersistence>,
     frame: Res<FrameCount>,
 ) {
@@ -879,10 +880,11 @@ fn setup_bench_environment(
     atmosphere.cycle_enabled = false;
     timing.set_enabled(true);
     info!(
-        "Bench environment configured; world persistence path {}, force_regenerate={}, auto_save={}",
+        "Bench environment configured; world persistence path {}, force_regenerate={}, auto_save={}, skip_props={}",
         persistence.path.display(),
         persistence.force_regenerate,
-        persistence.auto_save
+        persistence.auto_save,
+        scene.0.skip_props
     );
     record_startup_event_once(
         &mut state,
@@ -1629,7 +1631,6 @@ fn run_bench_state_machine(
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
-    persistence: Res<WorldPersistence>,
     chunk_stats: Res<RuntimeChunkStats>,
     mut terrain_lod_control: Option<ResMut<TerrainLodControl>>,
     mut inventory_control: Option<ResMut<InventoryUiBenchControl>>,
@@ -2072,7 +2073,7 @@ fn run_bench_state_machine(
                 if let Err(err) = write_area_timing_csv(&timing, &csv_path) {
                     warn!("failed to write bench CSV {}: {}", csv_path.display(), err);
                 }
-                save_bench_world_cache_if_ready(scene, &world, &persistence);
+                save_bench_world_cache_if_ready(scene, &world);
                 let gameplay_trace_csv = if checkpoint.gameplay.is_some() {
                     let trace_name = run_file_name(
                         &config.scene_path,
@@ -2305,31 +2306,27 @@ fn apply_inventory_ui_screenshot_category(
     control.category = category;
 }
 
-fn save_bench_world_cache_if_ready(
-    scene: &BenchScene,
-    world: &VoxelWorld,
-    persistence: &WorldPersistence,
-) {
-    if scene.world_cache_path.is_none() {
+fn save_bench_world_cache_if_ready(scene: &BenchScene, world: &VoxelWorld) {
+    let Some(path) = scene.world_cache_path.as_ref() else {
         return;
-    }
+    };
 
     let expected_chunks = expected_bench_world_chunks(world.world_size_chunks());
     let loaded_chunks = world.chunk_entries().count();
     if loaded_chunks != expected_chunks {
         warn!(
             "Skipping bench world cache save to {}; loaded {}/{} chunks",
-            persistence.path.display(),
+            path.display(),
             loaded_chunks,
             expected_chunks
         );
         return;
     }
 
-    if let Err(err) = persistence::save_world_to_path(world, &persistence.path) {
+    if let Err(err) = persistence::save_world_to_path(world, path) {
         warn!(
             "Failed to save bench world cache {}: {}",
-            persistence.path.display(),
+            path.display(),
             err
         );
     }
