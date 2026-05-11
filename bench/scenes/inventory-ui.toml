@@ -1,0 +1,34 @@
+seed = 12345
+duration_warmup_secs = 0.25
+median_runs = 1
+chunk_load_radius = 1
+world_size_chunks = [2, 2, 2]
+world_cache_path = "bench-runs/cache/inventory-ui-world.bin"
+skip_props = true
+freeze_terrain_lod_after_ready = true
+
+[startup_trace]
+enabled = true
+capture_csv = false
+max_phase_frames = 30
+
+[[checkpoint]]
+name = "inventory-categories"
+position = [20.0, 28.0, 20.0]
+look_at = [14.0, 12.0, 14.0]
+time_of_day = 0.42
+hold_frames = 48
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = false, ssao = false, baked_ao_strength = 0.0, fog = false, god_rays = false, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
+inventory_ui = { open = true, category = "scrolls" }
+screenshot_points = [
+    { name = "scrolls", frame = 4, inventory_category = "scrolls" },
+    { name = "books", frame = 8, inventory_category = "books" },
+    { name = "staffs", frame = 12, inventory_category = "staffs" },
+    { name = "artifacts", frame = 16, inventory_category = "artifacts" },
+    { name = "runes", frame = 20, inventory_category = "runes" },
+    { name = "bags", frame = 24, inventory_category = "bags" },
+    { name = "orbs", frame = 28, inventory_category = "orbs" },
+    { name = "potions", frame = 32, inventory_category = "potions" },
+]

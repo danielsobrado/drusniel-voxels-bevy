@@ -3,12 +3,11 @@ use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::ui::{AlignItems, FlexDirection, FlexWrap, JustifyContent, PositionType, Val};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::chat::ChatState;
-use crate::entity::{
-    EquippedItem, INVENTORY_COLUMNS, INVENTORY_SLOTS, Inventory, InventorySlot, ItemType,
-};
+use crate::entity::{EquippedItem, INVENTORY_SLOTS, Inventory, InventorySlot, ItemType};
 use crate::menu::PauseMenuState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
 
@@ -18,13 +17,19 @@ fn editor_native_viewport_enabled() -> bool {
     std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
 }
 
+fn bench_mode_enabled() -> bool {
+    std::env::args_os().any(|arg| arg == "--bench")
+}
+
 // Inventory UI constants (6x4 grid)
 const SLOT_SIZE: f32 = 64.0;
 const SLOT_GAP: f32 = 4.0;
-const PANEL_PADDING: f32 = 12.0;
-const GRID_WIDTH: f32 =
-    SLOT_SIZE * INVENTORY_COLUMNS as f32 + SLOT_GAP * (INVENTORY_COLUMNS as f32 - 1.0);
-const PANEL_WIDTH: f32 = GRID_WIDTH + PANEL_PADDING * 2.0;
+
+// Drusniel inventory frame and category sheet geometry.
+const DRUSNIEL_UI_ASPECT: f32 = 1672.0 / 941.0;
+const DRUSNIEL_UI_MAX_WIDTH: f32 = 1500.0;
+const CATEGORY_SHEET_PANEL_WIDTH: f32 = 384.0;
+const CATEGORY_SHEET_PANEL_HEIGHT: f32 = 512.0;
 
 // Hotbar constants (keep 3D rendered icons)
 const HOTBAR_SLOTS: usize = 8;
@@ -33,11 +38,90 @@ const HOTBAR_ICON_UI_SIZE: f32 = 40.0;
 const HOTBAR_ICON_SCENE_ORIGIN: Vec3 = Vec3::new(10000.0, 10000.0, 10000.0);
 const HOTBAR_ICON_SPACING: f32 = 6.0;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventoryCategory {
+    #[default]
+    Scrolls,
+    Books,
+    Staffs,
+    Artifacts,
+    Runes,
+    Bags,
+    Orbs,
+    Potions,
+}
+
+impl InventoryCategory {
+    const ALL: [InventoryCategory; 8] = [
+        InventoryCategory::Scrolls,
+        InventoryCategory::Books,
+        InventoryCategory::Staffs,
+        InventoryCategory::Artifacts,
+        InventoryCategory::Runes,
+        InventoryCategory::Bags,
+        InventoryCategory::Orbs,
+        InventoryCategory::Potions,
+    ];
+
+    fn sheet_rect(self) -> bevy::math::Rect {
+        let (col, row) = match self {
+            InventoryCategory::Scrolls => (0.0, 0.0),
+            InventoryCategory::Books => (1.0, 0.0),
+            InventoryCategory::Staffs => (2.0, 0.0),
+            InventoryCategory::Artifacts => (3.0, 0.0),
+            InventoryCategory::Runes => (0.0, 1.0),
+            InventoryCategory::Orbs => (1.0, 1.0),
+            InventoryCategory::Bags => (2.0, 1.0),
+            InventoryCategory::Potions => (3.0, 1.0),
+        };
+        let x = col * CATEGORY_SHEET_PANEL_WIDTH;
+        let y = row * CATEGORY_SHEET_PANEL_HEIGHT;
+        bevy::math::Rect::new(
+            x,
+            y,
+            x + CATEGORY_SHEET_PANEL_WIDTH,
+            y + CATEGORY_SHEET_PANEL_HEIGHT,
+        )
+    }
+
+    fn tab_bounds(self) -> (f32, f32, f32, f32) {
+        let top = 86.4;
+        let height = 12.7;
+        match self {
+            InventoryCategory::Scrolls => (7.2, top, 9.4, height),
+            InventoryCategory::Books => (17.2, top, 10.6, height),
+            InventoryCategory::Staffs => (27.7, top, 10.4, height),
+            InventoryCategory::Artifacts => (38.1, top, 13.4, height),
+            InventoryCategory::Runes => (51.7, top, 10.1, height),
+            InventoryCategory::Bags => (61.9, top, 10.0, height),
+            InventoryCategory::Orbs => (72.0, top, 10.3, height),
+            InventoryCategory::Potions => (82.3, top, 10.5, height),
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct InventoryUiBenchControl {
+    pub open: bool,
+    pub category: InventoryCategory,
+}
+
+impl Default for InventoryUiBenchControl {
+    fn default() -> Self {
+        Self {
+            open: false,
+            category: InventoryCategory::Scrolls,
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct InventoryUiState {
     pub open: bool,
     pub root_entity: Option<Entity>,
     pub selected_slot: Option<usize>,
+    active_category: InventoryCategory,
 }
 
 #[derive(Resource, Debug)]
@@ -97,6 +181,12 @@ struct InventorySlotIcon(usize);
 struct InventorySlotQuantity(usize);
 
 #[derive(Component)]
+struct InventoryCategoryButton(InventoryCategory);
+
+#[derive(Component)]
+struct InventoryCloseButton;
+
+#[derive(Component)]
 struct HotbarRoot;
 
 #[derive(Component)]
@@ -114,16 +204,36 @@ struct HotbarTitleText;
 impl Plugin for InventoryUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryUiState>()
+            .init_resource::<InventoryUiBenchControl>()
             .init_resource::<HotbarState>()
             .init_resource::<HotbarUiState>()
             .init_resource::<HotbarIconAssets>()
-            .init_resource::<DraggedItem>();
+            .init_resource::<DraggedItem>()
+            .init_resource::<TerrainToolState>();
 
         if editor_native_viewport_enabled() {
             return;
         }
 
+        if bench_mode_enabled() {
+            app.add_systems(PreUpdate, apply_inventory_ui_bench_control)
+                .add_systems(
+                    Update,
+                    (
+                        handle_inventory_slot_click,
+                        handle_inventory_slot_right_click,
+                        handle_inventory_category_buttons,
+                        handle_inventory_close_button,
+                        update_inventory_category_button_colors,
+                        refresh_inventory_ui,
+                    )
+                        .chain(),
+                );
+            return;
+        }
+
         app.add_systems(Startup, (setup_hotbar_icons, spawn_hotbar_ui).chain())
+            .add_systems(PreUpdate, apply_inventory_ui_bench_control)
             .add_systems(
                 Update,
                 (
@@ -134,10 +244,52 @@ impl Plugin for InventoryUiPlugin {
                     sync_equipped_from_hotbar,
                     refresh_hotbar_ui,
                     toggle_inventory_ui,
+                    handle_inventory_category_buttons,
+                    handle_inventory_close_button,
+                    update_inventory_category_button_colors,
                     refresh_inventory_ui,
                 )
                     .chain(),
             );
+    }
+}
+
+fn apply_inventory_ui_bench_control(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    inventory: Res<Inventory>,
+    equipped: Res<EquippedItem>,
+    control: Option<Res<InventoryUiBenchControl>>,
+    mut state: ResMut<InventoryUiState>,
+    mut dragged: ResMut<DraggedItem>,
+) {
+    let Some(control) = control else {
+        return;
+    };
+
+    if !control.open {
+        if state.open {
+            close_inventory_ui(&mut commands, &mut state, &mut dragged);
+        }
+        return;
+    }
+
+    let category_changed = state.active_category != control.category;
+    if category_changed {
+        state.active_category = control.category;
+        state.selected_slot = None;
+    }
+
+    if !state.open {
+        let root = spawn_inventory_ui(
+            &mut commands,
+            &asset_server,
+            &inventory,
+            &equipped,
+            state.active_category,
+        );
+        state.root_entity = Some(root);
+        state.open = true;
     }
 }
 
@@ -159,14 +311,7 @@ fn toggle_inventory_ui(
         if !(open_pressed || close_pressed) {
             return;
         }
-        if let Some(root) = state.root_entity.take() {
-            commands.entity(root).despawn();
-        }
-        state.open = false;
-        state.selected_slot = None;
-        dragged.item = None;
-        dragged.slot_index = None;
-        dragged.quantity = 0;
+        close_inventory_ui(&mut commands, &mut state, &mut dragged);
         return;
     }
 
@@ -178,9 +323,30 @@ fn toggle_inventory_ui(
         return;
     }
 
-    let root = spawn_inventory_ui(&mut commands, &asset_server, &inventory, &equipped);
+    let root = spawn_inventory_ui(
+        &mut commands,
+        &asset_server,
+        &inventory,
+        &equipped,
+        state.active_category,
+    );
     state.root_entity = Some(root);
     state.open = true;
+}
+
+fn close_inventory_ui(
+    commands: &mut Commands,
+    state: &mut InventoryUiState,
+    dragged: &mut DraggedItem,
+) {
+    if let Some(root) = state.root_entity.take() {
+        commands.entity(root).despawn();
+    }
+    state.open = false;
+    state.selected_slot = None;
+    dragged.item = None;
+    dragged.slot_index = None;
+    dragged.quantity = 0;
 }
 
 fn spawn_hotbar_ui(
@@ -414,6 +580,84 @@ fn handle_hotbar_slot_buttons(
     }
 }
 
+fn handle_inventory_category_buttons(
+    mut interactions: Query<(&Interaction, &InventoryCategoryButton), Changed<Interaction>>,
+    mut state: ResMut<InventoryUiState>,
+) {
+    if !state.open {
+        return;
+    }
+
+    for (interaction, button) in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed && state.active_category != button.0 {
+            state.active_category = button.0;
+            state.selected_slot = None;
+        }
+    }
+}
+
+fn handle_inventory_close_button(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<InventoryCloseButton>)>,
+    mut commands: Commands,
+    mut state: ResMut<InventoryUiState>,
+    mut dragged: ResMut<DraggedItem>,
+) {
+    if !state.open {
+        return;
+    }
+
+    for interaction in interactions.iter() {
+        if *interaction == Interaction::Pressed {
+            close_inventory_ui(&mut commands, &mut state, &mut dragged);
+            return;
+        }
+    }
+}
+
+fn update_inventory_category_button_colors(
+    state: Res<InventoryUiState>,
+    mut buttons: Query<(
+        &InventoryCategoryButton,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+) {
+    if !state.open {
+        return;
+    }
+
+    for (button, interaction, mut background, mut border) in buttons.iter_mut() {
+        let selected = state.active_category == button.0;
+        *background = BackgroundColor(category_button_fill(selected, *interaction));
+        *border = BorderColor::all(category_button_border(selected, *interaction));
+    }
+}
+
+fn category_button_fill(selected: bool, interaction: Interaction) -> Color {
+    if selected {
+        return Color::srgba(0.48, 0.16, 0.82, 0.34);
+    }
+
+    match interaction {
+        Interaction::Pressed => Color::srgba(0.5, 0.18, 0.8, 0.28),
+        Interaction::Hovered => Color::srgba(0.38, 0.14, 0.62, 0.22),
+        Interaction::None => Color::srgba(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+fn category_button_border(selected: bool, interaction: Interaction) -> Color {
+    if selected {
+        return Color::srgba(0.86, 0.54, 1.0, 0.92);
+    }
+
+    match interaction {
+        Interaction::Pressed => Color::srgba(0.82, 0.48, 1.0, 0.8),
+        Interaction::Hovered => Color::srgba(0.74, 0.42, 1.0, 0.62),
+        Interaction::None => Color::srgba(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
 fn sync_equipped_from_hotbar(
     hotbar: Res<HotbarState>,
     mut equipped: ResMut<EquippedItem>,
@@ -456,7 +700,12 @@ fn refresh_inventory_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
-    if !state.open || (!inventory.is_changed() && !equipped.is_changed() && !dragged.is_changed()) {
+    if !state.open
+        || (!inventory.is_changed()
+            && !equipped.is_changed()
+            && !dragged.is_changed()
+            && !state.is_changed())
+    {
         return;
     }
 
@@ -472,7 +721,7 @@ fn refresh_inventory_ui(
 
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
     commands.entity(grid_entity).with_children(|grid| {
-        spawn_inventory_slots(grid, &inventory, &state, &asset_server, &font);
+        spawn_inventory_center_contents(grid, &inventory, &state, &asset_server, &font);
     });
 }
 
@@ -520,9 +769,11 @@ fn spawn_inventory_ui(
     asset_server: &Res<AssetServer>,
     inventory: &Inventory,
     equipped: &EquippedItem,
+    active_category: InventoryCategory,
 ) -> Entity {
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
     let dragged = DraggedItem::default();
+    let frame = asset_server.load("images/UI_Drusniel2.png");
 
     commands
         .spawn((
@@ -539,65 +790,35 @@ fn spawn_inventory_ui(
         ))
         .with_children(|parent| {
             parent
-                .spawn((
-                    Node {
-                        width: Val::Px(PANEL_WIDTH),
-                        padding: UiRect::all(Val::Px(PANEL_PADDING)),
-                        row_gap: Val::Px(10.0),
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.85)),
-                ))
+                .spawn((Node {
+                    width: Val::Percent(92.0),
+                    max_width: Val::Px(DRUSNIEL_UI_MAX_WIDTH),
+                    max_height: Val::Percent(92.0),
+                    aspect_ratio: Some(DRUSNIEL_UI_ASPECT),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },))
                 .with_children(|panel| {
-                    // Title bar with close hint
-                    panel
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::SpaceBetween,
-                            align_items: AlignItems::Center,
-                            width: Val::Percent(100.0),
-                            ..default()
-                        })
-                        .with_children(|title_bar| {
-                            title_bar.spawn((
-                                Text::new("INVENTORY"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 18.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
-
-                            title_bar.spawn((
-                                Text::new("X"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgba(0.8, 0.3, 0.3, 1.0)),
-                            ));
-                        });
-
-                    // Held/dragging status
                     panel.spawn((
-                        Text::new(held_label(equipped, &dragged)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
                             ..default()
                         },
-                        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-                        InventoryHeldText,
+                        ImageNode::new(frame.clone()),
                     ));
 
-                    // Inventory grid (6x4)
                     panel
                         .spawn((
                             Node {
-                                width: Val::Px(GRID_WIDTH),
+                                width: Val::Percent(26.9),
+                                height: Val::Percent(62.6),
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(36.65),
+                                top: Val::Percent(19.6),
                                 flex_direction: FlexDirection::Row,
                                 flex_wrap: FlexWrap::Wrap,
                                 column_gap: Val::Px(SLOT_GAP),
@@ -609,23 +830,114 @@ fn spawn_inventory_ui(
                             InventoryGrid,
                         ))
                         .with_children(|grid| {
-                            let state = InventoryUiState::default();
-                            spawn_inventory_slots(grid, inventory, &state, asset_server, &font);
+                            let state = InventoryUiState {
+                                active_category,
+                                ..default()
+                            };
+                            spawn_inventory_center_contents(
+                                grid,
+                                inventory,
+                                &state,
+                                asset_server,
+                                &font,
+                            );
                         });
 
-                    // Instructions
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(22.0),
+                            height: Val::Percent(6.8),
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(10.1),
+                            top: Val::Percent(72.7),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|label| {
+                            label.spawn((
+                                Text::new(held_label(equipped, &dragged)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 15.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgba(0.86, 0.78, 0.95, 0.95)),
+                                InventoryHeldText,
+                            ));
+                        });
+
+                    for category in InventoryCategory::ALL {
+                        let (left, top, width, height) = category.tab_bounds();
+                        let selected = active_category == category;
+                        panel.spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(width),
+                                height: Val::Percent(height),
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(left),
+                                top: Val::Percent(top),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(category_button_fill(selected, Interaction::None)),
+                            BorderColor::all(category_button_border(selected, Interaction::None)),
+                            InventoryCategoryButton(category),
+                        ));
+                    }
+
                     panel.spawn((
-                        Text::new("Left-click: pick up/place | Right-click: split stack"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 10.0,
+                        Button,
+                        Node {
+                            width: Val::Percent(4.8),
+                            height: Val::Percent(8.4),
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(91.5),
+                            top: Val::Percent(8.2),
+                            border: UiRect::all(Val::Px(2.0)),
                             ..default()
                         },
-                        TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                        BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                        InventoryCloseButton,
                     ));
                 });
         })
         .id()
+}
+
+fn spawn_inventory_center_contents(
+    grid: &mut ChildSpawnerCommands,
+    inventory: &Inventory,
+    state: &InventoryUiState,
+    asset_server: &AssetServer,
+    font: &Handle<Font>,
+) {
+    if state.active_category == InventoryCategory::Bags {
+        spawn_inventory_slots(grid, inventory, state, asset_server, font);
+    } else {
+        spawn_inventory_category_panel(grid, state.active_category, asset_server);
+    }
+}
+
+fn spawn_inventory_category_panel(
+    grid: &mut ChildSpawnerCommands,
+    category: InventoryCategory,
+    asset_server: &AssetServer,
+) {
+    grid.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        ImageNode {
+            image: asset_server.load("images/small_combined.png"),
+            rect: Some(category.sheet_rect()),
+            ..default()
+        },
+    ));
 }
 
 fn held_label(equipped: &EquippedItem, dragged: &DraggedItem) -> String {

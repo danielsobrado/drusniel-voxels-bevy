@@ -7,11 +7,12 @@ use crate::performance::AreaTimingRecorder;
 use crate::player::PlayerMovementScheme;
 use crate::voxel::world::WorldBounds;
 
-use super::terrain_collider::{
-    generate_chunk_colliders, handle_chunk_modification, record_terrain_collision_diagnostics,
-    TerrainCollisionRegistry,
-};
 use super::PhysicsLayer;
+use super::terrain_collider::{
+    TerrainCollisionRegistry, generate_chunk_colliders, handle_chunk_modification,
+    poll_chunk_collider_bakes, record_terrain_collision_diagnostics,
+};
+use super::terrain_collision_cache::{TerrainCollisionCache, update_terrain_collision_cache};
 
 #[derive(Component)]
 struct WorldFloorCollider;
@@ -35,14 +36,17 @@ impl Plugin for PhysicsPlugin {
         app.insert_resource(Gravity(Vec3::new(0.0, -20.0, 0.0)));
         app.insert_resource(PhysicsLengthUnit(1.0));
         app.init_resource::<AreaTimingRecorder>();
+        app.init_resource::<TerrainCollisionCache>();
         app.init_resource::<TerrainCollisionRegistry>();
 
         app.add_systems(Startup, spawn_world_floor_collider);
         app.add_systems(
             Update,
             (
-                generate_chunk_colliders,
                 handle_chunk_modification,
+                update_terrain_collision_cache,
+                generate_chunk_colliders,
+                poll_chunk_collider_bakes,
                 record_terrain_collision_diagnostics,
             )
                 .chain(),

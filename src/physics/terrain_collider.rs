@@ -1,10 +1,12 @@
 use avian3d::prelude::*;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
 use crate::camera::controller::PlayerCamera;
-use crate::performance::{area_timer, AreaTimingRecorder};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::physics::PhysicsLayer;
+use crate::physics::terrain_collision_cache::TerrainCollisionCache;
 use crate::player::{Player, PlayerSpawnState};
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::world::VoxelWorld;
@@ -21,6 +23,8 @@ const MAX_COLLIDERS_PER_FRAME: usize = 4;
 const MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME: usize = 24;
 /// Startup can safely spend more work preparing the local terrain before player release.
 const MAX_STARTUP_COLLIDERS_PER_FRAME: usize = 48;
+/// Maximum completed baked colliders inserted into the physics world in one frame.
+const MAX_COLLIDER_SWAPS_PER_FRAME: usize = 4;
 const PLAYER_COLLIDER_CATCHUP_RADIUS: f32 = 128.0;
 
 /// Marker for chunks that need collider generation.
@@ -30,6 +34,13 @@ pub struct NeedsCollider;
 /// Marker for chunks with active colliders.
 #[derive(Component)]
 pub struct ChunkCollider;
+
+#[derive(Component)]
+pub struct TerrainColliderBakeTask {
+    task: Task<Option<(Collider, GeneratedColliderKind)>>,
+    chunk_position: IVec3,
+    source_revision: u64,
+}
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerrainCollisionChunk {
@@ -119,6 +130,13 @@ impl TerrainCollisionRegistry {
             .unwrap_or(TerrainCollisionState::Missing)
     }
 
+    pub fn source_revision(&self, chunk: IVec3) -> u64 {
+        self.chunks
+            .get(&chunk)
+            .map(|record| record.source_revision)
+            .unwrap_or(1)
+    }
+
     fn ensure_record(&mut self, chunk: IVec3) -> &mut TerrainCollisionRecord {
         self.chunks
             .entry(chunk)
@@ -157,6 +175,13 @@ impl TerrainCollisionRegistry {
         record.revision_component()
     }
 
+    fn mark_baking(&mut self, chunk: IVec3) -> TerrainCollisionRevision {
+        let record = self.ensure_record(chunk);
+        record.state = TerrainCollisionState::Baking;
+        record.queued_revision = record.source_revision;
+        record.revision_component()
+    }
+
     fn mark_mesh_changed(&mut self, chunk: IVec3) -> TerrainCollisionRevision {
         let record = self.ensure_record(chunk);
         record.source_revision = record.source_revision.saturating_add(1);
@@ -192,6 +217,18 @@ impl TerrainCollisionRegistry {
         record.revision_component()
     }
 
+    fn mark_stale_bake_drop(&mut self, chunk: IVec3) -> TerrainCollisionRevision {
+        let record = self.ensure_record(chunk);
+        record.stale_bake_drops = record.stale_bake_drops.saturating_add(1);
+        record.state = if record.collider_revision > 0 {
+            TerrainCollisionState::Stale
+        } else {
+            TerrainCollisionState::Queued
+        };
+        record.queued_revision = record.source_revision;
+        record.revision_component()
+    }
+
     fn counts(&self) -> TerrainCollisionStateCounts {
         let mut counts = TerrainCollisionStateCounts::default();
         for record in self.chunks.values() {
@@ -218,6 +255,7 @@ enum TerrainColliderMode {
     Heightfield,
     Trimesh,
     Voxelized,
+    Voxels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +263,7 @@ pub enum GeneratedColliderKind {
     Heightfield,
     Trimesh,
     Voxelized,
+    Voxels,
 }
 
 fn terrain_collider_mode() -> TerrainColliderMode {
@@ -236,8 +275,21 @@ fn terrain_collider_mode() -> TerrainColliderMode {
         "heightfield" | "rough" => TerrainColliderMode::Heightfield,
         "trimesh" => TerrainColliderMode::Trimesh,
         "voxelized" => TerrainColliderMode::Voxelized,
+        "voxels" | "occupancy" | "parry_voxels" => TerrainColliderMode::Voxels,
         _ => TerrainColliderMode::Auto,
     }
+}
+
+fn build_voxel_terrain_collider_from_coords(
+    coords: Vec<IVec3>,
+) -> Option<(Collider, GeneratedColliderKind)> {
+    if coords.is_empty() {
+        return None;
+    }
+    Some((
+        Collider::voxels(Vec3::splat(TERRAIN_COLLIDER_VOXEL_SIZE), &coords),
+        GeneratedColliderKind::Voxels,
+    ))
 }
 
 fn build_terrain_collider(
@@ -266,6 +318,7 @@ fn build_terrain_collider(
         TerrainColliderMode::Heightfield => heightfield().or_else(trimesh),
         TerrainColliderMode::Trimesh => trimesh(),
         TerrainColliderMode::Voxelized => voxelized().or_else(trimesh),
+        TerrainColliderMode::Voxels => None,
         TerrainColliderMode::Auto => trimesh().or_else(heightfield).or_else(voxelized),
     }
 }
@@ -326,15 +379,19 @@ fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
     )]))
 }
 
-/// System to generate trimesh colliders for terrain chunks.
-/// Throttled to MAX_COLLIDERS_PER_FRAME per frame, sorted nearest-to-camera first.
+/// System to start terrain collider bakes for chunks.
+/// Throttled per frame and sorted nearest-to-camera first. The completed bake is
+/// applied by `poll_chunk_collider_bakes`, so old colliders stay live while work
+/// runs on the async pool.
 pub fn generate_chunk_colliders(
     mut commands: Commands,
     chunks: Query<
         (Entity, &Mesh3d, &Transform, &ChunkMesh),
-        (With<ChunkMesh>, With<NeedsCollider>),
+        (With<NeedsCollider>, Without<TerrainColliderBakeTask>),
     >,
+    bake_tasks: Query<(), With<TerrainColliderBakeTask>>,
     meshes: Res<Assets<Mesh>>,
+    cache: Res<TerrainCollisionCache>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     camera_query: Query<&Transform, (With<PlayerCamera>, Without<ChunkMesh>)>,
@@ -344,15 +401,7 @@ pub fn generate_chunk_colliders(
 ) {
     let mode = terrain_collider_mode();
     let startup_collider_catchup = spawn_state.is_some_and(|state| state.initial_spawn_pending);
-    let (
-        pending_count,
-        generated,
-        generated_heightfield,
-        generated_trimesh,
-        generated_voxelized,
-        collider_budget,
-        player_near_pending,
-    ) = {
+    let (pending_count, spawned, collider_budget, player_near_pending) = {
         let _timer = area_timer(&mut timing, frame.0, "Collider Build");
 
         let camera_pos = camera_query
@@ -384,12 +433,9 @@ pub fn generate_chunk_colliders(
         });
 
         let pending_count = pending.len();
-        let mut generated = 0usize;
-        let mut generated_heightfield = 0usize;
-        let mut generated_trimesh = 0usize;
-        let mut generated_voxelized = 0usize;
+        let mut spawned = 0usize;
         for (entity, mesh_handle, _transform, chunk_mesh) in pending {
-            if generated >= collider_budget {
+            if spawned >= collider_budget {
                 break;
             }
             let queued_revision = registry.mark_queued(
@@ -397,29 +443,217 @@ pub fn generate_chunk_colliders(
                 TerrainCollisionDirtyCause::Initial,
             );
 
-            let Some(mesh) = meshes.get(&mesh_handle.0) else {
-                // Mesh not yet available in asset system - will retry next frame
-                // (NeedsCollider stays on the entity)
+            let cached_voxel_coords = if mode == TerrainColliderMode::Voxels {
+                let Some(cached) = cache
+                    .get(chunk_mesh.chunk_position)
+                    .filter(|cached| cached.source_revision == queued_revision.source_revision)
+                else {
+                    commands.entity(entity).try_insert((
+                        TerrainCollisionChunk {
+                            chunk: chunk_mesh.chunk_position,
+                        },
+                        TerrainCollisionState::Queued,
+                        queued_revision,
+                    ));
+                    trace!(
+                        "Collider gen deferred for {:?} - collision cache not ready",
+                        entity
+                    );
+                    continue;
+                };
+                Some(cached.occupancy.filled_core_coords().collect::<Vec<_>>())
+            } else {
+                None
+            };
+
+            let mesh = if mode == TerrainColliderMode::Voxels {
+                None
+            } else {
+                let Some(mesh) = meshes.get(&mesh_handle.0) else {
+                    // Mesh not yet available in asset system - will retry next frame
+                    // (NeedsCollider stays on the entity)
+                    commands.entity(entity).try_insert((
+                        TerrainCollisionChunk {
+                            chunk: chunk_mesh.chunk_position,
+                        },
+                        TerrainCollisionState::Queued,
+                        queued_revision,
+                    ));
+                    trace!("Collider gen deferred for {:?} - mesh not ready", entity);
+                    continue;
+                };
+                Some(mesh.clone())
+            };
+
+            let Some(cached_voxel_coords) = cached_voxel_coords else {
+                if mode == TerrainColliderMode::Voxels {
+                    commands.entity(entity).try_insert((
+                        TerrainCollisionChunk {
+                            chunk: chunk_mesh.chunk_position,
+                        },
+                        TerrainCollisionState::Queued,
+                        queued_revision,
+                    ));
+                    trace!(
+                        "Collider gen deferred for {:?} - voxel coords not ready",
+                        entity
+                    );
+                    continue;
+                }
+                let Some(mesh) = mesh else {
+                    commands.entity(entity).try_insert((
+                        TerrainCollisionChunk {
+                            chunk: chunk_mesh.chunk_position,
+                        },
+                        TerrainCollisionState::Queued,
+                        queued_revision,
+                    ));
+                    trace!("Collider gen deferred for {:?} - mesh not ready", entity);
+                    continue;
+                };
+                let baking_revision = registry.mark_baking(chunk_mesh.chunk_position);
+                let chunk_mesh = *chunk_mesh;
+                let task = AsyncComputeTaskPool::get()
+                    .spawn(async move { build_terrain_collider(&mesh, &chunk_mesh, mode) });
+
                 commands.entity(entity).try_insert((
+                    TerrainColliderBakeTask {
+                        task,
+                        chunk_position: chunk_mesh.chunk_position,
+                        source_revision: baking_revision.source_revision,
+                    },
                     TerrainCollisionChunk {
                         chunk: chunk_mesh.chunk_position,
                     },
-                    TerrainCollisionState::Queued,
-                    queued_revision,
+                    TerrainCollisionState::Baking,
+                    baking_revision,
                 ));
-                trace!("Collider gen deferred for {:?} - mesh not ready", entity);
+                spawned += 1;
+                trace!("Spawned terrain collider bake for chunk {:?}", entity);
                 continue;
             };
 
-            let collider = build_terrain_collider(mesh, chunk_mesh, mode);
+            let baking_revision = registry.mark_baking(chunk_mesh.chunk_position);
+            let mesh = mesh;
+            let chunk_mesh = *chunk_mesh;
+            let task = AsyncComputeTaskPool::get().spawn(async move {
+                let voxel_collider = build_voxel_terrain_collider_from_coords(cached_voxel_coords);
+                if mode == TerrainColliderMode::Voxels || voxel_collider.is_some() {
+                    return voxel_collider;
+                }
+                mesh.and_then(|mesh| build_terrain_collider(&mesh, &chunk_mesh, mode))
+            });
 
-            if let Some((collider, collider_kind)) = collider {
-                let revision = registry.mark_ready(chunk_mesh.chunk_position, collider_kind);
-                // Use regular commands (not queue_silenced) so Avian's observers
-                // can detect the collider change and sync physics state properly
+            commands.entity(entity).try_insert((
+                TerrainColliderBakeTask {
+                    task,
+                    chunk_position: chunk_mesh.chunk_position,
+                    source_revision: baking_revision.source_revision,
+                },
+                TerrainCollisionChunk {
+                    chunk: chunk_mesh.chunk_position,
+                },
+                TerrainCollisionState::Baking,
+                baking_revision,
+            ));
+            spawned += 1;
+            trace!("Spawned terrain collider bake for chunk {:?}", entity);
+        }
+
+        (pending_count, spawned, collider_budget, player_near_pending)
+    };
+
+    timing.record_count(frame.0, "Terrain Colliders Pending", pending_count as f64);
+    timing.record_count(frame.0, "Terrain Collider Bakes Spawned", spawned as f64);
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Bakes In Flight",
+        bake_tasks.iter().count() as f64,
+    );
+    timing.record_count(frame.0, "Terrain Collider Budget", collider_budget as f64);
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Player Near Pending",
+        player_near_pending as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Mode Heightfield",
+        (mode == TerrainColliderMode::Heightfield) as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Mode Trimesh",
+        (mode == TerrainColliderMode::Trimesh) as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Mode Voxelized",
+        (mode == TerrainColliderMode::Voxelized) as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Mode Voxels",
+        (mode == TerrainColliderMode::Voxels) as u8 as f64,
+    );
+}
+
+pub fn poll_chunk_collider_bakes(
+    mut commands: Commands,
+    mut bakes: Query<(Entity, &mut TerrainColliderBakeTask)>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+    mut registry: ResMut<TerrainCollisionRegistry>,
+) {
+    let (
+        applied,
+        failed,
+        stale_drops,
+        generated_heightfield,
+        generated_trimesh,
+        generated_voxelized,
+        generated_voxels,
+        in_flight,
+    ) = {
+        let _timer = area_timer(&mut timing, frame.0, "Collider Swap");
+        let mut applied = 0usize;
+        let mut failed = 0usize;
+        let mut stale_drops = 0usize;
+        let mut generated_heightfield = 0usize;
+        let mut generated_trimesh = 0usize;
+        let mut generated_voxelized = 0usize;
+        let mut generated_voxels = 0usize;
+        let mut in_flight = 0usize;
+
+        for (entity, mut bake) in bakes.iter_mut() {
+            in_flight += 1;
+            if applied >= MAX_COLLIDER_SWAPS_PER_FRAME {
+                continue;
+            }
+
+            let Some(result) = block_on(poll_once(&mut bake.task)) else {
+                continue;
+            };
+
+            if registry.source_revision(bake.chunk_position) != bake.source_revision {
+                let revision = registry.mark_stale_bake_drop(bake.chunk_position);
                 commands.entity(entity).try_insert((
                     TerrainCollisionChunk {
-                        chunk: chunk_mesh.chunk_position,
+                        chunk: bake.chunk_position,
+                    },
+                    TerrainCollisionState::Stale,
+                    revision,
+                ));
+                commands.entity(entity).remove::<TerrainColliderBakeTask>();
+                stale_drops += 1;
+                continue;
+            }
+
+            if let Some((collider, collider_kind)) = result {
+                let revision = registry.mark_ready(bake.chunk_position, collider_kind);
+                commands.entity(entity).try_insert((
+                    TerrainCollisionChunk {
+                        chunk: bake.chunk_position,
                     },
                     TerrainCollisionState::Ready,
                     revision,
@@ -430,46 +664,60 @@ pub fn generate_chunk_colliders(
                     ChunkCollider,
                 ));
                 commands.entity(entity).remove::<NeedsCollider>();
+                commands.entity(entity).remove::<TerrainColliderBakeTask>();
                 match collider_kind {
                     GeneratedColliderKind::Heightfield => generated_heightfield += 1,
                     GeneratedColliderKind::Trimesh => generated_trimesh += 1,
                     GeneratedColliderKind::Voxelized => generated_voxelized += 1,
+                    GeneratedColliderKind::Voxels => generated_voxels += 1,
                 }
-                trace!("Generated collider for chunk {:?}", entity);
+                applied += 1;
+                trace!("Applied baked terrain collider for chunk {:?}", entity);
             } else {
-                let revision = registry.mark_failed(chunk_mesh.chunk_position);
-                warn!("Failed to generate terrain collider for chunk {:?}", entity);
+                let revision = registry.mark_failed(bake.chunk_position);
+                warn!("Failed to bake terrain collider for chunk {:?}", entity);
                 commands.entity(entity).try_insert((
                     TerrainCollisionChunk {
-                        chunk: chunk_mesh.chunk_position,
+                        chunk: bake.chunk_position,
                     },
                     TerrainCollisionState::Failed,
                     revision,
                 ));
                 commands.entity(entity).remove::<NeedsCollider>();
+                commands.entity(entity).remove::<TerrainColliderBakeTask>();
+                failed += 1;
             }
-
-            generated += 1;
         }
 
         (
-            pending_count,
-            generated,
+            applied,
+            failed,
+            stale_drops,
             generated_heightfield,
             generated_trimesh,
             generated_voxelized,
-            collider_budget,
-            player_near_pending,
+            generated_voxels,
+            in_flight,
         )
     };
 
-    timing.record_count(frame.0, "Terrain Colliders Pending", pending_count as f64);
-    timing.record_count(frame.0, "Terrain Colliders Generated", generated as f64);
-    timing.record_count(frame.0, "Terrain Collider Budget", collider_budget as f64);
+    timing.record_count(frame.0, "Terrain Colliders Generated", applied as f64);
+    timing.record_count(frame.0, "Terrain Collider Swaps Applied", applied as f64);
+    timing.record_count(frame.0, "Terrain Collider Swaps Failed", failed as f64);
     timing.record_count(
         frame.0,
-        "Terrain Collider Player Near Pending",
-        player_near_pending as u8 as f64,
+        "Terrain Collider Stale Bake Drops Frame",
+        stale_drops as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Swap Budget",
+        MAX_COLLIDER_SWAPS_PER_FRAME as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Terrain Collider Bakes In Flight After Poll",
+        in_flight.saturating_sub(applied + failed + stale_drops) as f64,
     );
     timing.record_count(
         frame.0,
@@ -488,18 +736,8 @@ pub fn generate_chunk_colliders(
     );
     timing.record_count(
         frame.0,
-        "Terrain Collider Mode Heightfield",
-        (mode == TerrainColliderMode::Heightfield) as u8 as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "Terrain Collider Mode Trimesh",
-        (mode == TerrainColliderMode::Trimesh) as u8 as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "Terrain Collider Mode Voxelized",
-        (mode == TerrainColliderMode::Voxelized) as u8 as f64,
+        "Terrain Colliders Generated Voxels",
+        generated_voxels as f64,
     );
 }
 
@@ -566,6 +804,18 @@ mod tests {
     }
 
     #[test]
+    fn voxel_terrain_collider_builds_from_occupied_cells() {
+        let Some((_collider, kind)) =
+            build_voxel_terrain_collider_from_coords(vec![IVec3::ZERO, IVec3::new(1, 0, 0)])
+        else {
+            panic!("expected occupied cells to produce a voxel collider");
+        };
+
+        assert_eq!(kind, GeneratedColliderKind::Voxels);
+        assert!(build_voxel_terrain_collider_from_coords(Vec::new()).is_none());
+    }
+
+    #[test]
     fn observed_collision_state_matches_legacy_markers() {
         let collider = ChunkCollider;
         let needs = NeedsCollider;
@@ -581,6 +831,10 @@ mod tests {
         assert_eq!(
             observed_collision_state(Some(&collider), Some(&needs), None),
             TerrainCollisionState::Stale
+        );
+        assert_eq!(
+            observed_collision_state(None, Some(&needs), Some(TerrainCollisionState::Baking)),
+            TerrainCollisionState::Baking
         );
         assert_eq!(
             observed_collision_state(None, None, Some(TerrainCollisionState::Failed)),
@@ -602,6 +856,26 @@ mod tests {
         assert_eq!(stale.source_revision, 2);
         assert_eq!(stale.collider_revision, 1);
         assert_eq!(registry.state(chunk), TerrainCollisionState::Stale);
+    }
+
+    #[test]
+    fn registry_drops_stale_bake_without_losing_live_collider_revision() {
+        let mut registry = TerrainCollisionRegistry::default();
+        let chunk = IVec3::new(3, 0, 4);
+
+        registry.mark_ready(chunk, GeneratedColliderKind::Trimesh);
+        registry.mark_mesh_changed(chunk);
+        let baking = registry.mark_baking(chunk);
+        assert_eq!(baking.source_revision, 2);
+        assert_eq!(registry.state(chunk), TerrainCollisionState::Baking);
+
+        registry.mark_mesh_changed(chunk);
+        let stale = registry.mark_stale_bake_drop(chunk);
+
+        assert_eq!(stale.source_revision, 3);
+        assert_eq!(stale.collider_revision, 1);
+        assert_eq!(registry.state(chunk), TerrainCollisionState::Stale);
+        assert_eq!(registry.counts().stale_bake_drops, 1);
     }
 
     #[test]
@@ -736,6 +1010,7 @@ fn observed_collision_state(
 ) -> TerrainCollisionState {
     match (collider.is_some(), needs_collider.is_some(), explicit_state) {
         (_, _, Some(TerrainCollisionState::Failed)) => TerrainCollisionState::Failed,
+        (_, _, Some(TerrainCollisionState::Baking)) => TerrainCollisionState::Baking,
         (true, true, _) => TerrainCollisionState::Stale,
         (false, true, _) => TerrainCollisionState::Queued,
         (true, false, _) => TerrainCollisionState::Ready,

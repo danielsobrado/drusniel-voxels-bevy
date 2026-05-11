@@ -25,7 +25,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
 
@@ -175,6 +175,15 @@ pub fn save_world_to_path(
     let path = path.as_ref();
     let path_string = path_to_string(path);
     let data = world.to_data();
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| PersistenceError::FileAccess {
+                path: path_to_string(parent),
+                source: e,
+            })?;
+        }
+    }
 
     let file = File::create(path).map_err(|e| PersistenceError::FileAccess {
         path: path_string.clone(),
@@ -533,6 +542,8 @@ fn path_to_string(path: &Path) -> String {
 /// Resource to control world persistence behavior
 #[derive(Resource, Clone, Debug)]
 pub struct WorldPersistence {
+    /// World save path used by runtime loading/saving.
+    pub path: PathBuf,
     /// Force regeneration even if saved world exists
     pub force_regenerate: bool,
     /// Auto-save world after generation
@@ -542,6 +553,7 @@ pub struct WorldPersistence {
 impl Default for WorldPersistence {
     fn default() -> Self {
         Self {
+            path: PathBuf::from(WORLD_SAVE_PATH),
             force_regenerate: true, // Force regeneration to ensure fresh terrain
             auto_save: true,
         }

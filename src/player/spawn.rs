@@ -6,7 +6,7 @@ use bevy_tnua::builtins::{TnuaBuiltinJumpConfig, TnuaBuiltinWalkConfig};
 use super::{PlayerBundle, PlayerConfig, PlayerMovementSchemeConfig};
 use crate::constants::{DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z};
 use crate::performance::AreaTimingRecorder;
-use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::physics::{ChunkCollider, NeedsCollider, TerrainCollisionCache};
 use crate::rendering::water_displacement::WaterImpulseSource;
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -18,6 +18,7 @@ const SPAWN_MAX_RADIUS: i32 = 160;
 const INITIAL_SPAWN_WAIT_LOG_FRAMES: u32 = 300;
 const LAST_SAFE_VERTICAL_TOLERANCE: f32 = 1.75;
 const GROUND_GUARD_HEIGHT_TOLERANCE: f32 = 2.75;
+const SURFACE_PENETRATION_TOLERANCE: f32 = 0.35;
 const GROUND_GUARD_LOG_INTERVAL_FRAMES: u32 = 60;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,6 +115,8 @@ pub struct PlayerSpawnState {
     pub void_recovery_terrain_fallbacks: u64,
     pub void_recoveries: u64,
     pub ground_guard_recoveries: u64,
+    pub source_query_ground_fallbacks: u64,
+    pub blocked_unknown_ground_frames: u64,
     pub last_ground_guard_log_frame: u32,
 }
 
@@ -128,6 +131,8 @@ impl Default for PlayerSpawnState {
             void_recovery_terrain_fallbacks: 0,
             void_recoveries: 0,
             ground_guard_recoveries: 0,
+            source_query_ground_fallbacks: 0,
+            blocked_unknown_ground_frames: 0,
             last_ground_guard_log_frame: 0,
         }
     }
@@ -137,6 +142,7 @@ impl Default for PlayerSpawnState {
 pub struct SpawnColliderReadiness {
     ready_chunks: std::collections::HashSet<IVec3>,
     pending_chunks: std::collections::HashSet<IVec3>,
+    source_ready_chunks: std::collections::HashSet<IVec3>,
 }
 
 impl SpawnColliderReadiness {
@@ -160,8 +166,37 @@ impl SpawnColliderReadiness {
         readiness
     }
 
+    pub fn from_chunk_meshes_with_cache<'a>(
+        chunks: impl Iterator<
+            Item = (
+                &'a ChunkMesh,
+                Option<&'a ChunkCollider>,
+                Option<&'a NeedsCollider>,
+            ),
+        >,
+        cache: &TerrainCollisionCache,
+    ) -> Self {
+        let mut readiness = Self::from_chunk_meshes(chunks);
+        let observed_chunks: Vec<IVec3> = readiness
+            .ready_chunks
+            .iter()
+            .chain(readiness.pending_chunks.iter())
+            .copied()
+            .collect();
+        for chunk in observed_chunks {
+            if cache.get(chunk).is_some() {
+                readiness.source_ready_chunks.insert(chunk);
+            }
+        }
+        readiness
+    }
+
     fn is_chunk_ready(&self, chunk_pos: IVec3) -> bool {
         self.ready_chunks.contains(&chunk_pos) && !self.pending_chunks.contains(&chunk_pos)
+    }
+
+    fn is_chunk_source_ready(&self, chunk_pos: IVec3) -> bool {
+        self.is_chunk_ready(chunk_pos) || self.source_ready_chunks.contains(&chunk_pos)
     }
 }
 
@@ -207,6 +242,7 @@ pub fn spawn_player(
 
 pub fn resolve_initial_player_spawn(
     world: Res<VoxelWorld>,
+    cache: Res<TerrainCollisionCache>,
     mut state: ResMut<PlayerSpawnState>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
     mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<super::Player>>,
@@ -219,7 +255,8 @@ pub fn resolve_initial_player_spawn(
         return;
     };
 
-    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+    let readiness =
+        SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), &cache);
     let center = world_center_xz(&world);
     freeze_player_at_standby(&world, &readiness, &mut transform, velocity);
     state.initial_spawn_wait_frames = state.initial_spawn_wait_frames.saturating_add(1);
@@ -252,6 +289,7 @@ pub fn resolve_initial_player_spawn(
 
 pub fn recover_player_from_void(
     world: Res<VoxelWorld>,
+    cache: Res<TerrainCollisionCache>,
     mut state: ResMut<PlayerSpawnState>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
     mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<super::Player>>,
@@ -272,7 +310,8 @@ pub fn recover_player_from_void(
         return;
     }
 
-    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+    let readiness =
+        SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), &cache);
     let collider_ready_recovery_target = find_collider_ready_recovery_target(
         &world,
         transform.translation.xz(),
@@ -345,6 +384,7 @@ pub fn recover_player_from_void(
 
 pub fn recover_player_from_invalid_ground(
     world: Res<VoxelWorld>,
+    cache: Res<TerrainCollisionCache>,
     frame: Res<FrameCount>,
     mut state: ResMut<PlayerSpawnState>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
@@ -358,7 +398,8 @@ pub fn recover_player_from_invalid_ground(
         return;
     };
 
-    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+    let readiness =
+        SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), &cache);
     let validity = classify_player_world_validity(&world, transform.translation);
     let surface_without_collider =
         validate_existing_spawn_position(&world, transform.translation, &readiness, false).ok();
@@ -369,8 +410,21 @@ pub fn recover_player_from_invalid_ground(
             && falling_or_grounded
     });
 
-    if validity.is_valid() && !near_pending_ground {
-        return;
+    if validity.is_valid() {
+        if !near_pending_ground {
+            return;
+        }
+
+        if let Some(surface) = surface_without_collider {
+            clamp_player_to_source_support(&mut transform, velocity, surface.position);
+            state.source_query_ground_fallbacks =
+                state.source_query_ground_fallbacks.saturating_add(1);
+            state.last_safe_grounded_position = Some(transform.translation);
+            state.last_safe_ground_valid = true;
+            return;
+        }
+
+        state.blocked_unknown_ground_frames = state.blocked_unknown_ground_frames.saturating_add(1);
     }
 
     let recovery_target = find_collider_ready_recovery_target(
@@ -419,6 +473,7 @@ pub fn recover_player_from_invalid_ground(
 
 pub fn track_last_safe_grounded_position(
     world: Res<VoxelWorld>,
+    cache: Res<TerrainCollisionCache>,
     mut state: ResMut<PlayerSpawnState>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
     player_query: Query<(&Transform, Option<&LinearVelocity>), With<super::Player>>,
@@ -437,8 +492,9 @@ pub fn track_last_safe_grounded_position(
         return;
     }
 
-    let readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
-    match validate_existing_spawn_position(&world, transform.translation, &readiness, true) {
+    let readiness =
+        SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), &cache);
+    match validate_existing_spawn_position(&world, transform.translation, &readiness, false) {
         Ok(spawn)
             if (transform.translation.y - spawn.position.y).abs()
                 <= LAST_SAFE_VERTICAL_TOLERANCE =>
@@ -508,6 +564,16 @@ pub fn record_spawn_diagnostics(
         frame.0,
         "Ground Guard Recoveries",
         state.ground_guard_recoveries as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Source Query Ground Fallbacks",
+        state.source_query_ground_fallbacks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Blocked Unknown Ground Frames",
+        state.blocked_unknown_ground_frames as f64,
     );
     timing.record_count(
         frame.0,
@@ -676,6 +742,17 @@ pub fn classify_player_world_validity(world: &VoxelWorld, position: Vec3) -> Pla
             return PlayerWorldValidity::UndergroundInvalidSpawn;
         }
         VoxelSample::InBounds(voxel) if voxel.is_solid() => {
+            if let Ok(surface) = find_surface_spawn(
+                world,
+                block_pos.x,
+                block_pos.z,
+                &SpawnColliderReadiness::default(),
+                false,
+            ) {
+                if position.y + SURFACE_PENETRATION_TOLERANCE >= surface.position.y {
+                    return PlayerWorldValidity::InValidWorld;
+                }
+            }
             return PlayerWorldValidity::UndergroundInvalidSpawn;
         }
         VoxelSample::InBounds(_) | VoxelSample::OutsideAboveWorld => {}
@@ -719,7 +796,8 @@ pub fn can_player_enter_ground_column(
     };
 
     position.y > surface.position.y + GROUND_GUARD_HEIGHT_TOLERANCE
-        || spawn_collider_ready(collider_readiness, surface.chunk_pos)
+        || spawn_source_ready(collider_readiness, surface.chunk_pos)
+        || !spawn_collider_ready(collider_readiness, surface.chunk_pos)
 }
 
 fn validate_surface_spawn(
@@ -763,7 +841,7 @@ fn validate_surface_spawn(
     }
 
     let surface_chunk = VoxelWorld::world_to_chunk(surface_block);
-    if require_collider && !spawn_collider_ready(collider_readiness, surface_chunk) {
+    if require_collider && !spawn_source_ready(collider_readiness, surface_chunk) {
         return Err(SpawnRejectReason::ColliderNotReady);
     }
 
@@ -823,6 +901,13 @@ fn spawn_collider_ready(readiness: &SpawnColliderReadiness, surface_chunk: IVec3
         .all(|offset| readiness.is_chunk_ready(surface_chunk + *offset))
 }
 
+fn spawn_source_ready(readiness: &SpawnColliderReadiness, surface_chunk: IVec3) -> bool {
+    const OFFSETS: [IVec3; 5] = [IVec3::ZERO, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
+    OFFSETS
+        .iter()
+        .all(|offset| readiness.is_chunk_source_ready(surface_chunk + *offset))
+}
+
 fn ring_samples(origin_x: i32, origin_z: i32, radius: i32) -> Vec<(i32, i32)> {
     if radius == 0 {
         return vec![(origin_x, origin_z)];
@@ -880,6 +965,19 @@ fn teleport_player(
     transform.translation = position;
     if let Some(mut velocity) = velocity {
         velocity.0 = Vec3::ZERO;
+    }
+}
+
+fn clamp_player_to_source_support(
+    transform: &mut Transform,
+    velocity: Option<Mut<LinearVelocity>>,
+    support_position: Vec3,
+) {
+    transform.translation.y = transform.translation.y.max(support_position.y);
+    if let Some(mut velocity) = velocity {
+        if velocity.y < 0.0 {
+            velocity.y = 0.0;
+        }
     }
 }
 
@@ -972,6 +1070,18 @@ mod tests {
                 false,
             ),
             Err(SpawnRejectReason::NoHeadroom)
+        );
+    }
+
+    #[test]
+    fn world_validity_tolerates_small_surface_penetration() {
+        let world = world_with_surface(MIN_BREAKABLE_Y + 4, VoxelType::TopSoil);
+        let surface_y = (MIN_BREAKABLE_Y + 5) as f32;
+        let position = Vec3::new(4.5, surface_y - 0.05, 4.5);
+
+        assert_eq!(
+            classify_player_world_validity(&world, position),
+            PlayerWorldValidity::InValidWorld
         );
     }
 
@@ -1072,5 +1182,18 @@ mod tests {
         );
 
         assert!(readiness.is_chunk_ready(chunk_position));
+    }
+
+    #[test]
+    fn source_ready_support_ring_accepts_pending_collider_chunks() {
+        let center = IVec3::new(2, 0, 2);
+        let mut readiness = SpawnColliderReadiness::default();
+        for offset in [IVec3::ZERO, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            readiness.pending_chunks.insert(center + offset);
+            readiness.source_ready_chunks.insert(center + offset);
+        }
+
+        assert!(!spawn_collider_ready(&readiness, center));
+        assert!(spawn_source_ready(&readiness, center));
     }
 }

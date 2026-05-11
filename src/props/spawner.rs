@@ -263,7 +263,7 @@ pub fn spawn_props_on_terrain(
     }
 
     if terrain_modified && persistence_settings.auto_save {
-        if let Err(e) = voxel_persistence::save_world(&world) {
+        if let Err(e) = voxel_persistence::save_world_to_path(&world, &persistence_settings.path) {
             warn!("Failed to save world after prop terrain conform: {}", e);
         }
     }
@@ -1338,7 +1338,7 @@ pub fn spawn_landmark_buildings(
     info!("Spawned {} landmark buildings", spawned_count);
 
     if terrain_modified && persistence_settings.auto_save {
-        if let Err(e) = voxel_persistence::save_world(&world) {
+        if let Err(e) = voxel_persistence::save_world_to_path(&world, &persistence_settings.path) {
             warn!("Failed to save world after landmark terrain conform: {}", e);
         }
     }

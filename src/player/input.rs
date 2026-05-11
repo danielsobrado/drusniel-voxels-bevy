@@ -8,7 +8,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::input::config::GameAction;
 use crate::input::manager::ActionState;
 use crate::performance::AreaTimingRecorder;
-use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::physics::{ChunkCollider, NeedsCollider, TerrainCollisionCache};
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::world::VoxelWorld;
 
@@ -60,6 +60,7 @@ pub fn apply_player_movement(
     >,
     mut movement_configs: ResMut<Assets<PlayerMovementSchemeConfig>>,
     world: Res<VoxelWorld>,
+    cache: Res<TerrainCollisionCache>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
@@ -77,7 +78,8 @@ pub fn apply_player_movement(
 
     let mut direction = forward * input.movement.y + right * input.movement.x;
     if direction.length_squared() > 0.0 {
-        let collider_readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+        let collider_readiness =
+            SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), &cache);
         let probe_position =
             player_transform.translation + direction.normalize() * MOVEMENT_GROUND_PROBE_DISTANCE;
         if !can_player_enter_ground_column(&world, probe_position, &collider_readiness) {

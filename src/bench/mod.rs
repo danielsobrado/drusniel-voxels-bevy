@@ -4,11 +4,11 @@ use crate::environment::AtmosphereSettings;
 use crate::input::config::GameAction;
 use crate::input::manager::ActionState;
 use crate::interaction::{DebugDetailToggles, TargetedBlock, palette::PlacementPaletteState};
-use crate::inventory_ui::InventoryUiState;
+use crate::inventory_ui::{InventoryCategory, InventoryUiBenchControl, InventoryUiState};
 use crate::map::MapState;
 use crate::menu::{PauseMenuState, SettingsState, VisualSettings};
 use crate::performance::{AreaTimingRecorder, write_area_timing_csv};
-use crate::physics::{ChunkCollider, NeedsCollider};
+use crate::physics::{ChunkCollider, NeedsCollider, TerrainCollisionCache};
 use crate::player::{
     Player, SpawnColliderReadiness, can_player_enter_ground_column, classify_player_world_validity,
     find_surface_spawn,
@@ -24,7 +24,8 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
-use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl};
+use crate::voxel::persistence::{self, WorldPersistence};
+use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl, WorldConfig};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelEditResult, VoxelWorld, WorldBounds};
 use avian3d::prelude::{LinearVelocity, Position};
@@ -51,6 +52,7 @@ const GAMEPLAY_FALL_FAILURE_FRAMES: u32 = 6;
 const SCREENSHOT_WAIT_FRAMES: u32 = 60;
 const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
 const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
+const INVENTORY_SCREENSHOT_CATEGORY_LEAD_FRAMES: u32 = 4;
 const BENCH_BORDER_TURN_MIN_DIRECTION: f32 = 0.05;
 const BENCH_PATH_SAMPLE_DISTANCES: [f32; 4] = [3.0, 6.0, 12.0, 20.0];
 const BENCH_PATH_SAMPLE_ANGLES_DEGREES: [f32; 7] = [0.0, 35.0, -35.0, 70.0, -70.0, 90.0, -90.0];
@@ -317,6 +319,14 @@ struct BenchScene {
     duration_warmup_secs: f32,
     median_runs: u32,
     chunk_load_radius: i32,
+    #[serde(default)]
+    world_size_chunks: Option<[i32; 3]>,
+    #[serde(default)]
+    world_cache_path: Option<PathBuf>,
+    #[serde(default)]
+    world_cache_regenerate: bool,
+    #[serde(default)]
+    skip_props: bool,
     #[serde(default = "default_freeze_terrain_lod_after_ready")]
     freeze_terrain_lod_after_ready: bool,
     #[serde(default)]
@@ -343,6 +353,15 @@ struct BenchCheckpoint {
     render_features: Option<BenchCheckpointRenderFeatures>,
     motion: Option<BenchMotion>,
     gameplay: Option<BenchGameplay>,
+    inventory_ui: Option<BenchInventoryUi>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchInventoryUi {
+    #[serde(default = "default_true")]
+    open: bool,
+    #[serde(default)]
+    category: InventoryCategory,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -375,6 +394,8 @@ struct BenchCheckpointRenderFeatures {
 struct ScreenshotPoint {
     name: String,
     frame: u32,
+    #[serde(default)]
+    inventory_category: Option<InventoryCategory>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -742,7 +763,23 @@ impl Plugin for BenchPlugin {
             render_app.insert_resource(render_toggles);
         }
 
+        if let Some(size_chunks) = scene.world_size_chunks {
+            let size_chunks = IVec3::new(
+                size_chunks[0].max(1),
+                size_chunks[1].max(1),
+                size_chunks[2].max(1),
+            );
+            app.insert_resource(WorldConfig {
+                size_chunks,
+                chunk_size: crate::constants::CHUNK_SIZE_I32,
+                greedy_meshing: true,
+            })
+            .insert_resource(WorldBounds::from_size_chunks(size_chunks))
+            .insert_resource(VoxelWorld::new(size_chunks));
+        }
+
         app.insert_resource(BenchSceneResource(scene.clone()))
+            .insert_resource(bench_world_persistence(&scene))
             .insert_resource(render_toggles)
             .insert_resource(BenchState {
                 phase: BenchPhase::Warmup,
@@ -835,17 +872,40 @@ fn setup_bench_environment(
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut state: ResMut<BenchState>,
+    persistence: Res<WorldPersistence>,
     frame: Res<FrameCount>,
 ) {
     time.set_max_delta(std::time::Duration::from_millis(100));
     atmosphere.cycle_enabled = false;
     timing.set_enabled(true);
+    info!(
+        "Bench environment configured; world persistence path {}, force_regenerate={}, auto_save={}",
+        persistence.path.display(),
+        persistence.force_regenerate,
+        persistence.auto_save
+    );
     record_startup_event_once(
         &mut state,
         |seen| &mut seen.bench_environment_ready,
         "bench_environment_ready",
         frame.0,
     );
+}
+
+fn bench_world_persistence(scene: &BenchScene) -> WorldPersistence {
+    let mut persistence = WorldPersistence {
+        force_regenerate: false,
+        auto_save: false,
+        ..default()
+    };
+
+    if let Some(path) = scene.world_cache_path.clone() {
+        persistence.path = path;
+        persistence.force_regenerate = scene.world_cache_regenerate;
+        persistence.auto_save = false;
+    }
+
+    persistence
 }
 
 fn apply_bench_render_toggles(
@@ -1134,6 +1194,7 @@ fn apply_bench_gameplay_input(
     state: Option<Res<BenchState>>,
     mut actions: ResMut<ActionState>,
     world: Option<Res<VoxelWorld>>,
+    cache: Option<Res<TerrainCollisionCache>>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
     player: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
@@ -1163,7 +1224,12 @@ fn apply_bench_gameplay_input(
     if let (Some(world), Ok(mut camera_transform), Ok(player_transform)) =
         (world.as_deref(), camera.single_mut(), player.single())
     {
-        let collider_readiness = SpawnColliderReadiness::from_chunk_meshes(collider_query.iter());
+        let collider_readiness = cache
+            .as_deref()
+            .map(|cache| {
+                SpawnColliderReadiness::from_chunk_meshes_with_cache(collider_query.iter(), cache)
+            })
+            .unwrap_or_else(|| SpawnColliderReadiness::from_chunk_meshes(collider_query.iter()));
         if maybe_steer_bench_camera(
             gameplay,
             &world,
@@ -1210,8 +1276,7 @@ fn apply_bench_gameplay_dig_probe(
     world: Option<ResMut<VoxelWorld>>,
     player: Query<&Transform, With<Player>>,
 ) {
-    let (Some(scene), Some(state), Some(mut world)) = (scene, state.as_deref_mut(), world)
-    else {
+    let (Some(scene), Some(state), Some(mut world)) = (scene, state.as_deref_mut(), world) else {
         return;
     };
     if state.phase != BenchPhase::Hold {
@@ -1220,12 +1285,11 @@ fn apply_bench_gameplay_dig_probe(
     let Some(checkpoint) = scene.0.checkpoints.get(state.checkpoint_index) else {
         return;
     };
-    let Some(dig_probe) = checkpoint.gameplay.as_ref().and_then(|gameplay| {
-        gameplay
-            .dig_probe
-            .as_ref()
-            .filter(|probe| probe.enabled)
-    }) else {
+    let Some(dig_probe) = checkpoint
+        .gameplay
+        .as_ref()
+        .and_then(|gameplay| gameplay.dig_probe.as_ref().filter(|probe| probe.enabled))
+    else {
         return;
     };
     if state.hold_elapsed_frames < dig_probe.start_frame {
@@ -1565,8 +1629,10 @@ fn run_bench_state_machine(
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
+    persistence: Res<WorldPersistence>,
     chunk_stats: Res<RuntimeChunkStats>,
     mut terrain_lod_control: Option<ResMut<TerrainLodControl>>,
+    mut inventory_control: Option<ResMut<InventoryUiBenchControl>>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
@@ -1637,6 +1703,7 @@ fn run_bench_state_machine(
                     apply_checkpoint_render_features(world, &render_features);
                 });
             }
+            apply_checkpoint_inventory_ui(checkpoint, inventory_control.as_deref_mut());
             state.settle_frames_left = SETTLE_FRAMES;
             state.hold_frames_left = checkpoint.hold_frames;
             state.hold_elapsed_frames = 0;
@@ -1807,14 +1874,47 @@ fn run_bench_state_machine(
                     "terrain_ready",
                     frame.0,
                 );
-                state.render_ready_started = Some(Instant::now());
-                state.render_ready_wait_frames = 0;
-                state.render_ready_stable_frames = 0;
-                state.render_ready_last_signature = None;
-                if let Some(trace) = state.startup_trace.as_mut() {
-                    trace.start_phase("render-ready", frame.0);
+                if !checkpoint_requires_render_ready(checkpoint) {
+                    state.last_render_ready_signature = bench_render_ready_signature(&timing);
+                    state.last_render_ready_wait_frames = 0;
+                    state.last_render_ready_secs = 0.0;
+                    state.last_render_ready_stable_frames = 0;
+                    state.last_render_ready_timed_out = false;
+                    record_bench_render_ready_counts(
+                        &mut timing,
+                        frame.0,
+                        state.last_render_ready_signature,
+                        state.last_render_ready_wait_frames,
+                        state.last_render_ready_stable_frames,
+                        true,
+                        false,
+                    );
+                    record_startup_event_once(
+                        &mut state,
+                        |seen| &mut seen.render_ready,
+                        "render_ready",
+                        frame.0,
+                    );
+                    record_startup_event_once(
+                        &mut state,
+                        |seen| &mut seen.settle_start,
+                        "settle_start",
+                        frame.0,
+                    );
+                    if let Some(trace) = state.startup_trace.as_mut() {
+                        trace.start_phase("settle", frame.0);
+                    }
+                    state.phase = BenchPhase::Settle;
+                } else {
+                    state.render_ready_started = Some(Instant::now());
+                    state.render_ready_wait_frames = 0;
+                    state.render_ready_stable_frames = 0;
+                    state.render_ready_last_signature = None;
+                    if let Some(trace) = state.startup_trace.as_mut() {
+                        trace.start_phase("render-ready", frame.0);
+                    }
+                    state.phase = BenchPhase::WaitRenderReady;
                 }
-                state.phase = BenchPhase::WaitRenderReady;
             }
         }
         BenchPhase::WaitRenderReady => {
@@ -1972,6 +2072,7 @@ fn run_bench_state_machine(
                 if let Err(err) = write_area_timing_csv(&timing, &csv_path) {
                     warn!("failed to write bench CSV {}: {}", csv_path.display(), err);
                 }
+                save_bench_world_cache_if_ready(scene, &world, &persistence);
                 let gameplay_trace_csv = if checkpoint.gameplay.is_some() {
                     let trace_name = run_file_name(
                         &config.scene_path,
@@ -2106,6 +2207,11 @@ fn run_bench_state_machine(
                 {
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
                 }
+                apply_inventory_ui_screenshot_category(
+                    checkpoint,
+                    state.hold_elapsed_frames,
+                    inventory_control.as_deref_mut(),
+                );
                 capture_due_screenshots(&mut commands, &config, checkpoint, &mut state);
                 state.hold_elapsed_frames += 1;
                 state.hold_frames_left -= 1;
@@ -2148,6 +2254,93 @@ fn screenshots_exist(config: &BenchConfig, screenshots: &[ScreenshotRecord]) -> 
     screenshots
         .iter()
         .all(|screenshot| config.output_dir.join(&screenshot.path).exists())
+}
+
+fn checkpoint_requires_render_ready(checkpoint: &BenchCheckpoint) -> bool {
+    checkpoint.screenshot || !checkpoint.screenshot_points.is_empty()
+}
+
+fn apply_checkpoint_inventory_ui(
+    checkpoint: &BenchCheckpoint,
+    control: Option<&mut InventoryUiBenchControl>,
+) {
+    let Some(control) = control else {
+        return;
+    };
+
+    if let Some(inventory_ui) = checkpoint.inventory_ui.as_ref() {
+        control.open = inventory_ui.open;
+        control.category = inventory_ui.category;
+    } else {
+        control.open = false;
+    }
+}
+
+fn apply_inventory_ui_screenshot_category(
+    checkpoint: &BenchCheckpoint,
+    hold_frame: u32,
+    control: Option<&mut InventoryUiBenchControl>,
+) {
+    let Some(control) = control else {
+        return;
+    };
+    let Some(inventory_ui) = checkpoint.inventory_ui.as_ref() else {
+        return;
+    };
+    if !inventory_ui.open {
+        control.open = false;
+        return;
+    }
+
+    let mut category = inventory_ui.category;
+    for point in &checkpoint.screenshot_points {
+        if point.frame <= hold_frame + INVENTORY_SCREENSHOT_CATEGORY_LEAD_FRAMES
+            && let Some(point_category) = point.inventory_category
+        {
+            category = point_category;
+        }
+    }
+
+    control.open = true;
+    control.category = category;
+}
+
+fn save_bench_world_cache_if_ready(
+    scene: &BenchScene,
+    world: &VoxelWorld,
+    persistence: &WorldPersistence,
+) {
+    if scene.world_cache_path.is_none() {
+        return;
+    }
+
+    let expected_chunks = expected_bench_world_chunks(world.world_size_chunks());
+    let loaded_chunks = world.chunk_entries().count();
+    if loaded_chunks != expected_chunks {
+        warn!(
+            "Skipping bench world cache save to {}; loaded {}/{} chunks",
+            persistence.path.display(),
+            loaded_chunks,
+            expected_chunks
+        );
+        return;
+    }
+
+    if let Err(err) = persistence::save_world_to_path(world, &persistence.path) {
+        warn!(
+            "Failed to save bench world cache {}: {}",
+            persistence.path.display(),
+            err
+        );
+    }
+}
+
+fn expected_bench_world_chunks(size_chunks: IVec3) -> usize {
+    if size_chunks.x <= 0 || size_chunks.y <= 0 || size_chunks.z <= 0 {
+        return 0;
+    }
+
+    size_chunks.x as usize * size_chunks.y as usize * size_chunks.z as usize
 }
 
 fn write_gameplay_trace_csv(
@@ -3068,6 +3261,54 @@ pub fn bench_scene_requires_gameplay(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+pub fn bench_scene_requires_inventory_ui(path: &Path) -> bool {
+    #[derive(Deserialize)]
+    struct ProbeScene {
+        #[serde(rename = "checkpoint", default)]
+        checkpoints: Vec<ProbeCheckpoint>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProbeCheckpoint {
+        inventory_ui: Option<toml::Value>,
+        #[serde(default)]
+        screenshot_points: Vec<ProbeScreenshotPoint>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProbeScreenshotPoint {
+        inventory_category: Option<toml::Value>,
+    }
+
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| toml::from_str::<ProbeScene>(&text).ok())
+        .map(|scene| {
+            scene.checkpoints.iter().any(|checkpoint| {
+                checkpoint.inventory_ui.is_some()
+                    || checkpoint
+                        .screenshot_points
+                        .iter()
+                        .any(|point| point.inventory_category.is_some())
+            })
+        })
+        .unwrap_or(false)
+}
+
+pub fn bench_scene_skips_props(path: &Path) -> bool {
+    #[derive(Deserialize)]
+    struct ProbeScene {
+        #[serde(default)]
+        skip_props: bool,
+    }
+
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| toml::from_str::<ProbeScene>(&text).ok())
+        .map(|scene| scene.skip_props)
+        .unwrap_or(false)
+}
+
 fn run_file_name(
     scene_path: &Path,
     checkpoint: &BenchCheckpoint,
@@ -3328,6 +3569,46 @@ radius = 2
         assert_eq!(dig_probe.radius, 2);
         assert_eq!(dig_probe.interval_frames, 0);
         assert!(dig_probe.require_crust_rejection);
+    }
+
+    #[test]
+    fn gameplay_only_checkpoint_does_not_require_render_ready() {
+        let checkpoint: BenchCheckpoint = toml::from_str(
+            r#"
+name = "walk"
+position = [0.0, 10.0, 0.0]
+look_at = [0.0, 8.0, 1.0]
+time_of_day = 0.5
+hold_frames = 120
+screenshot = false
+
+[gameplay]
+movement = [0.0, 1.0]
+"#,
+        )
+        .expect("checkpoint should deserialize");
+
+        assert!(!checkpoint_requires_render_ready(&checkpoint));
+    }
+
+    #[test]
+    fn screenshot_checkpoint_requires_render_ready() {
+        let checkpoint: BenchCheckpoint = toml::from_str(
+            r#"
+name = "visual"
+position = [0.0, 10.0, 0.0]
+look_at = [0.0, 8.0, 1.0]
+time_of_day = 0.5
+hold_frames = 120
+
+[[screenshot_points]]
+name = "final"
+frame = 1
+"#,
+        )
+        .expect("checkpoint should deserialize");
+
+        assert!(checkpoint_requires_render_ready(&checkpoint));
     }
 
     #[test]

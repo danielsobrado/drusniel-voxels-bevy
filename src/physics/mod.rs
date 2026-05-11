@@ -8,7 +8,9 @@
 mod layers;
 mod plugin;
 mod terrain_collider;
+mod terrain_collision_cache;
 
 pub use layers::CollisionLayer as PhysicsLayer;
 pub use plugin::PhysicsPlugin;
 pub use terrain_collider::*;
+pub use terrain_collision_cache::*;

@@ -16,7 +16,10 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::time::Duration;
 use voxel_builder::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
-use voxel_builder::bench::{BenchCli, BenchConfig, BenchPlugin, bench_scene_requires_gameplay};
+use voxel_builder::bench::{
+    BenchCli, BenchConfig, BenchPlugin, bench_scene_requires_gameplay,
+    bench_scene_requires_inventory_ui, bench_scene_skips_props,
+};
 use voxel_builder::building::BuildingPlugin;
 use voxel_builder::camera::plugin::CameraPlugin;
 use voxel_builder::chat::ChatPlugin;
@@ -42,6 +45,7 @@ use voxel_builder::rendering::array_loader::AtlasMapping;
 use voxel_builder::rendering::plugin::RenderingPlugin;
 use voxel_builder::rendering::quality::RenderQualityPreset;
 use voxel_builder::runtime_commands::RuntimeWriteCommandPlugin;
+use voxel_builder::runtime_lock::{RuntimeInstanceKind, RuntimeInstanceLock};
 use voxel_builder::terrain::TerrainToolsPlugin;
 use voxel_builder::vegetation::VegetationPlugin;
 use voxel_builder::viewmodel::PickaxePlugin;
@@ -238,8 +242,10 @@ fn format_bytes(bytes: u64) -> String {
 
 fn visual_regression_bench_uses_vulkan(bench_config: Option<&BenchConfig>) -> bool {
     bench_config.is_some_and(|config| {
-        config.scene_path.file_name().and_then(|name| name.to_str())
-            == Some("visual-regression.toml")
+        matches!(
+            config.scene_path.file_name().and_then(|name| name.to_str()),
+            Some("visual-regression.toml" | "inventory-ui.toml")
+        )
     })
 }
 
@@ -328,6 +334,22 @@ fn editor_native_viewport_requested(cli: &BenchCli) -> bool {
     cli.editor_native_viewport || env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT")
 }
 
+fn runtime_instance_kind(
+    editor_runtime: bool,
+    editor_native_viewport: bool,
+    bench_config: Option<&BenchConfig>,
+) -> RuntimeInstanceKind {
+    if editor_runtime && !editor_native_viewport {
+        RuntimeInstanceKind::EditorRuntime
+    } else if editor_native_viewport {
+        RuntimeInstanceKind::EditorNativeViewport
+    } else if bench_config.is_some() {
+        RuntimeInstanceKind::Bench
+    } else {
+        RuntimeInstanceKind::Game
+    }
+}
+
 fn asset_file_path() -> String {
     std::env::var("DRUSNIEL_EDITOR_ASSET_DIR").unwrap_or_else(|_| "assets".to_string())
 }
@@ -379,6 +401,21 @@ fn main() {
     if cli.bench_headless {
         eprintln!("--bench-headless requested; this build falls back to windowed rendering");
     }
+    let runtime_kind = runtime_instance_kind(
+        editor_runtime,
+        editor_native_viewport,
+        bench_config.as_ref(),
+    );
+    let _runtime_lock = match RuntimeInstanceLock::acquire(runtime_kind) {
+        Ok(lock) => {
+            eprintln!("[LOCK] Runtime lock acquired: {}", lock.path().display());
+            lock
+        }
+        Err(error) => {
+            eprintln!("[LOCK] {error}");
+            std::process::exit(2);
+        }
+    };
 
     // Load logging configuration from YAML
     let log_filter = load_logging_config();
@@ -462,11 +499,17 @@ fn main() {
         .add_plugins(AdaptiveGIPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(VegetationPlugin)
-        .add_plugins(PropsPlugin)
         .add_plugins(AtmospherePlugin)
         .add_plugins(AtmosphereIntegrationPlugin) // Physical sky rendering
         .add_plugins(FogPlugin)
         .add_plugins(EntityPlugin);
+
+    let bench_skips_props = bench_config
+        .as_ref()
+        .is_some_and(|config| bench_scene_skips_props(&config.scene_path));
+    if !bench_skips_props {
+        app.add_plugins(PropsPlugin);
+    }
 
     if !visual_regression_uses_vulkan {
         app.add_plugins(ParticlePlugin);
@@ -475,6 +518,9 @@ fn main() {
     if let Some(config) = bench_config.as_ref() {
         if bench_scene_requires_gameplay(&config.scene_path) {
             app.add_plugins(PhysicsPlugin).add_plugins(PlayerPlugin);
+        }
+        if bench_scene_requires_inventory_ui(&config.scene_path) {
+            app.add_plugins(InventoryUiPlugin);
         }
         app.add_plugins(BenchPlugin);
     } else if editor_native_viewport {

@@ -661,7 +661,7 @@ fn should_attempt_saved_world_load(persistence_settings: &WorldPersistence) -> b
         || env_flag("VOXEL_FORCE_REGENERATE_WORLD")
         || env_flag("VOXEL_FORCE_REGENERATE_WATER")
     {
-        match persistence::delete_saved_world() {
+        match persistence::delete_saved_world_at_path(&persistence_settings.path) {
             Ok(()) => info!(
                 "Water body regeneration requested; deleted saved world so terrain can regenerate"
             ),
@@ -674,23 +674,28 @@ fn should_attempt_saved_world_load(persistence_settings: &WorldPersistence) -> b
         return false;
     }
 
-    if !persistence::saved_world_exists() {
+    if !persistence::saved_world_exists_at_path(&persistence_settings.path) {
         return false;
     }
 
     true
 }
 
-fn load_saved_world_for_runtime() -> Result<VoxelWorld, String> {
+fn load_saved_world_for_runtime(
+    persistence_settings: &WorldPersistence,
+) -> Result<VoxelWorld, String> {
     if env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT") {
         info!("Loading saved world for native editor viewport...");
-        return persistence::read_world_data_from_path(persistence::WORLD_SAVE_PATH)
+        return persistence::read_world_data_from_path(&persistence_settings.path)
             .map(VoxelWorld::from_data)
             .map_err(|err| err.to_string());
     }
 
-    info!("Loading saved world from disk...");
-    persistence::load_world().map_err(|err| err.to_string())
+    info!(
+        "Loading saved world from {}...",
+        persistence_settings.path.display()
+    );
+    persistence::load_world_from_path(&persistence_settings.path).map_err(|err| err.to_string())
 }
 
 fn expected_world_chunk_count(size_chunks: IVec3) -> usize {
@@ -831,7 +836,7 @@ fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
     }
 
     info!("Saving world to disk...");
-    match persistence::save_world(world) {
+    match persistence::save_world_to_path(world, &persistence_settings.path) {
         Ok(()) => info!("World saved successfully!"),
         Err(e) => warn!("Failed to save world: {}", e),
     }
@@ -864,7 +869,9 @@ fn start_voxel_world_after_overlay_frame(
         gen_state.world_stats = WorldStats::default();
         gen_state.start_time = Some(std::time::Instant::now());
 
-        let task = AsyncComputeTaskPool::get().spawn(async { load_saved_world_for_runtime() });
+        let persistence_settings = persistence_settings.clone();
+        let task = AsyncComputeTaskPool::get()
+            .spawn(async move { load_saved_world_for_runtime(&persistence_settings) });
         commands.spawn(WorldLoadTask { task });
         return;
     }
@@ -1910,9 +1917,13 @@ fn mesh_dirty_chunks_system(
 
     // Keep the O(N) debug/stat snapshot off hot dirty-mesh frames while the
     // terrain queue is backed up. Per-frame mesh counters above stay current.
-    let stats_recompute_due = had_dirty_chunks && frame.0 % 30 == 0;
-    let stats_recompute_blocked =
-        stats_recompute_due && dirty_chunks_queued > chunks_per_frame_limit;
+    let stats_recompute_due = should_recompute_runtime_chunk_stats(frame.0);
+    let stats_recompute_blocked = stats_recompute_due
+        && should_defer_runtime_chunk_stats_recompute(
+            had_dirty_chunks,
+            dirty_chunks_queued,
+            chunks_per_frame_limit,
+        );
     let stats_recompute_start = timing.enabled.then(Instant::now);
     if stats_recompute_due && !stats_recompute_blocked {
         chunk_stats.recompute_from_world(&world);
@@ -2088,6 +2099,18 @@ fn prioritize_dirty_chunks_for_camera(
         dirty_chunks.sort_by(|a, b| compare_dirty_chunk_distance(a, b, camera_pos));
     }
     sort_window
+}
+
+fn should_recompute_runtime_chunk_stats(frame: u32) -> bool {
+    frame % 30 == 0
+}
+
+fn should_defer_runtime_chunk_stats_recompute(
+    had_dirty_chunks: bool,
+    dirty_chunks_queued: usize,
+    chunks_per_frame_limit: usize,
+) -> bool {
+    had_dirty_chunks && dirty_chunks_queued > chunks_per_frame_limit
 }
 
 fn compare_dirty_chunk_distance(a: &IVec3, b: &IVec3, camera_pos: Vec3) -> std::cmp::Ordering {
@@ -3734,6 +3757,16 @@ mod tests {
         assert_eq!(sort_window, 2);
         assert_eq!(dirty_chunks[0], IVec3::new(0, 0, 0));
         assert_eq!(dirty_chunks[1], IVec3::new(1, 0, 0));
+    }
+
+    #[test]
+    fn runtime_chunk_stats_recompute_continues_after_dirty_queue_drains() {
+        assert!(should_recompute_runtime_chunk_stats(30));
+        assert!(!should_recompute_runtime_chunk_stats(31));
+
+        assert!(!should_defer_runtime_chunk_stats_recompute(false, 100, 4));
+        assert!(!should_defer_runtime_chunk_stats_recompute(true, 4, 4));
+        assert!(should_defer_runtime_chunk_stats_recompute(true, 5, 4));
     }
 
     #[test]
