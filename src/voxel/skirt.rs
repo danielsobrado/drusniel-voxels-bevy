@@ -279,7 +279,7 @@ impl NeighborLods {
     }
 }
 
-fn edge_supports_transition_apron(edge: &BoundaryEdge) -> bool {
+fn edge_supports_transition_lip(edge: &BoundaryEdge) -> bool {
     let avg_up = (edge.v0_normal.y + edge.v1_normal.y) * 0.5;
     let min_up = edge.v0_normal.y.min(edge.v1_normal.y);
     avg_up > 0.35 || min_up > 0.15
@@ -332,17 +332,16 @@ pub fn generate_skirts(
     }
 
     for edge in boundary_edges {
-        let broad_apron = edge_supports_transition_apron(edge);
-        let needs_apron =
-            !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
-        let needs_vertical_candidate =
-            !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
-        let needs_vertical = needs_vertical_candidate;
         let has_lower_lod_neighbor = neighbor_lods
             .lod_for_face(edge.face)
             .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
-        let use_sloped_transition_drop = needs_apron && broad_apron && has_lower_lod_neighbor;
-        if !needs_apron && !needs_vertical {
+        let supports_transition_lip = has_lower_lod_neighbor && edge_supports_transition_lip(edge);
+        let needs_lip = !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
+        let needs_vertical_candidate =
+            !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
+        let needs_vertical = needs_vertical_candidate;
+        let emit_lip = needs_lip && supports_transition_lip;
+        if !emit_lip && !needs_vertical {
             continue;
         }
 
@@ -356,46 +355,41 @@ pub fn generate_skirts(
 
         let base_idx = positions.len() as u32;
         let drop = Vec3::new(0.0, -config.depth, 0.0);
-        let apron_factor = if broad_apron { 0.35 } else { 0.08 };
-        let apron_min = if broad_apron { 0.35 } else { 0.08 };
-        let apron_max = if broad_apron { 2.0 } else { 0.30 };
-        let apron_width = neighbor_lods
-            .lod_for_face(edge.face)
-            .map(|lod| {
-                let step = lod.step_size().max(my_lod.step_size()).max(1) as f32;
-                (step * VOXEL_SIZE * apron_factor)
-                    .clamp(VOXEL_SIZE * apron_min, VOXEL_SIZE * apron_max)
-            })
-            .unwrap_or_else(|| {
-                let step = my_lod.step_size().max(1) as f32;
-                (step * VOXEL_SIZE * apron_factor)
-                    .clamp(VOXEL_SIZE * apron_min, VOXEL_SIZE * apron_max)
-            });
-        let apron_drop_amount = 0.02;
-        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * apron_drop_amount, 0.0);
+        let lip_width = if emit_lip {
+            neighbor_lods
+                .lod_for_face(edge.face)
+                .map(|lod| {
+                    let step = lod.step_size().max(my_lod.step_size()).max(1) as f32;
+                    (step * VOXEL_SIZE * 0.08).clamp(VOXEL_SIZE * 0.08, VOXEL_SIZE * 0.30)
+                })
+                .unwrap_or(VOXEL_SIZE * 0.08)
+        } else {
+            0.0
+        };
+        let lip_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.015, 0.0);
 
         let top0 = edge.v0_pos;
         let top1 = edge.v1_pos;
-        let apron0 = top0 + skirt_normal * apron_width + apron_drop;
-        let apron1 = top1 + skirt_normal * apron_width + apron_drop;
+        let lip0 = top0 + skirt_normal * lip_width + lip_drop;
+        let lip1 = top1 + skirt_normal * lip_width + lip_drop;
 
         let blend_factor = 0.2;
         let blended_normal0 =
             (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
         let blended_normal1 =
             (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
-        let vertical_normal0 = if needs_apron {
+        let vertical_normal0 = if emit_lip {
             upward_biased_normal(edge.v0_normal)
         } else {
             blended_normal0
         };
-        let vertical_normal1 = if needs_apron {
+        let vertical_normal1 = if emit_lip {
             upward_biased_normal(edge.v1_normal)
         } else {
             blended_normal1
         };
 
-        let (vertical_top0, vertical_top1) = if needs_apron {
+        let (vertical_top0, vertical_top1) = if emit_lip {
             positions.push(top0.to_array());
             normals.push(upward_biased_normal(edge.v0_normal).to_array());
             uvs.push([1.0, 0.0]);
@@ -406,23 +400,23 @@ pub fn generate_skirts(
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
-            positions.push(apron0.to_array());
+            positions.push(lip0.to_array());
             normals.push(upward_biased_normal(edge.v0_normal).to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v0_weights);
 
-            positions.push(apron1.to_array());
+            positions.push(lip1.to_array());
             normals.push(upward_biased_normal(edge.v1_normal).to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
             push_boundary_quad_indices(indices, edge.face, base_idx);
-            (apron0, apron1)
+            (lip0, lip1)
         } else {
             (top0, top1)
         };
 
-        if needs_apron && !needs_vertical {
+        if emit_lip && !needs_vertical {
             continue;
         }
 
@@ -431,13 +425,8 @@ pub fn generate_skirts(
         }
 
         let vertical_idx = positions.len() as u32;
-        let drop_outward = if use_sloped_transition_drop {
-            skirt_normal * apron_width
-        } else {
-            Vec3::ZERO
-        };
-        let bot0 = vertical_top0 + drop + drop_outward;
-        let bot1 = vertical_top1 + drop + drop_outward;
+        let bot0 = vertical_top0 + drop;
+        let bot1 = vertical_top1 + drop;
 
         positions.push(vertical_top0.to_array());
         normals.push(vertical_normal0.to_array());
@@ -526,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn lod_transition_adds_top_apron_with_lit_drop() {
+    fn lod_transition_adds_narrow_top_lip_without_outward_drop() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -557,25 +546,26 @@ mod tests {
         assert_eq!(positions.len(), 8);
         assert_eq!(indices.len(), 12);
         assert!(
-            positions[2][0] > 16.0 && positions[3][0] > 16.0,
-            "transition apron should extend into the lower-detail neighbor"
+            positions[2][0] > 16.0 && positions[2][0] <= 16.31,
+            "transition lip should cover the boundary without painting a broad patch"
         );
         assert!(
             positions[2][1] < positions[0][1] && positions[3][1] < positions[1][1],
-            "transition apron should have a small downward bias to avoid z-fighting"
+            "transition lip should have a small downward bias to avoid z-fighting"
         );
         assert!(
             normals[4][1] > 0.95 && normals[5][1] > 0.95,
             "transition drop should be lit like nearby top terrain instead of a dark wall"
         );
         assert!(
-            positions[6][0] > positions[4][0] && positions[7][0] > positions[5][0],
-            "top-surface transition drops should bevel outward instead of forming visible vertical strips"
+            (positions[6][0] - positions[4][0]).abs() < 0.001
+                && (positions[7][0] - positions[5][0]).abs() < 0.001,
+            "transition skirt should drop from the lip instead of stepping farther into the neighbor"
         );
     }
 
     #[test]
-    fn lower_lod_side_edge_uses_only_a_narrow_transition_lip() {
+    fn lower_lod_side_edge_uses_only_vertical_skirt() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -603,11 +593,13 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert_eq!(positions.len(), 8);
-        assert_eq!(indices.len(), 12);
+        assert_eq!(positions.len(), 4);
+        assert_eq!(indices.len(), 6);
         assert!(
-            positions[2][0] > 16.0 && positions[2][0] < 16.35,
-            "side edges should only emit a narrow lip, not a broad visible apron"
+            positions
+                .iter()
+                .all(|position| (position[0] - 16.0).abs() < 0.001),
+            "side edges should not emit horizontal lips over the neighbor terrain"
         );
     }
 
