@@ -64,6 +64,7 @@ const WATER_BODY_SHALLOW_FLOOD_MAX_AVG_DEPTH: f32 = 1.25;
 const WORLD_STARTUP_READY_HOLD_SECONDS: f32 = 1.0;
 const WORLD_STARTUP_BACKGROUND_ZOOM: f32 = 1.12;
 const WORLD_STARTUP_SETUP_DELAY_FRAMES: u8 = 1;
+const WORLD_GENERATION_TASK_SPAWN_BATCH: usize = 192;
 use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
@@ -477,6 +478,52 @@ struct PendingWorldGeneration {
     requested: bool,
 }
 
+#[derive(Resource, Default)]
+struct WorldGenerationQueue {
+    positions: Vec<IVec3>,
+    next_index: usize,
+    generator: Option<Arc<TerrainGenerator>>,
+}
+
+impl WorldGenerationQueue {
+    fn begin(&mut self, positions: Vec<IVec3>, generator: Arc<TerrainGenerator>) {
+        self.positions = positions;
+        self.next_index = 0;
+        self.generator = Some(generator);
+    }
+
+    fn remaining(&self) -> usize {
+        self.positions.len().saturating_sub(self.next_index)
+    }
+
+    fn take_next_batch(
+        &mut self,
+        max_batch_size: usize,
+    ) -> Option<(Vec<IVec3>, Arc<TerrainGenerator>, bool)> {
+        if self.remaining() == 0 {
+            self.positions.clear();
+            self.next_index = 0;
+            self.generator = None;
+            return None;
+        }
+
+        let generator = Arc::clone(self.generator.as_ref()?);
+        let batch_size = max_batch_size.max(1);
+        let end_index = (self.next_index + batch_size).min(self.positions.len());
+        let batch = self.positions[self.next_index..end_index].to_vec();
+        self.next_index = end_index;
+        let complete = self.remaining() == 0;
+
+        if complete {
+            self.positions.clear();
+            self.next_index = 0;
+            self.generator = None;
+        }
+
+        Some((batch, generator, complete))
+    }
+}
+
 #[derive(Component)]
 struct WorldStartupOverlay;
 
@@ -560,6 +607,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(WorldStartupOverlayState::default())
         .insert_resource(WorldStartupSetupState::default())
         .insert_resource(PendingWorldGeneration::default())
+        .insert_resource(WorldGenerationQueue::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -586,8 +634,9 @@ impl Plugin for VoxelPlugin {
             (
                 poll_world_load_task,
                 start_pending_world_generation.after(poll_world_load_task),
+                spawn_queued_chunk_generation_tasks.after(start_pending_world_generation),
                 // Stage 1: Pull newly-generated chunks into VoxelWorld
-                poll_chunk_generation_tasks.after(start_pending_world_generation),
+                poll_chunk_generation_tasks.after(spawn_queued_chunk_generation_tasks),
                 update_enclosure_state.after(poll_chunk_generation_tasks),
                 sync_occlusion_config_from_enclosure.after(update_enclosure_state),
                 toggle_enclosure_culling,
@@ -849,6 +898,7 @@ fn start_voxel_world_after_overlay_frame(
     mut gen_state: ResMut<ChunkGenerationState>,
     persistence_settings: Res<WorldPersistence>,
     mut setup_state: ResMut<WorldStartupSetupState>,
+    mut generation_queue: ResMut<WorldGenerationQueue>,
 ) {
     if setup_state.started {
         return;
@@ -876,15 +926,14 @@ fn start_voxel_world_after_overlay_frame(
         return;
     }
 
-    begin_world_generation(&mut commands, &world, &mut gen_state);
+    begin_world_generation(&world, &mut gen_state, &mut generation_queue);
 }
 
 fn begin_world_generation(
-    commands: &mut Commands,
     world: &VoxelWorld,
     gen_state: &mut ChunkGenerationState,
+    generation_queue: &mut WorldGenerationQueue,
 ) {
-    // Spawn async chunk generation tasks
     info!("Generating new world (async)...");
 
     let chunk_positions: Vec<IVec3> = world.all_chunk_positions().collect();
@@ -897,25 +946,12 @@ fn begin_world_generation(
     gen_state.world_stats = WorldStats::default();
     gen_state.start_time = Some(std::time::Instant::now());
 
-    // Create a shared terrain generator (Arc for thread safety)
     let generator = Arc::new(TerrainGenerator::default());
-
-    // Get the async compute task pool
-    let task_pool = AsyncComputeTaskPool::get();
-
-    // Spawn a task for each chunk
-    for chunk_pos in chunk_positions {
-        let generator = Arc::clone(&generator);
-
-        let task = task_pool.spawn(async move {
-            let (chunk, stats) = generate_chunk_async(chunk_pos, &generator);
-            ChunkGenerationResult { chunk, stats }
-        });
-
-        commands.spawn(ChunkGenerationTask { task, chunk_pos });
-    }
-
-    info!("Spawned {} async chunk generation tasks", total_chunks);
+    generation_queue.begin(chunk_positions, generator);
+    info!(
+        "Queued {} async chunk generation tasks for batched startup spawning",
+        total_chunks
+    );
 }
 
 /// Polls the asynchronous saved-world load before starting generation fallback.
@@ -997,17 +1033,50 @@ fn request_world_generation(
 }
 
 fn start_pending_world_generation(
-    mut commands: Commands,
     world: Res<VoxelWorld>,
     mut gen_state: ResMut<ChunkGenerationState>,
     mut pending_generation: ResMut<PendingWorldGeneration>,
+    mut generation_queue: ResMut<WorldGenerationQueue>,
 ) {
     if !pending_generation.requested {
         return;
     }
 
     pending_generation.requested = false;
-    begin_world_generation(&mut commands, &world, &mut gen_state);
+    begin_world_generation(&world, &mut gen_state, &mut generation_queue);
+}
+
+fn spawn_queued_chunk_generation_tasks(
+    mut commands: Commands,
+    mut generation_queue: ResMut<WorldGenerationQueue>,
+) {
+    let Some((chunk_positions, generator, complete)) =
+        generation_queue.take_next_batch(WORLD_GENERATION_TASK_SPAWN_BATCH)
+    else {
+        return;
+    };
+
+    let spawned_count = chunk_positions.len();
+    let task_pool = AsyncComputeTaskPool::get();
+    for chunk_pos in chunk_positions {
+        let generator = Arc::clone(&generator);
+        let task = task_pool.spawn(async move {
+            let (chunk, stats) = generate_chunk_async(chunk_pos, &generator);
+            ChunkGenerationResult { chunk, stats }
+        });
+
+        commands.spawn(ChunkGenerationTask { task, chunk_pos });
+    }
+
+    if complete {
+        info!("Finished spawning queued chunk generation tasks");
+    } else {
+        debug!(
+            "Spawned {} queued chunk generation tasks this frame; {} remaining",
+            spawned_count,
+            generation_queue.remaining()
+        );
+    }
 }
 
 fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -3719,6 +3788,39 @@ mod tests {
         assert_eq!(snapshot.stage, WorldStartupStage::LoadingSavedWorld);
         assert!(snapshot.detail.contains("Starting world load"));
         assert!(!snapshot.complete);
+    }
+
+    #[test]
+    fn world_generation_queue_batches_startup_task_spawns() {
+        let mut queue = WorldGenerationQueue::default();
+        queue.begin(
+            vec![
+                IVec3::new(0, 0, 0),
+                IVec3::new(1, 0, 0),
+                IVec3::new(2, 0, 0),
+                IVec3::new(3, 0, 0),
+                IVec3::new(4, 0, 0),
+            ],
+            Arc::new(TerrainGenerator::default()),
+        );
+
+        let (first_batch, _, first_complete) = queue.take_next_batch(2).expect("first batch");
+        assert_eq!(first_batch, vec![IVec3::new(0, 0, 0), IVec3::new(1, 0, 0)]);
+        assert!(!first_complete);
+        assert_eq!(queue.remaining(), 3);
+
+        let (second_batch, _, second_complete) = queue.take_next_batch(8).expect("second batch");
+        assert_eq!(
+            second_batch,
+            vec![
+                IVec3::new(2, 0, 0),
+                IVec3::new(3, 0, 0),
+                IVec3::new(4, 0, 0)
+            ]
+        );
+        assert!(second_complete);
+        assert_eq!(queue.remaining(), 0);
+        assert!(queue.take_next_batch(2).is_none());
     }
 
     #[test]
