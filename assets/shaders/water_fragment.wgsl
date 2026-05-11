@@ -120,7 +120,14 @@ fn fragment(
   let z_fragment_view = depth_ndc_to_view_z(in.position.z);
   let depth_diff_view = z_fragment_view - z_depth_buffer_view;
   let beers_law = exp(-depth_diff_view * water_clarity);
-  let depth_color = vec4<f32>(mix(deep_color.xyz, shallow_color.xyz, beers_law), 1.0 - beers_law);
+  let depth_rgb = mix(deep_color.xyz, shallow_color.xyz, beers_law);
+  let configured_surface_alpha = mix(deep_color.a, shallow_color.a, beers_law);
+  // This alpha is multiplied by the base material alpha below, so compensate
+  // here to keep shallow water visibly tinted across the full surface.
+  let base_surface_alpha = max(pbr_input.material.base_color.a, 0.001);
+  let surface_tint_alpha = clamp((configured_surface_alpha * 0.68) / base_surface_alpha, 0.0, 1.0);
+  let depth_alpha = max(1.0 - beers_law, surface_tint_alpha);
+  let depth_color = vec4<f32>(depth_rgb, depth_alpha);
   water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
 
 #ifdef USE_NOBLE_FOAM
