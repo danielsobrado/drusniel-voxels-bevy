@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOCK_DIR_NAME: &str = "drusniel-voxels";
 const LOCK_FILE_NAME: &str = "runtime.lock";
-const BENCH_LOCK_FILE_NAME: &str = "runtime-bench.lock";
+const BENCH_LOCK_PATH_ENV: &str = "DRUSNIEL_BENCH_RUNTIME_LOCK";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeInstanceKind {
@@ -144,11 +144,23 @@ impl Drop for RuntimeInstanceLock {
 }
 
 fn default_lock_path(kind: RuntimeInstanceKind) -> PathBuf {
-    let file_name = match kind {
-        RuntimeInstanceKind::Bench => BENCH_LOCK_FILE_NAME,
-        _ => LOCK_FILE_NAME,
-    };
-    std::env::temp_dir().join(LOCK_DIR_NAME).join(file_name)
+    if kind == RuntimeInstanceKind::Bench {
+        if let Some(path) = env_lock_path(BENCH_LOCK_PATH_ENV) {
+            return path;
+        }
+    }
+
+    std::env::temp_dir()
+        .join(LOCK_DIR_NAME)
+        .join(LOCK_FILE_NAME)
+}
+
+fn env_lock_path(name: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(name)?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(value))
 }
 
 fn read_existing_metadata(file: &mut File) -> String {
@@ -227,5 +239,15 @@ mod tests {
         assert!(!path.exists());
         let _second = RuntimeInstanceLock::acquire_at(RuntimeInstanceKind::Game, &path)
             .expect("reacquire after drop");
+    }
+
+    #[test]
+    fn bench_uses_shared_runtime_lock_by_default() {
+        if std::env::var_os(BENCH_LOCK_PATH_ENV).is_none() {
+            assert_eq!(
+                default_lock_path(RuntimeInstanceKind::Bench),
+                default_lock_path(RuntimeInstanceKind::Game)
+            );
+        }
     }
 }

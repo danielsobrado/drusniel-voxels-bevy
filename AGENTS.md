@@ -46,6 +46,8 @@ rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
 
 This bench drives spawn-adjacent routes, a historical fall-through route, and a dig-crust checkpoint that digs beneath the player and verifies the hard crust rejects below-floor/bedrock edits. It logs player coordinates, validity, collider readiness, stall events, fall-through events, and dig/crust rejection counters, and uses simple path steering to turn at borders and avoid missing ground or steep/blocking terrain.
 
+Runtime, editor viewport, and bench launches share the same runtime lock by default so only one Drusniel runtime runs at a time. Use `DRUSNIEL_BENCH_RUNTIME_LOCK` only when an isolated bench lock is intentional.
+
 ## Editor Runtime Verification
 
 After any task that changes the editor, the Bevy runtime, Tauri integration, viewport behavior, or editor-visible UI, rebuild the editor runtime sidecar and restart the desktop editor so the change can be tested in the running app.
