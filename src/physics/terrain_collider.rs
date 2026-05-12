@@ -24,8 +24,6 @@ const MAX_COLLIDERS_PER_FRAME: usize = 4;
 const MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME: usize = 24;
 /// Startup can safely spend more work preparing the local terrain before player release.
 const MAX_STARTUP_COLLIDERS_PER_FRAME: usize = 48;
-/// Maximum completed baked colliders inserted into the physics world in one frame.
-const MAX_COLLIDER_SWAPS_PER_FRAME: usize = 4;
 const PLAYER_COLLIDER_CATCHUP_RADIUS: f32 = 128.0;
 
 /// Marker for chunks that need collider generation.
@@ -295,6 +293,16 @@ fn terrain_collider_mode_from_env() -> TerrainColliderMode {
     }
 }
 
+fn collider_frame_budget(startup_catchup: bool, player_near_pending: bool) -> usize {
+    if startup_catchup {
+        MAX_STARTUP_COLLIDERS_PER_FRAME
+    } else if player_near_pending {
+        MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME
+    } else {
+        MAX_COLLIDERS_PER_FRAME
+    }
+}
+
 fn build_voxel_terrain_collider_from_coords(
     coords: Vec<IVec3>,
 ) -> Option<(Collider, GeneratedColliderKind)> {
@@ -435,20 +443,16 @@ pub fn generate_chunk_colliders(
         let player_near_pending = pending.iter().any(|(_, _, transform, _)| {
             horizontal_distance_sq(transform.translation, priority_pos) <= catchup_radius_sq
         });
-        let collider_budget = if startup_collider_catchup {
-            MAX_STARTUP_COLLIDERS_PER_FRAME
-        } else if player_near_pending {
-            MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME
-        } else {
-            MAX_COLLIDERS_PER_FRAME
-        };
-        pending.sort_by(|a, b| {
-            let da = collider_priority_distance_sq(a.2.translation, priority_pos);
-            let db = collider_priority_distance_sq(b.2.translation, priority_pos);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
+        let collider_budget = collider_frame_budget(startup_collider_catchup, player_near_pending);
         let pending_count = pending.len();
+        if pending_count > collider_budget {
+            pending.sort_by(|a, b| {
+                let da = collider_priority_distance_sq(a.2.translation, priority_pos);
+                let db = collider_priority_distance_sq(b.2.translation, priority_pos);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
         let mut spawned = 0usize;
         for (entity, mesh_handle, _transform, chunk_mesh) in pending {
             if spawned >= collider_budget {
@@ -618,10 +622,29 @@ pub fn generate_chunk_colliders(
 pub fn poll_chunk_collider_bakes(
     mut commands: Commands,
     mut bakes: Query<(Entity, &mut TerrainColliderBakeTask, Option<&Mesh3d>)>,
+    bake_transforms: Query<&Transform, With<TerrainColliderBakeTask>>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    camera_query: Query<&Transform, (With<PlayerCamera>, Without<ChunkMesh>)>,
+    player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>, Without<ChunkMesh>)>,
+    spawn_state: Option<Res<PlayerSpawnState>>,
     mut registry: ResMut<TerrainCollisionRegistry>,
 ) {
+    let startup_collider_catchup = spawn_state.is_some_and(|state| state.initial_spawn_pending);
+    let camera_pos = camera_query
+        .single()
+        .map(|t| t.translation)
+        .unwrap_or(Vec3::ZERO);
+    let priority_pos = player_query
+        .single()
+        .map(|t| t.translation)
+        .unwrap_or(camera_pos);
+    let catchup_radius_sq = PLAYER_COLLIDER_CATCHUP_RADIUS * PLAYER_COLLIDER_CATCHUP_RADIUS;
+    let player_near_pending = bake_transforms.iter().any(|transform| {
+        horizontal_distance_sq(transform.translation, priority_pos) <= catchup_radius_sq
+    });
+    let collider_budget = collider_frame_budget(startup_collider_catchup, player_near_pending);
+
     let (
         applied,
         failed,
@@ -644,7 +667,7 @@ pub fn poll_chunk_collider_bakes(
 
         for (entity, mut bake, mesh_handle) in bakes.iter_mut() {
             in_flight += 1;
-            if applied >= MAX_COLLIDER_SWAPS_PER_FRAME {
+            if applied >= collider_budget {
                 continue;
             }
 
@@ -733,7 +756,7 @@ pub fn poll_chunk_collider_bakes(
     timing.record_count(
         frame.0,
         "Terrain Collider Swap Budget",
-        MAX_COLLIDER_SWAPS_PER_FRAME as f64,
+        collider_budget as f64,
     );
     timing.record_count(
         frame.0,
