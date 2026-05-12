@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::asset::AssetId;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -40,6 +41,7 @@ pub struct TerrainColliderBakeTask {
     task: Task<Option<(Collider, GeneratedColliderKind)>>,
     chunk_position: IVec3,
     source_revision: u64,
+    mesh_asset_id: AssetId<Mesh>,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,6 +523,7 @@ pub fn generate_chunk_colliders(
                         task,
                         chunk_position: chunk_mesh.chunk_position,
                         source_revision: baking_revision.source_revision,
+                        mesh_asset_id: mesh_handle.0.id(),
                     },
                     TerrainCollisionChunk {
                         chunk: chunk_mesh.chunk_position,
@@ -549,6 +552,7 @@ pub fn generate_chunk_colliders(
                     task,
                     chunk_position: chunk_mesh.chunk_position,
                     source_revision: baking_revision.source_revision,
+                    mesh_asset_id: mesh_handle.0.id(),
                 },
                 TerrainCollisionChunk {
                     chunk: chunk_mesh.chunk_position,
@@ -600,7 +604,7 @@ pub fn generate_chunk_colliders(
 
 pub fn poll_chunk_collider_bakes(
     mut commands: Commands,
-    mut bakes: Query<(Entity, &mut TerrainColliderBakeTask)>,
+    mut bakes: Query<(Entity, &mut TerrainColliderBakeTask, Option<&Mesh3d>)>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut registry: ResMut<TerrainCollisionRegistry>,
@@ -625,7 +629,7 @@ pub fn poll_chunk_collider_bakes(
         let mut generated_voxels = 0usize;
         let mut in_flight = 0usize;
 
-        for (entity, mut bake) in bakes.iter_mut() {
+        for (entity, mut bake, mesh_handle) in bakes.iter_mut() {
             in_flight += 1;
             if applied >= MAX_COLLIDER_SWAPS_PER_FRAME {
                 continue;
@@ -635,7 +639,11 @@ pub fn poll_chunk_collider_bakes(
                 continue;
             };
 
-            if registry.source_revision(bake.chunk_position) != bake.source_revision {
+            let mesh_changed = mesh_handle
+                .map(|mesh_handle| mesh_handle.0.id() != bake.mesh_asset_id)
+                .unwrap_or(true);
+            if mesh_changed || registry.source_revision(bake.chunk_position) != bake.source_revision
+            {
                 let revision = registry.mark_stale_bake_drop(bake.chunk_position);
                 commands.entity(entity).try_insert((
                     TerrainCollisionChunk {

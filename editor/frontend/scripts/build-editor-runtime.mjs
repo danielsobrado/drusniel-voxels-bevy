@@ -18,11 +18,12 @@ const binariesDir = resolve(tauriDir, "binaries");
 const release = !process.argv.includes("--debug");
 const profile = release ? "release" : "debug";
 const targetTriple = process.env.CARGO_BUILD_TARGET || rustHostTriple();
+const targetDir = resolve(repoRoot, process.env.CARGO_TARGET_DIR || "target");
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
 
 run("cargo", ["build", "--bin", "voxel_builder", ...(release ? ["--release"] : [])], repoRoot);
 
-const sourceBinary = resolve(repoRoot, "target", profile, `voxel_builder${exeSuffix}`);
+const sourceBinary = resolve(targetDir, profile, `voxel_builder${exeSuffix}`);
 if (!existsSync(sourceBinary)) {
   throw new Error(`expected editor runtime binary at ${sourceBinary}`);
 }
@@ -36,8 +37,8 @@ const sidecarBinary = join(
 copyFileSync(sourceBinary, sidecarBinary);
 
 if (process.platform === "win32") {
-  copyMatchingFiles(resolve(repoRoot, "target", profile), /^bevy_dylib.*\.dll$/);
-  copyMatchingFiles(resolve(repoRoot, "target", profile, "deps"), /^bevy_dylib.*\.dll$/);
+  copyMatchingFiles(resolve(targetDir, profile), /^bevy_dylib.*\.dll$/);
+  copyMatchingFiles(resolve(targetDir, profile, "deps"), /^bevy_dylib.*\.dll$/);
   copyMatchingFiles(resolve(rustSysroot(), "bin"), /^std-.*\.dll$/);
 }
 

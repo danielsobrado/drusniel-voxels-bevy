@@ -285,14 +285,8 @@ fn create_body_water_materials(
                 0.06
             },
             metallic: 0.0,
-            reflectance: preset.reflection_strength.clamp(0.0, 1.0),
-            clearcoat: if matches!(kind, WaterBodyKind::Lake) {
-                0.72
-            } else if matches!(kind, WaterBodyKind::ShallowFlood) {
-                0.1
-            } else {
-                0.55
-            },
+            reflectance: water_reflectance(preset),
+            clearcoat: water_clearcoat(kind),
             clearcoat_perceptual_roughness: if matches!(kind, WaterBodyKind::Lake) {
                 0.06
             } else {
@@ -301,13 +295,7 @@ fn create_body_water_materials(
             double_sided: true,
             cull_mode: None,
             depth_bias: WATER_SURFACE_DEPTH_BIAS,
-            specular_transmission: if matches!(kind, WaterBodyKind::Ocean) {
-                0.18
-            } else if matches!(kind, WaterBodyKind::ShallowFlood) {
-                0.02
-            } else {
-                0.12
-            },
+            specular_transmission: water_specular_transmission(kind),
             ior: 1.33,
             thickness: if matches!(kind, WaterBodyKind::Pond) {
                 0.35
@@ -328,14 +316,8 @@ fn create_body_water_materials(
             0.08
         },
         metallic: 0.0,
-        reflectance: preset.reflection_strength.clamp(0.0, 1.0),
-        clearcoat: if matches!(kind, WaterBodyKind::Lake) {
-            0.62
-        } else if matches!(kind, WaterBodyKind::ShallowFlood) {
-            0.08
-        } else {
-            0.5
-        },
+        reflectance: water_reflectance(preset),
+        clearcoat: water_clearcoat(kind),
         clearcoat_perceptual_roughness: 0.12,
         double_sided: true,
         cull_mode: None,
@@ -354,6 +336,30 @@ fn water_color(rgba: [f32; 4], debug_solid_color: bool) -> Color {
     }
 }
 
+fn water_reflectance(preset: &WaterBodyPresetConfig) -> f32 {
+    (preset.reflection_strength * 0.62).clamp(0.02, 0.46)
+}
+
+fn water_clearcoat(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.26,
+        WaterBodyKind::Lake => 0.3,
+        WaterBodyKind::River => 0.18,
+        WaterBodyKind::Pond => 0.2,
+        WaterBodyKind::ShallowFlood => 0.06,
+        WaterBodyKind::Unknown => 0.24,
+    }
+}
+
+fn water_specular_transmission(kind: WaterBodyKind) -> f32 {
+    match kind {
+        WaterBodyKind::Ocean => 0.06,
+        WaterBodyKind::Lake | WaterBodyKind::River | WaterBodyKind::Pond => 0.04,
+        WaterBodyKind::ShallowFlood => 0.01,
+        WaterBodyKind::Unknown => 0.05,
+    }
+}
+
 fn water_edge_color(
     shallow_color: Color,
     preset: &WaterBodyPresetConfig,
@@ -366,7 +372,9 @@ fn water_edge_color(
     let linear = shallow_color.to_linear();
     let witchcraft_alpha =
         witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength);
-    Color::linear_rgba(linear.red, linear.green, linear.blue, witchcraft_alpha)
+    let foam_luma = linear.red * 0.2126 + linear.green * 0.7152 + linear.blue * 0.0722;
+    let foam = (foam_luma * 0.55 + 0.32).clamp(0.0, 1.0);
+    Color::linear_rgba(foam * 0.9, foam * 0.98, foam, witchcraft_alpha)
 }
 
 fn apply_noble_water_shader_params(
@@ -423,6 +431,37 @@ fn water_debug_body_color(kind: WaterBodyKind) -> Color {
         WaterBodyKind::Pond => Color::srgba(0.85, 0.8, 0.0, 0.78),
         WaterBodyKind::ShallowFlood => Color::srgba(1.0, 0.15, 0.05, 0.58),
         WaterBodyKind::Unknown => Color::srgba(1.0, 1.0, 1.0, 0.6),
+    }
+}
+
+#[cfg(test)]
+mod water_material_tests {
+    use super::*;
+
+    #[test]
+    fn water_edge_color_is_desaturated_for_shoreline_blend() {
+        let config = WaterConfig::default();
+        let preset = config.body_preset(WaterBodyKind::Ocean);
+        let shallow_color = water_color(preset.shallow_color, false);
+        let edge_color = water_edge_color(
+            shallow_color,
+            preset,
+            false,
+            WitchcraftWaterFinishParams::default(),
+        )
+        .to_linear();
+
+        assert!((edge_color.blue - edge_color.red).abs() < 0.08);
+        assert!((edge_color.blue - edge_color.green).abs() < 0.08);
+    }
+
+    #[test]
+    fn water_reflectance_damps_configured_strength() {
+        let config = WaterConfig::default();
+        let ocean = config.body_preset(WaterBodyKind::Ocean);
+
+        assert!(water_reflectance(ocean) < ocean.reflection_strength);
+        assert!(water_reflectance(ocean) <= 0.46);
     }
 }
 

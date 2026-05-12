@@ -254,6 +254,8 @@ struct BenchReadySignature {
     dirty_chunks: u32,
     mesh_entities: u32,
     water_mesh_entities: u32,
+    collider_ready_entities: u32,
+    collider_pending_entities: u32,
     high_lod_chunks: u32,
     low_lod_chunks: u32,
     culled_chunks: u32,
@@ -264,6 +266,7 @@ struct BenchReadySnapshot {
     signature: BenchReadySignature,
     chunks_meshed_this_frame: u32,
     chunks_skipped_this_frame: u32,
+    require_collider_ready: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -305,12 +308,39 @@ struct GameplayTraceSample {
 
 impl BenchReadySnapshot {
     fn is_ready_candidate(self) -> bool {
-        self.signature.missing_chunks == 0
-            && self.signature.dirty_chunks == 0
-            && self.chunks_meshed_this_frame == 0
+        if self.signature.missing_chunks != 0 || self.signature.dirty_chunks != 0 {
+            return false;
+        }
+
+        if self.require_collider_ready {
+            return self.signature.collider_pending_entities == 0
+                && self.signature.collider_ready_entities > 0;
+        }
+
+        self.chunks_meshed_this_frame == 0
             && self.chunks_skipped_this_frame == 0
             && self.signature.mesh_entities + self.signature.water_mesh_entities > 0
     }
+
+    fn stability_signature(self) -> BenchReadySignature {
+        if !self.require_collider_ready {
+            return self.signature;
+        }
+
+        BenchReadySignature {
+            missing_chunks: self.signature.missing_chunks,
+            dirty_chunks: self.signature.dirty_chunks,
+            collider_ready_entities: (self.signature.collider_ready_entities > 0) as u32,
+            collider_pending_entities: (self.signature.collider_pending_entities > 0) as u32,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct BenchColliderReadyStats {
+    ready_entities: u32,
+    pending_entities: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1117,6 +1147,8 @@ fn record_startup_observations(
             chunk_stats,
             vec3(checkpoint.position),
             scene.chunk_load_radius,
+            BenchColliderReadyStats::default(),
+            false,
         );
         trace.counters.missing_chunks = snapshot.signature.missing_chunks;
         trace.counters.dirty_chunks = snapshot.signature.dirty_chunks;
@@ -1762,20 +1794,28 @@ fn run_bench_state_machine(
         }
         BenchPhase::WaitReady => {
             let checkpoint = &scene.checkpoints[state.checkpoint_index];
+            let readiness_position = gameplay_start_or_checkpoint_position(checkpoint);
             let snapshot = bench_ready_snapshot(
                 &world,
                 &chunk_stats,
-                vec3(checkpoint.position),
+                readiness_position,
                 scene.chunk_load_radius,
+                bench_collider_ready_stats(
+                    collider_query.iter(),
+                    readiness_position,
+                    scene.chunk_load_radius,
+                ),
+                checkpoint.gameplay.is_some(),
             );
-            let signature_stable = state.ready_last_signature == Some(snapshot.signature);
+            let stability_signature = snapshot.stability_signature();
+            let signature_stable = state.ready_last_signature == Some(stability_signature);
             if snapshot.is_ready_candidate() && signature_stable {
                 state.ready_stable_frames += 1;
             } else {
                 state.ready_stable_frames = 0;
             }
             state.ready_wait_frames += 1;
-            state.ready_last_signature = Some(snapshot.signature);
+            state.ready_last_signature = Some(stability_signature);
             let wait_secs = state
                 .ready_started
                 .map(|started| started.elapsed().as_secs_f32())
@@ -1819,7 +1859,7 @@ fn run_bench_state_machine(
                         snapshot.chunks_meshed_this_frame,
                     );
                     println!(
-                        "[BENCH READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} missing_chunks={} dirty_chunks={} mesh_entities={} water_mesh_entities={}",
+                        "[BENCH READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} missing_chunks={} dirty_chunks={} mesh_entities={} water_mesh_entities={} collider_ready={} collider_pending={}",
                         checkpoint.name,
                         state.run_index,
                         state.ready_wait_frames,
@@ -1830,6 +1870,8 @@ fn run_bench_state_machine(
                         snapshot.signature.dirty_chunks,
                         snapshot.signature.mesh_entities,
                         snapshot.signature.water_mesh_entities,
+                        snapshot.signature.collider_ready_entities,
+                        snapshot.signature.collider_pending_entities,
                     );
                 } else {
                     info!(
@@ -1844,7 +1886,7 @@ fn run_bench_state_machine(
                         snapshot.signature.low_lod_chunks,
                     );
                     println!(
-                        "[BENCH READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} mesh_entities={} water_mesh_entities={} high_lod_chunks={} low_lod_chunks={}",
+                        "[BENCH READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_wait_secs={:.1} mesh_entities={} water_mesh_entities={} collider_ready={} collider_pending={} high_lod_chunks={} low_lod_chunks={}",
                         checkpoint.name,
                         state.run_index,
                         state.ready_wait_frames,
@@ -1853,6 +1895,8 @@ fn run_bench_state_machine(
                         READY_MIN_SECS,
                         snapshot.signature.mesh_entities,
                         snapshot.signature.water_mesh_entities,
+                        snapshot.signature.collider_ready_entities,
+                        snapshot.signature.collider_pending_entities,
                         snapshot.signature.high_lod_chunks,
                         snapshot.signature.low_lod_chunks,
                     );
@@ -2740,6 +2784,8 @@ fn bench_ready_snapshot(
     chunk_stats: &RuntimeChunkStats,
     position: Vec3,
     radius: i32,
+    collider_stats: BenchColliderReadyStats,
+    require_collider_ready: bool,
 ) -> BenchReadySnapshot {
     let (missing_chunks, dirty_chunks) = chunks_pending_counts(world, position, radius);
     BenchReadySnapshot {
@@ -2748,13 +2794,54 @@ fn bench_ready_snapshot(
             dirty_chunks,
             mesh_entities: chunk_stats.mesh_entities,
             water_mesh_entities: chunk_stats.water_mesh_entities,
+            collider_ready_entities: collider_stats.ready_entities,
+            collider_pending_entities: collider_stats.pending_entities,
             high_lod_chunks: chunk_stats.high_lod_chunks,
             low_lod_chunks: chunk_stats.low_lod_chunks,
             culled_chunks: chunk_stats.culled_chunks,
         },
         chunks_meshed_this_frame: chunk_stats.chunks_meshed_this_frame,
         chunks_skipped_this_frame: chunk_stats.chunks_skipped_this_frame,
+        require_collider_ready,
     }
+}
+
+fn bench_collider_ready_stats<'a>(
+    colliders: impl Iterator<
+        Item = (
+            &'a ChunkMesh,
+            Option<&'a ChunkCollider>,
+            Option<&'a NeedsCollider>,
+        ),
+    >,
+    center: Vec3,
+    radius: i32,
+) -> BenchColliderReadyStats {
+    let center_chunk = VoxelWorld::world_to_chunk(center.floor().as_ivec3());
+    let radius = radius.max(0);
+    let mut stats = BenchColliderReadyStats::default();
+    for (chunk_mesh, collider, needs_collider) in colliders {
+        let delta = chunk_mesh.chunk_position - center_chunk;
+        if delta.x.abs() > radius || delta.z.abs() > radius {
+            continue;
+        }
+        if collider.is_some() && needs_collider.is_none() {
+            stats.ready_entities += 1;
+        }
+        if needs_collider.is_some() {
+            stats.pending_entities += 1;
+        }
+    }
+    stats
+}
+
+fn gameplay_start_or_checkpoint_position(checkpoint: &BenchCheckpoint) -> Vec3 {
+    checkpoint
+        .gameplay
+        .as_ref()
+        .and_then(|gameplay| gameplay.start_position)
+        .map(vec3)
+        .unwrap_or_else(|| vec3(checkpoint.position))
 }
 
 fn chunks_pending_counts(world: &VoxelWorld, position: Vec3, radius: i32) -> (u32, u32) {
@@ -2823,6 +2910,16 @@ fn record_bench_ready_counts(
         frame,
         "Bench Ready Water Mesh Entities",
         snapshot.signature.water_mesh_entities as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Collider Ready Entities",
+        snapshot.signature.collider_ready_entities as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Collider Pending Entities",
+        snapshot.signature.collider_pending_entities as f64,
     );
     timing.record_count(
         frame,
@@ -3606,6 +3703,147 @@ frame = 1
         .expect("checkpoint should deserialize");
 
         assert!(checkpoint_requires_render_ready(&checkpoint));
+    }
+
+    #[test]
+    fn gameplay_ready_snapshot_waits_for_colliders() {
+        let mut snapshot = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                mesh_entities: 1,
+                collider_pending_entities: 1,
+                ..Default::default()
+            },
+            require_collider_ready: true,
+            ..Default::default()
+        };
+
+        assert!(!snapshot.is_ready_candidate());
+
+        snapshot.signature.collider_pending_entities = 0;
+        snapshot.signature.collider_ready_entities = 1;
+        assert!(snapshot.is_ready_candidate());
+    }
+
+    #[test]
+    fn visual_ready_snapshot_does_not_require_colliders() {
+        let snapshot = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                mesh_entities: 1,
+                collider_pending_entities: 4,
+                ..Default::default()
+            },
+            require_collider_ready: false,
+            ..Default::default()
+        };
+
+        assert!(snapshot.is_ready_candidate());
+    }
+
+    #[test]
+    fn gameplay_ready_snapshot_ignores_global_visual_mesh_work() {
+        let snapshot = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                collider_ready_entities: 4,
+                high_lod_chunks: 128,
+                low_lod_chunks: 32,
+                ..Default::default()
+            },
+            chunks_meshed_this_frame: 4,
+            chunks_skipped_this_frame: 2,
+            require_collider_ready: true,
+        };
+
+        assert!(snapshot.is_ready_candidate());
+    }
+
+    #[test]
+    fn visual_ready_snapshot_waits_for_global_mesh_quiescence() {
+        let snapshot = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                mesh_entities: 1,
+                ..Default::default()
+            },
+            chunks_meshed_this_frame: 1,
+            require_collider_ready: false,
+            ..Default::default()
+        };
+
+        assert!(!snapshot.is_ready_candidate());
+    }
+
+    #[test]
+    fn gameplay_stability_signature_ignores_global_visual_counts() {
+        let snapshot = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                missing_chunks: 0,
+                dirty_chunks: 0,
+                mesh_entities: 12,
+                water_mesh_entities: 4,
+                collider_ready_entities: 7,
+                collider_pending_entities: 0,
+                high_lod_chunks: 80,
+                low_lod_chunks: 20,
+                culled_chunks: 3,
+            },
+            require_collider_ready: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            snapshot.stability_signature(),
+            BenchReadySignature {
+                collider_ready_entities: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn gameplay_stability_signature_treats_ready_count_as_boolean() {
+        let mut first = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                collider_ready_entities: 1,
+                ..Default::default()
+            },
+            require_collider_ready: true,
+            ..Default::default()
+        };
+        let second = BenchReadySnapshot {
+            signature: BenchReadySignature {
+                collider_ready_entities: 400,
+                ..Default::default()
+            },
+            require_collider_ready: true,
+            ..Default::default()
+        };
+
+        assert_eq!(first.stability_signature(), second.stability_signature());
+
+        first.signature.collider_pending_entities = 1;
+        assert_ne!(first.stability_signature(), second.stability_signature());
+    }
+
+    #[test]
+    fn gameplay_start_position_prefers_explicit_gameplay_start() {
+        let checkpoint: BenchCheckpoint = toml::from_str(
+            r#"
+name = "walk"
+position = [10.0, 20.0, 30.0]
+look_at = [0.0, 8.0, 1.0]
+time_of_day = 0.5
+hold_frames = 120
+
+[gameplay]
+start_position = [40.0, 50.0, 60.0]
+movement = [0.0, 1.0]
+"#,
+        )
+        .expect("checkpoint should deserialize");
+
+        assert_eq!(
+            gameplay_start_or_checkpoint_position(&checkpoint),
+            Vec3::new(40.0, 50.0, 60.0)
+        );
     }
 
     #[test]

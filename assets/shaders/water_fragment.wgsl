@@ -125,10 +125,18 @@ fn fragment(
   // This alpha is multiplied by the base material alpha below, so compensate
   // here to keep shallow water visibly tinted across the full surface.
   let base_surface_alpha = max(pbr_input.material.base_color.a, 0.001);
-  let surface_tint_alpha = clamp((configured_surface_alpha * 0.68) / base_surface_alpha, 0.0, 1.0);
+  let surface_tint_alpha = clamp((configured_surface_alpha * 0.84) / base_surface_alpha, 0.0, 1.0);
   let depth_alpha = max(1.0 - beers_law, surface_tint_alpha);
   let depth_color = vec4<f32>(depth_rgb, depth_alpha);
-  water_color = mix(edge_color, depth_color, smoothstep(0.0, edge_scale, depth_diff_view));
+  let edge_enabled = edge_scale >= 0.0;
+  let edge_extent = max(abs(edge_scale), 0.001);
+  let edge_blend = select(1.0, smoothstep(0.0, edge_extent, depth_diff_view), edge_enabled);
+  let edge_factor = 1.0 - edge_blend;
+  let foam_multiplier = vec3<f32>(0.9, 0.96, 1.0);
+  water_color = vec4<f32>(
+    mix(depth_color.rgb, foam_multiplier, edge_factor * 0.18),
+    max(depth_color.a, edge_factor * clamp(edge_color.a, 0.0, 1.0) * 0.28)
+  );
 
 #ifdef USE_NOBLE_FOAM
   let noble_edge_extent = max(abs(edge_scale), 0.001);

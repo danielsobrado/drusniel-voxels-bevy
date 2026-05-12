@@ -49,7 +49,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
-const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE;
+const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -3810,7 +3810,7 @@ mod tests {
     }
 
     #[test]
-    fn water_surface_extends_one_voxel_for_shoreline_fade() {
+    fn water_surface_uses_narrow_overlap_for_shoreline_fade() {
         let mut world = world_with_vertical_chunks();
         let water_pos = IVec3::new(8, WATER_LEVEL - 2, 8);
         world.set_voxel(water_pos, VoxelType::Water);

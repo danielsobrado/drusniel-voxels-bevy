@@ -9,8 +9,8 @@ use crate::voxel::world::WorldBounds;
 
 use super::PhysicsLayer;
 use super::terrain_collider::{
-    TerrainCollisionRegistry, generate_chunk_colliders, handle_chunk_modification,
-    poll_chunk_collider_bakes, record_terrain_collision_diagnostics,
+    TerrainCollisionRegistry, generate_chunk_colliders, poll_chunk_collider_bakes,
+    record_terrain_collision_diagnostics,
 };
 use super::terrain_collision_cache::{TerrainCollisionCache, update_terrain_collision_cache};
 
@@ -43,7 +43,6 @@ impl Plugin for PhysicsPlugin {
         app.add_systems(
             Update,
             (
-                handle_chunk_modification,
                 update_terrain_collision_cache,
                 generate_chunk_colliders,
                 poll_chunk_collider_bakes,
