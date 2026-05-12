@@ -136,7 +136,6 @@ pub struct CollisionBorderHashes {
 #[derive(Resource, Default)]
 pub struct TerrainCollisionCache {
     chunks: HashMap<IVec3, CollisionChunkCache>,
-    last_rebuilt: usize,
 }
 
 impl TerrainCollisionCache {
@@ -241,7 +240,6 @@ pub fn update_terrain_collision_cache(
             cache.insert(chunk_cache);
             rebuilt += 1;
         }
-        cache.last_rebuilt = rebuilt;
         (rebuilt, occupied_core_cells)
     };
 

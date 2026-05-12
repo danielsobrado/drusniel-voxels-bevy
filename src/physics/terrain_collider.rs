@@ -260,6 +260,19 @@ enum TerrainColliderMode {
     Voxels,
 }
 
+#[derive(Resource, Clone, Copy, Debug)]
+pub(super) struct TerrainColliderConfig {
+    mode: TerrainColliderMode,
+}
+
+impl TerrainColliderConfig {
+    pub(super) fn from_env() -> Self {
+        Self {
+            mode: terrain_collider_mode_from_env(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GeneratedColliderKind {
     Heightfield,
@@ -268,7 +281,7 @@ pub enum GeneratedColliderKind {
     Voxels,
 }
 
-fn terrain_collider_mode() -> TerrainColliderMode {
+fn terrain_collider_mode_from_env() -> TerrainColliderMode {
     match std::env::var("VOXEL_TERRAIN_COLLIDER")
         .unwrap_or_else(|_| "auto".to_string())
         .to_ascii_lowercase()
@@ -396,12 +409,13 @@ pub fn generate_chunk_colliders(
     cache: Res<TerrainCollisionCache>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    config: Res<TerrainColliderConfig>,
     camera_query: Query<&Transform, (With<PlayerCamera>, Without<ChunkMesh>)>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>, Without<ChunkMesh>)>,
     spawn_state: Option<Res<PlayerSpawnState>>,
     mut registry: ResMut<TerrainCollisionRegistry>,
 ) {
-    let mode = terrain_collider_mode();
+    let mode = config.mode;
     let startup_collider_catchup = spawn_state.is_some_and(|state| state.initial_spawn_pending);
     let (pending_count, spawned, collider_budget, player_near_pending) = {
         let _timer = area_timer(&mut timing, frame.0, "Collider Build");
@@ -537,7 +551,6 @@ pub fn generate_chunk_colliders(
             };
 
             let baking_revision = registry.mark_baking(chunk_mesh.chunk_position);
-            let mesh = mesh;
             let chunk_mesh = *chunk_mesh;
             let task = AsyncComputeTaskPool::get().spawn(async move {
                 let voxel_collider = build_voxel_terrain_collider_from_coords(cached_voxel_coords);
@@ -900,34 +913,6 @@ mod tests {
             PlayerCollisionReadiness::DegradedUsingCurrentColliderPipeline
         );
     }
-}
-
-/// System to mark colliders for regeneration when chunk meshes change.
-pub fn handle_chunk_modification(
-    mut commands: Commands,
-    modified_chunks: Query<(Entity, &ChunkMesh), (Changed<Mesh3d>, With<ChunkCollider>)>,
-    frame: Res<FrameCount>,
-    mut timing: ResMut<AreaTimingRecorder>,
-    mut registry: ResMut<TerrainCollisionRegistry>,
-) {
-    let marked = {
-        let _timer = area_timer(&mut timing, frame.0, "Collider Update");
-        let mut marked = 0usize;
-        for (entity, chunk_mesh) in modified_chunks.iter() {
-            let revision = registry.mark_mesh_changed(chunk_mesh.chunk_position);
-            commands.entity(entity).try_insert((
-                NeedsCollider,
-                TerrainCollisionChunk {
-                    chunk: chunk_mesh.chunk_position,
-                },
-                TerrainCollisionState::Stale,
-                revision,
-            ));
-            marked += 1;
-        }
-        marked
-    };
-    timing.record_count(frame.0, "Terrain Collision Marked Stale", marked as f64);
 }
 
 pub fn record_terrain_collision_diagnostics(

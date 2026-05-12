@@ -9,8 +9,8 @@ use crate::voxel::world::WorldBounds;
 
 use super::PhysicsLayer;
 use super::terrain_collider::{
-    TerrainCollisionRegistry, generate_chunk_colliders, poll_chunk_collider_bakes,
-    record_terrain_collision_diagnostics,
+    TerrainColliderConfig, TerrainCollisionRegistry, generate_chunk_colliders,
+    poll_chunk_collider_bakes, record_terrain_collision_diagnostics,
 };
 use super::terrain_collision_cache::{TerrainCollisionCache, update_terrain_collision_cache};
 
@@ -38,6 +38,7 @@ impl Plugin for PhysicsPlugin {
         app.init_resource::<AreaTimingRecorder>();
         app.init_resource::<TerrainCollisionCache>();
         app.init_resource::<TerrainCollisionRegistry>();
+        app.insert_resource(TerrainColliderConfig::from_env());
 
         app.add_systems(Startup, spawn_world_floor_collider);
         app.add_systems(
