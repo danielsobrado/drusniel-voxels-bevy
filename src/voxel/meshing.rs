@@ -2293,6 +2293,34 @@ fn sample_lod_density_at_world_pos(world: &VoxelWorld, base_world_pos: IVec3, st
     1.0 - 2.0 * density
 }
 
+fn generate_low_lod_sdf<const N: usize>(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    padded_size: u32,
+    step: i32,
+    linearize: impl Fn([u32; 3]) -> u32,
+) -> [f32; N] {
+    let mut sdf = [1.0f32; N];
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+
+    for z in 0..padded_size {
+        for y in 0..padded_size {
+            for x in 0..padded_size {
+                let idx = linearize([x, y, z]) as usize;
+                let base_world_pos = chunk_origin
+                    + IVec3::new(
+                        (x as i32 - 1) * step,
+                        (y as i32 - 1) * step,
+                        (z as i32 - 1) * step,
+                    );
+                sdf[idx] = sample_lod_density_at_world_pos(world, base_world_pos, step);
+            }
+        }
+    }
+
+    sdf
+}
+
 fn coarse_aligned_lod_sample_base(
     chunk_origin: IVec3,
     px: u32,
@@ -2355,137 +2383,50 @@ fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
 /// Instead of sampling a single voxel per cell, this samples all voxels in the
 /// 2x2x2 region covered by each LOD cell and computes a weighted density.
 /// This creates smoother SDF gradients that reduce stair-stepping on slopes.
-fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; 1000] {
-    // 10^3 = 1000
-    let mut sdf = [1.0f32; LodShape1::USIZE];
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-    let step = LOD1_STEP_SIZE as i32;
-
-    for z in 0..LOD1_PADDED_SIZE {
-        for y in 0..LOD1_PADDED_SIZE {
-            for x in 0..LOD1_PADDED_SIZE {
-                let idx = LodShape1::linearize([x, y, z]) as usize;
-
-                // Base world position for this LOD cell
-                let base_x = chunk_origin.x + (x as i32 - 1) * step;
-                let base_y = chunk_origin.y + (y as i32 - 1) * step;
-                let base_z = chunk_origin.z + (z as i32 - 1) * step;
-
-                // Sample all voxels in the 2x2x2 region and count solids
-                let mut solid_count = 0;
-                let sample_count = step * step * step; // 8 for step=2
-
-                for dz in 0..step {
-                    for dy in 0..step {
-                        for dx in 0..step {
-                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
-                            if sample_voxel_at_world_pos(world, world_pos) {
-                                solid_count += 1;
-                            }
-                        }
-                    }
-                }
-
-                // Convert count to SDF value:
-                // 0 solids = +1.0 (fully air)
-                // 8 solids = -1.0 (fully solid)
-                // 4 solids = 0.0 (surface)
-                // This creates smooth gradients instead of hard -1/+1 edges
-                let density = solid_count as f32 / sample_count as f32;
-                sdf[idx] = 1.0 - 2.0 * density; // Maps 0->1, 0.5->0, 1->-1
-            }
-        }
-    }
-
-    sdf
+fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD1_GRID_VOLUME] {
+    generate_low_lod_sdf::<LOD1_GRID_VOLUME>(
+        chunk,
+        world,
+        LOD1_PADDED_SIZE,
+        LOD1_STEP_SIZE as i32,
+        LodShape1::linearize,
+    )
 }
 
 /// Generate an SDF array at LOD2 (quarter resolution).
 /// Returns a 6x6x6 grid (216 elements).
 /// Vertex positions must be scaled by step_size (4) after mesh generation.
-fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; 216] {
-    // 6^3 = 216
-    let mut sdf = [1.0f32; LodShape2::USIZE];
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-    let step = LOD2_STEP_SIZE as i32;
-
-    for z in 0..LOD2_PADDED_SIZE {
-        for y in 0..LOD2_PADDED_SIZE {
-            for x in 0..LOD2_PADDED_SIZE {
-                let idx = LodShape2::linearize([x, y, z]) as usize;
-
-                // Base world position for this LOD cell
-                let base_x = chunk_origin.x + (x as i32 - 1) * step;
-                let base_y = chunk_origin.y + (y as i32 - 1) * step;
-                let base_z = chunk_origin.z + (z as i32 - 1) * step;
-
-                // Sample all voxels in the 4x4x4 region and count solids
-                let mut solid_count = 0;
-                let sample_count = step * step * step; // 64 for step=4
-
-                for dz in 0..step {
-                    for dy in 0..step {
-                        for dx in 0..step {
-                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
-                            if sample_voxel_at_world_pos(world, world_pos) {
-                                solid_count += 1;
-                            }
-                        }
-                    }
-                }
-
-                // Convert count to SDF value
-                let density = solid_count as f32 / sample_count as f32;
-                sdf[idx] = 1.0 - 2.0 * density;
-            }
-        }
-    }
-
-    sdf
+fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD2_GRID_VOLUME] {
+    generate_low_lod_sdf::<LOD2_GRID_VOLUME>(
+        chunk,
+        world,
+        LOD2_PADDED_SIZE,
+        LOD2_STEP_SIZE as i32,
+        LodShape2::linearize,
+    )
 }
 
 /// Generate an SDF array at LOD3 (eighth resolution).
 /// Returns a 4x4x4 grid (64 elements).
 /// Vertex positions must be scaled by step_size (8) after mesh generation.
-fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; 64] {
-    // 4^3 = 64
-    let mut sdf = [1.0f32; LodShape3::USIZE];
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-    let step = LOD3_STEP_SIZE as i32;
+fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD3_GRID_VOLUME] {
+    generate_low_lod_sdf::<LOD3_GRID_VOLUME>(
+        chunk,
+        world,
+        LOD3_PADDED_SIZE,
+        LOD3_STEP_SIZE as i32,
+        LodShape3::linearize,
+    )
+}
 
-    for z in 0..LOD3_PADDED_SIZE {
-        for y in 0..LOD3_PADDED_SIZE {
-            for x in 0..LOD3_PADDED_SIZE {
-                let idx = LodShape3::linearize([x, y, z]) as usize;
-
-                // Base world position for this LOD cell
-                let base_x = chunk_origin.x + (x as i32 - 1) * step;
-                let base_y = chunk_origin.y + (y as i32 - 1) * step;
-                let base_z = chunk_origin.z + (z as i32 - 1) * step;
-
-                // Sample all voxels in the 8x8x8 region and count solids
-                let mut solid_count = 0;
-                let sample_count = step * step * step; // 512 for step=8
-
-                for dz in 0..step {
-                    for dy in 0..step {
-                        for dx in 0..step {
-                            let world_pos = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
-                            if sample_voxel_at_world_pos(world, world_pos) {
-                                solid_count += 1;
-                            }
-                        }
-                    }
-                }
-
-                // Convert count to SDF value
-                let density = solid_count as f32 / sample_count as f32;
-                sdf[idx] = 1.0 - 2.0 * density;
-            }
-        }
-    }
-
-    sdf
+fn skirt_depth_for_lod(lod: LodLevel) -> f32 {
+    (match lod {
+        LodLevel::Lod0 => 1.5,
+        LodLevel::Lod1 => 3.0,
+        LodLevel::Lod2 => 8.0,
+        LodLevel::Lod3 => 16.0,
+        LodLevel::Culled => 1.5,
+    }) * VOXEL_SIZE
 }
 
 /// Get voxel type at padded coordinates for water SDF generation.
@@ -3001,13 +2942,7 @@ pub fn generate_chunk_mesh_surface_nets(
         );
 
         let mut local_skirt_config = skirt_config.clone();
-        local_skirt_config.depth = match my_lod {
-            LodLevel::Lod0 => 1.5,
-            LodLevel::Lod1 => 3.0,
-            LodLevel::Lod2 => 8.0,  // Increased to better hide LOD seams
-            LodLevel::Lod3 => 16.0, // Doubled for extreme distance chunks
-            _ => 1.5,
-        } * VOXEL_SIZE; // Ensure scaling by voxel size
+        local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
         generate_skirts(
             &mut solid_mesh.positions,
@@ -3185,13 +3120,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         );
 
         let mut local_skirt_config = skirt_config.clone();
-        local_skirt_config.depth = match my_lod {
-            LodLevel::Lod0 => 1.5,
-            LodLevel::Lod1 => 3.0,
-            LodLevel::Lod2 => 8.0,  // Increased to better hide LOD seams
-            LodLevel::Lod3 => 16.0, // Doubled for extreme distance chunks
-            _ => 1.5,
-        } * VOXEL_SIZE; // Ensure scaling by voxel size
+        local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
         generate_skirts(
             &mut solid_mesh.positions,
@@ -3370,13 +3299,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         );
 
         let mut local_skirt_config = skirt_config.clone();
-        local_skirt_config.depth = match my_lod {
-            LodLevel::Lod0 => 1.5,
-            LodLevel::Lod1 => 3.0,
-            LodLevel::Lod2 => 8.0,  // Increased to better hide LOD seams
-            LodLevel::Lod3 => 16.0, // Doubled for extreme distance chunks
-            _ => 1.5,
-        } * VOXEL_SIZE; // Ensure scaling by voxel size
+        local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
         generate_skirts(
             &mut solid_mesh.positions,
@@ -3555,13 +3478,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         );
 
         let mut local_skirt_config = skirt_config.clone();
-        local_skirt_config.depth = match my_lod {
-            LodLevel::Lod0 => 1.5,
-            LodLevel::Lod1 => 3.0,
-            LodLevel::Lod2 => 8.0,  // Increased to better hide LOD seams
-            LodLevel::Lod3 => 16.0, // Doubled for extreme distance chunks
-            _ => 1.5,
-        } * VOXEL_SIZE; // Ensure scaling by voxel size
+        local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
         generate_skirts(
             &mut solid_mesh.positions,

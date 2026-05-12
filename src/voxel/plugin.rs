@@ -150,6 +150,21 @@ impl Default for LodSettings {
     }
 }
 
+impl LodSettings {
+    fn minimum_valid_cull_distance(high_detail_distance: f32) -> f32 {
+        high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0 + 1.0
+    }
+
+    fn has_valid_distance_bands(&self) -> bool {
+        self.cull_distance > self.high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0
+    }
+
+    pub fn clamp_distance_bands(&mut self) {
+        let min_cull_distance = Self::minimum_valid_cull_distance(self.high_detail_distance);
+        self.cull_distance = self.cull_distance.max(min_cull_distance);
+    }
+}
+
 /// Runtime chunk statistics for debug overlay and performance monitoring.
 ///
 /// This resource tracks chunk counts by uniformity type, mesh entities,
@@ -3301,6 +3316,7 @@ fn adjust_lod_for_integrated_gpu(
     if capabilities.integrated_gpu {
         lod_settings.high_detail_distance = INTEGRATED_GPU_HIGH_DETAIL_DISTANCE;
         lod_settings.cull_distance = INTEGRATED_GPU_CULL_DISTANCE;
+        lod_settings.clamp_distance_bands();
         lod_settings.low_detail_mode = MeshMode::Blocky;
         // Keep mesh_settings.mode as SurfaceNets for nearby chunks (V0.3 triplanar PBR look)
         // Only distant LOD chunks use Blocky mode for performance
@@ -3323,6 +3339,14 @@ fn calculate_target_lod_with_hysteresis(
     current_lod: LodLevel,
     settings: &LodSettings,
 ) -> LodLevel {
+    debug_assert!(
+        settings.has_valid_distance_bands(),
+        "LOD settings require cull_distance ({}) > high_detail_distance ({}) + 4 * TERRAIN_LOD_HYSTERESIS ({})",
+        settings.cull_distance,
+        settings.high_detail_distance,
+        TERRAIN_LOD_HYSTERESIS
+    );
+
     // Distance thresholds for LOD transitions
     // Lod0: 0 to high_detail_distance
     // Lod1: high_detail_distance to lod1_distance (midpoint to cull)
@@ -3699,6 +3723,36 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_lod_distances_keep_required_hysteresis_bands() {
+        assert!(LodSettings::default().has_valid_distance_bands());
+
+        let integrated_gpu_settings = LodSettings {
+            high_detail_distance: INTEGRATED_GPU_HIGH_DETAIL_DISTANCE,
+            cull_distance: INTEGRATED_GPU_CULL_DISTANCE,
+            low_detail_mode: MeshMode::Blocky,
+        };
+        assert!(integrated_gpu_settings.has_valid_distance_bands());
+    }
+
+    #[test]
+    fn lod_distance_clamp_preserves_four_hysteresis_bands() {
+        let mut settings = LodSettings {
+            high_detail_distance: 120.0,
+            cull_distance: 120.0 + TERRAIN_LOD_HYSTERESIS * 4.0,
+            low_detail_mode: MeshMode::SurfaceNets,
+        };
+
+        assert!(!settings.has_valid_distance_bands());
+
+        settings.clamp_distance_bands();
+
+        assert!(settings.has_valid_distance_bands());
+        assert!(
+            settings.cull_distance > settings.high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0
+        );
+    }
 
     #[test]
     fn water_material_visibility_restores_renderable_body_modes() {

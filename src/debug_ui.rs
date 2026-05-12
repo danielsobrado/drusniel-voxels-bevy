@@ -114,6 +114,7 @@ fn debug_settings_ui(
             ui.add(
                 egui::Slider::new(&mut lod_settings.cull_distance, 64.0..=1024.0).text("Cull Dist"),
             );
+            lod_settings.clamp_distance_bands();
 
             ui.separator();
             ui.heading("Terrain Style");
