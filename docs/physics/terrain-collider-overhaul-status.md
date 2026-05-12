@@ -44,9 +44,10 @@ Important behavior:
 - `NeedsCollider` marks chunks that need collider generation.
 - `TerrainColliderBakeTask` carries the async bake.
 - `ChunkCollider` marks the active terrain collider.
-- Baked colliders are inserted with a per-frame swap budget.
+- Collider bake dispatch and completed-collider swaps both use pressure-sensitive per-frame budgets.
 - Old colliders are not removed during the bake window.
 - Bake completion validates the terrain collision revision before publishing.
+- Async bake payloads carry only collider-relevant mesh data where possible, not the full render `Mesh`.
 
 Key file:
 
@@ -77,6 +78,22 @@ Key files:
 
 - `src/physics/plugin.rs`
 - `src/physics/terrain_collider.rs`
+
+### Collider Dispatch Performance Updates
+
+Several low-risk performance cleanups were applied after the stale-bake fix:
+
+- The removed `Changed<Mesh3d> + With<ChunkCollider>` watcher was deleted from the codebase, not just left unregistered.
+- `VOXEL_TERRAIN_COLLIDER` is read once when the physics plugin starts and stored as `TerrainColliderConfig`.
+- Collider bake dispatch skips sorting pending chunks when the current frame budget can process all pending work.
+- Collider swaps now use the same pressure-sensitive budget as bake dispatch:
+  - startup catch-up: `MAX_STARTUP_COLLIDERS_PER_FRAME`
+  - player-near catch-up: `MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME`
+  - normal churn: `MAX_COLLIDERS_PER_FRAME`
+- The default mesh bake path extracts positions and triangle indices into a compact `TerrainColliderMeshData` payload before spawning the async task. This avoids cloning normals, UVs, materials, and other render-only mesh attributes into the bake task.
+- Heightfield fallback still works from position-only data when triangle indices are unavailable.
+
+These changes preserve the core correctness invariant: a completed bake still publishes only when the entity's current mesh asset id and terrain collision source revision match the bake task.
 
 ### Gameplay Bench Readiness Gate
 
@@ -133,8 +150,37 @@ Important terrain collider components:
 | `TerrainCollisionRevision` | Revision component for source/baked/collider revision diagnostics. |
 | `TerrainCollisionRegistry` | Resource that tracks per-chunk collision state and revision metadata. |
 | `TerrainCollisionCache` | Resource holding conservative occupancy/source-query data. |
+| `TerrainColliderConfig` | Startup-loaded collider mode configuration derived from `VOXEL_TERRAIN_COLLIDER`. |
 
 The important distinction is that `NeedsCollider` is the authoritative ECS marker for collider work. The removed `Changed<Mesh3d> + With<ChunkCollider>` watcher is no longer part of the runtime invalidation path because it caused false stale marking.
+
+### Collider Accuracy Notes
+
+The default `auto` mode prefers a triangle mesh collider built from the terrain mesh positions and indices with `TrimeshFlags::FIX_INTERNAL_EDGES`.
+
+Accuracy properties:
+
+- Trimesh collision matches the mesh asset baked for the chunk. If rendering uses an LOD or simplified mesh for that entity, collision follows that mesh representation, not the raw voxel source.
+- The stale-bake guard prevents a collider built for an older mesh asset or source revision from replacing a newer collider.
+- During a rebuild, a chunk may be stale but still physically covered because the old `ChunkCollider` remains live until the replacement bake is validated.
+- The collision cache is conservative for source queries: missing chunks and below-floor samples are treated as solid for collision support, while above-world samples are air.
+- Heightfield mode is intentionally rough. It uses a fixed 9x9 max-height projection, so it cannot represent caves, overhangs, vertical walls, or concave voxel structures accurately.
+- Empty or invalid bake payloads currently produce `Failed`. This is operationally safe, but future diagnostics may benefit from distinguishing "no geometry needed" from "collider build failed".
+
+### Performance Hotspots And Status
+
+Performance claims should be validated with the collider walk bench before being treated as wins. The current state of the known hotspots is:
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Full render `Mesh` clone during bake dispatch | Improved | The dispatch path now extracts collider-relevant positions and indices before spawning the async bake, avoiding render-only attributes. |
+| Fixed swap budget of 4 | Improved | Swap budget now follows startup/player-near/normal pressure, matching bake dispatch. |
+| Unconditional pending sort in `generate_chunk_colliders` | Improved | Sort is skipped when `pending_count <= collider_budget`. |
+| Collision cache scans/sorts all chunk mesh entities | Still open | `update_terrain_collision_cache` still builds a candidate list and sorts by player distance every frame. A dirty set or priority queue would reduce steady-state work. |
+| `filled_core_coords` per-cell checks | Still open | Only relevant for `VOXEL_TERRAIN_COLLIDER=voxels`; default trimesh mode does not use this path. |
+| Diagnostics full scan | Still open | `record_terrain_collision_diagnostics` still observes all chunk mesh entities and recomputes counts each frame. |
+
+Do not interpret the estimated allocation and branch-count reductions as measured performance results. Use the timing rows and counters in `summary.json` for before/after claims.
 
 ### Current System Order
 
@@ -223,8 +269,6 @@ fn generate_chunk_colliders(world) {
         .without(TerrainColliderBakeTask)
         .with(Mesh3d, Transform, ChunkMesh);
 
-    pending.sort_by(distance_to(priority_pos));
-
     budget = if initial_spawn_pending {
         MAX_STARTUP_COLLIDERS_PER_FRAME
     } else if any_pending_near_player(pending) {
@@ -232,6 +276,10 @@ fn generate_chunk_colliders(world) {
     } else {
         MAX_COLLIDERS_PER_FRAME
     };
+
+    if pending.len() > budget {
+        pending.sort_by(distance_to(priority_pos));
+    }
 
     for chunk_entity in pending.take(budget) {
         queued_revision = registry.mark_queued(chunk_pos, Initial);
@@ -251,7 +299,7 @@ fn generate_chunk_colliders(world) {
                 continue;
             }
 
-            payload = mesh.clone();
+            payload = extract positions and triangle indices from mesh;
         }
 
         baking_revision = registry.mark_baking(chunk_pos);
@@ -280,6 +328,8 @@ Important implementation details:
 - The collider is not inserted immediately after task spawn.
 - `NeedsCollider` remains on the entity until a bake succeeds or fails.
 - A chunk may still have an old `ChunkCollider` while `NeedsCollider` and `TerrainColliderBakeTask` are present.
+- The default mesh payload excludes normals, UVs, materials, and other render-only attributes.
+- A position-only mesh can still produce a heightfield fallback, but trimesh and voxelized-trimesh require triangle indices.
 
 ### Collider Bake Completion And Swap
 
@@ -288,9 +338,16 @@ Important implementation details:
 ```text
 fn poll_chunk_collider_bakes(world) {
     applied = 0;
+    budget = if initial_spawn_pending {
+        MAX_STARTUP_COLLIDERS_PER_FRAME
+    } else if any_active_bake_near_player {
+        MAX_PLAYER_NEAR_COLLIDERS_PER_FRAME
+    } else {
+        MAX_COLLIDERS_PER_FRAME
+    };
 
     for (entity, bake_task, current_mesh_handle) in active_bake_tasks {
-        if applied >= MAX_COLLIDER_SWAPS_PER_FRAME {
+        if applied >= budget {
             continue;
         }
 
@@ -830,6 +887,13 @@ Latest measured run:
 bench-runs/2026-05-12T02-55-57Z/summary.json
 ```
 
+This run predates the later collider dispatch cleanups listed above. Re-run the collider walk bench before claiming measured gains from:
+
+- compact `TerrainColliderMeshData` bake payloads,
+- dynamic collider swap budgets,
+- sort skipping when pending work fits within the current frame budget,
+- startup collider mode caching.
+
 Bench guard:
 
 ```powershell
@@ -959,3 +1023,6 @@ The following criteria are currently met by the latest bench run:
 3. Investigate the `old-hole-route` stall separately as a player controller or route steering issue.
 4. Benchmark `VOXEL_TERRAIN_COLLIDER=voxels` against the same collider walk scene before choosing it as the default.
 5. Consider reducing the gameplay readiness radius to the player support prism plus movement lookahead once that query is available.
+6. Consider a dirty-chunk set for `TerrainCollisionCache` so steady-state cache updates do not allocate and sort all chunk mesh positions.
+7. Optimize `filled_core_coords` only if the voxel collider mode becomes a validated target; it is not on the default trimesh path.
+8. Consider an explicit `Empty` or `NoGeometry` state if failed-bake counters include valid air-only chunks.

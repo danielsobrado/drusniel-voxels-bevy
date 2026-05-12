@@ -11,7 +11,7 @@ use crate::physics::terrain_collision_cache::TerrainCollisionCache;
 use crate::player::{Player, PlayerSpawnState};
 use crate::voxel::meshing::ChunkMesh;
 use crate::voxel::world::VoxelWorld;
-use bevy_mesh::VertexAttributeValues;
+use bevy_mesh::{Indices, VertexAttributeValues};
 use std::collections::HashMap;
 
 const TERRAIN_COLLIDER_VOXEL_SIZE: f32 = 1.0;
@@ -279,6 +279,12 @@ pub enum GeneratedColliderKind {
     Voxels,
 }
 
+#[derive(Clone, Debug)]
+struct TerrainColliderMeshData {
+    positions: Vec<Vec3>,
+    indices: Option<Vec<[u32; 3]>>,
+}
+
 fn terrain_collider_mode_from_env() -> TerrainColliderMode {
     match std::env::var("VOXEL_TERRAIN_COLLIDER")
         .unwrap_or_else(|_| "auto".to_string())
@@ -316,25 +322,37 @@ fn build_voxel_terrain_collider_from_coords(
 }
 
 fn build_terrain_collider(
-    mesh: &Mesh,
+    mesh: &TerrainColliderMeshData,
     _chunk_mesh: &ChunkMesh,
     mode: TerrainColliderMode,
 ) -> Option<(Collider, GeneratedColliderKind)> {
     let heightfield = || {
-        coarse_heightfield_from_mesh(mesh)
+        coarse_heightfield_from_mesh_data(mesh)
             .map(|collider| (collider, GeneratedColliderKind::Heightfield))
     };
     let trimesh = || {
-        Collider::trimesh_from_mesh_with_config(mesh, TrimeshFlags::FIX_INTERNAL_EDGES)
+        mesh.indices.as_ref().and_then(|indices| {
+            Collider::try_trimesh_with_config(
+                mesh.positions.clone(),
+                indices.clone(),
+                TrimeshFlags::FIX_INTERNAL_EDGES,
+            )
+            .ok()
             .map(|collider| (collider, GeneratedColliderKind::Trimesh))
+        })
     };
     let voxelized = || {
-        Collider::voxelized_trimesh_from_mesh(
-            mesh,
-            TERRAIN_COLLIDER_VOXEL_SIZE,
-            FillMode::SurfaceOnly,
-        )
-        .map(|collider| (collider, GeneratedColliderKind::Voxelized))
+        mesh.indices.as_ref().map(|indices| {
+            (
+                Collider::voxelized_trimesh(
+                    &mesh.positions,
+                    indices,
+                    TERRAIN_COLLIDER_VOXEL_SIZE,
+                    FillMode::SurfaceOnly,
+                ),
+                GeneratedColliderKind::Voxelized,
+            )
+        })
     };
 
     match mode {
@@ -346,12 +364,40 @@ fn build_terrain_collider(
     }
 }
 
-fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
-    let Some(VertexAttributeValues::Float32x3(positions)) =
-        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-    else {
-        return None;
+fn extract_terrain_collider_mesh_data(mesh: &Mesh) -> Option<TerrainColliderMeshData> {
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION)? {
+        VertexAttributeValues::Float32(values) => {
+            if values.len() % 3 != 0 {
+                return None;
+            }
+            values
+                .chunks_exact(3)
+                .map(|position| Vec3::new(position[0], position[1], position[2]))
+                .collect()
+        }
+        VertexAttributeValues::Float32x3(values) => values
+            .iter()
+            .map(|position| Vec3::from_array(*position))
+            .collect(),
+        _ => return None,
     };
+
+    let indices = mesh.indices().map(|indices| match indices {
+        Indices::U16(indices) => indices
+            .chunks_exact(3)
+            .map(|index| [index[0] as u32, index[1] as u32, index[2] as u32])
+            .collect(),
+        Indices::U32(indices) => indices
+            .chunks_exact(3)
+            .map(|index| [index[0], index[1], index[2]])
+            .collect(),
+    });
+
+    Some(TerrainColliderMeshData { positions, indices })
+}
+
+fn coarse_heightfield_from_mesh_data(mesh: &TerrainColliderMeshData) -> Option<Collider> {
+    let positions = &mesh.positions;
     if positions.len() < 3 {
         return None;
     }
@@ -359,9 +405,8 @@ fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     for position in positions {
-        let p = Vec3::from_array(*position);
-        min = min.min(p);
-        max = max.max(p);
+        min = min.min(*position);
+        max = max.max(*position);
     }
 
     let width = (max.x - min.x).max(0.0);
@@ -377,7 +422,7 @@ fn coarse_heightfield_from_mesh(mesh: &Mesh) -> Option<Collider> {
     let max_index = (TERRAIN_HEIGHTFIELD_GRID - 1) as f32;
 
     for position in positions {
-        let p = Vec3::from_array(*position);
+        let p = *position;
         let x = (((p.x - min.x) / width) * max_index).round() as usize;
         let z = (((p.z - min.z) / depth) * max_index).round() as usize;
         let height = p.y - center.y + TERRAIN_HEIGHTFIELD_PADDING;
@@ -502,7 +547,7 @@ pub fn generate_chunk_colliders(
                     trace!("Collider gen deferred for {:?} - mesh not ready", entity);
                     continue;
                 };
-                Some(mesh.clone())
+                Some(extract_terrain_collider_mesh_data(mesh))
             };
 
             let Some(cached_voxel_coords) = cached_voxel_coords else {
@@ -520,21 +565,12 @@ pub fn generate_chunk_colliders(
                     );
                     continue;
                 }
-                let Some(mesh) = mesh else {
-                    commands.entity(entity).try_insert((
-                        TerrainCollisionChunk {
-                            chunk: chunk_mesh.chunk_position,
-                        },
-                        TerrainCollisionState::Queued,
-                        queued_revision,
-                    ));
-                    trace!("Collider gen deferred for {:?} - mesh not ready", entity);
-                    continue;
-                };
+                let mesh = mesh.flatten();
                 let baking_revision = registry.mark_baking(chunk_mesh.chunk_position);
                 let chunk_mesh = *chunk_mesh;
-                let task = AsyncComputeTaskPool::get()
-                    .spawn(async move { build_terrain_collider(&mesh, &chunk_mesh, mode) });
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    mesh.and_then(|mesh| build_terrain_collider(&mesh, &chunk_mesh, mode))
+                });
 
                 commands.entity(entity).try_insert((
                     TerrainColliderBakeTask {
@@ -561,7 +597,8 @@ pub fn generate_chunk_colliders(
                 if mode == TerrainColliderMode::Voxels || voxel_collider.is_some() {
                     return voxel_collider;
                 }
-                mesh.and_then(|mesh| build_terrain_collider(&mesh, &chunk_mesh, mode))
+                mesh.flatten()
+                    .and_then(|mesh| build_terrain_collider(&mesh, &chunk_mesh, mode))
             });
 
             commands.entity(entity).try_insert((
@@ -823,6 +860,18 @@ mod tests {
         mesh
     }
 
+    fn simple_heightfield_mesh() -> Mesh {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [1.0, 0.25, 0.0], [0.0, 0.5, 1.0]],
+        );
+        mesh
+    }
+
     fn simple_chunk_mesh() -> ChunkMesh {
         ChunkMesh {
             chunk_position: IVec3::ZERO,
@@ -836,15 +885,43 @@ mod tests {
     #[test]
     fn terrain_collider_auto_prefers_trimesh() {
         let mesh = simple_terrain_mesh();
+        let mesh_data = extract_terrain_collider_mesh_data(&mesh)
+            .expect("expected simple terrain mesh data to extract");
         let chunk_mesh = simple_chunk_mesh();
 
         let Some((_collider, kind)) =
-            build_terrain_collider(&mesh, &chunk_mesh, TerrainColliderMode::Auto)
+            build_terrain_collider(&mesh_data, &chunk_mesh, TerrainColliderMode::Auto)
         else {
             panic!("expected simple terrain mesh to produce a collider");
         };
 
         assert_eq!(kind, GeneratedColliderKind::Trimesh);
+    }
+
+    #[test]
+    fn terrain_collider_auto_falls_back_to_heightfield_without_indices() {
+        let mesh = simple_heightfield_mesh();
+        let mesh_data = extract_terrain_collider_mesh_data(&mesh)
+            .expect("expected position-only mesh data to extract");
+        let chunk_mesh = simple_chunk_mesh();
+
+        let Some((_collider, kind)) =
+            build_terrain_collider(&mesh_data, &chunk_mesh, TerrainColliderMode::Auto)
+        else {
+            panic!("expected position-only terrain mesh to produce a heightfield collider");
+        };
+
+        assert_eq!(kind, GeneratedColliderKind::Heightfield);
+    }
+
+    #[test]
+    fn terrain_collider_mesh_data_ignores_non_collision_attributes() {
+        let mesh = simple_terrain_mesh();
+        let mesh_data = extract_terrain_collider_mesh_data(&mesh)
+            .expect("expected simple terrain mesh data to extract");
+
+        assert_eq!(mesh_data.positions.len(), 3);
+        assert_eq!(mesh_data.indices.as_ref().map(Vec::len), Some(1));
     }
 
     #[test]
