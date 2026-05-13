@@ -408,17 +408,217 @@ After Issue 1 is implemented:
 
 ---
 
+## Diagnostic Tooling — Barycentric Debug Wireframe Overlay
+
+**Priority: Do this FIRST, before any geometry fixes.**
+
+### Rationale
+
+The artifacts could be LOD Surface Nets slabs, skirt geometry, or a combination.
+A barycentric wireframe overlay renders triangle edges in-shader, letting us
+immediately classify each visible artifact without guesswork. This avoids
+spending effort on the wrong fix.
+
+### What it shows
+
+| Visualization | What it tells you |
+|---|---|
+| Triangle edge wireframe | One big quad = coarse LOD slab. Many small tris = normal mesh. |
+| Skirt vs main mesh coloring | Confirms whether dark walls come from `generate_skirts` |
+| Edge distance fade | `min(bary.x, bary.y, bary.z)` gives distance-to-edge for cosmetic seam fading |
+
+### Integration Points
+
+#### Rust side — `MeshData` (meshing.rs:191–237)
+
+UV0 is already used for AO (`in.uv.x` → `vertex_ao` in shader, line 359).
+Vertex colors are material weights. Neither can be reused. Add barycentrics as a
+new attribute:
+
+```rust
+pub struct MeshData {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub colors: Vec<[f32; 4]>,
++   pub barycentrics: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+}
+```
+
+Surface Nets already uses per-triangle fresh vertices (each triangle pushes three
+new positions and indices `base_idx, base_idx+1, base_idx+2`), so barycentric
+assignment is trivial:
+
+```rust
+// After each Surface Nets triangle:
+solid_mesh.barycentrics.push([1.0, 0.0, 0.0]);
+solid_mesh.barycentrics.push([0.0, 1.0, 0.0]);
+solid_mesh.barycentrics.push([0.0, 0.0, 1.0]);
+```
+
+**Skirt vertices must also get barycentrics** — `generate_skirts`
+(`skirt.rs:315–449`) appends 4 vertices per skirt quad (two triangles). Each quad
+needs 4 barycentrics:
+
+```rust
+// Skirt quad (two triangles sharing the 4 vertices):
+barycentrics.push([1.0, 0.0, 0.0]); // v0
+barycentrics.push([0.0, 1.0, 0.0]); // v1
+barycentrics.push([0.0, 0.0, 1.0]); // v2 (bot0)
+barycentrics.push([0.0, 1.0, 0.0]); // v3 (bot1) — shared
+```
+
+#### Mesh attribute registration — `into_mesh` (meshing.rs:225–236)
+
+```rust
+pub fn into_mesh(self) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
++   if !self.barycentrics.is_empty() {
++       mesh.insert_attribute(
++           MeshVertexAttribute::new("Barycentric", 10, VertexFormat::Float32x3),
++           self.barycentrics,
++       );
++   }
+    mesh.insert_indices(Indices::U32(self.indices));
+    mesh
+}
+```
+
+#### Shader side — `triplanar_terrain.wgsl` (454 lines)
+
+The current `TriplanarMaterial` uses Bevy's default vertex shader via
+`forward_io::VertexOutput`. Barycentrics need to flow from vertex → fragment.
+Two options:
+
+**Option A — Custom vertex shader (cleanest)**
+
+Add a custom vertex shader that passes through all standard Bevy attributes plus
+the barycentric:
+
+```wgsl
+struct TerrainVertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(5) color: vec4<f32>,
+    @location(10) barycentric: vec3<f32>,
+};
+
+struct TerrainVertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec4<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(5) color: vec4<f32>,
+    @location(6) barycentric: vec3<f32>,
+};
+```
+
+Requires updating `TriplanarMaterial::specialize` to set the vertex shader and
+vertex buffer layout via `MeshVertexBufferLayoutRef`.
+
+**Option B — Pack into UV1 (simpler, limited)**
+
+Use `Mesh::ATTRIBUTE_UV_1` instead of a custom attribute. The vertex layout
+already supports it in Bevy's default pipeline. However, UV1 is `vec2<f32>`, so
+only two of three barycentric coords fit — the third is derived as
+`1.0 - uv1.x - uv1.y`. This avoids any vertex shader changes.
+
+```rust
+// Rust side:
+mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, bary_uv1); // Vec<[f32; 2]>
+```
+
+```wgsl
+// WGSL side:
+let bary = vec3<f32>(in.uv_b.x, in.uv_b.y, 1.0 - in.uv_b.x - in.uv_b.y);
+```
+
+**Recommendation: Use Option B for quick debugging, switch to Option A if the
+precision loss matters.**
+
+#### Fragment shader debug block — `triplanar_terrain.wgsl`
+
+Gate behind `TERRAIN_DEBUG_WIREFRAME` define (controlled via `specialize`):
+
+```wgsl
+#ifdef TERRAIN_DEBUG_WIREFRAME
+    let bary = vec3<f32>(in.uv_b.x, in.uv_b.y, 1.0 - in.uv_b.x - in.uv_b.y);
+    let edge = min(bary.x, min(bary.y, bary.z));
+    let line = 1.0 - smoothstep(0.01, 0.03, edge);
+    // Mix wireframe overlay: white lines over the normal lit terrain
+    color = vec4<f32>(mix(color.rgb, vec3<f32>(1.0), line * 0.8), color.a);
+#endif
+```
+
+#### Material quality variant — `triplanar_material.rs`
+
+Add a `WireframeDebug` quality variant to `TerrainMaterialQuality`:
+
+```rust
+pub enum TerrainMaterialQuality {
+    FullTriplanar,
+    CheapTriplanar,
+    SingleProjectionFar,
+    AtlasOnlyDebug,
++   WireframeDebug,
+}
+```
+
+In `specialize`:
+
+```rust
+TerrainMaterialQuality::WireframeDebug => {
+    fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
+}
+```
+
+#### Runtime toggle
+
+Add an `F-key` or console command to swap all terrain chunk materials to the
+`WireframeDebug` handle at runtime, similar to how `AtlasOnlyDebug` is already
+switchable.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/voxel/meshing.rs` | Add `barycentrics` field to `MeshData`, populate in Surface Nets path |
+| `src/voxel/skirt.rs` | Append barycentrics for skirt vertices |
+| `src/rendering/triplanar_material.rs` | Add `WireframeDebug` quality variant |
+| `assets/shaders/triplanar_terrain.wgsl` | Add `#ifdef TERRAIN_DEBUG_WIREFRAME` block |
+
+### Verification
+
+- Toggle wireframe mode and inspect the LOD artifacts visually
+- Confirm whether artifacts are: (a) one big low-LOD Surface Nets slab,
+  (b) skirt triangles, or (c) many tiny triangles from normal mesh
+- Use the classification to decide which of Issues 1–4 to fix first
+- Document findings with screenshots before proceeding to geometry fixes
+
+---
+
 ## Implementation Order
 
 | Priority | Issue | Effort | Expected Impact |
 |---|---|---|---|
+| 0 | Diagnostic — Barycentric wireframe overlay | Small | Classifies artifact source before fixing |
 | 1 | Issue 1 — Vertical NeighborLods + skirts | Medium | Fixes horizontal seam lines at Y chunk boundaries |
 | 2 | Issue 2 — PosY boundary surface check | Small | Fixes coarse slabs under overhangs |
 | 3 | Issue 3 — Low-LOD SDF boundary transition | Medium | Reduces vertex mismatch at LOD-LOD boundaries |
 | 4 | Issue 4 — Y boundary transition step | Small | Improves LOD0 SDF at vertical boundaries |
 
-Issues 1 and 2 should be done first since they target the most visible artifacts
-with the least risk of regression.
+The wireframe diagnostic should be done first to confirm which geometry is
+causing the artifacts, then Issues 1 and 2 should follow as they target the most
+visible artifacts with the least risk of regression.
 
 ---
 
@@ -426,9 +626,11 @@ with the least risk of regression.
 
 | File | Issues |
 |---|---|
-| `src/voxel/skirt.rs` | 1 |
+| `src/voxel/meshing.rs` | Diagnostic, 2, 3, 4 |
+| `src/voxel/skirt.rs` | Diagnostic, 1 |
 | `src/voxel/plugin.rs` | 1 |
-| `src/voxel/meshing.rs` | 2, 3, 4 |
+| `src/rendering/triplanar_material.rs` | Diagnostic |
+| `assets/shaders/triplanar_terrain.wgsl` | Diagnostic |
 | `src/constants.rs` | — (no changes expected) |
 | `src/voxel/chunk.rs` | — (no changes expected) |
 | `src/voxel/world.rs` | — (no changes expected) |
