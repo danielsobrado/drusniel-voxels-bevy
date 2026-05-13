@@ -192,6 +192,7 @@ pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    pub barycentric_uvs: Vec<[f32; 2]>,
     pub colors: Vec<[f32; 4]>, // Vertex colors for AO (blocky) or material weights (surface nets)
     pub indices: Vec<u32>,
 }
@@ -202,6 +203,7 @@ impl MeshData {
             positions: Vec::new(),
             normals: Vec::new(),
             uvs: Vec::new(),
+            barycentric_uvs: Vec::new(),
             colors: Vec::new(),
             indices: Vec::new(),
         }
@@ -213,6 +215,7 @@ impl MeshData {
             positions: Vec::with_capacity(vertex_cap),
             normals: Vec::with_capacity(vertex_cap),
             uvs: Vec::with_capacity(vertex_cap),
+            barycentric_uvs: Vec::with_capacity(vertex_cap),
             colors: Vec::with_capacity(vertex_cap),
             indices: Vec::with_capacity(index_cap),
         }
@@ -223,6 +226,7 @@ impl MeshData {
     }
 
     pub fn into_mesh(self) -> Mesh {
+        let vertex_count = self.positions.len();
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
@@ -230,9 +234,20 @@ impl MeshData {
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        let uv1 = if self.barycentric_uvs.len() == vertex_count {
+            self.barycentric_uvs
+        } else {
+            vec![[0.0, 0.0]; vertex_count]
+        };
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uv1);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
+    }
+
+    fn push_triangle_barycentrics(&mut self) {
+        self.barycentric_uvs
+            .extend_from_slice(&[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]);
     }
 }
 
@@ -2106,11 +2121,23 @@ pub(crate) fn empty_chunk_has_surface_nets_boundary_surface(
 ) -> bool {
     let origin = VoxelWorld::chunk_to_world(chunk_pos);
 
-    let plane_origin = IVec3::new(origin.x, origin.y - 1, origin.z);
+    let below_y = origin.y - 1;
     for x in 0..CHUNK_SIZE_I32 {
         for z in 0..CHUNK_SIZE_I32 {
-            let pos = plane_origin + IVec3::new(x, 0, z);
-            if terrain_meshing_voxel_at(world, pos).is_solid() {
+            if terrain_meshing_voxel_at(world, IVec3::new(origin.x + x, below_y, origin.z + z))
+                .is_solid()
+            {
+                return true;
+            }
+        }
+    }
+
+    let above_y = origin.y + CHUNK_SIZE_I32;
+    for x in 0..CHUNK_SIZE_I32 {
+        for z in 0..CHUNK_SIZE_I32 {
+            if terrain_meshing_voxel_at(world, IVec3::new(origin.x + x, above_y, origin.z + z))
+                .is_solid()
+            {
                 return true;
             }
         }
@@ -2200,25 +2227,30 @@ fn neighbor_lod_for_face(neighbor_lods: &NeighborLods, face: ChunkFace) -> Optio
     match face {
         ChunkFace::NegX => neighbor_lods.neg_x,
         ChunkFace::PosX => neighbor_lods.pos_x,
+        ChunkFace::NegY => neighbor_lods.neg_y,
+        ChunkFace::PosY => neighbor_lods.pos_y,
         ChunkFace::NegZ => neighbor_lods.neg_z,
         ChunkFace::PosZ => neighbor_lods.pos_z,
-        ChunkFace::NegY | ChunkFace::PosY => None,
     }
 }
 
-fn lower_detail_transition_step(
+fn lower_detail_transition_step_for_padded_size(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     px: u32,
+    py: u32,
     pz: u32,
+    padded_size: u32,
 ) -> Option<i32> {
     let mut transition_step = my_lod.step_size();
 
     for (face, on_boundary_sample_row) in [
         (ChunkFace::NegX, px == 1),
-        (ChunkFace::PosX, px == LOD0_PADDED_SIZE - 1),
+        (ChunkFace::PosX, px == padded_size - 1),
+        (ChunkFace::NegY, py == 1),
+        (ChunkFace::PosY, py == padded_size - 1),
         (ChunkFace::NegZ, pz == 1),
-        (ChunkFace::PosZ, pz == LOD0_PADDED_SIZE - 1),
+        (ChunkFace::PosZ, pz == padded_size - 1),
     ] {
         if !on_boundary_sample_row {
             continue;
@@ -2233,6 +2265,23 @@ fn lower_detail_transition_step(
     }
 
     (transition_step > my_lod.step_size()).then_some(transition_step as i32)
+}
+
+fn lower_detail_transition_step(
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    px: u32,
+    py: u32,
+    pz: u32,
+) -> Option<i32> {
+    lower_detail_transition_step_for_padded_size(
+        my_lod,
+        neighbor_lods,
+        px,
+        py,
+        pz,
+        LOD0_PADDED_SIZE,
+    )
 }
 
 fn sample_lod_density_at_world_pos(world: &VoxelWorld, base_world_pos: IVec3, step: i32) -> f32 {
@@ -2260,6 +2309,8 @@ fn generate_low_lod_sdf<const N: usize>(
     padded_size: u32,
     step: i32,
     linearize: impl Fn([u32; 3]) -> u32,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
 ) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
@@ -2268,13 +2319,24 @@ fn generate_low_lod_sdf<const N: usize>(
         for y in 0..padded_size {
             for x in 0..padded_size {
                 let idx = linearize([x, y, z]) as usize;
-                let base_world_pos = chunk_origin
-                    + IVec3::new(
-                        (x as i32 - 1) * step,
-                        (y as i32 - 1) * step,
-                        (z as i32 - 1) * step,
-                    );
-                sdf[idx] = sample_lod_density_at_world_pos(world, base_world_pos, step);
+                let effective_step = lower_detail_transition_step_for_padded_size(
+                    my_lod,
+                    neighbor_lods,
+                    x,
+                    y,
+                    z,
+                    padded_size,
+                )
+                .unwrap_or(step);
+                let base_world_pos = coarse_aligned_lod_sample_base_with_stride(
+                    chunk_origin,
+                    x,
+                    y,
+                    z,
+                    step,
+                    effective_step,
+                );
+                sdf[idx] = sample_lod_density_at_world_pos(world, base_world_pos, effective_step);
             }
         }
     }
@@ -2289,7 +2351,19 @@ fn coarse_aligned_lod_sample_base(
     pz: u32,
     step: i32,
 ) -> IVec3 {
+    coarse_aligned_lod_sample_base_with_stride(chunk_origin, px, py, pz, 1, step)
+}
+
+fn coarse_aligned_lod_sample_base_with_stride(
+    chunk_origin: IVec3,
+    px: u32,
+    py: u32,
+    pz: u32,
+    sample_stride: i32,
+    step: i32,
+) -> IVec3 {
     let local = IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
+    let local = local * sample_stride;
     let aligned = IVec3::new(
         local.x.div_euclid(step) * step,
         local.y.div_euclid(step) * step,
@@ -2315,7 +2389,7 @@ fn generate_sdf(
     // First pass: set binary solid/air values
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        if let Some(step) = lower_detail_transition_step(my_lod, neighbor_lods, px, pz) {
+        if let Some(step) = lower_detail_transition_step(my_lod, neighbor_lods, px, py, pz) {
             let base_world_pos = coarse_aligned_lod_sample_base(chunk_origin, px, py, pz, step);
             sdf[i] = sample_lod_density_at_world_pos(world, base_world_pos, step);
         } else {
@@ -2344,39 +2418,57 @@ fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
 /// Instead of sampling a single voxel per cell, this samples all voxels in the
 /// 2x2x2 region covered by each LOD cell and computes a weighted density.
 /// This creates smoother SDF gradients that reduce stair-stepping on slopes.
-fn generate_sdf_lod1(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD1_GRID_VOLUME] {
+fn generate_sdf_lod1(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    neighbor_lods: &NeighborLods,
+) -> [f32; LOD1_GRID_VOLUME] {
     generate_low_lod_sdf::<LOD1_GRID_VOLUME>(
         chunk,
         world,
         LOD1_PADDED_SIZE,
         LOD1_STEP_SIZE as i32,
         LodShape1::linearize,
+        LodLevel::Lod1,
+        neighbor_lods,
     )
 }
 
 /// Generate an SDF array at LOD2 (quarter resolution).
 /// Returns a 6x6x6 grid (216 elements).
 /// Vertex positions must be scaled by step_size (4) after mesh generation.
-fn generate_sdf_lod2(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD2_GRID_VOLUME] {
+fn generate_sdf_lod2(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    neighbor_lods: &NeighborLods,
+) -> [f32; LOD2_GRID_VOLUME] {
     generate_low_lod_sdf::<LOD2_GRID_VOLUME>(
         chunk,
         world,
         LOD2_PADDED_SIZE,
         LOD2_STEP_SIZE as i32,
         LodShape2::linearize,
+        LodLevel::Lod2,
+        neighbor_lods,
     )
 }
 
 /// Generate an SDF array at LOD3 (eighth resolution).
 /// Returns a 4x4x4 grid (64 elements).
 /// Vertex positions must be scaled by step_size (8) after mesh generation.
-fn generate_sdf_lod3(chunk: &Chunk, world: &VoxelWorld) -> [f32; LOD3_GRID_VOLUME] {
+fn generate_sdf_lod3(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    neighbor_lods: &NeighborLods,
+) -> [f32; LOD3_GRID_VOLUME] {
     generate_low_lod_sdf::<LOD3_GRID_VOLUME>(
         chunk,
         world,
         LOD3_PADDED_SIZE,
         LOD3_STEP_SIZE as i32,
         LodShape3::linearize,
+        LodLevel::Lod3,
+        neighbor_lods,
     )
 }
 
@@ -2889,6 +2981,7 @@ pub fn generate_chunk_mesh_surface_nets(
             solid_mesh.indices.push(base_idx);
             solid_mesh.indices.push(base_idx + 1);
             solid_mesh.indices.push(base_idx + 2);
+            solid_mesh.push_triangle_barycentrics();
         }
     }
 
@@ -2909,6 +3002,7 @@ pub fn generate_chunk_mesh_surface_nets(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
+            &mut solid_mesh.barycentric_uvs,
             &mut solid_mesh.colors,
             &mut solid_mesh.indices,
             &boundary_edges,
@@ -2957,7 +3051,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (10x10x10 grid)
-    let sdf = generate_sdf_lod1(chunk, world);
+    let sdf = generate_sdf_lod1(chunk, world, &neighbor_lods);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
@@ -3066,6 +3160,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             solid_mesh.indices.push(base_idx);
             solid_mesh.indices.push(base_idx + 1);
             solid_mesh.indices.push(base_idx + 2);
+            solid_mesh.push_triangle_barycentrics();
         }
     }
 
@@ -3087,6 +3182,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
+            &mut solid_mesh.barycentric_uvs,
             &mut solid_mesh.colors,
             &mut solid_mesh.indices,
             &boundary_edges,
@@ -3136,7 +3232,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (6x6x6 grid)
-    let sdf = generate_sdf_lod2(chunk, world);
+    let sdf = generate_sdf_lod2(chunk, world, &neighbor_lods);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
@@ -3245,6 +3341,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             solid_mesh.indices.push(base_idx);
             solid_mesh.indices.push(base_idx + 1);
             solid_mesh.indices.push(base_idx + 2);
+            solid_mesh.push_triangle_barycentrics();
         }
     }
 
@@ -3266,6 +3363,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
+            &mut solid_mesh.barycentric_uvs,
             &mut solid_mesh.colors,
             &mut solid_mesh.indices,
             &boundary_edges,
@@ -3315,7 +3413,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (4x4x4 grid)
-    let sdf = generate_sdf_lod3(chunk, world);
+    let sdf = generate_sdf_lod3(chunk, world, &neighbor_lods);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
@@ -3424,6 +3522,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             solid_mesh.indices.push(base_idx);
             solid_mesh.indices.push(base_idx + 1);
             solid_mesh.indices.push(base_idx + 2);
+            solid_mesh.push_triangle_barycentrics();
         }
     }
 
@@ -3445,6 +3544,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
+            &mut solid_mesh.barycentric_uvs,
             &mut solid_mesh.colors,
             &mut solid_mesh.indices,
             &boundary_edges,
@@ -3537,6 +3637,8 @@ mod tests {
             NeighborLods {
                 neg_x: None,
                 pos_x: None,
+                neg_y: None,
+                pos_y: None,
                 neg_z: None,
                 pos_z: None,
             },
@@ -3558,12 +3660,16 @@ mod tests {
         let no_transition_lods = NeighborLods {
             neg_x: None,
             pos_x: None,
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
         let transition_lods = NeighborLods {
             neg_x: None,
             pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
@@ -3573,7 +3679,7 @@ mod tests {
 
         let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods);
         let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
-        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world);
+        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
 
         assert_eq!(raw_sdf[boundary_idx], 1.0);
         assert_eq!(
@@ -3581,6 +3687,73 @@ mod tests {
             neighbor_lod1_sdf[neighbor_boundary_idx]
         );
         assert_eq!(transition_sdf[boundary_idx], 0.75);
+    }
+
+    #[test]
+    fn lod0_vertical_transition_boundary_sdf_matches_lower_lod_neighbor_sample() {
+        let chunk_pos = IVec3::new(0, 1, 0);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(1, 3, 1));
+        world.set_voxel(chunk_origin + IVec3::new(5, 0, 4), VoxelType::Rock);
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let neighbor = world.get_chunk(chunk_pos - IVec3::Y).unwrap();
+        let no_transition_lods = NeighborLods::default();
+        let transition_lods = NeighborLods {
+            neg_y: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let boundary_idx = PaddedChunkShape::linearize([5, 1, 5]) as usize;
+        let neighbor_boundary_idx = LodShape1::linearize([3, LOD1_PADDED_SIZE - 1, 3]) as usize;
+
+        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods);
+        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
+        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
+
+        assert_eq!(raw_sdf[boundary_idx], 1.0);
+        assert_eq!(
+            transition_sdf[boundary_idx],
+            neighbor_lod1_sdf[neighbor_boundary_idx]
+        );
+        assert_eq!(transition_sdf[boundary_idx], 0.75);
+    }
+
+    #[test]
+    fn low_lod_transition_boundary_sdf_matches_coarser_neighbor_sample() {
+        let chunk_pos = IVec3::new(1, 0, 0);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 1));
+        for x in 32..40 {
+            for y in 8..16 {
+                for z in 0..8 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Air);
+                }
+            }
+        }
+        world.set_voxel(chunk_origin + IVec3::new(23, 8, 0), VoxelType::Rock);
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
+        let no_transition_lods = NeighborLods::default();
+        let transition_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod3),
+            ..Default::default()
+        };
+
+        let boundary_idx = LodShape1::linearize([LOD1_PADDED_SIZE - 1, 5, 3]) as usize;
+        let neighbor_boundary_idx = LodShape3::linearize([1, 2, 1]) as usize;
+
+        let raw_sdf = generate_sdf_lod1(chunk, &world, &no_transition_lods);
+        let transition_sdf = generate_sdf_lod1(chunk, &world, &transition_lods);
+        let neighbor_lod3_sdf = generate_sdf_lod3(neighbor, &world, &NeighborLods::default());
+
+        assert_eq!(raw_sdf[boundary_idx], 1.0);
+        assert_eq!(
+            transition_sdf[boundary_idx],
+            neighbor_lod3_sdf[neighbor_boundary_idx]
+        );
+        assert_eq!(transition_sdf[boundary_idx], 1.0 - 2.0 / 512.0);
     }
 
     fn set_column(
@@ -3911,6 +4084,17 @@ mod tests {
         assert!(
             !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 1, 1)),
             "all-air side neighbors should not spawn standalone terrain slabs"
+        );
+    }
+
+    #[test]
+    fn surface_nets_empty_chunk_below_overhang_needs_terrain_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 2, 1));
+        world.set_voxel(IVec3::new(8, 16, 8), VoxelType::Sand);
+
+        assert!(
+            empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::ZERO),
+            "empty chunk below solid terrain must not be skipped because it owns the overhang boundary surface"
         );
     }
 

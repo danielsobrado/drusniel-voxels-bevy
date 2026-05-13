@@ -159,6 +159,7 @@ pub enum BenchTerrainMaterialQuality {
     CheapTriplanar,
     SingleProjectionFar,
     AtlasOnlyDebug,
+    WireframeDebug,
 }
 
 impl BenchTerrainMaterialQuality {
@@ -176,6 +177,9 @@ impl BenchTerrainMaterialQuality {
             }
             BenchTerrainMaterialQuality::AtlasOnlyDebug => {
                 Some(TerrainMaterialQuality::AtlasOnlyDebug)
+            }
+            BenchTerrainMaterialQuality::WireframeDebug => {
+                Some(TerrainMaterialQuality::WireframeDebug)
             }
         }
     }

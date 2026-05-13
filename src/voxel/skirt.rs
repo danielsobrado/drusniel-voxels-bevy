@@ -16,7 +16,7 @@ pub struct BoundaryFlags {
 
 impl BoundaryFlags {
     pub fn is_boundary(&self) -> bool {
-        self.neg_x || self.pos_x || self.neg_z || self.pos_z
+        self.neg_x || self.pos_x || self.neg_y || self.pos_y || self.neg_z || self.pos_z
     }
 
     pub fn on_face(&self, face: ChunkFace) -> bool {
@@ -172,12 +172,7 @@ pub fn extract_boundary_edges(
             let flags0 = compute_boundary_flags(local0, chunk_size);
             let flags1 = compute_boundary_flags(local1, chunk_size);
 
-            for face in [
-                ChunkFace::NegX,
-                ChunkFace::PosX,
-                ChunkFace::NegZ,
-                ChunkFace::PosZ,
-            ] {
+            for face in ChunkFace::ALL {
                 if !flags0.on_face(face) || !flags1.on_face(face) {
                     continue;
                 }
@@ -246,9 +241,12 @@ impl Default for SkirtConfig {
 }
 
 /// Neighbor LOD information for adaptive skirts.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct NeighborLods {
     pub neg_x: Option<LodLevel>,
     pub pos_x: Option<LodLevel>,
+    pub neg_y: Option<LodLevel>,
+    pub pos_y: Option<LodLevel>,
     pub neg_z: Option<LodLevel>,
     pub pos_z: Option<LodLevel>,
 }
@@ -258,9 +256,10 @@ impl NeighborLods {
         match face {
             ChunkFace::NegX => self.neg_x,
             ChunkFace::PosX => self.pos_x,
+            ChunkFace::NegY => self.neg_y,
+            ChunkFace::PosY => self.pos_y,
             ChunkFace::NegZ => self.neg_z,
             ChunkFace::PosZ => self.pos_z,
-            ChunkFace::NegY | ChunkFace::PosY => None,
         }
     }
 
@@ -287,7 +286,7 @@ fn upward_biased_normal(normal: Vec3) -> Vec3 {
 
 fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx: u32) {
     match face {
-        ChunkFace::NegX | ChunkFace::PosZ => {
+        ChunkFace::NegX | ChunkFace::PosZ | ChunkFace::NegY => {
             indices.extend_from_slice(&[
                 base_idx,
                 base_idx + 2,
@@ -297,7 +296,7 @@ fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx:
                 base_idx + 3,
             ]);
         }
-        ChunkFace::PosX | ChunkFace::NegZ => {
+        ChunkFace::PosX | ChunkFace::NegZ | ChunkFace::PosY => {
             indices.extend_from_slice(&[
                 base_idx,
                 base_idx + 1,
@@ -307,8 +306,11 @@ fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx:
                 base_idx + 2,
             ]);
         }
-        ChunkFace::NegY | ChunkFace::PosY => {}
     }
+}
+
+fn push_quad_barycentrics(barycentric_uvs: &mut Vec<[f32; 2]>) {
+    barycentric_uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, 1.0]]);
 }
 
 /// Generate skirt geometry and append to existing mesh data.
@@ -316,6 +318,7 @@ pub fn generate_skirts(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     uvs: &mut Vec<[f32; 2]>,
+    barycentric_uvs: &mut Vec<[f32; 2]>,
     material_weights: &mut Vec<[f32; 4]>,
     indices: &mut Vec<u32>,
     boundary_edges: &[BoundaryEdge],
@@ -344,9 +347,10 @@ pub fn generate_skirts(
         let skirt_normal = match edge.face {
             ChunkFace::NegX => Vec3::NEG_X,
             ChunkFace::PosX => Vec3::X,
+            ChunkFace::NegY => Vec3::NEG_Y,
+            ChunkFace::PosY => Vec3::Y,
             ChunkFace::NegZ => Vec3::NEG_Z,
             ChunkFace::PosZ => Vec3::Z,
-            ChunkFace::NegY | ChunkFace::PosY => continue,
         };
 
         let base_idx = positions.len() as u32;
@@ -406,6 +410,7 @@ pub fn generate_skirts(
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
+            push_quad_barycentrics(barycentric_uvs);
             push_boundary_quad_indices(indices, edge.face, base_idx);
             (lip0, lip1)
         } else {
@@ -444,6 +449,7 @@ pub fn generate_skirts(
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
+        push_quad_barycentrics(barycentric_uvs);
         push_boundary_quad_indices(indices, edge.face, vertical_idx);
     }
 }
@@ -479,12 +485,12 @@ mod tests {
     #[test]
     fn boundary_extraction_ignores_shared_edges_on_boundary_plane() {
         let local_positions = vec![
-            Vec3::new(16.0, 0.0, 4.0),
-            Vec3::new(16.0, 1.0, 4.0),
-            Vec3::new(16.0, 0.0, 5.0),
-            Vec3::new(16.0, 1.0, 4.0),
-            Vec3::new(16.0, 1.0, 5.0),
-            Vec3::new(16.0, 0.0, 5.0),
+            Vec3::new(16.0, 2.0, 4.0),
+            Vec3::new(16.0, 3.0, 4.0),
+            Vec3::new(16.0, 2.0, 5.0),
+            Vec3::new(16.0, 3.0, 4.0),
+            Vec3::new(16.0, 3.0, 5.0),
+            Vec3::new(16.0, 2.0, 5.0),
         ];
         let positions = local_positions
             .iter()
@@ -515,11 +521,14 @@ mod tests {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
         let mut weights = Vec::new();
         let mut indices = Vec::new();
         let neighbor_lods = NeighborLods {
             neg_x: None,
             pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
@@ -528,6 +537,7 @@ mod tests {
             &mut positions,
             &mut normals,
             &mut uvs,
+            &mut barycentric_uvs,
             &mut weights,
             &mut indices,
             &[edge_on_pos_x()],
@@ -540,6 +550,7 @@ mod tests {
         );
 
         assert_eq!(positions.len(), 8);
+        assert_eq!(barycentric_uvs.len(), 8);
         assert_eq!(indices.len(), 12);
         assert!(
             positions[2][0] > 16.0 && positions[2][0] <= 16.31,
@@ -565,11 +576,14 @@ mod tests {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
         let mut weights = Vec::new();
         let mut indices = Vec::new();
         let neighbor_lods = NeighborLods {
             neg_x: None,
             pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
@@ -578,6 +592,7 @@ mod tests {
             &mut positions,
             &mut normals,
             &mut uvs,
+            &mut barycentric_uvs,
             &mut weights,
             &mut indices,
             &[side_edge_on_pos_x()],
@@ -590,6 +605,7 @@ mod tests {
         );
 
         assert_eq!(positions.len(), 4);
+        assert_eq!(barycentric_uvs.len(), 4);
         assert_eq!(indices.len(), 6);
         assert!(
             positions
@@ -604,11 +620,14 @@ mod tests {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
         let mut weights = Vec::new();
         let mut indices = Vec::new();
         let neighbor_lods = NeighborLods {
             neg_x: None,
             pos_x: Some(LodLevel::Lod0),
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
@@ -617,6 +636,7 @@ mod tests {
             &mut positions,
             &mut normals,
             &mut uvs,
+            &mut barycentric_uvs,
             &mut weights,
             &mut indices,
             &[edge_on_pos_x()],
@@ -629,6 +649,7 @@ mod tests {
         );
 
         assert!(positions.is_empty());
+        assert!(barycentric_uvs.is_empty());
         assert!(indices.is_empty());
     }
 
@@ -637,11 +658,14 @@ mod tests {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
         let mut weights = Vec::new();
         let mut indices = Vec::new();
         let neighbor_lods = NeighborLods {
             neg_x: None,
             pos_x: None,
+            neg_y: None,
+            pos_y: None,
             neg_z: None,
             pos_z: None,
         };
@@ -650,6 +674,7 @@ mod tests {
             &mut positions,
             &mut normals,
             &mut uvs,
+            &mut barycentric_uvs,
             &mut weights,
             &mut indices,
             &[edge_on_pos_x()],
@@ -662,6 +687,58 @@ mod tests {
         );
 
         assert!(positions.is_empty());
+        assert!(barycentric_uvs.is_empty());
         assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn lower_lod_vertical_neighbor_generates_vertical_skirt() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let edge = BoundaryEdge {
+            v0_pos: Vec3::new(4.0, 16.0, 2.0),
+            v1_pos: Vec3::new(8.0, 16.0, 2.0),
+            v0_normal: Vec3::Y,
+            v1_normal: Vec3::Y,
+            v0_weights: [1.0, 0.0, 0.0, 0.0],
+            v1_weights: [1.0, 0.0, 0.0, 0.0],
+            face: ChunkFace::PosY,
+        };
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: None,
+            neg_y: None,
+            pos_y: Some(LodLevel::Lod2),
+            neg_z: None,
+            pos_z: None,
+        };
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[edge],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert_eq!(positions.len(), 8);
+        assert_eq!(barycentric_uvs.len(), 8);
+        assert_eq!(indices.len(), 12);
+        assert!(
+            positions.iter().any(|position| position[1] > 16.0),
+            "vertical transition lip should extend toward the coarser vertical neighbor"
+        );
     }
 }

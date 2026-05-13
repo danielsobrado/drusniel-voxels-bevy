@@ -1790,6 +1790,12 @@ fn mesh_dirty_chunks_system(
             pos_x: world
                 .get_chunk(chunk_pos + IVec3::new(1, 0, 0))
                 .map(|c| c.lod_level()),
+            neg_y: world
+                .get_chunk(chunk_pos + IVec3::new(0, -1, 0))
+                .map(|c| c.lod_level()),
+            pos_y: world
+                .get_chunk(chunk_pos + IVec3::new(0, 1, 0))
+                .map(|c| c.lod_level()),
             neg_z: world
                 .get_chunk(chunk_pos + IVec3::new(0, 0, -1))
                 .map(|c| c.lod_level()),
@@ -2355,7 +2361,8 @@ fn terrain_material_quality_for_distance(
         }
         TerrainMaterialQuality::CheapTriplanar
         | TerrainMaterialQuality::SingleProjectionFar
-        | TerrainMaterialQuality::AtlasOnlyDebug => current,
+        | TerrainMaterialQuality::AtlasOnlyDebug
+        | TerrainMaterialQuality::WireframeDebug => current,
         _ => current,
     }
 }
@@ -2366,6 +2373,7 @@ fn update_terrain_material_lod(
     triplanar_material: Res<TriplanarMaterialHandle>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     quality_preset: Res<RenderQualityPreset>,
+    runtime_debug: Option<Res<crate::runtime_commands::RuntimeViewportDebugState>>,
     mut terrain_meshes: Query<
         (
             &Transform,
@@ -2387,9 +2395,15 @@ fn update_terrain_material_lod(
     };
     let camera_pos = camera_transform.translation;
     let bench_toggles = bench_toggles.as_deref();
+    let wireframe_debug_enabled = runtime_debug.is_some_and(|debug| debug.wireframe);
 
     for (transform, mut chunk_mesh, mut material) in &mut terrain_meshes {
         if chunk_mesh.mesh_mode != MeshMode::SurfaceNets {
+            continue;
+        }
+        if wireframe_debug_enabled {
+            **material =
+                triplanar_material.handle_for_quality(TerrainMaterialQuality::WireframeDebug);
             continue;
         }
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);

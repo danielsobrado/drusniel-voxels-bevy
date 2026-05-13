@@ -104,6 +104,7 @@ pub enum TerrainMaterialQuality {
     CheapTriplanar,
     SingleProjectionFar,
     AtlasOnlyDebug,
+    WireframeDebug,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -179,6 +180,9 @@ impl Material for TriplanarMaterial {
                 TerrainMaterialQuality::AtlasOnlyDebug => {
                     fragment.shader_defs.push("TERRAIN_ATLAS_ONLY_DEBUG".into());
                 }
+                TerrainMaterialQuality::WireframeDebug => {
+                    fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
+                }
             }
         }
         Ok(())
@@ -192,6 +196,7 @@ pub struct TriplanarMaterialHandle {
     pub cheap_handle: Handle<TriplanarMaterial>,
     pub single_projection_far_handle: Handle<TriplanarMaterial>,
     pub atlas_only_debug_handle: Handle<TriplanarMaterial>,
+    pub wireframe_debug_handle: Handle<TriplanarMaterial>,
 }
 
 impl TriplanarMaterialHandle {
@@ -203,6 +208,7 @@ impl TriplanarMaterialHandle {
                 self.single_projection_far_handle.clone()
             }
             TerrainMaterialQuality::AtlasOnlyDebug => self.atlas_only_debug_handle.clone(),
+            TerrainMaterialQuality::WireframeDebug => self.wireframe_debug_handle.clone(),
         }
     }
 }

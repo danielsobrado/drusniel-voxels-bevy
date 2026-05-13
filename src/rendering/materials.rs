@@ -667,19 +667,23 @@ pub fn setup_triplanar_material(
     cheap_material.quality = TerrainMaterialQuality::CheapTriplanar;
     let mut single_projection_far_material = base_material.clone();
     single_projection_far_material.quality = TerrainMaterialQuality::SingleProjectionFar;
-    let mut atlas_only_debug_material = base_material;
+    let mut atlas_only_debug_material = base_material.clone();
     atlas_only_debug_material.quality = TerrainMaterialQuality::AtlasOnlyDebug;
+    let mut wireframe_debug_material = base_material;
+    wireframe_debug_material.quality = TerrainMaterialQuality::WireframeDebug;
 
     let material_handle = materials.add(full_material);
     let cheap_handle = materials.add(cheap_material);
     let single_projection_far_handle = materials.add(single_projection_far_material);
     let atlas_only_debug_handle = materials.add(atlas_only_debug_material);
+    let wireframe_debug_handle = materials.add(wireframe_debug_material);
 
     commands.insert_resource(TriplanarMaterialHandle {
         handle: material_handle,
         cheap_handle,
         single_projection_far_handle,
         atlas_only_debug_handle,
+        wireframe_debug_handle,
     });
 }
 
@@ -1080,6 +1084,7 @@ pub fn sync_weather_to_materials(
             (&handles.cheap_handle, 0.0),
             (&handles.single_projection_far_handle, 0.0),
             (&handles.atlas_only_debug_handle, 0.0),
+            (&handles.wireframe_debug_handle, 0.0),
         ] {
             if let Some(material) = triplanar_materials.get_mut(handle) {
                 material.uniforms.rain_factor = uniforms.rain_factor;

@@ -449,5 +449,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     }
 
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
+
+#ifdef TERRAIN_DEBUG_WIREFRAME
+    let bary = vec3<f32>(in.uv_b.x, in.uv_b.y, 1.0 - in.uv_b.x - in.uv_b.y);
+    let edge = min(bary.x, min(bary.y, bary.z));
+    let line = 1.0 - smoothstep(0.01, 0.03, edge);
+    color = vec4<f32>(mix(color.rgb, vec3<f32>(1.0), line * 0.8), color.a);
+#endif
+
     return color;
 }

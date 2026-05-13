@@ -269,6 +269,7 @@ struct TerrainPressureInventory {
     cheap_triplanar_meshes: usize,
     single_projection_far_meshes: usize,
     atlas_only_debug_meshes: usize,
+    wireframe_debug_meshes: usize,
 }
 
 fn binned_phase_inventory<BPI>(phases: &ViewBinnedRenderPhases<BPI>) -> BinnedPhaseInventory
@@ -441,6 +442,7 @@ fn visible_terrain_pressure_inventory(
                 stats.single_projection_far_meshes += 1;
             }
             TerrainMaterialQuality::AtlasOnlyDebug => stats.atlas_only_debug_meshes += 1,
+            TerrainMaterialQuality::WireframeDebug => stats.wireframe_debug_meshes += 1,
         }
     }
 
@@ -684,6 +686,10 @@ fn record_render_phase_inventory(
     sink.push_count(
         "Terrain Material Quality AtlasOnlyDebug Meshes",
         terrain_pressure.atlas_only_debug_meshes as f64,
+    );
+    sink.push_count(
+        "Terrain Material Quality WireframeDebug Meshes",
+        terrain_pressure.wireframe_debug_meshes as f64,
     );
 }
 

@@ -913,6 +913,12 @@ fn chunk_mesh_payload(
         pos_x: voxel_world
             .get_chunk(chunk_pos + IVec3::new(1, 0, 0))
             .map(|neighbor| neighbor.lod_level()),
+        neg_y: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(0, -1, 0))
+            .map(|neighbor| neighbor.lod_level()),
+        pos_y: voxel_world
+            .get_chunk(chunk_pos + IVec3::new(0, 1, 0))
+            .map(|neighbor| neighbor.lod_level()),
         neg_z: voxel_world
             .get_chunk(chunk_pos + IVec3::new(0, 0, -1))
             .map(|neighbor| neighbor.lod_level()),

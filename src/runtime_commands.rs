@@ -36,13 +36,15 @@ use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::shadow_budget::ShadowBudgetConfig;
 use crate::rendering::ssao::SsaoSupported;
-use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
+use crate::rendering::triplanar_material::{
+    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
+};
 use crate::rendering::water_reflection::{
     WaterPresence, WaterReflectionConfig, WaterReflectionDebugViewMode, WaterReflectionStatus,
 };
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::voxel::chunk::MeshDirtyReason;
-use crate::voxel::meshing::{WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::types::VoxelType;
@@ -1986,6 +1988,7 @@ fn set_baked_ao_strength(world: &mut World, strength: f32) {
                 handles.cheap_handle.clone(),
                 handles.single_projection_far_handle.clone(),
                 handles.atlas_only_debug_handle.clone(),
+                handles.wireframe_debug_handle.clone(),
             ]
         })
         .unwrap_or_default();
@@ -2081,9 +2084,50 @@ fn set_viewport_debug_overlay(
         if let Some(mut overlay_state) = world.get_resource_mut::<DebugOverlayState>() {
             overlay_state.visible = enabled;
         }
+        set_terrain_wireframe_debug_material(world, enabled);
     }
 
     world.insert_resource(state);
+}
+
+fn set_terrain_wireframe_debug_material(world: &mut World, enabled: bool) {
+    let Some((wireframe_handle, restore_handles)) = world
+        .get_resource::<TriplanarMaterialHandle>()
+        .map(|handles| {
+            (
+                handles.wireframe_debug_handle.clone(),
+                (!enabled).then(|| {
+                    (
+                        handles.handle.clone(),
+                        handles.cheap_handle.clone(),
+                        handles.single_projection_far_handle.clone(),
+                        handles.atlas_only_debug_handle.clone(),
+                    )
+                }),
+            )
+        })
+    else {
+        return;
+    };
+
+    let mut query = world.query::<(&mut MeshMaterial3d<TriplanarMaterial>, &ChunkMesh)>();
+    for (mut material, chunk_mesh) in query.iter_mut(world) {
+        **material = if enabled {
+            wireframe_handle.clone()
+        } else if let Some((full, cheap, single_projection_far, atlas_only_debug)) =
+            restore_handles.as_ref()
+        {
+            match chunk_mesh.material_quality {
+                TerrainMaterialQuality::FullTriplanar => full.clone(),
+                TerrainMaterialQuality::CheapTriplanar => cheap.clone(),
+                TerrainMaterialQuality::SingleProjectionFar => single_projection_far.clone(),
+                TerrainMaterialQuality::AtlasOnlyDebug => atlas_only_debug.clone(),
+                TerrainMaterialQuality::WireframeDebug => full.clone(),
+            }
+        } else {
+            wireframe_handle.clone()
+        };
+    }
 }
 
 fn set_editor_diagnostics(
