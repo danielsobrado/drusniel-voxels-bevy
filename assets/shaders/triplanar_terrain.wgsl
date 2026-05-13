@@ -69,7 +69,7 @@ const WEATHER_DEBUG_SNOW: u32 = 1u << 10u;
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var dirt_normal: texture_2d<f32>;
 
 fn compute_uv(world_coord: vec2<f32>) -> vec2<f32> {
-    return fract(world_coord / uniforms.tex_scale);
+    return world_coord / uniforms.tex_scale;
 }
 
 fn triplanar_weights(world_normal: vec3<f32>) -> vec3<f32> {

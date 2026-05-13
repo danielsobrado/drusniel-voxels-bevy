@@ -61,7 +61,7 @@ struct PbrSample {
 const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 fn compute_uv(world_coord: vec2<f32>) -> vec2<f32> {
-    return fract(world_coord / uniforms.tex_scale);
+    return world_coord / uniforms.tex_scale;
 }
 
 fn triplanar_weights(world_normal: vec3<f32>) -> vec3<f32> {

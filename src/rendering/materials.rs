@@ -718,6 +718,23 @@ pub fn configure_triplanar_textures(
             for tex_opt in textures {
                 if let Some(tex_handle) = tex_opt {
                     if let Some(image) = images.get_mut(tex_handle) {
+                        if image.texture_descriptor.mip_level_count == 1 {
+                            let width = image.texture_descriptor.size.width;
+                            let height = image.texture_descriptor.size.height;
+                            let mip_count =
+                                crate::rendering::mipmaps::calculate_mip_count(width, height);
+                            if crate::rendering::mipmaps::supports_mipmaps(
+                                image.texture_descriptor.format,
+                            ) {
+                                if let Some(data) = image.data.as_mut() {
+                                    crate::rendering::mipmaps::generate_mipmaps_rgba8(
+                                        data, width, height, mip_count,
+                                    );
+                                    image.texture_descriptor.mip_level_count = mip_count;
+                                }
+                            }
+                        }
+
                         // Set sampler to Repeat for tiling with trilinear filtering and anisotropy
                         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
                             address_mode_u: ImageAddressMode::Repeat,
@@ -768,12 +785,42 @@ pub fn configure_building_textures(
                 &material.wood_normal,
                 &material.wood_roughness,
                 &material.wood_ao,
+                &material.stone_albedo,
+                &material.stone_normal,
+                &material.stone_roughness,
+                &material.stone_ao,
+                &material.metal_albedo,
+                &material.metal_normal,
+                &material.metal_roughness,
+                &material.metal_ao,
+                &material.metal_metallic,
+                &material.thatch_albedo,
+                &material.thatch_normal,
+                &material.thatch_roughness,
+                &material.thatch_ao,
             ];
 
             let mut all_loaded = true;
             for tex_opt in textures {
                 if let Some(tex_handle) = tex_opt {
                     if let Some(image) = images.get_mut(tex_handle) {
+                        if image.texture_descriptor.mip_level_count == 1 {
+                            let width = image.texture_descriptor.size.width;
+                            let height = image.texture_descriptor.size.height;
+                            let mip_count =
+                                crate::rendering::mipmaps::calculate_mip_count(width, height);
+                            if crate::rendering::mipmaps::supports_mipmaps(
+                                image.texture_descriptor.format,
+                            ) {
+                                if let Some(data) = image.data.as_mut() {
+                                    crate::rendering::mipmaps::generate_mipmaps_rgba8(
+                                        data, width, height, mip_count,
+                                    );
+                                    image.texture_descriptor.mip_level_count = mip_count;
+                                }
+                            }
+                        }
+
                         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
                             address_mode_u: ImageAddressMode::Repeat,
                             address_mode_v: ImageAddressMode::Repeat,
@@ -825,6 +872,23 @@ pub fn configure_props_textures(
             for tex_opt in textures {
                 if let Some(tex_handle) = tex_opt {
                     if let Some(image) = images.get_mut(tex_handle) {
+                        if image.texture_descriptor.mip_level_count == 1 {
+                            let width = image.texture_descriptor.size.width;
+                            let height = image.texture_descriptor.size.height;
+                            let mip_count =
+                                crate::rendering::mipmaps::calculate_mip_count(width, height);
+                            if crate::rendering::mipmaps::supports_mipmaps(
+                                image.texture_descriptor.format,
+                            ) {
+                                if let Some(data) = image.data.as_mut() {
+                                    crate::rendering::mipmaps::generate_mipmaps_rgba8(
+                                        data, width, height, mip_count,
+                                    );
+                                    image.texture_descriptor.mip_level_count = mip_count;
+                                }
+                            }
+                        }
+
                         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
                             address_mode_u: ImageAddressMode::Repeat,
                             address_mode_v: ImageAddressMode::Repeat,
