@@ -13,6 +13,7 @@ Phased roadmap for the editor rebuild and integration workstream.
   - [Sprint 4 - World Outliner and selection system](./sprint-04-world-outliner-and-selection-system.md)
   - [Sprint 5 - Inspector system](./sprint-05-inspector-system.md)
   - [Sprint 6 - Viewport shell and overlays](./sprint-06-viewport-shell-and-overlays.md)
+  - [Fast authoring viewport plan](./fast-authoring-viewport-plan.md)
   - [Sprint 7 - Area and unbreakable-zone workflow](./sprint-07-area-and-unbreakable-zone-workflow.md)
   - [Sprint 8 - Voxel paint and texture atlas workflow](./sprint-08-voxel-paint-and-texture-atlas-workflow.md)
 - Phase 3 - Domain-specific systems
