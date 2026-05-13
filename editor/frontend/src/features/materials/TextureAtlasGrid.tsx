@@ -9,8 +9,8 @@ interface TextureAtlasGridProps {
   readonly onSelectTile: (tileId: string, index: number) => void;
 }
 
-const DEFAULT_ATLAS_COLUMNS = 4;
-const DEFAULT_ATLAS_ROWS = 4;
+const DEFAULT_ATLAS_COLUMNS = 8;
+const DEFAULT_ATLAS_ROWS = 8;
 const DEFAULT_TILE_COUNT = DEFAULT_ATLAS_COLUMNS * DEFAULT_ATLAS_ROWS;
 const DEFAULT_ATLAS_IMAGE_URL = "http://127.0.0.1:17777/assets/textures/atlas.png";
 

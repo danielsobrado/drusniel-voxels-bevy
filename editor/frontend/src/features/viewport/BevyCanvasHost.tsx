@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ChunkSummary, PropInstance, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
+import type { BlockAtlasMap, ChunkSummary, PropInstance, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LiteVoxelViewport, type LiteVoxelEditRequest, type LiteVoxelEditResponse, type LiteVoxelSelection } from "./LiteVoxelViewport";
 import { LITE_VOXEL_VIEWPORT_CONTRACT, NATIVE_BEVY_VIEWPORT_CONTRACT } from "./viewportArchitecture";
@@ -18,6 +18,7 @@ interface BevyCanvasHostProps {
   readonly props: readonly PropInstance[];
   readonly worldViewport: WorldViewportPreview | null;
   readonly viewportSnapshot: ViewportSnapshot | null;
+  readonly atlasMapping: BlockAtlasMap;
   readonly runtimeState: RuntimeState;
   readonly activeMode: EditorMode;
   readonly brushSettings: BrushSettings;
@@ -139,6 +140,7 @@ export function BevyCanvasHost({
   props,
   worldViewport,
   viewportSnapshot,
+  atlasMapping,
   runtimeState,
   activeMode,
   brushSettings,
@@ -303,6 +305,7 @@ export function BevyCanvasHost({
           props={props}
           worldViewport={worldViewport}
           viewportSnapshot={viewportSnapshot}
+          atlasMapping={atlasMapping}
           runtimeState={runtimeState}
           activeMode={activeMode}
           brushSettings={brushSettings}

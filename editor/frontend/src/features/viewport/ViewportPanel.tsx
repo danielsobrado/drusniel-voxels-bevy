@@ -424,6 +424,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
           props={editorState.props}
           worldViewport={editorState.worldViewport}
           viewportSnapshot={editorState.viewportSnapshot}
+          atlasMapping={editorState.atlasMapping}
           runtimeState={editorState.runtimeState}
           activeMode={activeMode}
           brushSettings={editorState.brushSettings}

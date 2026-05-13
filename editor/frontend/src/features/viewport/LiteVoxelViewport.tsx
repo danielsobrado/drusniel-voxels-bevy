@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
@@ -9,6 +9,7 @@ export interface LiteVoxelViewportProps {
   readonly props: readonly PropInstance[];
   readonly worldViewport: WorldViewportPreview | null;
   readonly viewportSnapshot: ViewportSnapshot | null;
+  readonly atlasMapping: BlockAtlasMap;
   readonly runtimeState: RuntimeState;
   readonly activeMode: EditorMode;
   readonly brushSettings: BrushSettings;
@@ -116,6 +117,19 @@ const MATERIAL_COLORS: Record<string, string> = {
   DungeonFloor: "#585562",
 };
 
+const ATLAS_IMAGE_URLS = ["/assets/textures/atlas.png", "http://127.0.0.1:17777/assets/textures/atlas.png"] as const;
+const ATLAS_COLUMNS = 8;
+const ATLAS_ROWS = 8;
+const ATLAS_TILE_COUNT = ATLAS_COLUMNS * ATLAS_ROWS;
+const LEGACY_ATLAS_TILE_IDS: Readonly<Record<string, string>> = {
+  "atlas/terrain_grass_top": "tile-3",
+  "atlas/terrain_grass_side": "tile-7",
+  "atlas/terrain_grass_side_alt": "tile-7",
+  "atlas/terrain_dirt": "tile-0",
+  "atlas/terrain_rock": "tile-1",
+  "atlas/terrain_sand": "tile-4",
+};
+
 const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -192,10 +206,102 @@ const drawDiamond = (ctx: CanvasRenderingContext2D, x: number, y: number, radius
   ctx.stroke();
 };
 
+const drawTexturedDiamond = (
+  ctx: CanvasRenderingContext2D,
+  atlasImage: HTMLImageElement,
+  tileIndex: number,
+  x: number,
+  y: number,
+  radiusX: number,
+  radiusY: number,
+  stroke: string,
+) => {
+  const tileWidth = atlasImage.naturalWidth / ATLAS_COLUMNS;
+  const tileHeight = atlasImage.naturalHeight / ATLAS_ROWS;
+  if (!Number.isFinite(tileWidth) || !Number.isFinite(tileHeight) || tileWidth <= 0 || tileHeight <= 0) {
+    return false;
+  }
+
+  const column = tileIndex % ATLAS_COLUMNS;
+  const row = Math.floor(tileIndex / ATLAS_COLUMNS);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x, y - radiusY);
+  ctx.lineTo(x + radiusX, y);
+  ctx.lineTo(x, y + radiusY);
+  ctx.lineTo(x - radiusX, y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    atlasImage,
+    column * tileWidth,
+    row * tileHeight,
+    tileWidth,
+    tileHeight,
+    x - radiusX,
+    y - radiusY,
+    radiusX * 2,
+    radiusY * 2,
+  );
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.moveTo(x, y - radiusY);
+  ctx.lineTo(x + radiusX, y);
+  ctx.lineTo(x, y + radiusY);
+  ctx.lineTo(x - radiusX, y);
+  ctx.closePath();
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+  return true;
+};
+
 const projectIso = (position: readonly [number, number, number], view: ViewState) => ({
   x: view.offsetX + (position[0] - position[2]) * 0.72 * view.zoom,
   y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
 });
+
+const normalizeAtlasTileId = (tileId: string) => LEGACY_ATLAS_TILE_IDS[tileId] ?? tileId;
+
+const parseAtlasTileIndex = (tileId: string): number | null => {
+  const match = /^tile-(\d+)$/.exec(normalizeAtlasTileId(tileId));
+  if (!match) {
+    return null;
+  }
+
+  const index = Number.parseInt(match[1], 10);
+  return Number.isInteger(index) && index >= 0 && index < ATLAS_TILE_COUNT ? index : null;
+};
+
+const blockForViewportMaterial = (material: WorldSurfaceSample["material"]): BlockType | null => {
+  switch (material) {
+    case "TopSoil":
+      return "grass";
+    case "SubSoil":
+      return "dirt";
+    case "Sand":
+      return "sand";
+    case "Rock":
+    case "Bedrock":
+    case "Clay":
+    case "DungeonWall":
+    case "DungeonFloor":
+      return "rock";
+    default:
+      return null;
+  }
+};
+
+const atlasTileIndexForSample = (
+  atlasMapping: BlockAtlasMap,
+  material: WorldSurfaceSample["material"],
+  face: keyof AtlasMapping = "top",
+): number | null => {
+  const block = blockForViewportMaterial(material);
+  return block ? parseAtlasTileIndex(atlasMapping[block][face]) : null;
+};
 
 const chunkIdForVoxel = (position: readonly [number, number, number]) =>
   `chunk-${Math.floor(position[0] / 16)}-${Math.floor(position[1] / 16)}-${Math.floor(position[2] / 16)}`;
@@ -377,6 +483,7 @@ export const LiteVoxelViewport = Object.assign(
     props,
     worldViewport,
     viewportSnapshot,
+    atlasMapping,
     runtimeState,
     activeMode,
     brushSettings,
@@ -405,10 +512,12 @@ export const LiteVoxelViewport = Object.assign(
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
     const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
     const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
+    const [atlasImage, setAtlasImage] = useState<HTMLImageElement | null>(null);
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
     const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
     const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
+    const atlasPreviewEnabled = viewportOverlays.atlasPreview || activeMode === "voxel_paint" || activeMode === "material";
     const waterSampleCount = samples.filter((sample) => sample.water).length;
     const chunkOverlayShapes = useMemo(() => buildChunkOverlayShapes(chunks, selection, view), [chunks, selection, view]);
     const brushPreviewShape = useMemo(() => buildBrushPreviewShape(brushSettings, targetedVoxel, activeMode, view), [activeMode, brushSettings, targetedVoxel, view]);
@@ -482,6 +591,37 @@ export const LiteVoxelViewport = Object.assign(
     }, [canvasSize.height, canvasSize.width, samples]);
 
     useEffect(() => {
+      let cancelled = false;
+      let nextUrlIndex = 0;
+
+      const loadNextAtlasUrl = () => {
+        if (!cancelled) {
+          const image = new Image();
+          image.onload = () => {
+            if (!cancelled) {
+              setAtlasImage(image);
+            }
+          };
+          image.onerror = () => {
+            nextUrlIndex += 1;
+            if (nextUrlIndex < ATLAS_IMAGE_URLS.length) {
+              loadNextAtlasUrl();
+            } else if (!cancelled) {
+              setAtlasImage(null);
+            }
+          };
+          image.src = ATLAS_IMAGE_URLS[nextUrlIndex];
+        }
+      };
+
+      loadNextAtlasUrl();
+
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) {
         return;
@@ -532,7 +672,7 @@ export const LiteVoxelViewport = Object.assign(
 
       const orderedSamples = [...samples].sort((left, right) => left.x + left.z + left.height - (right.x + right.z + right.height));
       for (const sample of orderedSamples) {
-        if (renderedMesh && !sample.water) {
+        if (renderedMesh && !sample.water && !atlasPreviewEnabled) {
           continue;
         }
         const isoX = (sample.x - sample.z) * 0.72;
@@ -542,8 +682,12 @@ export const LiteVoxelViewport = Object.assign(
         const radiusX = (hasBackendPreview ? 8 : 16) * view.zoom;
         const radiusY = (hasBackendPreview ? 4 : 8) * view.zoom;
         const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
+        const stroke = sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)";
+        const atlasTileIndex = atlasPreviewEnabled && !sample.water && atlasImage ? atlasTileIndexForSample(atlasMapping, sample.material, "top") : null;
 
-        drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)");
+        if (!(atlasImage && atlasTileIndex !== null && drawTexturedDiamond(ctx, atlasImage, atlasTileIndex, screenX, screenY, radiusX, radiusY, stroke))) {
+          drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, stroke);
+        }
         if (sample.water) {
           ctx.globalAlpha = 0.45;
           drawDiamond(ctx, screenX, screenY - 1.5 * view.zoom, radiusX * 0.82, radiusY * 0.72, "#65c7ff", "rgba(187, 237, 255, 0.8)");
@@ -557,7 +701,7 @@ export const LiteVoxelViewport = Object.assign(
         ctx.textAlign = "center";
         ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
       }
-    }, [canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
+    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
 
     return (
       <>
