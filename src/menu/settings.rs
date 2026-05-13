@@ -1656,6 +1656,7 @@ fn spawn_atlas_tile_button(
         });
 }
 
+#[allow(dead_code)]
 fn spawn_layer_button(
     parent: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
@@ -1741,8 +1742,10 @@ fn spawn_layer_button(
 }
 
 #[derive(Component, Copy, Clone)]
+#[allow(dead_code)]
 pub struct LayerTileIndexText(pub ActiveTextureLayer);
 
+#[allow(dead_code)]
 fn spawn_cube_face_preview(
     parent: &mut ChildSpawnerCommands,
     font: &Handle<Font>,

@@ -83,6 +83,7 @@ impl ItemType {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn sort_key(&self) -> u8 {
         match self {
             // Tools

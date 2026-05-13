@@ -367,7 +367,7 @@ pub fn handle_palette_input(
                     PlacementSelection::Voxel(voxel) => {
                         held.block_type = voxel;
                     }
-                    PlacementSelection::BuildingPiece { piece_id, .. } => {
+                    PlacementSelection::BuildingPiece { .. } => {
                         // Handled by sync_building_state_from_palette system
                     }
                     PlacementSelection::Prop { .. } => {}
@@ -897,6 +897,7 @@ fn is_descendant_of(mut entity: Entity, root: Entity, parents: &Query<&ChildOf>)
     }
 }
 
+#[allow(dead_code)]
 fn spawn_palette_ui(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,

@@ -3,7 +3,9 @@ use crate::rendering::array_loader::AtlasMapping;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
 use crate::vegetation::VegetationConfig;
+#[cfg(debug_assertions)]
 use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
+#[cfg(debug_assertions)]
 use crate::voxel::meshing::WaterMesh;
 use crate::voxel::plugin::LodSettings;
 use bevy::prelude::*;
@@ -78,13 +80,6 @@ fn toggle_debug_ui(mut state: ResMut<DebugUiState>, keys: Res<ButtonInput<KeyCod
     }
 }
 
-/// Local state for atlas mapping save status
-#[derive(Default)]
-struct AtlasMappingSaveStatus {
-    last_save_result: Option<Result<(), String>>,
-    save_time: f32,
-}
-
 fn debug_settings_ui(
     mut contexts: EguiContexts,
     state: Res<DebugUiState>,
@@ -96,8 +91,6 @@ fn debug_settings_ui(
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
     mut water_shader_toggles: ResMut<WaterShaderToggles>,
     mut sun_query: Query<&mut DirectionalLight>,
-    time: Res<Time>,
-    mut save_status: Local<AtlasMappingSaveStatus>,
 ) {
     if !state.show_settings {
         return;

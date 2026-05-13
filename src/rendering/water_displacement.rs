@@ -38,7 +38,7 @@ pub struct WaterDisplacementTexture {
 // ─── Internal simulation state ────────────────────────────────────────────────
 
 #[derive(Resource)]
-struct DisplacementState {
+pub(crate) struct DisplacementState {
     height: Vec<f32>,
     velocity: Vec<f32>,
     /// Back-buffers for double-buffered simulation (avoids 512KB clone per step).
@@ -387,6 +387,7 @@ fn step_and_upload_displacement(
 
 /// Query the water surface displacement height (in metres) at any world XZ position.
 /// Returns 0.0 if the displacement system is not active.
-pub fn sample_water_displacement(state: &DisplacementState, world_xz: Vec2) -> f32 {
+#[allow(dead_code)]
+pub(crate) fn sample_water_displacement(state: &DisplacementState, world_xz: Vec2) -> f32 {
     state.sample_height(world_xz)
 }

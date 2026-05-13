@@ -332,6 +332,7 @@ pub(crate) struct TexturesTabContent;
 
 /// Marker for the atlas grid container
 #[derive(Component)]
+#[allow(dead_code)]
 pub(crate) struct AtlasGridContainer;
 
 /// Marker for an atlas tile button, stores the tile index (0-15)
@@ -367,13 +368,17 @@ pub struct TextureLayerButton(pub ActiveTextureLayer);
 /// Marker for the cube preview faces
 #[derive(Component, Copy, Clone)]
 pub enum CubePreviewFace {
+    #[allow(dead_code)]
     Top,
+    #[allow(dead_code)]
     Side,
+    #[allow(dead_code)]
     Bottom,
 }
 
 /// Marker for the current tile display for each layer
 #[derive(Component, Copy, Clone)]
+#[allow(dead_code)]
 pub struct LayerTilePreview(pub ActiveTextureLayer);
 
 #[derive(Component, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]

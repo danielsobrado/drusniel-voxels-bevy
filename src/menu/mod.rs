@@ -259,7 +259,7 @@ fn close_menu(
 use bevy::ecs::system::SystemParam;
 
 #[derive(SystemParam)]
-pub struct MultiplayerResources<'w> {
+pub(crate) struct MultiplayerResources<'w> {
     pub form_state: ResMut<'w, MultiplayerFormState>,
     pub connect_tasks: ResMut<'w, ConnectTaskState>,
     pub network: ResMut<'w, NetworkSession>,

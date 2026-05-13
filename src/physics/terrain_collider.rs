@@ -182,6 +182,7 @@ impl TerrainCollisionRegistry {
         record.revision_component()
     }
 
+    #[allow(dead_code)]
     fn mark_mesh_changed(&mut self, chunk: IVec3) -> TerrainCollisionRevision {
         let record = self.ensure_record(chunk);
         record.source_revision = record.source_revision.saturating_add(1);
@@ -259,7 +260,7 @@ enum TerrainColliderMode {
 }
 
 #[derive(Resource, Clone, Copy, Debug)]
-pub(super) struct TerrainColliderConfig {
+pub(crate) struct TerrainColliderConfig {
     mode: TerrainColliderMode,
 }
 
@@ -451,7 +452,7 @@ fn coarse_heightfield_from_mesh_data(mesh: &TerrainColliderMeshData) -> Option<C
 /// Throttled per frame and sorted nearest-to-camera first. The completed bake is
 /// applied by `poll_chunk_collider_bakes`, so old colliders stay live while work
 /// runs on the async pool.
-pub fn generate_chunk_colliders(
+pub(crate) fn generate_chunk_colliders(
     mut commands: Commands,
     chunks: Query<
         (Entity, &Mesh3d, &Transform, &ChunkMesh),

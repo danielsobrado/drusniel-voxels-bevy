@@ -82,7 +82,7 @@ pub struct GodRaysLabel;
 
 /// Must match `GodRayUniforms` in `god_rays.wgsl` exactly.
 #[derive(Clone, Copy, ShaderType)]
-struct GodRayUniforms {
+pub(crate) struct GodRayUniforms {
     sun_screen_pos: Vec4,
     sun_dir_world: Vec4,
     intensity: f32,
@@ -100,8 +100,8 @@ struct GodRayUniforms {
 /// Computed each frame in the main world: the sun's screen-space UV and config.
 /// Extracted to the render world for the god ray node.
 #[derive(Resource, Clone)]
-pub struct GodRayFrameData {
-    pub uniforms: GodRayUniforms,
+pub(crate) struct GodRayFrameData {
+    pub(crate) uniforms: GodRayUniforms,
 }
 
 /// Sync GodRayConfig from the FogConfig YAML values when it changes.

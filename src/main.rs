@@ -56,8 +56,6 @@ use voxel_builder::voxel::world::{VoxelWorld, WorldBounds};
 use voxel_builder::weather::WeatherPlugin;
 use voxel_builder::world_rules::{ProtectedAreaRegistry, WorldRulesPlugin};
 
-mod input;
-
 /// Pre-flight GPU detection to query actual device limits before Bevy initializes.
 ///
 /// This function creates a temporary wgpu instance to probe the GPU's actual capabilities,

@@ -1722,6 +1722,7 @@ fn add_face_no_ao(mesh_data: &mut MeshData, local: UVec3, face: Face, voxel: Vox
 /// Add a water face with world-space UVs for proper wave calculation.
 /// Unlike solid terrain which uses atlas UVs, water needs world XZ coordinates
 /// so the wave shader can compute spatially-varying wave heights.
+#[allow(dead_code)]
 fn add_water_face(mesh_data: &mut MeshData, local: UVec3, face: Face, chunk_origin: IVec3) {
     let x = local.x as f32 * VOXEL_SIZE;
     let y = local.y as f32 * VOXEL_SIZE;

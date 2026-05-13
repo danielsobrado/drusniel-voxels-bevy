@@ -168,6 +168,7 @@ pub struct PerformanceMetrics {
     /// Last frame's total tracked time
     pub total_tracked_time_us: u64,
     /// Timestamp for measuring frame sections
+    #[allow(dead_code)]
     pub section_start: Option<Instant>,
 }
 
@@ -217,6 +218,7 @@ impl PerformanceMetrics {
     }
 
     /// Reset per-frame timings
+    #[allow(dead_code)]
     pub fn reset_frame_timings(&mut self) {
         self.total_tracked_time_us = self.physics_time_us
             + self.visibility_time_us

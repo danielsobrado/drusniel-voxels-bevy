@@ -27,9 +27,7 @@ struct MapRoot;
 struct MapPlayerMarker;
 
 #[derive(Component)]
-struct MapLandmarkMarker {
-    world_pos: Vec3,
-}
+struct MapLandmarkMarker;
 
 #[derive(Component)]
 struct MapCoordinatesText;
@@ -280,9 +278,7 @@ fn spawn_landmark_marker(parent: &mut ChildSpawnerCommands, world: &VoxelWorld, 
             ..default()
         },
         BackgroundColor(Color::srgb(0.98, 0.82, 0.24)),
-        MapLandmarkMarker {
-            world_pos: position,
-        },
+        MapLandmarkMarker,
     ));
 }
 

@@ -391,7 +391,7 @@ pub fn update_ray_tracing_on_camera(
     }
 }
 
-pub fn player_camera_system(
+pub(crate) fn player_camera_system(
     mut query: Query<(&mut Transform, &mut PlayerCamera)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,

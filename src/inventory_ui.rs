@@ -175,10 +175,10 @@ struct InventoryHeldText;
 struct InventorySlotButton(usize);
 
 #[derive(Component)]
-struct InventorySlotIcon(usize);
+struct InventorySlotIcon;
 
 #[derive(Component)]
-struct InventorySlotQuantity(usize);
+struct InventorySlotQuantity;
 
 #[derive(Component)]
 struct InventoryCategoryButton(InventoryCategory);
@@ -995,7 +995,7 @@ fn spawn_inventory_slots(
                         ..default()
                     },
                     ImageNode::new(asset_server.load(item.icon_path())),
-                    InventorySlotIcon(slot_idx),
+                    InventorySlotIcon,
                 ));
 
                 // Quantity text (bottom-right corner, only if > 1)
@@ -1038,7 +1038,7 @@ fn spawn_inventory_slots(
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
-                                InventorySlotQuantity(slot_idx),
+                                InventorySlotQuantity,
                             ));
                         });
                 }
