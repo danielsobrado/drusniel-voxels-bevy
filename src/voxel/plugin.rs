@@ -1520,6 +1520,14 @@ fn poll_chunk_generation_tasks(
 }
 
 fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
+    mark_chunk_halo_dirty(world, chunk_pos, MeshDirtyReason::Generation);
+}
+
+fn mark_chunk_lod_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
+    mark_chunk_halo_dirty(world, chunk_pos, MeshDirtyReason::NeighborLod);
+}
+
+fn mark_chunk_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3, reason: MeshDirtyReason) {
     for dz in -1..=1 {
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -1529,7 +1537,7 @@ fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
 
                 let neighbor_pos = chunk_pos + IVec3::new(dx, dy, dz);
                 if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                    neighbor.mark_dirty_with_reason(MeshDirtyReason::Generation);
+                    neighbor.mark_dirty_with_reason(reason);
                 }
             }
         }
@@ -1538,6 +1546,22 @@ fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
 
 fn should_defer_surface_nets_mesh(target_mode: MeshMode, missing_boundary_neighbors: u32) -> bool {
     matches!(target_mode, MeshMode::SurfaceNets) && missing_boundary_neighbors > 0
+}
+
+fn mesh_lod_level_for_surface_nets_cap(
+    target_mode: MeshMode,
+    uniformity: ChunkUniformity,
+    empty_surface_neighbor: bool,
+    lod_level: LodLevel,
+) -> LodLevel {
+    if matches!(target_mode, MeshMode::SurfaceNets)
+        && uniformity == ChunkUniformity::Empty
+        && empty_surface_neighbor
+    {
+        LodLevel::Lod0
+    } else {
+        lod_level
+    }
 }
 
 #[derive(Default)]
@@ -1715,6 +1739,12 @@ fn mesh_dirty_chunks_system(
         let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
             && matches!(target_mode, MeshMode::SurfaceNets)
             && empty_chunk_has_surface_nets_boundary_surface(&world, chunk_pos);
+        let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
+            target_mode,
+            uniformity,
+            empty_surface_neighbor,
+            lod_level,
+        );
 
         // Skip meshing for empty chunks unless Surface Nets needs this all-air
         // chunk to own a terrain boundary surface from the one-voxel halo.
@@ -1775,7 +1805,7 @@ fn mesh_dirty_chunks_system(
                 chunk,
                 &world,
                 target_mode,
-                lod_level,
+                mesh_lod_level,
                 neighbor_lods,
                 &skirt_config,
                 &ao_config.baked,
@@ -3729,17 +3759,7 @@ fn update_chunk_lod_system(
 
     let lod_changed_count = lod_changed.len() as u32;
     for chunk_pos in &lod_changed {
-        for offset in [
-            IVec3::new(-1, 0, 0),
-            IVec3::new(1, 0, 0),
-            IVec3::new(0, 0, -1),
-            IVec3::new(0, 0, 1),
-        ] {
-            let neighbor_pos = *chunk_pos + offset;
-            if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
-            }
-        }
+        mark_chunk_lod_halo_dirty(&mut world, *chunk_pos);
     }
 
     if !lod_transitions.last_change_frame.is_empty() && frame.0 % 600 == 0 {
@@ -4019,6 +4039,66 @@ mod tests {
         assert!(dirty.contains(&(center + IVec3::new(-1, -1, -1))));
         assert!(dirty.contains(&(center + IVec3::new(1, 1, 1))));
         assert!(dirty.contains(&(center + IVec3::Y)));
+    }
+
+    #[test]
+    fn lod_change_marks_full_3d_halo_dirty() {
+        let center = IVec3::new(1, 1, 1);
+        let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
+
+        for z in 0..3 {
+            for y in 0..3 {
+                for x in 0..3 {
+                    let mut chunk = Chunk::new(IVec3::new(x, y, z));
+                    chunk.clear_dirty();
+                    world.insert_chunk(chunk);
+                }
+            }
+        }
+
+        mark_chunk_lod_halo_dirty(&mut world, center);
+
+        let dirty = world.dirty_chunks().collect::<HashSet<_>>();
+        assert_eq!(dirty.len(), 26);
+        assert!(!dirty.contains(&center));
+        assert!(dirty.contains(&(center + IVec3::Y)));
+        assert!(dirty.contains(&(center + IVec3::NEG_Y)));
+        assert!(
+            world
+                .get_chunk(center + IVec3::Y)
+                .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::NeighborLod))
+        );
+    }
+
+    #[test]
+    fn empty_surface_nets_cap_forces_lod0_sampling() {
+        assert_eq!(
+            mesh_lod_level_for_surface_nets_cap(
+                MeshMode::SurfaceNets,
+                ChunkUniformity::Empty,
+                true,
+                LodLevel::Lod3
+            ),
+            LodLevel::Lod0
+        );
+        assert_eq!(
+            mesh_lod_level_for_surface_nets_cap(
+                MeshMode::SurfaceNets,
+                ChunkUniformity::Mixed,
+                true,
+                LodLevel::Lod3
+            ),
+            LodLevel::Lod3
+        );
+        assert_eq!(
+            mesh_lod_level_for_surface_nets_cap(
+                MeshMode::Blocky,
+                ChunkUniformity::Empty,
+                true,
+                LodLevel::Lod3
+            ),
+            LodLevel::Lod3
+        );
     }
 
     #[test]
