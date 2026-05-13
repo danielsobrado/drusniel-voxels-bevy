@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { BlockAtlasMap, ChunkSummary, PropInstance, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
-import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
+import type { BrushSettings, EditorMode, EditorViewportRole, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LiteVoxelViewport, type LiteVoxelEditRequest, type LiteVoxelEditResponse, type LiteVoxelSelection } from "./LiteVoxelViewport";
 import { LITE_VOXEL_VIEWPORT_CONTRACT, NATIVE_BEVY_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
@@ -19,6 +19,7 @@ interface BevyCanvasHostProps {
   readonly worldViewport: WorldViewportPreview | null;
   readonly viewportSnapshot: ViewportSnapshot | null;
   readonly atlasMapping: BlockAtlasMap;
+  readonly viewportRole: EditorViewportRole;
   readonly runtimeState: RuntimeState;
   readonly activeMode: EditorMode;
   readonly brushSettings: BrushSettings;
@@ -141,6 +142,7 @@ export function BevyCanvasHost({
   worldViewport,
   viewportSnapshot,
   atlasMapping,
+  viewportRole,
   runtimeState,
   activeMode,
   brushSettings,
@@ -171,10 +173,14 @@ export function BevyCanvasHost({
   const nativeResizeTimerRef = useRef<number | undefined>(undefined);
   const [nativeViewportRect, setNativeViewportRect] = useState<NativeViewportRect | null>(null);
   const desktopRuntime = hasTauriGlobals();
-  const browserPreviewEnabled = !desktopRuntime;
-  const activeViewportContract = browserPreviewEnabled ? LITE_VOXEL_VIEWPORT_CONTRACT : NATIVE_BEVY_VIEWPORT_CONTRACT;
-  const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (desktopRuntime ? "pending" : "unsupported"));
-  const [nativeViewportMessage, setNativeViewportMessage] = useState("Native Bevy viewport is starting.");
+  const activeViewportContract = viewportRole === "validation" ? NATIVE_BEVY_VIEWPORT_CONTRACT : LITE_VOXEL_VIEWPORT_CONTRACT;
+  const liteViewportEnabled = activeViewportContract.implementation === "liteVoxel";
+  const nativeViewportRequested = activeViewportContract.implementation === "nativeBevy";
+  const nativeViewportEnabled = nativeViewportRequested && desktopRuntime;
+  const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (nativeViewportEnabled ? "pending" : "unsupported"));
+  const [nativeViewportMessage, setNativeViewportMessage] = useState(
+    nativeViewportRequested ? "Native Bevy viewport is starting." : "Fast authoring viewport active.",
+  );
 
   useEffect(() => {
     const host = hostRef.current;
@@ -183,7 +189,7 @@ export function BevyCanvasHost({
     }
 
     const updateNativeRect = () => {
-      if (!desktopRuntime) {
+      if (!nativeViewportEnabled) {
         return;
       }
 
@@ -193,7 +199,7 @@ export function BevyCanvasHost({
     };
 
     const scheduleNativeRectUpdate = () => {
-      if (!desktopRuntime) {
+      if (!nativeViewportEnabled) {
         return;
       }
 
@@ -221,12 +227,15 @@ export function BevyCanvasHost({
         nativeResizeTimerRef.current = undefined;
       }
     };
-  }, [desktopRuntime]);
+  }, [nativeViewportEnabled]);
 
   useEffect(() => {
-    if (!desktopRuntime) {
-      setNativeViewportState(desktopRuntime ? "fallback" : "unsupported");
-      setNativeViewportMessage(desktopRuntime ? "Native viewport host is not ready." : "Browser preview mode.");
+    if (!nativeViewportEnabled) {
+      if (desktopRuntime) {
+        void invoke("detach_native_viewport").catch(() => undefined);
+      }
+      setNativeViewportState("unsupported");
+      setNativeViewportMessage(nativeViewportRequested ? "Native validation viewport requires the desktop editor." : "Fast authoring viewport active.");
       return;
     }
 
@@ -281,7 +290,7 @@ export function BevyCanvasHost({
         window.clearTimeout(retryTimer);
       }
     };
-  }, [desktopRuntime, nativeViewportRect, runtimeState]);
+  }, [desktopRuntime, nativeViewportEnabled, nativeViewportRect, nativeViewportRequested, runtimeState]);
 
   useEffect(() => {
     return () => {
@@ -292,14 +301,14 @@ export function BevyCanvasHost({
   return (
     <div
       ref={hostRef}
-      className={`bevy-canvas-host world-viewport-host ${nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
+      className={`bevy-canvas-host world-viewport-host ${nativeViewportEnabled && nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
       data-testid="bevy-canvas-host"
       data-viewport-role={activeViewportContract.role}
       data-viewport-implementation={activeViewportContract.implementation}
       data-viewport-runtime-renderer={String(activeViewportContract.ownsRuntimeRendering)}
       aria-label="Runtime world viewport"
     >
-      {browserPreviewEnabled ? (
+      {liteViewportEnabled ? (
         <LiteVoxelViewport
           chunks={chunks}
           props={props}
@@ -329,12 +338,12 @@ export function BevyCanvasHost({
         />
       ) : nativeViewportState !== "attached" ? (
         <div className="native-viewport-status" data-testid="native-viewport-status">
-          <strong>Native Bevy viewport</strong>
+          <strong>Native validation viewport</strong>
           <span>{nativeViewportMessage}</span>
         </div>
       ) : null}
 
-      {browserPreviewEnabled && waterDebug ? (
+      {liteViewportEnabled && waterDebug ? (
         <div className="viewport-water-overlay" aria-label="Water debug overlay" data-testid="viewport-water-overlay">
           <div>Mode: {waterDebugMode}</div>
           <div>Reflection active: {waterRuntimeSnapshot.reflectionStatus.active ? "on" : "off"}</div>
@@ -343,7 +352,7 @@ export function BevyCanvasHost({
         </div>
       ) : null}
 
-      {browserPreviewEnabled && showProtectedAreas ? (
+      {liteViewportEnabled && showProtectedAreas ? (
         <svg className="viewport-area-overlay-canvas" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240" preserveAspectRatio="none" aria-hidden="true">
           {areaOverlays.map((area) => {
             const rect = boundsToRect(area.bounds);

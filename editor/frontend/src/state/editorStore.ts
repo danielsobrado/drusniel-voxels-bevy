@@ -7,6 +7,7 @@ import type {
   CommandHistoryEntry,
   DirtyState,
   EditorMode,
+  EditorViewportRole,
   EditorSavedSnapshot,
   EditorUndoEntry,
   EditorUndoSnapshot,
@@ -81,6 +82,7 @@ const preserveSelectionWhenReplacingSummary = (summary: WorldSummary, currentSel
 const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   activeMode: state.activeMode,
   activeTool: state.activeTool,
+  viewportRole: state.viewportRole,
   selection: cloneEditorValue(state.selection),
   brushSettings: cloneEditorValue(state.brushSettings),
   propBrushSettings: cloneEditorValue(state.propBrushSettings),
@@ -104,6 +106,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
 const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUndoSnapshot): void => {
   state.activeMode = snapshot.activeMode;
   state.activeTool = snapshot.activeTool;
+  state.viewportRole = snapshot.viewportRole;
   state.selection = cloneEditorValue(snapshot.selection);
   state.brushSettings = cloneEditorValue(snapshot.brushSettings);
   state.propBrushSettings = cloneEditorValue(snapshot.propBrushSettings);
@@ -128,6 +131,7 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
 export interface EditorDataState {
   readonly activeMode: EditorMode;
   readonly activeTool: string;
+  readonly viewportRole: EditorViewportRole;
   readonly selection: Selection;
   readonly brushSettings: BrushSettings;
   readonly propBrushSettings: PropBrushSettings;
@@ -166,6 +170,7 @@ export interface EditorDataState {
 interface EditorActions {
   readonly setActiveMode: (mode: EditorMode) => void;
   readonly setActiveTool: (tool: string) => void;
+  readonly setViewportRole: (role: EditorViewportRole) => void;
   readonly setSelection: (selection: Selection) => void;
   readonly updateBrushSettings: (settings: Partial<BrushSettings>) => void;
   readonly setBrushRadius: (radius: number) => void;
@@ -388,6 +393,7 @@ const initialPropPlacementSettings: PropPlacementSettings = {
 export const createInitialEditorState = (): EditorDataState => ({
   activeMode: "select",
   activeTool: "select",
+  viewportRole: "authoring",
   selection: initialSelection,
   brushSettings: {
     radius: 4,
@@ -466,6 +472,10 @@ export const useEditorStore = create<EditorStore>()(
     setActiveTool: (tool) =>
       set((state) => {
         state.activeTool = tool;
+      }),
+    setViewportRole: (role) =>
+      set((state) => {
+        state.viewportRole = role;
       }),
     setSelection: (selection) =>
       set((state) => {

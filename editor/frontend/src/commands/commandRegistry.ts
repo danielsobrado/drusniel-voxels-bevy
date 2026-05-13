@@ -1,7 +1,7 @@
 import type { EditorCommand, EditorCommandContext } from "./commandTypes";
 import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
-import type { EditorDiagnosticsCategory, EditorMode, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
+import type { EditorDiagnosticsCategory, EditorMode, EditorViewportRole, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
 import type { BlockType, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 
@@ -56,6 +56,24 @@ const qualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
     ctx.getState().setRenderQualityPreset(renderQuality.preset);
   },
 });
+
+const viewportRoleCommand = (role: EditorViewportRole): EditorCommand => {
+  const title = role === "authoring" ? "Use authoring viewport" : "Use native validation viewport";
+  return {
+    id: role === "authoring" ? "editor.viewport.useAuthoring" : "editor.viewport.useValidation",
+    title,
+    description:
+      role === "authoring"
+        ? "Use the fast LiteVoxelViewport for editor navigation and voxel authoring."
+        : "Use the native Bevy viewport for final renderer validation.",
+    category: "View",
+    keywords: role === "authoring" ? ["viewport", "authoring", "lite", "fast", "three"] : ["viewport", "validation", "bevy", "native", "preview"],
+    run: (ctx) => {
+      ctx.getState().setViewportRole(role);
+      ctx.toast.info(role === "authoring" ? "Authoring viewport active." : "Native validation viewport active.");
+    },
+  };
+};
 
 const renderingQualityCommand = (preset: RenderQualityPreset): EditorCommand => ({
   ...qualityCommand(preset),
@@ -787,6 +805,8 @@ export const editorCommands: readonly EditorCommand[] = [
       ctx.toast.info("Editor handoff summary recorded.");
     },
   },
+  viewportRoleCommand("authoring"),
+  viewportRoleCommand("validation"),
   {
     id: "editor.view.toggleVoxelGrid",
     title: "Toggle voxel grid",

@@ -1,4 +1,4 @@
-import { Camera, CheckSquare2, Focus, Grid3X3, MousePointer2, Paintbrush, ShieldCheck, TestTube2 } from "lucide-react";
+import { Boxes, Camera, CheckSquare2, Focus, Grid3X3, MousePointer2, Paintbrush, ShieldCheck, TestTube2, TriangleAlert } from "lucide-react";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
@@ -55,6 +55,11 @@ export function ViewportControlsPanel() {
 
         <div className="viewport-controls-summary">
           <article className="viewport-controls-card">
+            <span>Viewport</span>
+            <strong>{editorState.viewportRole}</strong>
+            <small>{editorState.viewportRole === "authoring" ? "LiteVoxelViewport" : "Native Bevy"}</small>
+          </article>
+          <article className="viewport-controls-card">
             <span>Mode</span>
             <strong>{activeMode}</strong>
             <small>Tool {activeTool}</small>
@@ -74,6 +79,30 @@ export function ViewportControlsPanel() {
             </small>
           </article>
         </div>
+
+        <section className="viewport-controls-section">
+          <h3>Viewport</h3>
+          <div className="viewport-controls-tool-grid" role="toolbar" aria-label="Viewport mode">
+            <button
+              type="button"
+              className={`toolbar-button viewport-tool-button ${editorState.viewportRole === "authoring" ? "toolbar-button-active" : ""}`}
+              aria-pressed={editorState.viewportRole === "authoring"}
+              onClick={() => void runCommandById("editor.viewport.useAuthoring")}
+            >
+              <Boxes size={14} aria-hidden="true" />
+              Author
+            </button>
+            <button
+              type="button"
+              className={`toolbar-button viewport-tool-button ${editorState.viewportRole === "validation" ? "toolbar-button-active" : ""}`}
+              aria-pressed={editorState.viewportRole === "validation"}
+              onClick={() => void runCommandById("editor.viewport.useValidation")}
+            >
+              <TriangleAlert size={14} aria-hidden="true" />
+              Validate
+            </button>
+          </div>
+        </section>
 
         <section className="viewport-controls-section">
           <h3>Tools</h3>

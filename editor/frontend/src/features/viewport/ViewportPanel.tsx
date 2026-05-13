@@ -419,12 +419,35 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
     <section className="panel-shell viewport-panel" data-testid="panel-viewport" aria-labelledby="viewport-title">
       <PanelTitleBar title="Viewport" titleId="viewport-title" onClose={onClose} />
       <div className="panel-body viewport-body">
+        <div className="viewport-mode-switch" role="group" aria-label="Viewport mode" data-testid="viewport-mode-switch">
+          <button
+            type="button"
+            className={`toolbar-button viewport-mode-button ${editorState.viewportRole === "authoring" ? "toolbar-button-active" : ""}`}
+            aria-pressed={editorState.viewportRole === "authoring"}
+            data-testid="viewport-mode-authoring"
+            onClick={() => void runCommandById("editor.viewport.useAuthoring")}
+          >
+            <Boxes size={14} aria-hidden="true" />
+            Author
+          </button>
+          <button
+            type="button"
+            className={`toolbar-button viewport-mode-button ${editorState.viewportRole === "validation" ? "toolbar-button-active" : ""}`}
+            aria-pressed={editorState.viewportRole === "validation"}
+            data-testid="viewport-mode-validation"
+            onClick={() => void runCommandById("editor.viewport.useValidation")}
+          >
+            <TriangleAlert size={14} aria-hidden="true" />
+            Validate
+          </button>
+        </div>
         <BevyCanvasHost
           chunks={editorState.chunks}
           props={editorState.props}
           worldViewport={editorState.worldViewport}
           viewportSnapshot={editorState.viewportSnapshot}
           atlasMapping={editorState.atlasMapping}
+          viewportRole={editorState.viewportRole}
           runtimeState={editorState.runtimeState}
           activeMode={activeMode}
           brushSettings={editorState.brushSettings}

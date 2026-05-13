@@ -121,6 +121,7 @@ export interface CommandHistoryEntry {
 export interface EditorUndoSnapshot {
   readonly activeMode: EditorMode;
   readonly activeTool: string;
+  readonly viewportRole: EditorViewportRole;
   readonly selection: Selection;
   readonly brushSettings: BrushSettings;
   readonly propBrushSettings: PropBrushSettings;

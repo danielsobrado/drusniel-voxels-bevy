@@ -27,12 +27,14 @@ describe("editor store actions", () => {
   it("updates active mode, active tool, selection, and brush settings", () => {
     useEditorStore.getState().setActiveMode("water");
     useEditorStore.getState().setActiveTool("shoreline-brush");
+    useEditorStore.getState().setViewportRole("validation");
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
     useEditorStore.getState().updateBrushSettings({ radius: 9, materialBlockId: "sand" });
 
     const state = useEditorStore.getState();
     expect(state.activeMode).toBe("water");
     expect(state.activeTool).toBe("shoreline-brush");
+    expect(state.viewportRole).toBe("validation");
     expect(state.selection.label).toBe("LK_03");
     expect(state.brushSettings.radius).toBe(9);
     expect(state.brushSettings.materialBlockId).toBe("sand");
@@ -633,6 +635,16 @@ describe("editor command registry", () => {
     expect(useEditorStore.getState().viewportOverlays.propBillboards).toBe(true);
   });
 
+  it("switches between authoring and validation viewport roles", async () => {
+    expect(useEditorStore.getState().viewportRole).toBe("authoring");
+
+    await runCommand("editor.viewport.useValidation", createContext());
+    expect(useEditorStore.getState().viewportRole).toBe("validation");
+
+    await runCommand("editor.viewport.useAuthoring", createContext());
+    expect(useEditorStore.getState().viewportRole).toBe("authoring");
+  });
+
   it("refreshes profiler panels from runtime snapshots", async () => {
     class SnapshotRuntimeClient extends MockRuntimeClient {
       snapshotReads = 0;
@@ -801,4 +813,3 @@ describe("editor command registry", () => {
     expect(toastMessages).toContain("error:Save failed.");
   });
 });
-
