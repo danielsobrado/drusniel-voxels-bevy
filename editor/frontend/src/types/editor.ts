@@ -15,6 +15,20 @@ export type EditorMode = (typeof EDITOR_MODES)[number];
 export type RuntimeState = "mock" | "connected" | "disconnected" | "stale" | "error";
 export type RenderQualityPreset = "Low" | "Medium" | "High" | "Performance100";
 export type ViewportModifierKey = "none" | "shift" | "alt" | "control" | "meta";
+
+export const EDITOR_VIEWPORT_ROLES = ["authoring", "validation"] as const;
+export type EditorViewportRole = (typeof EDITOR_VIEWPORT_ROLES)[number];
+
+export const EDITOR_VIEWPORT_IMPLEMENTATIONS = ["liteVoxel", "nativeBevy"] as const;
+export type EditorViewportImplementation = (typeof EDITOR_VIEWPORT_IMPLEMENTATIONS)[number];
+
+export interface EditorViewportContract {
+  readonly role: EditorViewportRole;
+  readonly implementation: EditorViewportImplementation;
+  readonly ownsRuntimeRendering: boolean;
+  readonly ownsWorldPersistence: boolean;
+}
+
 export const EDITOR_DIAGNOSTIC_CATEGORIES = [
   "nativeViewport",
   "frontend",

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ChunkSummary, ProtectedArea, ViewportMeshBuffer, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { RuntimeState, ViewportModifierKey } from "../../types/editor";
+import { LiteVoxelViewport } from "./LiteVoxelViewport";
+import { LITE_VOXEL_VIEWPORT_CONTRACT, NATIVE_BEVY_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
 export interface AreaOverlayState {
   readonly id: string;
@@ -335,6 +337,7 @@ export function BevyCanvasHost({
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const desktopRuntime = hasTauriGlobals();
   const browserPreviewEnabled = !desktopRuntime;
+  const activeViewportContract = browserPreviewEnabled ? LITE_VOXEL_VIEWPORT_CONTRACT : NATIVE_BEVY_VIEWPORT_CONTRACT;
   const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (desktopRuntime ? "pending" : "unsupported"));
   const [nativeViewportMessage, setNativeViewportMessage] = useState("Native Bevy viewport is starting.");
   const samples = useMemo(() => (browserPreviewEnabled ? collectSamples(chunks, worldViewport) : []), [browserPreviewEnabled, chunks, worldViewport]);
@@ -552,10 +555,14 @@ export function BevyCanvasHost({
       ref={hostRef}
       className={`bevy-canvas-host world-viewport-host ${nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
       data-testid="bevy-canvas-host"
+      data-viewport-role={activeViewportContract.role}
+      data-viewport-implementation={activeViewportContract.implementation}
+      data-viewport-runtime-renderer={String(activeViewportContract.ownsRuntimeRendering)}
       aria-label="Runtime world viewport"
     >
       {browserPreviewEnabled ? (
         <>
+          <LiteVoxelViewport chunks={chunks} worldViewport={worldViewport} viewportSnapshot={viewportSnapshot} />
           <canvas
             ref={canvasRef}
             className="world-viewport-canvas"
