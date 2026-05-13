@@ -208,7 +208,6 @@ pub struct Chunk {
 pub enum MeshDirtyReason {
     Lod,
     NeighborLod,
-    Visibility,
     Generation,
     WaterMaterial,
     TerrainMutation,
@@ -220,10 +219,9 @@ impl MeshDirtyReason {
         match self {
             MeshDirtyReason::Lod => 1 << 0,
             MeshDirtyReason::NeighborLod => 1 << 1,
-            MeshDirtyReason::Visibility => 1 << 2,
-            MeshDirtyReason::Generation => 1 << 3,
-            MeshDirtyReason::WaterMaterial => 1 << 4,
-            MeshDirtyReason::TerrainMutation => 1 << 5,
+            MeshDirtyReason::Generation => 1 << 2,
+            MeshDirtyReason::WaterMaterial => 1 << 3,
+            MeshDirtyReason::TerrainMutation => 1 << 4,
         }
     }
 }
@@ -320,10 +318,6 @@ impl Chunk {
         self.dirty
     }
 
-    pub fn mark_dirty(&mut self) {
-        self.dirty = true;
-    }
-
     pub fn mark_dirty_with_reason(&mut self, reason: MeshDirtyReason) {
         self.dirty = true;
         self.dirty_reasons |= reason.bit();
@@ -340,6 +334,11 @@ impl Chunk {
     pub fn clear_dirty(&mut self) {
         self.dirty = false;
         self.dirty_reasons = 0;
+    }
+
+    pub fn reset_dirty_to_reason(&mut self, reason: MeshDirtyReason) {
+        self.dirty = true;
+        self.dirty_reasons = reason.bit();
     }
 
     pub fn set_mesh_entity(&mut self, entity: Entity) {

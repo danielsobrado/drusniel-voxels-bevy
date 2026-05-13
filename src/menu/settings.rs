@@ -2344,9 +2344,7 @@ pub fn handle_meshing_settings(
             }
             settings_state.greedy_meshing = option.0;
             world_config.greedy_meshing = option.0;
-            for (_, chunk) in world.chunk_entries_mut() {
-                chunk.mark_dirty_with_reason(MeshDirtyReason::WaterMaterial);
-            }
+            world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::WaterMaterial);
         }
     }
 }

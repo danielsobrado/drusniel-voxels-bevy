@@ -964,7 +964,6 @@ fn dirty_reason_names(flags: u8) -> Vec<String> {
     [
         (MeshDirtyReason::Lod, "LOD"),
         (MeshDirtyReason::NeighborLod, "NeighborLOD"),
-        (MeshDirtyReason::Visibility, "Visibility"),
         (MeshDirtyReason::Generation, "Generation"),
         (MeshDirtyReason::WaterMaterial, "WaterMaterial"),
         (MeshDirtyReason::TerrainMutation, "TerrainMutation"),

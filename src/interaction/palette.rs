@@ -7,7 +7,7 @@ use crate::menu::PauseMenuState;
 use crate::props::{Prop, PropAssets, PropConfig, PropType};
 use crate::voxel::types::Voxel;
 use crate::voxel::types::VoxelType;
-use crate::voxel::world::{VoxelEditResult, VoxelWorld};
+use crate::voxel::world::VoxelWorld;
 use crate::world_rules::ProtectedAreaRegistry;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -145,12 +145,7 @@ fn set_edit_mode_state(
 
     if !enabled {
         if let Some(dragged) = drag_state.dragged_block.take() {
-            if matches!(
-                world.set_voxel(dragged.original_position, dragged.block_type),
-                VoxelEditResult::Applied
-            ) {
-                crate::interaction::editing::mark_neighbors_dirty(world, dragged.original_position);
-            }
+            world.set_voxel(dragged.original_position, dragged.block_type);
         }
         drag_state.rotation_degrees = 0.0;
     }

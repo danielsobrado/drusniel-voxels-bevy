@@ -3959,8 +3959,10 @@ mod tests {
     #[test]
     fn invalid_below_floor_water_creates_no_mesh() {
         let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
-        let chunk = world.get_chunk_mut(IVec3::ZERO).unwrap();
-        chunk.set(UVec3::new(8, 0, 8), VoxelType::Water);
+        {
+            let mut chunk = world.get_chunk_mut(IVec3::ZERO).unwrap();
+            chunk.set(UVec3::new(8, 0, 8), VoxelType::Water);
+        }
 
         let mesh = meshed_chunk(&world, IVec3::ZERO);
 

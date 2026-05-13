@@ -674,7 +674,9 @@ impl Plugin for VoxelPlugin {
                 update_chunk_lod_system
                     .after(apply_visibility_culling_system)
                     .after(adjust_lod_for_integrated_gpu),
-                // Stage 5: Meshing (needs LOD from stage 4)
+                // Stage 5: Meshing consumes all mesh-dirty producers above. Systems
+                // that create mesh dirtiness later in Update must run before this or
+                // intentionally leave their chunks queued for the next frame.
                 mesh_dirty_chunks_system.after(update_chunk_lod_system),
             ),
         )
@@ -781,7 +783,8 @@ fn expected_world_chunk_count(size_chunks: IVec3) -> usize {
 fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
     let mut changed = false;
 
-    for (chunk_pos, chunk) in world.chunk_entries_mut() {
+    let chunk_positions: Vec<IVec3> = world.chunk_positions().collect();
+    for chunk_pos in chunk_positions {
         let chunk_min_y = chunk_pos.y * CHUNK_SIZE_I32;
         let chunk_max_y = chunk_min_y + CHUNK_SIZE_I32 - 1;
 
@@ -800,6 +803,9 @@ fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
         }
 
         let mut chunk_changed = false;
+        let Some(mut chunk) = world.get_chunk_mut(chunk_pos) else {
+            continue;
+        };
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 for y in 0..=max_local_y as u32 {
@@ -813,7 +819,7 @@ fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
         }
 
         if chunk_changed {
-            chunk.mark_dirty();
+            chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
             changed = true;
         }
     }
@@ -1429,8 +1435,7 @@ fn generate_chunk_async(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chun
 
     // Compute uniformity eagerly to enable skipping empty/solid chunks during meshing
     chunk.compute_uniformity();
-    chunk.clear_dirty();
-    chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
+    chunk.reset_dirty_to_reason(MeshDirtyReason::Generation);
     (chunk, stats)
 }
 
@@ -1536,9 +1541,7 @@ fn mark_chunk_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3, reason: MeshD
                 }
 
                 let neighbor_pos = chunk_pos + IVec3::new(dx, dy, dz);
-                if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
-                    neighbor.mark_dirty_with_reason(reason);
-                }
+                world.mark_chunk_dirty_with_reason(neighbor_pos, reason);
             }
         }
     }
@@ -1568,7 +1571,6 @@ fn mesh_lod_level_for_surface_nets_cap(
 struct MeshDirtyReasonCounts {
     lod: u32,
     neighbor_lod: u32,
-    visibility: u32,
     generation: u32,
     water_material: u32,
     terrain_mutation: u32,
@@ -1581,9 +1583,6 @@ impl MeshDirtyReasonCounts {
         }
         if flags & MeshDirtyReason::NeighborLod.bit() != 0 {
             self.neighbor_lod += 1;
-        }
-        if flags & MeshDirtyReason::Visibility.bit() != 0 {
-            self.visibility += 1;
         }
         if flags & MeshDirtyReason::Generation.bit() != 0 {
             self.generation += 1;
@@ -1668,7 +1667,6 @@ fn mesh_dirty_chunks_system(
         && reason_counts.terrain_mutation == 0
         && (reason_counts.lod > 0
             || reason_counts.neighbor_lod > 0
-            || reason_counts.visibility > 0
             || reason_counts.water_material > 0);
     let chunks_per_frame_limit = if lod_churn_only {
         MAX_LOD_DIRTY_CHUNKS_PER_FRAME
@@ -1684,7 +1682,8 @@ fn mesh_dirty_chunks_system(
     for chunk_pos in dirty_chunks {
         // Throttle expensive mesh generation, but let cheap empty/culled clears
         // drain faster so dirty queues do not stay backed up for hundreds of frames.
-        let dirty_visit_limit = if surface_nets_chunks_deferred_for_halo > 0
+        let dirty_visit_limit = if !lod_churn_only
+            && surface_nets_chunks_deferred_for_halo > 0
             && chunks_meshed as usize <= chunks_per_frame_limit
         {
             MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
@@ -1697,7 +1696,7 @@ fn mesh_dirty_chunks_system(
         }
         chunks_processed += 1;
         // Compute uniformity if unknown (lazy evaluation)
-        if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+        if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
             if chunk.uniformity() == ChunkUniformity::Unknown {
                 chunk.compute_uniformity();
             }
@@ -1717,7 +1716,7 @@ fn mesh_dirty_chunks_system(
 
         // Skip meshing for culled chunks
         if lod_level == LodLevel::Culled {
-            if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+            if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
                 if let Some(entity) = chunk.mesh_entity() {
                     commands.entity(entity).despawn();
                     chunk.clear_mesh_entity();
@@ -1752,7 +1751,7 @@ fn mesh_dirty_chunks_system(
             if empty_surface_neighbor {
                 terrain_mesh_lod_seam_repairs += 1;
             } else {
-                if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+                if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
                     if let Some(entity) = chunk.mesh_entity() {
                         commands.entity(entity).despawn();
                         chunk.clear_mesh_entity();
@@ -1854,7 +1853,7 @@ fn mesh_dirty_chunks_system(
 
         // Step 2: Update chunk state using mutable borrow
         let apply_start = timing.enabled.then(Instant::now);
-        if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
+        if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
             // Clear dirty flag
             chunk.clear_dirty();
 
@@ -2147,7 +2146,7 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Visit Limit",
-        if surface_nets_chunks_deferred_for_halo > 0 {
+        if !lod_churn_only && surface_nets_chunks_deferred_for_halo > 0 {
             MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
         } else {
             MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
@@ -2173,11 +2172,6 @@ fn mesh_dirty_chunks_system(
         frame.0,
         "Mesh Dirty Reason Neighbor LOD",
         reason_counts.neighbor_lod as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "Mesh Dirty Reason Visibility",
-        reason_counts.visibility as f64,
     );
     timing.record_count(
         frame.0,
@@ -3541,10 +3535,10 @@ fn update_chunk_face_visibility_system(
         .collect();
 
     for pos in dirty_positions {
-        if let Some(chunk) = world.get_chunk_mut(pos) {
+        if let Some(mut chunk) = world.get_chunk_mut(pos) {
             // Ensure uniformity is computed first (needed by visibility algorithm)
             chunk.compute_uniformity();
-            let visibility = compute_face_visibility(chunk);
+            let visibility = compute_face_visibility(&chunk);
             chunk.set_face_visibility(visibility);
             chunk.clear_visibility_dirty();
         }
@@ -3714,7 +3708,7 @@ fn update_chunk_lod_system(
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
     let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
-    for (chunk_pos, chunk) in world.chunk_entries_mut() {
+    for (chunk_pos, chunk) in world.chunk_entries() {
         let world_pos = VoxelWorld::chunk_to_world(*chunk_pos);
         let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = chunk_center.distance(camera_pos);
@@ -3753,7 +3747,7 @@ fn update_chunk_lod_system(
     for (chunk_pos, _current_lod, target_lod, _distance) in
         lod_candidates.into_iter().take(MAX_LOD_CHANGES_PER_UPDATE)
     {
-        let Some(chunk) = world.get_chunk_mut(chunk_pos) else {
+        let Some(mut chunk) = world.get_chunk_mut(chunk_pos) else {
             continue;
         };
         if !chunk.set_lod_level(target_lod) {

@@ -188,9 +188,7 @@ pub fn load_settings_on_startup(
     let was_greedy = world_config.greedy_meshing;
     world_config.greedy_meshing = settings_state.greedy_meshing;
     if was_greedy != world_config.greedy_meshing {
-        for (_, chunk) in world.chunk_entries_mut() {
-            chunk.mark_dirty_with_reason(MeshDirtyReason::WaterMaterial);
-        }
+        world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::WaterMaterial);
     }
 
     apply_player_settings(&settings_state, &mut player_config);

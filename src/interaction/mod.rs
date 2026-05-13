@@ -213,7 +213,6 @@ fn try_break_block(
     ) {
         VoxelEditResult::Applied => {
             held.block_type = voxel_type;
-            editing::mark_neighbors_dirty(world, pos);
             Ok(pos)
         }
         VoxelEditResult::NoChange => {
@@ -335,10 +334,7 @@ fn try_place_block(
     }
 
     match world.set_voxel_with_rules(place_pos, held.block_type, intent, protected_areas) {
-        VoxelEditResult::Applied => {
-            editing::mark_neighbors_dirty(world, place_pos);
-            Ok(place_pos)
-        }
+        VoxelEditResult::Applied => Ok(place_pos),
         VoxelEditResult::NoChange => Ok(place_pos),
         result => Err(placement_error_from_edit_result(place_pos, result)),
     }

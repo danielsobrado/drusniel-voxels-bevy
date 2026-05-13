@@ -436,9 +436,7 @@ fn load_world_data_into_runtime(
 
     let metadata = persistence::editor_world_metadata_from_data_for_bridge(&data, &save_path);
     let mut loaded_world = VoxelWorld::from_data(data);
-    for (_, chunk) in loaded_world.chunk_entries_mut() {
-        chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
-    }
+    loaded_world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::Generation);
 
     world.insert_resource(WorldBounds::from_size_chunks(
         loaded_world.world_size_chunks(),

@@ -427,11 +427,7 @@ pub fn toggle_mesh_mode(
         // This ensures blocky terrain applies to distant chunks too, not just LOD0
         lod_settings.low_detail_mode = mesh_settings.mode;
         // Mark all chunks dirty to trigger re-meshing
-        for chunk_pos in world.all_chunk_positions().collect::<Vec<_>>() {
-            if let Some(chunk) = world.get_chunk_mut(chunk_pos) {
-                chunk.mark_dirty_with_reason(MeshDirtyReason::WaterMaterial);
-            }
-        }
+        world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::WaterMaterial);
         info!(
             "Mesh mode: {:?} (all LODs) (F5 to toggle)",
             mesh_settings.mode

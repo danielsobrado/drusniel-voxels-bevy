@@ -2,7 +2,7 @@
 
 use bevy::math::{IVec3, UVec3};
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_VOLUME};
-use voxel_builder::voxel::chunk::{Chunk, ChunkData, FaceVisibility, LodLevel};
+use voxel_builder::voxel::chunk::{Chunk, ChunkData, FaceVisibility, LodLevel, MeshDirtyReason};
 use voxel_builder::voxel::types::VoxelType;
 
 #[test]
@@ -78,11 +78,12 @@ fn clear_dirty_works() {
 }
 
 #[test]
-fn mark_dirty_works() {
+fn mark_dirty_with_reason_works() {
     let mut chunk = Chunk::new(IVec3::ZERO);
     chunk.clear_dirty();
-    chunk.mark_dirty();
+    chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
     assert!(chunk.is_dirty());
+    assert!(chunk.has_dirty_reason(MeshDirtyReason::Generation));
 }
 
 #[test]

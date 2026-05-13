@@ -1349,11 +1349,9 @@ fn mark_chunk_dirty(world: &mut World, chunk_pos: IVec3) -> Result<(), String> {
     let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
         return Err("VoxelWorld resource is not available.".to_string());
     };
-    let Some(chunk) = voxel_world.get_chunk_mut(chunk_pos) else {
+    if !voxel_world.mark_chunk_dirty_with_reason(chunk_pos, MeshDirtyReason::Generation) {
         return Err(format!("Chunk {chunk_pos:?} does not exist."));
-    };
-
-    chunk.mark_dirty_with_reason(MeshDirtyReason::Generation);
+    }
     Ok(())
 }
 

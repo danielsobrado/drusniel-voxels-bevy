@@ -1,11 +1,12 @@
 use crate::constants::{BEDROCK_DEPTH, CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WORLD_KILL_Y};
 use crate::terrain::generation::config::terrain_config_fingerprint;
-use crate::voxel::chunk::Chunk;
+use crate::voxel::chunk::{Chunk, MeshDirtyReason};
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorldBounds {
@@ -218,15 +219,47 @@ impl VoxelSample {
 #[derive(Resource)]
 pub struct VoxelWorld {
     chunks: HashMap<IVec3, Chunk>,
+    dirty_chunks: HashSet<IVec3>,
     world_size_chunks: IVec3,
     bounds: WorldBounds,
     edit_stats: VoxelEditStats,
+}
+
+pub struct ChunkMut<'a> {
+    position: IVec3,
+    chunk: &'a mut Chunk,
+    dirty_chunks: &'a mut HashSet<IVec3>,
+}
+
+impl Deref for ChunkMut<'_> {
+    type Target = Chunk;
+
+    fn deref(&self) -> &Self::Target {
+        self.chunk
+    }
+}
+
+impl DerefMut for ChunkMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.chunk
+    }
+}
+
+impl Drop for ChunkMut<'_> {
+    fn drop(&mut self) {
+        if self.chunk.is_dirty() {
+            self.dirty_chunks.insert(self.position);
+        } else {
+            self.dirty_chunks.remove(&self.position);
+        }
+    }
 }
 
 impl VoxelWorld {
     pub fn new(size_chunks: IVec3) -> Self {
         Self {
             chunks: HashMap::new(),
+            dirty_chunks: HashSet::new(),
             world_size_chunks: size_chunks,
             bounds: WorldBounds::from_size_chunks(size_chunks),
             edit_stats: VoxelEditStats::default(),
@@ -238,8 +271,13 @@ impl VoxelWorld {
         self.chunks.get(&chunk_pos)
     }
 
-    pub fn get_chunk_mut(&mut self, chunk_pos: IVec3) -> Option<&mut Chunk> {
-        self.chunks.get_mut(&chunk_pos)
+    pub fn get_chunk_mut(&mut self, chunk_pos: IVec3) -> Option<ChunkMut<'_>> {
+        let chunk = self.chunks.get_mut(&chunk_pos)?;
+        Some(ChunkMut {
+            position: chunk_pos,
+            chunk,
+            dirty_chunks: &mut self.dirty_chunks,
+        })
     }
 
     pub fn chunk_exists(&self, chunk_pos: IVec3) -> bool {
@@ -247,7 +285,32 @@ impl VoxelWorld {
     }
 
     pub fn insert_chunk(&mut self, chunk: Chunk) {
-        self.chunks.insert(chunk.position(), chunk);
+        let position = chunk.position();
+        if chunk.is_dirty() {
+            self.dirty_chunks.insert(position);
+        } else {
+            self.dirty_chunks.remove(&position);
+        }
+        self.chunks.insert(position, chunk);
+    }
+
+    pub fn mark_chunk_dirty_with_reason(
+        &mut self,
+        chunk_pos: IVec3,
+        reason: MeshDirtyReason,
+    ) -> bool {
+        let Some(mut chunk) = self.get_chunk_mut(chunk_pos) else {
+            return false;
+        };
+        chunk.mark_dirty_with_reason(reason);
+        true
+    }
+
+    pub fn mark_all_loaded_chunks_dirty_with_reason(&mut self, reason: MeshDirtyReason) {
+        let positions: Vec<IVec3> = self.chunks.keys().copied().collect();
+        for chunk_pos in positions {
+            self.mark_chunk_dirty_with_reason(chunk_pos, reason);
+        }
     }
 
     // Voxel access (world coordinates)
@@ -357,40 +420,40 @@ impl VoxelWorld {
         let chunk_pos = Self::world_to_chunk(world_pos);
         let local_pos = Self::world_to_local(world_pos);
 
-        if let Some(chunk) = self.get_chunk_mut(chunk_pos) {
+        let Some(mut chunk) = self.get_chunk_mut(chunk_pos) else {
+            return VoxelEditResult::RejectedMissingChunk;
+        };
+        {
             let previous = chunk.get(local_pos);
             if previous == voxel {
                 return VoxelEditResult::NoChange;
             }
             chunk.set(local_pos, voxel);
-            for dz in -1..=1 {
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        if dx == 0 && dy == 0 && dz == 0 {
-                            continue;
-                        }
-                        let touches_neighbor = (dx < 0 && local_pos.x <= 1)
-                            || (dx > 0 && local_pos.x >= (CHUNK_SIZE_I32 - 2) as u32)
-                            || (dy < 0 && local_pos.y <= 1)
-                            || (dy > 0 && local_pos.y >= (CHUNK_SIZE_I32 - 2) as u32)
-                            || (dz < 0 && local_pos.z <= 1)
-                            || (dz > 0 && local_pos.z >= (CHUNK_SIZE_I32 - 2) as u32);
-                        if touches_neighbor {
-                            if let Some(neighbor) =
-                                self.get_chunk_mut(chunk_pos + IVec3::new(dx, dy, dz))
-                            {
-                                neighbor.mark_dirty_with_reason(
-                                    crate::voxel::chunk::MeshDirtyReason::TerrainMutation,
-                                );
-                            }
-                        }
+        }
+        drop(chunk);
+
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
+                    }
+                    let touches_neighbor = (dx < 0 && local_pos.x <= 1)
+                        || (dx > 0 && local_pos.x >= (CHUNK_SIZE_I32 - 2) as u32)
+                        || (dy < 0 && local_pos.y <= 1)
+                        || (dy > 0 && local_pos.y >= (CHUNK_SIZE_I32 - 2) as u32)
+                        || (dz < 0 && local_pos.z <= 1)
+                        || (dz > 0 && local_pos.z >= (CHUNK_SIZE_I32 - 2) as u32);
+                    if touches_neighbor {
+                        self.mark_chunk_dirty_with_reason(
+                            chunk_pos + IVec3::new(dx, dy, dz),
+                            MeshDirtyReason::TerrainMutation,
+                        );
                     }
                 }
             }
-            VoxelEditResult::Applied
-        } else {
-            VoxelEditResult::RejectedMissingChunk
         }
+        VoxelEditResult::Applied
     }
 
     // Coordinate conversion
@@ -416,14 +479,7 @@ impl VoxelWorld {
 
     // Iteration
     pub fn dirty_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
-        self.chunks
-            .iter()
-            .filter(|(_, chunk)| chunk.is_dirty())
-            .map(|(pos, _)| *pos)
-    }
-
-    pub fn chunk_entries_mut(&mut self) -> impl Iterator<Item = (&IVec3, &mut Chunk)> {
-        self.chunks.iter_mut()
+        self.dirty_chunks.iter().copied()
     }
 
     /// Returns an iterator over all chunk positions and their chunks (immutable).
@@ -680,6 +736,20 @@ mod tests {
             VoxelEditResult::Applied
         );
         assert_eq!(world.sample_voxel_raw(pos), Some(VoxelType::Air));
+    }
+
+    #[test]
+    fn dirty_chunk_membership_tracks_guarded_mutations() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+
+        assert_eq!(world.dirty_chunks().collect::<Vec<_>>(), vec![IVec3::ZERO]);
+
+        world.get_chunk_mut(IVec3::ZERO).unwrap().clear_dirty();
+        assert_eq!(world.dirty_chunks().count(), 0);
+
+        world.mark_chunk_dirty_with_reason(IVec3::ZERO, MeshDirtyReason::Generation);
+        assert_eq!(world.dirty_chunks().collect::<Vec<_>>(), vec![IVec3::ZERO]);
     }
 
     #[test]
