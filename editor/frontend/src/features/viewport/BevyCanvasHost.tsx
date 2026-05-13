@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ChunkSummary, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
-import type { RuntimeState, ViewportModifierKey } from "../../types/editor";
+import type { ChunkSummary, PropInstance, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
+import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LiteVoxelViewport } from "./LiteVoxelViewport";
 import { LITE_VOXEL_VIEWPORT_CONTRACT, NATIVE_BEVY_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
@@ -15,9 +15,15 @@ export interface AreaOverlayState {
 
 interface BevyCanvasHostProps {
   readonly chunks: readonly ChunkSummary[];
+  readonly props: readonly PropInstance[];
   readonly worldViewport: WorldViewportPreview | null;
   readonly viewportSnapshot: ViewportSnapshot | null;
   readonly runtimeState: RuntimeState;
+  readonly activeMode: EditorMode;
+  readonly brushSettings: BrushSettings;
+  readonly selection: Selection;
+  readonly targetedVoxel: readonly [number, number, number];
+  readonly viewportOverlays: ViewportOverlayState;
   readonly areaOverlays: readonly AreaOverlayState[];
   readonly showProtectedAreas: boolean;
   readonly waterDebug: boolean;
@@ -128,9 +134,15 @@ const nativeViewportDebug = (...items: unknown[]) => {
 
 export function BevyCanvasHost({
   chunks,
+  props,
   worldViewport,
   viewportSnapshot,
   runtimeState,
+  activeMode,
+  brushSettings,
+  selection,
+  targetedVoxel,
+  viewportOverlays,
   areaOverlays,
   showProtectedAreas,
   waterDebug,
@@ -284,9 +296,15 @@ export function BevyCanvasHost({
       {browserPreviewEnabled ? (
         <LiteVoxelViewport
           chunks={chunks}
+          props={props}
           worldViewport={worldViewport}
           viewportSnapshot={viewportSnapshot}
           runtimeState={runtimeState}
+          activeMode={activeMode}
+          brushSettings={brushSettings}
+          selection={selection}
+          targetedVoxel={targetedVoxel}
+          viewportOverlays={viewportOverlays}
           propPlacementEnabled={propPlacementEnabled}
           onPlaceProp={onPlaceProp}
           selectedPropRotationY={selectedPropRotationY}

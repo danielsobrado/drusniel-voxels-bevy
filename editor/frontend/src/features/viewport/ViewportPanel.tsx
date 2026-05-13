@@ -357,9 +357,15 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
       <div className="panel-body viewport-body">
         <BevyCanvasHost
           chunks={editorState.chunks}
+          props={editorState.props}
           worldViewport={editorState.worldViewport}
           viewportSnapshot={editorState.viewportSnapshot}
           runtimeState={editorState.runtimeState}
+          activeMode={activeMode}
+          brushSettings={editorState.brushSettings}
+          selection={editorState.selection}
+          targetedVoxel={targetedVoxel}
+          viewportOverlays={overlays}
           areaOverlays={areaOverlays}
           showProtectedAreas={overlays.protectedAreas}
           waterDebug={overlays.waterDebug}

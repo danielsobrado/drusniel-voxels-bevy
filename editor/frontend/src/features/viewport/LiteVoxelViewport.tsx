@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { ChunkSummary, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
-import type { RuntimeState, ViewportModifierKey } from "../../types/editor";
+import type { ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
 export interface LiteVoxelViewportProps {
   readonly chunks: readonly ChunkSummary[];
+  readonly props: readonly PropInstance[];
   readonly worldViewport: WorldViewportPreview | null;
   readonly viewportSnapshot: ViewportSnapshot | null;
   readonly runtimeState: RuntimeState;
+  readonly activeMode: EditorMode;
+  readonly brushSettings: BrushSettings;
+  readonly selection: Selection;
+  readonly targetedVoxel: readonly [number, number, number];
+  readonly viewportOverlays: ViewportOverlayState;
   readonly propPlacementEnabled?: boolean;
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
   readonly selectedPropRotationY?: number;
@@ -38,6 +44,34 @@ interface ModifierState {
   readonly altKey: boolean;
   readonly ctrlKey: boolean;
   readonly metaKey: boolean;
+}
+
+interface ProjectedPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ChunkOverlayShape {
+  readonly id: string;
+  readonly label: string;
+  readonly points: readonly ProjectedPoint[];
+  readonly dirty: boolean;
+  readonly selected: boolean;
+}
+
+interface BrushPreviewShape {
+  readonly center: ProjectedPoint;
+  readonly radius: number;
+  readonly invalid: boolean;
+  readonly affected: readonly ProjectedPoint[];
+}
+
+interface PropOverlayShape {
+  readonly id: string;
+  readonly label: string;
+  readonly point: ProjectedPoint;
+  readonly radius: number;
+  readonly selected: boolean;
 }
 
 const MATERIAL_COLORS: Record<string, string> = {
@@ -136,6 +170,81 @@ const projectIso = (position: readonly [number, number, number], view: ViewState
   y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
 });
 
+const pointsToSvg = (points: readonly ProjectedPoint[]) => points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+
+const buildChunkOverlayShapes = (
+  chunks: readonly ChunkSummary[],
+  selection: Selection,
+  view: ViewState,
+): readonly ChunkOverlayShape[] =>
+  chunks.map((chunk) => {
+    const [chunkX, chunkY, chunkZ] = chunk.coordinate;
+    const minX = chunkX * 16;
+    const minZ = chunkZ * 16;
+    const maxX = minX + 16;
+    const maxZ = minZ + 16;
+    const y = chunkY * 16 + 1;
+
+    return {
+      id: chunk.id,
+      label: chunk.label,
+      points: [
+        projectIso([minX, y, minZ], view),
+        projectIso([maxX, y, minZ], view),
+        projectIso([maxX, y, maxZ], view),
+        projectIso([minX, y, maxZ], view),
+      ],
+      dirty: chunk.dirty || chunk.meshStatus === "dirty" || chunk.meshStatus === "queued",
+      selected: selection.kind === "chunk" && selection.id === chunk.id,
+    };
+  });
+
+const buildBrushPreviewShape = (
+  brushSettings: BrushSettings,
+  targetedVoxel: readonly [number, number, number],
+  activeMode: EditorMode,
+  view: ViewState,
+): BrushPreviewShape | null => {
+  if (activeMode !== "voxel_sculpt" && activeMode !== "voxel_paint") {
+    return null;
+  }
+
+  const center = projectIso(targetedVoxel, view);
+  const radius = clamp(brushSettings.radius * 5.4 * view.zoom, 8, 120);
+  const invalid = targetedVoxel[1] <= 0;
+  const affected: ProjectedPoint[] = [];
+  const previewStep = Math.max(1, Math.round(brushSettings.radius / 3));
+
+  for (let x = -previewStep; x <= previewStep; x += previewStep) {
+    for (let z = -previewStep; z <= previewStep; z += previewStep) {
+      const distance = Math.sqrt(x * x + z * z);
+      if (brushSettings.brushShape === "sphere" && distance > previewStep * 1.35) {
+        continue;
+      }
+      affected.push(projectIso([targetedVoxel[0] + x, targetedVoxel[1], targetedVoxel[2] + z], view));
+    }
+  }
+
+  return { center, radius, invalid, affected };
+};
+
+const buildPropOverlayShapes = (
+  props: readonly PropInstance[],
+  selection: Selection,
+  view: ViewState,
+): readonly PropOverlayShape[] =>
+  props.map((prop) => {
+    const position = prop.transform.position ?? prop.position;
+    const scale = prop.transform.scale[0] ?? 1;
+    return {
+      id: prop.id,
+      label: prop.name,
+      point: projectIso(position, view),
+      radius: clamp((6 + scale * 8) * view.zoom, 5, 28),
+      selected: selection.kind === "prop" && selection.id === prop.id,
+    };
+  });
+
 const nearestPlacementSample = (
   samples: readonly WorldSurfaceSample[],
   view: ViewState,
@@ -204,9 +313,15 @@ const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer,
 export const LiteVoxelViewport = Object.assign(
   function LiteVoxelViewport({
     chunks,
+    props,
     worldViewport,
     viewportSnapshot,
     runtimeState,
+    activeMode,
+    brushSettings,
+    selection,
+    targetedVoxel,
+    viewportOverlays,
     propPlacementEnabled = false,
     onPlaceProp,
     selectedPropRotationY,
@@ -229,6 +344,10 @@ export const LiteVoxelViewport = Object.assign(
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
     const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
     const waterSampleCount = samples.filter((sample) => sample.water).length;
+    const chunkOverlayShapes = useMemo(() => buildChunkOverlayShapes(chunks, selection, view), [chunks, selection, view]);
+    const brushPreviewShape = useMemo(() => buildBrushPreviewShape(brushSettings, targetedVoxel, activeMode, view), [activeMode, brushSettings, targetedVoxel, view]);
+    const propOverlayShapes = useMemo(() => buildPropOverlayShapes(props, selection, view), [props, selection, view]);
+    const selectedVoxelPoint = selection.kind === "voxel" ? projectIso(selection.position, view) : null;
 
     const fitView = useCallback(() => {
       setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
@@ -411,6 +530,52 @@ export const LiteVoxelViewport = Object.assign(
             }
           }}
         />
+
+        {viewportOverlays.voxelGrid ? <div className="lite-viewport-grid-overlay" aria-hidden="true" data-testid="viewport-voxel-grid-overlay" /> : null}
+
+        {viewportOverlays.wireframe ? <div className="lite-viewport-wire-overlay" aria-hidden="true" data-testid="viewport-wireframe-overlay" /> : null}
+
+        <svg className="lite-viewport-authoring-overlay" data-testid="lite-viewport-authoring-overlay" aria-hidden="true">
+          {(viewportOverlays.chunkBounds || chunkOverlayShapes.some((shape) => shape.dirty || shape.selected)) &&
+            chunkOverlayShapes.map((shape) => (
+              <g key={shape.id} data-testid={`viewport-chunk-overlay-${shape.id}`}>
+                {shape.dirty ? (
+                  <polygon className="lite-viewport-dirty-chunk" points={pointsToSvg(shape.points)} />
+                ) : null}
+                {viewportOverlays.chunkBounds || shape.selected ? (
+                  <polygon className={shape.selected ? "lite-viewport-selected-chunk" : "lite-viewport-chunk-bound"} points={pointsToSvg(shape.points)} />
+                ) : null}
+              </g>
+            ))}
+
+          {selectedVoxelPoint ? (
+            <g data-testid="viewport-selected-voxel-overlay">
+              <circle className="lite-viewport-selected-voxel-ring" cx={selectedVoxelPoint.x} cy={selectedVoxelPoint.y} r={9 * view.zoom} />
+              <circle className="lite-viewport-selected-voxel-dot" cx={selectedVoxelPoint.x} cy={selectedVoxelPoint.y} r={2.5} />
+            </g>
+          ) : null}
+
+          {(viewportOverlays.propBounds || propOverlayShapes.some((shape) => shape.selected)) &&
+            propOverlayShapes.map((shape) => (
+              <g key={shape.id} data-testid={`viewport-prop-bound-overlay-${shape.id}`}>
+                <circle className={shape.selected ? "lite-viewport-selected-prop-bound" : "lite-viewport-prop-bound"} cx={shape.point.x} cy={shape.point.y} r={shape.radius} />
+                {shape.selected ? <circle className="lite-viewport-selected-prop-dot" cx={shape.point.x} cy={shape.point.y} r={2.5} /> : null}
+              </g>
+            ))}
+
+          {brushPreviewShape ? (
+            <g data-testid="viewport-brush-preview-overlay">
+              {brushPreviewShape.invalid ? (
+                <circle className="lite-viewport-invalid-target" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={brushPreviewShape.radius} />
+              ) : null}
+              {brushPreviewShape.affected.map((point, index) => (
+                <circle key={`${point.x}-${point.y}-${index}`} className="lite-viewport-affected-voxel" cx={point.x} cy={point.y} r={2.4} />
+              ))}
+              <circle className="lite-viewport-brush-radius" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={brushPreviewShape.radius} />
+              <circle className="lite-viewport-brush-center" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={3.2} />
+            </g>
+          ) : null}
+        </svg>
 
         <div className="viewport-canvas-controls" aria-label="Viewport controls">
           <button type="button" className="icon-button" title="Fit loaded world" aria-label="Fit loaded world" onClick={fitView}>

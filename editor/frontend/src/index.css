@@ -1022,6 +1022,7 @@ body {
 .viewport-area-overlay-canvas {
   position: absolute;
   inset: 0;
+  z-index: 2;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -1834,6 +1835,117 @@ input {
 
 .world-viewport-canvas:focus-visible {
   box-shadow: inset 0 0 0 2px rgba(168, 129, 202, 0.75);
+}
+
+.lite-viewport-grid-overlay,
+.lite-viewport-wire-overlay,
+.lite-viewport-authoring-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.lite-viewport-grid-overlay {
+  opacity: 0.5;
+  background-image:
+    linear-gradient(30deg, rgba(138, 190, 255, 0.16) 1px, transparent 1px),
+    linear-gradient(150deg, rgba(138, 190, 255, 0.12) 1px, transparent 1px);
+  background-position:
+    0 0,
+    0 0;
+  background-size:
+    34px 20px,
+    34px 20px;
+}
+
+.lite-viewport-wire-overlay {
+  opacity: 0.45;
+  background-image:
+    linear-gradient(0deg, rgba(230, 232, 236, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 232, 236, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.lite-viewport-chunk-bound {
+  fill: transparent;
+  stroke: rgba(142, 206, 255, 0.52);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+}
+
+.lite-viewport-selected-chunk {
+  fill: rgba(80, 174, 255, 0.1);
+  stroke: rgba(123, 211, 255, 0.92);
+  stroke-width: 2;
+}
+
+.lite-viewport-dirty-chunk {
+  fill: rgba(245, 165, 36, 0.16);
+  stroke: rgba(245, 165, 36, 0.78);
+  stroke-width: 1.5;
+}
+
+.lite-viewport-selected-voxel-ring,
+.lite-viewport-brush-radius {
+  fill: transparent;
+  stroke-width: 2;
+}
+
+.lite-viewport-selected-voxel-ring {
+  stroke: rgba(78, 204, 255, 0.95);
+}
+
+.lite-viewport-selected-voxel-dot,
+.lite-viewport-brush-center {
+  fill: rgba(215, 244, 255, 0.95);
+}
+
+.lite-viewport-brush-radius {
+  stroke: rgba(168, 129, 202, 0.9);
+  stroke-dasharray: 7 5;
+}
+
+.lite-viewport-affected-voxel {
+  fill: rgba(168, 129, 202, 0.58);
+  stroke: rgba(234, 221, 255, 0.56);
+  stroke-width: 0.8;
+}
+
+.lite-viewport-prop-bound,
+.lite-viewport-selected-prop-bound {
+  fill: rgba(255, 255, 255, 0.02);
+  stroke-width: 1.4;
+}
+
+.lite-viewport-prop-bound {
+  stroke: rgba(126, 236, 180, 0.58);
+  stroke-dasharray: 4 4;
+}
+
+.lite-viewport-selected-prop-bound {
+  fill: rgba(126, 236, 180, 0.12);
+  stroke: rgba(126, 236, 180, 0.95);
+  stroke-width: 2;
+}
+
+.lite-viewport-selected-prop-dot {
+  fill: rgba(218, 255, 233, 0.95);
+}
+
+.lite-viewport-invalid-target {
+  fill: rgba(229, 76, 89, 0.18);
+  stroke: rgba(255, 116, 128, 0.9);
+  stroke-width: 2;
+}
+
+.world-viewport-host .canvas-reticle,
+.world-viewport-host .canvas-label,
+.world-viewport-host .minimap-canvas,
+.world-viewport-host .viewport-water-overlay {
+  z-index: 3;
 }
 
 .viewport-canvas-controls {
