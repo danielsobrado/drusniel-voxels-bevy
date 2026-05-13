@@ -935,6 +935,7 @@ fn bench_world_persistence(scene: &BenchScene) -> WorldPersistence {
         persistence.path = path;
         persistence.force_regenerate = scene.world_cache_regenerate;
         persistence.auto_save = false;
+        persistence.allow_terrain_fingerprint_mismatch = true;
     }
 
     persistence
@@ -2355,6 +2356,10 @@ fn save_bench_world_cache_if_ready(scene: &BenchScene, world: &VoxelWorld) {
         return;
     };
 
+    if path.exists() && !scene.world_cache_regenerate {
+        return;
+    }
+
     let expected_chunks = expected_bench_world_chunks(world.world_size_chunks());
     let loaded_chunks = world.chunk_entries().count();
     if loaded_chunks != expected_chunks {
@@ -3589,6 +3594,67 @@ hold_frames = 30
         assert!(scene.startup_trace.capture_csv);
         assert_eq!(scene.startup_trace.max_phase_frames, 12_000);
         assert_eq!(scene.checkpoints.len(), 1);
+    }
+
+    #[test]
+    fn bench_world_cache_uses_shared_permissive_load() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/shared.bin"
+
+[[checkpoint]]
+name = "startup"
+position = [0.0, 1.0, 2.0]
+look_at = [3.0, 4.0, 5.0]
+time_of_day = 0.25
+hold_frames = 30
+"#,
+        )
+        .expect("bench scene should deserialize");
+
+        let persistence = bench_world_persistence(&scene);
+
+        assert_eq!(
+            persistence.path,
+            PathBuf::from("bench-runs/cache/shared.bin")
+        );
+        assert!(!persistence.force_regenerate);
+        assert!(!persistence.auto_save);
+        assert!(persistence.allow_terrain_fingerprint_mismatch);
+    }
+
+    #[test]
+    fn existing_bench_world_cache_is_not_rewritten_by_default() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("world.bin");
+        std::fs::write(&path, b"keep me").expect("seed cache file");
+        let scene = BenchScene {
+            seed: 1,
+            duration_warmup_secs: 0.0,
+            median_runs: 1,
+            chunk_load_radius: 1,
+            world_size_chunks: Some([1, 1, 1]),
+            world_cache_path: Some(path.clone()),
+            world_cache_regenerate: false,
+            skip_props: false,
+            freeze_terrain_lod_after_ready: true,
+            startup_trace: StartupTraceConfig::default(),
+            render_toggles: BenchRenderToggles::default(),
+            checkpoints: Vec::new(),
+        };
+        let mut world = VoxelWorld::new(IVec3::ONE);
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+
+        save_bench_world_cache_if_ready(&scene, &world);
+
+        assert_eq!(
+            std::fs::read(&path).expect("cache should remain readable"),
+            b"keep me"
+        );
     }
 
     #[test]

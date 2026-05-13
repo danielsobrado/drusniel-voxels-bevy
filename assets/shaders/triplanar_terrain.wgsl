@@ -438,12 +438,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 
     // Underwater caustics: add animated light patterns to terrain below water level
     if (world_pos.y < WATER_LEVEL) {
+        let caustic_surface_mask = smoothstep(0.25, 0.65, world_normal.y);
         let shoreline_caustic_falloff = 1.0 - smoothstep(WATER_LEVEL - 0.5, WATER_LEVEL, world_pos.y);
         let caustic = water_caustics::calculate_caustics(
             world_pos, WATER_LEVEL, globals.time,
             0.85,   // caustic_intensity (from water.yaml default)
             1.2     // caustic_scale (from water.yaml default)
-        ) * shoreline_caustic_falloff;
+        ) * shoreline_caustic_falloff * caustic_surface_mask;
         color = vec4<f32>(color.rgb + water_caustics::caustic_color(caustic), color.a);
     }
 

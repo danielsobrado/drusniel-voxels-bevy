@@ -45,6 +45,7 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 4;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
+const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
 const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 1;
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 4;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
@@ -197,6 +198,8 @@ pub struct RuntimeChunkStats {
     // Per-frame statistics (reset each frame in the meshing system)
     pub chunks_meshed_this_frame: u32,
     pub chunks_skipped_this_frame: u32,
+    pub dirty_chunks_queued: u32,
+    pub surface_nets_chunks_deferred_for_halo: u32,
 
     // LOD statistics
     pub high_lod_chunks: u32,
@@ -267,6 +270,8 @@ impl RuntimeChunkStats {
     pub fn reset_frame_counters(&mut self) {
         self.chunks_meshed_this_frame = 0;
         self.chunks_skipped_this_frame = 0;
+        self.dirty_chunks_queued = 0;
+        self.surface_nets_chunks_deferred_for_halo = 0;
         self.meshing_time_us = 0;
     }
 
@@ -749,8 +754,10 @@ fn should_attempt_saved_world_load(persistence_settings: &WorldPersistence) -> b
 fn load_saved_world_for_runtime(
     persistence_settings: &WorldPersistence,
 ) -> Result<VoxelWorld, String> {
-    if env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT") {
-        info!("Loading saved world for native editor viewport...");
+    if env_flag("DRUSNIEL_EDITOR_NATIVE_VIEWPORT")
+        || persistence_settings.allow_terrain_fingerprint_mismatch
+    {
+        info!("Loading saved world data without terrain fingerprint validation...");
         return persistence::read_world_data_from_path(&persistence_settings.path)
             .map(VoxelWorld::from_data)
             .map_err(|err| err.to_string());
@@ -1349,6 +1356,22 @@ fn world_startup_snapshot(
         };
     }
 
+    if chunk_stats.dirty_chunks_queued > 0
+        || chunk_stats.surface_nets_chunks_deferred_for_halo > 0
+        || chunk_stats.chunks_meshed_this_frame > 0
+        || chunk_stats.chunks_skipped_this_frame > 0
+    {
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::PreparingMeshes,
+            progress: 0.98,
+            detail: format!(
+                "Building terrain meshes ({} queued, {} waiting for neighbors)",
+                chunk_stats.dirty_chunks_queued, chunk_stats.surface_nets_chunks_deferred_for_halo
+            ),
+            complete: false,
+        };
+    }
+
     WorldStartupSnapshot {
         stage: WorldStartupStage::Ready,
         progress: 1.0,
@@ -1451,6 +1474,7 @@ fn poll_chunk_generation_tasks(
 
             // Insert chunk into world
             world.insert_chunk(result.chunk);
+            mark_surface_nets_halo_dirty(&mut world, chunk_pos);
 
             // Despawn the task entity
             commands.entity(entity).despawn();
@@ -1493,6 +1517,27 @@ fn poll_chunk_generation_tasks(
         // Save world
         try_save_world(&world, &persistence_settings);
     }
+}
+
+fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 && dz == 0 {
+                    continue;
+                }
+
+                let neighbor_pos = chunk_pos + IVec3::new(dx, dy, dz);
+                if let Some(neighbor) = world.get_chunk_mut(neighbor_pos) {
+                    neighbor.mark_dirty_with_reason(MeshDirtyReason::Generation);
+                }
+            }
+        }
+    }
+}
+
+fn should_defer_surface_nets_mesh(target_mode: MeshMode, missing_boundary_neighbors: u32) -> bool {
+    matches!(target_mode, MeshMode::SurfaceNets) && missing_boundary_neighbors > 0
 }
 
 #[derive(Default)]
@@ -1608,14 +1653,21 @@ fn mesh_dirty_chunks_system(
     };
     let mut terrain_mesh_empty_but_solid_voxels = 0u32;
     let mut terrain_mesh_boundary_missing_neighbor = 0u32;
+    let mut surface_nets_chunks_deferred_for_halo = 0u32;
     let terrain_mesh_degenerate_triangles_removed = 0u32;
     let mut terrain_mesh_lod_seam_repairs = 0u32;
 
     for chunk_pos in dirty_chunks {
         // Throttle expensive mesh generation, but let cheap empty/culled clears
         // drain faster so dirty queues do not stay backed up for hundreds of frames.
-        if chunks_processed >= MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
-            || chunks_meshed as usize >= chunks_per_frame_limit
+        let dirty_visit_limit = if surface_nets_chunks_deferred_for_halo > 0
+            && chunks_meshed as usize <= chunks_per_frame_limit
+        {
+            MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
+        } else {
+            MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
+        };
+        if chunks_processed >= dirty_visit_limit || chunks_meshed as usize >= chunks_per_frame_limit
         {
             break;
         }
@@ -1694,6 +1746,11 @@ fn mesh_dirty_chunks_system(
             count_missing_in_bounds_boundary_neighbors(&world, chunk_pos);
         if missing_boundary_neighbors > 0 {
             terrain_mesh_boundary_missing_neighbor += 1;
+            if should_defer_surface_nets_mesh(target_mode, missing_boundary_neighbors) {
+                surface_nets_chunks_deferred_for_halo += 1;
+                chunks_skipped += 1;
+                continue;
+            }
         }
 
         let neighbor_lods = NeighborLods {
@@ -1999,6 +2056,8 @@ fn mesh_dirty_chunks_system(
     // Update runtime statistics
     chunk_stats.chunks_meshed_this_frame = chunks_meshed;
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
+    chunk_stats.dirty_chunks_queued = dirty_chunks_queued as u32;
+    chunk_stats.surface_nets_chunks_deferred_for_halo = surface_nets_chunks_deferred_for_halo;
 
     // Keep the O(N) debug/stat snapshot off hot dirty-mesh frames while the
     // terrain queue is backed up. Per-frame mesh counters above stay current.
@@ -2052,7 +2111,11 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Visit Limit",
-        MAX_DIRTY_CHUNKS_VISITED_PER_FRAME as f64,
+        if surface_nets_chunks_deferred_for_halo > 0 {
+            MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
+        } else {
+            MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
+        } as f64,
     );
     timing.record_count(
         frame.0,
@@ -2149,6 +2212,11 @@ fn mesh_dirty_chunks_system(
         frame.0,
         "Terrain Mesh Boundary Missing Neighbor",
         terrain_mesh_boundary_missing_neighbor as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Surface Nets Chunks Deferred For Halo",
+        surface_nets_chunks_deferred_for_halo as f64,
     );
     timing.record_count(
         frame.0,
@@ -3922,6 +3990,38 @@ mod tests {
     }
 
     #[test]
+    fn surface_nets_mesh_defers_when_in_bounds_halo_is_missing() {
+        assert!(should_defer_surface_nets_mesh(MeshMode::SurfaceNets, 1));
+        assert!(!should_defer_surface_nets_mesh(MeshMode::SurfaceNets, 0));
+        assert!(!should_defer_surface_nets_mesh(MeshMode::Blocky, 1));
+    }
+
+    #[test]
+    fn generated_chunk_marks_full_3d_halo_dirty() {
+        let center = IVec3::new(1, 1, 1);
+        let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
+
+        for z in 0..3 {
+            for y in 0..3 {
+                for x in 0..3 {
+                    let mut chunk = Chunk::new(IVec3::new(x, y, z));
+                    chunk.clear_dirty();
+                    world.insert_chunk(chunk);
+                }
+            }
+        }
+
+        mark_surface_nets_halo_dirty(&mut world, center);
+
+        let dirty = world.dirty_chunks().collect::<HashSet<_>>();
+        assert_eq!(dirty.len(), 26);
+        assert!(!dirty.contains(&center));
+        assert!(dirty.contains(&(center + IVec3::new(-1, -1, -1))));
+        assert!(dirty.contains(&(center + IVec3::new(1, 1, 1))));
+        assert!(dirty.contains(&(center + IVec3::Y)));
+    }
+
+    #[test]
     fn world_startup_snapshot_reports_generation_progress() {
         let gen_state = ChunkGenerationState {
             total_chunks: 100,
@@ -3957,10 +4057,34 @@ mod tests {
         assert_eq!(preparing.stage, WorldStartupStage::PreparingMeshes);
         assert!(!preparing.complete);
 
-        chunk_stats.chunks_meshed_this_frame = 1;
+        chunk_stats.mesh_entities = 1;
         let ready = world_startup_snapshot(&gen_state, &chunk_stats, true);
         assert_eq!(ready.stage, WorldStartupStage::Ready);
         assert!(ready.complete);
+    }
+
+    #[test]
+    fn world_startup_snapshot_waits_for_deferred_surface_nets_halo() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 100,
+            is_complete: true,
+            loading_from_disk: false,
+            world_stats: WorldStats::default(),
+            start_time: None,
+        };
+        let chunk_stats = RuntimeChunkStats {
+            mesh_entities: 10,
+            dirty_chunks_queued: 2,
+            surface_nets_chunks_deferred_for_halo: 1,
+            ..Default::default()
+        };
+
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
+
+        assert_eq!(snapshot.stage, WorldStartupStage::PreparingMeshes);
+        assert!(snapshot.detail.contains("waiting for neighbors"));
+        assert!(!snapshot.complete);
     }
 
     #[test]

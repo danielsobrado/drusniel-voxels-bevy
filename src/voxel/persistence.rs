@@ -548,6 +548,12 @@ pub struct WorldPersistence {
     pub force_regenerate: bool,
     /// Auto-save world after generation
     pub auto_save: bool,
+    /// Load saved world data even if the terrain-generation fingerprint changed.
+    ///
+    /// This is intended for deterministic bench caches where startup cost and
+    /// scene stability matter more than automatically tracking terrain config
+    /// changes. Normal runtime loads should keep strict fingerprint validation.
+    pub allow_terrain_fingerprint_mismatch: bool,
 }
 
 impl Default for WorldPersistence {
@@ -556,6 +562,7 @@ impl Default for WorldPersistence {
             path: PathBuf::from(WORLD_SAVE_PATH),
             force_regenerate: true, // Force regeneration to ensure fresh terrain
             auto_save: true,
+            allow_terrain_fingerprint_mismatch: false,
         }
     }
 }

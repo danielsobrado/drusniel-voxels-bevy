@@ -97,6 +97,34 @@ fn terrain_materials_participate_in_depth_prepass() {
 }
 
 #[test]
+fn terrain_caustics_do_not_tint_vertical_lod_walls() {
+    let triplanar = include_str!("../assets/shaders/triplanar_terrain.wgsl");
+
+    assert!(
+        triplanar.contains("caustic_surface_mask = smoothstep(0.25, 0.65, world_normal.y)"),
+        "underwater caustics should be gated to upward-facing terrain, not vertical LOD sidewalls"
+    );
+    assert!(
+        triplanar.contains("* shoreline_caustic_falloff * caustic_surface_mask"),
+        "caustic tint should include the surface-angle mask"
+    );
+}
+
+#[test]
+fn blocky_caustics_do_not_tint_vertical_lod_walls() {
+    let blocky = include_str!("../assets/shaders/blocky_terrain.wgsl");
+
+    assert!(
+        blocky.contains("caustic_surface_mask = smoothstep(0.25, 0.65, pbr_input.world_normal.y)"),
+        "blocky terrain caustics should be gated to upward-facing terrain, not vertical LOD sidewalls"
+    );
+    assert!(
+        blocky.contains("* shoreline_caustic_falloff * caustic_surface_mask"),
+        "blocky caustic tint should include the surface-angle mask"
+    );
+}
+
+#[test]
 fn gtao_is_registered_as_a_real_post_process_node() {
     let gtao = include_str!("../src/rendering/gtao.rs");
     let gtao_shader = include_str!("../assets/shaders/gtao_main.wgsl");

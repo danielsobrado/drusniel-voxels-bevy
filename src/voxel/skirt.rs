@@ -265,17 +265,13 @@ impl NeighborLods {
     }
 
     pub fn needs_vertical_skirt(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
-        match self.lod_for_face(face) {
-            Some(n_lod) => n_lod.is_lower_detail_than(my_lod),
-            None => true,
-        }
+        self.lod_for_face(face)
+            .is_some_and(|n_lod| n_lod.is_lower_detail_than(my_lod))
     }
 
     pub fn needs_transition_apron(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
-        match self.lod_for_face(face) {
-            Some(n_lod) => n_lod.is_lower_detail_than(my_lod),
-            None => true,
-        }
+        self.lod_for_face(face)
+            .is_some_and(|n_lod| n_lod.is_lower_detail_than(my_lod))
     }
 }
 
@@ -613,6 +609,39 @@ mod tests {
         let neighbor_lods = NeighborLods {
             neg_x: None,
             pos_x: Some(LodLevel::Lod0),
+            neg_z: None,
+            pos_z: None,
+        };
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut weights,
+            &mut indices,
+            &[edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert!(positions.is_empty());
+        assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn unknown_neighbor_keeps_adaptive_skirt_disabled() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: None,
             neg_z: None,
             pos_z: None,
         };
