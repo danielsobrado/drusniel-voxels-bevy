@@ -93,13 +93,13 @@ body_presets:
     wave_speed: 0.18
     wave_scale: 4.0
     wave_count: 1
-    reflection_strength: 0.12
+    reflection_strength: 0.08
     fresnel_power: 3.0
     distortion_strength: 0.001
-    shallow_color: [0.08, 0.32, 0.64, 0.52]
-    deep_color: [0.01, 0.13, 0.34, 0.6]
-    clarity: 0.95
-    base_alpha: 0.48
+    shallow_color: [0.035, 0.20, 0.34, 0.74]
+    deep_color: [0.005, 0.065, 0.17, 0.86]
+    clarity: 0.42
+    base_alpha: 0.72
     foam_enabled: false
     shore_foam: false
     wave_crest_foam: false

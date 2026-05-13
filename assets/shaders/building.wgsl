@@ -348,5 +348,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Match Bevy's pre-exposed lighting convention: scale by exposure relative to the BLENDER baseline.
     let exposure_ratio = view.exposure / EXPOSURE_BLENDER;
-    return vec4(color * exposure_ratio, final_pbr.albedo.a);
+    return vec4(color * exposure_ratio, 1.0);
 }

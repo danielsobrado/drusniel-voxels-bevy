@@ -70,7 +70,7 @@ impl Material for BlockyMaterial {
     }
 
     fn enable_prepass() -> bool {
-        false
+        true
     }
 
     fn alpha_mode(&self) -> AlphaMode {

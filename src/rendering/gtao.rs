@@ -1,35 +1,50 @@
 //! XeGTAO - Ground Truth Ambient Occlusion
 //!
-//! Based on Intel's XeGTAO: https://github.com/GameTechDev/XeGTAO
-//! Provides high-quality ambient occlusion with bent normals output.
+//! Inspired by Intel's XeGTAO: https://github.com/GameTechDev/XeGTAO.
+//! Provides a depth-aware fullscreen ambient occlusion pass.
 //!
 //! Pipeline stages:
-//! 1. Prepass: Render depth + normals to texture
-//! 2. Main GTAO: Compute occlusion with horizon-based algorithm
-//! 3. Denoise: Spatial-temporal filtering for smooth results
+//! 1. Prepass: render depth for the active camera
+//! 2. Main GTAO: darken scene color using depth-neighborhood occlusion
 
-use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
-use bevy::prelude::*;
-use bevy::render::renderer::RenderAdapterInfo;
-use bevy::render::{
-    Render, RenderApp, RenderSystems,
-    extract_component::{ExtractComponent, ExtractComponentPlugin},
-    render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode},
-    render_resource::*,
-    renderer::RenderDevice,
-    texture::{CachedTexture, TextureCache},
-    view::{ViewTarget, ViewUniformOffset},
+use bevy::asset::{load_internal_asset, uuid_handle};
+use bevy::core_pipeline::{
+    FullscreenShader,
+    core_3d::graph::{Core3d, Node3d},
+    prepass::{DepthPrepass, NormalPrepass, ViewPrepassTextures},
 };
+use bevy::prelude::*;
+use bevy::render::{
+    RenderApp, RenderStartup,
+    extract_component::{ExtractComponent, ExtractComponentPlugin},
+    render_graph::{
+        NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
+    },
+    render_resource::*,
+    renderer::{RenderAdapterInfo, RenderContext, RenderDevice},
+    view::ViewTarget,
+};
+use bevy::shader::Shader;
 use std::num::NonZeroU64;
 use wgpu::DeviceType;
 
 use crate::rendering::ao_config::{AmbientOcclusionConfig, load_ambient_occlusion_config};
+use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
+
+const GTAO_SHADER_HANDLE: Handle<Shader> = uuid_handle!("8e571a0d-7cf7-4a12-9b2e-27c8f8e5b6a4");
 
 /// GTAO Plugin - Adds Ground Truth Ambient Occlusion to the render pipeline
 pub struct GtaoPlugin;
 
 impl Plugin for GtaoPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            GTAO_SHADER_HANDLE,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/gtao_main.wgsl"),
+            Shader::from_wgsl
+        );
+
         let config = load_ambient_occlusion_config().unwrap_or_else(|e| {
             warn!("Failed to load AO config: {}, using defaults", e);
             AmbientOcclusionConfig::default()
@@ -41,24 +56,22 @@ impl Plugin for GtaoPlugin {
             .add_systems(Startup, detect_gtao_support)
             .add_systems(PostStartup, configure_camera_gtao);
 
-        // Register systems in RenderApp (resources initialized in finish())
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(
-                Render,
-                prepare_gtao_textures.in_set(RenderSystems::PrepareResources),
+            render_app.add_systems(RenderStartup, init_gtao_pipeline);
+            render_app.add_render_graph_node::<ViewNodeRunner<GtaoNode>>(Core3d, GtaoLabel);
+            render_app.add_render_graph_edges(
+                Core3d,
+                (
+                    Node3d::EndMainPass,
+                    GtaoLabel,
+                    WaterReflectionCompositorLabel,
+                ),
             );
         }
     }
 
     fn finish(&self, app: &mut App) {
-        // Initialize GPU resources after RenderDevice is available
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .init_resource::<GtaoShaders>()
-                .init_resource::<GtaoPipelines>()
-                .init_resource::<GtaoMainPipeline>()
-                .init_resource::<SpecializedRenderPipelines<GtaoMainPipeline>>();
-        }
+        let _ = app;
     }
 }
 
@@ -89,11 +102,11 @@ pub struct GtaoSettings {
     pub thin_occluder_compensation: f32,
     /// Mip offset for sampling far depth
     pub depth_mip_sampling_offset: f32,
-    /// Enable temporal denoising
+    /// Reserved for the future temporal denoise pass.
     pub enable_denoise: bool,
-    /// Spatial filter radius
+    /// Reserved spatial filter radius for the future denoise pass.
     pub denoise_spatial_radius: u32,
-    /// Temporal blend factor (0-1)
+    /// Reserved temporal blend factor for the future denoise pass.
     pub denoise_temporal_blend: f32,
 }
 
@@ -116,7 +129,7 @@ impl Default for GtaoSettings {
 }
 
 /// GPU uniform buffer for GTAO settings
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct GtaoSettingsUniform {
     pub slice_count: u32,
@@ -148,39 +161,6 @@ impl From<&GtaoSettings> for GtaoSettingsUniform {
             sample_distribution_power: settings.sample_distribution_power,
             thin_occluder_compensation: settings.thin_occluder_compensation,
             depth_mip_sampling_offset: settings.depth_mip_sampling_offset,
-        }
-    }
-}
-
-/// GPU uniform buffer for denoise settings
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct DenoiseSettingsUniform {
-    pub spatial_radius: u32,
-    pub spatial_sigma: f32,
-    pub temporal_blend: f32,
-    pub depth_threshold: f32,
-    pub normal_threshold: f32,
-    pub _padding: [f32; 3],
-}
-
-impl DenoiseSettingsUniform {
-    pub const SIZE: u64 = std::mem::size_of::<Self>() as u64;
-
-    pub fn min_size() -> NonZeroU64 {
-        NonZeroU64::new(Self::SIZE).unwrap()
-    }
-}
-
-impl From<&GtaoSettings> for DenoiseSettingsUniform {
-    fn from(settings: &GtaoSettings) -> Self {
-        Self {
-            spatial_radius: settings.denoise_spatial_radius,
-            spatial_sigma: settings.denoise_spatial_radius as f32,
-            temporal_blend: settings.denoise_temporal_blend,
-            depth_threshold: 0.01,
-            normal_threshold: 0.1,
-            _padding: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -272,7 +252,7 @@ fn configure_camera_gtao(
         commands.entity(entity).insert(GtaoCamera);
 
         if let Some(gtao) = gtao_camera_components(&config, &supported) {
-            // GTAO requires depth and normal prepasses
+            // GTAO samples depth now and keeps normals available for future quality upgrades.
             commands
                 .entity(entity)
                 .insert((gtao, DepthPrepass, NormalPrepass));
@@ -302,328 +282,66 @@ pub fn toggle_gtao(
     }
 }
 
-// ============================================================================
-// GPU Pipeline Resources
-// ============================================================================
-
-/// Holds the GTAO render pipelines
 #[derive(Resource)]
-pub struct GtaoPipelines {
-    /// Bind group layout for GTAO main pass
-    pub main_layout: BindGroupLayout,
-    /// Bind group layout for denoise pass
-    pub denoise_layout: BindGroupLayout,
-    /// Sampler for textures
-    pub sampler: Sampler,
-    /// Linear sampler for filtering
-    pub linear_sampler: Sampler,
+struct GtaoPostPipeline {
+    layout: BindGroupLayoutDescriptor,
+    sampler: Sampler,
+    hdr_pipeline_id: CachedRenderPipelineId,
+    sdr_pipeline_id: CachedRenderPipelineId,
 }
 
-fn gtao_main_bind_group_layout_entries() -> Vec<BindGroupLayoutEntry> {
-    vec![
-        // Depth-normal texture
-        BindGroupLayoutEntry {
-            binding: 0,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Texture {
-                sample_type: TextureSampleType::Float { filterable: true },
-                view_dimension: TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        },
-        // Depth-normal sampler
-        BindGroupLayoutEntry {
-            binding: 1,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Sampler(SamplerBindingType::Filtering),
-            count: None,
-        },
-        // Noise texture
-        BindGroupLayoutEntry {
-            binding: 2,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Texture {
-                sample_type: TextureSampleType::Float { filterable: true },
-                view_dimension: TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        },
-        // Noise sampler
-        BindGroupLayoutEntry {
-            binding: 3,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Sampler(SamplerBindingType::Filtering),
-            count: None,
-        },
-        // GTAO settings uniform
-        BindGroupLayoutEntry {
-            binding: 4,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: Some(GtaoSettingsUniform::min_size()),
-            },
-            count: None,
-        },
-        // View uniforms
-        BindGroupLayoutEntry {
-            binding: 5,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: true,
-                min_binding_size: None,
-            },
-            count: None,
-        },
-    ]
-}
+fn init_gtao_pipeline(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    fullscreen_shader: Res<FullscreenShader>,
+    pipeline_cache: Res<PipelineCache>,
+) {
+    let layout = BindGroupLayoutDescriptor::new(
+        "gtao_post_layout",
+        &BindGroupLayoutEntries::sequential(
+            ShaderStages::FRAGMENT,
+            (
+                binding_types::texture_2d(TextureSampleType::Float { filterable: true }),
+                binding_types::sampler(SamplerBindingType::Filtering),
+                binding_types::texture_depth_2d(),
+                binding_types::uniform_buffer::<GtaoSettingsUniform>(false),
+            ),
+        ),
+    );
 
-impl FromWorld for GtaoPipelines {
-    fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
-
-        // Main GTAO pass bind group layout
-        let main_layout_entries = gtao_main_bind_group_layout_entries();
-        let main_layout = render_device
-            .create_bind_group_layout("gtao_main_bind_group_layout", &main_layout_entries);
-
-        // Denoise pass bind group layout
-        let denoise_layout = render_device.create_bind_group_layout(
-            "gtao_denoise_bind_group_layout",
-            &[
-                // Current AO texture
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Current AO sampler
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // History AO texture
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // History AO sampler
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Depth texture
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Depth,
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Depth sampler
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Denoise settings uniform
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(DenoiseSettingsUniform::min_size()),
-                    },
-                    count: None,
-                },
-            ],
-        );
-
-        // Create samplers
-        let sampler = render_device.create_sampler(&SamplerDescriptor {
-            label: Some("gtao_sampler"),
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            ..default()
-        });
-
-        let linear_sampler = render_device.create_sampler(&SamplerDescriptor {
-            label: Some("gtao_linear_sampler"),
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
-            ..default()
-        });
-
-        Self {
-            main_layout,
-            denoise_layout,
-            sampler,
-            linear_sampler,
-        }
-    }
-}
-
-/// Pipeline key for specialization
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct GtaoMainPipelineKey {
-    pub hdr: bool,
-}
-
-/// Main GTAO pipeline definition
-#[derive(Resource)]
-pub struct GtaoMainPipeline {
-    pub layout: BindGroupLayoutDescriptor,
-    pub shader: Handle<Shader>,
-}
-
-impl FromWorld for GtaoMainPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let shaders = world.resource::<GtaoShaders>();
-        let layout_entries = gtao_main_bind_group_layout_entries();
-        Self {
-            layout: BindGroupLayoutDescriptor::new("gtao_main_bind_group_layout", &layout_entries),
-            shader: shaders.main_shader.clone(),
-        }
-    }
-}
-
-impl SpecializedRenderPipeline for GtaoMainPipeline {
-    type Key = GtaoMainPipelineKey;
-
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
-        let format = if key.hdr {
-            TextureFormat::Rgba16Float
-        } else {
-            TextureFormat::Rgba8Unorm
-        };
-
-        // Fullscreen vertex state - draws a fullscreen triangle
-        // The vertex shader generates positions based on vertex index
-        let vertex_state = VertexState {
-            shader: self.shader.clone(),
-            shader_defs: vec![],
-            entry_point: Some("vertex".into()),
-            buffers: vec![],
-        };
-
-        RenderPipelineDescriptor {
-            label: Some("gtao_main_pipeline".into()),
-            layout: vec![self.layout.clone()],
-            push_constant_ranges: vec![],
-            vertex: vertex_state,
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
+    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+    let pipeline_descriptor =
+        |label: &'static str, format: TextureFormat| RenderPipelineDescriptor {
+            label: Some(label.into()),
+            layout: vec![layout.clone()],
+            vertex: fullscreen_shader.to_vertex_state(),
             fragment: Some(FragmentState {
-                shader: self.shader.clone(),
-                shader_defs: vec![],
-                entry_point: Some("fragment".into()),
+                shader: GTAO_SHADER_HANDLE,
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
+                ..default()
             }),
-            zero_initialize_workgroup_memory: false,
-        }
-    }
-}
+            ..default()
+        };
 
-/// Shader handles loaded at runtime
-#[derive(Resource)]
-pub struct GtaoShaders {
-    pub main_shader: Handle<Shader>,
-    pub denoise_shader: Handle<Shader>,
-}
+    let hdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "gtao_pipeline_hdr",
+        ViewTarget::TEXTURE_FORMAT_HDR,
+    ));
+    let sdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "gtao_pipeline_sdr",
+        TextureFormat::bevy_default(),
+    ));
 
-impl FromWorld for GtaoShaders {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.resource::<AssetServer>();
-        Self {
-            main_shader: asset_server.load("shaders/gtao_main.wgsl"),
-            denoise_shader: asset_server.load("shaders/gtao_denoise.wgsl"),
-        }
-    }
-}
-
-/// Per-view GTAO textures
-#[derive(Component)]
-pub struct GtaoTextures {
-    pub ao_texture: CachedTexture,
-    pub history_texture: CachedTexture,
-}
-
-/// System to prepare GTAO textures for each view
-fn prepare_gtao_textures(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    mut texture_cache: ResMut<TextureCache>,
-    views: Query<(Entity, &ViewTarget, &GtaoSettings)>,
-) {
-    for (entity, view_target, _settings) in views.iter() {
-        let size = view_target.main_texture().size();
-
-        let ao_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("gtao_ao_texture"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba16Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-        );
-
-        let history_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("gtao_history_texture"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba16Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-        );
-
-        commands.entity(entity).insert(GtaoTextures {
-            ao_texture,
-            history_texture,
-        });
-    }
+    commands.insert_resource(GtaoPostPipeline {
+        layout,
+        sampler,
+        hdr_pipeline_id,
+        sdr_pipeline_id,
+    });
 }
 
 // ============================================================================
@@ -634,53 +352,78 @@ fn prepare_gtao_textures(
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 pub struct GtaoLabel;
 
-/// GTAO render graph node
-///
-/// Note: Full render graph integration requires additional setup.
-/// This is a placeholder that will be expanded when the render graph
-/// integration is complete.
+/// GTAO render graph node.
 #[derive(Default)]
 pub struct GtaoNode;
 
 impl ViewNode for GtaoNode {
     type ViewQuery = (
         &'static ViewTarget,
+        &'static ViewPrepassTextures,
         &'static GtaoSettings,
-        &'static GtaoTextures,
-        &'static ViewUniformOffset,
     );
 
     fn run(
         &self,
         _graph: &mut RenderGraphContext,
-        _render_context: &mut bevy::render::renderer::RenderContext,
-        (_view_target, _settings, _textures, _view_offset): bevy::ecs::query::QueryItem<
-            Self::ViewQuery,
-        >,
-        _world: &World,
+        render_context: &mut RenderContext,
+        (view_target, prepass_textures, settings): bevy::ecs::query::QueryItem<Self::ViewQuery>,
+        world: &World,
     ) -> Result<(), NodeRunError> {
-        // GTAO implementation stub
-        //
-        // Full implementation requires:
-        // 1. Get depth and normal textures from prepass
-        // 2. Create bind groups with textures and uniforms
-        // 3. Run main GTAO pass (horizon-based AO calculation)
-        // 4. Run denoise pass (spatial-temporal filtering)
-        // 5. Output AO texture for compositing
-        //
-        // The GTAO algorithm samples the depth buffer in multiple directions
-        // to estimate ambient occlusion at each pixel. The denoise pass
-        // applies temporal accumulation and spatial filtering to reduce noise.
+        let Some(depth_view) = prepass_textures.depth_view() else {
+            return Ok(());
+        };
+        let Some(pipeline_res) = world.get_resource::<GtaoPostPipeline>() else {
+            return Ok(());
+        };
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let pipeline_id = if view_target.main_texture_format() == ViewTarget::TEXTURE_FORMAT_HDR {
+            pipeline_res.hdr_pipeline_id
+        } else {
+            pipeline_res.sdr_pipeline_id
+        };
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
+            return Ok(());
+        };
 
+        let uniform = GtaoSettingsUniform::from(settings);
+        let uniform_buffer =
+            render_context
+                .render_device()
+                .create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("gtao_settings_uniform"),
+                    contents: bytemuck::bytes_of(&uniform),
+                    usage: BufferUsages::UNIFORM,
+                });
+
+        let post_process = view_target.post_process_write();
+        let bind_group = render_context.render_device().create_bind_group(
+            "gtao_post_bind_group",
+            &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
+            &BindGroupEntries::sequential((
+                post_process.source,
+                &pipeline_res.sampler,
+                depth_view,
+                uniform_buffer.as_entire_binding(),
+            )),
+        );
+
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("gtao_post_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: post_process.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        render_pass.set_render_pipeline(pipeline);
+        render_pass.set_bind_group(0, &bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
         Ok(())
     }
-}
-
-// ============================================================================
-// Public API
-// ============================================================================
-
-/// Get the current AO texture for a view (for compositing)
-pub fn get_gtao_texture(textures: &GtaoTextures) -> &CachedTexture {
-    &textures.ao_texture
 }

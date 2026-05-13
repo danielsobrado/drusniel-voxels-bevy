@@ -6,7 +6,7 @@
 //! - Mesh generation and update systems
 //! - Async chunk generation using Bevy's task pool
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -52,6 +52,7 @@ const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
 const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
 const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
+const WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA: f32 = 80.0;
 const WATER_BODY_UPDATE_INTERVAL: f32 = 0.5;
 const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
 const WATER_BODY_LAKE_MIN_AREA: f32 = 128.0;
@@ -2850,7 +2851,7 @@ fn water_body_reflection_strength(
                 0.7
             }
         }
-        WaterBodyKind::ShallowFlood => 0.12,
+        WaterBodyKind::ShallowFlood => 0.08,
         WaterBodyKind::Unknown => 0.72,
     }
 }
@@ -2888,16 +2889,13 @@ fn water_body_material_mode(
     nearest_distance: f32,
     max_depth: usize,
     surface_area: f32,
-    kind: WaterBodyKind,
+    _kind: WaterBodyKind,
 ) -> WaterBodyMaterialMode {
     if env_flag("VOXEL_FORCE_ALL_WATER_CHEAP") {
         return WaterBodyMaterialMode::Cheap;
     }
     if env_flag("VOXEL_FORCE_ALL_WATER_FANCY") {
         return WaterBodyMaterialMode::Fancy;
-    }
-    if kind == WaterBodyKind::ShallowFlood {
-        return WaterBodyMaterialMode::Cheap;
     }
     if surface_area < WATER_FANCY_MIN_TRIANGLES as f32 || max_depth < WATER_FANCY_MIN_DEPTH {
         return WaterBodyMaterialMode::Cheap;
@@ -3601,6 +3599,8 @@ fn update_chunk_lod_system(
     *last_camera_pos = Some(camera_pos);
 
     let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32)> = Vec::new();
+    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
+    let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
     for (chunk_pos, chunk) in world.chunk_entries_mut() {
         let world_pos = VoxelWorld::chunk_to_world(*chunk_pos);
@@ -3609,7 +3609,12 @@ fn update_chunk_lod_system(
 
         // Use hysteresis-aware LOD calculation
         let current_lod = chunk.lod_level();
-        let target_lod = calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings);
+        let target_lod = water_shore_guarded_lod(
+            calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings),
+            distance,
+            &lod_settings,
+            water_lod_guard_chunks.contains(chunk_pos),
+        );
 
         if target_lod != current_lod {
             let cooldown_elapsed = lod_transitions
@@ -3681,6 +3686,11 @@ fn update_chunk_lod_system(
     let repeated_chunks_this_frame = lod_transitions.repeated_chunks_this_frame;
     let changes_per_second = lod_transitions.changes_per_second;
     drop(_timer);
+    timing.record_count(
+        frame.0,
+        "Water Shore Terrain LOD Guard Chunks",
+        water_lod_guard_count,
+    );
     record_lod_counters(
         &mut timing,
         frame.0,
@@ -3688,6 +3698,53 @@ fn update_chunk_lod_system(
         changes_per_second,
         repeated_chunks_this_frame,
     );
+}
+
+fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSet<IVec3> {
+    let mut chunks = HashSet::new();
+    for (chunk_pos, chunk) in world.chunk_entries() {
+        if !chunk_contains_liquid(chunk) {
+            continue;
+        }
+        for offset in [IVec3::ZERO, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            chunks.insert(*chunk_pos + offset);
+        }
+    }
+    chunks
+}
+
+fn chunk_contains_liquid(chunk: &Chunk) -> bool {
+    for z in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                if chunk
+                    .get(UVec3::new(x as u32, y as u32, z as u32))
+                    .is_liquid()
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn water_shore_guarded_lod(
+    target_lod: LodLevel,
+    distance: f32,
+    settings: &LodSettings,
+    water_shore_guarded: bool,
+) -> LodLevel {
+    if !water_shore_guarded || target_lod == LodLevel::Culled {
+        return target_lod;
+    }
+
+    let guard_distance = settings.high_detail_distance + WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA;
+    if distance <= guard_distance {
+        LodLevel::Lod0
+    } else {
+        target_lod
+    }
 }
 
 fn record_lod_counters(
@@ -3788,6 +3845,80 @@ mod tests {
             desired_water_visibility(false, true, Some(WaterBodyMaterialMode::Hidden)),
             Visibility::Inherited
         );
+    }
+
+    #[test]
+    fn shallow_flood_water_uses_fancy_material_when_near() {
+        assert_eq!(
+            water_body_material_mode(
+                WaterBodyMaterialMode::Unknown,
+                WATER_FANCY_DISTANCE - 1.0,
+                1,
+                WATER_FANCY_MIN_TRIANGLES as f32,
+                WaterBodyKind::ShallowFlood,
+            ),
+            WaterBodyMaterialMode::Fancy
+        );
+    }
+
+    #[test]
+    fn water_shore_lod_guard_keeps_water_chunk_and_neighbors_high_detail() {
+        let settings = LodSettings::default();
+
+        assert_eq!(
+            water_shore_guarded_lod(
+                LodLevel::Lod2,
+                settings.high_detail_distance + WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA - 1.0,
+                &settings,
+                true,
+            ),
+            LodLevel::Lod0
+        );
+        assert_eq!(
+            water_shore_guarded_lod(
+                LodLevel::Lod2,
+                settings.high_detail_distance + WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA + 1.0,
+                &settings,
+                true,
+            ),
+            LodLevel::Lod2
+        );
+        assert_eq!(
+            water_shore_guarded_lod(
+                LodLevel::Lod2,
+                settings.high_detail_distance,
+                &settings,
+                false
+            ),
+            LodLevel::Lod2
+        );
+        assert_eq!(
+            water_shore_guarded_lod(
+                LodLevel::Culled,
+                settings.high_detail_distance,
+                &settings,
+                true
+            ),
+            LodLevel::Culled
+        );
+    }
+
+    #[test]
+    fn water_shore_lod_guard_marks_horizontal_neighbors() {
+        let center = IVec3::new(1, 0, 1);
+        let mut world = VoxelWorld::new(IVec3::new(3, 1, 3));
+        let mut chunk = Chunk::new(center);
+        chunk.set(UVec3::new(8, 8, 8), VoxelType::Water);
+        world.insert_chunk(chunk);
+
+        let guarded = collect_water_shore_lod_guard_chunks(&world);
+
+        assert!(guarded.contains(&center));
+        assert!(guarded.contains(&(center + IVec3::X)));
+        assert!(guarded.contains(&(center + IVec3::NEG_X)));
+        assert!(guarded.contains(&(center + IVec3::Z)));
+        assert!(guarded.contains(&(center + IVec3::NEG_Z)));
+        assert!(!guarded.contains(&(center + IVec3::Y)));
     }
 
     #[test]

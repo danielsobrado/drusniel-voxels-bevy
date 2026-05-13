@@ -132,10 +132,10 @@ fn fragment(
   let edge_extent = max(abs(edge_scale), 0.001);
   let edge_blend = select(1.0, smoothstep(0.0, edge_extent, depth_diff_view), edge_enabled);
   let edge_factor = 1.0 - edge_blend;
-  let foam_multiplier = vec3<f32>(0.9, 0.96, 1.0);
+  let foam_multiplier = vec3<f32>(0.78, 0.84, 0.88);
   water_color = vec4<f32>(
-    mix(depth_color.rgb, foam_multiplier, edge_factor * 0.18),
-    max(depth_color.a, edge_factor * clamp(edge_color.a, 0.0, 1.0) * 0.28)
+    mix(depth_color.rgb, foam_multiplier, edge_factor * 0.10),
+    max(depth_color.a, edge_factor * clamp(edge_color.a, 0.0, 1.0) * 0.22)
   );
 
 #ifdef USE_NOBLE_FOAM

@@ -512,12 +512,12 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let height =
             BASE_TERRAIN_ELEVATION + continent + mountains + mountain_uplift + hills + detail
                 - valley_carve;
-        let height = self.apply_edge_shoreline_shape(world_x, world_z, height);
-
         // Normal land columns keep a continuous crust above bedrock. Water
         // body bathymetry is applied later and may carve beds lower than this.
         let min_surface = cfg.height.min.max(MIN_NORMAL_TERRAIN_SURFACE_Y as f32);
-        height.clamp(min_surface, cfg.height.max) as i32
+        let height = self.apply_edge_shoreline_shape(world_x, world_z, height);
+        let height = soften_height_cap(height, min_surface, cfg.height.max);
+        height.clamp(min_surface, cfg.height.max - 0.5) as i32
     }
 
     fn massif_cell_mask(&self, x: f32, z: f32) -> f32 {
@@ -1125,6 +1125,19 @@ fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
 }
 
 #[inline]
+fn soften_height_cap(height: f32, min_height: f32, max_height: f32) -> f32 {
+    let ceiling_start = (max_height - 18.0).max(min_height);
+    let ceiling = max_height - 0.5;
+    if height <= ceiling_start || ceiling <= ceiling_start {
+        return height;
+    }
+
+    let range = ceiling - ceiling_start;
+    let excess = height - ceiling_start;
+    ceiling_start + range * excess / (excess + range)
+}
+
+#[inline]
 fn default_world_edge_distance(world_x: i32, world_z: i32) -> i32 {
     let max_x = DEFAULT_WORLD_CHUNKS_X * CHUNK_SIZE_I32 - 1;
     let max_z = DEFAULT_WORLD_CHUNKS_Z * CHUNK_SIZE_I32 - 1;
@@ -1300,6 +1313,33 @@ mod tests {
         assert!(
             high_massif_samples >= 24,
             "expected broad high massif coverage, got {high_massif_samples} samples"
+        );
+    }
+
+    #[test]
+    fn default_terrain_does_not_flatten_high_massifs_at_height_cap() {
+        let config = TerrainConfig::default();
+        let generator = TerrainGenerator::with_config(ValueNoise::default(), config.clone());
+        let max_height = config.height.max as i32;
+        let mut capped_samples = 0;
+        let mut longest_capped_run = 0;
+
+        for z in (0..512).step_by(2) {
+            let mut current_run = 0;
+            for x in (0..512).step_by(2) {
+                if generator.get_base_height(x, z) >= max_height {
+                    capped_samples += 1;
+                    current_run += 1;
+                    longest_capped_run = longest_capped_run.max(current_run);
+                } else {
+                    current_run = 0;
+                }
+            }
+        }
+
+        assert_eq!(
+            capped_samples, 0,
+            "terrain height cap creates real flat high-altitude slabs; capped_samples={capped_samples}, longest_capped_run={longest_capped_run}"
         );
     }
 

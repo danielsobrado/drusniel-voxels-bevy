@@ -110,5 +110,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let fog_range = max(props.fog_end - props.fog_start, 1.0);
     let fog_factor = clamp((distance - props.fog_start) / fog_range, 0.0, 1.0) * props.aerial_strength;
     color = mix(color, props.fog_color.rgb, fog_factor);
-    return vec4<f32>(color * view.exposure / EXPOSURE_BLENDER, shaded_albedo.a);
+#ifdef PROP_BLEND_ALPHA
+    let output_alpha = shaded_albedo.a;
+#else
+    let output_alpha = 1.0;
+#endif
+    return vec4<f32>(color * view.exposure / EXPOSURE_BLENDER, output_alpha);
 }

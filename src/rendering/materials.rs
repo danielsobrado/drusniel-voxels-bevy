@@ -373,8 +373,8 @@ fn water_edge_color(
     let witchcraft_alpha =
         witchcraft_params.shader_control_alpha(preset.lake_ripple_overlay_strength);
     let foam_luma = linear.red * 0.2126 + linear.green * 0.7152 + linear.blue * 0.0722;
-    let foam = (foam_luma * 0.55 + 0.32).clamp(0.0, 1.0);
-    Color::linear_rgba(foam * 0.9, foam * 0.98, foam, witchcraft_alpha)
+    let foam = (foam_luma * 0.45 + 0.24).clamp(0.0, 0.78);
+    Color::linear_rgba(foam * 0.88, foam * 0.92, foam * 0.92, witchcraft_alpha)
 }
 
 fn apply_noble_water_shader_params(
@@ -453,6 +453,24 @@ mod water_material_tests {
 
         assert!((edge_color.blue - edge_color.red).abs() < 0.08);
         assert!((edge_color.blue - edge_color.green).abs() < 0.08);
+    }
+
+    #[test]
+    fn shallow_flood_edge_color_stays_below_foam_white() {
+        let config = WaterConfig::default();
+        let preset = config.body_preset(WaterBodyKind::ShallowFlood);
+        let shallow_color = water_color(preset.shallow_color, false);
+        let edge_color = water_edge_color(
+            shallow_color,
+            preset,
+            false,
+            WitchcraftWaterFinishParams::default(),
+        )
+        .to_linear();
+
+        assert!(edge_color.blue < 0.34);
+        assert!((edge_color.blue - edge_color.red).abs() < 0.04);
+        assert!((edge_color.blue - edge_color.green).abs() < 0.04);
     }
 
     #[test]

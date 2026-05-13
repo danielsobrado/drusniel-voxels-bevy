@@ -28,6 +28,8 @@ struct CompositorWeatherUniforms {
 struct ReflectionCompositorUniform {
     flags: vec4<u32>,
     params: vec4<f32>,
+    // x = max distance for accepting sky-depth water mask pixels.
+    params2: vec4<f32>,
     weather: CompositorWeatherUniforms,
     // x = rain_distortion_boost, y = rain_reflection_boost, z = snow_reflection_soften.
     weather_water: vec4<f32>,
@@ -66,6 +68,27 @@ fn scene_world_y_from_depth(uv: vec2<f32>, depth: f32) -> f32 {
     return world_h.y / world_h.w;
 }
 
+fn water_plane_hit_distance(uv: vec2<f32>, surface_y: f32) -> f32 {
+    let far_h = view.world_from_clip * vec4<f32>(uv_to_ndc(uv), 0.0, 1.0);
+    if abs(far_h.w) <= 0.00001 {
+        return -1.0;
+    }
+
+    let far_world = far_h.xyz / far_h.w;
+    let ray = far_world - view.world_position.xyz;
+    if length(ray) <= 0.0001 {
+        return -1.0;
+    }
+
+    let direction = normalize(ray);
+    if abs(direction.y) <= 0.00001 {
+        return -1.0;
+    }
+
+    let t = (surface_y - view.world_position.y) / direction.y;
+    return select(-1.0, t, t > 0.0);
+}
+
 fn occlusion_aware_mask(raw_mask: f32, uv: vec2<f32>, surface_y: f32) -> f32 {
     if raw_mask <= 0.01 {
         return 0.0;
@@ -74,7 +97,9 @@ fn occlusion_aware_mask(raw_mask: f32, uv: vec2<f32>, surface_y: f32) -> f32 {
     // Bevy uses reversed-Z. Near/opaque depth is > 0; sky/far clear is near 0.
     let depth = scene_depth_at_uv(uv);
     if depth <= 0.0001 {
-        return raw_mask;
+        let hit_distance = water_plane_hit_distance(uv, surface_y);
+        let max_distance = max(reflection_state.params2.x, 1.0);
+        return select(0.0, raw_mask, hit_distance > 0.0 && hit_distance <= max_distance);
     }
 
     let scene_delta = scene_world_y_from_depth(uv, depth) - surface_y;
@@ -116,7 +141,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
 
     if mask <= 0.01 {
-        return scene;
+        return vec4<f32>(scene.rgb, 1.0);
     }
 
     let rain_factor = clamp(reflection_state.weather.rain_factor, 0.0, 1.0);
@@ -144,7 +169,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let refraction_uv = clamp(in.uv + refraction_distortion, vec2<f32>(0.001), vec2<f32>(0.999));
         let refracted_scene = textureSample(scene_texture, scene_sampler, refraction_uv);
         let refraction_blend = mask * clamp(refraction_strength * 7.5, 0.0, 0.28) * border_mask;
-        base_scene = vec4<f32>(mix(scene.rgb, refracted_scene.rgb, refraction_blend), scene.a);
+        base_scene = vec4<f32>(mix(scene.rgb, refracted_scene.rgb, refraction_blend), 1.0);
     }
 
     let distort = wave_distortion(in.uv, surface_y, distortion_strength);
@@ -170,5 +195,5 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         return base_scene;
     }
 
-    return vec4<f32>(mix(base_scene.rgb, reflection.rgb, blend), base_scene.a);
+    return vec4<f32>(mix(base_scene.rgb, reflection.rgb, blend), 1.0);
 }

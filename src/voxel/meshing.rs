@@ -2097,60 +2097,21 @@ fn sample_voxel_solid(
     voxel.is_solid() || voxel.is_liquid()
 }
 
-/// Surface Nets can assign a boundary surface to the all-air chunk adjacent to
-/// terrain. Those chunks still need mesh/collider generation even though their
-/// own voxel payload is empty.
+/// Surface Nets can assign a vertical chunk-boundary cap to the all-air chunk
+/// above terrain. Those chunks still need mesh/collider generation even though
+/// their own voxel payload is empty.
 pub(crate) fn empty_chunk_has_surface_nets_boundary_surface(
     world: &VoxelWorld,
     chunk_pos: IVec3,
 ) -> bool {
     let origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let planes = [
-        (
-            IVec3::NEG_X,
-            IVec3::new(origin.x - 1, origin.y, origin.z),
-            IVec3::Y,
-            IVec3::Z,
-        ),
-        (
-            IVec3::X,
-            IVec3::new(origin.x + CHUNK_SIZE_I32, origin.y, origin.z),
-            IVec3::Y,
-            IVec3::Z,
-        ),
-        (
-            IVec3::NEG_Y,
-            IVec3::new(origin.x, origin.y - 1, origin.z),
-            IVec3::X,
-            IVec3::Z,
-        ),
-        (
-            IVec3::Y,
-            IVec3::new(origin.x, origin.y + CHUNK_SIZE_I32, origin.z),
-            IVec3::X,
-            IVec3::Z,
-        ),
-        (
-            IVec3::NEG_Z,
-            IVec3::new(origin.x, origin.y, origin.z - 1),
-            IVec3::X,
-            IVec3::Y,
-        ),
-        (
-            IVec3::Z,
-            IVec3::new(origin.x, origin.y, origin.z + CHUNK_SIZE_I32),
-            IVec3::X,
-            IVec3::Y,
-        ),
-    ];
 
-    for (_, plane_origin, axis_a, axis_b) in planes {
-        for a in 0..CHUNK_SIZE_I32 {
-            for b in 0..CHUNK_SIZE_I32 {
-                let pos = plane_origin + axis_a * a + axis_b * b;
-                if terrain_meshing_voxel_at(world, pos).is_solid() {
-                    return true;
-                }
+    let plane_origin = IVec3::new(origin.x, origin.y - 1, origin.z);
+    for x in 0..CHUNK_SIZE_I32 {
+        for z in 0..CHUNK_SIZE_I32 {
+            let pos = plane_origin + IVec3::new(x, 0, z);
+            if terrain_meshing_voxel_at(world, pos).is_solid() {
+                return true;
             }
         }
     }
@@ -3935,6 +3896,21 @@ mod tests {
         assert!(
             !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 2, 1)),
             "water-only boundaries should remain water mesh responsibility, not terrain mesh"
+        );
+    }
+
+    #[test]
+    fn surface_nets_empty_side_neighbor_does_not_need_terrain_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 2, 2));
+        for z in 15..=18 {
+            for y in 20..=26 {
+                world.set_voxel(IVec3::new(15, y, z), VoxelType::Sand);
+            }
+        }
+
+        assert!(
+            !empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 1, 1)),
+            "all-air side neighbors should not spawn standalone terrain slabs"
         );
     }
 

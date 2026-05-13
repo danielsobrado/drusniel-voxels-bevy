@@ -78,10 +78,8 @@ impl Plugin for RenderingPlugin {
                     record_render_quality_counters.after(sync_render_quality_preset),
                 ),
             )
-            // GTAO replaces SSAO for better quality
-            .add_plugins(GtaoPlugin)
             .add_plugins(GtaoNoisePlugin)
-            // PCSS for contact-hardening soft shadows
+            // PCSS config is loaded for compatibility; custom PCSS shadow sampling is not active.
             .add_plugins(PcssPlugin)
             // Legacy SSAO kept for compatibility (disabled by default in gtao.yaml)
             .add_plugins(SsaoPlugin)
@@ -93,6 +91,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WaterReflectionPlugin)
             // Post-process compositor: blends the reflection texture onto water pixels
             .add_plugins(WaterReflectionCompositorPlugin)
+            // GTAO post-process runs after the main pass and before water/god-ray compositing.
+            .add_plugins(GtaoPlugin)
             // Diagnostic-only water visual probe and overlay counters.
             .add_plugins(WaterVisualProbePlugin)
             // Optional shaderpack-style final color/alpha finish for water.

@@ -146,7 +146,7 @@ impl Material for TriplanarMaterial {
     }
 
     fn enable_prepass() -> bool {
-        false
+        true
     }
 
     fn alpha_mode(&self) -> AlphaMode {

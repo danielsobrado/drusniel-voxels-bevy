@@ -71,3 +71,4 @@ editor/frontend/src-tauri/icons/android/mipmap-hdpi/*.png
 assets/models/vegetation/grass_bushes/ultimate_stylized_nature/*.png
 
 debug/*.png
+docs/lod/image/*.png

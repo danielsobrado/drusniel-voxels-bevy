@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
-pub const TERRAIN_GENERATION_VERSION: u64 = 9;
+pub const TERRAIN_GENERATION_VERSION: u64 = 10;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Deserialize)]
@@ -180,15 +180,15 @@ fn default_massif_scale() -> f32 {
 }
 
 fn default_massif_amplitude() -> f32 {
-    68.0
+    38.0
 }
 
 fn default_massif_threshold() -> f32 {
-    0.28
+    0.38
 }
 
 fn default_massif_power() -> f32 {
-    1.35
+    1.65
 }
 
 impl Default for TerrainConfig {

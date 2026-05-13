@@ -43,6 +43,7 @@ use crate::weather::{WeatherRuntime, WeatherShaderUniforms};
 
 const COMPOSITOR_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("f0e1d2c3-b4a5-9678-efab-012345678901");
+const NEAR_SKY_WATER_MASK_DISTANCE: f32 = 32.0;
 
 /// Label used to identify the compositor node in the render graph.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -62,6 +63,7 @@ struct ExtractedReflectionStatus {
     fresnel_power: f32,
     distortion_strength: f32,
     surface_y: f32,
+    sky_mask_max_distance: f32,
     weather: WeatherShaderUniforms,
     weather_water: [f32; 4],
     refraction: [f32; 4],
@@ -72,6 +74,7 @@ struct ExtractedReflectionStatus {
 struct ReflectionCompositorUniform {
     flags: [u32; 4],
     params: [f32; 4],
+    params2: [f32; 4],
     weather: WeatherShaderUniforms,
     weather_water: [f32; 4],
     refraction: [f32; 4],
@@ -104,8 +107,17 @@ fn extract_reflection_texture(world: &mut World) {
         weather,
         weather_water,
         refraction,
+        sky_mask_max_distance,
     ) = world.resource_scope::<bevy::render::MainWorld, _>(|_, main_world| {
         let water_config = main_world.get_resource::<WaterConfig>();
+        let sky_mask_max_distance = main_world
+            .get_resource::<WaterReflectionConfig>()
+            .map(|config| {
+                config
+                    .auto_disable_distance
+                    .max(NEAR_SKY_WATER_MASK_DISTANCE)
+            })
+            .unwrap_or(WaterReflectionConfig::default().auto_disable_distance);
         let weather_water = water_config
             .map(|config| {
                 [
@@ -179,6 +191,7 @@ fn extract_reflection_texture(world: &mut World) {
                 .unwrap_or_default(),
             weather_water,
             refraction,
+            sky_mask_max_distance,
         )
     });
     let sample_reflection = sample_reflection && !compositor_disabled;
@@ -194,6 +207,7 @@ fn extract_reflection_texture(world: &mut World) {
                 fresnel_power: params.fresnel_power,
                 distortion_strength: params.distortion_strength,
                 surface_y: params.surface_y,
+                sky_mask_max_distance,
                 weather,
                 weather_water,
                 refraction,
@@ -333,6 +347,7 @@ impl ViewNode for CompositorNode {
                 status.distortion_strength,
                 status.surface_y,
             ],
+            params2: [status.sky_mask_max_distance, 0.0, 0.0, 0.0],
             weather: status.weather,
             weather_water: status.weather_water,
             refraction: status.refraction,

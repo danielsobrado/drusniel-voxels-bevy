@@ -1,6 +1,7 @@
 pcss:
-  # Percentage-Closer Soft Shadows
-  enabled: true
+  # Percentage-Closer Soft Shadows.
+  # Disabled until the custom PCSS shader is wired into Bevy's active PBR shadow path.
+  enabled: false
   
   # World-space light source size (meters)
   # Larger = softer shadows with wider penumbra

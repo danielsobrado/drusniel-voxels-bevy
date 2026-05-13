@@ -84,13 +84,13 @@ fn snow_flake_mask(uv: vec2<f32>, time: f32, density: f32, quality: f32) -> f32 
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scene = textureSample(scene_texture, scene_sampler, in.uv);
     if overlay_state.flags.x != 0u || overlay_state.flags.y == 0u || overlay_state.flags.w == 0u {
-        return scene;
+        return vec4<f32>(scene.rgb, 1.0);
     }
 
     let weather = overlay_state.weather;
     let overlay_density = safe_saturate(overlay_state.params.x);
     if overlay_density <= 0.001 {
-        return scene;
+        return vec4<f32>(scene.rgb, 1.0);
     }
 
     let quality = overlay_state.params.y;
@@ -117,12 +117,12 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let overlay_mask = safe_saturate(max(rain_alpha, snow_alpha) * 3.0);
 
     if debug_mode == 1u {
-        return vec4<f32>(vec3<f32>(overlay_mask), scene.a);
+        return vec4<f32>(vec3<f32>(overlay_mask), 1.0);
     }
     if debug_mode == 2u {
         let rain_class = vec3<f32>(0.16, 0.38, 1.0) * safe_saturate(rain_alpha * 3.0);
         let snow_class = vec3<f32>(1.0, 1.0, 1.0) * safe_saturate(snow_alpha * 3.0);
-        return vec4<f32>(max(rain_class, snow_class), scene.a);
+        return vec4<f32>(max(rain_class, snow_class), 1.0);
     }
 
     var color = scene.rgb;
@@ -139,5 +139,5 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         color = mix(color, color * vec3<f32>(1.015, 1.02, 1.035), snow_density * 0.025);
     }
 
-    return vec4<f32>(color, scene.a);
+    return vec4<f32>(color, 1.0);
 }

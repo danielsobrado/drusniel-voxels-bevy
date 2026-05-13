@@ -2138,6 +2138,10 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
                 .shader_defs
                 .push("PROP_INSTANCE_TINT".into());
         }
+        let blends_alpha = key
+            .mesh_key
+            .intersection(MeshPipelineKey::BLEND_RESERVED_BITS)
+            == MeshPipelineKey::BLEND_ALPHA;
         descriptor
             .vertex
             .buffers
@@ -2150,6 +2154,9 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
             ));
             if key.tint_enabled {
                 fragment.shader_defs.push("PROP_INSTANCE_TINT".into());
+            }
+            if blends_alpha {
+                fragment.shader_defs.push("PROP_BLEND_ALPHA".into());
             }
         }
         descriptor

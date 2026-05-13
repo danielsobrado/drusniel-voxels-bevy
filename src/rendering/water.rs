@@ -201,13 +201,13 @@ fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
         wave_speed: 0.18,
         wave_scale: 4.0,
         wave_count: 1,
-        reflection_strength: 0.12,
+        reflection_strength: 0.08,
         fresnel_power: 3.0,
         distortion_strength: 0.001,
-        shallow_color: [0.08, 0.32, 0.64, 0.52],
-        deep_color: [0.01, 0.13, 0.34, 0.6],
-        clarity: 0.95,
-        base_alpha: 0.48,
+        shallow_color: [0.035, 0.20, 0.34, 0.74],
+        deep_color: [0.005, 0.065, 0.17, 0.86],
+        clarity: 0.42,
+        base_alpha: 0.72,
         foam_enabled: false,
         shore_foam: false,
         wave_crest_foam: false,
@@ -347,7 +347,7 @@ pub const WATER_CAUSTICS_HANDLE: Handle<Shader> =
 pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
     uuid_handle!("a42e6f9b-5c81-4a0d-a6f7-6e45e9ef0001");
 pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
-    uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
+    uuid_handle!("4c8c8d38-6c4b-4d3e-b48a-5bd7f8198f39");
 pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
 pub const NOBLE_GERSTNER_HANDLE: Handle<Shader> =
     uuid_handle!("e8a0c196-9db0-4db7-a623-3c8f57c20e01");

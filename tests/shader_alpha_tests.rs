@@ -1,0 +1,182 @@
+fn assert_not_contains(haystack: &str, needle: &str, shader_name: &str) {
+    assert!(
+        !haystack.contains(needle),
+        "{shader_name} should not preserve render-target alpha via `{needle}`"
+    );
+}
+
+#[test]
+fn fullscreen_post_passes_scrub_scene_alpha() {
+    let water_compositor = include_str!("../assets/shaders/water_reflection_compositor.wgsl");
+    let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
+    let weather_overlay = include_str!("../assets/shaders/weather_overlay.wgsl");
+
+    for (name, shader) in [
+        ("water_reflection_compositor.wgsl", water_compositor),
+        ("god_rays.wgsl", god_rays),
+        ("weather_overlay.wgsl", weather_overlay),
+    ] {
+        assert_not_contains(shader, "return scene;", name);
+        assert_not_contains(shader, "scene.a", name);
+        assert_not_contains(shader, "base_scene.a", name);
+    }
+}
+
+#[test]
+fn water_reflection_compositor_rejects_sky_masks_without_water_plane_hit() {
+    let water_compositor = include_str!("../assets/shaders/water_reflection_compositor.wgsl");
+
+    assert!(
+        water_compositor.contains("fn water_plane_hit_distance"),
+        "water reflection compositor should validate sky mask pixels against finite water-plane hits"
+    );
+    assert!(
+        water_compositor.contains("hit_distance <= max_distance"),
+        "sky/far-clear mask pixels should not pass through at unbounded horizon distance"
+    );
+    assert!(
+        water_compositor.contains("params2: vec4<f32>"),
+        "water reflection compositor should receive a configurable sky-mask distance limit"
+    );
+    assert_not_contains(
+        water_compositor,
+        "return raw_mask;",
+        "water_reflection_compositor.wgsl",
+    );
+}
+
+#[test]
+fn opaque_prop_shaders_write_solid_alpha() {
+    let props = include_str!("../assets/shaders/props.wgsl");
+    let instanced_props = include_str!("../assets/shaders/instanced_prop.wgsl");
+    let simple_lod = include_str!("../assets/shaders/simple_lod.wgsl");
+    let building = include_str!("../assets/shaders/building.wgsl");
+
+    assert_not_contains(props, "final_pbr.albedo.a", "props.wgsl");
+    assert!(
+        instanced_props.contains("#ifdef PROP_BLEND_ALPHA"),
+        "instanced_prop.wgsl should only preserve alpha for explicitly blended prop passes"
+    );
+    assert_not_contains(simple_lod, "albedo.a", "simple_lod.wgsl");
+    assert_not_contains(building, "final_pbr.albedo.a", "building.wgsl");
+}
+
+#[test]
+fn depth_dependent_passes_have_depth_before_weather_overlay() {
+    let weather_overlay = include_str!("../src/rendering/weather_overlay.rs");
+    let compact_weather = weather_overlay
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(
+        compact_weather.contains("GodRaysLabel, WeatherOverlayLabel, Node3d::Bloom"),
+        "weather overlay should run after god rays so depth-dependent lighting does not sample precipitation"
+    );
+    assert!(
+        !compact_weather.contains("WeatherOverlayLabel, GodRaysLabel"),
+        "weather overlay should not feed into the god-ray pass"
+    );
+}
+
+#[test]
+fn terrain_materials_participate_in_depth_prepass() {
+    let triplanar = include_str!("../src/rendering/triplanar_material.rs");
+    let blocky = include_str!("../src/rendering/blocky_material.rs");
+    let compact_triplanar = triplanar.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact_blocky = blocky.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        compact_triplanar.contains("fn enable_prepass() -> bool { true }"),
+        "triplanar terrain must write prepass depth for water compositing and god rays"
+    );
+    assert!(
+        compact_blocky.contains("fn enable_prepass() -> bool { true }"),
+        "blocky terrain must write prepass depth for water compositing and god rays"
+    );
+}
+
+#[test]
+fn gtao_is_registered_as_a_real_post_process_node() {
+    let gtao = include_str!("../src/rendering/gtao.rs");
+    let gtao_shader = include_str!("../assets/shaders/gtao_main.wgsl");
+    let compact = gtao.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        compact.contains("add_render_graph_node::<ViewNodeRunner<GtaoNode>>(Core3d, GtaoLabel)"),
+        "GTAO must be registered in the Core3d graph"
+    );
+    assert!(
+        compact.contains("Node3d::EndMainPass, GtaoLabel, WaterReflectionCompositorLabel"),
+        "GTAO should run after the main pass and before water/god-ray compositing"
+    );
+    assert!(
+        compact.contains("render_pass.draw(0..3, 0..1)"),
+        "GTAO node should execute a fullscreen pass"
+    );
+    assert!(
+        !gtao.contains("GTAO implementation stub"),
+        "GTAO should not be left as a no-op stub"
+    );
+    assert!(
+        gtao_shader.contains("scene_texture") && gtao_shader.contains("depth_texture"),
+        "GTAO shader should sample scene color and prepass depth"
+    );
+}
+
+#[test]
+fn internal_shader_handles_are_unique_for_water_and_god_rays() {
+    let water = include_str!("../src/rendering/water.rs");
+    let god_rays = include_str!("../src/rendering/god_rays.rs");
+
+    let gerstner_uuid = water
+        .lines()
+        .skip_while(|line| !line.contains("GERSTNER_WAVES_HANDLE"))
+        .find_map(uuid_from_line)
+        .expect("GERSTNER_WAVES_HANDLE should use uuid_handle!");
+    let god_rays_uuid = god_rays
+        .lines()
+        .skip_while(|line| !line.contains("GOD_RAYS_SHADER_HANDLE"))
+        .find_map(uuid_from_line)
+        .expect("GOD_RAYS_SHADER_HANDLE should use uuid_handle!");
+
+    assert_ne!(
+        gerstner_uuid, god_rays_uuid,
+        "internal shader handles must not alias the same asset UUID"
+    );
+}
+
+#[test]
+fn pcss_is_not_advertised_as_active_without_shader_integration() {
+    let pcss = include_str!("../src/rendering/pcss.rs");
+    let pcss_config = include_str!("../assets/config/pcss.yaml");
+    let pcss_shader = include_str!("../assets/shaders/pcss_shadows.wgsl");
+
+    assert!(
+        pcss.contains("config.enabled = false"),
+        "PCSS plugin should disable the compatibility config until shader integration exists"
+    );
+    assert!(
+        !pcss.contains("PcssShadows"),
+        "PCSS should not tag lights with a marker that the render path never consumes"
+    );
+    assert!(
+        pcss_config.contains("enabled: false"),
+        "PCSS config should not default to an advertised active state"
+    );
+    assert!(
+        !pcss_shader.contains("@group("),
+        "PCSS utility shader should not declare hard-coded bind groups"
+    );
+    assert!(
+        !pcss_shader.contains("vec3<f32>(0.5, 0.5, 0.5)"),
+        "PCSS utility shader should not fabricate placeholder shadow coordinates"
+    );
+}
+
+fn uuid_from_line(line: &str) -> Option<&str> {
+    let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
+    let rest = &line[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}

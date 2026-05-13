@@ -442,7 +442,8 @@ impl Plugin for GodRayPlugin {
 
         render_app.add_render_graph_node::<ViewNodeRunner<GodRayNode>>(Core3d, GodRaysLabel);
 
-        // Wire: WaterReflectionCompositor → GodRays → Bloom
+        // WeatherOverlay inserts itself after GodRays, so depth-dependent lighting samples the
+        // scene before screen-space precipitation is composited.
         render_app.add_render_graph_edges(
             Core3d,
             (WaterReflectionCompositorLabel, GodRaysLabel, Node3d::Bloom),

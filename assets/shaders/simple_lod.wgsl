@@ -36,5 +36,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend toward fog color
     let final_color = mix(color, uniforms.fog_color.rgb, fog_factor);
 
-    return vec4<f32>(final_color, albedo.a);
+    return vec4<f32>(final_color, 1.0);
 }

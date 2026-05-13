@@ -35,7 +35,6 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::god_rays::GodRaysLabel;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
-use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
 use crate::weather::{WEATHER_FLAG_PRECIP_OVERLAY, WeatherRuntime, WeatherShaderUniforms};
 
 const WEATHER_OVERLAY_SHADER_HANDLE: Handle<Shader> =
@@ -296,15 +295,8 @@ impl Plugin for WeatherOverlayPlugin {
             Core3d,
             WeatherOverlayLabel,
         );
-        render_app.add_render_graph_edges(
-            Core3d,
-            (
-                WaterReflectionCompositorLabel,
-                WeatherOverlayLabel,
-                GodRaysLabel,
-                Node3d::Bloom,
-            ),
-        );
+        render_app
+            .add_render_graph_edges(Core3d, (GodRaysLabel, WeatherOverlayLabel, Node3d::Bloom));
     }
 }
 

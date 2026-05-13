@@ -22,9 +22,9 @@ terrain:
     lacunarity: 2.3
     ridge_power: 1.8  # Sharper peaks (1.0 = smooth, 2.0+ = sharp ridges)
     massif_scale: 0.0035
-    massif_amplitude: 68.0
-    massif_threshold: 0.28
-    massif_power: 1.35
+    massif_amplitude: 38.0
+    massif_threshold: 0.38
+    massif_power: 1.65
 
   # Hills and local variation
   hills:

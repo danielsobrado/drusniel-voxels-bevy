@@ -51,7 +51,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     // Skip if sun is behind the camera
     if uniforms.sun_screen_pos.w < 0.5 {
-        return scene;
+        return vec4<f32>(scene.rgb, 1.0);
     }
 
     let sun_uv = uniforms.sun_screen_pos.xy;
@@ -103,5 +103,5 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let god_rays = accumulated * uniforms.intensity * weather_intensity_mult * directional_fade;
 
     // Additive blend onto the scene
-    return vec4<f32>(scene.rgb + god_rays, scene.a);
+    return vec4<f32>(scene.rgb + god_rays, 1.0);
 }
