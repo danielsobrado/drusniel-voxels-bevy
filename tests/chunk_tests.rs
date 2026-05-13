@@ -2,7 +2,9 @@
 
 use bevy::math::{IVec3, UVec3};
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_VOLUME};
-use voxel_builder::voxel::chunk::{Chunk, ChunkData, FaceVisibility, LodLevel, MeshDirtyReason};
+use voxel_builder::voxel::chunk::{
+    Chunk, ChunkData, ChunkUniformity, FaceVisibility, LodLevel, MeshDirtyReason,
+};
 use voxel_builder::voxel::types::VoxelType;
 
 #[test]
@@ -66,6 +68,22 @@ fn setting_same_voxel_does_not_mark_dirty() {
         !chunk.is_dirty(),
         "Setting same voxel should not mark dirty"
     );
+}
+
+#[test]
+fn with_voxels_sets_generation_state_without_mutation_reason() {
+    let mut voxels = [VoxelType::Air; CHUNK_VOLUME];
+    voxels[Chunk::index(1, 2, 3)] = VoxelType::Rock;
+
+    let chunk = Chunk::with_voxels(IVec3::new(2, 3, 4), voxels);
+
+    assert_eq!(chunk.position(), IVec3::new(2, 3, 4));
+    assert_eq!(chunk.get(UVec3::new(1, 2, 3)), VoxelType::Rock);
+    assert!(chunk.is_dirty());
+    assert!(chunk.has_dirty_reason(MeshDirtyReason::Generation));
+    assert!(!chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation));
+    assert_eq!(chunk.uniformity(), ChunkUniformity::Mixed);
+    assert!(chunk.is_visibility_dirty());
 }
 
 #[test]

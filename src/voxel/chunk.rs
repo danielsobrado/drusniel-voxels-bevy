@@ -245,6 +245,23 @@ impl Chunk {
         }
     }
 
+    pub fn with_voxels(position: IVec3, voxels: [VoxelType; CHUNK_VOLUME]) -> Self {
+        let uniformity = Self::compute_uniformity_for(&voxels);
+        Self {
+            voxels,
+            dirty: true,
+            dirty_reasons: MeshDirtyReason::Generation.bit(),
+            mesh_entity: None,
+            water_mesh_entity: None,
+            water_mask_mesh_entity: None,
+            position,
+            lod_level: LodLevel::Lod0,
+            uniformity,
+            face_visibility: FaceVisibility::all_connected(),
+            visibility_dirty: uniformity != ChunkUniformity::Empty,
+        }
+    }
+
     /// Gets the voxel at the given local coordinates.
     ///
     /// # Panics
@@ -505,17 +522,22 @@ impl Chunk {
             return self.uniformity;
         }
 
-        let first_voxel = self.voxels[0];
+        self.uniformity = Self::compute_uniformity_for(&self.voxels);
+        self.uniformity
+    }
+
+    fn compute_uniformity_for(voxels: &[VoxelType; CHUNK_VOLUME]) -> ChunkUniformity {
+        let first_voxel = voxels[0];
         let mut all_same = true;
 
-        for &voxel in &self.voxels[1..] {
+        for &voxel in &voxels[1..] {
             if voxel != first_voxel {
                 all_same = false;
                 break;
             }
         }
 
-        self.uniformity = if all_same {
+        if all_same {
             if first_voxel == VoxelType::Air {
                 ChunkUniformity::Empty
             } else {
@@ -523,9 +545,7 @@ impl Chunk {
             }
         } else {
             ChunkUniformity::Mixed
-        };
-
-        self.uniformity
+        }
     }
 
     /// Invalidates the cached uniformity state, forcing recomputation on next check.

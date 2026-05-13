@@ -555,14 +555,8 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     /// Water body bathymetry lowers terrain under lakes, ponds, and river
     /// channels before the usual water fill step runs.
     pub fn get_height(&self, world_x: i32, world_z: i32) -> i32 {
-        let base_height = self.get_base_height(world_x, world_z);
-        let metadata = self.get_water_generation_metadata(world_x, world_z);
-        let carved_height = if metadata.is_surface_water() {
-            base_height.min(metadata.bed_y)
-        } else {
-            base_height
-        };
-        carved_height.clamp(MIN_BREAKABLE_Y, self.config.height.max as i32)
+        self.get_height_and_water_generation_metadata(world_x, world_z)
+            .0
     }
 
     pub fn get_water_generation_metadata(
@@ -572,6 +566,25 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     ) -> WaterGenerationMetadata {
         let base_height = self.get_base_height(world_x, world_z);
         self.water_generation_metadata_for_base_height(world_x, world_z, base_height)
+    }
+
+    pub(crate) fn get_height_and_water_generation_metadata(
+        &self,
+        world_x: i32,
+        world_z: i32,
+    ) -> (i32, WaterGenerationMetadata) {
+        let base_height = self.get_base_height(world_x, world_z);
+        let metadata =
+            self.water_generation_metadata_for_base_height(world_x, world_z, base_height);
+        let carved_height = if metadata.is_surface_water() {
+            base_height.min(metadata.bed_y)
+        } else {
+            base_height
+        };
+        (
+            carved_height.clamp(MIN_BREAKABLE_Y, self.config.height.max as i32),
+            metadata,
+        )
     }
 
     fn water_generation_metadata_for_base_height(
@@ -1018,7 +1031,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
     }
 
     /// Determines the voxel type based on biome, depth, and water proximity.
-    fn get_biome_voxel(&self, biome: Biome, depth: i32, near_water: bool) -> VoxelType {
+    pub(crate) fn get_biome_voxel(&self, biome: Biome, depth: i32, near_water: bool) -> VoxelType {
         match biome {
             Biome::Sandy => {
                 if depth <= 2 {
