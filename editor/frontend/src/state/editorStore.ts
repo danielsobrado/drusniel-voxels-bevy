@@ -128,6 +128,37 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.dirtyState = castDraft(cloneEditorValue(snapshot.dirtyState));
 };
 
+const replaceDirtyViewportChunks = (
+  currentSnapshot: ViewportSnapshot | null,
+  nextSnapshot: ViewportSnapshot,
+  dirtyChunkIds: readonly string[],
+): ViewportSnapshot => {
+  if (!currentSnapshot || currentSnapshot.worldId !== nextSnapshot.worldId || dirtyChunkIds.length === 0) {
+    return nextSnapshot;
+  }
+
+  const dirtyChunks = new Set(dirtyChunkIds);
+  const currentChunks = new Map(currentSnapshot.chunks.map((chunk) => [chunk.chunkId, chunk] as const));
+
+  return {
+    ...nextSnapshot,
+    chunks: nextSnapshot.chunks.map((chunk) => {
+      const currentChunk = currentChunks.get(chunk.chunkId);
+      if (
+        !currentChunk ||
+        dirtyChunks.has(chunk.chunkId) ||
+        chunk.dirty ||
+        chunk.meshState === "queued" ||
+        currentChunk.payloadId !== chunk.payloadId
+      ) {
+        return chunk;
+      }
+
+      return currentChunk;
+    }),
+  };
+};
+
 export interface EditorDataState {
   readonly activeMode: EditorMode;
   readonly activeTool: string;
@@ -776,12 +807,13 @@ export const useEditorStore = create<EditorStore>()(
       }),
     setViewportSnapshot: (snapshot) =>
       set((state) => {
-        state.viewportSnapshot = castDraft(snapshot);
-        const preview = snapshot
+        const nextSnapshot = snapshot ? replaceDirtyViewportChunks(state.viewportSnapshot, snapshot, state.dirtyState.dirtyChunkIds) : null;
+        state.viewportSnapshot = castDraft(nextSnapshot);
+        const preview = nextSnapshot
           ? {
-              chunkSize: snapshot.chunkSize,
-              sampleResolution: snapshot.sampleResolution,
-              chunks: snapshot.chunks.map((chunk) => ({
+              chunkSize: nextSnapshot.chunkSize,
+              sampleResolution: nextSnapshot.sampleResolution,
+              chunks: nextSnapshot.chunks.map((chunk) => ({
                 chunkId: chunk.chunkId,
                 coordinate: chunk.coordinate,
                 samples: [...chunk.samples],

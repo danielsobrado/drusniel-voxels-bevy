@@ -12,6 +12,7 @@ import { createInitialEditorState, useEditorStore } from "./editorStore";
 import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntimeWarnings, getSelectedObject, getVisibleOutlinerNodes } from "./editorSelectors";
 import { menuCommandIds } from "../components/editor/EditorMenubar";
 import { toolbarCommandIds } from "../components/editor/MainToolbar";
+import type { ViewportSnapshot } from "../types/world";
 
 const collectSourceFiles = (directory: string): readonly string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -567,6 +568,54 @@ describe("editor command registry", () => {
     });
     expect(state.dirtyState.dirtyChunkIds).toContain("chunk-0-0-0");
     expect(state.commandHistory[0].commandId).toBe("editor.voxel.paintMaterial");
+  });
+
+  it("replaces dirty viewport chunks while preserving clean chunk payload objects", async () => {
+    const snapshotResult = await new MockEditorBackendClient().getViewportSnapshot();
+    if (!snapshotResult.ok) {
+      expect.fail("Mock viewport snapshot should load.");
+    }
+
+    const initialSnapshot = snapshotResult.data;
+    useEditorStore.getState().setViewportSnapshot(initialSnapshot);
+    const storedInitialSnapshot = useEditorStore.getState().viewportSnapshot;
+    if (!storedInitialSnapshot) {
+      expect.fail("Viewport snapshot should be stored.");
+    }
+
+    const dirtyChunkId = "chunk-1-0";
+    const cleanChunkId = "chunk-3-0";
+    const initialDirtyChunk = storedInitialSnapshot.chunks.find((chunk) => chunk.chunkId === dirtyChunkId);
+    const initialCleanChunk = storedInitialSnapshot.chunks.find((chunk) => chunk.chunkId === cleanChunkId);
+    if (!initialDirtyChunk || !initialCleanChunk) {
+      expect.fail("Expected mock viewport chunks are missing.");
+    }
+
+    const updatedSnapshot: ViewportSnapshot = {
+      ...initialSnapshot,
+      generatedAt: "phase-6-dirty-replacement",
+      chunks: initialSnapshot.chunks.map((chunk) =>
+        chunk.chunkId === dirtyChunkId
+          ? {
+              ...chunk,
+              payloadId: `${chunk.payloadId}-updated`,
+              samples: chunk.samples.map((sample) => ({ ...sample, height: sample.height + 1 })),
+            }
+          : { ...chunk },
+      ),
+    };
+
+    useEditorStore.getState().markDirty(dirtyChunkId);
+    useEditorStore.getState().setViewportSnapshot(updatedSnapshot);
+
+    const storedUpdatedSnapshot = useEditorStore.getState().viewportSnapshot;
+    if (!storedUpdatedSnapshot) {
+      expect.fail("Updated viewport snapshot should be stored.");
+    }
+
+    expect(storedUpdatedSnapshot.chunks.find((chunk) => chunk.chunkId === dirtyChunkId)).not.toBe(initialDirtyChunk);
+    expect(storedUpdatedSnapshot.chunks.find((chunk) => chunk.chunkId === cleanChunkId)).toBe(initialCleanChunk);
+    expect(storedUpdatedSnapshot.chunks.find((chunk) => chunk.chunkId === dirtyChunkId)?.payloadId).toBe(`${initialDirtyChunk.payloadId}-updated`);
   });
 
   it("does not run voxel replacement without a voxel selection", async () => {

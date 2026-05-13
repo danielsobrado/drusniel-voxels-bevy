@@ -709,6 +709,8 @@ export const LiteVoxelViewport = Object.assign(
           ref={canvasRef}
           className="world-viewport-canvas"
           data-testid="world-viewport-canvas"
+          data-atlas-preview-enabled={String(atlasPreviewEnabled)}
+          data-renderable-mesh={String(hasRenderableMesh)}
           tabIndex={0}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);

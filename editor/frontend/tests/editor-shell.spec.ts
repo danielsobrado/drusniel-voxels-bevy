@@ -10,6 +10,10 @@ test("editor shell renders", async ({ page }) => {
 
   await expect(page.getByTestId("panel-viewport")).toBeVisible();
   await expect(page.getByTestId("bevy-canvas-host")).toBeVisible();
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-role", "authoring");
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-implementation", "liteVoxel");
+  await expect(page.getByTestId("world-viewport-canvas")).toBeVisible();
+  await expect(page.getByTestId("viewport-mode-authoring")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("panel-world-outliner")).toBeVisible();
   await expect(page.getByTestId("panel-inspector")).toBeVisible();
   await expect(page.getByTestId("panel-asset-browser")).toBeVisible();
@@ -18,6 +22,33 @@ test("editor shell renders", async ({ page }) => {
   await expect(page.getByText("Console").first()).toBeVisible();
   await expect(page.getByText("Profiler").first()).toBeVisible();
   await expect(page.getByText("Agent Workbench").first()).toBeVisible();
+});
+
+test("viewport mode switch separates fast authoring from native validation", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-role", "authoring");
+  await expect(page.getByTestId("world-viewport-canvas")).toBeVisible();
+
+  await page.getByTestId("viewport-mode-validation").click();
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-role", "validation");
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-implementation", "nativeBevy");
+  await expect(page.getByTestId("native-viewport-status")).toContainText("Native validation viewport");
+
+  await page.getByTestId("viewport-mode-authoring").click();
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-role", "authoring");
+  await expect(page.getByTestId("bevy-canvas-host")).toHaveAttribute("data-viewport-implementation", "liteVoxel");
+  await expect(page.getByTestId("world-viewport-canvas")).toBeVisible();
+});
+
+test("authoring viewport overlay toggles affect diagnostic layers", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("viewport-voxel-grid-overlay")).toBeVisible();
+
+  await page.locator('[data-command-id="editor.view.toggleVoxelGrid"]').first().click();
+  await expect(page.getByTestId("viewport-voxel-grid-overlay")).not.toBeVisible();
+
+  await page.locator('[data-command-id="editor.view.toggleVoxelGrid"]').first().click();
+  await expect(page.getByTestId("viewport-voxel-grid-overlay")).toBeVisible();
 });
 
 test("selecting a mocked outliner item updates the inspector header", async ({ page }) => {
@@ -170,6 +201,14 @@ test("advertised editor keyboard shortcuts run commands", async ({ page }) => {
 
 test("texture atlas assignment updates mappings and rebuild state", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.keyboard.press("Control+K");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.getByPlaceholder("Run editor command...").fill("open texture atlas");
+  await page
+    .getByTestId("command-palette")
+    .locator('[data-command-id="editor.material.openTextureAtlas"]')
+    .click();
+  await expect(page.getByTestId("world-viewport-canvas")).toHaveAttribute("data-atlas-preview-enabled", "true");
 
   const textureTab = page.locator('.dockview-react').getByText("Texture Atlas", { exact: true }).first();
   await textureTab.click();
