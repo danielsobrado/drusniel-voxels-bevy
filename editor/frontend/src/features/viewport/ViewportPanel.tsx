@@ -6,6 +6,7 @@ import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import { getProtectedAreaWarnings, getRuntimeWarnings, getSelectedObject } from "../../state/editorSelectors";
 import { BevyCanvasHost, type AreaOverlayState } from "./BevyCanvasHost";
+import type { LiteVoxelEditRequest, LiteVoxelEditResponse, LiteVoxelSelection } from "./LiteVoxelViewport";
 import type { ViewportModifierKey } from "../../types/editor";
 import type { PropAsset, PropInstance, ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
 import type { WaterReflectionDebugViewMode } from "../../types/world";
@@ -46,6 +47,9 @@ const modifierKeyOptions: readonly { readonly value: ViewportModifierKey; readon
 ];
 
 const formatPropNumber = (value: number) => Number(value.toFixed(2)).toString();
+
+const voxelSelectionLabel = (position: readonly [number, number, number], block = "Voxel") =>
+  `${block} (${position[0]}, ${position[1]}, ${position[2]})`;
 
 const buildPlacedProp = (
   asset: PropAsset,
@@ -181,6 +185,66 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
         transform: nextProp.transform,
       });
       void runtimeClient.scatterProps([nextProp]);
+    },
+    [runtimeClient],
+  );
+
+  const selectVoxelInViewer = useCallback((voxel: LiteVoxelSelection) => {
+    useEditorStore.getState().setSelection({
+      kind: "voxel",
+      chunkId: voxel.chunkId,
+      position: voxel.position,
+      label: voxelSelectionLabel(voxel.position),
+    });
+  }, []);
+
+  const setVoxelInViewer = useCallback(
+    async (edit: LiteVoxelEditRequest): Promise<LiteVoxelEditResponse> => {
+      const result = await runtimeClient.setVoxel(edit.position, edit.block);
+      if (!result.ok) {
+        useEditorStore.getState().pushAgentTimelineEvent({
+          kind: "warning",
+          message: `Voxel edit rejected at ${edit.position.join(", ")}: ${result.message}`,
+        });
+        return { ok: false, message: result.message };
+      }
+
+      const mutation = result.data;
+      const position: [number, number, number] = [mutation.position[0], mutation.position[1], mutation.position[2]];
+      if (mutation.editResult !== "applied" && mutation.editResult !== "noChange") {
+        const message = mutation.editResult.replace(/^rejected/, "rejected ");
+        useEditorStore.getState().pushAgentTimelineEvent({
+          kind: "warning",
+          message: `Voxel edit ${message} at ${position.join(", ")}.`,
+        });
+        return {
+          ok: false,
+          message,
+          chunkId: mutation.chunkId,
+          voxel: mutation.currentVoxel ?? mutation.voxel,
+        };
+      }
+
+      const state = useEditorStore.getState();
+      if (mutation.editResult === "applied") {
+        state.markDirty(mutation.chunkId);
+      }
+      state.setSelection({
+        kind: "voxel",
+        chunkId: mutation.chunkId,
+        position,
+        label: voxelSelectionLabel(position, mutation.currentVoxel ?? mutation.voxel),
+      });
+      state.pushAgentTimelineEvent({
+        kind: "command",
+        message: `Viewport voxel edit: set ${position.join(", ")} to ${mutation.currentVoxel ?? mutation.voxel}.`,
+      });
+
+      return {
+        ok: true,
+        chunkId: mutation.chunkId,
+        voxel: mutation.currentVoxel ?? mutation.voxel,
+      };
     },
     [runtimeClient],
   );
@@ -377,6 +441,8 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
           waterRuntimeSnapshot={editorState.waterRuntimeSnapshot}
           propPlacementEnabled={activeMode === "props"}
           onPlaceProp={placePropInViewer}
+          onSelectVoxel={selectVoxelInViewer}
+          onSetVoxel={setVoxelInViewer}
           selectedPropRotationY={selectedProp?.transform.rotation[1]}
           selectedPropUniformScale={selectedProp?.transform.scale[0]}
           propRotateDragModifier={editorState.propPlacementSettings.rotateDragModifier}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
@@ -17,6 +17,8 @@ export interface LiteVoxelViewportProps {
   readonly viewportOverlays: ViewportOverlayState;
   readonly propPlacementEnabled?: boolean;
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
+  readonly onSelectVoxel?: (selection: LiteVoxelSelection) => void;
+  readonly onSetVoxel?: (edit: LiteVoxelEditRequest) => Promise<LiteVoxelEditResponse>;
   readonly selectedPropRotationY?: number;
   readonly selectedPropUniformScale?: number;
   readonly propRotateDragModifier?: ViewportModifierKey;
@@ -27,6 +29,23 @@ export interface LiteVoxelViewportProps {
   readonly propScaleMin?: number;
   readonly propScaleMax?: number;
   readonly onAdjustSelectedProp?: (adjustment: { readonly rotationY?: number; readonly uniformScale?: number }) => void;
+}
+
+export interface LiteVoxelSelection {
+  readonly position: [number, number, number];
+  readonly chunkId: string;
+  readonly face: "top" | "side" | "bottom";
+}
+
+export interface LiteVoxelEditRequest extends LiteVoxelSelection {
+  readonly block: BlockType;
+}
+
+export interface LiteVoxelEditResponse {
+  readonly ok: boolean;
+  readonly message?: string;
+  readonly chunkId?: string;
+  readonly voxel?: string;
 }
 
 interface ViewState {
@@ -72,6 +91,14 @@ interface PropOverlayShape {
   readonly point: ProjectedPoint;
   readonly radius: number;
   readonly selected: boolean;
+}
+
+interface PendingVoxelEdit {
+  readonly id: string;
+  readonly position: [number, number, number];
+  readonly block: BlockType;
+  readonly status: "pending" | "applied" | "rejected";
+  readonly message?: string;
 }
 
 const MATERIAL_COLORS: Record<string, string> = {
@@ -169,6 +196,9 @@ const projectIso = (position: readonly [number, number, number], view: ViewState
   x: view.offsetX + (position[0] - position[2]) * 0.72 * view.zoom,
   y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
 });
+
+const chunkIdForVoxel = (position: readonly [number, number, number]) =>
+  `chunk-${Math.floor(position[0] / 16)}-${Math.floor(position[1] / 16)}-${Math.floor(position[2] / 16)}`;
 
 const pointsToSvg = (points: readonly ProjectedPoint[]) => points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
 
@@ -275,6 +305,37 @@ const nearestPlacementSample = (
   return [nearest.x, nearest.height + 1, nearest.z];
 };
 
+const nearestVoxelSelection = (
+  samples: readonly WorldSurfaceSample[],
+  view: ViewState,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  targetFace: "top" | "side" | "bottom" | "all",
+): LiteVoxelSelection | null => {
+  if (samples.length === 0) {
+    return null;
+  }
+
+  const position = nearestPlacementSample(samples, view, clientX, clientY, rect);
+  if (!position) {
+    return null;
+  }
+
+  const voxelPosition: [number, number, number] = [
+    Math.round(position[0]),
+    Math.max(0, Math.round(position[1] - 1)),
+    Math.round(position[2]),
+  ];
+  const face = targetFace === "all" ? "top" : targetFace;
+
+  return {
+    position: voxelPosition,
+    chunkId: chunkIdForVoxel(voxelPosition),
+    face,
+  };
+};
+
 const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer, view: ViewState, fill: string, stroke: string) => {
   if (!mesh.positions || !mesh.indices || mesh.indices.length < 3) {
     return false;
@@ -324,6 +385,8 @@ export const LiteVoxelViewport = Object.assign(
     viewportOverlays,
     propPlacementEnabled = false,
     onPlaceProp,
+    onSelectVoxel,
+    onSetVoxel,
     selectedPropRotationY,
     selectedPropUniformScale,
     propRotateDragModifier = "shift",
@@ -337,8 +400,11 @@ export const LiteVoxelViewport = Object.assign(
   }: LiteVoxelViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const dragRef = useRef<CanvasDragState | null>(null);
+    const suppressClickRef = useRef(false);
     const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
+    const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
+    const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
     const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
@@ -348,6 +414,49 @@ export const LiteVoxelViewport = Object.assign(
     const brushPreviewShape = useMemo(() => buildBrushPreviewShape(brushSettings, targetedVoxel, activeMode, view), [activeMode, brushSettings, targetedVoxel, view]);
     const propOverlayShapes = useMemo(() => buildPropOverlayShapes(props, selection, view), [props, selection, view]);
     const selectedVoxelPoint = selection.kind === "voxel" ? projectIso(selection.position, view) : null;
+    const hoveredVoxelPoint = hoveredVoxel ? projectIso(hoveredVoxel.position, view) : null;
+
+    const queueVoxelEdit = useCallback(
+      async (voxelSelection: LiteVoxelSelection) => {
+        if (!onSetVoxel) {
+          return;
+        }
+
+        const block = brushSettings.materialBlockId;
+        const editId = `voxel-edit-${Date.now()}-${voxelSelection.position.join("-")}`;
+        setPendingVoxelEdits((current) => [
+          ...current,
+          {
+            id: editId,
+            position: voxelSelection.position,
+            block,
+            status: "pending",
+          },
+        ]);
+
+        let result: LiteVoxelEditResponse;
+        try {
+          result = await onSetVoxel({ ...voxelSelection, block });
+        } catch (error) {
+          result = { ok: false, message: error instanceof Error ? error.message : "runtime edit failed" };
+        }
+        setPendingVoxelEdits((current) =>
+          current.map((edit) =>
+            edit.id === editId
+              ? {
+                  ...edit,
+                  status: result.ok ? "applied" : "rejected",
+                  message: result.message,
+                }
+              : edit,
+          ),
+        );
+        window.setTimeout(() => {
+          setPendingVoxelEdits((current) => current.filter((edit) => edit.id !== editId));
+        }, result.ok ? 900 : 2200);
+      },
+      [brushSettings.materialBlockId, onSetVoxel],
+    );
 
     const fitView = useCallback(() => {
       setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
@@ -459,6 +568,7 @@ export const LiteVoxelViewport = Object.assign(
           tabIndex={0}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
+            suppressClickRef.current = false;
             if (
               propPlacementEnabled &&
               onAdjustSelectedProp &&
@@ -474,8 +584,16 @@ export const LiteVoxelViewport = Object.assign(
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current;
+            const voxelSelection = nearestVoxelSelection(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), brushSettings.targetFace);
+            setHoveredVoxel(voxelSelection);
             if (!drag) {
               return;
+            }
+            const dragDistance = drag.kind === "pan"
+              ? Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y)
+              : Math.abs(event.clientX - drag.x);
+            if (dragDistance > 4) {
+              suppressClickRef.current = true;
             }
             if (drag.kind === "prop-rotate") {
               event.preventDefault();
@@ -493,6 +611,11 @@ export const LiteVoxelViewport = Object.assign(
           }}
           onPointerCancel={() => {
             dragRef.current = null;
+            setHoveredVoxel(null);
+          }}
+          onPointerLeave={() => {
+            dragRef.current = null;
+            setHoveredVoxel(null);
           }}
           onWheel={(event) => {
             event.preventDefault();
@@ -516,6 +639,25 @@ export const LiteVoxelViewport = Object.assign(
             const position = nearestPlacementSample(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
             if (position) {
               onPlaceProp(position);
+            }
+          }}
+          onClick={(event) => {
+            if (suppressClickRef.current) {
+              suppressClickRef.current = false;
+              return;
+            }
+            if (propPlacementEnabled) {
+              return;
+            }
+
+            const voxelSelection = nearestVoxelSelection(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), brushSettings.targetFace);
+            if (!voxelSelection) {
+              return;
+            }
+
+            onSelectVoxel?.(voxelSelection);
+            if (activeMode === "voxel_paint" || activeMode === "voxel_sculpt") {
+              void queueVoxelEdit(voxelSelection);
             }
           }}
           onKeyDown={(event) => {
@@ -554,6 +696,24 @@ export const LiteVoxelViewport = Object.assign(
               <circle className="lite-viewport-selected-voxel-dot" cx={selectedVoxelPoint.x} cy={selectedVoxelPoint.y} r={2.5} />
             </g>
           ) : null}
+
+          {hoveredVoxelPoint ? (
+            <g data-testid="viewport-hovered-voxel-overlay">
+              <circle className="lite-viewport-hovered-voxel-ring" cx={hoveredVoxelPoint.x} cy={hoveredVoxelPoint.y} r={7 * view.zoom} />
+              <line className="lite-viewport-hovered-voxel-face" x1={hoveredVoxelPoint.x - 8} y1={hoveredVoxelPoint.y} x2={hoveredVoxelPoint.x + 8} y2={hoveredVoxelPoint.y} />
+              <line className="lite-viewport-hovered-voxel-face" x1={hoveredVoxelPoint.x} y1={hoveredVoxelPoint.y - 8} x2={hoveredVoxelPoint.x} y2={hoveredVoxelPoint.y + 8} />
+            </g>
+          ) : null}
+
+          {pendingVoxelEdits.map((edit) => {
+            const point = projectIso(edit.position, view);
+            return (
+              <g key={edit.id} data-testid={`viewport-optimistic-voxel-${edit.status}`}>
+                <circle className={`lite-viewport-optimistic-voxel lite-viewport-optimistic-voxel-${edit.status}`} cx={point.x} cy={point.y} r={10 * view.zoom} />
+                {edit.status === "rejected" ? <text className="lite-viewport-edit-rejection-label" x={point.x + 12} y={point.y - 12}>{edit.message ?? "rejected"}</text> : null}
+              </g>
+            );
+          })}
 
           {(viewportOverlays.propBounds || propOverlayShapes.some((shape) => shape.selected)) &&
             propOverlayShapes.map((shape) => (

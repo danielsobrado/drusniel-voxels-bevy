@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChunkSummary, PropInstance, ProtectedArea, ViewportSnapshot, WaterReflectionDebugViewMode, WaterRuntimeSnapshot, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
-import { LiteVoxelViewport } from "./LiteVoxelViewport";
+import { LiteVoxelViewport, type LiteVoxelEditRequest, type LiteVoxelEditResponse, type LiteVoxelSelection } from "./LiteVoxelViewport";
 import { LITE_VOXEL_VIEWPORT_CONTRACT, NATIVE_BEVY_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
 export interface AreaOverlayState {
@@ -31,6 +31,8 @@ interface BevyCanvasHostProps {
   readonly waterRuntimeSnapshot: WaterRuntimeSnapshot;
   readonly propPlacementEnabled?: boolean;
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
+  readonly onSelectVoxel?: (selection: LiteVoxelSelection) => void;
+  readonly onSetVoxel?: (edit: LiteVoxelEditRequest) => Promise<LiteVoxelEditResponse>;
   readonly selectedPropRotationY?: number;
   readonly selectedPropUniformScale?: number;
   readonly propRotateDragModifier?: ViewportModifierKey;
@@ -150,6 +152,8 @@ export function BevyCanvasHost({
   waterRuntimeSnapshot,
   propPlacementEnabled = false,
   onPlaceProp,
+  onSelectVoxel,
+  onSetVoxel,
   selectedPropRotationY,
   selectedPropUniformScale,
   propRotateDragModifier = "shift",
@@ -307,6 +311,8 @@ export function BevyCanvasHost({
           viewportOverlays={viewportOverlays}
           propPlacementEnabled={propPlacementEnabled}
           onPlaceProp={onPlaceProp}
+          onSelectVoxel={onSelectVoxel}
+          onSetVoxel={onSetVoxel}
           selectedPropRotationY={selectedPropRotationY}
           selectedPropUniformScale={selectedPropUniformScale}
           propRotateDragModifier={propRotateDragModifier}
