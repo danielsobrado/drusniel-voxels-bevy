@@ -1,6 +1,7 @@
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
+use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::shader::Shader;
 
 use crate::props::billboard::BillboardMaterial;
@@ -11,6 +12,7 @@ use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMesh};
 use crate::rendering::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
+    sync_capabilities_to_main,
 };
 use crate::rendering::cinematic::CinematicPlugin;
 use crate::rendering::god_rays::GodRayPlugin;
@@ -68,11 +70,6 @@ impl Plugin for RenderingPlugin {
             .add_systems(
                 Update,
                 (
-                    detect_graphics_capabilities
-                        .in_set(GraphicsDetectionSet)
-                        .run_if(|capabilities: Res<GraphicsCapabilities>| {
-                            capabilities.adapter_name.is_none()
-                        }),
                     sync_render_quality_preset,
                     apply_render_quality_preset.after(sync_render_quality_preset),
                     record_render_quality_counters.after(sync_render_quality_preset),
@@ -144,6 +141,22 @@ impl Plugin for RenderingPlugin {
                     sync_voxel_water_material_overrides.after(bevy_water::update_materials),
                 ),
             );
+
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .init_resource::<GraphicsCapabilities>()
+                .add_systems(
+                    Render,
+                    (
+                        detect_graphics_capabilities.in_set(GraphicsDetectionSet),
+                        sync_capabilities_to_main
+                            .after(GraphicsDetectionSet)
+                            .in_set(RenderSystems::Cleanup),
+                    ),
+                );
+        } else {
+            warn!("Render sub-app not available; graphics capability detection disabled");
+        }
     }
 }
 

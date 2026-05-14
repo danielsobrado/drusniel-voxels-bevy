@@ -249,7 +249,7 @@ pub fn spawn_camera(
         AntiAliasing::Fxaa => {
             camera.insert(Fxaa::default());
         }
-        AntiAliasing::Taa => {
+        AntiAliasing::Taa if capabilities.taa_supported => {
             camera.insert((
                 TemporalAntiAliasing::default(),
                 ContrastAdaptiveSharpening {
@@ -272,6 +272,7 @@ pub fn spawn_camera(
 
 pub fn update_camera_anti_aliasing(
     settings_state: Res<SettingsState>,
+    capabilities: Res<GraphicsCapabilities>,
     mut commands: Commands,
     mut camera_query: Query<(Entity, &mut Msaa), With<PlayerCamera>>,
 ) {
@@ -299,14 +300,16 @@ pub fn update_camera_anti_aliasing(
             }
             AntiAliasing::Taa => {
                 *msaa = Msaa::Off;
-                camera.insert((
-                    TemporalAntiAliasing::default(),
-                    ContrastAdaptiveSharpening {
-                        enabled: true,
-                        sharpening_strength: 0.6,
-                        denoise: false,
-                    },
-                ));
+                if capabilities.taa_supported {
+                    camera.insert((
+                        TemporalAntiAliasing::default(),
+                        ContrastAdaptiveSharpening {
+                            enabled: true,
+                            sharpening_strength: 0.6,
+                            denoise: false,
+                        },
+                    ));
+                }
             }
         }
     }
@@ -387,6 +390,51 @@ pub fn update_ray_tracing_on_camera(
                 commands.entity(entity).remove::<ScreenSpaceReflections>();
             }
             _ => {}
+        }
+    }
+}
+
+/// Reconcile existing cameras when GPU capabilities arrive from the render app.
+pub fn apply_taa_capabilities(
+    settings_state: Res<SettingsState>,
+    capabilities: Res<GraphicsCapabilities>,
+    mut commands: Commands,
+    mut cameras: Query<
+        (
+            Entity,
+            &mut Msaa,
+            Option<&TemporalAntiAliasing>,
+            Option<&ContrastAdaptiveSharpening>,
+        ),
+        With<PlayerCamera>,
+    >,
+) {
+    if !capabilities.is_changed() {
+        return;
+    }
+
+    let should_enable = settings_state.anti_aliasing == AntiAliasing::Taa && capabilities.taa_supported;
+    for (entity, mut msaa, taa, sharpening) in cameras.iter_mut() {
+        let mut camera = commands.entity(entity);
+        if should_enable {
+            *msaa = Msaa::Off;
+            if taa.is_none() {
+                camera.insert(TemporalAntiAliasing::default());
+            }
+            if sharpening.is_none() {
+                camera.insert(ContrastAdaptiveSharpening {
+                    enabled: true,
+                    sharpening_strength: 0.6,
+                    denoise: false,
+                });
+            }
+        } else {
+            if taa.is_some() {
+                camera.remove::<TemporalAntiAliasing>();
+            }
+            if sharpening.is_some() {
+                camera.remove::<ContrastAdaptiveSharpening>();
+            }
         }
     }
 }

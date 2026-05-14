@@ -9,7 +9,7 @@ use wgpu::DeviceType;
 pub struct GraphicsDetectionSet;
 
 /// Runtime information about the active GPU's rendering capabilities.
-#[derive(Resource, Clone, Debug, Default)]
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct GraphicsCapabilities {
     pub adapter_name: Option<String>,
     pub integrated_gpu: bool,
@@ -29,53 +29,72 @@ pub fn detect_graphics_capabilities(
     adapter_info: Option<Res<RenderAdapterInfo>>,
     mut capabilities: ResMut<GraphicsCapabilities>,
     mut commands: Commands,
-    mut warned: Local<bool>,
 ) {
-    if capabilities.adapter_name.is_some() {
+    let (Some(adapter), Some(adapter_info)) = (adapter, adapter_info) else {
+        warn_once!(
+            "Render adapter not available yet; TAA will remain disabled until capabilities are known"
+        );
+        return;
+    };
+
+    let hdr_features = adapter.get_texture_format_features(ViewTarget::TEXTURE_FORMAT_HDR);
+    let sdr_features = adapter.get_texture_format_features(TextureFormat::bevy_default());
+    let hdr_filterable = hdr_features
+        .flags
+        .contains(TextureFormatFeatureFlags::FILTERABLE);
+    let sdr_filterable = sdr_features
+        .flags
+        .contains(TextureFormatFeatureFlags::FILTERABLE);
+    let features = adapter.features();
+    let new_capabilities = GraphicsCapabilities {
+        adapter_name: Some(adapter_info.name.clone()),
+        integrated_gpu: matches!(adapter_info.device_type, DeviceType::IntegratedGpu),
+        taa_supported: hdr_filterable && sdr_filterable,
+        ray_tracing_supported: features
+            .contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_QUERY),
+    };
+
+    if *capabilities == new_capabilities {
         return;
     }
 
-    if let (Some(adapter), Some(adapter_info)) = (adapter, adapter_info) {
-        let hdr_features = adapter.get_texture_format_features(ViewTarget::TEXTURE_FORMAT_HDR);
-        let sdr_features = adapter.get_texture_format_features(TextureFormat::bevy_default());
+    *capabilities = new_capabilities;
 
-        let hdr_filterable = hdr_features
-            .flags
-            .contains(TextureFormatFeatureFlags::FILTERABLE);
-        let sdr_filterable = sdr_features
-            .flags
-            .contains(TextureFormatFeatureFlags::FILTERABLE);
-        let features = adapter.features();
+    info!(
+        adapter = %adapter_info.name,
+        backend = ?adapter_info.backend,
+        integrated_gpu = capabilities.integrated_gpu,
+        taa_supported = capabilities.taa_supported,
+        ray_tracing_supported = capabilities.ray_tracing_supported,
+        hdr_filterable,
+        sdr_filterable,
+        "Detected GPU capabilities",
+    );
 
-        capabilities.adapter_name = Some(adapter_info.name.clone());
-        capabilities.integrated_gpu = matches!(adapter_info.device_type, DeviceType::IntegratedGpu);
-        capabilities.taa_supported = hdr_filterable && sdr_filterable;
-        capabilities.ray_tracing_supported =
-            features.contains(bevy::render::settings::WgpuFeatures::EXPERIMENTAL_RAY_QUERY);
+    if capabilities.integrated_gpu {
+        commands.insert_resource(GpuPreprocessingSupport {
+            max_supported_mode: GpuPreprocessingMode::None,
+        });
+        info!("Integrated GPU detected; disabling GPU preprocessing.");
+    }
+}
 
-        info!(
-            adapter = %adapter_info.name,
-            backend = ?adapter_info.backend,
-            integrated_gpu = capabilities.integrated_gpu,
-            taa_supported = capabilities.taa_supported,
-            ray_tracing_supported = capabilities.ray_tracing_supported,
-            hdr_filterable,
-            sdr_filterable,
-            "Detected GPU capabilities",
-        );
+/// Copy capabilities from the render world back into the main app.
+pub fn sync_capabilities_to_main(
+    capabilities: Res<GraphicsCapabilities>,
+    mut main_world: ResMut<bevy::render::MainWorld>,
+) {
+    if !capabilities.is_changed() {
+        return;
+    }
 
-        if capabilities.integrated_gpu {
-            commands.insert_resource(GpuPreprocessingSupport {
-                max_supported_mode: GpuPreprocessingMode::None,
-            });
-            info!("Integrated GPU detected; disabling GPU preprocessing.");
+    let main_world = main_world.as_mut();
+
+    if let Some(mut main_capabilities) = main_world.get_resource_mut::<GraphicsCapabilities>() {
+        if *main_capabilities != *capabilities {
+            *main_capabilities = capabilities.clone();
         }
     } else {
-        if !*warned {
-            warn!(
-                "Render adapter not available yet; TAA will remain disabled until capabilities are known"
-            );
-            *warned = true;
-        }
+        main_world.insert_resource(capabilities.clone());
     }
 }
