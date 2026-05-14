@@ -31,6 +31,7 @@ use crate::rendering::quality::{
     sync_render_quality_preset,
 };
 use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::ray_tracing::toggle_voxel_ray_backend_key;
 use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::ssao::SsaoPlugin;
@@ -70,6 +71,7 @@ impl Plugin for RenderingPlugin {
             .add_systems(
                 Update,
                 (
+                    toggle_voxel_ray_backend_key,
                     sync_render_quality_preset,
                     apply_render_quality_preset.after(sync_render_quality_preset),
                     record_render_quality_counters.after(sync_render_quality_preset),
@@ -102,6 +104,7 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WeatherOverlayPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
+            .add_plugins(naadf_plugin())
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
             // Register TriplanarMaterial as a custom material type
             .add_plugins(MaterialPlugin::<TriplanarMaterial>::default())
@@ -159,6 +162,14 @@ impl Plugin for RenderingPlugin {
         }
     }
 }
+
+#[cfg(feature = "naadf")]
+fn naadf_plugin() -> crate::rendering::naadf::NaadfPlugin {
+    crate::rendering::naadf::NaadfPlugin
+}
+
+#[cfg(not(feature = "naadf"))]
+fn naadf_plugin() {}
 
 fn render_timing_enabled(app: &App) -> bool {
     app.world().contains_resource::<crate::bench::BenchConfig>()

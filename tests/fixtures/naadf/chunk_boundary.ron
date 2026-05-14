@@ -1,0 +1,7 @@
+(
+    name: "chunk_boundary",
+    occupied: [([15, 8, 8], "rock")],
+    rays: [
+        (origin: [14.5, 8.5, 8.5], dir: [1.0, 0.0, 0.0], max_distance: 4.0, hit: Some([15, 8, 8])),
+    ],
+)

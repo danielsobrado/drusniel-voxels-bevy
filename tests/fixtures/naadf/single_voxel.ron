@@ -1,0 +1,7 @@
+(
+    name: "single_voxel",
+    occupied: [([4, 4, 4], "rock")],
+    rays: [
+        (origin: [0.5, 4.5, 4.5], dir: [1.0, 0.0, 0.0], max_distance: 16.0, hit: Some([4, 4, 4])),
+    ],
+)

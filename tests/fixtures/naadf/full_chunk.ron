@@ -1,0 +1,7 @@
+(
+    name: "full_chunk",
+    fill: "rock",
+    rays: [
+        (origin: [-1.0, 0.5, 0.5], dir: [1.0, 0.0, 0.0], max_distance: 4.0, hit: Some([0, 0, 0])),
+    ],
+)

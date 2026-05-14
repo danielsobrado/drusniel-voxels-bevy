@@ -1843,7 +1843,10 @@ fn set_ray_tracing_enabled(world: &mut World, enabled: bool) {
     if let Some(mut settings) = world.get_resource_mut::<RayTracingSettings>() {
         settings.enabled = enabled;
     } else {
-        world.insert_resource(RayTracingSettings { enabled });
+        world.insert_resource(RayTracingSettings {
+            enabled,
+            ..default()
+        });
     }
 }
 
@@ -2186,6 +2189,10 @@ fn runtime_metrics_payload(
     let reflection_status = &water_visual_probe["reflectionStatus"];
     let water_presence = &water_visual_probe["waterPresence"];
     let render_features = render_feature_metrics_payload(world);
+    let ray_tracing = world
+        .get_resource::<RayTracingSettings>()
+        .cloned()
+        .unwrap_or_default();
 
     json!({
         "fps": 60,
@@ -2203,6 +2210,11 @@ fn runtime_metrics_payload(
             "probeSelectionCount": 6,
             "sdfShadows": true,
             "contactShadows": true,
+            "voxelRayBackend": ray_tracing.voxel_backend.as_str(),
+            "effectiveVoxelRayBackend": ray_tracing.effective_backend().as_str(),
+            "experimentalRenderMode": ray_tracing.experimental_mode.as_str(),
+            "backendSwitchGeneration": ray_tracing.backend_switch_generation,
+            "voxelRayFallbackReason": ray_tracing.fallback_reason,
         },
         "waterRenderDebug": {
             "reflectionActive": reflection_status["active"].as_bool().unwrap_or(false),

@@ -1,5 +1,6 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::array_loader::AtlasMapping;
+use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
 use crate::vegetation::VegetationConfig;
@@ -90,6 +91,7 @@ fn debug_settings_ui(
     prop_fade: Option<ResMut<FoliageFadeSettings>>,
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
     mut water_shader_toggles: ResMut<WaterShaderToggles>,
+    ray_tracing: Option<Res<RayTracingSettings>>,
     mut sun_query: Query<&mut DirectionalLight>,
 ) {
     if !state.show_settings {
@@ -142,6 +144,19 @@ fn debug_settings_ui(
                 ),
             );
             ui.label("Toggles affect render perf — rerun bench after changes");
+
+            if let Some(ray_tracing) = ray_tracing {
+                ui.separator();
+                ui.heading("Voxel Ray Backend");
+                ui.label(format!("Backend: {}", ray_tracing.voxel_backend.as_str()));
+                ui.label(format!(
+                    "Render mode: {}",
+                    ray_tracing.experimental_mode.as_str()
+                ));
+                if let Some(reason) = ray_tracing.fallback_reason.as_deref() {
+                    ui.label(format!("Fallback: {reason}"));
+                }
+            }
 
             // Atlas Mapping UI moved to Pause Menu > Settings > Textures
             if let Some(_mapping) = atlas_mapping {
@@ -244,6 +259,7 @@ fn debug_settings_ui(
             ui.label("Press Shift+F9 to dump terrain hole probe JSON");
             ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
+            ui.label("Press F11 to cycle voxel ray backend");
         },
     );
 }

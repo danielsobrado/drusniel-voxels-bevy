@@ -1,0 +1,24 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[render_toggles]
+voxel_ray_backend = "naadf"
+experimental_render_mode = "naadf_preview"
+naadf_force_cpu_builder = true
+naadf_max_chunk_updates_per_frame = 4
+
+[[checkpoint]]
+name = "naadf-preview-experimental"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 120
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
+screenshot_points = [
+    { name = "preview", frame = 60 },
+]

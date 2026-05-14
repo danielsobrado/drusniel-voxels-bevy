@@ -20,6 +20,9 @@ use crate::props::{Prop, PropAssets};
 use crate::rendering::building_material::BuildingMesh;
 use crate::rendering::cinematic_config::CinematicConfig;
 use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::ray_tracing::{
+    ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
+};
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
@@ -98,7 +101,7 @@ impl BenchConfig {
 #[derive(Resource)]
 struct BenchSceneResource(BenchScene);
 
-#[derive(Resource, Clone, Copy, Debug, Default, Deserialize)]
+#[derive(Resource, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct BenchRenderToggles {
     #[serde(default)]
     pub disable_instanced_props: bool,
@@ -128,9 +131,19 @@ pub struct BenchRenderToggles {
     pub prop_subcluster_grid: u8,
     #[serde(default)]
     pub quality_preset: Option<RenderQualityPreset>,
+    #[serde(default)]
+    pub voxel_ray_backend: Option<String>,
+    #[serde(default)]
+    pub experimental_render_mode: Option<String>,
+    #[serde(default)]
+    pub naadf_force_cpu_builder: Option<bool>,
+    #[serde(default)]
+    pub naadf_force_gpu_builder: Option<bool>,
+    #[serde(default)]
+    pub naadf_max_chunk_updates_per_frame: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 struct StartupTraceConfig {
     #[serde(default)]
     enabled: bool,
@@ -150,7 +163,7 @@ impl Default for StartupTraceConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BenchTerrainMaterialQuality {
     #[default]
@@ -497,6 +510,7 @@ struct BenchSummary {
     bevy_version: String,
     run_started_utc: String,
     duration_secs: f64,
+    render_toggles: BenchRenderToggles,
     checkpoints: Vec<CheckpointSummary>,
 }
 
@@ -792,9 +806,9 @@ impl Plugin for BenchPlugin {
             warn!("--bench-headless requested; falling back to windowed rendering on this backend");
         }
 
-        let render_toggles = scene.render_toggles;
+        let render_toggles = scene.render_toggles.clone();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(render_toggles);
+            render_app.insert_resource(render_toggles.clone());
         }
 
         if let Some(size_chunks) = scene.world_size_chunks {
@@ -955,6 +969,11 @@ fn apply_bench_render_toggles(
     mut point_lights: Query<&mut PointLight>,
     mut spot_lights: Query<&mut SpotLight>,
     mut reflection_config: Option<ResMut<WaterReflectionConfig>>,
+    ray_tracing: Option<ResMut<RayTracingSettings>>,
+    capabilities: Option<Res<crate::rendering::capabilities::GraphicsCapabilities>>,
+    #[cfg(feature = "naadf")] mut naadf_config: Option<
+        ResMut<crate::rendering::naadf::NaadfConfig>,
+    >,
 ) {
     if toggles.disable_water_meshes {
         for mut visibility in &mut visibility_queries.p0() {
@@ -980,6 +999,34 @@ fn apply_bench_render_toggles(
     if toggles.disable_reflection_cameras {
         if let Some(config) = reflection_config.as_deref_mut() {
             config.enabled = false;
+        }
+    }
+    if let Some(mut ray_tracing) = ray_tracing {
+        if let Some(mode) = toggles
+            .voxel_ray_backend
+            .as_deref()
+            .and_then(VoxelRayBackendMode::parse)
+        {
+            ray_tracing.set_voxel_backend(mode, capabilities.as_deref());
+        }
+        if let Some(mode) = toggles
+            .experimental_render_mode
+            .as_deref()
+            .and_then(ExperimentalRenderMode::parse)
+        {
+            ray_tracing.experimental_mode = mode;
+        }
+    }
+    #[cfg(feature = "naadf")]
+    if let Some(config) = naadf_config.as_deref_mut() {
+        if let Some(force_cpu) = toggles.naadf_force_cpu_builder {
+            config.debug.force_cpu_builder = force_cpu;
+        }
+        if let Some(force_gpu) = toggles.naadf_force_gpu_builder {
+            config.debug.force_gpu_builder = force_gpu;
+        }
+        if let Some(max_updates) = toggles.naadf_max_chunk_updates_per_frame {
+            config.chunk_cache.max_chunk_updates_per_frame = max_updates;
         }
     }
 }
@@ -2632,6 +2679,7 @@ fn finish_bench(
         bevy_version: "0.18.1".to_string(),
         run_started_utc: state.run_started_utc.clone(),
         duration_secs: state.started.elapsed().as_secs_f64(),
+        render_toggles: scene.render_toggles.clone(),
         checkpoints: std::mem::take(&mut state.checkpoints),
     };
 

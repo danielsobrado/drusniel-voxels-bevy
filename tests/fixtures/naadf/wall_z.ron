@@ -1,0 +1,7 @@
+(
+    name: "wall_z",
+    occupied_rule: "z == 8",
+    rays: [
+        (origin: [2.5, 2.5, 0.5], dir: [0.0, 0.0, 1.0], max_distance: 16.0, hit: Some([2, 2, 8])),
+    ],
+)

@@ -112,6 +112,13 @@ fn env_flag(name: &str) -> bool {
 
 pub struct VoxelPlugin;
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub enum VoxelTerrainSet {
+    GeneratedChunks,
+    NaadfDirtyQueue,
+    MeshDirty,
+}
+
 #[derive(Resource, Default, Debug)]
 pub struct TerrainLodControl {
     pub freeze_lod: bool,
@@ -653,6 +660,15 @@ impl Plugin for VoxelPlugin {
             ..default()
         })
         .insert_resource(OcclusionUpdateTimer::default())
+        .configure_sets(
+            Update,
+            (
+                VoxelTerrainSet::GeneratedChunks,
+                VoxelTerrainSet::NaadfDirtyQueue,
+                VoxelTerrainSet::MeshDirty,
+            )
+                .chain(),
+        )
         .add_systems(Startup, spawn_world_startup_overlay)
         .add_systems(
             Update,
@@ -665,7 +681,9 @@ impl Plugin for VoxelPlugin {
                 start_pending_world_generation.after(poll_world_load_task),
                 spawn_queued_chunk_generation_tasks.after(start_pending_world_generation),
                 // Stage 1: Pull newly-generated chunks into VoxelWorld
-                poll_chunk_generation_tasks.after(spawn_queued_chunk_generation_tasks),
+                poll_chunk_generation_tasks
+                    .after(spawn_queued_chunk_generation_tasks)
+                    .in_set(VoxelTerrainSet::GeneratedChunks),
                 update_enclosure_state.after(poll_chunk_generation_tasks),
                 sync_occlusion_config_from_enclosure.after(update_enclosure_state),
                 toggle_enclosure_culling,
@@ -685,7 +703,9 @@ impl Plugin for VoxelPlugin {
                 // Stage 5: Meshing consumes all mesh-dirty producers above. Systems
                 // that create mesh dirtiness later in Update must run before this or
                 // intentionally leave their chunks queued for the next frame.
-                mesh_dirty_chunks_system.after(update_chunk_lod_system),
+                mesh_dirty_chunks_system
+                    .after(update_chunk_lod_system)
+                    .in_set(VoxelTerrainSet::MeshDirty),
             ),
         )
         .add_systems(

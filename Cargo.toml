@@ -8,6 +8,8 @@ default-run = "voxel_builder"
 # cargo run --release --features tracy then connect with Tracy 0.11.x.
 tracy = ["bevy/trace_tracy"]
 legacy_prop_spawn = []
+naadf = []
+naadf_debug = ["naadf"]
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
@@ -83,4 +85,3 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
-

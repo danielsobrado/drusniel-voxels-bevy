@@ -1,0 +1,7 @@
+(
+    name: "empty_chunk",
+    occupied: [],
+    rays: [
+        (origin: [0.5, 0.5, 0.5], dir: [1.0, 0.0, 0.0], max_distance: 16.0, hit: None),
+    ],
+)

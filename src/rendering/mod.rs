@@ -43,6 +43,7 @@ pub mod shadow_budget;
 pub mod ssao;
 pub mod triplanar_material;
 pub mod volumetric_clouds;
+pub mod voxel_ray_backend;
 pub mod water;
 pub mod water_displacement;
 pub mod water_reflection;
@@ -50,6 +51,9 @@ pub mod water_reflection_compositor;
 pub mod water_visual_probe;
 pub mod weather_overlay;
 pub mod witchcraft_water_finish;
+
+#[cfg(feature = "naadf")]
+pub mod naadf;
 
 pub use adaptive_gi::{AdaptiveGIPlugin, AdaptiveGIQuality, AdaptiveGISettings};
 pub use ao_config::AmbientOcclusionConfig;
