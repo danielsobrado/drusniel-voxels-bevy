@@ -350,6 +350,7 @@ export function BevyCanvasHost({
           selection={selection}
           targetedVoxel={targetedVoxel}
           viewportOverlays={viewportOverlays}
+          areaOverlays={areaOverlays}
           propPlacementEnabled={propPlacementEnabled}
           onPlaceProp={onPlaceProp}
           onSelectVoxel={onSelectVoxel}

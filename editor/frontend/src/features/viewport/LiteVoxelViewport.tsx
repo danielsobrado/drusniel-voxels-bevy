@@ -1,8 +1,42 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Camera, ExternalLink, Eye, EyeOff, Maximize2, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import { Canvas, type ThreeEvent, useThree } from "@react-three/fiber";
+import * as THREE from "three";
+import type { BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshPayload, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
+import {
+  ATLAS_IMAGE_URLS,
+  MATERIAL_COLORS,
+  atlasTileIndexForMaterial,
+  collectSamples,
+  createViewportMeshGeometry,
+  sampleColumnTransform,
+  sampleMaterialKey,
+  tileTextureForIndex,
+  viewportBoundsFromSamples,
+} from "./voxelGeometry";
+import { buildAffectedVoxelPositions, type PendingVoxelEdit, shouldShowBrushPreview } from "./voxelEditPreview";
+import { chunkIdForVoxel, placementFromSelection, selectionFromPoint, selectionFromSample } from "./voxelPicking";
+import { boundsCenter, boundsSize, type LiteProtectedAreaOverlay, overlayColor } from "./protectedAreaMeshes";
+import {
+  DETACHED_GAME_CAMERA_CHANNEL,
+  DETACHED_GAME_CAMERA_STORAGE_KEY,
+  DETACHED_GAME_CAMERA_WINDOW_LABEL,
+  drawGameCameraPreview,
+  renderGameCameraPreviewCanvas,
+  type DetachedGameCameraSnapshot,
+  type GameCameraState,
+} from "./gameCameraPreview";
+
+export { collectSamples } from "./voxelGeometry";
+export {
+  DETACHED_GAME_CAMERA_CHANNEL,
+  DETACHED_GAME_CAMERA_STORAGE_KEY,
+  drawGameCameraPreview,
+  type DetachedGameCameraSnapshot,
+  type GameCameraState,
+} from "./gameCameraPreview";
 
 export interface LiteVoxelViewportProps {
   readonly chunks: readonly ChunkSummary[];
@@ -16,6 +50,7 @@ export interface LiteVoxelViewportProps {
   readonly selection: Selection;
   readonly targetedVoxel: readonly [number, number, number];
   readonly viewportOverlays: ViewportOverlayState;
+  readonly areaOverlays?: readonly LiteProtectedAreaOverlay[];
   readonly propPlacementEnabled?: boolean;
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
   readonly onSelectVoxel?: (selection: LiteVoxelSelection) => void;
@@ -51,15 +86,14 @@ export interface LiteVoxelEditResponse {
 }
 
 interface ViewState {
+  readonly target: readonly [number, number, number];
   readonly zoom: number;
-  readonly offsetX: number;
-  readonly offsetY: number;
-  readonly rotation: number;
+  readonly yaw: number;
   readonly pitch: number;
   readonly heightOffset: number;
 }
 
-type CanvasDragState =
+type ViewportDragState =
   | { readonly kind: "pan"; readonly x: number; readonly y: number; readonly view: ViewState }
   | { readonly kind: "orbit"; readonly x: number; readonly y: number; readonly view: ViewState }
   | { readonly kind: "prop-rotate"; readonly x: number; readonly startRotationY: number };
@@ -69,60 +103,6 @@ interface ModifierState {
   readonly altKey: boolean;
   readonly ctrlKey: boolean;
   readonly metaKey: boolean;
-}
-
-interface ProjectedPoint {
-  readonly x: number;
-  readonly y: number;
-}
-
-interface ChunkOverlayShape {
-  readonly id: string;
-  readonly label: string;
-  readonly points: readonly ProjectedPoint[];
-  readonly dirty: boolean;
-  readonly selected: boolean;
-}
-
-interface BrushPreviewShape {
-  readonly center: ProjectedPoint;
-  readonly radius: number;
-  readonly invalid: boolean;
-  readonly affected: readonly ProjectedPoint[];
-}
-
-interface PropOverlayShape {
-  readonly id: string;
-  readonly label: string;
-  readonly point: ProjectedPoint;
-  readonly radius: number;
-  readonly selected: boolean;
-}
-
-interface SurfaceWallFace {
-  readonly points: readonly ProjectedPoint[];
-  readonly material: WorldSurfaceSample["material"];
-  readonly sortKey: number;
-}
-
-export interface GameCameraState {
-  readonly position: readonly [number, number, number];
-  readonly yaw: number;
-}
-
-export interface DetachedGameCameraSnapshot {
-  readonly camera: GameCameraState;
-  readonly samples: readonly WorldSurfaceSample[];
-  readonly cellSize: number;
-  readonly updatedAt: number;
-}
-
-interface PendingVoxelEdit {
-  readonly id: string;
-  readonly position: [number, number, number];
-  readonly block: BlockType;
-  readonly status: "pending" | "applied" | "rejected";
-  readonly message?: string;
 }
 
 type ViewportKeyAction =
@@ -141,41 +121,25 @@ type ViewportKeyAction =
 
 type ViewportKeyBindings = Record<ViewportKeyAction, string>;
 
-const MATERIAL_COLORS: Record<string, string> = {
-  Air: "#171923",
-  TopSoil: "#4d8f4e",
-  SubSoil: "#80613c",
-  Rock: "#7f8792",
-  Bedrock: "#4a4d55",
-  Sand: "#d5bd82",
-  Clay: "#b07f61",
-  Water: "#2a8ecf",
-  Wood: "#7a5132",
-  Leaves: "#3f8b4d",
-  DungeonWall: "#4f5363",
-  DungeonFloor: "#585562",
+interface SampleGroup {
+  readonly key: string;
+  readonly material: WorldSurfaceSample["material"];
+  readonly samples: readonly WorldSurfaceSample[];
+  readonly tileIndex: number | null;
+}
+
+type VoxelIntersectionEvent = {
+  readonly face?: { readonly normal: THREE.Vector3 } | null;
+  readonly instanceId?: number;
+  readonly object: THREE.Object3D;
+  readonly point: THREE.Vector3;
 };
 
-const ATLAS_IMAGE_URLS = ["/assets/textures/atlas.png", "http://127.0.0.1:17777/assets/textures/atlas.png"] as const;
-const ATLAS_COLUMNS = 8;
-const ATLAS_ROWS = 8;
-const ATLAS_TILE_COUNT = ATLAS_COLUMNS * ATLAS_ROWS;
-const LEGACY_ATLAS_TILE_IDS: Readonly<Record<string, string>> = {
-  "atlas/terrain_grass_top": "tile-3",
-  "atlas/terrain_grass_side": "tile-7",
-  "atlas/terrain_grass_side_alt": "tile-7",
-  "atlas/terrain_dirt": "tile-0",
-  "atlas/terrain_rock": "tile-1",
-  "atlas/terrain_sand": "tile-4",
-};
-
-const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0, rotation: 0, pitch: 0.5, heightOffset: 0 };
-export const DETACHED_GAME_CAMERA_CHANNEL = "drusniel-game-camera-preview";
-export const DETACHED_GAME_CAMERA_STORAGE_KEY = "drusniel.editor.detachedGameCamera";
-const DETACHED_GAME_CAMERA_WINDOW_LABEL = "game-camera-preview";
-const MIN_VIEW_PITCH = 0.08;
-const MAX_VIEW_PITCH = 0.92;
+const DEFAULT_VIEW: ViewState = { target: [32, 8, 32], zoom: 8, yaw: Math.PI * 0.25, pitch: 0.72, heightOffset: 0 };
+const MIN_VIEW_PITCH = 0.12;
+const MAX_VIEW_PITCH = 1.18;
 const VIEW_HEIGHT_STEP = 8;
+
 const DEFAULT_VIEWPORT_KEY_BINDINGS: ViewportKeyBindings = {
   panForward: "w",
   panBackward: "s",
@@ -226,28 +190,8 @@ const VIEWPORT_BINDING_LABELS: readonly { readonly action: ViewportKeyAction; re
 ];
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
 const normalizeDegrees = (degrees: number) => ((degrees % 360) + 360) % 360;
-
 const normalizeKeyboardKey = (key: string) => (key === "+" ? "=" : key.toLowerCase());
-
-const normalizeQuarterTurn = (rotation: number) => ((rotation % 4) + 4) % 4;
-
-const rotateHorizontal = (x: number, z: number, rotation: number): readonly [number, number] => {
-  const radians = normalizeQuarterTurn(rotation) * Math.PI * 0.5;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return [x * cos - z * sin, x * sin + z * cos];
-};
-
-const viewWithCamera = (view: ViewState, patch: Partial<ViewState>): ViewState => ({
-  ...view,
-  ...patch,
-  rotation: patch.rotation === undefined ? view.rotation : normalizeQuarterTurn(patch.rotation),
-  pitch: clamp(patch.pitch ?? view.pitch, MIN_VIEW_PITCH, MAX_VIEW_PITCH),
-});
-
-const gameYawForView = (view: ViewState) => normalizeQuarterTurn(view.rotation) * Math.PI * 0.5 + Math.PI * 0.25;
 
 const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none") => {
   switch (key) {
@@ -264,631 +208,555 @@ const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none"
   }
 };
 
-const sampleGridKey = (x: number, z: number) => `${x}:${z}`;
-
-const sampleColumnKey = (sample: WorldSurfaceSample, chunkSize: number) =>
-  `${Math.floor(sample.x / chunkSize)}:${Math.floor(sample.z / chunkSize)}`;
-
-const fallbackSamplesFromChunks = (chunks: readonly ChunkSummary[]): readonly WorldSurfaceSample[] =>
-  chunks.map((chunk) => {
-    const [x, y, z] = chunk.coordinate;
-    const material = chunk.waterMeshCount > 0 ? "Water" : chunk.blockCount > 2000 ? "Rock" : "TopSoil";
-    return {
-      x: x * 16 + 8,
-      z: z * 16 + 8,
-      height: y * 16 + clamp(Math.round(chunk.blockCount / 220), 2, 15),
-      material,
-      water: material === "Water",
-    };
-  });
-
-export const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: WorldViewportPreview | null): readonly WorldSurfaceSample[] => {
-  const samples = worldViewport?.chunks.flatMap((chunk) => [...chunk.samples]) ?? [];
-  if (samples.length === 0) {
-    return fallbackSamplesFromChunks(chunks);
-  }
-
-  const byColumn = new Map<string, WorldSurfaceSample>();
-  for (const sample of samples) {
-    if (sample.material === "Air" && !sample.water) {
-      continue;
-    }
-
-    const key = sampleGridKey(sample.x, sample.z);
-    const current = byColumn.get(key);
-    if (!current || sample.height > current.height) {
-      byColumn.set(key, sample);
-    }
-  }
-
-  const mergedSamples = [...byColumn.values()];
-  return mergedSamples.length > 0 ? mergedSamples : fallbackSamplesFromChunks(chunks);
+const fitViewForSamples = (samples: readonly WorldSurfaceSample[], width: number, height: number, current: ViewState = DEFAULT_VIEW): ViewState => {
+  const bounds = viewportBoundsFromSamples(samples);
+  const shortestViewportSide = Math.max(1, Math.min(width, height));
+  const zoom = clamp(shortestViewportSide / (bounds.radius * 2.25), 1.4, 64);
+  return {
+    ...current,
+    target: [bounds.center.x, bounds.center.y, bounds.center.z],
+    zoom,
+  };
 };
 
-const buildSurfaceWallFaces = (
-  samples: readonly WorldSurfaceSample[],
-  cellSize: number,
-  view: ViewState,
-): readonly SurfaceWallFace[] => {
-  if (samples.length === 0) {
-    return [];
+const viewWithCamera = (view: ViewState, patch: Partial<ViewState>): ViewState => ({
+  ...view,
+  ...patch,
+  zoom: clamp(patch.zoom ?? view.zoom, 1.2, 96),
+  pitch: clamp(patch.pitch ?? view.pitch, MIN_VIEW_PITCH, MAX_VIEW_PITCH),
+});
+
+const panView = (view: ViewState, deltaX: number, deltaY: number): ViewState => {
+  const panScale = 1 / Math.max(1, view.zoom);
+  const right = new THREE.Vector3(Math.cos(view.yaw - Math.PI * 0.5), 0, Math.sin(view.yaw - Math.PI * 0.5));
+  const forward = new THREE.Vector3(Math.cos(view.yaw), 0, Math.sin(view.yaw));
+  const target = new THREE.Vector3(...view.target);
+  target.addScaledVector(right, deltaX * panScale);
+  target.addScaledVector(forward, deltaY * panScale);
+  return { ...view, target: [target.x, target.y, target.z] };
+};
+
+const cameraPositionForView = (view: ViewState, radius: number) => {
+  const target = new THREE.Vector3(view.target[0], view.target[1] + view.heightOffset, view.target[2]);
+  const distance = Math.max(32, radius * 2.5);
+  const horizontalDistance = Math.cos(view.pitch) * distance;
+  return target.clone().add(new THREE.Vector3(
+    Math.cos(view.yaw) * horizontalDistance,
+    Math.sin(view.pitch) * distance,
+    Math.sin(view.yaw) * horizontalDistance,
+  ));
+};
+
+const gameYawForView = (view: ViewState) => view.yaw + Math.PI;
+
+const intersectionFromEvent = (event: ThreeEvent<PointerEvent | MouseEvent>) => event as ThreeEvent<PointerEvent | MouseEvent> & VoxelIntersectionEvent;
+
+const normalFromEvent = (event: ThreeEvent<PointerEvent | MouseEvent>) => {
+  const intersection = intersectionFromEvent(event);
+  if (!intersection.face) {
+    return null;
   }
 
-  const byPosition = new Map(samples.map((sample) => [sampleGridKey(sample.x, sample.z), sample]));
-  const faces: SurfaceWallFace[] = [];
-  const isViewerFacingWallDirection = (dx: number, dz: number) => {
-    const [rotatedX, rotatedZ] = rotateHorizontal(dx, dz, view.rotation);
-    return rotatedX > 0 || rotatedZ > 0;
+  return intersection.face.normal.clone().transformDirection(intersection.object.matrixWorld);
+};
+
+const groupSamples = (
+  samples: readonly WorldSurfaceSample[],
+  atlasMapping: BlockAtlasMap,
+  atlasPreviewEnabled: boolean,
+): readonly SampleGroup[] => {
+  const groups = new Map<string, { material: WorldSurfaceSample["material"]; samples: WorldSurfaceSample[]; tileIndex: number | null }>();
+
+  for (const sample of samples) {
+    const key = sampleMaterialKey(sample, atlasMapping, atlasPreviewEnabled);
+    const tileIndex = atlasPreviewEnabled && !sample.water ? atlasTileIndexForMaterial(atlasMapping, sample.material, "top") : null;
+    const group = groups.get(key) ?? { material: sample.material, samples: [], tileIndex };
+    group.samples.push(sample);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
+};
+
+const useAtlasTexture = () => {
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const textureRef = useRef<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let nextUrlIndex = 0;
+    const loader = new THREE.TextureLoader();
+
+    const loadNext = () => {
+      loader.load(
+        ATLAS_IMAGE_URLS[nextUrlIndex],
+        (loadedTexture) => {
+          if (cancelled) {
+            loadedTexture.dispose();
+            return;
+          }
+          loadedTexture.colorSpace = THREE.SRGBColorSpace;
+          loadedTexture.magFilter = THREE.NearestFilter;
+          loadedTexture.minFilter = THREE.NearestFilter;
+          textureRef.current?.dispose();
+          textureRef.current = loadedTexture;
+          setTexture(loadedTexture);
+        },
+        undefined,
+        () => {
+          nextUrlIndex += 1;
+          if (!cancelled && nextUrlIndex < ATLAS_IMAGE_URLS.length) {
+            loadNext();
+          }
+        },
+      );
+    };
+
+    loadNext();
+
+    return () => {
+      cancelled = true;
+      textureRef.current?.dispose();
+      textureRef.current = null;
+    };
+  }, []);
+
+  return texture;
+};
+
+function CameraController({ view, samples }: { readonly view: ViewState; readonly samples: readonly WorldSurfaceSample[] }) {
+  const { camera, invalidate } = useThree();
+  const bounds = useMemo(() => viewportBoundsFromSamples(samples), [samples]);
+
+  useEffect(() => {
+    const target = new THREE.Vector3(view.target[0], view.target[1] + view.heightOffset, view.target[2]);
+    camera.position.copy(cameraPositionForView(view, bounds.radius));
+    camera.up.set(0, 1, 0);
+    camera.lookAt(target);
+    if (camera instanceof THREE.OrthographicCamera) {
+      camera.zoom = view.zoom;
+      camera.near = -2000;
+      camera.far = 5000;
+      camera.updateProjectionMatrix();
+    }
+    invalidate();
+  }, [bounds.radius, camera, invalidate, view]);
+
+  return null;
+}
+
+function ViewportMeshLayer({
+  payload,
+  targetFace,
+  onHover,
+  onPick,
+  onPlace,
+  suppressClickRef,
+}: {
+  readonly payload: ViewportMeshPayload;
+  readonly targetFace: BrushSettings["targetFace"];
+  readonly onHover: (selection: LiteVoxelSelection | null) => void;
+  readonly onPick: (selection: LiteVoxelSelection) => void;
+  readonly onPlace: (position: readonly [number, number, number]) => void;
+  readonly suppressClickRef: MutableRefObject<boolean>;
+}) {
+  const terrainGeometry = useMemo(() => createViewportMeshGeometry(payload.terrain), [payload.terrain]);
+  const waterGeometry = useMemo(() => createViewportMeshGeometry(payload.water), [payload.water]);
+
+  useEffect(() => () => {
+    terrainGeometry?.dispose();
+    waterGeometry?.dispose();
+  }, [terrainGeometry, waterGeometry]);
+
+  const handlePointer = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onHover(selectionFromPoint(intersectionFromEvent(event).point, targetFace, normalFromEvent(event)));
   };
-  const addWall = (
-    high: WorldSurfaceSample,
-    low: WorldSurfaceSample,
-    direction: readonly [number, number],
-    highStart: readonly [number, number, number],
-    highEnd: readonly [number, number, number],
-    lowEnd: readonly [number, number, number],
-    lowStart: readonly [number, number, number],
-  ) => {
-    if (high.height <= low.height || !isViewerFacingWallDirection(direction[0], direction[1])) {
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    onPick(selectionFromPoint(intersectionFromEvent(event).point, targetFace, normalFromEvent(event)));
+  };
+
+  const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    onPlace(placementFromSelection(selectionFromPoint(intersectionFromEvent(event).point, targetFace, normalFromEvent(event))));
+  };
+
+  return (
+    <>
+      {terrainGeometry ? (
+        <mesh geometry={terrainGeometry} onPointerMove={handlePointer} onClick={handleClick} onDoubleClick={handleDoubleClick}>
+          <meshStandardMaterial color="#6e7782" roughness={0.92} metalness={0} vertexColors={Boolean(payload.terrain.colors?.length)} side={THREE.DoubleSide} />
+        </mesh>
+      ) : null}
+      {waterGeometry ? (
+        <mesh geometry={waterGeometry} onPointerMove={handlePointer} onClick={handleClick} onDoubleClick={handleDoubleClick}>
+          <meshStandardMaterial color="#3aa7df" transparent opacity={0.58} roughness={0.35} metalness={0} side={THREE.DoubleSide} />
+        </mesh>
+      ) : null}
+    </>
+  );
+}
+
+function SampleInstances({
+  group,
+  atlasTexture,
+  cellSize,
+  targetFace,
+  onHover,
+  onPick,
+  onPlace,
+  suppressClickRef,
+}: {
+  readonly group: SampleGroup;
+  readonly atlasTexture: THREE.Texture | null;
+  readonly cellSize: number;
+  readonly targetFace: BrushSettings["targetFace"];
+  readonly onHover: (selection: LiteVoxelSelection | null) => void;
+  readonly onPick: (selection: LiteVoxelSelection) => void;
+  readonly onPlace: (position: readonly [number, number, number]) => void;
+  readonly suppressClickRef: MutableRefObject<boolean>;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const tileTexture = useMemo(
+    () => (atlasTexture && group.tileIndex !== null ? tileTextureForIndex(atlasTexture, group.tileIndex) : null),
+    [atlasTexture, group.tileIndex],
+  );
+
+  useEffect(() => () => tileTexture?.dispose(), [tileTexture]);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) {
       return;
     }
 
-    const [rotatedX, rotatedZ] = rotateHorizontal(high.x, high.z, view.rotation);
-    faces.push({
-      points: [
-        projectIso(highStart, view),
-        projectIso(highEnd, view),
-        projectIso(lowEnd, view),
-        projectIso(lowStart, view),
-      ],
-      material: high.material,
-      sortKey: rotatedX + rotatedZ + high.height - (high.height - low.height) * 0.5,
+    const dummy = new THREE.Object3D();
+    group.samples.forEach((sample, index) => {
+      const { position, scale } = sampleColumnTransform(sample, cellSize);
+      dummy.position.copy(position);
+      dummy.scale.copy(scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(index, dummy.matrix);
     });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [cellSize, group.samples]);
+
+  const selectionForEvent = (event: ThreeEvent<PointerEvent | MouseEvent>) => {
+    const instanceId = intersectionFromEvent(event).instanceId ?? 0;
+    const sample = group.samples[instanceId];
+    return sample ? selectionFromSample(sample, targetFace, normalFromEvent(event)) : null;
   };
 
-  for (const sample of samples) {
-    const east = byPosition.get(sampleGridKey(sample.x + cellSize, sample.z));
-    const south = byPosition.get(sampleGridKey(sample.x, sample.z + cellSize));
-
-    if (east) {
-      addWall(
-        sample,
-        east,
-        [cellSize, 0],
-        [sample.x + cellSize, sample.height, sample.z],
-        [sample.x + cellSize, sample.height, sample.z + cellSize],
-        [east.x, east.height, east.z + cellSize],
-        [east.x, east.height, east.z],
-      );
-      addWall(
-        east,
-        sample,
-        [-cellSize, 0],
-        [east.x, east.height, east.z + cellSize],
-        [east.x, east.height, east.z],
-        [sample.x + cellSize, sample.height, sample.z],
-        [sample.x + cellSize, sample.height, sample.z + cellSize],
-      );
-    }
-
-    if (south) {
-      addWall(
-        sample,
-        south,
-        [0, cellSize],
-        [sample.x + cellSize, sample.height, sample.z + cellSize],
-        [sample.x, sample.height, sample.z + cellSize],
-        [south.x, south.height, south.z],
-        [south.x + cellSize, south.height, south.z],
-      );
-      addWall(
-        south,
-        sample,
-        [0, -cellSize],
-        [south.x, south.height, south.z],
-        [south.x + cellSize, south.height, south.z],
-        [sample.x + cellSize, sample.height, sample.z + cellSize],
-        [sample.x, sample.height, sample.z + cellSize],
-      );
-    }
-  }
-
-  return faces.sort((left, right) => left.sortKey - right.sortKey);
-};
-
-const fitViewForSamples = (samples: readonly WorldSurfaceSample[], width: number, height: number, current: ViewState = DEFAULT_VIEW): ViewState => {
-  if (samples.length === 0 || width <= 0 || height <= 0) {
-    return viewWithCamera(DEFAULT_VIEW, {
-      rotation: current.rotation,
-      pitch: current.pitch,
-      heightOffset: current.heightOffset,
-    });
-  }
-
-  const iso = samples.map((sample) => {
-    const [x, z] = rotateHorizontal(sample.x, sample.z, current.rotation);
-    return {
-      x: (x - z) * 0.72,
-      y: (x + z) * 0.72 * current.pitch - (sample.height - current.heightOffset) * 1.35,
-    };
-  });
-  const minX = Math.min(...iso.map((point) => point.x));
-  const maxX = Math.max(...iso.map((point) => point.x));
-  const minY = Math.min(...iso.map((point) => point.y));
-  const maxY = Math.max(...iso.map((point) => point.y));
-  const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, maxY - minY);
-  const zoom = clamp(Math.min((width * 0.7) / spanX, (height * 0.64) / spanY), 0.28, 4.4);
-
-  return {
-    zoom,
-    offsetX: width / 2 - ((minX + maxX) / 2) * zoom,
-    offsetY: height / 2 - ((minY + maxY) / 2) * zoom + height * 0.05,
-    rotation: normalizeQuarterTurn(current.rotation),
-    pitch: clamp(current.pitch, MIN_VIEW_PITCH, MAX_VIEW_PITCH),
-    heightOffset: current.heightOffset,
+  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onHover(selectionForEvent(event));
   };
-};
 
-const drawDiamond = (ctx: CanvasRenderingContext2D, x: number, y: number, radiusX: number, radiusY: number, fill: string, stroke: string) => {
-  ctx.beginPath();
-  ctx.moveTo(x, y - radiusY);
-  ctx.lineTo(x + radiusX, y);
-  ctx.lineTo(x, y + radiusY);
-  ctx.lineTo(x - radiusX, y);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  ctx.strokeStyle = stroke;
-  ctx.stroke();
-};
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    const selection = selectionForEvent(event);
+    if (!selection) {
+      return;
+    }
 
-const tracePolygon = (ctx: CanvasRenderingContext2D, points: readonly ProjectedPoint[]) => {
-  const [first, ...rest] = points;
-  if (!first) {
-    return false;
-  }
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
 
-  ctx.beginPath();
-  ctx.moveTo(first.x, first.y);
-  for (const point of rest) {
-    ctx.lineTo(point.x, point.y);
-  }
-  ctx.closePath();
-  return true;
-};
+    onPick(selection);
+  };
 
-const fillPolygon = (ctx: CanvasRenderingContext2D, points: readonly ProjectedPoint[], fill: string, stroke: string) => {
-  if (!tracePolygon(ctx, points)) {
-    return;
-  }
+  const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    const selection = selectionForEvent(event);
+    if (selection) {
+      onPlace(placementFromSelection(selection));
+    }
+  };
 
-  ctx.fillStyle = fill;
-  ctx.fill();
-  ctx.strokeStyle = stroke;
-  ctx.stroke();
-};
-
-const drawTexturedPolygon = (
-  ctx: CanvasRenderingContext2D,
-  atlasImage: HTMLImageElement,
-  tileIndex: number,
-  points: readonly ProjectedPoint[],
-  stroke: string,
-) => {
-  const tileWidth = atlasImage.naturalWidth / ATLAS_COLUMNS;
-  const tileHeight = atlasImage.naturalHeight / ATLAS_ROWS;
-  if (!Number.isFinite(tileWidth) || !Number.isFinite(tileHeight) || tileWidth <= 0 || tileHeight <= 0) {
-    return false;
-  }
-
-  const column = tileIndex % ATLAS_COLUMNS;
-  const row = Math.floor(tileIndex / ATLAS_COLUMNS);
-  const minX = Math.min(...points.map((point) => point.x));
-  const maxX = Math.max(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxY = Math.max(...points.map((point) => point.y));
-  const width = maxX - minX;
-  const height = maxY - minY;
-  if (width <= 0 || height <= 0) {
-    return false;
-  }
-
-  ctx.save();
-  if (!tracePolygon(ctx, points)) {
-    ctx.restore();
-    return false;
-  }
-  ctx.clip();
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(
-    atlasImage,
-    column * tileWidth,
-    row * tileHeight,
-    tileWidth,
-    tileHeight,
-    minX,
-    minY,
-    width,
-    height,
+  const color = MATERIAL_COLORS[group.material] ?? MATERIAL_COLORS.Rock;
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, group.samples.length]}
+      onPointerMove={handlePointerMove}
+      onPointerOut={() => onHover(null)}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color={tileTexture ? "#ffffff" : color}
+        map={tileTexture ?? undefined}
+        transparent={group.material === "Water"}
+        opacity={group.material === "Water" ? 0.68 : 1}
+        roughness={0.86}
+        metalness={0}
+      />
+    </instancedMesh>
   );
-  ctx.restore();
+}
 
-  if (tracePolygon(ctx, points)) {
-    ctx.strokeStyle = stroke;
-    ctx.stroke();
-  }
-  return true;
-};
+function BoxWire({
+  center,
+  size,
+  color,
+  opacity = 0.9,
+  testId,
+}: {
+  readonly center: THREE.Vector3;
+  readonly size: THREE.Vector3;
+  readonly color: string;
+  readonly opacity?: number;
+  readonly testId?: string;
+}) {
+  return (
+    <mesh position={center} userData={testId ? { testId } : undefined}>
+      <boxGeometry args={[size.x, size.y, size.z]} />
+      <meshBasicMaterial color={color} wireframe transparent opacity={opacity} depthTest={false} />
+    </mesh>
+  );
+}
 
-const drawSurfaceWallFace = (ctx: CanvasRenderingContext2D, face: SurfaceWallFace) => {
-  const materialColor = MATERIAL_COLORS[face.material] ?? MATERIAL_COLORS.Rock;
-  ctx.save();
-  ctx.globalAlpha = 0.66;
-  fillPolygon(ctx, face.points, materialColor, "rgba(8, 10, 14, 0.78)");
-  ctx.restore();
-};
-
-const drawIsoSurfaceCell = (
-  ctx: CanvasRenderingContext2D,
-  sample: WorldSurfaceSample,
-  atlasMapping: BlockAtlasMap,
-  atlasImage: HTMLImageElement | null,
-  cellSize: number,
-  view: ViewState,
-) => {
-  const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
-  const stroke = "rgba(11, 14, 20, 0.86)";
-  const sideDepth = clamp(cellSize * 0.34 * view.zoom, 3 * view.zoom, 14 * view.zoom);
-  const topNorth = projectIso([sample.x, sample.height, sample.z], view);
-  const topEast = projectIso([sample.x + cellSize, sample.height, sample.z], view);
-  const topSouth = projectIso([sample.x + cellSize, sample.height, sample.z + cellSize], view);
-  const topWest = projectIso([sample.x, sample.height, sample.z + cellSize], view);
-  const top: readonly ProjectedPoint[] = [
-    topNorth,
-    topEast,
-    topSouth,
-    topWest,
-  ];
-  const leftSide: readonly ProjectedPoint[] = [
-    topWest,
-    topSouth,
-    { x: topSouth.x, y: topSouth.y + sideDepth },
-    { x: topWest.x, y: topWest.y + sideDepth },
-  ];
-  const rightSide: readonly ProjectedPoint[] = [
-    topEast,
-    topSouth,
-    { x: topSouth.x, y: topSouth.y + sideDepth },
-    { x: topEast.x, y: topEast.y + sideDepth },
-  ];
-
-  fillPolygon(ctx, leftSide, "rgba(15, 18, 24, 0.44)", stroke);
-  ctx.save();
-  ctx.globalAlpha = 0.64;
-  fillPolygon(ctx, leftSide, materialColor, stroke);
-  ctx.globalAlpha = 0.52;
-  fillPolygon(ctx, rightSide, materialColor, stroke);
-  ctx.restore();
-
-  const topTileIndex = atlasImage ? atlasTileIndexForSample(atlasMapping, sample.material, "top") : null;
-  if (!(atlasImage && topTileIndex !== null && drawTexturedPolygon(ctx, atlasImage, topTileIndex, top, stroke))) {
-    fillPolygon(ctx, top, materialColor, stroke);
-  }
-};
-
-const projectIso = (position: readonly [number, number, number], view: ViewState) => {
-  const [x, z] = rotateHorizontal(position[0], position[2], view.rotation);
-  return {
-    x: view.offsetX + (x - z) * 0.72 * view.zoom,
-    y: view.offsetY + ((x + z) * 0.72 * view.pitch - (position[1] - view.heightOffset) * 1.35) * view.zoom,
-  };
-};
-
-const normalizeAtlasTileId = (tileId: string) => LEGACY_ATLAS_TILE_IDS[tileId] ?? tileId;
-
-const parseAtlasTileIndex = (tileId: string): number | null => {
-  const match = /^tile-(\d+)$/.exec(normalizeAtlasTileId(tileId));
-  if (!match) {
+function ChunkBoundsLayer({ chunks, selection, visible }: { readonly chunks: readonly ChunkSummary[]; readonly selection: Selection; readonly visible: boolean }) {
+  if (!visible) {
     return null;
   }
 
-  const index = Number.parseInt(match[1], 10);
-  return Number.isInteger(index) && index >= 0 && index < ATLAS_TILE_COUNT ? index : null;
-};
+  return (
+    <>
+      {chunks.map((chunk) => {
+        const [x, y, z] = chunk.coordinate;
+        const dirty = chunk.dirty || chunk.meshStatus === "dirty" || chunk.meshStatus === "queued";
+        const selected = selection.kind === "chunk" && selection.id === chunk.id;
+        const center = new THREE.Vector3(x * 16 + 8, y * 16 + 8, z * 16 + 8);
+        return (
+          <group key={chunk.id}>
+            <BoxWire center={center} size={new THREE.Vector3(16, 16, 16)} color={selected ? "#2cb8ff" : dirty ? "#f5a524" : "#8f95a3"} opacity={selected || dirty ? 0.96 : 0.42} />
+            {dirty ? (
+              <mesh position={center}>
+                <boxGeometry args={[16, 16, 16]} />
+                <meshBasicMaterial color="#f5a524" transparent opacity={0.08} depthWrite={false} />
+              </mesh>
+            ) : null}
+          </group>
+        );
+      })}
+    </>
+  );
+}
 
-const blockForViewportMaterial = (material: WorldSurfaceSample["material"]): BlockType | null => {
-  switch (material) {
-    case "TopSoil":
-      return "grass";
-    case "SubSoil":
-      return "dirt";
-    case "Sand":
-      return "sand";
-    case "Rock":
-    case "Bedrock":
-    case "Clay":
-    case "DungeonWall":
-    case "DungeonFloor":
-      return "rock";
-    default:
-      return null;
-  }
-};
-
-const atlasTileIndexForSample = (
-  atlasMapping: BlockAtlasMap,
-  material: WorldSurfaceSample["material"],
-  face: keyof AtlasMapping = "top",
-): number | null => {
-  const block = blockForViewportMaterial(material);
-  return block ? parseAtlasTileIndex(atlasMapping[block][face]) : null;
-};
-
-const chunkIdForVoxel = (position: readonly [number, number, number]) =>
-  `chunk-${Math.floor(position[0] / 16)}-${Math.floor(position[1] / 16)}-${Math.floor(position[2] / 16)}`;
-
-const pointsToSvg = (points: readonly ProjectedPoint[]) => points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-
-const buildChunkOverlayShapes = (
-  chunks: readonly ChunkSummary[],
-  selection: Selection,
-  view: ViewState,
-): readonly ChunkOverlayShape[] =>
-  chunks.map((chunk) => {
-    const [chunkX, chunkY, chunkZ] = chunk.coordinate;
-    const minX = chunkX * 16;
-    const minZ = chunkZ * 16;
-    const maxX = minX + 16;
-    const maxZ = minZ + 16;
-    const y = chunkY * 16 + 1;
-
-    return {
-      id: chunk.id,
-      label: chunk.label,
-      points: [
-        projectIso([minX, y, minZ], view),
-        projectIso([maxX, y, minZ], view),
-        projectIso([maxX, y, maxZ], view),
-        projectIso([minX, y, maxZ], view),
-      ],
-      dirty: chunk.dirty || chunk.meshStatus === "dirty" || chunk.meshStatus === "queued",
-      selected: selection.kind === "chunk" && selection.id === chunk.id,
-    };
-  });
-
-const buildBrushPreviewShape = (
-  brushSettings: BrushSettings,
-  targetedVoxel: readonly [number, number, number],
-  activeMode: EditorMode,
-  view: ViewState,
-): BrushPreviewShape | null => {
-  if (activeMode !== "voxel_sculpt" && activeMode !== "voxel_paint") {
+function ProtectedAreaLayer({ areas, visible }: { readonly areas: readonly LiteProtectedAreaOverlay[]; readonly visible: boolean }) {
+  if (!visible) {
     return null;
   }
 
-  const center = projectIso(targetedVoxel, view);
-  const radius = clamp(brushSettings.radius * 5.4 * view.zoom, 8, 120);
+  return (
+    <>
+      {areas.map((area) => {
+        const center = boundsCenter(area.bounds);
+        const size = boundsSize(area.bounds);
+        const color = overlayColor(area);
+        return (
+          <group key={area.id}>
+            <mesh position={center}>
+              <boxGeometry args={[size.x, size.y, size.z]} />
+              <meshBasicMaterial color={color} transparent opacity={area.kind === "selected" ? 0.17 : 0.09} depthWrite={false} />
+            </mesh>
+            <BoxWire center={center} size={size} color={color} opacity={area.kind === "selected" ? 0.95 : 0.58} />
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+function SelectionLayer({
+  selection,
+  hoveredVoxel,
+  pendingVoxelEdits,
+}: {
+  readonly selection: Selection;
+  readonly hoveredVoxel: LiteVoxelSelection | null;
+  readonly pendingVoxelEdits: readonly PendingVoxelEdit[];
+}) {
+  const selectedPosition = selection.kind === "voxel" ? selection.position : null;
+  return (
+    <>
+      {selectedPosition ? (
+        <BoxWire center={new THREE.Vector3(selectedPosition[0] + 0.5, selectedPosition[1] + 0.5, selectedPosition[2] + 0.5)} size={new THREE.Vector3(1.08, 1.08, 1.08)} color="#2cb8ff" opacity={1} />
+      ) : null}
+      {hoveredVoxel ? (
+        <BoxWire center={new THREE.Vector3(hoveredVoxel.position[0] + 0.5, hoveredVoxel.position[1] + 0.5, hoveredVoxel.position[2] + 0.5)} size={new THREE.Vector3(1.08, 1.08, 1.08)} color="#f5f7fb" opacity={0.72} />
+      ) : null}
+      {pendingVoxelEdits.map((edit) => {
+        const color = edit.status === "applied" ? "#22c55e" : edit.status === "rejected" ? "#ef4444" : "#f5a524";
+        return (
+          <mesh key={edit.id} position={[edit.position[0] + 0.5, edit.position[1] + 0.5, edit.position[2] + 0.5]}>
+            <boxGeometry args={[1.16, 1.16, 1.16]} />
+            <meshBasicMaterial color={color} transparent opacity={0.32} />
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
+
+function BrushPreviewLayer({
+  brushSettings,
+  targetedVoxel,
+  activeMode,
+}: {
+  readonly brushSettings: BrushSettings;
+  readonly targetedVoxel: readonly [number, number, number];
+  readonly activeMode: EditorMode;
+}) {
+  const affected = useMemo(() => buildAffectedVoxelPositions(brushSettings, targetedVoxel, activeMode), [activeMode, brushSettings, targetedVoxel]);
+  if (!shouldShowBrushPreview(activeMode)) {
+    return null;
+  }
+
+  const center = new THREE.Vector3(targetedVoxel[0] + 0.5, targetedVoxel[1] + 0.5, targetedVoxel[2] + 0.5);
   const invalid = targetedVoxel[1] <= 0;
-  const affected: ProjectedPoint[] = [];
-  const previewStep = Math.max(1, Math.round(brushSettings.radius / 3));
+  return (
+    <group>
+      {brushSettings.brushShape === "sphere" ? (
+        <mesh position={center}>
+          <sphereGeometry args={[brushSettings.radius, 24, 16]} />
+          <meshBasicMaterial color={invalid ? "#ef4444" : "#2cb8ff"} wireframe transparent opacity={0.46} depthTest={false} />
+        </mesh>
+      ) : (
+        <BoxWire
+          center={center}
+          size={new THREE.Vector3(brushSettings.radius * 2, brushSettings.brushShape === "cylinder" ? 1.2 : brushSettings.radius * 2, brushSettings.radius * 2)}
+          color={invalid ? "#ef4444" : "#2cb8ff"}
+          opacity={0.62}
+        />
+      )}
+      {affected.map((point, index) => (
+        <mesh key={`${point.x}-${point.y}-${point.z}-${index}`} position={point}>
+          <boxGeometry args={[0.24, 0.24, 0.24]} />
+          <meshBasicMaterial color={invalid ? "#ef4444" : "#9de7ff"} transparent opacity={0.82} depthTest={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
-  for (let x = -previewStep; x <= previewStep; x += previewStep) {
-    for (let z = -previewStep; z <= previewStep; z += previewStep) {
-      const distance = Math.sqrt(x * x + z * z);
-      if (brushSettings.brushShape === "sphere" && distance > previewStep * 1.35) {
-        continue;
-      }
-      affected.push(projectIso([targetedVoxel[0] + x, targetedVoxel[1], targetedVoxel[2] + z], view));
-    }
-  }
-
-  return { center, radius, invalid, affected };
-};
-
-const buildPropOverlayShapes = (
-  props: readonly PropInstance[],
-  selection: Selection,
-  view: ViewState,
-): readonly PropOverlayShape[] =>
-  props.map((prop) => {
-    const position = prop.transform.position ?? prop.position;
-    const scale = prop.transform.scale[0] ?? 1;
-    return {
-      id: prop.id,
-      label: prop.name,
-      point: projectIso(position, view),
-      radius: clamp((6 + scale * 8) * view.zoom, 5, 28),
-      selected: selection.kind === "prop" && selection.id === prop.id,
-    };
-  });
-
-const nearestPlacementSample = (
-  samples: readonly WorldSurfaceSample[],
-  view: ViewState,
-  clientX: number,
-  clientY: number,
-  rect: DOMRect,
-): readonly [number, number, number] | null => {
-  if (samples.length === 0) {
+function PropBoundsLayer({ props, selection, visible }: { readonly props: readonly PropInstance[]; readonly selection: Selection; readonly visible: boolean }) {
+  if (!visible && selection.kind !== "prop") {
     return null;
   }
 
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
-  let nearest = samples[0];
-  let nearestDistance = Number.POSITIVE_INFINITY;
+  return (
+    <>
+      {props.map((prop) => {
+        const position = prop.transform.position ?? prop.position;
+        const selected = selection.kind === "prop" && selection.id === prop.id;
+        if (!visible && !selected) {
+          return null;
+        }
+        const radius = Math.max(0.8, 1 + (prop.transform.scale[0] ?? 1) * 1.8);
+        return (
+          <mesh key={prop.id} position={[position[0], position[1] + radius * 0.5, position[2]]}>
+            <sphereGeometry args={[radius, 16, 10]} />
+            <meshBasicMaterial color={selected ? "#2cb8ff" : "#a26cff"} wireframe transparent opacity={selected ? 0.86 : 0.38} depthTest={false} />
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
 
-  for (const sample of samples) {
-    const projected = projectIso([sample.x, sample.height, sample.z], view);
-    const dx = projected.x - x;
-    const dy = projected.y - y;
-    const distance = dx * dx + dy * dy;
-    if (distance < nearestDistance) {
-      nearest = sample;
-      nearestDistance = distance;
-    }
-  }
-
-  return [nearest.x, nearest.height + 1, nearest.z];
-};
-
-const nearestVoxelSelection = (
-  samples: readonly WorldSurfaceSample[],
-  view: ViewState,
-  clientX: number,
-  clientY: number,
-  rect: DOMRect,
-  targetFace: "top" | "side" | "bottom" | "all",
-): LiteVoxelSelection | null => {
-  if (samples.length === 0) {
-    return null;
-  }
-
-  const position = nearestPlacementSample(samples, view, clientX, clientY, rect);
-  if (!position) {
-    return null;
-  }
-
-  const voxelPosition: [number, number, number] = [
-    Math.round(position[0]),
-    Math.max(0, Math.round(position[1] - 1)),
-    Math.round(position[2]),
-  ];
-  const face = targetFace === "all" ? "top" : targetFace;
-
-  return {
-    position: voxelPosition,
-    chunkId: chunkIdForVoxel(voxelPosition),
-    face,
-  };
-};
-
-const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer, view: ViewState, fill: string, stroke: string) => {
-  if (!mesh.positions || !mesh.indices || mesh.indices.length < 3) {
-    return false;
-  }
-
-  ctx.save();
-  ctx.lineWidth = Math.max(0.5, 0.8 * view.zoom);
-  ctx.strokeStyle = stroke;
-  ctx.fillStyle = fill;
-
-  const triangleLimit = Math.min(mesh.indices.length - (mesh.indices.length % 3), 18000);
-  for (let index = 0; index < triangleLimit; index += 3) {
-    const a = mesh.positions[mesh.indices[index]];
-    const b = mesh.positions[mesh.indices[index + 1]];
-    const c = mesh.positions[mesh.indices[index + 2]];
-    if (!a || !b || !c) {
-      continue;
-    }
-
-    const pa = projectIso(a, view);
-    const pb = projectIso(b, view);
-    const pc = projectIso(c, view);
-    ctx.beginPath();
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-    ctx.lineTo(pc.x, pc.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  ctx.restore();
-  return true;
-};
-
-export const drawGameCameraPreview = (
-  ctx: CanvasRenderingContext2D,
-  samples: readonly WorldSurfaceSample[],
-  camera: GameCameraState,
-  cellSize: number,
-  width: number,
-  height: number,
-) => {
-  ctx.clearRect(0, 0, width, height);
-  const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, "#182636");
-  sky.addColorStop(0.55, "#101821");
-  sky.addColorStop(1, "#0a0d12");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, width, height);
-
-  const horizon = height * 0.48;
-  ctx.fillStyle = "rgba(5, 7, 10, 0.52)";
-  ctx.fillRect(0, horizon, width, height - horizon);
-
-  const sampleMap = new Map(samples.map((sample) => [sampleGridKey(sample.x, sample.z), sample]));
-  const forwardX = Math.cos(camera.yaw);
-  const forwardZ = Math.sin(camera.yaw);
-  const rightX = -forwardZ;
-  const rightZ = forwardX;
-  const focal = width * 0.74;
-  const drawItems = samples
-    .map((sample) => {
-      const dx = sample.x + cellSize * 0.5 - camera.position[0];
-      const dz = sample.z + cellSize * 0.5 - camera.position[2];
-      const depth = dx * forwardX + dz * forwardZ;
-      if (depth <= 2 || depth > 160) {
-        return null;
-      }
-      const lateral = dx * rightX + dz * rightZ;
-      const screenX = width * 0.5 + (lateral / depth) * focal;
-      const size = clamp((cellSize / depth) * focal, 2, 52);
-      if (screenX < -size || screenX > width + size) {
-        return null;
-      }
-
-      const neighbors = [
-        sampleMap.get(sampleGridKey(sample.x + cellSize, sample.z)),
-        sampleMap.get(sampleGridKey(sample.x - cellSize, sample.z)),
-        sampleMap.get(sampleGridKey(sample.x, sample.z + cellSize)),
-        sampleMap.get(sampleGridKey(sample.x, sample.z - cellSize)),
-      ].filter((neighbor): neighbor is WorldSurfaceSample => Boolean(neighbor));
-      const baseHeight = Math.min(sample.height - 1, ...neighbors.map((neighbor) => neighbor.height));
-      const topY = horizon + ((camera.position[1] - sample.height) / depth) * focal * 0.62;
-      const bottomY = horizon + ((camera.position[1] - baseHeight) / depth) * focal * 0.62;
-      return { sample, depth, screenX, size, topY, bottomY };
-    })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .sort((left, right) => right.depth - left.depth);
-
-  for (const item of drawItems) {
-    const materialColor = MATERIAL_COLORS[item.sample.material] ?? MATERIAL_COLORS.Rock;
-    const half = item.size * 0.5;
-    const topHeight = item.size * 0.24;
-    const bottomY = Math.max(item.topY + 2, item.bottomY);
-
-    ctx.fillStyle = item.sample.water ? "rgba(74, 184, 234, 0.7)" : materialColor;
-    ctx.strokeStyle = "rgba(4, 6, 10, 0.78)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.rect(item.screenX - half, item.topY, item.size, bottomY - item.topY);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.globalAlpha = item.sample.water ? 0.72 : 1;
-    ctx.beginPath();
-    ctx.moveTo(item.screenX, item.topY - topHeight);
-    ctx.lineTo(item.screenX + half, item.topY);
-    ctx.lineTo(item.screenX, item.topY + topHeight);
-    ctx.lineTo(item.screenX - half, item.topY);
-    ctx.closePath();
-    ctx.fillStyle = item.sample.water ? "#65c7ff" : materialColor;
-    ctx.fill();
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
-  ctx.beginPath();
-  ctx.moveTo(width * 0.5 - 10, height * 0.5);
-  ctx.lineTo(width * 0.5 + 10, height * 0.5);
-  ctx.moveTo(width * 0.5, height * 0.5 - 10);
-  ctx.lineTo(width * 0.5, height * 0.5 + 10);
-  ctx.stroke();
-};
+function AuthoringScene({
+  chunks,
+  props,
+  meshChunks,
+  samples,
+  sampleGroups,
+  sampleCellSize,
+  atlasTexture,
+  view,
+  viewportOverlays,
+  areaOverlays,
+  selection,
+  hoveredVoxel,
+  pendingVoxelEdits,
+  brushSettings,
+  targetedVoxel,
+  activeMode,
+  suppressClickRef,
+  onHover,
+  onPick,
+  onPlace,
+}: {
+  readonly chunks: readonly ChunkSummary[];
+  readonly props: readonly PropInstance[];
+  readonly meshChunks: NonNullable<ViewportSnapshot["chunks"]>;
+  readonly samples: readonly WorldSurfaceSample[];
+  readonly sampleGroups: readonly SampleGroup[];
+  readonly sampleCellSize: number;
+  readonly atlasTexture: THREE.Texture | null;
+  readonly view: ViewState;
+  readonly viewportOverlays: ViewportOverlayState;
+  readonly areaOverlays: readonly LiteProtectedAreaOverlay[];
+  readonly selection: Selection;
+  readonly hoveredVoxel: LiteVoxelSelection | null;
+  readonly pendingVoxelEdits: readonly PendingVoxelEdit[];
+  readonly brushSettings: BrushSettings;
+  readonly targetedVoxel: readonly [number, number, number];
+  readonly activeMode: EditorMode;
+  readonly suppressClickRef: MutableRefObject<boolean>;
+  readonly onHover: (selection: LiteVoxelSelection | null) => void;
+  readonly onPick: (selection: LiteVoxelSelection) => void;
+  readonly onPlace: (position: readonly [number, number, number]) => void;
+}) {
+  return (
+    <>
+      <color attach="background" args={["#0b0d12"]} />
+      <ambientLight intensity={0.72} />
+      <directionalLight position={[72, 120, 84]} intensity={1.7} />
+      <CameraController view={view} samples={samples} />
+      {viewportOverlays.voxelGrid ? <gridHelper args={[256, 64, "#4a5361", "#29303a"]} position={[64, 0.02, 64]} /> : null}
+      {meshChunks.map((chunk) => (
+        <ViewportMeshLayer
+          key={chunk.payloadId}
+          payload={chunk.mesh}
+          targetFace={brushSettings.targetFace}
+          onHover={onHover}
+          onPick={onPick}
+          onPlace={onPlace}
+          suppressClickRef={suppressClickRef}
+        />
+      ))}
+      {sampleGroups.map((group) => (
+        <SampleInstances
+          key={group.key}
+          group={group}
+          atlasTexture={atlasTexture}
+          cellSize={sampleCellSize}
+          targetFace={brushSettings.targetFace}
+          onHover={onHover}
+          onPick={onPick}
+          onPlace={onPlace}
+          suppressClickRef={suppressClickRef}
+        />
+      ))}
+      <ChunkBoundsLayer chunks={chunks} selection={selection} visible={viewportOverlays.chunkBounds} />
+      <ProtectedAreaLayer areas={areaOverlays} visible={viewportOverlays.protectedAreas} />
+      <SelectionLayer selection={selection} hoveredVoxel={hoveredVoxel} pendingVoxelEdits={pendingVoxelEdits} />
+      <BrushPreviewLayer brushSettings={brushSettings} targetedVoxel={targetedVoxel} activeMode={activeMode} />
+      <PropBoundsLayer props={props} selection={selection} visible={viewportOverlays.propBounds} />
+    </>
+  );
+}
 
 export const LiteVoxelViewport = Object.assign(
   function LiteVoxelViewport({
@@ -903,6 +771,7 @@ export const LiteVoxelViewport = Object.assign(
     selection,
     targetedVoxel,
     viewportOverlays,
+    areaOverlays = [],
     propPlacementEnabled = false,
     onPlaceProp,
     onSelectVoxel,
@@ -919,9 +788,9 @@ export const LiteVoxelViewport = Object.assign(
     propScaleMax = 4,
     onAdjustSelectedProp,
   }: LiteVoxelViewportProps) {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const hostRef = useRef<HTMLDivElement>(null);
     const gameCameraCanvasRef = useRef<HTMLCanvasElement>(null);
-    const dragRef = useRef<CanvasDragState | null>(null);
+    const dragRef = useRef<ViewportDragState | null>(null);
     const suppressClickRef = useRef(false);
     const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
@@ -933,45 +802,19 @@ export const LiteVoxelViewport = Object.assign(
     const [gameCamera, setGameCamera] = useState<GameCameraState | null>(null);
     const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
     const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
-    const [atlasImage, setAtlasImage] = useState<HTMLImageElement | null>(null);
+    const atlasTexture = useAtlasTexture();
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
     const viewportChunkSize = viewportSnapshot?.chunkSize ?? worldViewport?.chunkSize ?? 16;
     const sampleCellSize = useMemo(() => {
       const sampleResolution = viewportSnapshot?.sampleResolution ?? worldViewport?.sampleResolution ?? 1;
       return sampleResolution > 0 ? viewportChunkSize / sampleResolution : viewportChunkSize;
     }, [viewportChunkSize, viewportSnapshot, worldViewport]);
-    const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
     const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
-    const meshBackedColumns = useMemo(() => {
-      const columns = new Set<string>();
-      for (const chunk of meshChunks) {
-        if (chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length) {
-          columns.add(`${chunk.coordinate[0]}:${chunk.coordinate[2]}`);
-        }
-      }
-      return columns;
-    }, [meshChunks]);
-    const visibleSamples = useMemo(() => {
-      if (!hasRenderableMesh || meshBackedColumns.size === 0) {
-        return samples;
-      }
-
-      return samples.filter((sample) => {
-        return !meshBackedColumns.has(sampleColumnKey(sample, viewportChunkSize));
-      });
-    }, [hasRenderableMesh, meshBackedColumns, samples, viewportChunkSize]);
-    const visibleSurfaceWallFaces = useMemo(
-      () => buildSurfaceWallFaces(visibleSamples, sampleCellSize, view),
-      [sampleCellSize, view, visibleSamples],
-    );
+    const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const atlasPreviewEnabled = viewportOverlays.atlasPreview || activeMode === "voxel_paint" || activeMode === "material";
+    const sampleGroups = useMemo(() => groupSamples(samples, atlasMapping, atlasPreviewEnabled), [atlasMapping, atlasPreviewEnabled, samples]);
     const waterSampleCount = samples.filter((sample) => sample.water).length;
-    const chunkOverlayShapes = useMemo(() => buildChunkOverlayShapes(chunks, selection, view), [chunks, selection, view]);
-    const brushPreviewShape = useMemo(() => buildBrushPreviewShape(brushSettings, targetedVoxel, activeMode, view), [activeMode, brushSettings, targetedVoxel, view]);
-    const propOverlayShapes = useMemo(() => buildPropOverlayShapes(props, selection, view), [props, selection, view]);
-    const selectedVoxelPoint = selection.kind === "voxel" ? projectIso(selection.position, view) : null;
-    const hoveredVoxelPoint = hoveredVoxel ? projectIso(hoveredVoxel.position, view) : null;
 
     const updateKeyBinding = useCallback((action: ViewportKeyAction, nextKey: string) => {
       setKeyBindings((current) => {
@@ -1117,9 +960,32 @@ export const LiteVoxelViewport = Object.assign(
       window.open(url.toString(), DETACHED_GAME_CAMERA_WINDOW_LABEL, "popup,width=640,height=360,resizable=yes");
     }, [gameCamera, publishDetachedGameCameraSnapshot]);
 
+    const handlePick = useCallback(
+      (voxelSelection: LiteVoxelSelection) => {
+        if (gameCameraPlacementArmed) {
+          placeGameCamera(voxelSelection.position);
+          return;
+        }
+
+        onSelectVoxel?.(voxelSelection);
+        if (activeMode === "voxel_paint" || activeMode === "voxel_sculpt") {
+          void queueVoxelEdit(voxelSelection);
+        }
+      },
+      [activeMode, gameCameraPlacementArmed, onSelectVoxel, placeGameCamera, queueVoxelEdit],
+    );
+
+    const handlePlace = useCallback(
+      (position: readonly [number, number, number]) => {
+        if (propPlacementEnabled && onPlaceProp) {
+          onPlaceProp(position);
+        }
+      },
+      [onPlaceProp, propPlacementEnabled],
+    );
+
     useEffect(() => {
-      const canvas = canvasRef.current;
-      const host = canvas?.parentElement;
+      const host = hostRef.current;
       if (!host) {
         return;
       }
@@ -1137,114 +1003,6 @@ export const LiteVoxelViewport = Object.assign(
     }, [canvasSize.height, canvasSize.width, samples]);
 
     useEffect(() => {
-      let cancelled = false;
-      let nextUrlIndex = 0;
-
-      const loadNextAtlasUrl = () => {
-        if (!cancelled) {
-          const image = new Image();
-          image.onload = () => {
-            if (!cancelled) {
-              setAtlasImage(image);
-            }
-          };
-          image.onerror = () => {
-            nextUrlIndex += 1;
-            if (nextUrlIndex < ATLAS_IMAGE_URLS.length) {
-              loadNextAtlasUrl();
-            } else if (!cancelled) {
-              setAtlasImage(null);
-            }
-          };
-          image.src = ATLAS_IMAGE_URLS[nextUrlIndex];
-        }
-      };
-
-      loadNextAtlasUrl();
-
-      return () => {
-        cancelled = true;
-      };
-    }, []);
-
-    useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(canvasSize.width * dpr));
-      canvas.height = Math.max(1, Math.floor(canvasSize.height * dpr));
-      canvas.style.width = `${canvasSize.width}px`;
-      canvas.style.height = `${canvasSize.height}px`;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        return;
-      }
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
-      const gradient = ctx.createLinearGradient(0, 0, 0, canvasSize.height);
-      gradient.addColorStop(0, "#151821");
-      gradient.addColorStop(0.58, "#101218");
-      gradient.addColorStop(1, "#0b0d12");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
-
-      ctx.save();
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.28;
-      for (let line = -40; line < 80; line += 1) {
-        const startX = view.offsetX + line * 26 * view.zoom;
-        ctx.strokeStyle = line % 8 === 0 ? "#4a5361" : "#29303a";
-        ctx.beginPath();
-        ctx.moveTo(startX - 900 * view.zoom, view.offsetY - 280 * view.zoom);
-        ctx.lineTo(startX + 900 * view.zoom, view.offsetY + 620 * view.zoom);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      for (const chunk of meshChunks) {
-        drawMeshBuffer(ctx, chunk.mesh.terrain, view, "rgba(92, 101, 111, 0.28)", "rgba(15, 18, 24, 0.34)");
-        drawMeshBuffer(ctx, chunk.mesh.water, view, "rgba(55, 159, 220, 0.32)", "rgba(157, 221, 255, 0.42)");
-      }
-
-      const orderedSamples = [...visibleSamples].sort((left, right) => {
-        const [leftX, leftZ] = rotateHorizontal(left.x, left.z, view.rotation);
-        const [rightX, rightZ] = rotateHorizontal(right.x, right.z, view.rotation);
-        return leftX + leftZ + left.height - (rightX + rightZ + right.height);
-      });
-      for (const face of visibleSurfaceWallFaces) {
-        drawSurfaceWallFace(ctx, face);
-      }
-      for (const sample of orderedSamples) {
-        const { x: screenX, y: screenY } = projectIso([sample.x, sample.height, sample.z], view);
-        const radiusX = sampleCellSize * 0.72 * view.zoom;
-        const radiusY = sampleCellSize * 0.36 * view.zoom;
-        const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
-        const stroke = sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)";
-
-        if (!sample.water) {
-          drawIsoSurfaceCell(ctx, sample, atlasMapping, atlasImage, sampleCellSize, view);
-        } else {
-          drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, stroke);
-          ctx.globalAlpha = 0.45;
-          drawDiamond(ctx, screenX, screenY - 1.5 * view.zoom, radiusX * 0.82, radiusY * 0.72, "#65c7ff", "rgba(187, 237, 255, 0.8)");
-          ctx.globalAlpha = 1;
-        }
-      }
-
-      if (samples.length === 0) {
-        ctx.fillStyle = "#d5d9e2";
-        ctx.font = "12px Inter, system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
-      }
-    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, meshChunks, sampleCellSize, samples.length, view, visibleSamples, visibleSurfaceWallFaces]);
-
-    useEffect(() => {
       const canvas = gameCameraCanvasRef.current;
       if (!canvas || !gameCameraEnabled || !gameCamera) {
         return;
@@ -1252,19 +1010,7 @@ export const LiteVoxelViewport = Object.assign(
 
       const width = 320;
       const height = 180;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        return;
-      }
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawGameCameraPreview(ctx, samples, gameCamera, sampleCellSize, width, height);
+      renderGameCameraPreviewCanvas(canvas, samples, gameCamera, sampleCellSize, width, height);
     }, [gameCamera, gameCameraEnabled, sampleCellSize, samples]);
 
     useEffect(() => {
@@ -1295,15 +1041,15 @@ export const LiteVoxelViewport = Object.assign(
 
     return (
       <>
-        <canvas
-          ref={canvasRef}
+        <div
+          ref={hostRef}
           className="world-viewport-canvas"
           data-testid="world-viewport-canvas"
           data-atlas-preview-enabled={String(atlasPreviewEnabled)}
           data-renderable-mesh={String(hasRenderableMesh)}
-          data-surface-preview-mode={hasRenderableMesh ? "mesh-filtered" : "sampled"}
-          data-visible-surface-samples={visibleSamples.length}
-          data-visible-surface-walls={visibleSurfaceWallFaces.length}
+          data-surface-preview-mode={hasRenderableMesh ? "webgl-mesh" : "webgl-sampled"}
+          data-visible-surface-samples={samples.length}
+          data-visible-surface-walls={0}
           tabIndex={0}
           onPointerDown={(event) => {
             event.currentTarget.focus();
@@ -1330,8 +1076,6 @@ export const LiteVoxelViewport = Object.assign(
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current;
-            const voxelSelection = nearestVoxelSelection(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), brushSettings.targetFace);
-            setHoveredVoxel(voxelSelection);
             if (!drag) {
               return;
             }
@@ -1353,14 +1097,14 @@ export const LiteVoxelViewport = Object.assign(
               event.preventDefault();
               setView(
                 viewWithCamera(drag.view, {
-                  rotation: drag.view.rotation + (event.clientX - drag.x) / 180,
+                  yaw: drag.view.yaw - (event.clientX - drag.x) / 220,
                   pitch: drag.view.pitch + (event.clientY - drag.y) / 360,
                 }),
               );
               return;
             }
 
-            setView({ ...drag.view, offsetX: drag.view.offsetX + event.clientX - drag.x, offsetY: drag.view.offsetY + event.clientY - drag.y });
+            setView(panView(drag.view, event.clientX - drag.x, event.clientY - drag.y));
           }}
           onPointerUp={() => {
             dragRef.current = null;
@@ -1396,42 +1140,7 @@ export const LiteVoxelViewport = Object.assign(
             }
 
             const zoomMultiplier = event.deltaY < 0 ? 1.1 : 0.9;
-            const nextZoom = clamp(view.zoom * zoomMultiplier, 0.18, 8);
-            setView({ ...view, zoom: nextZoom });
-          }}
-          onDoubleClick={(event) => {
-            if (!propPlacementEnabled || !onPlaceProp) {
-              return;
-            }
-
-            const position = nearestPlacementSample(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
-            if (position) {
-              onPlaceProp(position);
-            }
-          }}
-          onClick={(event) => {
-            if (suppressClickRef.current) {
-              suppressClickRef.current = false;
-              return;
-            }
-            if (propPlacementEnabled) {
-              return;
-            }
-
-            const voxelSelection = nearestVoxelSelection(samples, view, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), brushSettings.targetFace);
-            if (!voxelSelection) {
-              return;
-            }
-
-            if (gameCameraPlacementArmed) {
-              placeGameCamera(voxelSelection.position);
-              return;
-            }
-
-            onSelectVoxel?.(voxelSelection);
-            if (activeMode === "voxel_paint" || activeMode === "voxel_sculpt") {
-              void queueVoxelEdit(voxelSelection);
-            }
+            setView((current) => viewWithCamera(current, { zoom: current.zoom * zoomMultiplier }));
           }}
           onKeyDown={(event) => {
             if (event.key === "Escape" && keysPanelOpen) {
@@ -1448,12 +1157,12 @@ export const LiteVoxelViewport = Object.assign(
             }
             if (key === keyBindings.zoomIn) {
               event.preventDefault();
-              setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }));
+              setView((current) => viewWithCamera(current, { zoom: current.zoom * 1.15 }));
               return;
             }
             if (key === keyBindings.zoomOut) {
               event.preventDefault();
-              setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }));
+              setView((current) => viewWithCamera(current, { zoom: current.zoom * 0.85 }));
               return;
             }
             const panStep = event.altKey ? 18 : event.shiftKey ? 96 : 48;
@@ -1478,12 +1187,12 @@ export const LiteVoxelViewport = Object.assign(
             if (event.ctrlKey && (key === "arrowleft" || key === "arrowright")) {
               event.preventDefault();
               const direction = key === "arrowleft" ? -1 : 1;
-              setView((current) => viewWithCamera(current, { rotation: current.rotation + direction * rotateStep }));
+              setView((current) => viewWithCamera(current, { yaw: current.yaw + direction * rotateStep }));
               return;
             }
             if (event.ctrlKey && (key === "arrowup" || key === "arrowdown")) {
               event.preventDefault();
-              const direction = key === "arrowup" ? -1 : 1;
+              const direction = key === "arrowup" ? 1 : -1;
               setView((current) => viewWithCamera(current, { pitch: current.pitch + direction * tiltStep }));
               return;
             }
@@ -1506,13 +1215,13 @@ export const LiteVoxelViewport = Object.assign(
             const pan = panByKey[key];
             if (pan && !event.metaKey && !event.ctrlKey) {
               event.preventDefault();
-              setView((current) => ({ ...current, offsetX: current.offsetX + pan[0], offsetY: current.offsetY + pan[1] }));
+              setView((current) => panView(current, pan[0], pan[1]));
               return;
             }
             if ((key === keyBindings.orbitLeft || key === keyBindings.orbitRight) && !event.ctrlKey && !event.metaKey) {
               event.preventDefault();
               const direction = key === keyBindings.orbitLeft ? -1 : 1;
-              setView((current) => viewWithCamera(current, { rotation: current.rotation + direction * rotateStep }));
+              setView((current) => viewWithCamera(current, { yaw: current.yaw + direction * rotateStep }));
               return;
             }
             if ((key === keyBindings.tiltDown || key === keyBindings.tiltUp) && !event.ctrlKey && !event.metaKey) {
@@ -1523,11 +1232,43 @@ export const LiteVoxelViewport = Object.assign(
             }
             if ((key === keyBindings.reset) && !event.ctrlKey && !event.metaKey) {
               event.preventDefault();
-              setView((current) => fitViewForSamples(samples, canvasSize.width, canvasSize.height, { ...DEFAULT_VIEW, rotation: current.rotation }));
+              setView((current) => fitViewForSamples(samples, canvasSize.width, canvasSize.height, { ...DEFAULT_VIEW, yaw: current.yaw }));
             }
           }}
           onContextMenu={(event) => event.preventDefault()}
-        />
+        >
+          <Canvas
+            orthographic
+            camera={{ position: [96, 96, 96], zoom: view.zoom, near: -2000, far: 5000 }}
+            gl={{ antialias: false, powerPreference: "high-performance" }}
+            frameloop="demand"
+            style={{ width: "100%", height: "100%" }}
+            onPointerMissed={() => setHoveredVoxel(null)}
+          >
+            <AuthoringScene
+              chunks={chunks}
+              props={props}
+              meshChunks={meshChunks}
+              samples={samples}
+              sampleGroups={sampleGroups}
+              sampleCellSize={sampleCellSize}
+              atlasTexture={atlasTexture}
+              view={view}
+              viewportOverlays={viewportOverlays}
+              areaOverlays={areaOverlays}
+              selection={selection}
+              hoveredVoxel={hoveredVoxel}
+              pendingVoxelEdits={pendingVoxelEdits}
+              brushSettings={brushSettings}
+              targetedVoxel={targetedVoxel}
+              activeMode={activeMode}
+              suppressClickRef={suppressClickRef}
+              onHover={setHoveredVoxel}
+              onPick={handlePick}
+              onPlace={handlePlace}
+            />
+          </Canvas>
+        </div>
 
         {viewportOverlays.voxelGrid ? <div className="lite-viewport-grid-overlay" aria-hidden="true" data-testid="viewport-voxel-grid-overlay" /> : null}
 
@@ -1540,60 +1281,7 @@ export const LiteVoxelViewport = Object.assign(
           aria-hidden="true"
         >
           {viewportOverlays.chunkBounds &&
-            chunkOverlayShapes.map((shape) => (
-              <g key={shape.id} data-testid={`viewport-chunk-overlay-${shape.id}`}>
-                {shape.dirty ? (
-                  <polygon className="lite-viewport-dirty-chunk" points={pointsToSvg(shape.points)} />
-                ) : null}
-                <polygon className={shape.selected ? "lite-viewport-selected-chunk" : "lite-viewport-chunk-bound"} points={pointsToSvg(shape.points)} />
-              </g>
-            ))}
-
-          {selectedVoxelPoint ? (
-            <g data-testid="viewport-selected-voxel-overlay">
-              <circle className="lite-viewport-selected-voxel-ring" cx={selectedVoxelPoint.x} cy={selectedVoxelPoint.y} r={9 * view.zoom} />
-              <circle className="lite-viewport-selected-voxel-dot" cx={selectedVoxelPoint.x} cy={selectedVoxelPoint.y} r={2.5} />
-            </g>
-          ) : null}
-
-          {hoveredVoxelPoint ? (
-            <g data-testid="viewport-hovered-voxel-overlay">
-              <circle className="lite-viewport-hovered-voxel-ring" cx={hoveredVoxelPoint.x} cy={hoveredVoxelPoint.y} r={7 * view.zoom} />
-              <line className="lite-viewport-hovered-voxel-face" x1={hoveredVoxelPoint.x - 8} y1={hoveredVoxelPoint.y} x2={hoveredVoxelPoint.x + 8} y2={hoveredVoxelPoint.y} />
-              <line className="lite-viewport-hovered-voxel-face" x1={hoveredVoxelPoint.x} y1={hoveredVoxelPoint.y - 8} x2={hoveredVoxelPoint.x} y2={hoveredVoxelPoint.y + 8} />
-            </g>
-          ) : null}
-
-          {pendingVoxelEdits.map((edit) => {
-            const point = projectIso(edit.position, view);
-            return (
-              <g key={edit.id} data-testid={`viewport-optimistic-voxel-${edit.status}`}>
-                <circle className={`lite-viewport-optimistic-voxel lite-viewport-optimistic-voxel-${edit.status}`} cx={point.x} cy={point.y} r={10 * view.zoom} />
-                {edit.status === "rejected" ? <text className="lite-viewport-edit-rejection-label" x={point.x + 12} y={point.y - 12}>{edit.message ?? "rejected"}</text> : null}
-              </g>
-            );
-          })}
-
-          {(viewportOverlays.propBounds || propOverlayShapes.some((shape) => shape.selected)) &&
-            propOverlayShapes.map((shape) => (
-              <g key={shape.id} data-testid={`viewport-prop-bound-overlay-${shape.id}`}>
-                <circle className={shape.selected ? "lite-viewport-selected-prop-bound" : "lite-viewport-prop-bound"} cx={shape.point.x} cy={shape.point.y} r={shape.radius} />
-                {shape.selected ? <circle className="lite-viewport-selected-prop-dot" cx={shape.point.x} cy={shape.point.y} r={2.5} /> : null}
-              </g>
-            ))}
-
-          {brushPreviewShape ? (
-            <g data-testid="viewport-brush-preview-overlay">
-              {brushPreviewShape.invalid ? (
-                <circle className="lite-viewport-invalid-target" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={brushPreviewShape.radius} />
-              ) : null}
-              {brushPreviewShape.affected.map((point, index) => (
-                <circle key={`${point.x}-${point.y}-${index}`} className="lite-viewport-affected-voxel" cx={point.x} cy={point.y} r={2.4} />
-              ))}
-              <circle className="lite-viewport-brush-radius" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={brushPreviewShape.radius} />
-              <circle className="lite-viewport-brush-center" cx={brushPreviewShape.center.x} cy={brushPreviewShape.center.y} r={3.2} />
-            </g>
-          ) : null}
+            chunks.map((chunk) => <g key={chunk.id} data-testid={`viewport-chunk-overlay-${chunk.id}`} />)}
         </svg>
 
         <div className="viewport-canvas-controls" aria-label="Viewport controls">
@@ -1605,7 +1293,7 @@ export const LiteVoxelViewport = Object.assign(
             className="icon-button"
             title="Orbit left"
             aria-label="Orbit left"
-            onClick={() => setView((current) => viewWithCamera(current, { rotation: current.rotation - 1 / 6 }))}
+            onClick={() => setView((current) => viewWithCamera(current, { yaw: current.yaw - 1 / 6 }))}
           >
             <RotateCcw size={14} aria-hidden="true" />
           </button>
@@ -1614,14 +1302,14 @@ export const LiteVoxelViewport = Object.assign(
             className="icon-button"
             title="Orbit right"
             aria-label="Orbit right"
-            onClick={() => setView((current) => viewWithCamera(current, { rotation: current.rotation + 1 / 6 }))}
+            onClick={() => setView((current) => viewWithCamera(current, { yaw: current.yaw + 1 / 6 }))}
           >
             <RotateCw size={14} aria-hidden="true" />
           </button>
-          <button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }))}>
+          <button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" onClick={() => setView((current) => viewWithCamera(current, { zoom: current.zoom * 1.15 }))}>
             <ZoomIn size={14} aria-hidden="true" />
           </button>
-          <button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }))}>
+          <button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" onClick={() => setView((current) => viewWithCamera(current, { zoom: current.zoom * 0.85 }))}>
             <ZoomOut size={14} aria-hidden="true" />
           </button>
           <button
