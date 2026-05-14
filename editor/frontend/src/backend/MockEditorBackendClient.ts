@@ -1,4 +1,4 @@
-import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
+import type { AtlasMappingDto, BackendResult, EditorBackendClient, VoxelModelExport, VoxelModelFormat, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
 import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import type { ViewportSnapshot } from "../types/world";
 
@@ -31,6 +31,17 @@ export class MockEditorBackendClient implements EditorBackendClient {
 
   async loadWorldFile(_file: File): Promise<BackendResult<WorldSummary>> {
     return { ok: true, data: mockWorldSummary() };
+  }
+
+  async exportVoxelModel(format: VoxelModelFormat): Promise<BackendResult<VoxelModelExport>> {
+    return {
+      ok: true,
+      data: {
+        fileName: `mock-drusniel-world.${format}`,
+        contentType: format === "vox" ? "model/x-vox" : "model/x-vl32",
+        blob: new Blob([new Uint8Array(format === "vox" ? [86, 79, 88, 32] : [])]),
+      },
+    };
   }
 
   async saveDefaultWorld(): Promise<BackendResult<WorldSaveSummary>> {

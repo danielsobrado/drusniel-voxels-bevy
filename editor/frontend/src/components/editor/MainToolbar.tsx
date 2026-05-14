@@ -1,11 +1,14 @@
-import { Brush, Boxes, Droplets, Grid3X3, History, Lightbulb, MousePointer2, Package, Redo2, Save, Sparkles, SquareDashedMousePointer, TestTube2, Undo2 } from "lucide-react";
+import { Brush, Boxes, Download, Droplets, Grid3X3, History, Lightbulb, MousePointer2, Package, Redo2, Save, Sparkles, SquareDashedMousePointer, TestTube2, Undo2, Upload } from "lucide-react";
 import { useEditorStore } from "../../state/editorStore";
 import type { EditorMode, RenderQualityPreset } from "../../types/editor";
 import { StatusPill } from "./StatusPill";
 
 export const modeCommandIds = ["editor.mode.select", "editor.mode.voxelSculpt", "editor.mode.voxelPaint", "editor.mode.area", "editor.mode.props", "editor.mode.water", "editor.mode.lighting", "editor.mode.agent"] as const;
 export const toolbarCommandIds = [
+  "editor.file.openWorld",
   "editor.file.save",
+  "editor.file.exportVox",
+  "editor.file.exportVl32",
   "editor.file.saveSnapshot",
   "editor.history.undo",
   "editor.history.redo",
@@ -45,8 +48,17 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
   return (
     <section className="toolbar-root" data-testid="main-toolbar" aria-label="Main editor toolbar">
       <div className="toolbar-group" aria-label="File controls">
+          <button type="button" className="toolbar-button" aria-label="Open world or voxel model file" data-command-id="editor.file.openWorld" onClick={() => void runCommand("editor.file.openWorld")}>
+            <Upload size={14} aria-hidden="true" /> Open
+          </button>
           <button type="button" className="toolbar-button" aria-label="Save editor" data-command-id="editor.file.save" onClick={() => void runCommand("editor.file.save")}>
             <Save size={14} aria-hidden="true" /> Save
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Export VOX model" data-command-id="editor.file.exportVox" onClick={() => void runCommand("editor.file.exportVox")}>
+            <Download size={14} aria-hidden="true" /> .vox
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Export VL32 model" data-command-id="editor.file.exportVl32" onClick={() => void runCommand("editor.file.exportVl32")}>
+            <Download size={14} aria-hidden="true" /> .vl32
           </button>
           
           <button type="button" className="toolbar-button" aria-label="Save editor snapshot" data-command-id="editor.file.saveSnapshot" onClick={() => void runCommand("editor.file.saveSnapshot")}>

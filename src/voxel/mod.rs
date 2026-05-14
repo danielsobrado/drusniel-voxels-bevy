@@ -21,6 +21,7 @@ pub mod enclosure;
 pub mod gravity;
 pub mod hole_probe;
 pub mod meshing;
+pub mod model_io;
 pub mod occlusion;
 pub mod octree;
 pub mod persistence;

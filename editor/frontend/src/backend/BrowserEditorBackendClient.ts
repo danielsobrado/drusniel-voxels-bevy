@@ -1,4 +1,4 @@
-import type { AtlasMappingDto, BackendResult, EditorBackendClient, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
+import type { AtlasMappingDto, BackendResult, EditorBackendClient, VoxelModelExport, VoxelModelFormat, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
 import type { RuntimeCommandRequest } from "../runtime/runtimeCommands";
 import type { RuntimeCommandResult, RuntimeSaveSummary, RuntimeSnapshot } from "../runtime/runtimeSchemas";
 import type { ViewportSnapshot } from "../types/world";
@@ -85,7 +85,12 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
 
   async loadWorldFile(file: File): Promise<BackendResult<WorldSummary>> {
     try {
-      return await this.fetchJson<WorldSummary>("/editor/world/load-upload", {
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      const path = extension === "vox" || extension === "vl32"
+        ? `/editor/model/import/${extension}`
+        : "/editor/world/load-upload";
+
+      return await this.fetchJson<WorldSummary>(path, {
         method: "POST",
         headers: {
           "content-type": "application/octet-stream",
@@ -93,9 +98,25 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
         body: await file.arrayBuffer(),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown world file read failure.";
-      return { ok: false, error: `Failed to read selected world file: ${message}`, code: "WORLD_FILE_READ_FAILED" };
+      const message = error instanceof Error ? error.message : "Unknown file read failure.";
+      return { ok: false, error: `Failed to read selected file: ${message}`, code: "WORLD_FILE_READ_FAILED" };
     }
+  }
+
+  async exportVoxelModel(format: VoxelModelFormat): Promise<BackendResult<VoxelModelExport>> {
+    const result = await this.fetchBlob(`/editor/model/export/${format}`);
+    if (!result.ok) {
+      return result;
+    }
+
+    return {
+      ok: true,
+      data: {
+        fileName: `drusniel-world.${format}`,
+        contentType: result.data.type || (format === "vox" ? "model/x-vox" : "model/x-vl32"),
+        blob: result.data,
+      },
+    };
   }
 
   async saveDefaultWorld(): Promise<BackendResult<WorldSaveSummary>> {
@@ -149,6 +170,25 @@ export class BrowserEditorBackendClient implements EditorBackendClient {
   private async fetchJson<T>(path: string, init?: RequestInit): Promise<BackendResult<T>> {
     try {
       return await normalizeBackendResult<T>(await fetch(`${this.baseUrl}${path}`, init));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown editor backend request failure.";
+      return { ok: false, error: `Editor backend unavailable: ${message}`, code: "BACKEND_UNAVAILABLE" };
+    }
+  }
+
+  private async fetchBlob(path: string, init?: RequestInit): Promise<BackendResult<Blob>> {
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, init);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as BackendResult<unknown> | null;
+        return {
+          ok: false,
+          error: body && !body.ok ? body.error : `Editor backend request failed with HTTP ${response.status}.`,
+          code: body && !body.ok ? body.code : "HTTP_ERROR",
+        };
+      }
+
+      return { ok: true, data: await response.blob() };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown editor backend request failure.";
       return { ok: false, error: `Editor backend unavailable: ${message}`, code: "BACKEND_UNAVAILABLE" };

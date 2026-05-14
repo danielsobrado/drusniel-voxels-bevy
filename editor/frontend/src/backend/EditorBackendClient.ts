@@ -24,11 +24,19 @@ export interface WorldSaveSummary {
 }
 
 export type AtlasMappingDto = BlockAtlasMap;
+export type VoxelModelFormat = "vox" | "vl32";
+
+export interface VoxelModelExport {
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly blob: Blob;
+}
 
 export interface EditorBackendClient {
   readonly saveWorldSnapshot: () => Promise<BackendResult<WorldSaveSummary>>;
   readonly loadDefaultWorld: () => Promise<BackendResult<WorldSummary>>;
   readonly loadWorldFile: (file: File) => Promise<BackendResult<WorldSummary>>;
+  readonly exportVoxelModel: (format: VoxelModelFormat) => Promise<BackendResult<VoxelModelExport>>;
   readonly saveDefaultWorld: () => Promise<BackendResult<WorldSaveSummary>>;
   readonly savedWorldExists: () => Promise<BackendResult<boolean>>;
   readonly deleteSavedWorld: () => Promise<BackendResult<{ readonly deleted: boolean }>>;

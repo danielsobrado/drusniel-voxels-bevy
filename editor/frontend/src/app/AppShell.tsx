@@ -207,10 +207,10 @@ export function AppShell() {
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runCommand={runCommandById} />
       <input
         ref={fileInputRef}
-        aria-label="Open Drusniel world file"
+        aria-label="Open Drusniel world or voxel model file"
         className="sr-only"
         type="file"
-        accept=".bin,.world"
+        accept=".bin,.world,.vox,.vl32"
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (!file) {

@@ -13,6 +13,15 @@ const unwrapBackend = <T>(result: BackendResult<T>): T => {
   return result.data;
 };
 
+const downloadBlob = (blob: Blob, fileName: string): void => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
 class RuntimeCommandError extends Error {
   readonly status: Exclude<RuntimeCommandStatus, "success">;
 
@@ -676,11 +685,11 @@ const createAreaCommand = (
 export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.openWorld",
-    title: "Open world file",
-    description: "Open a persisted voxel world file and load it through the editor backend.",
+    title: "Open world or model file",
+    description: "Open a persisted voxel world file or voxel model and load it through the editor backend.",
     category: "File",
     shortcut: "Ctrl+O",
-    keywords: ["file", "world", "open"],
+    keywords: ["file", "world", "model", "open", "vox", "vl32"],
     run: (ctx) => ctx.openWorldFile(),
   },
   {
@@ -710,6 +719,30 @@ export const editorCommands: readonly EditorCommand[] = [
       unwrapBackend(await ctx.backendClient.saveDefaultWorld());
       ctx.getState().clearDirty();
       ctx.toast.success("World save complete.");
+    },
+  },
+  {
+    id: "editor.file.exportVox",
+    title: "Export .vox model",
+    description: "Export the active voxel world as a MagicaVoxel VOX model.",
+    category: "File",
+    keywords: ["file", "save", "export", "vox", "model", "magicavoxel"],
+    run: async (ctx) => {
+      const exported = unwrapBackend(await ctx.backendClient.exportVoxelModel("vox"));
+      downloadBlob(exported.blob, exported.fileName);
+      ctx.toast.success(`Exported voxel model: ${exported.fileName}.`);
+    },
+  },
+  {
+    id: "editor.file.exportVl32",
+    title: "Export .vl32 model",
+    description: "Export the active voxel world as a VL32 voxel list.",
+    category: "File",
+    keywords: ["file", "save", "export", "vl32", "model", "voxel list"],
+    run: async (ctx) => {
+      const exported = unwrapBackend(await ctx.backendClient.exportVoxelModel("vl32"));
+      downloadBlob(exported.blob, exported.fileName);
+      ctx.toast.success(`Exported voxel model: ${exported.fileName}.`);
     },
   },
   {
