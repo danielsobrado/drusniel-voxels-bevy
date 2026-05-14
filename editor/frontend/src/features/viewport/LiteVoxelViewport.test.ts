@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { WorldViewportPreview } from "../../types/world";
-import { collectExposedVoxels, collectSamples, exposedVoxelTransform } from "./voxelGeometry";
+import type { WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import { collectExposedVoxels, collectSamples, exposedVoxelTransform, viewportBoundsFromSamples } from "./voxelGeometry";
 
 describe("collectSamples", () => {
   it("keeps the highest non-air surface per sampled world column", () => {
@@ -82,5 +82,22 @@ describe("collectSamples", () => {
 
     expect(transform.position.toArray()).toEqual([8.5, 12.5, 4.5]);
     expect(transform.scale.toArray()).toEqual([1, 1, 1]);
+  });
+
+  it("computes viewport bounds for exact voxel previews without spreading large arrays", () => {
+    const samples: WorldSurfaceSample[] = Array.from({ length: 140_000 }, (_, index) => ({
+      x: index % 700,
+      z: Math.floor(index / 700),
+      height: (index % 32) + 1,
+      material: "TopSoil",
+      water: false,
+    }));
+
+    const bounds = viewportBoundsFromSamples(samples);
+
+    expect(bounds.center.x).toBe(349.5);
+    expect(bounds.center.z).toBe(99.5);
+    expect(bounds.center.y).toBe(16.5);
+    expect(bounds.radius).toBeGreaterThan(0);
   });
 });

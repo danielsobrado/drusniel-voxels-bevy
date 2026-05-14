@@ -82,12 +82,15 @@ pub fn detect_graphics_capabilities(
 /// Copy capabilities from the render world back into the main app.
 pub fn sync_capabilities_to_main(
     capabilities: Res<GraphicsCapabilities>,
-    mut main_world: ResMut<bevy::render::MainWorld>,
+    main_world: Option<ResMut<bevy::render::MainWorld>>,
 ) {
     if !capabilities.is_changed() {
         return;
     }
 
+    let Some(mut main_world) = main_world else {
+        return;
+    };
     let main_world = main_world.as_mut();
 
     if let Some(mut main_capabilities) = main_world.get_resource_mut::<GraphicsCapabilities>() {

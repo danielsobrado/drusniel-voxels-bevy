@@ -228,12 +228,22 @@ export const viewportBoundsFromSamples = (samples: readonly WorldSurfaceSample[]
     };
   }
 
-  const minX = Math.min(...samples.map((sample) => sample.x));
-  const maxX = Math.max(...samples.map((sample) => sample.x));
-  const minY = Math.min(...samples.map((sample) => sample.height));
-  const maxY = Math.max(...samples.map((sample) => sample.height));
-  const minZ = Math.min(...samples.map((sample) => sample.z));
-  const maxZ = Math.max(...samples.map((sample) => sample.z));
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+
+  for (const sample of samples) {
+    minX = Math.min(minX, sample.x);
+    maxX = Math.max(maxX, sample.x);
+    minY = Math.min(minY, sample.height);
+    maxY = Math.max(maxY, sample.height);
+    minZ = Math.min(minZ, sample.z);
+    maxZ = Math.max(maxZ, sample.z);
+  }
+
   const center = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
   const radius = Math.max(16, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) * 0.55);
   return { center, radius };
