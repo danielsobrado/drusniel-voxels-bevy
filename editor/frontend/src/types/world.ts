@@ -39,10 +39,20 @@ export interface WorldSurfaceSample {
   readonly water: boolean;
 }
 
+export type ViewportVoxelFace = "posY" | "negY" | "negX" | "posX" | "negZ" | "posZ";
+
+export interface ViewportExposedVoxel {
+  readonly position: readonly [number, number, number];
+  readonly material: ViewportVoxelMaterial;
+  readonly water: boolean;
+  readonly exposedFaces: readonly ViewportVoxelFace[];
+}
+
 export interface ChunkViewportPreview {
   readonly chunkId: string;
   readonly coordinate: [number, number, number];
   readonly samples: readonly WorldSurfaceSample[];
+  readonly voxels?: readonly ViewportExposedVoxel[];
 }
 
 export interface WorldViewportPreview {

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -29,7 +28,7 @@ use crate::voxel::persistence::{
 };
 use crate::voxel::plugin::{WaterBodyInfo, WaterBodyRegistry};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
@@ -495,8 +494,7 @@ fn frontend_world_summary_from_metadata_and_world(
     voxel_world: &VoxelWorld,
 ) -> Value {
     let summary_chunks = selected_editor_chunks(voxel_world);
-    let viewport_chunks = selected_editor_chunks(voxel_world);
-    let chunk_previews = chunk_preview_payloads(&viewport_chunks);
+    let chunk_previews = chunk_preview_payloads(voxel_world, &summary_chunks);
 
     json!({
         "worldId": metadata.save_path,
@@ -514,7 +512,7 @@ fn frontend_world_summary_from_metadata_and_world(
         "materials": [],
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,
-            "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+            "sampleResolution": CHUNK_SIZE,
             "chunkCountTotal": metadata.chunk_count,
             "chunkCountIncluded": chunk_previews.len(),
             "chunks": chunk_previews,
@@ -709,22 +707,31 @@ fn water_body_murkiness(kind: WaterBodyKind) -> f32 {
     }
 }
 
-const VIEWPORT_SAMPLE_RESOLUTION: usize = 4;
+const VIEWPORT_PREVIEW_CHUNK_LIMIT: usize = 64;
 const VIEWPORT_MESH_CHUNK_LIMIT: usize = 16;
 const VIEWPORT_MESH_VERTEX_LIMIT: usize = 20_000;
+
+const VIEWPORT_EXPOSED_FACE_OFFSETS: [(&str, IVec3); 6] = [
+    ("negX", IVec3::new(-1, 0, 0)),
+    ("posX", IVec3::new(1, 0, 0)),
+    ("negY", IVec3::new(0, -1, 0)),
+    ("posY", IVec3::new(0, 1, 0)),
+    ("negZ", IVec3::new(0, 0, -1)),
+    ("posZ", IVec3::new(0, 0, 1)),
+];
 
 fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Value {
     let bounds = world
         .get_resource::<WorldBounds>()
         .copied()
         .unwrap_or_else(|| WorldBounds::from_size_chunks(voxel_world.world_size_chunks()));
-    let viewport_chunks = selected_editor_chunks(voxel_world);
+    let viewport_chunks = limited_editor_viewport_chunks(voxel_world);
 
     json!({
         "protocolVersion": 1,
         "worldId": "runtime-world",
         "chunkSize": CHUNK_SIZE_I32,
-        "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+        "sampleResolution": CHUNK_SIZE,
         "bounds": {
             "minChunk": [bounds.min_chunk.x, bounds.min_chunk.y, bounds.min_chunk.z],
             "maxChunk": [bounds.max_chunk.x, bounds.max_chunk.y, bounds.max_chunk.z],
@@ -767,7 +774,8 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
                         "present": summary.water_voxels > 0,
                     },
                     "mesh": chunk_mesh_payload(world, voxel_world, chunk.position(), index),
-                    "samples": chunk_surface_samples(&data),
+                    "samples": [],
+                    "voxels": chunk_exposed_voxels_from_world(voxel_world, chunk),
                 })
             })
             .collect::<Vec<_>>(),
@@ -776,24 +784,10 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
 }
 
 fn selected_editor_chunks(voxel_world: &VoxelWorld) -> Vec<&Chunk> {
-    let mut columns: BTreeMap<(i32, i32), &Chunk> = BTreeMap::new();
-    for (_, chunk) in voxel_world.chunk_entries() {
-        if !chunk_has_visible_voxels(chunk) {
-            continue;
-        }
-
-        let position = chunk.position();
-        columns
-            .entry((position.x, position.z))
-            .and_modify(|existing| {
-                if position.y > existing.position().y {
-                    *existing = chunk;
-                }
-            })
-            .or_insert(chunk);
-    }
-
-    let mut chunks = columns.into_values().collect::<Vec<_>>();
+    let mut chunks = voxel_world
+        .chunk_entries()
+        .filter_map(|(_, chunk)| chunk_has_visible_voxels(chunk).then_some(chunk))
+        .collect::<Vec<_>>();
     if chunks.is_empty() {
         chunks = voxel_world
             .chunk_entries()
@@ -804,7 +798,6 @@ fn selected_editor_chunks(voxel_world: &VoxelWorld) -> Vec<&Chunk> {
             (position.x, position.z, position.y)
         });
     }
-
     chunks
 }
 
@@ -812,7 +805,29 @@ fn chunk_has_visible_voxels(chunk: &Chunk) -> bool {
     chunk.iter_solid().next().is_some()
 }
 
-fn chunk_preview_payloads(chunks: &[&Chunk]) -> Vec<Value> {
+fn limited_editor_viewport_chunks(voxel_world: &VoxelWorld) -> Vec<&Chunk> {
+    let mut chunks = selected_editor_chunks(voxel_world);
+    if chunks.len() > VIEWPORT_PREVIEW_CHUNK_LIMIT {
+        let world_size = voxel_world.world_size_chunks();
+        let center_x = world_size.x / 2;
+        let center_z = world_size.z / 2;
+        chunks.sort_by_key(|chunk| {
+            let position = chunk.position();
+            let dx = position.x - center_x;
+            let dz = position.z - center_z;
+            (dx * dx + dz * dz, position.x, position.z, position.y)
+        });
+        chunks.truncate(VIEWPORT_PREVIEW_CHUNK_LIMIT);
+        chunks.sort_by_key(|chunk| {
+            let position = chunk.position();
+            (position.x, position.z, position.y)
+        });
+    }
+
+    chunks
+}
+
+fn chunk_preview_payloads(voxel_world: &VoxelWorld, chunks: &[&Chunk]) -> Vec<Value> {
     chunks
         .iter()
         .map(|chunk| {
@@ -821,7 +836,41 @@ fn chunk_preview_payloads(chunks: &[&Chunk]) -> Vec<Value> {
             json!({
                 "chunkId": format!("chunk-{x}-{y}-{z}"),
                 "coordinate": [x, y, z],
-                "samples": chunk_surface_samples(&data),
+                "samples": [],
+                "voxels": chunk_exposed_voxels_from_world(voxel_world, chunk),
+            })
+        })
+        .collect()
+}
+
+fn chunk_exposed_voxels_from_world(voxel_world: &VoxelWorld, chunk: &Chunk) -> Vec<Value> {
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    chunk
+        .iter_solid()
+        .filter_map(|(local, voxel)| {
+            let world_pos = chunk_origin + local.as_ivec3();
+            let exposed_faces = VIEWPORT_EXPOSED_FACE_OFFSETS
+                .iter()
+                .filter_map(|(face, offset)| {
+                    let neighbor = voxel_world
+                        .sample_voxel_for_terrain_meshing(world_pos + *offset)
+                        .terrain_meshing_voxel();
+                    let exposed = if voxel == VoxelType::Water {
+                        neighbor == VoxelType::Air
+                    } else {
+                        neighbor.is_transparent()
+                    };
+                    exposed.then_some(json!(face))
+                })
+                .collect::<Vec<_>>();
+
+            (!exposed_faces.is_empty()).then(|| {
+                json!({
+                    "position": [world_pos.x, world_pos.y, world_pos.z],
+                    "material": voxel_material_name(voxel),
+                    "water": voxel == VoxelType::Water,
+                    "exposedFaces": exposed_faces,
+                })
             })
         })
         .collect()
@@ -966,44 +1015,6 @@ fn mesh_buffer_payload(mesh: &MeshData, omit_buffers: bool, chunk_origin: Vec3) 
         "colors": if omit_buffers { Value::Null } else { json!(mesh.colors) },
         "indices": if omit_buffers { Value::Null } else { json!(mesh.indices) },
     })
-}
-
-fn chunk_surface_samples(data: &crate::voxel::chunk::ChunkData) -> Vec<Value> {
-    let stride = CHUNK_SIZE / VIEWPORT_SAMPLE_RESOLUTION;
-    let chunk_origin = data.position * CHUNK_SIZE_I32;
-    let mut samples = Vec::with_capacity(VIEWPORT_SAMPLE_RESOLUTION * VIEWPORT_SAMPLE_RESOLUTION);
-
-    for sample_z in 0..VIEWPORT_SAMPLE_RESOLUTION {
-        for sample_x in 0..VIEWPORT_SAMPLE_RESOLUTION {
-            let local_x = (sample_x * stride).min(CHUNK_SIZE - 1);
-            let local_z = (sample_z * stride).min(CHUNK_SIZE - 1);
-            let mut surface_y = 0_i32;
-            let mut material = VoxelType::Air;
-
-            for local_y in (0..CHUNK_SIZE).rev() {
-                let voxel = data
-                    .voxels
-                    .get(crate::voxel::chunk::Chunk::index(local_x, local_y, local_z))
-                    .copied()
-                    .unwrap_or_default();
-                if voxel != VoxelType::Air {
-                    surface_y = chunk_origin.y + local_y as i32;
-                    material = voxel;
-                    break;
-                }
-            }
-
-            samples.push(json!({
-                "x": chunk_origin.x + local_x as i32,
-                "z": chunk_origin.z + local_z as i32,
-                "height": surface_y,
-                "material": voxel_material_name(material),
-                "water": material == VoxelType::Water,
-            }));
-        }
-    }
-
-    samples
 }
 
 fn voxel_material_name(voxel: VoxelType) -> &'static str {
@@ -1172,6 +1183,7 @@ fn status_reason(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::CHUNK_VOLUME;
     use crate::voxel::meshing::WaterBodyId;
 
     #[test]
@@ -1209,5 +1221,100 @@ mod tests {
         let reflection_strength = water_bodies[0]["reflectionStrength"].as_f64().unwrap();
         assert!((reflection_strength - 0.76).abs() < 0.0001);
         assert_eq!(water_bodies[0]["reflectionStatus"]["active"], json!(true));
+    }
+
+    #[test]
+    fn viewport_exposed_voxels_cover_every_surface_column() {
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        let mut voxels = [VoxelType::Air; CHUNK_VOLUME];
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                voxels[Chunk::index(x, 3, z)] = VoxelType::TopSoil;
+            }
+        }
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::ZERO, voxels));
+
+        let chunk = voxel_world.get_chunk(IVec3::ZERO).unwrap();
+        let voxels = chunk_exposed_voxels_from_world(&voxel_world, chunk);
+
+        assert_eq!(voxels.len(), CHUNK_SIZE * CHUNK_SIZE);
+        assert_eq!(voxels[0]["position"], json!([0, 3, 0]));
+        assert_eq!(voxels[1]["position"], json!([1, 3, 0]));
+        assert!(
+            voxels
+                .iter()
+                .all(|voxel| voxel["material"] == json!("TopSoil"))
+        );
+        assert!(voxels.iter().all(|voxel| {
+            voxel["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("posY"))
+        }));
+    }
+
+    #[test]
+    fn viewport_exposed_voxels_hide_shared_faces_and_keep_vertical_chunks() {
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 2, 1));
+        let mut lower_voxels = [VoxelType::Air; CHUNK_VOLUME];
+        lower_voxels[Chunk::index(0, 3, 0)] = VoxelType::TopSoil;
+        lower_voxels[Chunk::index(1, 3, 0)] = VoxelType::TopSoil;
+        let mut upper_voxels = [VoxelType::Air; CHUNK_VOLUME];
+        upper_voxels[Chunk::index(0, 10, 0)] = VoxelType::Rock;
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::ZERO, lower_voxels));
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::new(0, 1, 0), upper_voxels));
+
+        let selected_chunks = selected_editor_chunks(&voxel_world);
+        assert_eq!(selected_chunks.len(), 2);
+
+        let lower_chunk = voxel_world.get_chunk(IVec3::ZERO).unwrap();
+        let lower_payload = chunk_exposed_voxels_from_world(&voxel_world, lower_chunk);
+        let left = lower_payload
+            .iter()
+            .find(|voxel| voxel["position"] == json!([0, 3, 0]))
+            .unwrap();
+        let right = lower_payload
+            .iter()
+            .find(|voxel| voxel["position"] == json!([1, 3, 0]))
+            .unwrap();
+
+        assert!(
+            !left["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("posX"))
+        );
+        assert!(
+            !right["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("negX"))
+        );
+
+        let upper_chunk = voxel_world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+        let upper_payload = chunk_exposed_voxels_from_world(&voxel_world, upper_chunk);
+        assert_eq!(
+            upper_payload[0]["position"],
+            json!([0, CHUNK_SIZE_I32 + 10, 0])
+        );
+        assert_eq!(upper_payload[0]["material"], json!("Rock"));
+    }
+
+    #[test]
+    fn editor_world_summary_chunk_selection_is_not_capped() {
+        let mut voxel_world = VoxelWorld::new(IVec3::new(10, 1, 10));
+        for z in 0..7 {
+            for x in 0..10 {
+                let mut voxels = [VoxelType::Air; CHUNK_VOLUME];
+                voxels[Chunk::index(0, 0, 0)] = VoxelType::TopSoil;
+                voxel_world.insert_chunk(Chunk::with_voxels(IVec3::new(x, 0, z), voxels));
+            }
+        }
+
+        let selected_chunks = selected_editor_chunks(&voxel_world);
+        let limited_chunks = limited_editor_viewport_chunks(&voxel_world);
+
+        assert_eq!(selected_chunks.len(), 70);
+        assert_eq!(limited_chunks.len(), VIEWPORT_PREVIEW_CHUNK_LIMIT);
     }
 }

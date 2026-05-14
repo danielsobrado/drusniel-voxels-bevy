@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, ExternalLink, Eye, EyeOff, Maximize2, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type {
+  AtlasMapping,
+  BlockAtlasMap,
+  BlockType,
+  ChunkSummary,
+  PropInstance,
+  ViewportExposedVoxel,
+  ViewportSnapshot,
+  ViewportVoxelFace,
+  WorldSurfaceSample,
+  WorldViewportPreview,
+} from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 
@@ -103,6 +114,20 @@ interface SurfaceWallFace {
   readonly points: readonly ProjectedPoint[];
   readonly material: WorldSurfaceSample["material"];
   readonly sortKey: number;
+}
+
+interface VoxelFaceShape {
+  readonly points: readonly ProjectedPoint[];
+  readonly material: WorldSurfaceSample["material"];
+  readonly water: boolean;
+  readonly face: ViewportVoxelFace;
+  readonly sortKey: number;
+}
+
+interface IsoSurfaceCellPolygons {
+  readonly top: readonly ProjectedPoint[];
+  readonly leftSide: readonly ProjectedPoint[];
+  readonly rightSide: readonly ProjectedPoint[];
 }
 
 export interface GameCameraState {
@@ -282,7 +307,40 @@ const fallbackSamplesFromChunks = (chunks: readonly ChunkSummary[]): readonly Wo
     };
   });
 
+export const collectExposedVoxels = (worldViewport: WorldViewportPreview | null): readonly ViewportExposedVoxel[] =>
+  worldViewport?.chunks.flatMap((chunk) => [...(chunk.voxels ?? [])]) ?? [];
+
+const samplesFromExposedVoxels = (voxels: readonly ViewportExposedVoxel[]): readonly WorldSurfaceSample[] => {
+  const byColumn = new Map<string, WorldSurfaceSample>();
+  for (const voxel of voxels) {
+    if (!voxel.exposedFaces.includes("posY")) {
+      continue;
+    }
+
+    const [x, y, z] = voxel.position;
+    const sample: WorldSurfaceSample = {
+      x,
+      z,
+      height: y + 1,
+      material: voxel.material,
+      water: voxel.water,
+    };
+    const key = sampleGridKey(x, z);
+    const current = byColumn.get(key);
+    if (!current || sample.height > current.height) {
+      byColumn.set(key, sample);
+    }
+  }
+
+  return [...byColumn.values()];
+};
+
 export const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: WorldViewportPreview | null): readonly WorldSurfaceSample[] => {
+  const voxelSamples = samplesFromExposedVoxels(collectExposedVoxels(worldViewport));
+  if (voxelSamples.length > 0) {
+    return voxelSamples;
+  }
+
   const samples = worldViewport?.chunks.flatMap((chunk) => [...chunk.samples]) ?? [];
   if (samples.length === 0) {
     return fallbackSamplesFromChunks(chunks);
@@ -529,6 +587,42 @@ const drawSurfaceWallFace = (ctx: CanvasRenderingContext2D, face: SurfaceWallFac
   ctx.restore();
 };
 
+export const buildIsoSurfaceCellPolygons = (
+  sample: WorldSurfaceSample,
+  cellSize: number,
+  view: ViewState,
+): IsoSurfaceCellPolygons => {
+  const bottomHeight = sample.height - 1;
+  const topNorth = projectIso([sample.x, sample.height, sample.z], view);
+  const topEast = projectIso([sample.x + cellSize, sample.height, sample.z], view);
+  const topSouth = projectIso([sample.x + cellSize, sample.height, sample.z + cellSize], view);
+  const topWest = projectIso([sample.x, sample.height, sample.z + cellSize], view);
+  const bottomEast = projectIso([sample.x + cellSize, bottomHeight, sample.z], view);
+  const bottomSouth = projectIso([sample.x + cellSize, bottomHeight, sample.z + cellSize], view);
+  const bottomWest = projectIso([sample.x, bottomHeight, sample.z + cellSize], view);
+
+  return {
+    top: [
+      topNorth,
+      topEast,
+      topSouth,
+      topWest,
+    ],
+    leftSide: [
+      topWest,
+      topSouth,
+      bottomSouth,
+      bottomWest,
+    ],
+    rightSide: [
+      topEast,
+      topSouth,
+      bottomSouth,
+      bottomEast,
+    ],
+  };
+};
+
 const drawIsoSurfaceCell = (
   ctx: CanvasRenderingContext2D,
   sample: WorldSurfaceSample,
@@ -539,29 +633,7 @@ const drawIsoSurfaceCell = (
 ) => {
   const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
   const stroke = "rgba(11, 14, 20, 0.86)";
-  const sideDepth = clamp(cellSize * 0.34 * view.zoom, 3 * view.zoom, 14 * view.zoom);
-  const topNorth = projectIso([sample.x, sample.height, sample.z], view);
-  const topEast = projectIso([sample.x + cellSize, sample.height, sample.z], view);
-  const topSouth = projectIso([sample.x + cellSize, sample.height, sample.z + cellSize], view);
-  const topWest = projectIso([sample.x, sample.height, sample.z + cellSize], view);
-  const top: readonly ProjectedPoint[] = [
-    topNorth,
-    topEast,
-    topSouth,
-    topWest,
-  ];
-  const leftSide: readonly ProjectedPoint[] = [
-    topWest,
-    topSouth,
-    { x: topSouth.x, y: topSouth.y + sideDepth },
-    { x: topWest.x, y: topWest.y + sideDepth },
-  ];
-  const rightSide: readonly ProjectedPoint[] = [
-    topEast,
-    topSouth,
-    { x: topSouth.x, y: topSouth.y + sideDepth },
-    { x: topEast.x, y: topEast.y + sideDepth },
-  ];
+  const { top, leftSide, rightSide } = buildIsoSurfaceCellPolygons(sample, cellSize, view);
 
   fillPolygon(ctx, leftSide, "rgba(15, 18, 24, 0.44)", stroke);
   ctx.save();
@@ -575,6 +647,110 @@ const drawIsoSurfaceCell = (
   if (!(atlasImage && topTileIndex !== null && drawTexturedPolygon(ctx, atlasImage, topTileIndex, top, stroke))) {
     fillPolygon(ctx, top, materialColor, stroke);
   }
+};
+
+const horizontalFaceDirection = (face: ViewportVoxelFace): readonly [number, number] | null => {
+  switch (face) {
+    case "negX":
+      return [-1, 0];
+    case "posX":
+      return [1, 0];
+    case "negZ":
+      return [0, -1];
+    case "posZ":
+      return [0, 1];
+    default:
+      return null;
+  }
+};
+
+const isViewerFacingVoxelFace = (face: ViewportVoxelFace, view: ViewState) => {
+  if (face === "posY") {
+    return true;
+  }
+  if (face === "negY") {
+    return false;
+  }
+
+  const direction = horizontalFaceDirection(face);
+  if (!direction) {
+    return false;
+  }
+
+  const [rotatedX, rotatedZ] = rotateHorizontal(direction[0], direction[1], view.rotation);
+  return rotatedX > 0 || rotatedZ > 0;
+};
+
+export const buildIsoVoxelFacePolygons = (voxel: ViewportExposedVoxel, view: ViewState): readonly VoxelFaceShape[] => {
+  const [x, y, z] = voxel.position;
+  const corners = {
+    nwb: projectIso([x, y, z], view),
+    neb: projectIso([x + 1, y, z], view),
+    seb: projectIso([x + 1, y, z + 1], view),
+    swb: projectIso([x, y, z + 1], view),
+    nwt: projectIso([x, y + 1, z], view),
+    net: projectIso([x + 1, y + 1, z], view),
+    set: projectIso([x + 1, y + 1, z + 1], view),
+    swt: projectIso([x, y + 1, z + 1], view),
+  };
+  const [rotatedX, rotatedZ] = rotateHorizontal(x + 0.5, z + 0.5, view.rotation);
+  const baseSortKey = rotatedX + rotatedZ + y;
+  const facePoints: Record<ViewportVoxelFace, readonly ProjectedPoint[]> = {
+    posY: [corners.nwt, corners.net, corners.set, corners.swt],
+    negY: [corners.swb, corners.seb, corners.neb, corners.nwb],
+    negX: [corners.swt, corners.nwt, corners.nwb, corners.swb],
+    posX: [corners.net, corners.set, corners.seb, corners.neb],
+    negZ: [corners.nwt, corners.net, corners.neb, corners.nwb],
+    posZ: [corners.set, corners.swt, corners.swb, corners.seb],
+  };
+
+  return voxel.exposedFaces
+    .filter((face) => isViewerFacingVoxelFace(face, view))
+    .map((face) => ({
+      points: facePoints[face],
+      material: voxel.material,
+      water: voxel.water,
+      face,
+      sortKey: baseSortKey + (face === "posY" ? 0.7 : 0),
+    }))
+    .sort((left, right) => left.sortKey - right.sortKey);
+};
+
+const drawIsoVoxelFace = (
+  ctx: CanvasRenderingContext2D,
+  face: VoxelFaceShape,
+  atlasMapping: BlockAtlasMap,
+  atlasImage: HTMLImageElement | null,
+) => {
+  const materialColor = MATERIAL_COLORS[face.material] ?? MATERIAL_COLORS.Rock;
+  const stroke = face.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.86)";
+  if (face.water) {
+    ctx.save();
+    ctx.globalAlpha = face.face === "posY" ? 0.68 : 0.42;
+    fillPolygon(ctx, face.points, "#65c7ff", stroke);
+    ctx.restore();
+    return;
+  }
+
+  if (face.face === "posY") {
+    const topTileIndex = atlasImage ? atlasTileIndexForSample(atlasMapping, face.material, "top") : null;
+    if (atlasImage && topTileIndex !== null && drawTexturedPolygon(ctx, atlasImage, topTileIndex, face.points, stroke)) {
+      return;
+    }
+    fillPolygon(ctx, face.points, materialColor, stroke);
+    return;
+  }
+
+  const sideFace = face.face === "negX" || face.face === "posZ" ? "side" : "bottom";
+  const sideTileIndex = atlasImage ? atlasTileIndexForSample(atlasMapping, face.material, sideFace) : null;
+  if (atlasImage && sideTileIndex !== null && drawTexturedPolygon(ctx, atlasImage, sideTileIndex, face.points, stroke)) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = face.face === "negX" || face.face === "posZ" ? 0.66 : 0.54;
+  fillPolygon(ctx, face.points, materialColor, stroke);
+  ctx.restore();
 };
 
 const projectIso = (position: readonly [number, number, number], view: ViewState) => {
@@ -764,41 +940,6 @@ const nearestVoxelSelection = (
   };
 };
 
-const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer, view: ViewState, fill: string, stroke: string) => {
-  if (!mesh.positions || !mesh.indices || mesh.indices.length < 3) {
-    return false;
-  }
-
-  ctx.save();
-  ctx.lineWidth = Math.max(0.5, 0.8 * view.zoom);
-  ctx.strokeStyle = stroke;
-  ctx.fillStyle = fill;
-
-  const triangleLimit = Math.min(mesh.indices.length - (mesh.indices.length % 3), 18000);
-  for (let index = 0; index < triangleLimit; index += 3) {
-    const a = mesh.positions[mesh.indices[index]];
-    const b = mesh.positions[mesh.indices[index + 1]];
-    const c = mesh.positions[mesh.indices[index + 2]];
-    if (!a || !b || !c) {
-      continue;
-    }
-
-    const pa = projectIso(a, view);
-    const pb = projectIso(b, view);
-    const pc = projectIso(c, view);
-    ctx.beginPath();
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-    ctx.lineTo(pc.x, pc.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  ctx.restore();
-  return true;
-};
-
 export const drawGameCameraPreview = (
   ctx: CanvasRenderingContext2D,
   samples: readonly WorldSurfaceSample[],
@@ -934,15 +1075,18 @@ export const LiteVoxelViewport = Object.assign(
     const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
     const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
     const [atlasImage, setAtlasImage] = useState<HTMLImageElement | null>(null);
+    const exposedVoxels = useMemo(() => collectExposedVoxels(worldViewport), [worldViewport]);
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
-    const viewportChunkSize = viewportSnapshot?.chunkSize ?? worldViewport?.chunkSize ?? 16;
+    const viewportChunkSize = worldViewport?.chunkSize ?? viewportSnapshot?.chunkSize ?? 16;
     const sampleCellSize = useMemo(() => {
-      const sampleResolution = viewportSnapshot?.sampleResolution ?? worldViewport?.sampleResolution ?? 1;
+      const sampleResolution = worldViewport?.sampleResolution ?? viewportSnapshot?.sampleResolution ?? 1;
       return sampleResolution > 0 ? viewportChunkSize / sampleResolution : viewportChunkSize;
     }, [viewportChunkSize, viewportSnapshot, worldViewport]);
+    const usesUnitVoxelSamples = sampleCellSize <= 1;
     const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
+    const hasExactVoxelPreview = exposedVoxels.length > 0;
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
-    const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
+    const hasRenderableMesh = false;
     const meshBackedColumns = useMemo(() => {
       const columns = new Set<string>();
       for (const chunk of meshChunks) {
@@ -962,8 +1106,15 @@ export const LiteVoxelViewport = Object.assign(
       });
     }, [hasRenderableMesh, meshBackedColumns, samples, viewportChunkSize]);
     const visibleSurfaceWallFaces = useMemo(
-      () => buildSurfaceWallFaces(visibleSamples, sampleCellSize, view),
-      [sampleCellSize, view, visibleSamples],
+      () => (usesUnitVoxelSamples ? [] : buildSurfaceWallFaces(visibleSamples, sampleCellSize, view)),
+      [sampleCellSize, usesUnitVoxelSamples, view, visibleSamples],
+    );
+    const visibleVoxelFaces = useMemo(
+      () =>
+        exposedVoxels
+          .flatMap((voxel) => [...buildIsoVoxelFacePolygons(voxel, view)])
+          .sort((left, right) => left.sortKey - right.sortKey),
+      [exposedVoxels, view],
     );
     const atlasPreviewEnabled = viewportOverlays.atlasPreview || activeMode === "voxel_paint" || activeMode === "material";
     const waterSampleCount = samples.filter((sample) => sample.water).length;
@@ -1206,43 +1357,45 @@ export const LiteVoxelViewport = Object.assign(
       }
       ctx.restore();
 
-      for (const chunk of meshChunks) {
-        drawMeshBuffer(ctx, chunk.mesh.terrain, view, "rgba(92, 101, 111, 0.28)", "rgba(15, 18, 24, 0.34)");
-        drawMeshBuffer(ctx, chunk.mesh.water, view, "rgba(55, 159, 220, 0.32)", "rgba(157, 221, 255, 0.42)");
-      }
-
       const orderedSamples = [...visibleSamples].sort((left, right) => {
         const [leftX, leftZ] = rotateHorizontal(left.x, left.z, view.rotation);
         const [rightX, rightZ] = rotateHorizontal(right.x, right.z, view.rotation);
         return leftX + leftZ + left.height - (rightX + rightZ + right.height);
       });
-      for (const face of visibleSurfaceWallFaces) {
-        drawSurfaceWallFace(ctx, face);
-      }
-      for (const sample of orderedSamples) {
-        const { x: screenX, y: screenY } = projectIso([sample.x, sample.height, sample.z], view);
-        const radiusX = sampleCellSize * 0.72 * view.zoom;
-        const radiusY = sampleCellSize * 0.36 * view.zoom;
-        const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
-        const stroke = sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)";
 
-        if (!sample.water) {
-          drawIsoSurfaceCell(ctx, sample, atlasMapping, atlasImage, sampleCellSize, view);
-        } else {
-          drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, stroke);
-          ctx.globalAlpha = 0.45;
-          drawDiamond(ctx, screenX, screenY - 1.5 * view.zoom, radiusX * 0.82, radiusY * 0.72, "#65c7ff", "rgba(187, 237, 255, 0.8)");
-          ctx.globalAlpha = 1;
+      if (visibleVoxelFaces.length > 0) {
+        for (const face of visibleVoxelFaces) {
+          drawIsoVoxelFace(ctx, face, atlasMapping, atlasImage);
+        }
+      } else {
+        for (const face of visibleSurfaceWallFaces) {
+          drawSurfaceWallFace(ctx, face);
+        }
+        for (const sample of orderedSamples) {
+          const { x: screenX, y: screenY } = projectIso([sample.x, sample.height, sample.z], view);
+          const radiusX = sampleCellSize * 0.72 * view.zoom;
+          const radiusY = sampleCellSize * 0.36 * view.zoom;
+          const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
+          const stroke = sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)";
+
+          if (!sample.water) {
+            drawIsoSurfaceCell(ctx, sample, atlasMapping, atlasImage, sampleCellSize, view);
+          } else {
+            drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, stroke);
+            ctx.globalAlpha = 0.45;
+            drawDiamond(ctx, screenX, screenY - 1.5 * view.zoom, radiusX * 0.82, radiusY * 0.72, "#65c7ff", "rgba(187, 237, 255, 0.8)");
+            ctx.globalAlpha = 1;
+          }
         }
       }
 
-      if (samples.length === 0) {
+      if (samples.length === 0 && exposedVoxels.length === 0) {
         ctx.fillStyle = "#d5d9e2";
         ctx.font = "12px Inter, system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
       }
-    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, meshChunks, sampleCellSize, samples.length, view, visibleSamples, visibleSurfaceWallFaces]);
+    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, exposedVoxels.length, sampleCellSize, samples.length, view, visibleSamples, visibleSurfaceWallFaces, visibleVoxelFaces]);
 
     useEffect(() => {
       const canvas = gameCameraCanvasRef.current;
@@ -1301,7 +1454,7 @@ export const LiteVoxelViewport = Object.assign(
           data-testid="world-viewport-canvas"
           data-atlas-preview-enabled={String(atlasPreviewEnabled)}
           data-renderable-mesh={String(hasRenderableMesh)}
-          data-surface-preview-mode={hasRenderableMesh ? "mesh-filtered" : "sampled"}
+          data-surface-preview-mode={hasExactVoxelPreview ? "exposed-voxels" : hasRenderableMesh ? "mesh-filtered" : "sampled"}
           data-visible-surface-samples={visibleSamples.length}
           data-visible-surface-walls={visibleSurfaceWallFaces.length}
           tabIndex={0}
@@ -1752,14 +1905,14 @@ export const LiteVoxelViewport = Object.assign(
 
         <div className="canvas-reticle" aria-hidden="true" />
         <div className="canvas-label">
-          {hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {runtimeState}
+          {hasExactVoxelPreview ? "Exact voxel viewport" : hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {runtimeState}
         </div>
         <div className="minimap-canvas" aria-label="World viewport summary">
           <div className="minimap-grid">
             <strong>{chunks.length}</strong>
             <span>chunks</span>
             <span>{samples.length} samples</span>
-            <span>{meshChunks.length} mesh payloads</span>
+            <span>{exposedVoxels.length} exposed voxels</span>
             <span>{waterSampleCount} water</span>
           </div>
         </div>
