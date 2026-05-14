@@ -95,6 +95,9 @@ This document outlines the rendering enhancement plan for Drusniel Voxels, organ
 - [ ] DDGI (Dynamic Diffuse Global Illumination)
 - [ ] Light probe volumes
 - [ ] Irradiance caching
+- [ ] NAADF voxel ray-query/GI backend research spike
+
+See [NAADF implementation plan](./rendering/naadf-implementation-plan.md) for the staged v0.6+ backend plan. NAADF should be evaluated as a derived voxel ray-query cache for GI, shadows, AO, and preview rendering before any full renderer rewrite is considered.
 
 ### Volumetric Lighting
 - [ ] Volumetric fog with shadows
