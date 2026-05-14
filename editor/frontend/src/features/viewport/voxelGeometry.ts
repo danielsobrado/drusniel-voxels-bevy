@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, ViewportMeshBuffer, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, ViewportExposedVoxel, ViewportMeshBuffer, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 
 export const MATERIAL_COLORS: Record<string, string> = {
   Air: "#171923",
@@ -48,6 +48,11 @@ const fallbackSamplesFromChunks = (chunks: readonly ChunkSummary[]): readonly Wo
   });
 
 export const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: WorldViewportPreview | null): readonly WorldSurfaceSample[] => {
+  const voxelSamples = samplesFromExposedVoxels(collectExposedVoxels(worldViewport));
+  if (voxelSamples.length > 0) {
+    return voxelSamples;
+  }
+
   const samples = worldViewport?.chunks.flatMap((chunk) => [...chunk.samples]) ?? [];
   if (samples.length === 0) {
     return fallbackSamplesFromChunks(chunks);
@@ -68,6 +73,34 @@ export const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: W
 
   const mergedSamples = [...byColumn.values()];
   return mergedSamples.length > 0 ? mergedSamples : fallbackSamplesFromChunks(chunks);
+};
+
+export const collectExposedVoxels = (worldViewport: WorldViewportPreview | null): readonly ViewportExposedVoxel[] =>
+  worldViewport?.chunks.flatMap((chunk) => [...(chunk.voxels ?? [])]) ?? [];
+
+const samplesFromExposedVoxels = (voxels: readonly ViewportExposedVoxel[]): readonly WorldSurfaceSample[] => {
+  const byColumn = new Map<string, WorldSurfaceSample>();
+  for (const voxel of voxels) {
+    if (!voxel.exposedFaces.includes("posY")) {
+      continue;
+    }
+
+    const [x, y, z] = voxel.position;
+    const sample: WorldSurfaceSample = {
+      x,
+      z,
+      height: y + 1,
+      material: voxel.material,
+      water: voxel.water,
+    };
+    const key = sampleGridKey(x, z);
+    const current = byColumn.get(key);
+    if (!current || sample.height > current.height) {
+      byColumn.set(key, sample);
+    }
+  }
+
+  return [...byColumn.values()];
 };
 
 export const createViewportMeshGeometry = (mesh: ViewportMeshBuffer): THREE.BufferGeometry | null => {
@@ -160,6 +193,23 @@ export const sampleMaterialKey = (sample: WorldSurfaceSample, atlasMapping: Bloc
 
   const tileIndex = atlasPreviewEnabled ? atlasTileIndexForMaterial(atlasMapping, sample.material, "top") : null;
   return tileIndex === null ? sample.material : `${sample.material}:tile-${tileIndex}`;
+};
+
+export const exposedVoxelMaterialKey = (voxel: ViewportExposedVoxel, atlasMapping: BlockAtlasMap, atlasPreviewEnabled: boolean) => {
+  if (voxel.water) {
+    return "Water";
+  }
+
+  const tileIndex = atlasPreviewEnabled ? atlasTileIndexForMaterial(atlasMapping, voxel.material, "top") : null;
+  return tileIndex === null ? voxel.material : `${voxel.material}:tile-${tileIndex}`;
+};
+
+export const exposedVoxelTransform = (voxel: ViewportExposedVoxel) => {
+  const [x, y, z] = voxel.position;
+  return {
+    position: new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5),
+    scale: new THREE.Vector3(1, 1, 1),
+  };
 };
 
 export const sampleColumnTransform = (sample: WorldSurfaceSample, cellSize: number) => {

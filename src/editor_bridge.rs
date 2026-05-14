@@ -1,16 +1,15 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use log::warn;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::props::{PropConfig, PropDefinition};
@@ -22,17 +21,18 @@ use crate::runtime_commands::{
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
 use crate::voxel::meshing::{
-    MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode, generate_chunk_mesh_with_mode,
+    generate_chunk_mesh_with_mode, MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode,
 };
+use crate::voxel::model_io::{export_world, import_world_data, VoxelModelFormat};
 use crate::voxel::persistence::{
-    self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
+    self, read_world_data_from_bytes, EditorWorldMetadata, WorldData, WORLD_SAVE_PATH,
 };
 use crate::voxel::plugin::{
-    LodSettings, WaterBodyInfo, WaterBodyRegistry, build_terrain_neighbor_lods,
-    effective_terrain_mesh_lod_for_chunk, target_terrain_mesh_mode_for_lod,
+    build_terrain_neighbor_lods, effective_terrain_mesh_lod_for_chunk,
+    target_terrain_mesh_mode_for_lod, LodSettings, WaterBodyInfo, WaterBodyRegistry,
 };
 use crate::voxel::skirt::SkirtConfig;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:17777";
@@ -83,6 +83,11 @@ impl FromWorld for EditorBridgeChannel {
 enum BridgeOperation {
     EditorLoadDefaultWorld,
     EditorLoadUploadedWorld(Vec<u8>),
+    EditorImportVoxelModel {
+        format: VoxelModelFormat,
+        bytes: Vec<u8>,
+    },
+    EditorExportVoxelModel(VoxelModelFormat),
     EditorSaveDefaultWorld,
     EditorWorldSummary,
     EditorViewportSnapshot,
@@ -97,7 +102,34 @@ struct BridgeRequest {
 
 struct BridgeResponse {
     status: u16,
-    body: Value,
+    body: BridgeResponseBody,
+}
+
+enum BridgeResponseBody {
+    Json(Value),
+    Binary {
+        content_type: &'static str,
+        bytes: Vec<u8>,
+    },
+}
+
+impl BridgeResponse {
+    fn json(status: u16, body: Value) -> Self {
+        Self {
+            status,
+            body: BridgeResponseBody::Json(body),
+        }
+    }
+
+    fn binary(status: u16, content_type: &'static str, bytes: Vec<u8>) -> Self {
+        Self {
+            status,
+            body: BridgeResponseBody::Binary {
+                content_type,
+                bytes,
+            },
+        }
+    }
 }
 
 fn editor_runtime_bridge_enabled() -> bool {
@@ -136,6 +168,12 @@ fn service_editor_bridge_requests(world: &mut World) {
             BridgeOperation::EditorLoadUploadedWorld(bytes) => {
                 editor_load_uploaded_world_response(world, &bytes)
             }
+            BridgeOperation::EditorImportVoxelModel { format, bytes } => {
+                editor_import_voxel_model_response(world, format, &bytes)
+            }
+            BridgeOperation::EditorExportVoxelModel(format) => {
+                editor_export_voxel_model_response(world, format)
+            }
             BridgeOperation::EditorSaveDefaultWorld => editor_save_default_world_response(world),
             BridgeOperation::EditorWorldSummary => editor_current_world_summary_response(world),
             BridgeOperation::EditorViewportSnapshot => editor_viewport_snapshot_response(world),
@@ -149,7 +187,7 @@ fn service_editor_bridge_requests(world: &mut World) {
                     })
                 });
 
-                BridgeResponse { status: 200, body }
+                BridgeResponse::json(200, body)
             }
             BridgeOperation::RuntimeSnapshot => {
                 let body =
@@ -161,7 +199,7 @@ fn service_editor_bridge_requests(world: &mut World) {
                         })
                     });
 
-                BridgeResponse { status: 200, body }
+                BridgeResponse::json(200, body)
             }
         };
 
@@ -240,6 +278,20 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
         ("POST", "/editor/world/load-upload") => {
             BridgeOperation::EditorLoadUploadedWorld(request.body)
         }
+        ("POST", "/editor/model/import/vox") => BridgeOperation::EditorImportVoxelModel {
+            format: VoxelModelFormat::Vox,
+            bytes: request.body,
+        },
+        ("POST", "/editor/model/import/vl32") => BridgeOperation::EditorImportVoxelModel {
+            format: VoxelModelFormat::Vl32,
+            bytes: request.body,
+        },
+        ("GET", "/editor/model/export/vox") => {
+            BridgeOperation::EditorExportVoxelModel(VoxelModelFormat::Vox)
+        }
+        ("GET", "/editor/model/export/vl32") => {
+            BridgeOperation::EditorExportVoxelModel(VoxelModelFormat::Vl32)
+        }
         ("POST", "/editor/world/save-default") => BridgeOperation::EditorSaveDefaultWorld,
         ("GET", "/editor/world/summary") => BridgeOperation::EditorWorldSummary,
         ("GET", "/editor/viewport/snapshot") => BridgeOperation::EditorViewportSnapshot,
@@ -286,9 +338,17 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
     }
 
     match response_receiver.recv_timeout(REQUEST_TIMEOUT) {
-        Ok(response) => {
-            let _ = write_json_response(&mut stream, response.status, response.body);
-        }
+        Ok(response) => match response.body {
+            BridgeResponseBody::Json(body) => {
+                let _ = write_json_response(&mut stream, response.status, body);
+            }
+            BridgeResponseBody::Binary {
+                content_type,
+                bytes,
+            } => {
+                let _ = write_binary_response(&mut stream, response.status, content_type, &bytes);
+            }
+        },
         Err(_) => {
             let _ = write_json_response(
                 &mut stream,
@@ -301,14 +361,14 @@ fn handle_bridge_connection(mut stream: TcpStream, sender: Sender<BridgeRequest>
 
 fn editor_save_default_world_response(world: &World) -> BridgeResponse {
     let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
-        return BridgeResponse {
-            status: 503,
-            body: json!({
+        return BridgeResponse::json(
+            503,
+            json!({
                 "ok": false,
                 "error": "VoxelWorld resource is not available.",
                 "code": "WORLD_UNAVAILABLE",
             }),
-        };
+        );
     };
 
     let result = persistence::editor_save_default_world(voxel_world);
@@ -316,20 +376,20 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
         let (editor_prop_count, editor_prop_save_path) = match save_editor_placed_props(world) {
             Ok(summary) => summary,
             Err(message) => {
-                return BridgeResponse {
-                    status: 500,
-                    body: json!({
+                return BridgeResponse::json(
+                    500,
+                    json!({
                         "ok": false,
                         "error": message,
                         "code": "EDITOR_PROP_SAVE_FAILED",
                     }),
-                };
+                );
             }
         };
 
-        BridgeResponse {
-            status: 200,
-            body: json!({
+        BridgeResponse::json(
+            200,
+            json!({
                 "ok": true,
                 "data": {
                     "worldId": result.save_path,
@@ -341,84 +401,130 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
                     },
                 },
             }),
-        }
+        )
     } else {
-        BridgeResponse {
-            status: 400,
-            body: json!({
+        BridgeResponse::json(
+            400,
+            json!({
                 "ok": false,
                 "error": result.error_message.unwrap_or_else(|| "Failed to save default world.".to_string()),
                 "code": result.error_kind.unwrap_or_else(|| "WORLD_SAVE_FAILED".to_string()),
             }),
-        }
+        )
     }
 }
 
 fn editor_load_default_world_response(world: &mut World) -> BridgeResponse {
     match persistence::read_world_data_from_path(WORLD_SAVE_PATH) {
         Ok(data) => load_world_data_into_runtime(world, data, WORLD_SAVE_PATH.to_string()),
-        Err(error) => BridgeResponse {
-            status: 400,
-            body: json!({
+        Err(error) => BridgeResponse::json(
+            400,
+            json!({
                 "ok": false,
                 "error": error.to_string(),
                 "code": "WORLD_LOAD_FAILED",
             }),
-        },
+        ),
     }
 }
 
 fn editor_load_uploaded_world_response(world: &mut World, bytes: &[u8]) -> BridgeResponse {
     match read_world_data_from_bytes(bytes) {
         Ok(data) => load_world_data_into_runtime(world, data, "uploaded-world".to_string()),
-        Err(error) => BridgeResponse {
-            status: 400,
-            body: json!({
+        Err(error) => BridgeResponse::json(
+            400,
+            json!({
                 "ok": false,
                 "error": error.to_string(),
                 "code": "WORLD_UPLOAD_INVALID",
             }),
-        },
+        ),
+    }
+}
+
+fn editor_import_voxel_model_response(
+    world: &mut World,
+    format: VoxelModelFormat,
+    bytes: &[u8],
+) -> BridgeResponse {
+    match import_world_data(format, bytes) {
+        Ok(data) => {
+            let save_path = format!("uploaded-model.{}", format.extension());
+            load_world_data_into_runtime(world, data, save_path)
+        }
+        Err(error) => BridgeResponse::json(
+            400,
+            json!({
+                "ok": false,
+                "error": error.to_string(),
+                "code": "VOXEL_MODEL_IMPORT_FAILED",
+            }),
+        ),
+    }
+}
+
+fn editor_export_voxel_model_response(world: &World, format: VoxelModelFormat) -> BridgeResponse {
+    let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+        return BridgeResponse::json(
+            503,
+            json!({
+                "ok": false,
+                "error": "VoxelWorld resource is not available.",
+                "code": "WORLD_UNAVAILABLE",
+            }),
+        );
+    };
+
+    match export_world(format, voxel_world) {
+        Ok(bytes) => BridgeResponse::binary(200, format.content_type(), bytes),
+        Err(error) => BridgeResponse::json(
+            400,
+            json!({
+                "ok": false,
+                "error": error.to_string(),
+                "code": "VOXEL_MODEL_EXPORT_FAILED",
+            }),
+        ),
     }
 }
 
 fn editor_current_world_summary_response(world: &World) -> BridgeResponse {
     match world.get_resource::<VoxelWorld>() {
-        Some(voxel_world) => BridgeResponse {
-            status: 200,
-            body: json!({
+        Some(voxel_world) => BridgeResponse::json(
+            200,
+            json!({
                 "ok": true,
                 "data": frontend_world_summary_from_world(world, voxel_world, "runtime-world"),
             }),
-        },
-        None => BridgeResponse {
-            status: 503,
-            body: json!({
+        ),
+        None => BridgeResponse::json(
+            503,
+            json!({
                 "ok": false,
                 "error": "VoxelWorld resource is not available.",
                 "code": "WORLD_UNAVAILABLE",
             }),
-        },
+        ),
     }
 }
 
 fn editor_viewport_snapshot_response(world: &World) -> BridgeResponse {
     match world.get_resource::<VoxelWorld>() {
-        Some(voxel_world) => BridgeResponse {
-            status: 200,
-            body: json!({
+        Some(voxel_world) => BridgeResponse::json(
+            200,
+            json!({
                 "ok": true,
                 "data": viewport_snapshot_from_world(world, voxel_world),
             }),
-        },
-        None => BridgeResponse {
-            status: 503,
-            body: json!({
+        ),
+        None => BridgeResponse::json(
+            503,
+            json!({
                 "ok": false,
                 "error": "VoxelWorld resource is not available.",
                 "code": "WORLD_UNAVAILABLE",
             }),
-        },
+        ),
     }
 }
 
@@ -450,13 +556,13 @@ fn load_world_data_into_runtime(
         .get_resource::<VoxelWorld>()
         .expect("loaded VoxelWorld should be present immediately after insertion");
 
-    BridgeResponse {
-        status: 200,
-        body: json!({
+    BridgeResponse::json(
+        200,
+        json!({
             "ok": true,
             "data": frontend_world_summary_from_metadata_and_world(world, &metadata, loaded),
         }),
-    }
+    )
 }
 
 fn despawn_existing_chunk_entities(world: &mut World) {
@@ -498,8 +604,7 @@ fn frontend_world_summary_from_metadata_and_world(
     voxel_world: &VoxelWorld,
 ) -> Value {
     let summary_chunks = selected_editor_chunks(voxel_world);
-    let viewport_chunks = selected_editor_chunks(voxel_world);
-    let chunk_previews = chunk_preview_payloads(&viewport_chunks);
+    let chunk_previews = chunk_preview_payloads(voxel_world, &summary_chunks);
 
     json!({
         "worldId": metadata.save_path,
@@ -517,7 +622,7 @@ fn frontend_world_summary_from_metadata_and_world(
         "materials": [],
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,
-            "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+            "sampleResolution": CHUNK_SIZE,
             "chunkCountTotal": metadata.chunk_count,
             "chunkCountIncluded": chunk_previews.len(),
             "chunks": chunk_previews,
@@ -712,9 +817,16 @@ fn water_body_murkiness(kind: WaterBodyKind) -> f32 {
     }
 }
 
-const VIEWPORT_SAMPLE_RESOLUTION: usize = 4;
 const VIEWPORT_MESH_CHUNK_LIMIT: usize = 16;
 const VIEWPORT_MESH_VERTEX_LIMIT: usize = 20_000;
+const VIEWPORT_EXPOSED_FACE_OFFSETS: [(&str, IVec3); 6] = [
+    ("negX", IVec3::new(-1, 0, 0)),
+    ("posX", IVec3::new(1, 0, 0)),
+    ("negY", IVec3::new(0, -1, 0)),
+    ("posY", IVec3::new(0, 1, 0)),
+    ("negZ", IVec3::new(0, 0, -1)),
+    ("posZ", IVec3::new(0, 0, 1)),
+];
 
 fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Value {
     let bounds = world
@@ -727,7 +839,7 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
         "protocolVersion": 1,
         "worldId": "runtime-world",
         "chunkSize": CHUNK_SIZE_I32,
-        "sampleResolution": VIEWPORT_SAMPLE_RESOLUTION,
+        "sampleResolution": CHUNK_SIZE,
         "bounds": {
             "minChunk": [bounds.min_chunk.x, bounds.min_chunk.y, bounds.min_chunk.z],
             "maxChunk": [bounds.max_chunk.x, bounds.max_chunk.y, bounds.max_chunk.z],
@@ -770,7 +882,8 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
                         "present": summary.water_voxels > 0,
                     },
                     "mesh": chunk_mesh_payload(world, voxel_world, chunk.position(), index),
-                    "samples": chunk_surface_samples(&data),
+                    "samples": [],
+                    "voxels": chunk_exposed_voxels_from_world(voxel_world, chunk),
                 })
             })
             .collect::<Vec<_>>(),
@@ -779,24 +892,10 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
 }
 
 fn selected_editor_chunks(voxel_world: &VoxelWorld) -> Vec<&Chunk> {
-    let mut columns: BTreeMap<(i32, i32), &Chunk> = BTreeMap::new();
-    for (_, chunk) in voxel_world.chunk_entries() {
-        if !chunk_has_visible_voxels(chunk) {
-            continue;
-        }
-
-        let position = chunk.position();
-        columns
-            .entry((position.x, position.z))
-            .and_modify(|existing| {
-                if position.y > existing.position().y {
-                    *existing = chunk;
-                }
-            })
-            .or_insert(chunk);
-    }
-
-    let mut chunks = columns.into_values().collect::<Vec<_>>();
+    let mut chunks = voxel_world
+        .chunk_entries()
+        .filter_map(|(_, chunk)| chunk_has_visible_voxels(chunk).then_some(chunk))
+        .collect::<Vec<_>>();
     if chunks.is_empty() {
         chunks = voxel_world
             .chunk_entries()
@@ -815,7 +914,7 @@ fn chunk_has_visible_voxels(chunk: &Chunk) -> bool {
     chunk.iter_solid().next().is_some()
 }
 
-fn chunk_preview_payloads(chunks: &[&Chunk]) -> Vec<Value> {
+fn chunk_preview_payloads(voxel_world: &VoxelWorld, chunks: &[&Chunk]) -> Vec<Value> {
     chunks
         .iter()
         .map(|chunk| {
@@ -824,7 +923,41 @@ fn chunk_preview_payloads(chunks: &[&Chunk]) -> Vec<Value> {
             json!({
                 "chunkId": format!("chunk-{x}-{y}-{z}"),
                 "coordinate": [x, y, z],
-                "samples": chunk_surface_samples(&data),
+                "samples": [],
+                "voxels": chunk_exposed_voxels_from_world(voxel_world, chunk),
+            })
+        })
+        .collect()
+}
+
+fn chunk_exposed_voxels_from_world(voxel_world: &VoxelWorld, chunk: &Chunk) -> Vec<Value> {
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    chunk
+        .iter_solid()
+        .filter_map(|(local, voxel)| {
+            let world_pos = chunk_origin + local.as_ivec3();
+            let exposed_faces = VIEWPORT_EXPOSED_FACE_OFFSETS
+                .iter()
+                .filter_map(|(face, offset)| {
+                    let neighbor = voxel_world
+                        .sample_voxel_for_terrain_meshing(world_pos + *offset)
+                        .terrain_meshing_voxel();
+                    let exposed = if voxel == VoxelType::Water {
+                        neighbor == VoxelType::Air
+                    } else {
+                        neighbor.is_transparent()
+                    };
+                    exposed.then_some(json!(face))
+                })
+                .collect::<Vec<_>>();
+
+            (!exposed_faces.is_empty()).then(|| {
+                json!({
+                    "position": [world_pos.x, world_pos.y, world_pos.z],
+                    "material": voxel_material_name(voxel),
+                    "water": voxel == VoxelType::Water,
+                    "exposedFaces": exposed_faces,
+                })
             })
         })
         .collect()
@@ -960,44 +1093,6 @@ fn mesh_buffer_payload(mesh: &MeshData, omit_buffers: bool, chunk_origin: Vec3) 
         "colors": if omit_buffers { Value::Null } else { json!(mesh.colors) },
         "indices": if omit_buffers { Value::Null } else { json!(mesh.indices) },
     })
-}
-
-fn chunk_surface_samples(data: &crate::voxel::chunk::ChunkData) -> Vec<Value> {
-    let stride = CHUNK_SIZE / VIEWPORT_SAMPLE_RESOLUTION;
-    let chunk_origin = data.position * CHUNK_SIZE_I32;
-    let mut samples = Vec::with_capacity(VIEWPORT_SAMPLE_RESOLUTION * VIEWPORT_SAMPLE_RESOLUTION);
-
-    for sample_z in 0..VIEWPORT_SAMPLE_RESOLUTION {
-        for sample_x in 0..VIEWPORT_SAMPLE_RESOLUTION {
-            let local_x = (sample_x * stride).min(CHUNK_SIZE - 1);
-            let local_z = (sample_z * stride).min(CHUNK_SIZE - 1);
-            let mut surface_y = 0_i32;
-            let mut material = VoxelType::Air;
-
-            for local_y in (0..CHUNK_SIZE).rev() {
-                let voxel = data
-                    .voxels
-                    .get(crate::voxel::chunk::Chunk::index(local_x, local_y, local_z))
-                    .copied()
-                    .unwrap_or_default();
-                if voxel != VoxelType::Air {
-                    surface_y = chunk_origin.y + local_y as i32;
-                    material = voxel;
-                    break;
-                }
-            }
-
-            samples.push(json!({
-                "x": chunk_origin.x + local_x as i32,
-                "z": chunk_origin.z + local_z as i32,
-                "height": surface_y,
-                "material": voxel_material_name(material),
-                "water": material == VoxelType::Water,
-            }));
-        }
-    }
-
-    samples
 }
 
 fn voxel_material_name(voxel: VoxelType) -> &'static str {
@@ -1166,6 +1261,7 @@ fn status_reason(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::CHUNK_VOLUME;
     use crate::voxel::meshing::WaterBodyId;
 
     #[test]
@@ -1203,5 +1299,76 @@ mod tests {
         let reflection_strength = water_bodies[0]["reflectionStrength"].as_f64().unwrap();
         assert!((reflection_strength - 0.76).abs() < 0.0001);
         assert_eq!(water_bodies[0]["reflectionStatus"]["active"], json!(true));
+    }
+
+    #[test]
+    fn viewport_exposed_voxels_cover_every_surface_column() {
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        let mut voxels = [VoxelType::Air; CHUNK_VOLUME];
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                voxels[Chunk::index(x, 3, z)] = VoxelType::TopSoil;
+            }
+        }
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::ZERO, voxels));
+
+        let chunk = voxel_world.get_chunk(IVec3::ZERO).unwrap();
+        let voxels = chunk_exposed_voxels_from_world(&voxel_world, chunk);
+
+        assert_eq!(voxels.len(), CHUNK_SIZE * CHUNK_SIZE);
+        assert_eq!(voxels[0]["position"], json!([0, 3, 0]));
+        assert_eq!(voxels[1]["position"], json!([1, 3, 0]));
+        assert!(voxels
+            .iter()
+            .all(|voxel| voxel["material"] == json!("TopSoil")));
+        assert!(voxels.iter().all(|voxel| {
+            voxel["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("posY"))
+        }));
+    }
+
+    #[test]
+    fn viewport_exposed_voxels_hide_shared_faces_and_keep_vertical_chunks() {
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 2, 1));
+        let mut lower_voxels = [VoxelType::Air; CHUNK_VOLUME];
+        lower_voxels[Chunk::index(0, 3, 0)] = VoxelType::TopSoil;
+        lower_voxels[Chunk::index(1, 3, 0)] = VoxelType::TopSoil;
+        let mut upper_voxels = [VoxelType::Air; CHUNK_VOLUME];
+        upper_voxels[Chunk::index(0, 10, 0)] = VoxelType::Rock;
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::ZERO, lower_voxels));
+        voxel_world.insert_chunk(Chunk::with_voxels(IVec3::new(0, 1, 0), upper_voxels));
+
+        let selected_chunks = selected_editor_chunks(&voxel_world);
+        assert_eq!(selected_chunks.len(), 2);
+
+        let lower_chunk = voxel_world.get_chunk(IVec3::ZERO).unwrap();
+        let lower_payload = chunk_exposed_voxels_from_world(&voxel_world, lower_chunk);
+        let left = lower_payload
+            .iter()
+            .find(|voxel| voxel["position"] == json!([0, 3, 0]))
+            .unwrap();
+        let right = lower_payload
+            .iter()
+            .find(|voxel| voxel["position"] == json!([1, 3, 0]))
+            .unwrap();
+
+        assert!(!left["exposedFaces"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("posX")));
+        assert!(!right["exposedFaces"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("negX")));
+
+        let upper_chunk = voxel_world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
+        let upper_payload = chunk_exposed_voxels_from_world(&voxel_world, upper_chunk);
+        assert_eq!(
+            upper_payload[0]["position"],
+            json!([0, CHUNK_SIZE_I32 + 10, 0])
+        );
+        assert_eq!(upper_payload[0]["material"], json!("Rock"));
     }
 }

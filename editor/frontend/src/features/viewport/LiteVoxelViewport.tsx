@@ -2,15 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Camera, ExternalLink, Eye, EyeOff, Maximize2, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import { Canvas, type ThreeEvent, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import type { BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshPayload, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportExposedVoxel, ViewportMeshPayload, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
 import {
   ATLAS_IMAGE_URLS,
   MATERIAL_COLORS,
   atlasTileIndexForMaterial,
+  collectExposedVoxels,
   collectSamples,
   createViewportMeshGeometry,
+  exposedVoxelMaterialKey,
+  exposedVoxelTransform,
   sampleColumnTransform,
   sampleMaterialKey,
   tileTextureForIndex,
@@ -125,6 +128,13 @@ interface SampleGroup {
   readonly key: string;
   readonly material: WorldSurfaceSample["material"];
   readonly samples: readonly WorldSurfaceSample[];
+  readonly tileIndex: number | null;
+}
+
+interface VoxelGroup {
+  readonly key: string;
+  readonly material: ViewportExposedVoxel["material"];
+  readonly voxels: readonly ViewportExposedVoxel[];
   readonly tileIndex: number | null;
 }
 
@@ -272,6 +282,24 @@ const groupSamples = (
     const tileIndex = atlasPreviewEnabled && !sample.water ? atlasTileIndexForMaterial(atlasMapping, sample.material, "top") : null;
     const group = groups.get(key) ?? { material: sample.material, samples: [], tileIndex };
     group.samples.push(sample);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
+};
+
+const groupVoxels = (
+  voxels: readonly ViewportExposedVoxel[],
+  atlasMapping: BlockAtlasMap,
+  atlasPreviewEnabled: boolean,
+): readonly VoxelGroup[] => {
+  const groups = new Map<string, { material: ViewportExposedVoxel["material"]; voxels: ViewportExposedVoxel[]; tileIndex: number | null }>();
+
+  for (const voxel of voxels) {
+    const key = exposedVoxelMaterialKey(voxel, atlasMapping, atlasPreviewEnabled);
+    const tileIndex = atlasPreviewEnabled && !voxel.water ? atlasTileIndexForMaterial(atlasMapping, voxel.material, "top") : null;
+    const group = groups.get(key) ?? { material: voxel.material, voxels: [], tileIndex };
+    group.voxels.push(voxel);
     groups.set(key, group);
   }
 
@@ -504,6 +532,109 @@ function SampleInstances({
   );
 }
 
+function ExactVoxelInstances({
+  group,
+  atlasTexture,
+  targetFace,
+  onHover,
+  onPick,
+  onPlace,
+  suppressClickRef,
+}: {
+  readonly group: VoxelGroup;
+  readonly atlasTexture: THREE.Texture | null;
+  readonly targetFace: BrushSettings["targetFace"];
+  readonly onHover: (selection: LiteVoxelSelection | null) => void;
+  readonly onPick: (selection: LiteVoxelSelection) => void;
+  readonly onPlace: (position: readonly [number, number, number]) => void;
+  readonly suppressClickRef: MutableRefObject<boolean>;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const tileTexture = useMemo(
+    () => (atlasTexture && group.tileIndex !== null ? tileTextureForIndex(atlasTexture, group.tileIndex) : null),
+    [atlasTexture, group.tileIndex],
+  );
+
+  useEffect(() => () => tileTexture?.dispose(), [tileTexture]);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) {
+      return;
+    }
+
+    const dummy = new THREE.Object3D();
+    group.voxels.forEach((voxel, index) => {
+      const { position, scale } = exposedVoxelTransform(voxel);
+      dummy.position.copy(position);
+      dummy.scale.copy(scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(index, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [group.voxels]);
+
+  const selectionForEvent = (event: ThreeEvent<PointerEvent | MouseEvent>) => {
+    const instanceId = intersectionFromEvent(event).instanceId ?? 0;
+    const voxel = group.voxels[instanceId];
+    if (!voxel) {
+      return null;
+    }
+    const [x, y, z] = voxel.position;
+    return selectionFromPoint(new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5), targetFace, normalFromEvent(event));
+  };
+
+  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onHover(selectionForEvent(event));
+  };
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    const selection = selectionForEvent(event);
+    if (!selection) {
+      return;
+    }
+
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+
+    onPick(selection);
+  };
+
+  const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    const selection = selectionForEvent(event);
+    if (selection) {
+      onPlace(placementFromSelection(selection));
+    }
+  };
+
+  const color = MATERIAL_COLORS[group.material] ?? MATERIAL_COLORS.Rock;
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, group.voxels.length]}
+      onPointerMove={handlePointerMove}
+      onPointerOut={() => onHover(null)}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color={tileTexture ? "#ffffff" : color}
+        map={tileTexture ?? undefined}
+        transparent={group.material === "Water"}
+        opacity={group.material === "Water" ? 0.68 : 1}
+        roughness={0.86}
+        metalness={0}
+      />
+    </instancedMesh>
+  );
+}
+
 function BoxWire({
   center,
   size,
@@ -681,6 +812,7 @@ function AuthoringScene({
   meshChunks,
   samples,
   sampleGroups,
+  voxelGroups,
   sampleCellSize,
   atlasTexture,
   view,
@@ -702,6 +834,7 @@ function AuthoringScene({
   readonly meshChunks: NonNullable<ViewportSnapshot["chunks"]>;
   readonly samples: readonly WorldSurfaceSample[];
   readonly sampleGroups: readonly SampleGroup[];
+  readonly voxelGroups: readonly VoxelGroup[];
   readonly sampleCellSize: number;
   readonly atlasTexture: THREE.Texture | null;
   readonly view: ViewState;
@@ -725,30 +858,47 @@ function AuthoringScene({
       <directionalLight position={[72, 120, 84]} intensity={1.7} />
       <CameraController view={view} samples={samples} />
       {viewportOverlays.voxelGrid ? <gridHelper args={[256, 64, "#4a5361", "#29303a"]} position={[64, 0.02, 64]} /> : null}
-      {meshChunks.map((chunk) => (
-        <ViewportMeshLayer
-          key={chunk.payloadId}
-          payload={chunk.mesh}
-          targetFace={brushSettings.targetFace}
-          onHover={onHover}
-          onPick={onPick}
-          onPlace={onPlace}
-          suppressClickRef={suppressClickRef}
-        />
-      ))}
-      {sampleGroups.map((group) => (
-        <SampleInstances
-          key={group.key}
-          group={group}
-          atlasTexture={atlasTexture}
-          cellSize={sampleCellSize}
-          targetFace={brushSettings.targetFace}
-          onHover={onHover}
-          onPick={onPick}
-          onPlace={onPlace}
-          suppressClickRef={suppressClickRef}
-        />
-      ))}
+      {voxelGroups.length > 0
+        ? voxelGroups.map((group) => (
+            <ExactVoxelInstances
+              key={group.key}
+              group={group}
+              atlasTexture={atlasTexture}
+              targetFace={brushSettings.targetFace}
+              onHover={onHover}
+              onPick={onPick}
+              onPlace={onPlace}
+              suppressClickRef={suppressClickRef}
+            />
+          ))
+        : (
+            <>
+              {meshChunks.map((chunk) => (
+                <ViewportMeshLayer
+                  key={chunk.payloadId}
+                  payload={chunk.mesh}
+                  targetFace={brushSettings.targetFace}
+                  onHover={onHover}
+                  onPick={onPick}
+                  onPlace={onPlace}
+                  suppressClickRef={suppressClickRef}
+                />
+              ))}
+              {sampleGroups.map((group) => (
+                <SampleInstances
+                  key={group.key}
+                  group={group}
+                  atlasTexture={atlasTexture}
+                  cellSize={sampleCellSize}
+                  targetFace={brushSettings.targetFace}
+                  onHover={onHover}
+                  onPick={onPick}
+                  onPlace={onPlace}
+                  suppressClickRef={suppressClickRef}
+                />
+              ))}
+            </>
+          )}
       <ChunkBoundsLayer chunks={chunks} selection={selection} visible={viewportOverlays.chunkBounds} />
       <ProtectedAreaLayer areas={areaOverlays} visible={viewportOverlays.protectedAreas} />
       <SelectionLayer selection={selection} hoveredVoxel={hoveredVoxel} pendingVoxelEdits={pendingVoxelEdits} />
@@ -803,6 +953,7 @@ export const LiteVoxelViewport = Object.assign(
     const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
     const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
     const atlasTexture = useAtlasTexture();
+    const exposedVoxels = useMemo(() => collectExposedVoxels(worldViewport), [worldViewport]);
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
     const viewportChunkSize = viewportSnapshot?.chunkSize ?? worldViewport?.chunkSize ?? 16;
     const sampleCellSize = useMemo(() => {
@@ -810,10 +961,12 @@ export const LiteVoxelViewport = Object.assign(
       return sampleResolution > 0 ? viewportChunkSize / sampleResolution : viewportChunkSize;
     }, [viewportChunkSize, viewportSnapshot, worldViewport]);
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
-    const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
+    const hasExactVoxelPreview = exposedVoxels.length > 0;
+    const hasRenderableMesh = !hasExactVoxelPreview && meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
     const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const atlasPreviewEnabled = viewportOverlays.atlasPreview || activeMode === "voxel_paint" || activeMode === "material";
     const sampleGroups = useMemo(() => groupSamples(samples, atlasMapping, atlasPreviewEnabled), [atlasMapping, atlasPreviewEnabled, samples]);
+    const voxelGroups = useMemo(() => groupVoxels(exposedVoxels, atlasMapping, atlasPreviewEnabled), [atlasMapping, atlasPreviewEnabled, exposedVoxels]);
     const waterSampleCount = samples.filter((sample) => sample.water).length;
 
     const updateKeyBinding = useCallback((action: ViewportKeyAction, nextKey: string) => {
@@ -1047,7 +1200,7 @@ export const LiteVoxelViewport = Object.assign(
           data-testid="world-viewport-canvas"
           data-atlas-preview-enabled={String(atlasPreviewEnabled)}
           data-renderable-mesh={String(hasRenderableMesh)}
-          data-surface-preview-mode={hasRenderableMesh ? "webgl-mesh" : "webgl-sampled"}
+          data-surface-preview-mode={hasExactVoxelPreview ? "webgl-exposed-voxels" : hasRenderableMesh ? "webgl-mesh" : "webgl-sampled"}
           data-visible-surface-samples={samples.length}
           data-visible-surface-walls={0}
           tabIndex={0}
@@ -1251,6 +1404,7 @@ export const LiteVoxelViewport = Object.assign(
               meshChunks={meshChunks}
               samples={samples}
               sampleGroups={sampleGroups}
+              voxelGroups={voxelGroups}
               sampleCellSize={sampleCellSize}
               atlasTexture={atlasTexture}
               view={view}
@@ -1440,12 +1594,13 @@ export const LiteVoxelViewport = Object.assign(
 
         <div className="canvas-reticle" aria-hidden="true" />
         <div className="canvas-label">
-          {hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {runtimeState}
+          {hasExactVoxelPreview ? "Exact voxel viewport" : hasRenderableMesh ? "Runtime mesh viewport" : hasBackendPreview ? "Loaded world viewport" : "World summary viewport"} / {runtimeState}
         </div>
         <div className="minimap-canvas" aria-label="World viewport summary">
           <div className="minimap-grid">
             <strong>{chunks.length}</strong>
             <span>chunks</span>
+            <span>{exposedVoxels.length} exposed voxels</span>
             <span>{samples.length} samples</span>
             <span>{meshChunks.length} mesh payloads</span>
             <span>{waterSampleCount} water</span>

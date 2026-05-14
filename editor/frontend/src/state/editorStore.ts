@@ -159,6 +159,28 @@ const replaceDirtyViewportChunks = (
   };
 };
 
+const mergeViewportPreview = (
+  currentPreview: WorldViewportPreview | null,
+  nextPreview: WorldViewportPreview,
+): WorldViewportPreview => {
+  if (
+    !currentPreview ||
+    currentPreview.chunks.length <= nextPreview.chunks.length
+  ) {
+    return nextPreview;
+  }
+
+  if (currentPreview.chunkSize !== nextPreview.chunkSize || currentPreview.sampleResolution !== nextPreview.sampleResolution) {
+    return currentPreview;
+  }
+
+  const nextChunksById = new Map(nextPreview.chunks.map((chunk) => [chunk.chunkId, chunk] as const));
+  return {
+    ...currentPreview,
+    chunks: currentPreview.chunks.map((chunk) => nextChunksById.get(chunk.chunkId) ?? chunk),
+  };
+};
+
 export interface EditorDataState {
   readonly activeMode: EditorMode;
   readonly activeTool: string;
@@ -817,11 +839,12 @@ export const useEditorStore = create<EditorStore>()(
                 chunkId: chunk.chunkId,
                 coordinate: chunk.coordinate,
                 samples: [...chunk.samples],
+                voxels: [...(chunk.voxels ?? [])],
               })),
             }
           : null;
         if (preview) {
-          state.worldViewport = castDraft(preview);
+          state.worldViewport = castDraft(mergeViewportPreview(state.worldViewport, preview));
         }
       }),
     markDirty: (chunkId) =>
