@@ -127,3 +127,28 @@ fn default_max_upload_bytes_per_frame() -> u32 {
 fn default_max_gpu_memory_mb() -> u32 {
     512
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_keeps_naadf_release_gate_closed() {
+        let config = NaadfConfig::default();
+
+        assert!(!config.enabled);
+        assert!(!config.gpu.allow_integrated_gpu);
+        assert!(!config.use_for_sun_visibility);
+        assert!(!config.use_for_terrain_ao);
+        assert!(!config.use_for_contact_shadows);
+    }
+
+    #[test]
+    fn checked_in_config_keeps_naadf_default_off() {
+        let config = NaadfConfig::load_or_default("assets/config/naadf.yaml");
+
+        assert!(!config.enabled);
+        assert!(!config.gpu.allow_integrated_gpu);
+        assert_eq!(config.chunk_cache.max_gpu_memory_mb, 512);
+    }
+}

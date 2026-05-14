@@ -4,10 +4,19 @@
 //! Based on Alexander Sannikov's Radiance Cascades technique.
 
 use bevy::asset::RenderAssetUsages;
+#[cfg(feature = "naadf")]
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::render_resource::*;
 use std::collections::{HashSet, VecDeque};
 
+#[cfg(feature = "naadf")]
+use crate::performance::AreaTimingRecorder;
+#[cfg(feature = "naadf")]
+use crate::rendering::naadf::NaadfStats;
+use crate::rendering::ray_tracing::{
+    ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
+};
 use crate::voxel::world::VoxelWorld;
 
 /// Plugin for Radiance Cascades global illumination
@@ -18,7 +27,17 @@ impl Plugin for RadianceCascadesPlugin {
         app.init_resource::<RadianceCascadesConfig>()
             .init_resource::<SdfVolumeState>()
             .add_systems(Startup, setup_radiance_cascades)
-            .add_systems(Update, (update_sdf_volume, update_cascade_params).chain());
+            .add_systems(
+                Update,
+                (
+                    sync_radiance_cascades_voxel_backend,
+                    update_sdf_volume,
+                    update_cascade_params,
+                )
+                    .chain(),
+            );
+        #[cfg(feature = "naadf")]
+        app.add_systems(Update, record_naadf_gi_counters);
 
         // Render app systems would go here for full implementation
     }
@@ -67,6 +86,12 @@ pub struct RadianceCascadesConfig {
 
     /// Update SDF incrementally vs full rebuild
     pub incremental_sdf_updates: bool,
+
+    /// Selected voxel ray backend for GI queries.
+    pub voxel_backend: VoxelRayBackendMode,
+
+    /// Last backend switch generation mirrored from ray tracing settings.
+    pub backend_switch_generation: u64,
 }
 
 impl Default for RadianceCascadesConfig {
@@ -86,6 +111,8 @@ impl Default for RadianceCascadesConfig {
             sdf_world_min: Vec3::new(-256.0, 0.0, -256.0),
             sdf_world_max: Vec3::new(256.0, 64.0, 256.0),
             incremental_sdf_updates: true,
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            backend_switch_generation: 0,
         }
     }
 }
@@ -110,6 +137,9 @@ pub struct SdfVolumeState {
 
     /// Previous frame's view-projection for reprojection
     pub prev_view_proj: Mat4,
+
+    /// Last GI history reset caused by a voxel backend switch.
+    pub history_reset_generation: u64,
 }
 
 impl Default for SdfVolumeState {
@@ -121,6 +151,39 @@ impl Default for SdfVolumeState {
             frame_index: 0,
             initialized: false,
             prev_view_proj: Mat4::IDENTITY,
+            history_reset_generation: 0,
+        }
+    }
+}
+
+pub fn sync_radiance_cascades_voxel_backend(
+    ray_tracing: Res<RayTracingSettings>,
+    mut config: ResMut<RadianceCascadesConfig>,
+    mut state: ResMut<SdfVolumeState>,
+) {
+    apply_radiance_backend_selection(&ray_tracing, &mut config, &mut state);
+}
+
+pub fn apply_radiance_backend_selection(
+    ray_tracing: &RayTracingSettings,
+    config: &mut RadianceCascadesConfig,
+    state: &mut SdfVolumeState,
+) {
+    let target_backend = match ray_tracing.experimental_mode {
+        ExperimentalRenderMode::Current => ray_tracing.effective_backend(),
+        ExperimentalRenderMode::CurrentWithNaadfGi | ExperimentalRenderMode::NaadfPreview => {
+            VoxelRayBackendMode::Naadf
+        }
+    };
+
+    config.voxel_backend = target_backend;
+
+    if config.backend_switch_generation != ray_tracing.backend_switch_generation {
+        config.backend_switch_generation = ray_tracing.backend_switch_generation;
+        if ray_tracing.reset_history_on_backend_switch {
+            state.frame_index = 0;
+            state.prev_view_proj = Mat4::IDENTITY;
+            state.history_reset_generation = ray_tracing.backend_switch_generation;
         }
     }
 }
@@ -154,7 +217,8 @@ pub struct RadianceCascadeUniforms {
 
     pub frame_index: u32,
     pub temporal_blend: f32,
-    pub _padding4: Vec2,
+    pub voxel_backend: u32,
+    pub backend_switch_generation: u32,
 
     pub camera_position: Vec3,
     pub _padding5: f32,
@@ -435,13 +499,76 @@ pub fn create_radiance_uniforms(
 
         frame_index: state.frame_index,
         temporal_blend: config.temporal_blend,
-        _padding4: Vec2::ZERO,
+        voxel_backend: voxel_backend_code(config.voxel_backend),
+        backend_switch_generation: config.backend_switch_generation as u32,
 
         camera_position: camera_pos,
         _padding5: 0.0,
 
         inv_view_proj,
     }
+}
+
+fn voxel_backend_code(backend: VoxelRayBackendMode) -> u32 {
+    match backend {
+        VoxelRayBackendMode::CurrentSdf | VoxelRayBackendMode::Auto => 0,
+        VoxelRayBackendMode::Naadf => 1,
+    }
+}
+
+#[cfg(feature = "naadf")]
+pub fn record_naadf_gi_counters(
+    config: Res<RadianceCascadesConfig>,
+    mut naadf_stats: Option<ResMut<NaadfStats>>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Res<FrameCount>,
+) {
+    let gi_rays = estimated_naadf_gi_rays(&config);
+    if let Some(stats) = naadf_stats.as_deref_mut() {
+        stats.gi_rays_last_frame = gi_rays;
+    }
+
+    let Some(timing) = timing.as_deref_mut() else {
+        return;
+    };
+    let Some(stats) = naadf_stats.as_deref() else {
+        return;
+    };
+
+    timing.record_count(
+        frame.0,
+        "naadf.gpu_memory_bytes",
+        stats.gpu_memory_bytes as f64,
+    );
+    timing.record_count(frame.0, "naadf.chunks_resident", stats.loaded_chunks as f64);
+    timing.record_count(
+        frame.0,
+        "naadf.dirty_chunks_pending",
+        stats.dirty_pending as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.gpu_build_queue_oldest_age_frames",
+        stats.gpu_build_queue_oldest_age_frames as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.uploaded_chunks_last_frame",
+        stats.gpu_uploaded_chunks_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.avg_ray_steps_last_frame",
+        stats.gpu_avg_ray_steps_last_frame as f64,
+    );
+    timing.record_count(frame.0, "naadf.gi_rays_last_frame", gi_rays as f64);
+}
+
+pub fn estimated_naadf_gi_rays(config: &RadianceCascadesConfig) -> u64 {
+    if config.voxel_backend != VoxelRayBackendMode::Naadf {
+        return 0;
+    }
+    config.cascade_count as u64 * config.rays_per_probe as u64
 }
 
 /// SDF volume data generation utilities
@@ -614,5 +741,92 @@ mod tests {
 
         assert_eq!(state.dirty_chunks.len(), 2);
         assert_eq!(state.dirty_chunks.back().copied(), Some(first));
+    }
+
+    #[test]
+    fn backend_selection_mirrors_ray_tracing_and_resets_history() {
+        let mut config = RadianceCascadesConfig::default();
+        let mut state = SdfVolumeState {
+            frame_index: 44,
+            prev_view_proj: Mat4::from_scale(Vec3::splat(2.0)),
+            ..default()
+        };
+        let settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            resolved_voxel_backend: VoxelRayBackendMode::Naadf,
+            backend_switch_generation: 7,
+            ..default()
+        };
+
+        apply_radiance_backend_selection(&settings, &mut config, &mut state);
+
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+        assert_eq!(config.backend_switch_generation, 7);
+        assert_eq!(state.frame_index, 0);
+        assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
+        assert_eq!(state.history_reset_generation, 7);
+    }
+
+    #[test]
+    fn current_with_naadf_gi_forces_naadf_backend() {
+        let mut config = RadianceCascadesConfig::default();
+        let mut state = SdfVolumeState::default();
+        let settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            experimental_mode: ExperimentalRenderMode::CurrentWithNaadfGi,
+            ..default()
+        };
+
+        apply_radiance_backend_selection(&settings, &mut config, &mut state);
+
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+    }
+
+    #[test]
+    fn radiance_uniforms_include_backend_selection() {
+        let mut config = RadianceCascadesConfig {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            backend_switch_generation: 9,
+            ..default()
+        };
+        let state = SdfVolumeState::default();
+
+        let uniforms = create_radiance_uniforms(
+            &config,
+            &state,
+            Vec3::ZERO,
+            Vec3::Y,
+            Vec3::ONE,
+            Mat4::IDENTITY,
+        );
+
+        assert_eq!(uniforms.voxel_backend, 1);
+        assert_eq!(uniforms.backend_switch_generation, 9);
+
+        config.voxel_backend = VoxelRayBackendMode::CurrentSdf;
+        let uniforms = create_radiance_uniforms(
+            &config,
+            &state,
+            Vec3::ZERO,
+            Vec3::Y,
+            Vec3::ONE,
+            Mat4::IDENTITY,
+        );
+        assert_eq!(uniforms.voxel_backend, 0);
+    }
+
+    #[test]
+    fn estimated_naadf_gi_rays_only_counts_naadf_backend() {
+        let mut config = RadianceCascadesConfig {
+            cascade_count: 4,
+            rays_per_probe: 16,
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            ..default()
+        };
+
+        assert_eq!(estimated_naadf_gi_rays(&config), 0);
+
+        config.voxel_backend = VoxelRayBackendMode::Naadf;
+        assert_eq!(estimated_naadf_gi_rays(&config), 64);
     }
 }

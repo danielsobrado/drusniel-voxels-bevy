@@ -1,7 +1,7 @@
 (
     name: "tunnel",
-    fill: "rock",
-    empty_rule: "y == 8 && z == 8",
+    fill: Some("rock"),
+    empty_rule: Some("y == 8 && z == 8"),
     rays: [
         (origin: [0.5, 8.5, 8.5], dir: [1.0, 0.0, 0.0], max_distance: 16.0, hit: None),
     ],

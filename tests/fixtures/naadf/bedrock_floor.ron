@@ -1,6 +1,6 @@
 (
     name: "bedrock_floor",
-    occupied_rule: "y == 0",
+    occupied_rule: Some("y == 0"),
     rays: [
         (origin: [8.5, 4.5, 8.5], dir: [0.0, -1.0, 0.0], max_distance: 8.0, hit: Some([8, 0, 8])),
     ],

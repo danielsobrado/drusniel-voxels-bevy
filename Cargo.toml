@@ -5,9 +5,12 @@ edition = "2024"
 default-run = "voxel_builder"
 
 [features]
+default = []
 # cargo run --release --features tracy then connect with Tracy 0.11.x.
 tracy = ["bevy/trace_tracy"]
 legacy_prop_spawn = []
+# Experimental/default-off derived voxel ray cache. Enable only for NAADF diagnostics,
+# A/B benches, and preview work.
 naadf = []
 naadf_debug = ["naadf"]
 

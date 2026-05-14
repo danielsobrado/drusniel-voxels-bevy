@@ -1,3 +1,5 @@
+# NAADF is experimental and remains default-off for mainline builds.
+# Enable only with the `naadf` Cargo feature and focused A/B validation.
 enabled: false
 build_visible_chunks_only: true
 
@@ -10,6 +12,7 @@ chunk_cache:
   max_gpu_memory_mb: 512
 
 gpu:
+  # Integrated GPUs remain blocked unless a focused diagnostic run opts in.
   allow_integrated_gpu: false
   prefer_gpu_builder: false
   debug_readback: false

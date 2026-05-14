@@ -67,6 +67,8 @@ impl ExperimentalRenderMode {
 pub struct RayTracingSettings {
     pub enabled: bool,
     pub voxel_backend: VoxelRayBackendMode,
+    #[serde(default)]
+    pub resolved_voxel_backend: VoxelRayBackendMode,
     pub experimental_mode: ExperimentalRenderMode,
     pub allow_naadf_on_integrated_gpu: bool,
     pub reset_history_on_backend_switch: bool,
@@ -79,6 +81,7 @@ impl Default for RayTracingSettings {
         Self {
             enabled: false,
             voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            resolved_voxel_backend: VoxelRayBackendMode::CurrentSdf,
             experimental_mode: ExperimentalRenderMode::Current,
             allow_naadf_on_integrated_gpu: false,
             reset_history_on_backend_switch: true,
@@ -108,6 +111,10 @@ impl RayTracingSettings {
             return false;
         }
         self.voxel_backend = next;
+        self.resolved_voxel_backend = match next {
+            VoxelRayBackendMode::Auto => VoxelRayBackendMode::CurrentSdf,
+            mode => mode,
+        };
         if self.reset_history_on_backend_switch {
             self.backend_switch_generation = self.backend_switch_generation.saturating_add(1);
         }
@@ -115,11 +122,53 @@ impl RayTracingSettings {
     }
 
     pub fn effective_backend(&self) -> VoxelRayBackendMode {
+        self.resolved_voxel_backend
+    }
+
+    pub fn resolve_naadf_cache_policy(
+        &mut self,
+        cache_ready: bool,
+        cache_warming: bool,
+        cache_stale: bool,
+    ) {
         match self.voxel_backend {
-            VoxelRayBackendMode::Auto => VoxelRayBackendMode::CurrentSdf,
-            mode => mode,
+            VoxelRayBackendMode::CurrentSdf => {
+                self.resolved_voxel_backend = VoxelRayBackendMode::CurrentSdf;
+                if self
+                    .fallback_reason
+                    .as_deref()
+                    .is_some_and(is_naadf_cache_fallback)
+                {
+                    self.fallback_reason = None;
+                }
+            }
+            VoxelRayBackendMode::Naadf | VoxelRayBackendMode::Auto => {
+                if cache_ready && !cache_stale {
+                    self.resolved_voxel_backend = VoxelRayBackendMode::Naadf;
+                    if self
+                        .fallback_reason
+                        .as_deref()
+                        .is_some_and(is_naadf_cache_fallback)
+                    {
+                        self.fallback_reason = None;
+                    }
+                } else {
+                    self.resolved_voxel_backend = VoxelRayBackendMode::CurrentSdf;
+                    self.fallback_reason = Some(if cache_stale {
+                        "NAADF cache stale; using CurrentSdf fallback".into()
+                    } else if cache_warming {
+                        "NAADF cache warming; using CurrentSdf fallback".into()
+                    } else {
+                        "NAADF cache not ready; using CurrentSdf fallback".into()
+                    });
+                }
+            }
         }
     }
+}
+
+fn is_naadf_cache_fallback(reason: &str) -> bool {
+    reason.starts_with("NAADF cache ")
 }
 
 pub fn toggle_voxel_ray_backend_key(
@@ -144,5 +193,63 @@ pub fn toggle_voxel_ray_backend_key(
         );
     } else if let Some(reason) = settings.fallback_reason.as_deref() {
         warn!("Voxel ray backend unchanged: {}", reason);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn naadf_cache_policy_falls_back_while_warming() {
+        let mut settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            resolved_voxel_backend: VoxelRayBackendMode::Naadf,
+            ..default()
+        };
+
+        settings.resolve_naadf_cache_policy(false, true, false);
+
+        assert_eq!(
+            settings.effective_backend(),
+            VoxelRayBackendMode::CurrentSdf
+        );
+        assert_eq!(
+            settings.fallback_reason.as_deref(),
+            Some("NAADF cache warming; using CurrentSdf fallback")
+        );
+    }
+
+    #[test]
+    fn naadf_cache_policy_allows_ready_cache() {
+        let mut settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Auto,
+            ..default()
+        };
+
+        settings.resolve_naadf_cache_policy(true, false, false);
+
+        assert_eq!(settings.effective_backend(), VoxelRayBackendMode::Naadf);
+        assert!(settings.fallback_reason.is_none());
+    }
+
+    #[test]
+    fn naadf_cache_policy_falls_back_when_stale() {
+        let mut settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            resolved_voxel_backend: VoxelRayBackendMode::Naadf,
+            ..default()
+        };
+
+        settings.resolve_naadf_cache_policy(true, false, true);
+
+        assert_eq!(
+            settings.effective_backend(),
+            VoxelRayBackendMode::CurrentSdf
+        );
+        assert_eq!(
+            settings.fallback_reason.as_deref(),
+            Some("NAADF cache stale; using CurrentSdf fallback")
+        );
     }
 }

@@ -8,15 +8,15 @@ world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 voxel_ray_backend = "naadf"
 experimental_render_mode = "current_with_naadf_gi"
 naadf_force_cpu_builder = true
-naadf_max_chunk_updates_per_frame = 2
+naadf_max_chunk_updates_per_frame = 1
 
 [[checkpoint]]
-name = "naadf-dig-edit"
+name = "naadf-heavy-dig-edit"
 position = [256.0, 82.0, 220.0]
 look_at = [282.0, 64.0, 250.0]
 time_of_day = 0.42
-hold_frames = 180
+hold_frames = 240
 screenshot = false
 fog_tier = "off"
 render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
-gameplay = { min_horizontal_speed = 0.0, stall_after_frames = 30, max_stall_events = 0, dig_probe = { enabled = true, start_frame = 30, interval_frames = 30, radius = 1, require_crust_rejection = true } }
+gameplay = { min_horizontal_speed = 0.0, stall_after_frames = 30, max_stall_events = 0, dig_probe = { enabled = true, start_frame = 20, interval_frames = 10, radius = 2, require_crust_rejection = true } }

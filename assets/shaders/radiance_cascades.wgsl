@@ -47,7 +47,8 @@ struct RadianceCascadeParams {
     // Temporal
     frame_index: u32,
     temporal_blend: f32,
-    _padding4: vec2<f32>,
+    voxel_backend: u32,
+    backend_switch_generation: u32,
     
     // Camera
     camera_position: vec3<f32>,
@@ -81,6 +82,8 @@ const INV_PI: f32 = 0.31830988618;
 const MAX_STEPS: u32 = 64u;
 const SDF_EPSILON: f32 = 0.001;
 const RAY_EPSILON: f32 = 0.01;
+const GI_BACKEND_CURRENT_SDF: u32 = 0u;
+const GI_BACKEND_NAADF: u32 = 1u;
 
 // Cascade intervals (each cascade covers 4x the area of the previous)
 const CASCADE_SCALE: f32 = 4.0;
@@ -171,6 +174,23 @@ fn sphere_trace(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHi
     
     result.distance = t;
     return result;
+}
+
+fn trace_current_sdf_gi(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
+    return sphere_trace(origin, direction, max_dist);
+}
+
+fn trace_naadf_gi_fallback(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
+    // The NAADF GI pipeline variant binds the real NAADF buffers later. Until
+    // then this branch keeps backend selection explicit without changing output.
+    return trace_current_sdf_gi(origin, direction, max_dist);
+}
+
+fn trace_gi_backend(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
+    if params.voxel_backend == GI_BACKEND_NAADF {
+        return trace_naadf_gi_fallback(origin, direction, max_dist);
+    }
+    return trace_current_sdf_gi(origin, direction, max_dist);
 }
 
 /// Soft shadow using SDF (penumbra estimation)
@@ -315,7 +335,7 @@ fn trace_probe_ray(
 ) -> vec3<f32> {
     let max_dist = params.max_ray_distance * pow(CASCADE_SCALE, f32(cascade_level));
     
-    let hit = sphere_trace(origin, direction, max_dist);
+    let hit = trace_gi_backend(origin, direction, max_dist);
     
     if hit.hit {
         // Hit geometry - compute lighting at hit point

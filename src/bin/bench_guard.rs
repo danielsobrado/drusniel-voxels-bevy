@@ -27,10 +27,13 @@ struct Args {
 #[derive(Debug, Deserialize)]
 struct GuardConfig {
     #[serde(rename = "check")]
+    #[serde(default)]
     checks: Vec<GuardCheck>,
+    #[serde(default)]
+    naadf: Option<NaadfGuardConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct GuardCheck {
     name: String,
     scene: String,
@@ -50,7 +53,7 @@ struct GuardCheck {
     skip_if: Option<SkipCondition>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct SkipCondition {
     area: String,
     field: String,
@@ -59,6 +62,39 @@ struct SkipCondition {
     lt: Option<f64>,
     lte: Option<f64>,
     eq: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+struct NaadfGuardConfig {
+    max_gpu_memory_mb: f64,
+    max_dirty_chunks_pending: f64,
+    max_oldest_dirty_chunk_age_frames: f64,
+    max_avg_ray_steps: f64,
+    max_uploaded_chunks_per_frame: f64,
+    max_frame_time_regression_percent: f64,
+    targets: Vec<NaadfGuardTarget>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct NaadfGuardTarget {
+    label: String,
+    scene: String,
+    checkpoint: String,
+    baseline_scene: Option<String>,
+    baseline_checkpoint: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NaadfFrameRegressionCheck {
+    name: String,
+    scene: String,
+    checkpoint: String,
+    baseline_scene: String,
+    baseline_checkpoint: String,
+    field: String,
+    max_regression_percent: f64,
+    required: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +148,120 @@ struct CheckResult {
     status: Status,
 }
 
+impl Default for NaadfGuardConfig {
+    fn default() -> Self {
+        Self {
+            max_gpu_memory_mb: 512.0,
+            max_dirty_chunks_pending: 256.0,
+            max_oldest_dirty_chunk_age_frames: 120.0,
+            max_avg_ray_steps: 90.0,
+            max_uploaded_chunks_per_frame: 8.0,
+            max_frame_time_regression_percent: 10.0,
+            targets: default_naadf_targets(),
+        }
+    }
+}
+
+impl GuardConfig {
+    fn expanded_checks(&self) -> Vec<GuardCheck> {
+        let mut checks = self.checks.clone();
+        if let Some(naadf) = &self.naadf {
+            checks.extend(naadf.metric_checks());
+        }
+        checks
+    }
+
+    fn expanded_naadf_frame_regression_checks(&self) -> Vec<NaadfFrameRegressionCheck> {
+        self.naadf
+            .as_ref()
+            .map(NaadfGuardConfig::frame_regression_checks)
+            .unwrap_or_default()
+    }
+}
+
+impl NaadfGuardConfig {
+    fn metric_checks(&self) -> Vec<GuardCheck> {
+        let mut checks = Vec::with_capacity(self.targets.len() * 5);
+        for target in &self.targets {
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "gpu_memory_bytes",
+                "naadf.gpu_memory_bytes",
+                warning_threshold(self.max_gpu_memory_mb * 1024.0 * 1024.0),
+                self.max_gpu_memory_mb * 1024.0 * 1024.0,
+                "bytes",
+            ));
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "dirty_chunks_pending",
+                "naadf.dirty_chunks_pending",
+                warning_threshold(self.max_dirty_chunks_pending),
+                self.max_dirty_chunks_pending,
+                "count",
+            ));
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "oldest_dirty_chunk_age_frames",
+                "naadf.gpu_build_queue_oldest_age_frames",
+                warning_threshold(self.max_oldest_dirty_chunk_age_frames),
+                self.max_oldest_dirty_chunk_age_frames,
+                "frames",
+            ));
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "avg_ray_steps",
+                "naadf.avg_ray_steps_last_frame",
+                warning_threshold(self.max_avg_ray_steps),
+                self.max_avg_ray_steps,
+                "steps",
+            ));
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "uploaded_chunks_per_frame",
+                "naadf.uploaded_chunks_last_frame",
+                warning_threshold(self.max_uploaded_chunks_per_frame),
+                self.max_uploaded_chunks_per_frame,
+                "count",
+            ));
+        }
+        checks
+    }
+
+    fn frame_regression_checks(&self) -> Vec<NaadfFrameRegressionCheck> {
+        let mut checks = Vec::new();
+        for target in &self.targets {
+            let (Some(baseline_scene), Some(baseline_checkpoint)) =
+                (&target.baseline_scene, &target.baseline_checkpoint)
+            else {
+                continue;
+            };
+            for field in ["avg_ms", "p99_ms"] {
+                checks.push(NaadfFrameRegressionCheck {
+                    name: format!("naadf_{}_frame_{}_regression", target.label, field),
+                    scene: target.scene.clone(),
+                    checkpoint: target.checkpoint.clone(),
+                    baseline_scene: baseline_scene.clone(),
+                    baseline_checkpoint: baseline_checkpoint.clone(),
+                    field: field.to_string(),
+                    max_regression_percent: self.max_frame_time_regression_percent,
+                    required: false,
+                });
+            }
+        }
+        checks
+    }
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(true) => ExitCode::SUCCESS,
@@ -136,9 +286,14 @@ fn run() -> Result<bool, String> {
         summaries.push((path.clone(), summary));
     }
 
-    let mut results = Vec::with_capacity(config.checks.len());
-    for check in &config.checks {
+    let checks = config.expanded_checks();
+    let regression_checks = config.expanded_naadf_frame_regression_checks();
+    let mut results = Vec::with_capacity(checks.len() + regression_checks.len());
+    for check in &checks {
         results.push(evaluate_check(check, &summaries));
+    }
+    for check in &regression_checks {
+        results.push(evaluate_naadf_frame_regression(check, &summaries));
     }
 
     println!("Config: {}", args.config.display());
@@ -217,6 +372,83 @@ fn evaluate_check(check: &GuardCheck, summaries: &[(PathBuf, BenchSummary)]) -> 
         checkpoint: format!("{}/{}", check.scene, check.checkpoint),
         metric,
         value,
+        threshold,
+        status,
+    }
+}
+
+fn evaluate_naadf_frame_regression(
+    check: &NaadfFrameRegressionCheck,
+    summaries: &[(PathBuf, BenchSummary)],
+) -> CheckResult {
+    let metric = format!(
+        "{} (__frame_total:{} vs {}/{})",
+        check.name, check.field, check.baseline_scene, check.baseline_checkpoint
+    );
+    let threshold = format!(
+        "fail > {}% frame regression",
+        format_number(Some(check.max_regression_percent))
+    );
+    let checkpoint = format!("{}/{}", check.scene, check.checkpoint);
+    let target = summaries
+        .iter()
+        .map(|(_, summary)| summary)
+        .find(|summary| summary.scene == check.scene)
+        .and_then(|summary| {
+            metric_value(summary, &check.checkpoint, "__frame_total", &check.field)
+        });
+    let baseline = summaries
+        .iter()
+        .map(|(_, summary)| summary)
+        .find(|summary| summary.scene == check.baseline_scene)
+        .and_then(|summary| {
+            metric_value(
+                summary,
+                &check.baseline_checkpoint,
+                "__frame_total",
+                &check.field,
+            )
+        });
+
+    let (Some(target), Some(baseline)) = (target, baseline) else {
+        return CheckResult {
+            checkpoint,
+            metric,
+            value: None,
+            threshold,
+            status: if check.required {
+                Status::Missing
+            } else {
+                Status::Skipped
+            },
+        };
+    };
+
+    if baseline <= f64::EPSILON {
+        return CheckResult {
+            checkpoint,
+            metric,
+            value: None,
+            threshold: format!("{threshold}; skipped because baseline <= 0"),
+            status: if check.required {
+                Status::Missing
+            } else {
+                Status::Skipped
+            },
+        };
+    }
+
+    let regression_percent = ((target - baseline) / baseline) * 100.0;
+    let status = if regression_percent > check.max_regression_percent {
+        Status::Fail
+    } else {
+        Status::Pass
+    };
+
+    CheckResult {
+        checkpoint,
+        metric,
+        value: Some(regression_percent),
         threshold,
         status,
     }
@@ -402,4 +634,178 @@ fn format_number(value: Option<f64>) -> String {
 
 fn default_required() -> bool {
     true
+}
+
+fn default_naadf_targets() -> Vec<NaadfGuardTarget> {
+    vec![
+        NaadfGuardTarget {
+            label: "gi".into(),
+            scene: "visual-regression-naadf-gi.toml".into(),
+            checkpoint: "naadf-gi-experimental".into(),
+            baseline_scene: Some("visual-regression-naadf-current.toml".into()),
+            baseline_checkpoint: Some("naadf-current-reference".into()),
+        },
+        NaadfGuardTarget {
+            label: "preview".into(),
+            scene: "visual-regression-naadf-preview.toml".into(),
+            checkpoint: "naadf-preview-experimental".into(),
+            baseline_scene: Some("visual-regression-naadf-current.toml".into()),
+            baseline_checkpoint: Some("naadf-current-reference".into()),
+        },
+        NaadfGuardTarget {
+            label: "live_lod_ridge".into(),
+            scene: "visual-regression-naadf-live-lod.toml".into(),
+            checkpoint: "naadf-live-lod-ridge-run".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+        NaadfGuardTarget {
+            label: "live_lod_jump".into(),
+            scene: "visual-regression-naadf-live-lod.toml".into(),
+            checkpoint: "naadf-live-lod-jump-water".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+        NaadfGuardTarget {
+            label: "live_lod_forest".into(),
+            scene: "visual-regression-naadf-live-lod.toml".into(),
+            checkpoint: "naadf-live-lod-forest-sweep".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+        NaadfGuardTarget {
+            label: "dig_edit".into(),
+            scene: "dig-edit-naadf-stability.toml".into(),
+            checkpoint: "naadf-heavy-dig-edit".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+    ]
+}
+
+fn naadf_metric_check(
+    label: &str,
+    scene: &str,
+    checkpoint: &str,
+    metric_name: &str,
+    area: &str,
+    warn_gt: f64,
+    fail_gt: f64,
+    unit: &str,
+) -> GuardCheck {
+    GuardCheck {
+        name: format!("naadf_{label}_{metric_name}"),
+        scene: scene.into(),
+        checkpoint: checkpoint.into(),
+        area: area.into(),
+        field: "avg_ms".into(),
+        unit: unit.into(),
+        warn_gt: Some(warn_gt),
+        fail_gt: Some(fail_gt),
+        warn_lt: None,
+        fail_lt: None,
+        exists: false,
+        required: false,
+        skip_if: None,
+    }
+}
+
+fn warning_threshold(fail_threshold: f64) -> f64 {
+    fail_threshold * 0.9
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn naadf_config_expands_optional_metric_checks() {
+        let config: GuardConfig = toml::from_str(
+            r#"
+            [naadf]
+            max_gpu_memory_mb = 512
+            max_dirty_chunks_pending = 256
+            max_oldest_dirty_chunk_age_frames = 120
+            max_avg_ray_steps = 90
+            max_uploaded_chunks_per_frame = 8
+            max_frame_time_regression_percent = 10
+            "#,
+        )
+        .expect("NAADF guard config should parse");
+
+        let checks = config.expanded_checks();
+
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "naadf_gi_gpu_memory_bytes")
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "naadf_gi_dirty_chunks_pending")
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "naadf_gi_avg_ray_steps")
+        );
+        assert!(
+            checks
+                .iter()
+                .filter(|check| check.name.starts_with("naadf_"))
+                .all(|check| !check.required)
+        );
+    }
+
+    #[test]
+    fn naadf_frame_regression_fails_against_baseline_summary() {
+        let check = NaadfFrameRegressionCheck {
+            name: "naadf_gi_frame_avg_regression".into(),
+            scene: "visual-regression-naadf-gi.toml".into(),
+            checkpoint: "naadf-gi-experimental".into(),
+            baseline_scene: "visual-regression-naadf-current.toml".into(),
+            baseline_checkpoint: "naadf-current-reference".into(),
+            field: "avg_ms".into(),
+            max_regression_percent: 10.0,
+            required: false,
+        };
+        let summaries = vec![
+            (
+                PathBuf::from("baseline.json"),
+                summary_with_frame(
+                    "visual-regression-naadf-current.toml",
+                    "naadf-current-reference",
+                    10.0,
+                    12.0,
+                ),
+            ),
+            (
+                PathBuf::from("target.json"),
+                summary_with_frame(
+                    "visual-regression-naadf-gi.toml",
+                    "naadf-gi-experimental",
+                    11.2,
+                    13.0,
+                ),
+            ),
+        ];
+
+        let result = evaluate_naadf_frame_regression(&check, &summaries);
+
+        assert_eq!(result.status, Status::Fail);
+        assert!((result.value.unwrap() - 12.0).abs() <= 1e-9);
+    }
+
+    fn summary_with_frame(scene: &str, checkpoint: &str, avg_ms: f64, p99_ms: f64) -> BenchSummary {
+        BenchSummary {
+            scene: scene.into(),
+            checkpoints: vec![CheckpointSummary {
+                name: checkpoint.into(),
+                median_frame_ms: avg_ms,
+                p99_frame_ms: p99_ms,
+                areas: HashMap::new(),
+            }],
+        }
+    }
 }

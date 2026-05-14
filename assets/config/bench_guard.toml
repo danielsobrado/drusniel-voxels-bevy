@@ -1,6 +1,14 @@
 # Bench-only regression guard for completed render optimizations.
 # Run manually after a bench; this is not part of normal cargo build/check.
 
+[naadf]
+max_gpu_memory_mb = 512
+max_dirty_chunks_pending = 256
+max_oldest_dirty_chunk_age_frames = 120
+max_avg_ray_steps = 90
+max_uploaded_chunks_per_frame = 8
+max_frame_time_regression_percent = 10
+
 [[check]]
 name = "ridge_frame_avg"
 scene = "visual-regression.toml"

@@ -211,4 +211,211 @@ mod tests {
             assert_eq!(node.payload(), 0x12345);
         }
     }
+
+    #[test]
+    fn wgsl_constants_match_rust_layout() {
+        let common = include_str!("../../../assets/shaders/naadf/common.wgsl");
+
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_VOXELS_PER_BLOCK_AXIS"),
+            VOXELS_PER_BLOCK_AXIS
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_BLOCKS_PER_CHUNK_AXIS"),
+            BLOCKS_PER_CHUNK_AXIS
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_VOXELS_PER_CHUNK_AXIS"),
+            VOXELS_PER_CHUNK_AXIS
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_VOXELS_PER_BLOCK"),
+            VOXELS_PER_BLOCK
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_BLOCKS_PER_CHUNK"),
+            BLOCKS_PER_CHUNK
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_VOXELS_PER_CHUNK"),
+            VOXELS_PER_CHUNK
+        );
+        assert_eq!(wgsl_u32_const(common, "NAADF_RAW_VOXEL_RECORD_BYTES"), 4);
+        assert_eq!(wgsl_u32_const(common, "NAADF_NODE_STATE_SHIFT"), 30);
+    }
+
+    #[test]
+    fn wgsl_layout_imports_common_shader() {
+        let layout = include_str!("../../../assets/shaders/naadf/layout.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(layout, "shaders/naadf/layout.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+    }
+
+    #[test]
+    fn wgsl_ray_trace_imports_layout_and_declares_dense_traversal() {
+        let ray_trace = include_str!("../../../assets/shaders/naadf/ray_trace.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(ray_trace, "shaders/naadf/ray_trace.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/layout.wgsl"
+            )
+        }));
+        assert!(ray_trace.contains("fn trace_naadf_dense_debug"));
+        assert!(ray_trace.contains("naadf_voxel_records"));
+        assert!(ray_trace.contains("naadf_material_records"));
+        assert!(ray_trace.contains("fn naadf_step_axis"));
+    }
+
+    #[test]
+    fn wgsl_block_builder_imports_layout_and_uses_raw_voxels() {
+        let build_blocks = include_str!("../../../assets/shaders/naadf/build_blocks.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(build_blocks, "shaders/naadf/build_blocks.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/layout.wgsl"
+            )
+        }));
+        assert!(build_blocks.contains("@compute"));
+        assert!(build_blocks.contains("naadf_raw_voxel_records"));
+        assert!(build_blocks.contains("naadf_block_records"));
+        assert!(build_blocks.contains("NAADF_NODE_UNIFORM_FULL"));
+    }
+
+    #[test]
+    fn wgsl_bounds_builder_writes_directional_bounds() {
+        let build_bounds = include_str!("../../../assets/shaders/naadf/build_bounds.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(build_bounds, "shaders/naadf/build_bounds.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+        assert!(build_bounds.contains("@compute"));
+        assert!(build_bounds.contains("naadf_mask_bit_is_set"));
+        assert!(build_bounds.contains("naadf_pack_bounds_xy"));
+        assert!(build_bounds.contains("naadf_pack_bounds_z"));
+    }
+
+    #[test]
+    fn wgsl_lighting_queries_import_ray_trace_for_sun_visibility() {
+        let lighting = include_str!("../../../assets/shaders/naadf/lighting_queries.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(lighting, "shaders/naadf/lighting_queries.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/ray_trace.wgsl"
+            )
+        }));
+        assert!(lighting.contains("fn naadf_sun_visibility"));
+        assert!(lighting.contains("fn naadf_terrain_ao_visibility"));
+        assert!(lighting.contains("fn naadf_contact_shadow_visibility"));
+        assert!(lighting.contains("trace_naadf_dense_debug"));
+    }
+
+    #[test]
+    fn wgsl_radiance_shader_routes_probe_rays_through_backend_abstraction() {
+        let radiance = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(radiance.contains("voxel_backend: u32"));
+        assert!(radiance.contains("const GI_BACKEND_NAADF"));
+        assert!(radiance.contains("fn trace_gi_backend"));
+        assert!(radiance.contains("trace_naadf_gi_fallback"));
+        assert!(radiance.contains("let hit = trace_gi_backend"));
+    }
+
+    #[test]
+    fn wgsl_debug_visualize_declares_ray_step_heatmap() {
+        let debug_visualize = include_str!("../../../assets/shaders/naadf/debug_visualize.wgsl");
+
+        assert!(debug_visualize.contains("@compute"));
+        assert!(debug_visualize.contains("naadf_ray_step_heatmap_inputs"));
+        assert!(debug_visualize.contains("naadf_ray_step_heatmap_output"));
+        assert!(debug_visualize.contains("fn naadf_ray_step_heatmap"));
+    }
+
+    #[test]
+    fn wgsl_first_hit_declares_preview_material_path() {
+        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(first_hit, "shaders/naadf/first_hit.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/ray_trace.wgsl"
+            )
+        }));
+        assert!(first_hit.contains("fn preview_naadf_first_hit"));
+        assert!(first_hit.contains("fn naadf_preview_material_color"));
+    }
+
+    #[test]
+    fn wgsl_preview_composite_declares_modes() {
+        let composite = include_str!("../../../assets/shaders/naadf/preview_composite.wgsl");
+
+        assert!(composite.contains("NAADF_PREVIEW_FULLSCREEN"));
+        assert!(composite.contains("NAADF_PREVIEW_SPLIT_VIEW"));
+        assert!(composite.contains("NAADF_PREVIEW_PICTURE_IN_PICTURE"));
+        assert!(composite.contains("fn naadf_preview_composite_color"));
+    }
+
+    #[test]
+    fn wgsl_temporal_accumulation_declares_blend_and_reset() {
+        let temporal = include_str!("../../../assets/shaders/naadf/temporal_accumulation.wgsl");
+
+        assert!(temporal.contains("NaadfTemporalAccumulationParams"));
+        assert!(temporal.contains("reset_history"));
+        assert!(temporal.contains("fn naadf_temporal_accumulate"));
+        assert!(temporal.contains("motion_valid"));
+    }
+
+    #[test]
+    fn wgsl_spatial_resampling_declares_edge_aware_helpers() {
+        let spatial = include_str!("../../../assets/shaders/naadf/spatial_resampling.wgsl");
+
+        assert!(spatial.contains("NaadfSpatialResamplingParams"));
+        assert!(spatial.contains("fn naadf_spatial_weight"));
+        assert!(spatial.contains("fn naadf_spatial_accumulate"));
+        assert!(spatial.contains("depth_sigma"));
+        assert!(spatial.contains("normal_sigma"));
+    }
+
+    fn wgsl_u32_const(source: &str, name: &str) -> u32 {
+        let prefix = format!("const {name}: u32 = ");
+        let line = source
+            .lines()
+            .find(|line| line.trim_start().starts_with(&prefix))
+            .unwrap_or_else(|| panic!("missing WGSL const {name}"));
+        let value = line
+            .trim_start()
+            .trim_start_matches(&prefix)
+            .trim_end_matches(';')
+            .trim_end_matches('u');
+        u32::from_str_radix(
+            value.trim_start_matches("0x"),
+            if value.starts_with("0x") { 16 } else { 10 },
+        )
+        .unwrap_or_else(|err| panic!("invalid WGSL const {name}: {err}"))
+    }
 }

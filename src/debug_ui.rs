@@ -1,5 +1,7 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::array_loader::AtlasMapping;
+#[cfg(feature = "naadf")]
+use crate::rendering::naadf::{NaadfConfig, NaadfStats};
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
@@ -92,6 +94,8 @@ fn debug_settings_ui(
     prop_wind: Option<ResMut<GrassPropWindSettings>>,
     mut water_shader_toggles: ResMut<WaterShaderToggles>,
     ray_tracing: Option<Res<RayTracingSettings>>,
+    #[cfg(feature = "naadf")] naadf_stats: Option<Res<NaadfStats>>,
+    #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
     mut sun_query: Query<&mut DirectionalLight>,
 ) {
     if !state.show_settings {
@@ -155,6 +159,58 @@ fn debug_settings_ui(
                 ));
                 if let Some(reason) = ray_tracing.fallback_reason.as_deref() {
                     ui.label(format!("Fallback: {reason}"));
+                }
+                #[cfg(feature = "naadf")]
+                if let Some(config) = naadf_config.as_deref_mut() {
+                    ui.checkbox(&mut config.enabled, "Enable NAADF cache");
+                    ui.checkbox(
+                        &mut config.use_for_sun_visibility,
+                        "Use NAADF sun visibility",
+                    );
+                    ui.checkbox(&mut config.use_for_terrain_ao, "Use NAADF terrain AO");
+                    ui.checkbox(
+                        &mut config.use_for_contact_shadows,
+                        "Use NAADF contact shadows",
+                    );
+                }
+                #[cfg(feature = "naadf")]
+                if let Some(stats) = naadf_stats.as_deref() {
+                    ui.label(format!(
+                        "NAADF cache: {} chunks, {} dirty pending, {} in flight",
+                        stats.loaded_chunks, stats.dirty_pending, stats.dirty_in_flight
+                    ));
+                    ui.label(format!(
+                        "NAADF streaming interest: {} chunks",
+                        stats.streaming_interest_chunks
+                    ));
+                    ui.label(format!(
+                        "NAADF GPU memory: {} bytes",
+                        stats.gpu_memory_bytes
+                    ));
+                    ui.label(format!(
+                        "NAADF GPU slots: {}/{} used, {} free",
+                        stats.gpu_slots_used, stats.gpu_max_chunks, stats.gpu_slots_available
+                    ));
+                    ui.label(format!(
+                        "NAADF reserved/free-list: {}/{} ({:.0}% fragmentation)",
+                        stats.gpu_slots_reserved,
+                        stats.gpu_slots_free_list,
+                        stats.gpu_slot_fragmentation * 100.0
+                    ));
+                    ui.label(format!(
+                        "NAADF uploads: {} pending, {} chunks / {} bytes last frame",
+                        stats.gpu_uploads_pending,
+                        stats.gpu_uploaded_chunks_last_frame,
+                        stats.gpu_uploaded_bytes_last_frame
+                    ));
+                    ui.label(format!(
+                        "NAADF GPU avg ray steps: {:.1}",
+                        stats.gpu_avg_ray_steps_last_frame
+                    ));
+                    ui.label(format!(
+                        "NAADF GPU build queue: {} pending, oldest {} frames",
+                        stats.gpu_build_queue_pending, stats.gpu_build_queue_oldest_age_frames
+                    ));
                 }
             }
 

@@ -220,6 +220,7 @@ impl VoxelSample {
 pub struct VoxelWorld {
     chunks: HashMap<IVec3, Chunk>,
     dirty_chunks: HashSet<IVec3>,
+    derived_dirty_chunks: HashSet<IVec3>,
     world_size_chunks: IVec3,
     bounds: WorldBounds,
     edit_stats: VoxelEditStats,
@@ -229,6 +230,7 @@ pub struct ChunkMut<'a> {
     position: IVec3,
     chunk: &'a mut Chunk,
     dirty_chunks: &'a mut HashSet<IVec3>,
+    derived_dirty_chunks: &'a mut HashSet<IVec3>,
 }
 
 impl Deref for ChunkMut<'_> {
@@ -249,6 +251,7 @@ impl Drop for ChunkMut<'_> {
     fn drop(&mut self) {
         if self.chunk.is_dirty() {
             self.dirty_chunks.insert(self.position);
+            self.derived_dirty_chunks.insert(self.position);
         } else {
             self.dirty_chunks.remove(&self.position);
         }
@@ -260,6 +263,7 @@ impl VoxelWorld {
         Self {
             chunks: HashMap::new(),
             dirty_chunks: HashSet::new(),
+            derived_dirty_chunks: HashSet::new(),
             world_size_chunks: size_chunks,
             bounds: WorldBounds::from_size_chunks(size_chunks),
             edit_stats: VoxelEditStats::default(),
@@ -277,6 +281,7 @@ impl VoxelWorld {
             position: chunk_pos,
             chunk,
             dirty_chunks: &mut self.dirty_chunks,
+            derived_dirty_chunks: &mut self.derived_dirty_chunks,
         })
     }
 
@@ -288,6 +293,7 @@ impl VoxelWorld {
         let position = chunk.position();
         if chunk.is_dirty() {
             self.dirty_chunks.insert(position);
+            self.derived_dirty_chunks.insert(position);
         } else {
             self.dirty_chunks.remove(&position);
         }
@@ -480,6 +486,14 @@ impl VoxelWorld {
     // Iteration
     pub fn dirty_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
         self.dirty_chunks.iter().copied()
+    }
+
+    pub fn derived_dirty_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
+        self.derived_dirty_chunks.iter().copied()
+    }
+
+    pub fn take_derived_dirty_chunks(&mut self) -> Vec<IVec3> {
+        self.derived_dirty_chunks.drain().collect()
     }
 
     /// Returns an iterator over all chunk positions and their chunks (immutable).
@@ -744,12 +758,23 @@ mod tests {
         world.insert_chunk(Chunk::new(IVec3::ZERO));
 
         assert_eq!(world.dirty_chunks().collect::<Vec<_>>(), vec![IVec3::ZERO]);
+        assert_eq!(
+            world.derived_dirty_chunks().collect::<Vec<_>>(),
+            vec![IVec3::ZERO]
+        );
+        assert_eq!(world.take_derived_dirty_chunks(), vec![IVec3::ZERO]);
+        assert_eq!(world.derived_dirty_chunks().count(), 0);
 
         world.get_chunk_mut(IVec3::ZERO).unwrap().clear_dirty();
         assert_eq!(world.dirty_chunks().count(), 0);
+        assert_eq!(world.derived_dirty_chunks().count(), 0);
 
         world.mark_chunk_dirty_with_reason(IVec3::ZERO, MeshDirtyReason::Generation);
         assert_eq!(world.dirty_chunks().collect::<Vec<_>>(), vec![IVec3::ZERO]);
+        assert_eq!(
+            world.derived_dirty_chunks().collect::<Vec<_>>(),
+            vec![IVec3::ZERO]
+        );
     }
 
     #[test]
@@ -770,5 +795,8 @@ mod tests {
         );
         assert!(world.get_chunk(IVec3::ZERO).unwrap().is_dirty());
         assert!(world.get_chunk(IVec3::X).unwrap().is_dirty());
+        let derived_dirty = world.derived_dirty_chunks().collect::<HashSet<_>>();
+        assert!(derived_dirty.contains(&IVec3::ZERO));
+        assert!(derived_dirty.contains(&IVec3::X));
     }
 }

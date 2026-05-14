@@ -210,6 +210,22 @@ pub enum RuntimeWriteCommand {
         #[serde(rename = "chunkIds")]
         chunk_ids: Vec<String>,
     },
+    #[serde(rename = "runtime.compareNaadfChunkOccupancy")]
+    CompareNaadfChunkOccupancy {
+        #[serde(rename = "chunkId")]
+        chunk_id: String,
+        #[serde(rename = "maxMismatches", default = "default_naadf_max_mismatches")]
+        max_mismatches: usize,
+    },
+    #[serde(rename = "runtime.compareNaadfRay")]
+    CompareNaadfRay {
+        origin: [f32; 3],
+        direction: [f32; 3],
+        #[serde(rename = "maxDistance", default = "default_naadf_ray_max_distance")]
+        max_distance: f32,
+        #[serde(default = "default_naadf_ray_purpose")]
+        purpose: String,
+    },
     #[serde(rename = "runtime.setAtlasMapping")]
     SetAtlasMapping { mapping: FrontendAtlasMapping },
     #[serde(rename = "runtime.saveAtlasMapping")]
@@ -246,6 +262,18 @@ pub enum RuntimeWriteCommand {
     LoadProtectedAreas {},
     #[serde(rename = "runtime.saveWorldSnapshot")]
     SaveWorldSnapshot { reason: Option<String> },
+}
+
+fn default_naadf_max_mismatches() -> usize {
+    16
+}
+
+fn default_naadf_ray_max_distance() -> f32 {
+    256.0
+}
+
+fn default_naadf_ray_purpose() -> String {
+    "debug".to_string()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -941,6 +969,42 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 }
             }
         }
+        RuntimeWriteCommand::CompareNaadfChunkOccupancy {
+            chunk_id,
+            max_mismatches,
+        } => {
+            if parse_chunk_id(chunk_id).is_none() {
+                errors.push(format!(
+                    "chunkId '{chunk_id}' must look like chunk-x-z or chunk-x-y-z."
+                ));
+            }
+            if *max_mismatches > 256 {
+                errors.push("maxMismatches must be 256 or less.".to_string());
+            }
+        }
+        RuntimeWriteCommand::CompareNaadfRay {
+            origin,
+            direction,
+            max_distance,
+            purpose,
+        } => {
+            validate_finite_vec3("origin", origin, &mut errors);
+            validate_finite_vec3("direction", direction, &mut errors);
+            if direction
+                .iter()
+                .all(|component| component.abs() <= f32::EPSILON)
+            {
+                errors.push("direction must not be the zero vector.".to_string());
+            }
+            if !max_distance.is_finite() || *max_distance <= 0.0 || *max_distance > 4096.0 {
+                errors.push("maxDistance must be finite and in the range (0, 4096].".to_string());
+            }
+            if crate::rendering::voxel_ray_backend::VoxelRayPurpose::parse(purpose).is_none() {
+                errors.push(format!(
+                    "purpose '{purpose}' must be debug, sun_visibility, gi_secondary, terrain_ao, contact_shadow, or preview_primary."
+                ));
+            }
+        }
         RuntimeWriteCommand::SetAtlasMapping { mapping }
         | RuntimeWriteCommand::SaveAtlasMapping { mapping } => {
             validate_atlas_mapping(mapping, &mut errors);
@@ -1008,6 +1072,12 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+fn validate_finite_vec3(field: &str, value: &[f32; 3], errors: &mut Vec<String>) {
+    if value.iter().any(|component| !component.is_finite()) {
+        errors.push(format!("{field} must contain only finite numbers."));
     }
 }
 
@@ -1142,6 +1212,16 @@ fn execute_runtime_write_command(
             }
             RuntimeCommandResult::success(json!({ "queuedChunkIds": queued }))
         }
+        RuntimeWriteCommand::CompareNaadfChunkOccupancy {
+            chunk_id,
+            max_mismatches,
+        } => compare_naadf_chunk_occupancy(world, &chunk_id, max_mismatches),
+        RuntimeWriteCommand::CompareNaadfRay {
+            origin,
+            direction,
+            max_distance,
+            purpose,
+        } => compare_naadf_ray(world, origin, direction, max_distance, &purpose),
         RuntimeWriteCommand::SetAtlasMapping { mapping } => {
             match to_runtime_atlas_mapping(&mapping) {
                 Ok(next_mapping) => {
@@ -1353,6 +1433,163 @@ fn mark_chunk_dirty(world: &mut World, chunk_pos: IVec3) -> Result<(), String> {
         return Err(format!("Chunk {chunk_pos:?} does not exist."));
     }
     Ok(())
+}
+
+#[cfg(feature = "naadf")]
+fn compare_naadf_chunk_occupancy(
+    world: &World,
+    chunk_id: &str,
+    max_mismatches: usize,
+) -> RuntimeCommandResult<Value> {
+    let Some(chunk_pos) = parse_chunk_id(chunk_id) else {
+        return RuntimeCommandResult::validation(
+            "Runtime command validation failed.",
+            vec![format!(
+                "chunkId '{chunk_id}' must look like chunk-x-z or chunk-x-y-z."
+            )],
+        );
+    };
+
+    let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+        return RuntimeCommandResult::failure(
+            RuntimeCommandStatus::Failure,
+            "VoxelWorld resource is not available.".to_string(),
+        );
+    };
+    let Some(cache) = world.get_resource::<crate::rendering::naadf::NaadfCache>() else {
+        return RuntimeCommandResult::failure(
+            RuntimeCommandStatus::Failure,
+            "NaadfCache resource is not available.".to_string(),
+        );
+    };
+
+    let world_chunk_present = voxel_world.get_chunk(chunk_pos).is_some();
+    let Some(naadf_chunk) = cache.get(chunk_pos) else {
+        return RuntimeCommandResult::success(json!({
+            "chunkId": chunk_id,
+            "chunk": [chunk_pos.x, chunk_pos.y, chunk_pos.z],
+            "worldChunkPresent": world_chunk_present,
+            "naadfChunkPresent": false,
+            "mismatchCount": null,
+            "mismatches": [],
+        }));
+    };
+
+    let mismatches = crate::rendering::naadf::debug::compare_chunk_occupancy(
+        voxel_world,
+        naadf_chunk,
+        max_mismatches,
+    );
+
+    RuntimeCommandResult::success(json!({
+        "chunkId": chunk_id,
+        "chunk": [chunk_pos.x, chunk_pos.y, chunk_pos.z],
+        "worldChunkPresent": world_chunk_present,
+        "naadfChunkPresent": true,
+        "mismatchCount": mismatches.len(),
+        "truncatedAt": max_mismatches,
+        "mismatches": mismatches
+            .iter()
+            .map(|mismatch| json!({
+                "local": [mismatch.local.x, mismatch.local.y, mismatch.local.z],
+                "worldOccupied": mismatch.world_occupied,
+                "naadfOccupied": mismatch.naadf_occupied,
+            }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+#[cfg(not(feature = "naadf"))]
+fn compare_naadf_chunk_occupancy(
+    _world: &World,
+    _chunk_id: &str,
+    _max_mismatches: usize,
+) -> RuntimeCommandResult<Value> {
+    RuntimeCommandResult::failure(
+        RuntimeCommandStatus::Unsupported,
+        "NAADF diagnostics require the naadf feature.".to_string(),
+    )
+}
+
+#[cfg(feature = "naadf")]
+fn compare_naadf_ray(
+    world: &World,
+    origin: [f32; 3],
+    direction: [f32; 3],
+    max_distance: f32,
+    purpose: &str,
+) -> RuntimeCommandResult<Value> {
+    let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+        return RuntimeCommandResult::failure(
+            RuntimeCommandStatus::Failure,
+            "VoxelWorld resource is not available.".to_string(),
+        );
+    };
+    let Some(cache) = world.get_resource::<crate::rendering::naadf::NaadfCache>() else {
+        return RuntimeCommandResult::failure(
+            RuntimeCommandStatus::Failure,
+            "NaadfCache resource is not available.".to_string(),
+        );
+    };
+    let Some(purpose) = crate::rendering::voxel_ray_backend::VoxelRayPurpose::parse(purpose) else {
+        return RuntimeCommandResult::validation(
+            "Runtime command validation failed.",
+            vec!["purpose is not a known voxel ray purpose.".to_string()],
+        );
+    };
+
+    let comparison = crate::rendering::naadf::debug::compare_backend_ray(
+        voxel_world,
+        cache,
+        Vec3::from_array(origin),
+        Vec3::from_array(direction),
+        max_distance,
+        purpose,
+    );
+
+    RuntimeCommandResult::success(json!({
+        "origin": origin,
+        "direction": direction,
+        "maxDistance": max_distance,
+        "purpose": purpose.as_str(),
+        "matches": comparison.matches,
+        "current": {
+            "steps": comparison.current_steps,
+            "hit": comparison.current_hit.as_ref().map(voxel_ray_hit_payload),
+        },
+        "naadf": {
+            "steps": comparison.naadf_steps,
+            "hit": comparison.naadf_hit.as_ref().map(voxel_ray_hit_payload),
+        },
+    }))
+}
+
+#[cfg(not(feature = "naadf"))]
+fn compare_naadf_ray(
+    _world: &World,
+    _origin: [f32; 3],
+    _direction: [f32; 3],
+    _max_distance: f32,
+    _purpose: &str,
+) -> RuntimeCommandResult<Value> {
+    RuntimeCommandResult::failure(
+        RuntimeCommandStatus::Unsupported,
+        "NAADF diagnostics require the naadf feature.".to_string(),
+    )
+}
+
+#[cfg(feature = "naadf")]
+fn voxel_ray_hit_payload(hit: &crate::rendering::voxel_ray_backend::VoxelRayHit) -> Value {
+    json!({
+        "chunk": [hit.chunk.x, hit.chunk.y, hit.chunk.z],
+        "local": [hit.local.x, hit.local.y, hit.local.z],
+        "worldVoxel": [hit.world_voxel.x, hit.world_voxel.y, hit.world_voxel.z],
+        "position": [hit.position.x, hit.position.y, hit.position.z],
+        "normal": [hit.normal.x, hit.normal.y, hit.normal.z],
+        "distance": hit.distance,
+        "materialId": hit.material_id,
+        "steps": hit.steps,
+    })
 }
 
 fn set_runtime_voxel(

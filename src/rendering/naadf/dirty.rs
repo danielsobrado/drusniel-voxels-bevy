@@ -45,6 +45,14 @@ impl NaadfDirtyChunkQueue {
         self.pending.len()
     }
 
+    pub fn pending_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
+        self.pending.iter().copied()
+    }
+
+    pub fn in_flight_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
+        self.in_flight.iter().copied()
+    }
+
     pub fn stats(&self) -> NaadfDirtyQueueStats {
         NaadfDirtyQueueStats {
             pending: self.pending.len(),
@@ -56,14 +64,15 @@ impl NaadfDirtyChunkQueue {
 
 pub fn queue_existing_dirty_chunks(
     config: Res<NaadfConfig>,
-    world: Res<VoxelWorld>,
+    mut world: ResMut<VoxelWorld>,
     mut queue: ResMut<NaadfDirtyChunkQueue>,
 ) {
+    let dirty_chunks = world.take_derived_dirty_chunks();
     if !config.enabled {
         return;
     }
 
-    for chunk_pos in world.dirty_chunks() {
+    for chunk_pos in dirty_chunks {
         queue.queue(chunk_pos);
     }
 }
@@ -78,5 +87,21 @@ mod tests {
         assert!(queue.queue(IVec3::new(1, 2, 3)));
         assert!(!queue.queue(IVec3::new(1, 2, 3)));
         assert_eq!(queue.pending_len(), 1);
+    }
+
+    #[test]
+    fn dirty_queue_exposes_pending_and_in_flight_chunks_for_debug() {
+        let mut queue = NaadfDirtyChunkQueue::default();
+        queue.queue(IVec3::X);
+        queue.queue(IVec3::Y);
+        assert_eq!(
+            queue.pending_chunks().collect::<Vec<_>>(),
+            vec![IVec3::X, IVec3::Y]
+        );
+
+        assert_eq!(queue.pop_pending(), Some(IVec3::X));
+
+        assert_eq!(queue.pending_chunks().collect::<Vec<_>>(), vec![IVec3::Y]);
+        assert_eq!(queue.in_flight_chunks().collect::<Vec<_>>(), vec![IVec3::X]);
     }
 }

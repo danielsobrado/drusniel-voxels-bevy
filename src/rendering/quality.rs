@@ -128,6 +128,31 @@ impl RenderQualityPreset {
             Self::High => WeatherQuality::Ultra,
         }
     }
+
+    pub fn naadf_max_chunk_updates_per_frame(self) -> u32 {
+        match self {
+            Self::Low => 1,
+            Self::Medium => 2,
+            Self::High => 4,
+            Self::Performance100 => 1,
+        }
+    }
+
+    pub fn naadf_max_upload_bytes_per_frame(self) -> u32 {
+        match self {
+            Self::Low => 1 * 1024 * 1024,
+            Self::Medium => 2 * 1024 * 1024,
+            Self::High => 4 * 1024 * 1024,
+            Self::Performance100 => 1 * 1024 * 1024,
+        }
+    }
+
+    pub fn naadf_allows_contact_queries(self) -> bool {
+        match self {
+            Self::Low | Self::Performance100 => false,
+            Self::Medium | Self::High => true,
+        }
+    }
 }
 
 pub fn sync_render_quality_preset(
@@ -153,6 +178,9 @@ pub fn sync_render_quality_preset(
 pub fn apply_render_quality_preset(
     preset: Res<RenderQualityPreset>,
     mut reflection_config: Option<ResMut<WaterReflectionConfig>>,
+    #[cfg(feature = "naadf")] mut naadf_config: Option<
+        ResMut<crate::rendering::naadf::NaadfConfig>,
+    >,
     mut last_applied: Local<Option<RenderQualityPreset>>,
 ) {
     if Some(*preset) == *last_applied {
@@ -167,6 +195,15 @@ pub fn apply_render_quality_preset(
         config.auto_disable_distance = preset.water_reflection_distance();
         config.require_water_in_frustum = true;
         config.clamp_runtime();
+    }
+
+    #[cfg(feature = "naadf")]
+    if let Some(config) = naadf_config.as_deref_mut() {
+        config.chunk_cache.max_chunk_updates_per_frame = preset.naadf_max_chunk_updates_per_frame();
+        config.chunk_cache.max_upload_bytes_per_frame = preset.naadf_max_upload_bytes_per_frame();
+        if !preset.naadf_allows_contact_queries() {
+            config.use_for_contact_shadows = false;
+        }
     }
 }
 
@@ -195,4 +232,25 @@ pub fn record_render_quality_counters(
         "Water Reflection Quality",
         preset.water_reflection_quality_code(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn naadf_quality_budgets_keep_performance100_conservative() {
+        assert!(RenderQualityPreset::Performance100.naadf_max_chunk_updates_per_frame() <= 1);
+        assert!(
+            RenderQualityPreset::Performance100.naadf_max_upload_bytes_per_frame()
+                <= RenderQualityPreset::Medium.naadf_max_upload_bytes_per_frame()
+        );
+        assert!(!RenderQualityPreset::Performance100.naadf_allows_contact_queries());
+    }
+
+    #[test]
+    fn low_quality_disables_expensive_naadf_contact_queries() {
+        assert!(!RenderQualityPreset::Low.naadf_allows_contact_queries());
+        assert!(RenderQualityPreset::High.naadf_allows_contact_queries());
+    }
 }

@@ -1,6 +1,6 @@
 (
     name: "wall_x",
-    occupied_rule: "x == 8",
+    occupied_rule: Some("x == 8"),
     rays: [
         (origin: [0.5, 2.5, 2.5], dir: [1.0, 0.0, 0.0], max_distance: 16.0, hit: Some([8, 2, 2])),
     ],

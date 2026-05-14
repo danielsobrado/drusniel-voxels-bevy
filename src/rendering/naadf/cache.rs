@@ -21,15 +21,24 @@ pub struct NaadfCacheBuildReport {
     pub removed_missing: u32,
     pub deferred: u32,
     pub missing: Vec<IVec3>,
+    pub rebuilt_chunks: Vec<IVec3>,
 }
 
 impl NaadfCache {
+    pub fn insert_chunk(&mut self, chunk: NaadfChunk) {
+        self.chunks.insert(chunk.position, chunk);
+    }
+
     pub fn get(&self, chunk_pos: IVec3) -> Option<&NaadfChunk> {
         self.chunks.get(&chunk_pos)
     }
 
     pub fn contains_chunk(&self, chunk_pos: IVec3) -> bool {
         self.chunks.contains_key(&chunk_pos)
+    }
+
+    pub fn remove_chunk(&mut self, chunk_pos: IVec3) -> Option<NaadfChunk> {
+        self.chunks.remove(&chunk_pos)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&IVec3, &NaadfChunk)> {
@@ -82,6 +91,7 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
             Ok(chunk) => {
                 cache.chunks.insert(chunk_pos, chunk);
                 report.rebuilt += 1;
+                report.rebuilt_chunks.push(chunk_pos);
             }
             Err(NaadfExtractionError::MissingChunk(pos)) => {
                 if cache.chunks.remove(&pos).is_some() {
@@ -131,7 +141,7 @@ mod tests {
         let chunk = extractor.extract_chunk(&world, IVec3::ZERO).unwrap();
         let mut cache = NaadfCache::default();
 
-        cache.chunks.insert(IVec3::ZERO, chunk);
+        cache.insert_chunk(chunk);
 
         assert!(cache.contains_chunk(IVec3::ZERO));
         assert_eq!(cache.len(), 1);
