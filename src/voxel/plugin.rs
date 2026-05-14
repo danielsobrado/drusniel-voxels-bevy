@@ -1826,6 +1826,19 @@ fn should_defer_surface_nets_mesh(target_mode: MeshMode, missing_boundary_neighb
     matches!(target_mode, MeshMode::SurfaceNets) && missing_boundary_neighbors > 0
 }
 
+pub(crate) fn target_terrain_mesh_mode_for_lod(
+    lod_level: LodLevel,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+) -> MeshMode {
+    match lod_level {
+        LodLevel::Lod0 => mesh_settings.mode,
+        LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 | LodLevel::Culled => {
+            lod_settings.low_detail_mode
+        }
+    }
+}
+
 fn mesh_lod_level_for_surface_nets_cap(
     target_mode: MeshMode,
     uniformity: ChunkUniformity,
@@ -1839,6 +1852,78 @@ fn mesh_lod_level_for_surface_nets_cap(
         LodLevel::Lod0
     } else {
         lod_level
+    }
+}
+
+pub(crate) fn effective_terrain_mesh_lod_for_chunk(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+) -> Option<LodLevel> {
+    let chunk = world.get_chunk(chunk_pos)?;
+    let lod_level = chunk.lod_level();
+
+    if lod_level == LodLevel::Culled {
+        return Some(LodLevel::Culled);
+    }
+
+    let target_mode = target_terrain_mesh_mode_for_lod(lod_level, mesh_settings, lod_settings);
+    let empty_surface_neighbor = chunk.uniformity() == ChunkUniformity::Empty
+        && matches!(target_mode, MeshMode::SurfaceNets)
+        && empty_chunk_has_surface_nets_boundary_surface(world, chunk_pos);
+
+    Some(mesh_lod_level_for_surface_nets_cap(
+        target_mode,
+        chunk.uniformity(),
+        empty_surface_neighbor,
+        lod_level,
+    ))
+}
+
+pub(crate) fn build_terrain_neighbor_lods(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+) -> NeighborLods {
+    NeighborLods {
+        neg_x: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(-1, 0, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_x: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(1, 0, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        neg_y: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, -1, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_y: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 1, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        neg_z: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 0, -1),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_z: effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 0, 1),
+            mesh_settings,
+            lod_settings,
+        ),
     }
 }
 
@@ -1978,11 +2063,8 @@ fn mesh_dirty_chunks_system(
         }
 
         let (target_mode, lod_level, uniformity) = if let Some(chunk) = world.get_chunk(chunk_pos) {
-            let target_mode = match chunk.lod_level() {
-                LodLevel::Lod0 => mesh_settings.mode,
-                LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 => lod_settings.low_detail_mode,
-                LodLevel::Culled => lod_settings.low_detail_mode,
-            };
+            let target_mode =
+                target_terrain_mesh_mode_for_lod(chunk.lod_level(), &mesh_settings, &lod_settings);
 
             (target_mode, chunk.lod_level(), chunk.uniformity())
         } else {
@@ -2057,26 +2139,13 @@ fn mesh_dirty_chunks_system(
             }
         }
 
-        let neighbor_lods = NeighborLods {
-            neg_x: world
-                .get_chunk(chunk_pos + IVec3::new(-1, 0, 0))
-                .map(|c| c.lod_level()),
-            pos_x: world
-                .get_chunk(chunk_pos + IVec3::new(1, 0, 0))
-                .map(|c| c.lod_level()),
-            neg_y: world
-                .get_chunk(chunk_pos + IVec3::new(0, -1, 0))
-                .map(|c| c.lod_level()),
-            pos_y: world
-                .get_chunk(chunk_pos + IVec3::new(0, 1, 0))
-                .map(|c| c.lod_level()),
-            neg_z: world
-                .get_chunk(chunk_pos + IVec3::new(0, 0, -1))
-                .map(|c| c.lod_level()),
-            pos_z: world
-                .get_chunk(chunk_pos + IVec3::new(0, 0, 1))
-                .map(|c| c.lod_level()),
-        };
+        if matches!(target_mode, MeshMode::Blocky) && blocky_material.is_none() {
+            chunks_skipped += 1;
+            continue;
+        }
+
+        let neighbor_lods =
+            build_terrain_neighbor_lods(&world, chunk_pos, &mesh_settings, &lod_settings);
 
         // Step 1: Generate mesh data using immutable borrow (with timing)
         let mesh_start = Instant::now();
@@ -2160,7 +2229,7 @@ fn mesh_dirty_chunks_system(
 
                 if let Some(entity) = chunk.mesh_entity() {
                     // Update existing entity with new mesh AND correct material for current mode
-                    match mesh_settings.mode {
+                    match target_mode {
                         MeshMode::Blocky => {
                             if let Some(blocky_mat) = blocky_material.as_ref() {
                                 commands
@@ -2200,7 +2269,7 @@ fn mesh_dirty_chunks_system(
                     };
 
                     // Spawn with appropriate material based on mesh mode
-                    let entity = match mesh_settings.mode {
+                    let entity = match target_mode {
                         MeshMode::Blocky => {
                             let Some(blocky_material) = blocky_material.as_ref() else {
                                 continue;
@@ -4381,6 +4450,33 @@ mod tests {
                 LodLevel::Lod3
             ),
             LodLevel::Lod3
+        );
+    }
+
+    #[test]
+    fn neighbor_lods_use_effective_lod_for_empty_surface_nets_caps() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 2, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_chunk(Chunk::new(IVec3::Y));
+        world.set_voxel(IVec3::new(8, 15, 8), VoxelType::Sand);
+        world
+            .get_chunk_mut(IVec3::Y)
+            .unwrap()
+            .set_lod_level(LodLevel::Lod3);
+
+        let mesh_settings = MeshSettings {
+            mode: MeshMode::SurfaceNets,
+            ..Default::default()
+        };
+        let lod_settings = LodSettings::default();
+
+        assert_eq!(
+            world.get_chunk(IVec3::Y).unwrap().lod_level(),
+            LodLevel::Lod3
+        );
+        assert_eq!(
+            build_terrain_neighbor_lods(&world, IVec3::ZERO, &mesh_settings, &lod_settings).pos_y,
+            Some(LodLevel::Lod0)
         );
     }
 

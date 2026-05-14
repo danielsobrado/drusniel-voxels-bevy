@@ -27,8 +27,11 @@ use crate::voxel::meshing::{
 use crate::voxel::persistence::{
     self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
 };
-use crate::voxel::plugin::{WaterBodyInfo, WaterBodyRegistry};
-use crate::voxel::skirt::{NeighborLods, SkirtConfig};
+use crate::voxel::plugin::{
+    LodSettings, WaterBodyInfo, WaterBodyRegistry, build_terrain_neighbor_lods,
+    effective_terrain_mesh_lod_for_chunk, target_terrain_mesh_mode_for_lod,
+};
+use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
@@ -875,6 +878,10 @@ fn chunk_mesh_payload(
         .get_resource::<MeshSettings>()
         .copied()
         .unwrap_or_default();
+    let lod_settings = world
+        .get_resource::<LodSettings>()
+        .copied()
+        .unwrap_or_default();
     let skirt_config = world
         .get_resource::<SkirtConfig>()
         .cloned()
@@ -883,32 +890,19 @@ fn chunk_mesh_payload(
         .get_resource::<AmbientOcclusionConfig>()
         .cloned()
         .unwrap_or_default();
-    let neighbor_lods = NeighborLods {
-        neg_x: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(-1, 0, 0))
-            .map(|neighbor| neighbor.lod_level()),
-        pos_x: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(1, 0, 0))
-            .map(|neighbor| neighbor.lod_level()),
-        neg_y: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(0, -1, 0))
-            .map(|neighbor| neighbor.lod_level()),
-        pos_y: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(0, 1, 0))
-            .map(|neighbor| neighbor.lod_level()),
-        neg_z: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(0, 0, -1))
-            .map(|neighbor| neighbor.lod_level()),
-        pos_z: voxel_world
-            .get_chunk(chunk_pos + IVec3::new(0, 0, 1))
-            .map(|neighbor| neighbor.lod_level()),
-    };
+    let target_mode =
+        target_terrain_mesh_mode_for_lod(chunk.lod_level(), &mesh_settings, &lod_settings);
+    let mesh_lod_level =
+        effective_terrain_mesh_lod_for_chunk(voxel_world, chunk_pos, &mesh_settings, &lod_settings)
+            .unwrap_or_else(|| chunk.lod_level());
+    let neighbor_lods =
+        build_terrain_neighbor_lods(voxel_world, chunk_pos, &mesh_settings, &lod_settings);
 
     let mesh_result = generate_chunk_mesh_with_mode(
         chunk,
         voxel_world,
-        mesh_settings.mode,
-        chunk.lod_level(),
+        target_mode,
+        mesh_lod_level,
         neighbor_lods,
         &skirt_config,
         &ao_config.baked,
