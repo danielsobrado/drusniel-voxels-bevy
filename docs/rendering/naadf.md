@@ -60,6 +60,8 @@ Integrated GPU fallback is conservative. `allow_naadf_on_integrated_gpu` and `gp
 
 GPU buffers, upload queues, shader helpers, preview state, temporal accumulation, and spatial resampling scaffolding are implemented, but the feature is still experimental.
 
+Radiance Cascades deliberately remains on `CurrentSdf` until a real NAADF GI shader backend and bind group are available. The shader-side NAADF branch no longer aliases the current SDF path; accidental NAADF GI selection should be visible during code review and tests instead of silently producing current-SDF output.
+
 The NAADF preview path is not yet accepted as a replacement renderer. It needs visual regression runs, screenshot inspection, and performance guard baselines before it can be considered for broader use.
 
 No visual verification or bench execution has been run for this batch yet.

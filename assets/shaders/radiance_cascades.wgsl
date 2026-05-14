@@ -180,15 +180,23 @@ fn trace_current_sdf_gi(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) 
     return sphere_trace(origin, direction, max_dist);
 }
 
-fn trace_naadf_gi_fallback(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
-    // The NAADF GI pipeline variant binds the real NAADF buffers later. Until
-    // then this branch keeps backend selection explicit without changing output.
-    return trace_current_sdf_gi(origin, direction, max_dist);
+fn trace_naadf_gi_unavailable(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
+    // NAADF GI must not silently call the current SDF path. Until the render
+    // graph binds the NAADF chunk/block/voxel buffers, the resolved fallback
+    // policy should select GI_BACKEND_CURRENT_SDF before this shader branch is
+    // used. Returning a miss here makes accidental wiring obvious.
+    var result: RayHit;
+    result.hit = false;
+    result.position = origin + direction * max_dist;
+    result.normal = vec3<f32>(0.0);
+    result.distance = max_dist;
+    result.steps = 0u;
+    return result;
 }
 
 fn trace_gi_backend(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
     if params.voxel_backend == GI_BACKEND_NAADF {
-        return trace_naadf_gi_fallback(origin, direction, max_dist);
+        return trace_naadf_gi_unavailable(origin, direction, max_dist);
     }
     return trace_current_sdf_gi(origin, direction, max_dist);
 }

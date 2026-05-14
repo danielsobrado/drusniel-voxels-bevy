@@ -274,6 +274,7 @@ mod tests {
         assert!(ray_trace.contains("naadf_voxel_records"));
         assert!(ray_trace.contains("naadf_material_records"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
+        assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
     }
 
     #[test]
@@ -293,6 +294,7 @@ mod tests {
         assert!(build_blocks.contains("naadf_raw_voxel_records"));
         assert!(build_blocks.contains("naadf_block_records"));
         assert!(build_blocks.contains("NAADF_NODE_UNIFORM_FULL"));
+        assert!(build_blocks.contains("uniform_material"));
     }
 
     #[test]
@@ -340,8 +342,16 @@ mod tests {
         assert!(radiance.contains("voxel_backend: u32"));
         assert!(radiance.contains("const GI_BACKEND_NAADF"));
         assert!(radiance.contains("fn trace_gi_backend"));
-        assert!(radiance.contains("trace_naadf_gi_fallback"));
+        assert!(!radiance.contains("trace_naadf_gi_fallback"));
         assert!(radiance.contains("let hit = trace_gi_backend"));
+    }
+
+    #[test]
+    fn wgsl_debug_trace_rays_has_ray_count_guard() {
+        let debug_trace = include_str!("../../../assets/shaders/naadf/debug_trace_rays.wgsl");
+
+        assert!(debug_trace.contains("ray_count"));
+        assert!(debug_trace.contains("if index >= naadf_debug_trace_params.ray_count"));
     }
 
     #[test]

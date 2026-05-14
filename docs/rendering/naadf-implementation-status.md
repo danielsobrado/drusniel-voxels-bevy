@@ -1109,6 +1109,85 @@ Details:
 - Added config tests that lock `NaadfConfig::default()` and checked-in `assets/config/naadf.yaml` to disabled-by-default behavior.
 - Verified the current renderer remains the shipping default through unchanged `RayTracingSettings` defaults and README documentation.
 
+### NAADF-FIX-001: Preserve Dirty Chunks While Disabled
+
+Updated:
+
+- `src/rendering/naadf/dirty.rs`
+
+Details:
+
+- Fixed `queue_existing_dirty_chunks` so it returns before draining `VoxelWorld::derived_dirty_chunks()` when NAADF is disabled.
+- Added coverage proving disabled NAADF leaves derived dirty state intact and does not queue work.
+
+### NAADF-FIX-002: Disable GPU Build Queue Until Dispatch Exists
+
+Updated:
+
+- `src/rendering/naadf/prepare.rs`
+
+Details:
+
+- Added an explicit `naadf_gpu_builder_dispatch_available()` gate, currently `false`.
+- `queue_gpu_builds_from_cache_report` now clears and returns unless NAADF is enabled, GPU builder preference is enabled, and dispatch support exists.
+- `sync_gpu_build_queue_stats` uses the same gate, preventing queued items from aging forever and forcing stale-cache fallback.
+- Added coverage proving the queue is cleared while dispatch is unavailable.
+
+### NAADF-FIX-003: Mixed-Material Full Block Handling
+
+Updated:
+
+- `assets/shaders/naadf/build_blocks.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- The WGSL block builder now tracks `uniform_material`.
+- Full blocks become `NAADF_NODE_UNIFORM_FULL` only when all 64 voxels are occupied and all occupied voxels share the same material.
+- Full mixed-material blocks remain `NAADF_NODE_CHILDREN`, matching the CPU builder policy.
+- Added shader metadata coverage for the uniform-material guard.
+
+### NAADF-FIX-004: Debug Ray Count Guard
+
+Updated:
+
+- `assets/shaders/naadf/debug_trace_rays.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- Added `NaadfDebugTraceParams` with `ray_count`.
+- `debug_trace_rays` now returns early when `global_id.x` is outside the submitted ray count.
+- Added shader metadata coverage for the guard.
+
+### NAADF-FIX-005: Stop Fake NAADF GI Fallback
+
+Updated:
+
+- `assets/shaders/radiance_cascades.wgsl`
+- `src/rendering/radiance_cascades.rs`
+- `docs/rendering/naadf.md`
+
+Details:
+
+- Removed the shader-side `trace_naadf_gi_fallback` path that silently called `trace_current_sdf_gi`.
+- Added an explicit unavailable NAADF GI branch that returns a miss if selected accidentally.
+- Added a Rust-side `naadf_gi_shader_backend_available()` gate, currently `false`, so Radiance Cascades resolves to `CurrentSdf` until the real NAADF GI shader/backend bind group exists.
+- Updated backend selection tests so experimental NAADF GI respects resolved fallback/current behavior.
+
+### NAADF-FIX-006: Uniform-Full Debug Ray Entry
+
+Updated:
+
+- `assets/shaders/naadf/ray_trace.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- Fixed `trace_naadf_dense_debug` uniform-full chunk handling to compute ray/chunk AABB entry.
+- Rays that start outside a full chunk now hit at the chunk entry point instead of returning distance zero at the ray origin.
+- Added shader metadata coverage for the chunk-entry helper.
+
 ## Verification Completed
 
 The following non-visual checks were run after the implementation passes:
@@ -1134,6 +1213,11 @@ rtk cargo test --features naadf rendering::ray_tracing::tests
 rtk cargo test --features naadf rendering::naadf::preview::tests
 rtk cargo test --bin bench_guard
 rtk cargo test --features naadf rendering::naadf::config::tests
+rtk cargo test --features naadf rendering::naadf::dirty::tests
+rtk cargo test --features naadf rendering::naadf::prepare::tests
+rtk cargo test --features naadf rendering::naadf::layout::tests
+rtk cargo test --features naadf rendering::radiance_cascades::tests
+rtk cargo test --features naadf rendering::naadf::gpu_tests::tests
 ```
 
 Results:
@@ -1157,6 +1241,11 @@ Results:
 - `rendering::naadf::preview::tests`: 5 tests passed.
 - `bench_guard` binary tests: 2 tests passed.
 - `rendering::naadf::config::tests`: 2 tests passed.
+- `rendering::naadf::dirty::tests`: 3 tests passed after NAADF-FIX-001.
+- `rendering::naadf::prepare::tests`: 4 tests passed after NAADF-FIX-002.
+- `rendering::naadf::layout::tests`: 15 tests passed after NAADF-FIX-003/004/005/006.
+- `rendering::radiance_cascades::tests`: 6 tests passed after NAADF-FIX-005.
+- `rendering::naadf::gpu_tests::tests`: 3 tests passed after NAADF-FIX-004.
 - These checks were rerun after adding the cache/rebuild system.
 - These checks were rerun after adding the occupancy comparison runtime command.
 - These checks were rerun after implementing the current backend wrapper.
@@ -1198,6 +1287,7 @@ Results:
 - The feature-gated layout/shader metadata tests were rerun after adding spatial resampling helper logic.
 - The non-visual `bench_guard` binary tests were run after adding configurable NAADF guard threshold expansion and frame regression checks.
 - The feature-gated NAADF config tests were run after adding explicit release-gate/default-off coverage.
+- Feature-gated dirty, prepare, layout, radiance, and GPU test-helper tests were rerun after the NAADF-FIX review batch.
 
 Known warning:
 

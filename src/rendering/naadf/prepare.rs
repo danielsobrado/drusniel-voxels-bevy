@@ -123,7 +123,8 @@ pub fn queue_gpu_builds_from_cache_report(
     cache: Res<NaadfCache>,
     mut build_queue: ResMut<NaadfGpuBuildQueue>,
 ) {
-    if !config.enabled {
+    if !config.enabled || !config.gpu.prefer_gpu_builder || !naadf_gpu_builder_dispatch_available()
+    {
         build_queue.clear();
         return;
     }
@@ -138,16 +139,29 @@ pub fn sync_gpu_build_queue_stats(
     mut build_queue: ResMut<NaadfGpuBuildQueue>,
     mut stats: ResMut<NaadfStats>,
 ) {
-    if !config.enabled {
+    let queue_stats = sync_gpu_build_queue_stats_for_config(&config, &mut build_queue);
+
+    stats.gpu_build_queue_pending = queue_stats.pending as u32;
+    stats.gpu_build_queue_oldest_age_frames = queue_stats.oldest_age_frames;
+    stats.gpu_build_queue_queued_total = queue_stats.queued_total;
+}
+
+pub fn sync_gpu_build_queue_stats_for_config(
+    config: &NaadfConfig,
+    build_queue: &mut NaadfGpuBuildQueue,
+) -> NaadfGpuBuildQueueStats {
+    if !config.enabled || !config.gpu.prefer_gpu_builder || !naadf_gpu_builder_dispatch_available()
+    {
         build_queue.clear();
     } else {
         build_queue.increment_ages();
     }
 
-    let queue_stats = build_queue.stats();
-    stats.gpu_build_queue_pending = queue_stats.pending as u32;
-    stats.gpu_build_queue_oldest_age_frames = queue_stats.oldest_age_frames;
-    stats.gpu_build_queue_queued_total = queue_stats.queued_total;
+    build_queue.stats()
+}
+
+pub const fn naadf_gpu_builder_dispatch_available() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -196,5 +210,22 @@ mod tests {
 
         assert_eq!(stats.pending, 2);
         assert_eq!(stats.oldest_age_frames, 2);
+    }
+
+    #[test]
+    fn gpu_build_queue_is_disabled_until_dispatch_exists() {
+        let mut queue = NaadfGpuBuildQueue::default();
+        queue.queue(IVec3::X);
+
+        let stats = sync_gpu_build_queue_stats_for_config(
+            &NaadfConfig {
+                enabled: true,
+                ..default()
+            },
+            &mut queue,
+        );
+
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.oldest_age_frames, 0);
     }
 }

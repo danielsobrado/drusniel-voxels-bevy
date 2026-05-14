@@ -18,6 +18,7 @@ fn build_naadf_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
 
     var occupied_count = 0u;
     var first_material = 0u;
+    var uniform_material = true;
     var occupancy_low = 0u;
     var occupancy_high = 0u;
 
@@ -38,6 +39,8 @@ fn build_naadf_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
                     }
                     if occupied_count == 0u {
                         first_material = naadf_raw_voxel_material(raw_record);
+                    } else if naadf_raw_voxel_material(raw_record) != first_material {
+                        uniform_material = false;
                     }
                     occupied_count = occupied_count + 1u;
                 }
@@ -48,7 +51,7 @@ fn build_naadf_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
     var node = naadf_make_node(NAADF_NODE_CHILDREN, 0u);
     if occupied_count == 0u {
         node = naadf_make_node(NAADF_NODE_UNIFORM_EMPTY, 0u);
-    } else if occupied_count == 64u {
+    } else if occupied_count == 64u && uniform_material {
         node = naadf_make_node(NAADF_NODE_UNIFORM_FULL, first_material);
     }
 

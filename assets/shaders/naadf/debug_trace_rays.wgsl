@@ -17,12 +17,24 @@ struct NaadfDebugRayOutput {
     normal: vec4<f32>,
 }
 
+struct NaadfDebugTraceParams {
+    ray_count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
 @group(3) @binding(2) var<storage, read> naadf_debug_ray_inputs: array<NaadfDebugRayInput>;
 @group(3) @binding(3) var<storage, read_write> naadf_debug_ray_outputs: array<NaadfDebugRayOutput>;
+@group(3) @binding(4) var<uniform> naadf_debug_trace_params: NaadfDebugTraceParams;
 
 @compute @workgroup_size(64)
 fn debug_trace_rays(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let index = global_id.x;
+    if index >= naadf_debug_trace_params.ray_count {
+        return;
+    }
+
     let input = naadf_debug_ray_inputs[index];
     let ray = NaadfRay(
         input.origin_max_distance.xyz,

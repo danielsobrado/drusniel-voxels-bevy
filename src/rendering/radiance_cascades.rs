@@ -169,11 +169,17 @@ pub fn apply_radiance_backend_selection(
     config: &mut RadianceCascadesConfig,
     state: &mut SdfVolumeState,
 ) {
-    let target_backend = match ray_tracing.experimental_mode {
-        ExperimentalRenderMode::Current => ray_tracing.effective_backend(),
-        ExperimentalRenderMode::CurrentWithNaadfGi | ExperimentalRenderMode::NaadfPreview => {
-            VoxelRayBackendMode::Naadf
-        }
+    let requested_backend = match ray_tracing.experimental_mode {
+        ExperimentalRenderMode::Current
+        | ExperimentalRenderMode::CurrentWithNaadfGi
+        | ExperimentalRenderMode::NaadfPreview => ray_tracing.effective_backend(),
+    };
+    let target_backend = if requested_backend == VoxelRayBackendMode::Naadf
+        && !naadf_gi_shader_backend_available()
+    {
+        VoxelRayBackendMode::CurrentSdf
+    } else {
+        requested_backend
     };
 
     config.voxel_backend = target_backend;
@@ -186,6 +192,10 @@ pub fn apply_radiance_backend_selection(
             state.history_reset_generation = ray_tracing.backend_switch_generation;
         }
     }
+}
+
+pub const fn naadf_gi_shader_backend_available() -> bool {
+    false
 }
 
 /// GPU uniforms for radiance cascades
@@ -760,7 +770,7 @@ mod tests {
 
         apply_radiance_backend_selection(&settings, &mut config, &mut state);
 
-        assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
         assert_eq!(config.backend_switch_generation, 7);
         assert_eq!(state.frame_index, 0);
         assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
@@ -768,18 +778,20 @@ mod tests {
     }
 
     #[test]
-    fn current_with_naadf_gi_forces_naadf_backend() {
+    fn current_with_naadf_gi_respects_fallback_backend() {
         let mut config = RadianceCascadesConfig::default();
         let mut state = SdfVolumeState::default();
         let settings = RayTracingSettings {
-            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            resolved_voxel_backend: VoxelRayBackendMode::CurrentSdf,
             experimental_mode: ExperimentalRenderMode::CurrentWithNaadfGi,
+            fallback_reason: Some("NAADF cache warming; using CurrentSdf fallback".into()),
             ..default()
         };
 
         apply_radiance_backend_selection(&settings, &mut config, &mut state);
 
-        assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
     }
 
     #[test]

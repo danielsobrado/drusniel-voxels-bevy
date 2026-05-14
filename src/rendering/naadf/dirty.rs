@@ -67,11 +67,11 @@ pub fn queue_existing_dirty_chunks(
     mut world: ResMut<VoxelWorld>,
     mut queue: ResMut<NaadfDirtyChunkQueue>,
 ) {
-    let dirty_chunks = world.take_derived_dirty_chunks();
     if !config.enabled {
         return;
     }
 
+    let dirty_chunks = world.take_derived_dirty_chunks();
     for chunk_pos in dirty_chunks {
         queue.queue(chunk_pos);
     }
@@ -80,6 +80,7 @@ pub fn queue_existing_dirty_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxel::chunk::Chunk;
 
     #[test]
     fn dirty_queue_deduplicates_positions() {
@@ -103,5 +104,28 @@ mod tests {
 
         assert_eq!(queue.pending_chunks().collect::<Vec<_>>(), vec![IVec3::Y]);
         assert_eq!(queue.in_flight_chunks().collect::<Vec<_>>(), vec![IVec3::X]);
+    }
+
+    #[test]
+    fn disabled_naadf_does_not_drain_derived_dirty_chunks() {
+        let mut app = App::new();
+        let mut world = VoxelWorld::new(IVec3::ONE);
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        assert_eq!(world.derived_dirty_chunks().count(), 1);
+
+        app.insert_resource(NaadfConfig::default())
+            .insert_resource(world)
+            .init_resource::<NaadfDirtyChunkQueue>()
+            .add_systems(Update, queue_existing_dirty_chunks);
+
+        app.update();
+
+        let world = app.world().resource::<VoxelWorld>();
+        let queue = app.world().resource::<NaadfDirtyChunkQueue>();
+        assert_eq!(
+            world.derived_dirty_chunks().collect::<Vec<_>>(),
+            vec![IVec3::ZERO]
+        );
+        assert_eq!(queue.pending_len(), 0);
     }
 }
