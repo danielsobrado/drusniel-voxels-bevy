@@ -358,12 +358,15 @@ pub fn prepare_naadf_gpu_buffers(
 pub fn sync_naadf_gpu_status_to_main(
     buffers: Res<NaadfGpuBuffers>,
     uploads: Res<NaadfGpuUploadStats>,
-    mut main_world: ResMut<MainWorld>,
+    main_world: Option<ResMut<MainWorld>>,
 ) {
     if !buffers.is_changed() && !uploads.is_changed() {
         return;
     }
 
+    let Some(mut main_world) = main_world else {
+        return;
+    };
     let Some(mut stats) = main_world.get_resource_mut::<NaadfStats>() else {
         return;
     };

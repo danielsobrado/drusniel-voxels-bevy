@@ -98,10 +98,11 @@ pub fn toggle_enclosure_culling(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut config: ResMut<OcclusionConfig>,
 ) {
-    if keyboard.just_pressed(KeyCode::F11) {
+    let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+    if shift_held && keyboard.just_pressed(KeyCode::F11) {
         config.force_disabled = !config.force_disabled;
         info!(
-            "Enclosure occlusion culling: {}",
+            "Enclosure occlusion culling: {} (Shift+F11 to toggle)",
             if config.force_disabled {
                 "force-disabled"
             } else {

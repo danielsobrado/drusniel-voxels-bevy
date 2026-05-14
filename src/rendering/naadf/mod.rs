@@ -33,7 +33,7 @@ pub struct NaadfPlugin;
 
 impl Plugin for NaadfPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NaadfConfig>()
+        app.insert_resource(NaadfConfig::runtime_default())
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
             .init_resource::<gpu_buffers::NaadfGpuChunkTable>()

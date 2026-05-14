@@ -264,11 +264,19 @@ impl NeighborLods {
     }
 
     pub fn needs_vertical_skirt(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
+        if matches!(face, ChunkFace::NegY | ChunkFace::PosY) {
+            return false;
+        }
+
         self.lod_for_face(face)
             .is_some_and(|n_lod| n_lod.is_lower_detail_than(my_lod))
     }
 
     pub fn needs_transition_apron(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
+        if matches!(face, ChunkFace::NegY | ChunkFace::PosY) {
+            return false;
+        }
+
         self.lod_for_face(face)
             .is_some_and(|n_lod| n_lod.is_lower_detail_than(my_lod))
     }
@@ -331,6 +339,12 @@ pub fn generate_skirts(
     }
 
     for edge in boundary_edges {
+        // Keep Y-face neighbor LODs for dirtying/debugging, but do not patch
+        // terrain altitude slices with world-down skirt geometry.
+        if matches!(edge.face, ChunkFace::NegY | ChunkFace::PosY) {
+            continue;
+        }
+
         let has_lower_lod_neighbor = neighbor_lods
             .lod_for_face(edge.face)
             .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
@@ -692,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_lod_vertical_neighbor_generates_vertical_skirt() {
+    fn lower_lod_vertical_neighbor_does_not_generate_skirt() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -733,12 +747,8 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert_eq!(positions.len(), 8);
-        assert_eq!(barycentric_uvs.len(), 8);
-        assert_eq!(indices.len(), 12);
-        assert!(
-            positions.iter().any(|position| position[1] > 16.0),
-            "vertical transition lip should extend toward the coarser vertical neighbor"
-        );
+        assert!(positions.is_empty());
+        assert!(barycentric_uvs.is_empty());
+        assert!(indices.is_empty());
     }
 }

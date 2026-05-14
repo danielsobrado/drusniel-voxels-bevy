@@ -92,6 +92,21 @@ impl Default for RayTracingSettings {
 }
 
 impl RayTracingSettings {
+    pub fn from_env_or_default() -> Self {
+        let mut settings = Self::default();
+        if std::env::var("DRUSNIEL_NAADF").is_ok_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        }) {
+            settings.voxel_backend = VoxelRayBackendMode::Naadf;
+            settings.resolved_voxel_backend = VoxelRayBackendMode::Naadf;
+            settings.backend_switch_generation = 1;
+        }
+        settings
+    }
+
     pub fn set_voxel_backend(
         &mut self,
         next: VoxelRayBackendMode,
@@ -188,8 +203,10 @@ pub fn toggle_voxel_ray_backend_key(
     };
     if settings.set_voxel_backend(next, capabilities.as_deref()) {
         info!(
-            "Voxel ray backend: {} (F11 to cycle)",
-            settings.voxel_backend.as_str()
+            "Voxel ray backend requested: {}, effective: {}, fallback: {} (F11 to cycle)",
+            settings.voxel_backend.as_str(),
+            settings.effective_backend().as_str(),
+            settings.fallback_reason.as_deref().unwrap_or("none")
         );
     } else if let Some(reason) = settings.fallback_reason.as_deref() {
         warn!("Voxel ray backend unchanged: {}", reason);

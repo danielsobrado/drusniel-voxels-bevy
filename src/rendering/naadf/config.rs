@@ -98,6 +98,24 @@ impl NaadfConfig {
     pub fn load_or_default(path: impl AsRef<Path>) -> Self {
         load_config(path).unwrap_or_default()
     }
+
+    pub fn runtime_default() -> Self {
+        let mut config = Self::load_or_default("assets/config/naadf.yaml");
+        if env_flag_enabled("DRUSNIEL_NAADF") {
+            config.enabled = true;
+            config.debug.force_cpu_builder = true;
+        }
+        config
+    }
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn default_true() -> bool {

@@ -1,4 +1,5 @@
 param(
+    [switch]$Naadf,
     [switch]$NoStopExisting,
     [switch]$KeepLock
 )
@@ -65,6 +66,15 @@ if (-not $KeepLock -and (Test-Path -LiteralPath $LockPath)) {
 }
 
 Set-Location -LiteralPath $RepoRoot
-Write-Host "Starting user runtime from $RepoRoot"
-& rtk cargo run --release
+$cargoArgs = @("cargo", "run", "--release")
+if ($Naadf) {
+    $env:DRUSNIEL_NAADF = "1"
+    $cargoArgs += @("--features", "naadf")
+    Write-Host "Starting user runtime from $RepoRoot with NAADF feature enabled"
+} else {
+    Remove-Item Env:\DRUSNIEL_NAADF -ErrorAction SilentlyContinue
+    Write-Host "Starting user runtime from $RepoRoot"
+}
+
+& rtk @cargoArgs
 exit $LASTEXITCODE

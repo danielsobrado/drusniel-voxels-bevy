@@ -1826,6 +1826,13 @@ fn should_defer_surface_nets_mesh(target_mode: MeshMode, missing_boundary_neighb
     matches!(target_mode, MeshMode::SurfaceNets) && missing_boundary_neighbors > 0
 }
 
+fn visual_surface_nets_lod(lod_level: LodLevel) -> LodLevel {
+    match lod_level {
+        LodLevel::Lod3 => LodLevel::Lod2,
+        other => other,
+    }
+}
+
 pub(crate) fn target_terrain_mesh_mode_for_lod(
     lod_level: LodLevel,
     mesh_settings: &MeshSettings,
@@ -1845,13 +1852,19 @@ fn mesh_lod_level_for_surface_nets_cap(
     empty_surface_neighbor: bool,
     lod_level: LodLevel,
 ) -> LodLevel {
-    if matches!(target_mode, MeshMode::SurfaceNets)
+    let mesh_lod_level = if matches!(target_mode, MeshMode::SurfaceNets)
         && uniformity == ChunkUniformity::Empty
         && empty_surface_neighbor
     {
         LodLevel::Lod0
     } else {
         lod_level
+    };
+
+    if matches!(target_mode, MeshMode::SurfaceNets) {
+        visual_surface_nets_lod(mesh_lod_level)
+    } else {
+        mesh_lod_level
     }
 }
 
@@ -3973,6 +3986,16 @@ pub fn apply_visibility_culling_system(
 ///
 /// Uses hysteresis to prevent rapid LOD switching when camera is near thresholds.
 /// Throttled to every 0.25s and skipped when camera hasn't moved significantly.
+fn terrain_lod_distance_xz(chunk_pos: IVec3, camera_pos: Vec3) -> f32 {
+    let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
+    let chunk_center = Vec2::new(
+        world_pos.x as f32 + CHUNK_SIZE_F32 * 0.5,
+        world_pos.z as f32 + CHUNK_SIZE_F32 * 0.5,
+    );
+
+    chunk_center.distance(Vec2::new(camera_pos.x, camera_pos.z))
+}
+
 fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
@@ -4053,9 +4076,7 @@ fn update_chunk_lod_system(
     let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
     for (chunk_pos, chunk) in world.chunk_entries() {
-        let world_pos = VoxelWorld::chunk_to_world(*chunk_pos);
-        let chunk_center = world_pos.as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
-        let distance = chunk_center.distance(camera_pos);
+        let distance = terrain_lod_distance_xz(*chunk_pos, camera_pos);
 
         // Use hysteresis-aware LOD calculation
         let current_lod = chunk.lod_level();
@@ -4440,7 +4461,7 @@ mod tests {
                 true,
                 LodLevel::Lod3
             ),
-            LodLevel::Lod3
+            LodLevel::Lod2
         );
         assert_eq!(
             mesh_lod_level_for_surface_nets_cap(
@@ -4450,6 +4471,15 @@ mod tests {
                 LodLevel::Lod3
             ),
             LodLevel::Lod3
+        );
+    }
+
+    #[test]
+    fn terrain_lod_distance_ignores_chunk_height() {
+        let camera_pos = Vec3::new(24.0, 128.0, 24.0);
+        assert_eq!(
+            terrain_lod_distance_xz(IVec3::new(1, 0, 1), camera_pos),
+            terrain_lod_distance_xz(IVec3::new(1, 6, 1), camera_pos)
         );
     }
 

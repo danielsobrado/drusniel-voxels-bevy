@@ -66,7 +66,7 @@ impl Plugin for RenderingPlugin {
         }
 
         app.init_resource::<GraphicsCapabilities>()
-            .init_resource::<RayTracingSettings>()
+            .insert_resource(RayTracingSettings::from_env_or_default())
             .init_resource::<RenderQualityPreset>()
             .add_systems(
                 Update,

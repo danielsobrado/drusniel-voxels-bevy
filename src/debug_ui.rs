@@ -1,7 +1,7 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::array_loader::AtlasMapping;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::{NaadfConfig, NaadfStats};
+use crate::rendering::naadf::{NaadfCacheState, NaadfConfig, NaadfStats};
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
@@ -95,6 +95,7 @@ fn debug_settings_ui(
     mut water_shader_toggles: ResMut<WaterShaderToggles>,
     ray_tracing: Option<Res<RayTracingSettings>>,
     #[cfg(feature = "naadf")] naadf_stats: Option<Res<NaadfStats>>,
+    #[cfg(feature = "naadf")] naadf_cache_state: Option<Res<NaadfCacheState>>,
     #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
     mut sun_query: Query<&mut DirectionalLight>,
 ) {
@@ -152,7 +153,14 @@ fn debug_settings_ui(
             if let Some(ray_tracing) = ray_tracing {
                 ui.separator();
                 ui.heading("Voxel Ray Backend");
-                ui.label(format!("Backend: {}", ray_tracing.voxel_backend.as_str()));
+                ui.label(format!(
+                    "Requested backend: {}",
+                    ray_tracing.voxel_backend.as_str()
+                ));
+                ui.label(format!(
+                    "Effective backend: {}",
+                    ray_tracing.effective_backend().as_str()
+                ));
                 ui.label(format!(
                     "Render mode: {}",
                     ray_tracing.experimental_mode.as_str()
@@ -172,6 +180,24 @@ fn debug_settings_ui(
                         &mut config.use_for_contact_shadows,
                         "Use NAADF contact shadows",
                     );
+                }
+                #[cfg(not(feature = "naadf"))]
+                ui.label("NAADF feature: not compiled. Start with .\\startVoxels.ps1 -Naadf.");
+                #[cfg(feature = "naadf")]
+                if let Some(cache_state) = naadf_cache_state.as_deref() {
+                    ui.label(format!(
+                        "NAADF cache state: {}",
+                        if cache_state.ready {
+                            "ready"
+                        } else if cache_state.warming {
+                            "warming"
+                        } else {
+                            "not ready"
+                        }
+                    ));
+                    if let Some(reason) = cache_state.fallback_reason.as_deref() {
+                        ui.label(format!("NAADF cache reason: {reason}"));
+                    }
                 }
                 #[cfg(feature = "naadf")]
                 if let Some(stats) = naadf_stats.as_deref() {
@@ -316,6 +342,7 @@ fn debug_settings_ui(
             ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
             ui.label("Press F11 to cycle voxel ray backend");
+            ui.label("Press Shift+F11 to toggle enclosure culling");
         },
     );
 }

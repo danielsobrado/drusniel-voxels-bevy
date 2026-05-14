@@ -2239,7 +2239,7 @@ fn lower_detail_transition_step_for_padded_size(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     px: u32,
-    py: u32,
+    _py: u32,
     pz: u32,
     padded_size: u32,
 ) -> Option<i32> {
@@ -2248,8 +2248,6 @@ fn lower_detail_transition_step_for_padded_size(
     for (face, on_boundary_sample_row) in [
         (ChunkFace::NegX, px == 1),
         (ChunkFace::PosX, px == padded_size - 1),
-        (ChunkFace::NegY, py == 1),
-        (ChunkFace::PosY, py == padded_size - 1),
         (ChunkFace::NegZ, pz == 1),
         (ChunkFace::PosZ, pz == padded_size - 1),
     ] {
@@ -3691,14 +3689,13 @@ mod tests {
     }
 
     #[test]
-    fn lod0_vertical_transition_boundary_sdf_matches_lower_lod_neighbor_sample() {
+    fn lod0_vertical_transition_boundary_ignores_lower_lod_neighbor_sample() {
         let chunk_pos = IVec3::new(0, 1, 0);
         let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
         let mut world = world_with_test_chunks(IVec3::new(1, 3, 1));
         world.set_voxel(chunk_origin + IVec3::new(5, 0, 4), VoxelType::Rock);
 
         let chunk = world.get_chunk(chunk_pos).unwrap();
-        let neighbor = world.get_chunk(chunk_pos - IVec3::Y).unwrap();
         let no_transition_lods = NeighborLods::default();
         let transition_lods = NeighborLods {
             neg_y: Some(LodLevel::Lod1),
@@ -3706,18 +3703,12 @@ mod tests {
         };
 
         let boundary_idx = PaddedChunkShape::linearize([5, 1, 5]) as usize;
-        let neighbor_boundary_idx = LodShape1::linearize([3, LOD1_PADDED_SIZE - 1, 3]) as usize;
 
         let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods);
         let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
-        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
 
         assert_eq!(raw_sdf[boundary_idx], 1.0);
-        assert_eq!(
-            transition_sdf[boundary_idx],
-            neighbor_lod1_sdf[neighbor_boundary_idx]
-        );
-        assert_eq!(transition_sdf[boundary_idx], 0.75);
+        assert_eq!(transition_sdf[boundary_idx], raw_sdf[boundary_idx]);
     }
 
     #[test]
