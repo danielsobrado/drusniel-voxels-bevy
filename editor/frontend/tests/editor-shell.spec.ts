@@ -43,12 +43,35 @@ test("viewport mode switch separates fast authoring from native validation", asy
 test("authoring viewport overlay toggles affect diagnostic layers", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("viewport-voxel-grid-overlay")).toBeVisible();
+  await expect(page.getByTestId("viewport-chunk-bounds-badge")).toContainText("Chunk bounds");
+  await expect(page.getByTestId("lite-viewport-authoring-overlay")).toHaveAttribute("data-chunk-bounds-visible", "true");
 
-  await page.locator('[data-command-id="editor.view.toggleVoxelGrid"]').first().click();
-  await expect(page.getByTestId("viewport-voxel-grid-overlay")).not.toBeVisible();
+  await page.getByTestId("viewport-chunk-bounds-badge-toggle").click();
+  await expect(page.getByTestId("viewport-chunk-bounds-badge")).toContainText("Bounds hidden");
+  await expect(page.getByTestId("lite-viewport-authoring-overlay")).toHaveAttribute("data-chunk-bounds-visible", "false");
+  await expect(page.locator('[data-testid^="viewport-chunk-overlay-"]')).toHaveCount(0);
 
-  await page.locator('[data-command-id="editor.view.toggleVoxelGrid"]').first().click();
-  await expect(page.getByTestId("viewport-voxel-grid-overlay")).toBeVisible();
+  await page.getByTestId("viewport-chunk-bounds-badge-toggle").click();
+  await expect(page.getByTestId("viewport-chunk-bounds-badge")).toContainText("Chunk bounds");
+  await expect(page.getByTestId("lite-viewport-authoring-overlay")).toHaveAttribute("data-chunk-bounds-visible", "true");
+
+  await page.getByTestId("viewport-game-camera-toggle").click();
+  await expect(page.getByTestId("viewport-game-camera-preview")).toBeVisible();
+  await expect.poll(async () => page.getByTestId("viewport-game-camera-canvas").evaluate((canvas) => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(0);
+  const detachedGameCameraPromise = page.waitForEvent("popup");
+  await page.getByTestId("viewport-game-camera-detach").click();
+  const detachedGameCamera = await detachedGameCameraPromise;
+  await detachedGameCamera.waitForLoadState("domcontentloaded");
+  await expect(detachedGameCamera.getByTestId("detached-game-camera-window")).toBeVisible();
+  await expect.poll(async () => detachedGameCamera.getByTestId("detached-game-camera-canvas").evaluate((canvas) => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(0);
+  await detachedGameCamera.close();
+  await page.getByTestId("viewport-game-camera-place").click();
+  await expect(page.getByTestId("viewport-game-camera-place")).toContainText("Click map");
+
+  await page.getByRole("button", { name: "Keys" }).click();
+  await expect(page.getByTestId("viewport-key-bindings-panel")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("viewport-key-bindings-panel")).toBeHidden();
 });
 
 test("selecting a mocked outliner item updates the inspector header", async ({ page }) => {

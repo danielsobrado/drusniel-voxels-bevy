@@ -59,6 +59,8 @@ struct NativeViewportRect {
     y: i32,
     width: i32,
     height: i32,
+    visible: Option<bool>,
+    focus: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -169,10 +171,16 @@ fn attach_native_viewport(
         *cached_hwnd = Some(hwnd as isize);
     }
 
+    let visible = rect.visible.unwrap_or(true);
+
     Ok(NativeViewportAttachment {
         attached: true,
         hwnd: Some(hwnd as isize),
-        message: "native Bevy viewport attached".to_string(),
+        message: if visible {
+            "native Bevy viewport attached".to_string()
+        } else {
+            "native Bevy viewport prepared".to_string()
+        },
     })
 }
 
@@ -285,12 +293,15 @@ fn embed_runtime_window(
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos,
-        ShowWindow, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
-        WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        ShowWindow, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SW_HIDE, SW_SHOW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+        WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
 
-    let child_style = (WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN) as isize;
+    let visible = rect.visible.unwrap_or(true);
+    let focus = rect.focus.unwrap_or(visible);
+    let visible_style = if visible { WS_VISIBLE } else { 0 };
+    let child_style = (WS_CHILD | visible_style | WS_CLIPSIBLINGS | WS_CLIPCHILDREN) as isize;
     let removed_style =
         (WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
             as isize;
@@ -345,6 +356,11 @@ fn embed_runtime_window(
             .max(1.0)
             .min((parent_height - y).max(1) as f32) as i32;
 
+        let position_flags = if visible {
+            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW
+        } else {
+            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE
+        };
         let positioned = SetWindowPos(
             child_hwnd,
             null_mut(),
@@ -352,14 +368,18 @@ fn embed_runtime_window(
             y,
             width,
             height,
-            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+            position_flags,
         ) != 0;
         if !positioned {
             return Err("failed to position Bevy viewport window".to_string());
         }
 
-        ShowWindow(child_hwnd, SW_SHOW);
-        let previous_focus = SetFocus(child_hwnd);
+        ShowWindow(child_hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        let previous_focus = if focus {
+            SetFocus(child_hwnd)
+        } else {
+            null_mut()
+        };
         if editor_diagnostics_enabled() {
             eprintln!(
                 "[editor-diagnostics][nativeViewport] embedded parent_hwnd={} child_hwnd={} previous_focus={} dpi_scale={:.2} rect=({}, {}, {}, {}) client=({}, {})",

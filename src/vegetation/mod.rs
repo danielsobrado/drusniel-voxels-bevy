@@ -7,7 +7,9 @@ use crate::constants::{
     GRASS_FULL_DISTANCE, GRASS_HALF_DISTANCE,
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
-use crate::voxel::meshing::ChunkMesh;
+use crate::rendering::blocky_material::BlockyMaterial;
+use crate::rendering::triplanar_material::TriplanarMaterial;
+use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
@@ -15,6 +17,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use std::collections::HashSet;
 
 pub use grass_material::{GrassMaterial, GrassMaterialHandles, GrassMaterialPlugin};
 pub use wind::{WindAffected, WindAnimationType, WindConfig, WindPlugin, WindState};
@@ -53,11 +56,48 @@ pub struct ParticlesSpawned(pub bool);
 
 /// Marker that a voxel chunk mesh already has a procedural grass instance attached
 #[derive(Component)]
-pub struct ChunkGrassAttached;
+pub struct ChunkGrassAttached {
+    mesh: Handle<Mesh>,
+}
 
 /// Component for procedural grass patch entities (for debug UI compatibility)
 #[derive(Component)]
 pub struct ProceduralGrassPatch;
+
+enum GrassProcessResult {
+    Spawned(usize),
+    Empty,
+    Deferred,
+}
+
+pub fn invalidate_grass_for_changed_chunks(
+    mut commands: Commands,
+    changed_chunks: Query<
+        (Entity, &ChunkGrassAttached, &Mesh3d),
+        (With<ChunkMesh>, Changed<Mesh3d>, Without<WaterMesh>),
+    >,
+    grass_query: Query<(Entity, &ChildOf), With<ProceduralGrassPatch>>,
+) {
+    let changed_chunks: HashSet<Entity> = changed_chunks
+        .iter()
+        .filter_map(|(entity, attached, chunk_mesh)| {
+            (attached.mesh != chunk_mesh.0).then_some(entity)
+        })
+        .collect();
+    if changed_chunks.is_empty() {
+        return;
+    }
+
+    for entity in &changed_chunks {
+        commands.entity(*entity).remove::<ChunkGrassAttached>();
+    }
+
+    for (grass_entity, child_of) in grass_query.iter() {
+        if changed_chunks.contains(&child_of.0) {
+            commands.entity(grass_entity).despawn();
+        }
+    }
+}
 
 /// Configuration resource for vegetation
 #[derive(Resource)]
@@ -136,10 +176,16 @@ pub fn attach_procedural_grass_to_chunks(
     veg_config: Res<VegetationConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
-    // Query chunks with StandardMaterial (blocky mode)
+    // Query chunks with BlockyMaterial (blocky mode)
     blocky_chunk_query: Query<
-        (Entity, &ChunkMesh, &Mesh3d, &Transform),
-        Without<ChunkGrassAttached>,
+        (
+            Entity,
+            &ChunkMesh,
+            &Mesh3d,
+            &MeshMaterial3d<BlockyMaterial>,
+            &Transform,
+        ),
+        (Without<ChunkGrassAttached>, Without<WaterMesh>),
     >,
     // Query chunks with TriplanarMaterial (surface nets mode)
     triplanar_chunk_query: Query<
@@ -147,10 +193,10 @@ pub fn attach_procedural_grass_to_chunks(
             Entity,
             &ChunkMesh,
             &Mesh3d,
-            &MeshMaterial3d<crate::rendering::triplanar_material::TriplanarMaterial>,
+            &MeshMaterial3d<TriplanarMaterial>,
             &Transform,
         ),
-        Without<ChunkGrassAttached>,
+        (Without<ChunkGrassAttached>, Without<WaterMesh>),
     >,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -160,6 +206,8 @@ pub fn attach_procedural_grass_to_chunks(
     let base_max_count = veg_config.max_blades_per_chunk;
     let mut chunks_considered = 0usize;
     let mut chunks_spawned = 0usize;
+    let mut chunks_empty = 0usize;
+    let mut chunks_deferred = 0usize;
     let mut instances_spawned = 0usize;
 
     let (camera_pos, camera_forward) = camera_query
@@ -168,7 +216,7 @@ pub fn attach_procedural_grass_to_chunks(
         .unwrap_or((Vec3::ZERO, Vec3::NEG_Z));
 
     // Process blocky chunks
-    for (entity, chunk, chunk_mesh, transform) in blocky_chunk_query.iter() {
+    for (entity, chunk, chunk_mesh, _material, transform) in blocky_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
         let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
@@ -180,7 +228,7 @@ pub fn attach_procedural_grass_to_chunks(
         };
         chunks_considered += 1;
 
-        let spawned = process_chunk_for_grass(
+        match process_chunk_for_grass(
             &mut commands,
             &assets,
             &mut meshes,
@@ -190,10 +238,13 @@ pub fn attach_procedural_grass_to_chunks(
             transform,
             density,
             max_count,
-        );
-        if spawned > 0 {
-            chunks_spawned += 1;
-            instances_spawned += spawned;
+        ) {
+            GrassProcessResult::Spawned(spawned) => {
+                chunks_spawned += 1;
+                instances_spawned += spawned;
+            }
+            GrassProcessResult::Empty => chunks_empty += 1,
+            GrassProcessResult::Deferred => chunks_deferred += 1,
         }
     }
 
@@ -210,7 +261,7 @@ pub fn attach_procedural_grass_to_chunks(
         };
         chunks_considered += 1;
 
-        let spawned = process_chunk_for_grass(
+        match process_chunk_for_grass(
             &mut commands,
             &assets,
             &mut meshes,
@@ -220,15 +271,20 @@ pub fn attach_procedural_grass_to_chunks(
             transform,
             density,
             max_count,
-        );
-        if spawned > 0 {
-            chunks_spawned += 1;
-            instances_spawned += spawned;
+        ) {
+            GrassProcessResult::Spawned(spawned) => {
+                chunks_spawned += 1;
+                instances_spawned += spawned;
+            }
+            GrassProcessResult::Empty => chunks_empty += 1,
+            GrassProcessResult::Deferred => chunks_deferred += 1,
         }
     }
     drop(_timer);
     timing.record_count(frame.0, "Grass Chunks Considered", chunks_considered as f64);
     timing.record_count(frame.0, "Grass Chunks Spawned", chunks_spawned as f64);
+    timing.record_count(frame.0, "Grass Chunks Empty", chunks_empty as f64);
+    timing.record_count(frame.0, "Grass Chunks Deferred", chunks_deferred as f64);
     timing.record_count(frame.0, "Grass Instances Spawned", instances_spawned as f64);
 }
 
@@ -298,26 +354,29 @@ fn process_chunk_for_grass(
     transform: &Transform,
     density: u32,
     max_count: usize,
-) -> usize {
+) -> GrassProcessResult {
     let Some(chunk_source_mesh) = meshes.get(&chunk_mesh.0) else {
-        return 0;
+        return GrassProcessResult::Deferred;
     };
 
     let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count);
     if instances.is_empty() {
-        return 0;
+        commands.entity(entity).try_insert(ChunkGrassAttached {
+            mesh: chunk_mesh.0.clone(),
+        });
+        return GrassProcessResult::Empty;
     }
     let instance_count = instances.len();
 
     let template_mesh = match meshes.get(&assets.blade_mesh) {
         Some(mesh) => mesh,
-        None => return 0,
+        None => return GrassProcessResult::Deferred,
     };
 
     // Pass chunk origin so grass positions are relative to chunk (since we parent to chunk)
     let chunk_origin = transform.translation;
     let Some(grass_mesh) = build_grass_patch_mesh(template_mesh, &instances, chunk_origin) else {
-        return 0;
+        return GrassProcessResult::Deferred;
     };
 
     let mesh_handle = meshes.add(grass_mesh);
@@ -327,7 +386,9 @@ fn process_chunk_for_grass(
         % assets.materials.len();
     let material_handle = assets.materials[material_idx].clone();
 
-    commands.entity(entity).try_insert(ChunkGrassAttached);
+    commands.entity(entity).try_insert(ChunkGrassAttached {
+        mesh: chunk_mesh.0.clone(),
+    });
 
     // Parent grass to chunk entity so it despawns when chunk is culled
     commands.spawn((
@@ -342,7 +403,7 @@ fn process_chunk_for_grass(
         NotShadowCaster,
         ChildOf(entity),
     ));
-    instance_count
+    GrassProcessResult::Spawned(instance_count)
 }
 
 /// Extract grass instances from a mesh by sampling upward-facing triangles
@@ -402,6 +463,22 @@ fn collect_grass_instances(
             continue;
         }
 
+        // Use the stored normal from the first vertex of the triangle (all 3 should be the same for flat faces).
+        // Reject side and bottom faces before transforming vertices; most chunk triangles cannot grow grass.
+        let normal_local = Vec3::from(normals[tri[0] as usize]);
+        let normal_world = transform.rotation * normal_local;
+        let normal_len_sq = normal_world.length_squared();
+
+        if normal_len_sq <= 0.0001 || normal_world.y <= 0.0 {
+            _rejected_normal += 1;
+            continue;
+        }
+
+        if normal_world.y * normal_world.y <= 0.0625 * normal_len_sq {
+            _rejected_normal += 1;
+            continue;
+        }
+
         let v0 = transform.transform_point(Vec3::from(positions[tri[0] as usize]));
         let v1 = transform.transform_point(Vec3::from(positions[tri[1] as usize]));
         let v2 = transform.transform_point(Vec3::from(positions[tri[2] as usize]));
@@ -409,10 +486,6 @@ fn collect_grass_instances(
         if v0.is_nan() || v1.is_nan() || v2.is_nan() {
             continue;
         }
-
-        // Use the stored normal from the first vertex of the triangle (all 3 should be the same for flat faces)
-        let normal_local = Vec3::from(normals[tri[0] as usize]);
-        let normal_world = transform.rotation * normal_local; // Transform rotation only, not translation
 
         let normal = (v1 - v0).cross(v2 - v0);
         let area = normal.length() * 0.5;
@@ -428,12 +501,7 @@ fn collect_grass_instances(
             continue;
         }
 
-        let normal_dir = normal_world.normalize();
-
-        if normal_dir.y <= 0.25 {
-            _rejected_normal += 1;
-            continue;
-        }
+        let normal_dir = normal_world / normal_len_sq.sqrt();
 
         _accepted += 1;
 
@@ -1214,7 +1282,8 @@ impl Plugin for VegetationPlugin {
             .add_systems(
                 Update,
                 (
-                    attach_procedural_grass_to_chunks, // Mixed with assets
+                    invalidate_grass_for_changed_chunks,
+                    attach_procedural_grass_to_chunks.after(invalidate_grass_for_changed_chunks), // Mixed with assets
                     cull_distant_grass,
                     sync_grass_wind_config,
                     // spawn_rock_props, // Disabled in favor of asset props

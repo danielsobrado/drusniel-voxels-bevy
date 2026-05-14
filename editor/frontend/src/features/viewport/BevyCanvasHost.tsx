@@ -35,6 +35,7 @@ interface BevyCanvasHostProps {
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
   readonly onSelectVoxel?: (selection: LiteVoxelSelection) => void;
   readonly onSetVoxel?: (edit: LiteVoxelEditRequest) => Promise<LiteVoxelEditResponse>;
+  readonly onToggleChunkBounds?: () => void;
   readonly selectedPropRotationY?: number;
   readonly selectedPropUniformScale?: number;
   readonly propRotateDragModifier?: ViewportModifierKey;
@@ -45,9 +46,15 @@ interface BevyCanvasHostProps {
   readonly propScaleMin?: number;
   readonly propScaleMax?: number;
   readonly onAdjustSelectedProp?: (adjustment: { readonly rotationY?: number; readonly uniformScale?: number }) => void;
+  readonly onNativeViewportStatusChange?: (status: NativeViewportStatus) => void;
 }
 
-type NativeViewportState = "unsupported" | "pending" | "attached" | "fallback";
+export type NativeViewportState = "unsupported" | "pending" | "attached" | "fallback";
+
+export interface NativeViewportStatus {
+  readonly state: NativeViewportState;
+  readonly message: string;
+}
 
 interface NativeViewportAttachment {
   readonly attached: boolean;
@@ -60,10 +67,20 @@ interface NativeViewportRect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly visible?: boolean;
+  readonly focus?: boolean;
 }
 
 const hasTauriGlobals = () => typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 const NATIVE_VIEWPORT_RESIZE_SETTLE_MS = 1000;
+const NATIVE_VIEWPORT_WARM_RECT: NativeViewportRect = {
+  x: 0,
+  y: 0,
+  width: 1,
+  height: 1,
+  visible: false,
+  focus: false,
+};
 
 const readNativeViewportRect = (host: HTMLElement): NativeViewportRect => {
   const rect = host.getBoundingClientRect();
@@ -158,6 +175,7 @@ export function BevyCanvasHost({
   onPlaceProp,
   onSelectVoxel,
   onSetVoxel,
+  onToggleChunkBounds,
   selectedPropRotationY,
   selectedPropUniformScale,
   propRotateDragModifier = "shift",
@@ -168,6 +186,7 @@ export function BevyCanvasHost({
   propScaleMin = 0.25,
   propScaleMax = 4,
   onAdjustSelectedProp,
+  onNativeViewportStatusChange,
 }: BevyCanvasHostProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const nativeResizeTimerRef = useRef<number | undefined>(undefined);
@@ -176,11 +195,16 @@ export function BevyCanvasHost({
   const activeViewportContract = viewportRole === "validation" ? NATIVE_BEVY_VIEWPORT_CONTRACT : LITE_VOXEL_VIEWPORT_CONTRACT;
   const liteViewportEnabled = activeViewportContract.implementation === "liteVoxel";
   const nativeViewportRequested = activeViewportContract.implementation === "nativeBevy";
-  const nativeViewportEnabled = nativeViewportRequested && desktopRuntime;
+  const nativeViewportVisible = nativeViewportRequested && desktopRuntime;
+  const nativeViewportEnabled = desktopRuntime;
   const [nativeViewportState, setNativeViewportState] = useState<NativeViewportState>(() => (nativeViewportEnabled ? "pending" : "unsupported"));
   const [nativeViewportMessage, setNativeViewportMessage] = useState(
-    nativeViewportRequested ? "Native Bevy viewport is starting." : "Fast authoring viewport active.",
+    desktopRuntime ? "Native validation viewport is warming in the background." : "Native validation viewport requires the desktop editor.",
   );
+
+  useEffect(() => {
+    onNativeViewportStatusChange?.({ state: nativeViewportState, message: nativeViewportMessage });
+  }, [nativeViewportMessage, nativeViewportState, onNativeViewportStatusChange]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -231,11 +255,8 @@ export function BevyCanvasHost({
 
   useEffect(() => {
     if (!nativeViewportEnabled) {
-      if (desktopRuntime) {
-        void invoke("detach_native_viewport").catch(() => undefined);
-      }
       setNativeViewportState("unsupported");
-      setNativeViewportMessage(nativeViewportRequested ? "Native validation viewport requires the desktop editor." : "Fast authoring viewport active.");
+      setNativeViewportMessage("Native validation viewport requires the desktop editor.");
       return;
     }
 
@@ -247,28 +268,36 @@ export function BevyCanvasHost({
         return;
       }
 
-      if (!nativeViewportRect || nativeViewportRect.width < 16 || nativeViewportRect.height < 16) {
+      if (nativeViewportVisible && (!nativeViewportRect || nativeViewportRect.width < 16 || nativeViewportRect.height < 16)) {
         nativeViewportDebug("attach skipped: host rect not ready", nativeViewportRect);
         setNativeViewportState("fallback");
         setNativeViewportMessage("Native viewport host is not ready.");
         return;
       }
 
-      nativeViewportDebug("attach request", nativeViewportRect);
+      const attachmentRect: NativeViewportRect = nativeViewportVisible
+        ? { ...nativeViewportRect!, visible: true, focus: true }
+        : NATIVE_VIEWPORT_WARM_RECT;
+
+      nativeViewportDebug("attach request", attachmentRect);
       setNativeViewportState((current) => (current === "attached" ? current : "pending"));
       void invoke<NativeViewportAttachment>("attach_native_viewport", {
         rect: {
-          x: nativeViewportRect.x,
-          y: nativeViewportRect.y,
-          width: nativeViewportRect.width,
-          height: nativeViewportRect.height,
+          x: attachmentRect.x,
+          y: attachmentRect.y,
+          width: attachmentRect.width,
+          height: attachmentRect.height,
+          visible: attachmentRect.visible ?? true,
+          focus: attachmentRect.focus ?? true,
         },
       })
         .then((attachment) => {
           if (!cancelled) {
             nativeViewportDebug("attach result", attachment);
             setNativeViewportState(attachment.attached ? "attached" : "fallback");
-            setNativeViewportMessage(attachment.message);
+            setNativeViewportMessage(
+              attachment.attached && !nativeViewportVisible ? "Native validation viewport is warmed in the background." : attachment.message,
+            );
           }
         })
         .catch((error: unknown) => {
@@ -290,7 +319,7 @@ export function BevyCanvasHost({
         window.clearTimeout(retryTimer);
       }
     };
-  }, [desktopRuntime, nativeViewportEnabled, nativeViewportRect, nativeViewportRequested, runtimeState]);
+  }, [nativeViewportEnabled, nativeViewportRect, nativeViewportVisible, runtimeState]);
 
   useEffect(() => {
     return () => {
@@ -301,7 +330,7 @@ export function BevyCanvasHost({
   return (
     <div
       ref={hostRef}
-      className={`bevy-canvas-host world-viewport-host ${nativeViewportEnabled && nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
+      className={`bevy-canvas-host world-viewport-host ${nativeViewportVisible && nativeViewportState === "attached" ? "world-viewport-host-native" : ""}`}
       data-testid="bevy-canvas-host"
       data-viewport-role={activeViewportContract.role}
       data-viewport-implementation={activeViewportContract.implementation}
@@ -325,6 +354,7 @@ export function BevyCanvasHost({
           onPlaceProp={onPlaceProp}
           onSelectVoxel={onSelectVoxel}
           onSetVoxel={onSetVoxel}
+          onToggleChunkBounds={onToggleChunkBounds}
           selectedPropRotationY={selectedPropRotationY}
           selectedPropUniformScale={selectedPropUniformScale}
           propRotateDragModifier={propRotateDragModifier}

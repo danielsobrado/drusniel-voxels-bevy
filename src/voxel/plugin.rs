@@ -474,6 +474,10 @@ impl ChunkGenerationState {
     }
 }
 
+fn should_poll_chunk_generation_tasks(gen_state: &ChunkGenerationState) -> bool {
+    !gen_state.is_complete && !gen_state.loading_from_disk && gen_state.total_chunks > 0
+}
+
 /// Component to hold a pending chunk generation task.
 #[derive(Component)]
 struct ChunkGenerationTask {
@@ -1698,8 +1702,8 @@ fn poll_chunk_generation_tasks(
     mut tasks: Query<(Entity, &mut ChunkGenerationTask)>,
     persistence_settings: Res<WorldPersistence>,
 ) {
-    // Skip if generation is already complete
-    if gen_state.is_complete {
+    // Skip until actual generation work has been queued.
+    if !should_poll_chunk_generation_tasks(&gen_state) {
         return;
     }
 
@@ -4436,6 +4440,48 @@ mod tests {
         assert_eq!(snapshot.stage, WorldStartupStage::LoadingSavedWorld);
         assert!(snapshot.detail.contains("Starting world load"));
         assert!(!snapshot.complete);
+    }
+
+    #[test]
+    fn chunk_generation_polling_waits_while_saved_world_is_loading() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 0,
+            chunks_completed: 0,
+            is_complete: false,
+            loading_from_disk: true,
+            world_stats: WorldStats::default(),
+            start_time: Some(std::time::Instant::now()),
+        };
+
+        assert!(!should_poll_chunk_generation_tasks(&gen_state));
+    }
+
+    #[test]
+    fn chunk_generation_polling_does_not_complete_empty_startup_state() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 0,
+            chunks_completed: 0,
+            is_complete: false,
+            loading_from_disk: false,
+            world_stats: WorldStats::default(),
+            start_time: Some(std::time::Instant::now()),
+        };
+
+        assert!(!should_poll_chunk_generation_tasks(&gen_state));
+    }
+
+    #[test]
+    fn chunk_generation_polling_runs_for_queued_generation() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 25,
+            is_complete: false,
+            loading_from_disk: false,
+            world_stats: WorldStats::default(),
+            start_time: Some(std::time::Instant::now()),
+        };
+
+        assert!(should_poll_chunk_generation_tasks(&gen_state));
     }
 
     #[test]

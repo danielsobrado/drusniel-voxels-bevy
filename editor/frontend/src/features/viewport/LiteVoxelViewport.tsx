@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { Camera, ExternalLink, Eye, EyeOff, Maximize2, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, PropInstance, ViewportMeshBuffer, ViewportSnapshot, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 import type { BrushSettings, EditorMode, RuntimeState, Selection, ViewportModifierKey, ViewportOverlayState } from "../../types/editor";
 import { LITE_VOXEL_VIEWPORT_CONTRACT } from "./viewportArchitecture";
@@ -20,6 +20,7 @@ export interface LiteVoxelViewportProps {
   readonly onPlaceProp?: (position: readonly [number, number, number]) => void;
   readonly onSelectVoxel?: (selection: LiteVoxelSelection) => void;
   readonly onSetVoxel?: (edit: LiteVoxelEditRequest) => Promise<LiteVoxelEditResponse>;
+  readonly onToggleChunkBounds?: () => void;
   readonly selectedPropRotationY?: number;
   readonly selectedPropUniformScale?: number;
   readonly propRotateDragModifier?: ViewportModifierKey;
@@ -53,10 +54,14 @@ interface ViewState {
   readonly zoom: number;
   readonly offsetX: number;
   readonly offsetY: number;
+  readonly rotation: number;
+  readonly pitch: number;
+  readonly heightOffset: number;
 }
 
 type CanvasDragState =
   | { readonly kind: "pan"; readonly x: number; readonly y: number; readonly view: ViewState }
+  | { readonly kind: "orbit"; readonly x: number; readonly y: number; readonly view: ViewState }
   | { readonly kind: "prop-rotate"; readonly x: number; readonly startRotationY: number };
 
 interface ModifierState {
@@ -94,6 +99,24 @@ interface PropOverlayShape {
   readonly selected: boolean;
 }
 
+interface SurfaceWallFace {
+  readonly points: readonly ProjectedPoint[];
+  readonly material: WorldSurfaceSample["material"];
+  readonly sortKey: number;
+}
+
+export interface GameCameraState {
+  readonly position: readonly [number, number, number];
+  readonly yaw: number;
+}
+
+export interface DetachedGameCameraSnapshot {
+  readonly camera: GameCameraState;
+  readonly samples: readonly WorldSurfaceSample[];
+  readonly cellSize: number;
+  readonly updatedAt: number;
+}
+
 interface PendingVoxelEdit {
   readonly id: string;
   readonly position: [number, number, number];
@@ -101,6 +124,22 @@ interface PendingVoxelEdit {
   readonly status: "pending" | "applied" | "rejected";
   readonly message?: string;
 }
+
+type ViewportKeyAction =
+  | "panForward"
+  | "panBackward"
+  | "panLeft"
+  | "panRight"
+  | "orbitLeft"
+  | "orbitRight"
+  | "tiltDown"
+  | "tiltUp"
+  | "fit"
+  | "reset"
+  | "zoomIn"
+  | "zoomOut";
+
+type ViewportKeyBindings = Record<ViewportKeyAction, string>;
 
 const MATERIAL_COLORS: Record<string, string> = {
   Air: "#171923",
@@ -130,11 +169,85 @@ const LEGACY_ATLAS_TILE_IDS: Readonly<Record<string, string>> = {
   "atlas/terrain_sand": "tile-4",
 };
 
-const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0 };
+const DEFAULT_VIEW: ViewState = { zoom: 1, offsetX: 0, offsetY: 0, rotation: 0, pitch: 0.5, heightOffset: 0 };
+export const DETACHED_GAME_CAMERA_CHANNEL = "drusniel-game-camera-preview";
+export const DETACHED_GAME_CAMERA_STORAGE_KEY = "drusniel.editor.detachedGameCamera";
+const DETACHED_GAME_CAMERA_WINDOW_LABEL = "game-camera-preview";
+const MIN_VIEW_PITCH = 0.08;
+const MAX_VIEW_PITCH = 0.92;
+const VIEW_HEIGHT_STEP = 8;
+const DEFAULT_VIEWPORT_KEY_BINDINGS: ViewportKeyBindings = {
+  panForward: "w",
+  panBackward: "s",
+  panLeft: "a",
+  panRight: "d",
+  orbitLeft: "q",
+  orbitRight: "e",
+  tiltDown: "z",
+  tiltUp: "x",
+  fit: "f",
+  reset: "r",
+  zoomIn: "=",
+  zoomOut: "-",
+};
+
+const VIEWPORT_KEY_OPTIONS: readonly { readonly value: string; readonly label: string }[] = [
+  { value: "w", label: "W" },
+  { value: "a", label: "A" },
+  { value: "s", label: "S" },
+  { value: "d", label: "D" },
+  { value: "q", label: "Q" },
+  { value: "e", label: "E" },
+  { value: "z", label: "Z" },
+  { value: "x", label: "X" },
+  { value: "r", label: "R" },
+  { value: "f", label: "F" },
+  { value: "=", label: "+" },
+  { value: "-", label: "-" },
+  { value: "arrowup", label: "Up" },
+  { value: "arrowdown", label: "Down" },
+  { value: "arrowleft", label: "Left" },
+  { value: "arrowright", label: "Right" },
+];
+
+const VIEWPORT_BINDING_LABELS: readonly { readonly action: ViewportKeyAction; readonly label: string }[] = [
+  { action: "panForward", label: "Pan forward" },
+  { action: "panBackward", label: "Pan back" },
+  { action: "panLeft", label: "Pan left" },
+  { action: "panRight", label: "Pan right" },
+  { action: "orbitLeft", label: "Orbit left" },
+  { action: "orbitRight", label: "Orbit right" },
+  { action: "tiltDown", label: "Tilt down" },
+  { action: "tiltUp", label: "Tilt up" },
+  { action: "fit", label: "Fit world" },
+  { action: "reset", label: "Reset view" },
+  { action: "zoomIn", label: "Zoom in" },
+  { action: "zoomOut", label: "Zoom out" },
+];
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const normalizeDegrees = (degrees: number) => ((degrees % 360) + 360) % 360;
+
+const normalizeKeyboardKey = (key: string) => (key === "+" ? "=" : key.toLowerCase());
+
+const normalizeQuarterTurn = (rotation: number) => ((rotation % 4) + 4) % 4;
+
+const rotateHorizontal = (x: number, z: number, rotation: number): readonly [number, number] => {
+  const radians = normalizeQuarterTurn(rotation) * Math.PI * 0.5;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [x * cos - z * sin, x * sin + z * cos];
+};
+
+const viewWithCamera = (view: ViewState, patch: Partial<ViewState>): ViewState => ({
+  ...view,
+  ...patch,
+  rotation: patch.rotation === undefined ? view.rotation : normalizeQuarterTurn(patch.rotation),
+  pitch: clamp(patch.pitch ?? view.pitch, MIN_VIEW_PITCH, MAX_VIEW_PITCH),
+});
+
+const gameYawForView = (view: ViewState) => normalizeQuarterTurn(view.rotation) * Math.PI * 0.5 + Math.PI * 0.25;
 
 const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none") => {
   switch (key) {
@@ -151,6 +264,11 @@ const modifierMatches = (event: ModifierState, key: ViewportModifierKey = "none"
   }
 };
 
+const sampleGridKey = (x: number, z: number) => `${x}:${z}`;
+
+const sampleColumnKey = (sample: WorldSurfaceSample, chunkSize: number) =>
+  `${Math.floor(sample.x / chunkSize)}:${Math.floor(sample.z / chunkSize)}`;
+
 const fallbackSamplesFromChunks = (chunks: readonly ChunkSummary[]): readonly WorldSurfaceSample[] =>
   chunks.map((chunk) => {
     const [x, y, z] = chunk.coordinate;
@@ -164,20 +282,136 @@ const fallbackSamplesFromChunks = (chunks: readonly ChunkSummary[]): readonly Wo
     };
   });
 
-const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: WorldViewportPreview | null): readonly WorldSurfaceSample[] => {
+export const collectSamples = (chunks: readonly ChunkSummary[], worldViewport: WorldViewportPreview | null): readonly WorldSurfaceSample[] => {
   const samples = worldViewport?.chunks.flatMap((chunk) => [...chunk.samples]) ?? [];
-  return samples.length > 0 ? samples : fallbackSamplesFromChunks(chunks);
-};
-
-const fitViewForSamples = (samples: readonly WorldSurfaceSample[], width: number, height: number): ViewState => {
-  if (samples.length === 0 || width <= 0 || height <= 0) {
-    return DEFAULT_VIEW;
+  if (samples.length === 0) {
+    return fallbackSamplesFromChunks(chunks);
   }
 
-  const iso = samples.map((sample) => ({
-    x: (sample.x - sample.z) * 0.72,
-    y: (sample.x + sample.z) * 0.36 - sample.height * 1.35,
-  }));
+  const byColumn = new Map<string, WorldSurfaceSample>();
+  for (const sample of samples) {
+    if (sample.material === "Air" && !sample.water) {
+      continue;
+    }
+
+    const key = sampleGridKey(sample.x, sample.z);
+    const current = byColumn.get(key);
+    if (!current || sample.height > current.height) {
+      byColumn.set(key, sample);
+    }
+  }
+
+  const mergedSamples = [...byColumn.values()];
+  return mergedSamples.length > 0 ? mergedSamples : fallbackSamplesFromChunks(chunks);
+};
+
+const buildSurfaceWallFaces = (
+  samples: readonly WorldSurfaceSample[],
+  cellSize: number,
+  view: ViewState,
+): readonly SurfaceWallFace[] => {
+  if (samples.length === 0) {
+    return [];
+  }
+
+  const byPosition = new Map(samples.map((sample) => [sampleGridKey(sample.x, sample.z), sample]));
+  const faces: SurfaceWallFace[] = [];
+  const isViewerFacingWallDirection = (dx: number, dz: number) => {
+    const [rotatedX, rotatedZ] = rotateHorizontal(dx, dz, view.rotation);
+    return rotatedX > 0 || rotatedZ > 0;
+  };
+  const addWall = (
+    high: WorldSurfaceSample,
+    low: WorldSurfaceSample,
+    direction: readonly [number, number],
+    highStart: readonly [number, number, number],
+    highEnd: readonly [number, number, number],
+    lowEnd: readonly [number, number, number],
+    lowStart: readonly [number, number, number],
+  ) => {
+    if (high.height <= low.height || !isViewerFacingWallDirection(direction[0], direction[1])) {
+      return;
+    }
+
+    const [rotatedX, rotatedZ] = rotateHorizontal(high.x, high.z, view.rotation);
+    faces.push({
+      points: [
+        projectIso(highStart, view),
+        projectIso(highEnd, view),
+        projectIso(lowEnd, view),
+        projectIso(lowStart, view),
+      ],
+      material: high.material,
+      sortKey: rotatedX + rotatedZ + high.height - (high.height - low.height) * 0.5,
+    });
+  };
+
+  for (const sample of samples) {
+    const east = byPosition.get(sampleGridKey(sample.x + cellSize, sample.z));
+    const south = byPosition.get(sampleGridKey(sample.x, sample.z + cellSize));
+
+    if (east) {
+      addWall(
+        sample,
+        east,
+        [cellSize, 0],
+        [sample.x + cellSize, sample.height, sample.z],
+        [sample.x + cellSize, sample.height, sample.z + cellSize],
+        [east.x, east.height, east.z + cellSize],
+        [east.x, east.height, east.z],
+      );
+      addWall(
+        east,
+        sample,
+        [-cellSize, 0],
+        [east.x, east.height, east.z + cellSize],
+        [east.x, east.height, east.z],
+        [sample.x + cellSize, sample.height, sample.z],
+        [sample.x + cellSize, sample.height, sample.z + cellSize],
+      );
+    }
+
+    if (south) {
+      addWall(
+        sample,
+        south,
+        [0, cellSize],
+        [sample.x + cellSize, sample.height, sample.z + cellSize],
+        [sample.x, sample.height, sample.z + cellSize],
+        [south.x, south.height, south.z],
+        [south.x + cellSize, south.height, south.z],
+      );
+      addWall(
+        south,
+        sample,
+        [0, -cellSize],
+        [south.x, south.height, south.z],
+        [south.x + cellSize, south.height, south.z],
+        [sample.x + cellSize, sample.height, sample.z + cellSize],
+        [sample.x, sample.height, sample.z + cellSize],
+      );
+    }
+  }
+
+  return faces.sort((left, right) => left.sortKey - right.sortKey);
+};
+
+const fitViewForSamples = (samples: readonly WorldSurfaceSample[], width: number, height: number, current: ViewState = DEFAULT_VIEW): ViewState => {
+  if (samples.length === 0 || width <= 0 || height <= 0) {
+    return viewWithCamera(DEFAULT_VIEW, {
+      rotation: current.rotation,
+      pitch: current.pitch,
+      heightOffset: current.heightOffset,
+    });
+  }
+
+  const iso = samples.map((sample) => {
+    const [x, z] = rotateHorizontal(sample.x, sample.z, current.rotation);
+    return {
+      x: (x - z) * 0.72,
+      y: (x + z) * 0.72 * current.pitch - (sample.height - current.heightOffset) * 1.35,
+    };
+  });
   const minX = Math.min(...iso.map((point) => point.x));
   const maxX = Math.max(...iso.map((point) => point.x));
   const minY = Math.min(...iso.map((point) => point.y));
@@ -190,6 +424,9 @@ const fitViewForSamples = (samples: readonly WorldSurfaceSample[], width: number
     zoom,
     offsetX: width / 2 - ((minX + maxX) / 2) * zoom,
     offsetY: height / 2 - ((minY + maxY) / 2) * zoom + height * 0.05,
+    rotation: normalizeQuarterTurn(current.rotation),
+    pitch: clamp(current.pitch, MIN_VIEW_PITCH, MAX_VIEW_PITCH),
+    heightOffset: current.heightOffset,
   };
 };
 
@@ -206,14 +443,37 @@ const drawDiamond = (ctx: CanvasRenderingContext2D, x: number, y: number, radius
   ctx.stroke();
 };
 
-const drawTexturedDiamond = (
+const tracePolygon = (ctx: CanvasRenderingContext2D, points: readonly ProjectedPoint[]) => {
+  const [first, ...rest] = points;
+  if (!first) {
+    return false;
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  for (const point of rest) {
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.closePath();
+  return true;
+};
+
+const fillPolygon = (ctx: CanvasRenderingContext2D, points: readonly ProjectedPoint[], fill: string, stroke: string) => {
+  if (!tracePolygon(ctx, points)) {
+    return;
+  }
+
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+};
+
+const drawTexturedPolygon = (
   ctx: CanvasRenderingContext2D,
   atlasImage: HTMLImageElement,
   tileIndex: number,
-  x: number,
-  y: number,
-  radiusX: number,
-  radiusY: number,
+  points: readonly ProjectedPoint[],
   stroke: string,
 ) => {
   const tileWidth = atlasImage.naturalWidth / ATLAS_COLUMNS;
@@ -224,14 +484,21 @@ const drawTexturedDiamond = (
 
   const column = tileIndex % ATLAS_COLUMNS;
   const row = Math.floor(tileIndex / ATLAS_COLUMNS);
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
 
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(x, y - radiusY);
-  ctx.lineTo(x + radiusX, y);
-  ctx.lineTo(x, y + radiusY);
-  ctx.lineTo(x - radiusX, y);
-  ctx.closePath();
+  if (!tracePolygon(ctx, points)) {
+    ctx.restore();
+    return false;
+  }
   ctx.clip();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
@@ -240,28 +507,83 @@ const drawTexturedDiamond = (
     row * tileHeight,
     tileWidth,
     tileHeight,
-    x - radiusX,
-    y - radiusY,
-    radiusX * 2,
-    radiusY * 2,
+    minX,
+    minY,
+    width,
+    height,
   );
   ctx.restore();
 
-  ctx.beginPath();
-  ctx.moveTo(x, y - radiusY);
-  ctx.lineTo(x + radiusX, y);
-  ctx.lineTo(x, y + radiusY);
-  ctx.lineTo(x - radiusX, y);
-  ctx.closePath();
-  ctx.strokeStyle = stroke;
-  ctx.stroke();
+  if (tracePolygon(ctx, points)) {
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  }
   return true;
 };
 
-const projectIso = (position: readonly [number, number, number], view: ViewState) => ({
-  x: view.offsetX + (position[0] - position[2]) * 0.72 * view.zoom,
-  y: view.offsetY + ((position[0] + position[2]) * 0.36 - position[1] * 1.35) * view.zoom,
-});
+const drawSurfaceWallFace = (ctx: CanvasRenderingContext2D, face: SurfaceWallFace) => {
+  const materialColor = MATERIAL_COLORS[face.material] ?? MATERIAL_COLORS.Rock;
+  ctx.save();
+  ctx.globalAlpha = 0.66;
+  fillPolygon(ctx, face.points, materialColor, "rgba(8, 10, 14, 0.78)");
+  ctx.restore();
+};
+
+const drawIsoSurfaceCell = (
+  ctx: CanvasRenderingContext2D,
+  sample: WorldSurfaceSample,
+  atlasMapping: BlockAtlasMap,
+  atlasImage: HTMLImageElement | null,
+  cellSize: number,
+  view: ViewState,
+) => {
+  const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
+  const stroke = "rgba(11, 14, 20, 0.86)";
+  const sideDepth = clamp(cellSize * 0.34 * view.zoom, 3 * view.zoom, 14 * view.zoom);
+  const topNorth = projectIso([sample.x, sample.height, sample.z], view);
+  const topEast = projectIso([sample.x + cellSize, sample.height, sample.z], view);
+  const topSouth = projectIso([sample.x + cellSize, sample.height, sample.z + cellSize], view);
+  const topWest = projectIso([sample.x, sample.height, sample.z + cellSize], view);
+  const top: readonly ProjectedPoint[] = [
+    topNorth,
+    topEast,
+    topSouth,
+    topWest,
+  ];
+  const leftSide: readonly ProjectedPoint[] = [
+    topWest,
+    topSouth,
+    { x: topSouth.x, y: topSouth.y + sideDepth },
+    { x: topWest.x, y: topWest.y + sideDepth },
+  ];
+  const rightSide: readonly ProjectedPoint[] = [
+    topEast,
+    topSouth,
+    { x: topSouth.x, y: topSouth.y + sideDepth },
+    { x: topEast.x, y: topEast.y + sideDepth },
+  ];
+
+  fillPolygon(ctx, leftSide, "rgba(15, 18, 24, 0.44)", stroke);
+  ctx.save();
+  ctx.globalAlpha = 0.64;
+  fillPolygon(ctx, leftSide, materialColor, stroke);
+  ctx.globalAlpha = 0.52;
+  fillPolygon(ctx, rightSide, materialColor, stroke);
+  ctx.restore();
+
+  const topTileIndex = atlasImage ? atlasTileIndexForSample(atlasMapping, sample.material, "top") : null;
+  if (!(atlasImage && topTileIndex !== null && drawTexturedPolygon(ctx, atlasImage, topTileIndex, top, stroke))) {
+    fillPolygon(ctx, top, materialColor, stroke);
+  }
+};
+
+const projectIso = (position: readonly [number, number, number], view: ViewState) => {
+  const [x, z] = rotateHorizontal(position[0], position[2], view.rotation);
+  return {
+    x: view.offsetX + (x - z) * 0.72 * view.zoom,
+    y: view.offsetY + ((x + z) * 0.72 * view.pitch - (position[1] - view.heightOffset) * 1.35) * view.zoom,
+  };
+};
 
 const normalizeAtlasTileId = (tileId: string) => LEGACY_ATLAS_TILE_IDS[tileId] ?? tileId;
 
@@ -477,6 +799,97 @@ const drawMeshBuffer = (ctx: CanvasRenderingContext2D, mesh: ViewportMeshBuffer,
   return true;
 };
 
+export const drawGameCameraPreview = (
+  ctx: CanvasRenderingContext2D,
+  samples: readonly WorldSurfaceSample[],
+  camera: GameCameraState,
+  cellSize: number,
+  width: number,
+  height: number,
+) => {
+  ctx.clearRect(0, 0, width, height);
+  const sky = ctx.createLinearGradient(0, 0, 0, height);
+  sky.addColorStop(0, "#182636");
+  sky.addColorStop(0.55, "#101821");
+  sky.addColorStop(1, "#0a0d12");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, width, height);
+
+  const horizon = height * 0.48;
+  ctx.fillStyle = "rgba(5, 7, 10, 0.52)";
+  ctx.fillRect(0, horizon, width, height - horizon);
+
+  const sampleMap = new Map(samples.map((sample) => [sampleGridKey(sample.x, sample.z), sample]));
+  const forwardX = Math.cos(camera.yaw);
+  const forwardZ = Math.sin(camera.yaw);
+  const rightX = -forwardZ;
+  const rightZ = forwardX;
+  const focal = width * 0.74;
+  const drawItems = samples
+    .map((sample) => {
+      const dx = sample.x + cellSize * 0.5 - camera.position[0];
+      const dz = sample.z + cellSize * 0.5 - camera.position[2];
+      const depth = dx * forwardX + dz * forwardZ;
+      if (depth <= 2 || depth > 160) {
+        return null;
+      }
+      const lateral = dx * rightX + dz * rightZ;
+      const screenX = width * 0.5 + (lateral / depth) * focal;
+      const size = clamp((cellSize / depth) * focal, 2, 52);
+      if (screenX < -size || screenX > width + size) {
+        return null;
+      }
+
+      const neighbors = [
+        sampleMap.get(sampleGridKey(sample.x + cellSize, sample.z)),
+        sampleMap.get(sampleGridKey(sample.x - cellSize, sample.z)),
+        sampleMap.get(sampleGridKey(sample.x, sample.z + cellSize)),
+        sampleMap.get(sampleGridKey(sample.x, sample.z - cellSize)),
+      ].filter((neighbor): neighbor is WorldSurfaceSample => Boolean(neighbor));
+      const baseHeight = Math.min(sample.height - 1, ...neighbors.map((neighbor) => neighbor.height));
+      const topY = horizon + ((camera.position[1] - sample.height) / depth) * focal * 0.62;
+      const bottomY = horizon + ((camera.position[1] - baseHeight) / depth) * focal * 0.62;
+      return { sample, depth, screenX, size, topY, bottomY };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((left, right) => right.depth - left.depth);
+
+  for (const item of drawItems) {
+    const materialColor = MATERIAL_COLORS[item.sample.material] ?? MATERIAL_COLORS.Rock;
+    const half = item.size * 0.5;
+    const topHeight = item.size * 0.24;
+    const bottomY = Math.max(item.topY + 2, item.bottomY);
+
+    ctx.fillStyle = item.sample.water ? "rgba(74, 184, 234, 0.7)" : materialColor;
+    ctx.strokeStyle = "rgba(4, 6, 10, 0.78)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(item.screenX - half, item.topY, item.size, bottomY - item.topY);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.globalAlpha = item.sample.water ? 0.72 : 1;
+    ctx.beginPath();
+    ctx.moveTo(item.screenX, item.topY - topHeight);
+    ctx.lineTo(item.screenX + half, item.topY);
+    ctx.lineTo(item.screenX, item.topY + topHeight);
+    ctx.lineTo(item.screenX - half, item.topY);
+    ctx.closePath();
+    ctx.fillStyle = item.sample.water ? "#65c7ff" : materialColor;
+    ctx.fill();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.beginPath();
+  ctx.moveTo(width * 0.5 - 10, height * 0.5);
+  ctx.lineTo(width * 0.5 + 10, height * 0.5);
+  ctx.moveTo(width * 0.5, height * 0.5 - 10);
+  ctx.lineTo(width * 0.5, height * 0.5 + 10);
+  ctx.stroke();
+};
+
 export const LiteVoxelViewport = Object.assign(
   function LiteVoxelViewport({
     chunks,
@@ -494,6 +907,7 @@ export const LiteVoxelViewport = Object.assign(
     onPlaceProp,
     onSelectVoxel,
     onSetVoxel,
+    onToggleChunkBounds,
     selectedPropRotationY,
     selectedPropUniformScale,
     propRotateDragModifier = "shift",
@@ -506,17 +920,51 @@ export const LiteVoxelViewport = Object.assign(
     onAdjustSelectedProp,
   }: LiteVoxelViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const gameCameraCanvasRef = useRef<HTMLCanvasElement>(null);
     const dragRef = useRef<CanvasDragState | null>(null);
     const suppressClickRef = useRef(false);
     const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
+    const [cameraSlots, setCameraSlots] = useState<ReadonlyArray<ViewState | null>>([null, null, null]);
+    const [keysPanelOpen, setKeysPanelOpen] = useState(false);
+    const [keyBindings, setKeyBindings] = useState<ViewportKeyBindings>(DEFAULT_VIEWPORT_KEY_BINDINGS);
+    const [gameCameraEnabled, setGameCameraEnabled] = useState(false);
+    const [gameCameraPlacementArmed, setGameCameraPlacementArmed] = useState(false);
+    const [gameCamera, setGameCamera] = useState<GameCameraState | null>(null);
     const [hoveredVoxel, setHoveredVoxel] = useState<LiteVoxelSelection | null>(null);
     const [pendingVoxelEdits, setPendingVoxelEdits] = useState<readonly PendingVoxelEdit[]>([]);
     const [atlasImage, setAtlasImage] = useState<HTMLImageElement | null>(null);
     const samples = useMemo(() => collectSamples(chunks, worldViewport), [chunks, worldViewport]);
+    const viewportChunkSize = viewportSnapshot?.chunkSize ?? worldViewport?.chunkSize ?? 16;
+    const sampleCellSize = useMemo(() => {
+      const sampleResolution = viewportSnapshot?.sampleResolution ?? worldViewport?.sampleResolution ?? 1;
+      return sampleResolution > 0 ? viewportChunkSize / sampleResolution : viewportChunkSize;
+    }, [viewportChunkSize, viewportSnapshot, worldViewport]);
     const hasBackendPreview = Boolean(worldViewport && worldViewport.chunks.length > 0);
     const meshChunks = useMemo(() => viewportSnapshot?.chunks.filter((chunk) => chunk.mesh.included) ?? [], [viewportSnapshot]);
     const hasRenderableMesh = meshChunks.some((chunk) => Boolean(chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length));
+    const meshBackedColumns = useMemo(() => {
+      const columns = new Set<string>();
+      for (const chunk of meshChunks) {
+        if (chunk.mesh.terrain.positions?.length || chunk.mesh.water.positions?.length) {
+          columns.add(`${chunk.coordinate[0]}:${chunk.coordinate[2]}`);
+        }
+      }
+      return columns;
+    }, [meshChunks]);
+    const visibleSamples = useMemo(() => {
+      if (!hasRenderableMesh || meshBackedColumns.size === 0) {
+        return samples;
+      }
+
+      return samples.filter((sample) => {
+        return !meshBackedColumns.has(sampleColumnKey(sample, viewportChunkSize));
+      });
+    }, [hasRenderableMesh, meshBackedColumns, samples, viewportChunkSize]);
+    const visibleSurfaceWallFaces = useMemo(
+      () => buildSurfaceWallFaces(visibleSamples, sampleCellSize, view),
+      [sampleCellSize, view, visibleSamples],
+    );
     const atlasPreviewEnabled = viewportOverlays.atlasPreview || activeMode === "voxel_paint" || activeMode === "material";
     const waterSampleCount = samples.filter((sample) => sample.water).length;
     const chunkOverlayShapes = useMemo(() => buildChunkOverlayShapes(chunks, selection, view), [chunks, selection, view]);
@@ -524,6 +972,36 @@ export const LiteVoxelViewport = Object.assign(
     const propOverlayShapes = useMemo(() => buildPropOverlayShapes(props, selection, view), [props, selection, view]);
     const selectedVoxelPoint = selection.kind === "voxel" ? projectIso(selection.position, view) : null;
     const hoveredVoxelPoint = hoveredVoxel ? projectIso(hoveredVoxel.position, view) : null;
+
+    const updateKeyBinding = useCallback((action: ViewportKeyAction, nextKey: string) => {
+      setKeyBindings((current) => {
+        const next = normalizeKeyboardKey(nextKey);
+        const previous = current[action];
+        const conflictingAction = VIEWPORT_BINDING_LABELS.find((binding) => binding.action !== action && current[binding.action] === next)?.action;
+        return {
+          ...current,
+          ...(conflictingAction ? { [conflictingAction]: previous } : {}),
+          [action]: next,
+        };
+      });
+    }, []);
+
+    const placeGameCamera = useCallback(
+      (position: readonly [number, number, number]) => {
+        setGameCamera({
+          position: [position[0], position[1] + 1.7, position[2]],
+          yaw: gameYawForView(view),
+        });
+        setGameCameraEnabled(true);
+        setGameCameraPlacementArmed(false);
+      },
+      [view],
+    );
+
+    const placeGameCameraAtTarget = useCallback(() => {
+      const target = hoveredVoxel?.position ?? targetedVoxel;
+      placeGameCamera([target[0], target[1], target[2]]);
+    }, [hoveredVoxel, placeGameCamera, targetedVoxel]);
 
     const queueVoxelEdit = useCallback(
       async (voxelSelection: LiteVoxelSelection) => {
@@ -568,8 +1046,76 @@ export const LiteVoxelViewport = Object.assign(
     );
 
     const fitView = useCallback(() => {
-      setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
+      setView((current) => fitViewForSamples(samples, canvasSize.width, canvasSize.height, current));
     }, [canvasSize.height, canvasSize.width, samples]);
+
+    const publishDetachedGameCameraSnapshot = useCallback(
+      (camera: GameCameraState) => {
+        const snapshot: DetachedGameCameraSnapshot = {
+          camera,
+          samples,
+          cellSize: sampleCellSize,
+          updatedAt: Date.now(),
+        };
+
+        try {
+          window.localStorage.setItem(DETACHED_GAME_CAMERA_STORAGE_KEY, JSON.stringify(snapshot));
+        } catch {
+          // Detached preview is best-effort; the inline preview still works without storage.
+        }
+
+        if ("BroadcastChannel" in window) {
+          const channel = new BroadcastChannel(DETACHED_GAME_CAMERA_CHANNEL);
+          channel.postMessage(snapshot);
+          channel.close();
+        }
+      },
+      [sampleCellSize, samples],
+    );
+
+    const openDetachedGameCamera = useCallback(async () => {
+      setGameCameraEnabled(true);
+
+      if (gameCamera) {
+        publishDetachedGameCameraSnapshot(gameCamera);
+      }
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("window", "game-camera");
+      url.hash = "";
+
+      const isTauriDesktop = "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
+      if (isTauriDesktop) {
+        try {
+          const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+          const existingWindow = await WebviewWindow.getByLabel(DETACHED_GAME_CAMERA_WINDOW_LABEL);
+          if (existingWindow) {
+            await existingWindow.setFocus();
+            return;
+          }
+
+          const detachedWindow = new WebviewWindow(DETACHED_GAME_CAMERA_WINDOW_LABEL, {
+            url: `${url.pathname}${url.search}`,
+            title: "Game Camera",
+            width: 640,
+            height: 360,
+            minWidth: 360,
+            minHeight: 220,
+            resizable: true,
+            focus: true,
+            center: true,
+          });
+          void detachedWindow.once("tauri://error", () => {
+            window.open(url.toString(), DETACHED_GAME_CAMERA_WINDOW_LABEL, "popup,width=640,height=360,resizable=yes");
+          });
+          return;
+        } catch {
+          // Browser fallback below also covers test runs.
+        }
+      }
+
+      window.open(url.toString(), DETACHED_GAME_CAMERA_WINDOW_LABEL, "popup,width=640,height=360,resizable=yes");
+    }, [gameCamera, publishDetachedGameCameraSnapshot]);
 
     useEffect(() => {
       const canvas = canvasRef.current;
@@ -587,7 +1133,7 @@ export const LiteVoxelViewport = Object.assign(
     }, []);
 
     useEffect(() => {
-      setView(fitViewForSamples(samples, canvasSize.width, canvasSize.height));
+      setView((current) => fitViewForSamples(samples, canvasSize.width, canvasSize.height, current));
     }, [canvasSize.height, canvasSize.width, samples]);
 
     useEffect(() => {
@@ -660,35 +1206,30 @@ export const LiteVoxelViewport = Object.assign(
       }
       ctx.restore();
 
-      let renderedMesh = false;
       for (const chunk of meshChunks) {
-        renderedMesh =
-          drawMeshBuffer(ctx, chunk.mesh.terrain, view, "rgba(92, 101, 111, 0.72)", "rgba(15, 18, 24, 0.7)") ||
-          renderedMesh;
-        renderedMesh =
-          drawMeshBuffer(ctx, chunk.mesh.water, view, "rgba(55, 159, 220, 0.55)", "rgba(157, 221, 255, 0.55)") ||
-          renderedMesh;
+        drawMeshBuffer(ctx, chunk.mesh.terrain, view, "rgba(92, 101, 111, 0.28)", "rgba(15, 18, 24, 0.34)");
+        drawMeshBuffer(ctx, chunk.mesh.water, view, "rgba(55, 159, 220, 0.32)", "rgba(157, 221, 255, 0.42)");
       }
 
-      const orderedSamples = [...samples].sort((left, right) => left.x + left.z + left.height - (right.x + right.z + right.height));
+      const orderedSamples = [...visibleSamples].sort((left, right) => {
+        const [leftX, leftZ] = rotateHorizontal(left.x, left.z, view.rotation);
+        const [rightX, rightZ] = rotateHorizontal(right.x, right.z, view.rotation);
+        return leftX + leftZ + left.height - (rightX + rightZ + right.height);
+      });
+      for (const face of visibleSurfaceWallFaces) {
+        drawSurfaceWallFace(ctx, face);
+      }
       for (const sample of orderedSamples) {
-        if (renderedMesh && !sample.water && !atlasPreviewEnabled) {
-          continue;
-        }
-        const isoX = (sample.x - sample.z) * 0.72;
-        const isoY = (sample.x + sample.z) * 0.36 - sample.height * 1.35;
-        const screenX = view.offsetX + isoX * view.zoom;
-        const screenY = view.offsetY + isoY * view.zoom;
-        const radiusX = (hasBackendPreview ? 8 : 16) * view.zoom;
-        const radiusY = (hasBackendPreview ? 4 : 8) * view.zoom;
+        const { x: screenX, y: screenY } = projectIso([sample.x, sample.height, sample.z], view);
+        const radiusX = sampleCellSize * 0.72 * view.zoom;
+        const radiusY = sampleCellSize * 0.36 * view.zoom;
         const materialColor = MATERIAL_COLORS[sample.material] ?? MATERIAL_COLORS.Rock;
         const stroke = sample.water ? "rgba(157, 221, 255, 0.75)" : "rgba(11, 14, 20, 0.85)";
-        const atlasTileIndex = atlasPreviewEnabled && !sample.water && atlasImage ? atlasTileIndexForSample(atlasMapping, sample.material, "top") : null;
 
-        if (!(atlasImage && atlasTileIndex !== null && drawTexturedDiamond(ctx, atlasImage, atlasTileIndex, screenX, screenY, radiusX, radiusY, stroke))) {
+        if (!sample.water) {
+          drawIsoSurfaceCell(ctx, sample, atlasMapping, atlasImage, sampleCellSize, view);
+        } else {
           drawDiamond(ctx, screenX, screenY, radiusX, radiusY, materialColor, stroke);
-        }
-        if (sample.water) {
           ctx.globalAlpha = 0.45;
           drawDiamond(ctx, screenX, screenY - 1.5 * view.zoom, radiusX * 0.82, radiusY * 0.72, "#65c7ff", "rgba(187, 237, 255, 0.8)");
           ctx.globalAlpha = 1;
@@ -701,7 +1242,56 @@ export const LiteVoxelViewport = Object.assign(
         ctx.textAlign = "center";
         ctx.fillText("No world chunks loaded", canvasSize.width / 2, canvasSize.height / 2);
       }
-    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, hasBackendPreview, meshChunks, samples, view]);
+    }, [atlasImage, atlasMapping, atlasPreviewEnabled, canvasSize.height, canvasSize.width, meshChunks, sampleCellSize, samples.length, view, visibleSamples, visibleSurfaceWallFaces]);
+
+    useEffect(() => {
+      const canvas = gameCameraCanvasRef.current;
+      if (!canvas || !gameCameraEnabled || !gameCamera) {
+        return;
+      }
+
+      const width = 320;
+      const height = 180;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        return;
+      }
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawGameCameraPreview(ctx, samples, gameCamera, sampleCellSize, width, height);
+    }, [gameCamera, gameCameraEnabled, sampleCellSize, samples]);
+
+    useEffect(() => {
+      if (!gameCamera) {
+        return;
+      }
+
+      publishDetachedGameCameraSnapshot(gameCamera);
+    }, [gameCamera, publishDetachedGameCameraSnapshot]);
+
+    useEffect(() => {
+      if (!keysPanelOpen) {
+        return;
+      }
+
+      const closeOnEscape = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") {
+          return;
+        }
+
+        event.preventDefault();
+        setKeysPanelOpen(false);
+      };
+
+      document.addEventListener("keydown", closeOnEscape, true);
+      return () => document.removeEventListener("keydown", closeOnEscape, true);
+    }, [keysPanelOpen]);
 
     return (
       <>
@@ -711,8 +1301,12 @@ export const LiteVoxelViewport = Object.assign(
           data-testid="world-viewport-canvas"
           data-atlas-preview-enabled={String(atlasPreviewEnabled)}
           data-renderable-mesh={String(hasRenderableMesh)}
+          data-surface-preview-mode={hasRenderableMesh ? "mesh-filtered" : "sampled"}
+          data-visible-surface-samples={visibleSamples.length}
+          data-visible-surface-walls={visibleSurfaceWallFaces.length}
           tabIndex={0}
           onPointerDown={(event) => {
+            event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
             suppressClickRef.current = false;
             if (
@@ -723,6 +1317,12 @@ export const LiteVoxelViewport = Object.assign(
             ) {
               event.preventDefault();
               dragRef.current = { kind: "prop-rotate", x: event.clientX, startRotationY: selectedPropRotationY };
+              return;
+            }
+
+            if (event.button === 1 || event.button === 2 || event.altKey || event.ctrlKey) {
+              event.preventDefault();
+              dragRef.current = { kind: "orbit", x: event.clientX, y: event.clientY, view };
               return;
             }
 
@@ -749,6 +1349,16 @@ export const LiteVoxelViewport = Object.assign(
               onAdjustSelectedProp?.({ rotationY: normalizeDegrees(snappedRotation) });
               return;
             }
+            if (drag.kind === "orbit") {
+              event.preventDefault();
+              setView(
+                viewWithCamera(drag.view, {
+                  rotation: drag.view.rotation + (event.clientX - drag.x) / 180,
+                  pitch: drag.view.pitch + (event.clientY - drag.y) / 360,
+                }),
+              );
+              return;
+            }
 
             setView({ ...drag.view, offsetX: drag.view.offsetX + event.clientX - drag.x, offsetY: drag.view.offsetY + event.clientY - drag.y });
           }}
@@ -770,6 +1380,18 @@ export const LiteVoxelViewport = Object.assign(
               const fineMultiplier = propFineScaleModifier !== "none" && modifierMatches(event, propFineScaleModifier) ? 0.25 : 1;
               const nextScale = clamp(selectedPropUniformScale + direction * propScaleStep * fineMultiplier, propScaleMin, propScaleMax);
               onAdjustSelectedProp({ uniformScale: nextScale });
+              return;
+            }
+
+            if (event.altKey) {
+              const direction = event.deltaY < 0 ? 1 : -1;
+              setView((current) => viewWithCamera(current, { heightOffset: current.heightOffset + direction * VIEW_HEIGHT_STEP }));
+              return;
+            }
+
+            if (event.ctrlKey) {
+              const direction = event.deltaY < 0 ? 1 : -1;
+              setView((current) => viewWithCamera(current, { pitch: current.pitch + direction * 0.04 }));
               return;
             }
 
@@ -801,38 +1423,129 @@ export const LiteVoxelViewport = Object.assign(
               return;
             }
 
+            if (gameCameraPlacementArmed) {
+              placeGameCamera(voxelSelection.position);
+              return;
+            }
+
             onSelectVoxel?.(voxelSelection);
             if (activeMode === "voxel_paint" || activeMode === "voxel_sculpt") {
               void queueVoxelEdit(voxelSelection);
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === "Home" || event.key.toLowerCase() === "f") {
+            if (event.key === "Escape" && keysPanelOpen) {
+              event.preventDefault();
+              setKeysPanelOpen(false);
+              return;
+            }
+
+            const key = normalizeKeyboardKey(event.key);
+            if (event.key === "Home" || key === keyBindings.fit) {
+              event.preventDefault();
               fitView();
+              return;
             }
-            if (event.key === "+" || event.key === "=") {
+            if (key === keyBindings.zoomIn) {
+              event.preventDefault();
               setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }));
+              return;
             }
-            if (event.key === "-" || event.key === "_") {
+            if (key === keyBindings.zoomOut) {
+              event.preventDefault();
               setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }));
+              return;
+            }
+            const panStep = event.altKey ? 18 : event.shiftKey ? 96 : 48;
+            const rotateStep = event.shiftKey ? 0.5 : 1 / 6;
+            const tiltStep = event.shiftKey ? 0.12 : 0.04;
+            const digitSlotMatch = /^digit([1-3])$/.exec(event.code.toLowerCase());
+            if (event.ctrlKey && digitSlotMatch) {
+              event.preventDefault();
+              const slotIndex = Number.parseInt(digitSlotMatch[1], 10) - 1;
+              setCameraSlots((current) => current.map((slot, index) => (index === slotIndex ? view : slot)));
+              return;
+            }
+            if (!event.ctrlKey && !event.metaKey && digitSlotMatch) {
+              const slotIndex = Number.parseInt(digitSlotMatch[1], 10) - 1;
+              const slot = cameraSlots[slotIndex];
+              if (slot) {
+                event.preventDefault();
+                setView(slot);
+                return;
+              }
+            }
+            if (event.ctrlKey && (key === "arrowleft" || key === "arrowright")) {
+              event.preventDefault();
+              const direction = key === "arrowleft" ? -1 : 1;
+              setView((current) => viewWithCamera(current, { rotation: current.rotation + direction * rotateStep }));
+              return;
+            }
+            if (event.ctrlKey && (key === "arrowup" || key === "arrowdown")) {
+              event.preventDefault();
+              const direction = key === "arrowup" ? -1 : 1;
+              setView((current) => viewWithCamera(current, { pitch: current.pitch + direction * tiltStep }));
+              return;
+            }
+            if (event.altKey && (key === "arrowup" || key === "arrowdown")) {
+              event.preventDefault();
+              const direction = key === "arrowup" ? 1 : -1;
+              setView((current) => viewWithCamera(current, { heightOffset: current.heightOffset + direction * VIEW_HEIGHT_STEP }));
+              return;
+            }
+            const panByKey: Record<string, readonly [number, number]> = {
+              arrowup: [0, panStep],
+              arrowdown: [0, -panStep],
+              arrowleft: [panStep, 0],
+              arrowright: [-panStep, 0],
+              [keyBindings.panForward]: [0, panStep],
+              [keyBindings.panBackward]: [0, -panStep],
+              [keyBindings.panLeft]: [panStep, 0],
+              [keyBindings.panRight]: [-panStep, 0],
+            };
+            const pan = panByKey[key];
+            if (pan && !event.metaKey && !event.ctrlKey) {
+              event.preventDefault();
+              setView((current) => ({ ...current, offsetX: current.offsetX + pan[0], offsetY: current.offsetY + pan[1] }));
+              return;
+            }
+            if ((key === keyBindings.orbitLeft || key === keyBindings.orbitRight) && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              const direction = key === keyBindings.orbitLeft ? -1 : 1;
+              setView((current) => viewWithCamera(current, { rotation: current.rotation + direction * rotateStep }));
+              return;
+            }
+            if ((key === keyBindings.tiltDown || key === keyBindings.tiltUp) && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              const direction = key === keyBindings.tiltDown ? -1 : 1;
+              setView((current) => viewWithCamera(current, { pitch: current.pitch + direction * tiltStep }));
+              return;
+            }
+            if ((key === keyBindings.reset) && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              setView((current) => fitViewForSamples(samples, canvasSize.width, canvasSize.height, { ...DEFAULT_VIEW, rotation: current.rotation }));
             }
           }}
+          onContextMenu={(event) => event.preventDefault()}
         />
 
         {viewportOverlays.voxelGrid ? <div className="lite-viewport-grid-overlay" aria-hidden="true" data-testid="viewport-voxel-grid-overlay" /> : null}
 
         {viewportOverlays.wireframe ? <div className="lite-viewport-wire-overlay" aria-hidden="true" data-testid="viewport-wireframe-overlay" /> : null}
 
-        <svg className="lite-viewport-authoring-overlay" data-testid="lite-viewport-authoring-overlay" aria-hidden="true">
-          {(viewportOverlays.chunkBounds || chunkOverlayShapes.some((shape) => shape.dirty || shape.selected)) &&
+        <svg
+          className="lite-viewport-authoring-overlay"
+          data-testid="lite-viewport-authoring-overlay"
+          data-chunk-bounds-visible={String(viewportOverlays.chunkBounds)}
+          aria-hidden="true"
+        >
+          {viewportOverlays.chunkBounds &&
             chunkOverlayShapes.map((shape) => (
               <g key={shape.id} data-testid={`viewport-chunk-overlay-${shape.id}`}>
                 {shape.dirty ? (
                   <polygon className="lite-viewport-dirty-chunk" points={pointsToSvg(shape.points)} />
                 ) : null}
-                {viewportOverlays.chunkBounds || shape.selected ? (
-                  <polygon className={shape.selected ? "lite-viewport-selected-chunk" : "lite-viewport-chunk-bound"} points={pointsToSvg(shape.points)} />
-                ) : null}
+                <polygon className={shape.selected ? "lite-viewport-selected-chunk" : "lite-viewport-chunk-bound"} points={pointsToSvg(shape.points)} />
               </g>
             ))}
 
@@ -887,13 +1600,155 @@ export const LiteVoxelViewport = Object.assign(
           <button type="button" className="icon-button" title="Fit loaded world" aria-label="Fit loaded world" onClick={fitView}>
             <Maximize2 size={14} aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Orbit left"
+            aria-label="Orbit left"
+            onClick={() => setView((current) => viewWithCamera(current, { rotation: current.rotation - 1 / 6 }))}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Orbit right"
+            aria-label="Orbit right"
+            onClick={() => setView((current) => viewWithCamera(current, { rotation: current.rotation + 1 / 6 }))}
+          >
+            <RotateCw size={14} aria-hidden="true" />
+          </button>
           <button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 1.15, 0.18, 8) }))}>
             <ZoomIn size={14} aria-hidden="true" />
           </button>
           <button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" onClick={() => setView((current) => ({ ...current, zoom: clamp(current.zoom * 0.85, 0.18, 8) }))}>
             <ZoomOut size={14} aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className={`icon-button ${gameCameraEnabled ? "icon-button-active" : ""}`}
+            title="Toggle game camera preview"
+            aria-label="Toggle game camera preview"
+            aria-pressed={gameCameraEnabled}
+            data-testid="viewport-game-camera-toggle"
+            onClick={() => {
+              if (!gameCamera) {
+                placeGameCameraAtTarget();
+                return;
+              }
+              setGameCameraEnabled((enabled) => !enabled);
+            }}
+          >
+            <Camera size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`viewport-keys-badge ${keysPanelOpen ? "viewport-keys-badge-active" : ""}`}
+            aria-expanded={keysPanelOpen}
+            aria-controls="viewport-key-bindings-panel"
+            onClick={() => setKeysPanelOpen((open) => !open)}
+          >
+            Keys
+          </button>
         </div>
+
+        {keysPanelOpen ? (
+          <section
+            id="viewport-key-bindings-panel"
+            className="viewport-key-bindings-panel"
+            aria-label="Author viewport key bindings"
+            data-testid="viewport-key-bindings-panel"
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setKeysPanelOpen(false);
+              }
+            }}
+          >
+            <div className="viewport-key-bindings-header">
+              <strong>Author Keys</strong>
+              <button type="button" className="viewport-key-reset" onClick={() => setKeyBindings(DEFAULT_VIEWPORT_KEY_BINDINGS)}>
+                Reset
+              </button>
+            </div>
+            <div className="viewport-key-bindings-list">
+              {VIEWPORT_BINDING_LABELS.map((binding) => (
+                <label key={binding.action} className="viewport-key-binding-row">
+                  <span>{binding.label}</span>
+                  <select value={keyBindings[binding.action]} onChange={(event) => updateKeyBinding(binding.action, event.target.value)}>
+                    {VIEWPORT_KEY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div className="viewport-fixed-bindings">
+              <span>Alt/Ctrl drag: orbit + tilt</span>
+              <span>Alt wheel: vertical offset</span>
+              <span>Ctrl + 1/2/3: save view</span>
+              <span>1/2/3: recall view</span>
+            </div>
+          </section>
+        ) : null}
+
+        {onToggleChunkBounds ? (
+          <div className={`viewport-chunk-bounds-badge ${viewportOverlays.chunkBounds ? "viewport-chunk-bounds-badge-active" : ""}`} data-testid="viewport-chunk-bounds-badge">
+            <span className="viewport-chunk-bounds-swatch" aria-hidden="true" />
+            <span>{viewportOverlays.chunkBounds ? "Chunk bounds" : "Bounds hidden"}</span>
+            <button
+              type="button"
+              className="icon-button viewport-chunk-bounds-toggle"
+              title={viewportOverlays.chunkBounds ? "Hide chunk bounds" : "Show chunk bounds"}
+              aria-label={viewportOverlays.chunkBounds ? "Hide chunk bounds" : "Show chunk bounds"}
+              data-testid="viewport-chunk-bounds-badge-toggle"
+              onClick={onToggleChunkBounds}
+            >
+              {viewportOverlays.chunkBounds ? <EyeOff size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
+            </button>
+          </div>
+        ) : null}
+
+        {gameCameraEnabled ? (
+          <section className="viewport-game-camera-preview" data-testid="viewport-game-camera-preview" aria-label="Game camera voxel preview">
+            <div className="viewport-game-camera-header">
+              <strong>Game Camera</strong>
+              <div className="viewport-game-camera-actions">
+                <button
+                  type="button"
+                  className={gameCameraPlacementArmed ? "viewport-game-camera-action viewport-game-camera-action-active" : "viewport-game-camera-action"}
+                  data-testid="viewport-game-camera-place"
+                  onClick={() => setGameCameraPlacementArmed((armed) => !armed)}
+                >
+                  {gameCameraPlacementArmed ? "Click map" : "Place"}
+                </button>
+                <button type="button" className="viewport-game-camera-action" onClick={placeGameCameraAtTarget}>
+                  Target
+                </button>
+                <button
+                  type="button"
+                  className="viewport-game-camera-action"
+                  data-testid="viewport-game-camera-detach"
+                  title="Open game camera in a separate window"
+                  aria-label="Open game camera in a separate window"
+                  onClick={() => void openDetachedGameCamera()}
+                >
+                  <ExternalLink size={12} aria-hidden="true" />
+                  Detach
+                </button>
+              </div>
+            </div>
+            <canvas ref={gameCameraCanvasRef} className="viewport-game-camera-canvas" data-testid="viewport-game-camera-canvas" />
+            {gameCamera ? (
+              <div className="viewport-game-camera-readout">
+                {gameCamera.position.map((value) => value.toFixed(1)).join(", ")}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <div className="canvas-reticle" aria-hidden="true" />
         <div className="canvas-label">

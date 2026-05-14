@@ -494,8 +494,8 @@ fn frontend_world_summary_from_metadata_and_world(
     metadata: &EditorWorldMetadata,
     voxel_world: &VoxelWorld,
 ) -> Value {
-    let summary_chunks = selected_editor_chunks(voxel_world, WORLD_SUMMARY_CHUNK_LIMIT);
-    let viewport_chunks = selected_editor_chunks(voxel_world, VIEWPORT_CHUNK_LIMIT);
+    let summary_chunks = selected_editor_chunks(voxel_world);
+    let viewport_chunks = selected_editor_chunks(voxel_world);
     let chunk_previews = chunk_preview_payloads(&viewport_chunks);
 
     json!({
@@ -709,8 +709,6 @@ fn water_body_murkiness(kind: WaterBodyKind) -> f32 {
     }
 }
 
-const WORLD_SUMMARY_CHUNK_LIMIT: usize = 512;
-const VIEWPORT_CHUNK_LIMIT: usize = 512;
 const VIEWPORT_SAMPLE_RESOLUTION: usize = 4;
 const VIEWPORT_MESH_CHUNK_LIMIT: usize = 16;
 const VIEWPORT_MESH_VERTEX_LIMIT: usize = 20_000;
@@ -720,7 +718,7 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
         .get_resource::<WorldBounds>()
         .copied()
         .unwrap_or_else(|| WorldBounds::from_size_chunks(voxel_world.world_size_chunks()));
-    let viewport_chunks = selected_editor_chunks(voxel_world, VIEWPORT_CHUNK_LIMIT);
+    let viewport_chunks = selected_editor_chunks(voxel_world);
 
     json!({
         "protocolVersion": 1,
@@ -777,7 +775,7 @@ fn viewport_snapshot_from_world(world: &World, voxel_world: &VoxelWorld) -> Valu
     })
 }
 
-fn selected_editor_chunks(voxel_world: &VoxelWorld, limit: usize) -> Vec<&Chunk> {
+fn selected_editor_chunks(voxel_world: &VoxelWorld) -> Vec<&Chunk> {
     let mut columns: BTreeMap<(i32, i32), &Chunk> = BTreeMap::new();
     for (_, chunk) in voxel_world.chunk_entries() {
         if !chunk_has_visible_voxels(chunk) {
@@ -807,26 +805,7 @@ fn selected_editor_chunks(voxel_world: &VoxelWorld, limit: usize) -> Vec<&Chunk>
         });
     }
 
-    take_evenly(chunks, limit)
-}
-
-fn take_evenly<T>(items: Vec<T>, limit: usize) -> Vec<T> {
-    if limit == 0 || items.len() <= limit {
-        return items;
-    }
-
-    let len = items.len();
-    items
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            if index * limit / len != (index + 1) * limit / len {
-                Some(item)
-            } else {
-                None
-            }
-        })
-        .collect()
+    chunks
 }
 
 fn chunk_has_visible_voxels(chunk: &Chunk) -> bool {
@@ -939,11 +918,13 @@ fn chunk_mesh_payload(
     let terrain_too_large = mesh_result.solid.positions.len() > VIEWPORT_MESH_VERTEX_LIMIT;
     let water_too_large = mesh_result.water.positions.len() > VIEWPORT_MESH_VERTEX_LIMIT;
 
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
+
     json!({
         "included": !(terrain_too_large || water_too_large),
         "reason": if terrain_too_large || water_too_large { "vertex_limit" } else { "included" },
-        "terrain": mesh_buffer_payload(&mesh_result.solid, terrain_too_large),
-        "water": mesh_buffer_payload(&mesh_result.water, water_too_large),
+        "terrain": mesh_buffer_payload(&mesh_result.solid, terrain_too_large, chunk_origin),
+        "water": mesh_buffer_payload(&mesh_result.water, water_too_large, chunk_origin),
         "stats": {
             "waterAirBoundariesTotal": mesh_result.water_stats.air_boundaries_total,
             "waterAirBoundariesExposed": mesh_result.water_stats.air_boundaries_exposed,
@@ -961,12 +942,25 @@ fn mesh_stats_payload(mesh: Option<&MeshData>) -> Value {
     })
 }
 
-fn mesh_buffer_payload(mesh: &MeshData, omit_buffers: bool) -> Value {
+fn mesh_buffer_payload(mesh: &MeshData, omit_buffers: bool, chunk_origin: Vec3) -> Value {
+    let world_positions = (!omit_buffers).then(|| {
+        mesh.positions
+            .iter()
+            .map(|position| {
+                [
+                    position[0] + chunk_origin.x,
+                    position[1] + chunk_origin.y,
+                    position[2] + chunk_origin.z,
+                ]
+            })
+            .collect::<Vec<_>>()
+    });
+
     json!({
         "vertexCount": mesh.positions.len(),
         "indexCount": mesh.indices.len(),
         "triangleCount": mesh.indices.len() / 3,
-        "positions": if omit_buffers { Value::Null } else { json!(mesh.positions) },
+        "positions": if omit_buffers { Value::Null } else { json!(world_positions) },
         "normals": if omit_buffers { Value::Null } else { json!(mesh.normals) },
         "uvs": if omit_buffers { Value::Null } else { json!(mesh.uvs) },
         "colors": if omit_buffers { Value::Null } else { json!(mesh.colors) },

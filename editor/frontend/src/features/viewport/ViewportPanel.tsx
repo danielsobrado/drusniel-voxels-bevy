@@ -1,11 +1,11 @@
-﻿import { ChangeEvent, useCallback, useMemo } from "react";
+﻿import { ChangeEvent, useCallback, useMemo, useState } from "react";
 import { Boxes, Camera, CheckSquare2, Focus, Grid3X3, MousePointer2, Paintbrush, ShieldCheck, TestTube2, TriangleAlert } from "lucide-react";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import { getProtectedAreaWarnings, getRuntimeWarnings, getSelectedObject } from "../../state/editorSelectors";
-import { BevyCanvasHost, type AreaOverlayState } from "./BevyCanvasHost";
+import { BevyCanvasHost, type AreaOverlayState, type NativeViewportStatus } from "./BevyCanvasHost";
 import type { LiteVoxelEditRequest, LiteVoxelEditResponse, LiteVoxelSelection } from "./LiteVoxelViewport";
 import type { ViewportModifierKey } from "../../types/editor";
 import type { PropAsset, PropInstance, ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
@@ -102,6 +102,10 @@ const buildPlacedProp = (
 
 export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {}) {
   const editorState = useEditorStore();
+  const [nativeViewportStatus, setNativeViewportStatus] = useState<NativeViewportStatus>({
+    state: "pending",
+    message: "Native validation viewport is warming in the background.",
+  });
   const { backendClient, runtimeClient } = useEditorClients();
   const { runCommandById } = useCommandRunner({ backendClient, runtimeClient });
   const activeMode = editorState.activeMode;
@@ -414,6 +418,14 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
         };
       }
     | undefined;
+  const validateStatusLabel =
+    nativeViewportStatus.state === "attached"
+      ? "Ready"
+      : nativeViewportStatus.state === "pending"
+        ? "Warming"
+        : nativeViewportStatus.state === "fallback"
+          ? "Retrying"
+          : "Desktop";
 
   return (
     <section className="panel-shell viewport-panel" data-testid="panel-viewport" aria-labelledby="viewport-title">
@@ -439,6 +451,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
           >
             <TriangleAlert size={14} aria-hidden="true" />
             Validate
+            <span className={`viewport-mode-status viewport-mode-status-${nativeViewportStatus.state}`}>{validateStatusLabel}</span>
           </button>
         </div>
         <BevyCanvasHost
@@ -467,6 +480,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
           onPlaceProp={placePropInViewer}
           onSelectVoxel={selectVoxelInViewer}
           onSetVoxel={setVoxelInViewer}
+          onToggleChunkBounds={() => editorState.toggleViewportOverlay("chunkBounds")}
           selectedPropRotationY={selectedProp?.transform.rotation[1]}
           selectedPropUniformScale={selectedProp?.transform.scale[0]}
           propRotateDragModifier={editorState.propPlacementSettings.rotateDragModifier}
@@ -477,6 +491,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
           propScaleMin={editorState.propPlacementSettings.minScale}
           propScaleMax={editorState.propPlacementSettings.maxScale}
           onAdjustSelectedProp={adjustSelectedPropInViewer}
+          onNativeViewportStatusChange={setNativeViewportStatus}
         />
       </div>
     </section>
