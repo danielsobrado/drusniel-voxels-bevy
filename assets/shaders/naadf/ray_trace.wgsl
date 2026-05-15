@@ -1,9 +1,10 @@
-#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_X, NAADF_CHUNK_BOUND_OFFSET_POS_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Z, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state
 #import "shaders/naadf/layout.wgsl" naadf_block_coord_for_voxel, naadf_block_index_in_chunk, naadf_chunk_world_origin, naadf_local_coord_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read> naadf_voxel_records: array<u32>;
 @group(3) @binding(1) var<storage, read> naadf_material_records: array<u32>;
 @group(3) @binding(5) var<storage, read> naadf_block_records: array<u32>;
+@group(3) @binding(11) var<storage, read> naadf_chunk_records: array<u32>;
 
 struct NaadfRay {
     origin: vec3<f32>,
@@ -63,6 +64,8 @@ fn trace_naadf_dense_debug(
     var normal = vec3<f32>(0.0);
     let chunk_origin = naadf_chunk_world_origin(chunk_pos);
     let chunk_end = chunk_origin + vec3<i32>(i32(NAADF_VOXELS_PER_CHUNK_AXIS));
+    let chunk_record_base = (voxel_base_record / NAADF_VOXELS_PER_CHUNK) *
+        NAADF_PACKED_CHUNK_WORDS;
     let block_base_record = (voxel_base_record / NAADF_VOXELS_PER_CHUNK) *
         NAADF_BLOCKS_PER_CHUNK * NAADF_PACKED_BLOCK_WORDS;
 
@@ -74,6 +77,30 @@ fn trace_naadf_dense_debug(
         let cell_position = current_position + normal * -0.5;
         let voxel = vec3<i32>(floor(cell_position));
         if all(voxel >= chunk_origin) && all(voxel < chunk_end) {
+            if naadf_node_state(chunk_node) == NAADF_NODE_UNIFORM_EMPTY {
+                let chunk_skip_record = naadf_chunk_records[chunk_record_base + 6u];
+                let bounds_in_dir = naadf_chunk_skip_for_step(chunk_skip_record, step) *
+                    vec3<u32>(NAADF_VOXELS_PER_CHUNK_AXIS) +
+                    naadf_distance_to_chunk_edge(vec3<u32>(voxel - chunk_origin), step);
+                let axis = naadf_step_axis_from_bounds(
+                    current_position,
+                    direction,
+                    step,
+                    normal,
+                    bounds_in_dir,
+                    inv_direction_abs,
+                );
+                if axis.axis == 0u {
+                    normal = vec3<f32>(f32(-step.x), 0.0, 0.0);
+                } else if axis.axis == 1u {
+                    normal = vec3<f32>(0.0, f32(-step.y), 0.0);
+                } else {
+                    normal = vec3<f32>(0.0, 0.0, f32(-step.z));
+                }
+                traveled = traveled + max(axis.distance, 0.0001);
+                continue;
+            }
+
             let local = vec3<u32>(voxel - chunk_origin);
             let local_index = naadf_voxel_index_in_chunk(local);
             let voxel_record = naadf_voxel_records[voxel_base_record + local_index];
@@ -127,6 +154,18 @@ fn trace_naadf_dense_debug(
     return naadf_make_miss(max_steps);
 }
 
+fn naadf_chunk_bounds_field(record: u32, offset: u32) -> u32 {
+    return (record >> offset) & 0x1fu;
+}
+
+fn naadf_chunk_skip_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {
+    return vec3<u32>(
+        naadf_chunk_bounds_field(record, select(NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_POS_X, step.x > 0i)),
+        naadf_chunk_bounds_field(record, select(NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Y, step.y > 0i)),
+        naadf_chunk_bounds_field(record, select(NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_Z, step.z > 0i)),
+    );
+}
+
 struct NaadfStepChoice {
     axis: u32,
     distance: f32,
@@ -150,6 +189,15 @@ fn naadf_directional_skip_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {
 
 fn naadf_distance_to_block_edge(local: vec3<u32>, step: vec3<i32>) -> vec3<u32> {
     let max_local = NAADF_VOXELS_PER_BLOCK_AXIS - 1u;
+    return vec3<u32>(
+        select(local.x, max_local - local.x, step.x > 0i),
+        select(local.y, max_local - local.y, step.y > 0i),
+        select(local.z, max_local - local.z, step.z > 0i),
+    );
+}
+
+fn naadf_distance_to_chunk_edge(local: vec3<u32>, step: vec3<i32>) -> vec3<u32> {
+    let max_local = NAADF_VOXELS_PER_CHUNK_AXIS - 1u;
     return vec3<u32>(
         select(local.x, max_local - local.x, step.x > 0i),
         select(local.y, max_local - local.y, step.y > 0i),

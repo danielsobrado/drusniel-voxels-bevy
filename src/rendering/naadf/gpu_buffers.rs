@@ -18,6 +18,7 @@ pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_MATERIAL_RECORD_BYTES: u64 = 4;
 pub const NAADF_BLOCK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_RECORD_BYTES: u64 = 32;
+pub const NAADF_CHUNK_LOOKUP_RECORD_BYTES: u64 = 16;
 pub const NAADF_DEBUG_RAY_RECORDS: u64 = 1024;
 pub const NAADF_DEBUG_RAY_RECORD_BYTES: u64 = 64;
 pub const NAADF_STATS_BUFFER_BYTES: u64 = 256;
@@ -32,11 +33,13 @@ pub struct NaadfGpuBufferPlan {
     pub material_records: u64,
     pub block_records: u64,
     pub chunk_records: u64,
+    pub chunk_lookup_records: u64,
     pub voxel_buffer_bytes: u64,
     pub raw_voxel_buffer_bytes: u64,
     pub material_buffer_bytes: u64,
     pub block_buffer_bytes: u64,
     pub chunk_buffer_bytes: u64,
+    pub chunk_lookup_buffer_bytes: u64,
     pub upload_buffer_bytes: u64,
     pub debug_ray_buffer_bytes: u64,
     pub stats_buffer_bytes: u64,
@@ -50,11 +53,13 @@ impl NaadfGpuBufferPlan {
         let material_records = voxel_records;
         let block_records = max_chunks as u64 * super::layout::BLOCKS_PER_CHUNK as u64;
         let chunk_records = max_chunks as u64;
+        let chunk_lookup_records = max_chunks as u64;
         let voxel_buffer_bytes = voxel_records * NAADF_VOXEL_RECORD_BYTES;
         let raw_voxel_buffer_bytes = raw_voxel_records * NAADF_RAW_VOXEL_RECORD_BYTES;
         let material_buffer_bytes = material_records * NAADF_MATERIAL_RECORD_BYTES;
         let block_buffer_bytes = block_records * NAADF_BLOCK_RECORD_BYTES;
         let chunk_buffer_bytes = chunk_records * NAADF_CHUNK_RECORD_BYTES;
+        let chunk_lookup_buffer_bytes = chunk_lookup_records * NAADF_CHUNK_LOOKUP_RECORD_BYTES;
         let upload_buffer_bytes = crate::constants::CHUNK_VOLUME as u64 * NAADF_VOXEL_RECORD_BYTES;
         let debug_ray_buffer_bytes = NAADF_DEBUG_RAY_RECORDS * NAADF_DEBUG_RAY_RECORD_BYTES;
         let stats_buffer_bytes = NAADF_STATS_BUFFER_BYTES;
@@ -63,6 +68,7 @@ impl NaadfGpuBufferPlan {
             + material_buffer_bytes
             + block_buffer_bytes
             + chunk_buffer_bytes
+            + chunk_lookup_buffer_bytes
             + upload_buffer_bytes
             + debug_ray_buffer_bytes
             + stats_buffer_bytes;
@@ -73,11 +79,13 @@ impl NaadfGpuBufferPlan {
             material_records,
             block_records,
             chunk_records,
+            chunk_lookup_records,
             voxel_buffer_bytes,
             raw_voxel_buffer_bytes,
             material_buffer_bytes,
             block_buffer_bytes,
             chunk_buffer_bytes,
+            chunk_lookup_buffer_bytes,
             upload_buffer_bytes,
             debug_ray_buffer_bytes,
             stats_buffer_bytes,
@@ -125,6 +133,7 @@ pub struct NaadfGpuBufferAllocation {
     pub material_buffer: Buffer,
     pub block_buffer: Buffer,
     pub chunk_buffer: Buffer,
+    pub chunk_lookup_buffer: Buffer,
     pub upload_buffer: Buffer,
     pub debug_ray_buffer: Buffer,
     pub stats_buffer: Buffer,
@@ -154,6 +163,7 @@ pub struct NaadfGpuUploadQueueStats {
 #[derive(Resource, Default, Debug)]
 pub struct ExtractedNaadfGpuUploads {
     pub uploads: Vec<NaadfChunkUpload>,
+    pub lookup_records: Vec<[u32; 4]>,
     pub estimated_bytes: u32,
 }
 
@@ -263,6 +273,7 @@ pub fn extract_naadf_gpu_uploads(mut commands: Commands, mut main_world: ResMut<
         let Some(table) = world.get_resource::<NaadfGpuChunkTable>() else {
             return;
         };
+        extracted.lookup_records = table.lookup_records();
 
         let budget = NaadfUploadBudget::from(config);
         while extracted.uploads.len() < budget.max_chunks as usize {
@@ -468,6 +479,12 @@ pub fn upload_naadf_chunks_to_gpu(
             .uploaded_bytes_last_frame
             .saturating_add(upload.estimated_bytes);
     }
+
+    render_queue.write_buffer(
+        &allocation.chunk_lookup_buffer,
+        0,
+        bytemuck::cast_slice(uploads.lookup_records.as_slice()),
+    );
 }
 
 pub fn pack_naadf_chunk_upload(chunk: &NaadfChunk, slot: u32) -> NaadfChunkUpload {
@@ -510,7 +527,7 @@ pub fn pack_naadf_chunk_upload(chunk: &NaadfChunk, slot: u32) -> NaadfChunkUploa
             i32_to_u32_bits(chunk.position.z),
             BLOCKS_PER_CHUNK,
             crate::constants::CHUNK_VOLUME as u32,
-            0,
+            chunk.chunk_skip.0,
             0,
         ],
         block_records,
@@ -594,6 +611,12 @@ fn create_naadf_gpu_allocation(
             render_device,
             "naadf_chunk_records",
             plan.chunk_buffer_bytes,
+            storage_usage,
+        ),
+        chunk_lookup_buffer: create_buffer(
+            render_device,
+            "naadf_chunk_lookup_records",
+            plan.chunk_lookup_buffer_bytes,
             storage_usage,
         ),
         upload_buffer: create_buffer(
@@ -701,6 +724,29 @@ impl NaadfGpuChunkTable {
         self.chunk_to_slot.keys().copied()
     }
 
+    pub fn lookup_records(&self) -> Vec<[u32; 4]> {
+        let mut records = self
+            .chunk_to_slot
+            .iter()
+            .map(|(chunk_pos, slot)| {
+                [
+                    i32_to_u32_bits(chunk_pos.x),
+                    i32_to_u32_bits(chunk_pos.y),
+                    i32_to_u32_bits(chunk_pos.z),
+                    *slot,
+                ]
+            })
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| {
+            (
+                i32::from_ne_bytes(record[0].to_ne_bytes()),
+                i32::from_ne_bytes(record[1].to_ne_bytes()),
+                i32::from_ne_bytes(record[2].to_ne_bytes()),
+            )
+        });
+        records
+    }
+
     pub fn stats(&self) -> NaadfGpuChunkTableStats {
         let free_slots = self.free_slots.len() as u32;
         let reserved_slots = self.next_slot;
@@ -779,6 +825,35 @@ mod tests {
     }
 
     #[test]
+    fn chunk_table_lookup_records_are_sorted_for_gpu_binary_search() {
+        let mut table = NaadfGpuChunkTable::with_capacity(4);
+        assert_eq!(table.slot_for_chunk(IVec3::new(2, 0, 0)), Some(0));
+        assert_eq!(table.slot_for_chunk(IVec3::new(-1, 5, 0)), Some(1));
+        assert_eq!(table.slot_for_chunk(IVec3::new(-1, 4, 9)), Some(2));
+
+        let records = table.lookup_records();
+        let positions = records
+            .iter()
+            .map(|record| {
+                IVec3::new(
+                    i32::from_ne_bytes(record[0].to_ne_bytes()),
+                    i32::from_ne_bytes(record[1].to_ne_bytes()),
+                    i32::from_ne_bytes(record[2].to_ne_bytes()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            positions,
+            vec![
+                IVec3::new(-1, 4, 9),
+                IVec3::new(-1, 5, 0),
+                IVec3::new(2, 0, 0),
+            ]
+        );
+    }
+
+    #[test]
     fn buffer_plan_includes_required_gpu_buffers() {
         let plan = NaadfGpuBufferPlan::for_chunk_capacity(2);
 
@@ -787,11 +862,13 @@ mod tests {
         assert_eq!(plan.material_records, 8192);
         assert_eq!(plan.block_records, 128);
         assert_eq!(plan.chunk_records, 2);
+        assert_eq!(plan.chunk_lookup_records, 2);
         assert!(plan.voxel_buffer_bytes > 0);
         assert!(plan.raw_voxel_buffer_bytes > 0);
         assert!(plan.material_buffer_bytes > 0);
         assert!(plan.block_buffer_bytes > 0);
         assert!(plan.chunk_buffer_bytes > 0);
+        assert!(plan.chunk_lookup_buffer_bytes > 0);
         assert!(plan.upload_buffer_bytes > 0);
         assert!(plan.debug_ray_buffer_bytes > 0);
         assert!(plan.stats_buffer_bytes > 0);
@@ -815,6 +892,7 @@ mod tests {
 
         assert_eq!(upload.chunk_pos, IVec3::new(-1, 2, 3));
         assert_eq!(upload.slot, 7);
+        assert_eq!(upload.chunk_record[6], naadf.chunk_skip.0);
         assert_eq!(upload.block_records.len(), BLOCKS_PER_CHUNK as usize);
         assert_eq!(upload.voxel_records.len(), crate::constants::CHUNK_VOLUME);
         assert_eq!(

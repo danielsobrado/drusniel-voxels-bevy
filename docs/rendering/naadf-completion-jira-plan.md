@@ -1,8 +1,8 @@
 # NAADF Completion JIRA Plan
 
-Status: implementation backlog  
+Status: implementation in progress  
 Last reviewed: 2026-05-15  
-Scope: remaining work after CPU voxel/block skip propagation, CPU skip traversal, GPU upload packing, and WGSL skip traversal scaffolding.
+Scope: remaining work after CPU voxel/block/chunk skip propagation, CPU skip traversal, GPU upload packing, GPU build dispatch scaffolding, and WGSL skip traversal scaffolding.
 
 ## Current Baseline
 
@@ -11,17 +11,24 @@ The local NAADF path now has:
 - 16x16x16 Drusniel chunks split into 4x4x4 NAADF blocks and 4x4x4 voxels per block.
 - CPU-built per-voxel 2-bit directional skip fields inside each block.
 - CPU-built per-block 2-bit directional skip fields inside each chunk.
+- CPU-built per-chunk 5-bit directional skip fields across loaded known-empty neighbor chunks.
 - CPU skip traversal that consumes `voxel_skip` and `directional_skip_blocks`.
-- GPU upload packing where voxel records carry occupancy plus 12-bit directional skip data, and block record word 5 carries per-block skip data.
-- WGSL traversal that reads `naadf_voxel_records` and `naadf_block_records` and jumps by decoded AADF bounds.
+- GPU upload packing where voxel records carry occupancy plus 12-bit directional skip data, block record word 5 carries per-block skip data, and chunk record word 6 carries per-chunk skip data.
+- GPU build shaders for block, voxel, block-bound, and chunk-node record generation.
+- GPU chunk-bound shader for safe contiguous loaded-empty chunk skips.
+- WGSL traversal that reads `naadf_voxel_records`, `naadf_block_records`, and `naadf_chunk_records` and jumps by decoded AADF bounds.
+- A Core3d render graph view node that dispatches NAADF GPU build stages, first-hit preview, and fullscreen preview compositing when preview mode is active.
+- First-hit color/depth/normal preview output plus an edge-aware spatial filter dispatch before fullscreen compositing.
+- A GPU chunk lookup buffer with sorted `(x, y, z, slot)` records; first-hit preview now walks chunk-space along the ray and binary-searches this table instead of brute-force scanning every valid chunk record.
+- Persistent per-view temporal preview history using ping-pong `rgba16float` textures in the render world.
+- Non-empty temporal and preview composite compute entry points.
 
 The remaining gaps are:
 
-- No full upstream-style chunk-level AADF propagation across neighboring chunks.
-- GPU build shaders do not match the CPU-built/uploaded record format.
-- Several compute entry points are empty.
-- No production render graph node or preview pipeline dispatch.
-- Missing upstream stages such as denoise, temporal reprojection, atmosphere integration, and entity/dynamic voxel support.
+- GPU chunk-bound construction now has a safe contiguous-neighbor shader path, but does not yet implement the full upstream queue/propagation solver with all perpendicular-bound constraints.
+- The preview render graph now allocates, dispatches, and composites a first-hit preview target through a GPU chunk lookup table. This removes the brute-force chunk scan, but it is still a first-hit preview path rather than the upstream full final renderer.
+- Spatial and temporal filtering are wired into the preview graph. The temporal path is persistent-history accumulation, not full motion-vector TAA or SVGF parity.
+- Missing upstream stages such as atmosphere integration, entity/dynamic voxel support, advanced GI, and SVGF denoise parity.
 
 ## Delivery Strategy
 

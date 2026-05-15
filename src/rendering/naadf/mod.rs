@@ -15,8 +15,14 @@ pub mod stats;
 pub mod streaming;
 pub mod systems;
 
+use bevy::asset::load_internal_asset;
+use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
-use bevy::render::{ExtractSchedule, Render, RenderApp, RenderSystems};
+use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
+use bevy::render::{ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
+use bevy::shader::Shader;
+
+use crate::rendering::weather_overlay::WeatherOverlayLabel;
 
 pub use cache::{NaadfCache, NaadfCacheBuildReport};
 pub use config::NaadfConfig;
@@ -33,6 +39,79 @@ pub struct NaadfPlugin;
 
 impl Plugin for NaadfPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_BUILD_BLOCKS_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/build_blocks.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_BUILD_BOUNDS_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/build_bounds.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_BUILD_CHUNKS_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/build_chunks.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_BUILD_CHUNK_BOUNDS_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/build_chunk_bounds.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_FIRST_HIT_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/first_hit.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_SPATIAL_RESAMPLING_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/spatial_resampling.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_TEMPORAL_ACCUMULATION_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/temporal_accumulation.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/preview_fullscreen_composite.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+
         app.insert_resource(NaadfConfig::runtime_default())
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
@@ -70,13 +149,18 @@ impl Plugin for NaadfPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuConfig>()
+                .init_resource::<pipeline::ExtractedNaadfPreviewPipelineState>()
+                .init_resource::<pipeline::ExtractedNaadfPreviewSettings>()
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuUploads>()
                 .init_resource::<NaadfGpuBuffers>()
                 .init_resource::<gpu_buffers::NaadfGpuUploadStats>()
+                .init_resource::<pipeline::NaadfPreviewTemporalHistory>()
+                .add_systems(RenderStartup, pipeline::init_naadf_preview_build_pipelines)
                 .add_systems(
                     ExtractSchedule,
                     (
                         gpu_buffers::extract_naadf_gpu_config,
+                        pipeline::extract_naadf_preview_pipeline_state,
                         gpu_buffers::extract_naadf_gpu_uploads,
                     )
                         .chain(),
@@ -94,6 +178,18 @@ impl Plugin for NaadfPlugin {
                     Render,
                     gpu_buffers::sync_naadf_gpu_status_to_main.in_set(RenderSystems::Cleanup),
                 );
+            render_app.add_render_graph_node::<ViewNodeRunner<pipeline::NaadfPreviewBuildNode>>(
+                Core3d,
+                preview::NaadfPreviewNodeLabel,
+            );
+            render_app.add_render_graph_edges(
+                Core3d,
+                (
+                    WeatherOverlayLabel,
+                    preview::NaadfPreviewNodeLabel,
+                    Node3d::Bloom,
+                ),
+            );
         } else {
             warn!("Render sub-app not available; NAADF GPU buffer allocation disabled");
         }

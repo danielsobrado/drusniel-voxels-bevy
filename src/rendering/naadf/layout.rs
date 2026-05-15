@@ -13,6 +13,15 @@ pub const BOUND_OFFSET_POS_Z: u32 = 10;
 pub const BOUND_FIELD_MASK: u32 = 0b11;
 pub const BOUND_FIELD_MAX: u8 = 3;
 
+pub const CHUNK_BOUND_OFFSET_NEG_X: u32 = 0;
+pub const CHUNK_BOUND_OFFSET_POS_X: u32 = 5;
+pub const CHUNK_BOUND_OFFSET_NEG_Y: u32 = 10;
+pub const CHUNK_BOUND_OFFSET_POS_Y: u32 = 15;
+pub const CHUNK_BOUND_OFFSET_NEG_Z: u32 = 20;
+pub const CHUNK_BOUND_OFFSET_POS_Z: u32 = 25;
+pub const CHUNK_BOUND_FIELD_MASK: u32 = 0b1_1111;
+pub const CHUNK_BOUND_FIELD_MAX: u8 = 31;
+
 /// 6 directional skip distances packed as 2-bit fields (range 0..=3 per axis).
 /// `0` means "the cell itself blocks the ray in this direction"; `3` means
 /// "you can advance 3 cells in this direction before the safe envelope ends."
@@ -57,6 +66,39 @@ impl PackedDirectionalBounds2Bit {
         let cur = self.get_at_offset(offset);
         if cur < BOUND_FIELD_MAX {
             self.0 += 1u16 << offset;
+        }
+    }
+}
+
+/// 6 directional chunk-skip distances packed as 5-bit fields (range 0..=31).
+/// This mirrors upstream's chunk-level field width while keeping the chunk
+/// record explicit rather than overloading the node payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PackedDirectionalBounds5Bit(pub u32);
+
+impl PackedDirectionalBounds5Bit {
+    pub const fn new(neg_x: u8, pos_x: u8, neg_y: u8, pos_y: u8, neg_z: u8, pos_z: u8) -> Self {
+        let raw = ((neg_x & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_NEG_X
+            | ((pos_x & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_POS_X
+            | ((neg_y & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_NEG_Y
+            | ((pos_y & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_POS_Y
+            | ((neg_z & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_NEG_Z
+            | ((pos_z & CHUNK_BOUND_FIELD_MASK as u8) as u32) << CHUNK_BOUND_OFFSET_POS_Z;
+        Self(raw)
+    }
+
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    pub fn get_at_offset(self, offset: u32) -> u8 {
+        ((self.0 >> offset) & CHUNK_BOUND_FIELD_MASK) as u8
+    }
+
+    pub fn add_one(&mut self, offset: u32) {
+        let cur = self.get_at_offset(offset);
+        if cur < CHUNK_BOUND_FIELD_MAX {
+            self.0 += 1u32 << offset;
         }
     }
 }
@@ -197,6 +239,9 @@ impl Default for NaadfBlock {
 pub struct NaadfChunk {
     pub position: IVec3,
     pub node: PackedNaadfNode,
+    /// Per-chunk directional skip distances, in *chunk* units across loaded,
+    /// known-empty chunks. Missing or unloaded neighbors terminate propagation.
+    pub chunk_skip: PackedDirectionalBounds5Bit,
     pub blocks: Vec<NaadfBlock>,
     pub occupancy: [bool; CHUNK_VOLUME],
     pub material_ids: [u16; CHUNK_VOLUME],
@@ -323,6 +368,25 @@ mod tests {
         );
         assert_eq!(wgsl_u32_const(common, "NAADF_RAW_VOXEL_RECORD_BYTES"), 4);
         assert_eq!(wgsl_u32_const(common, "NAADF_NODE_STATE_SHIFT"), 30);
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_CHUNK_BOUND_OFFSET_POS_X"),
+            CHUNK_BOUND_OFFSET_POS_X
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_CHUNK_BOUND_FIELD_MASK"),
+            CHUNK_BOUND_FIELD_MASK
+        );
+    }
+
+    #[test]
+    fn packed_chunk_bounds_round_trip_extremes() {
+        let packed = PackedDirectionalBounds5Bit::new(0, 1, 7, 15, 30, 31);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_NEG_X), 0);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_POS_X), 1);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_NEG_Y), 7);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_POS_Y), 15);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_NEG_Z), 30);
+        assert_eq!(packed.get_at_offset(CHUNK_BOUND_OFFSET_POS_Z), 31);
     }
 
     #[test]
@@ -355,6 +419,8 @@ mod tests {
         assert!(ray_trace.contains("naadf_voxel_records"));
         assert!(ray_trace.contains("naadf_material_records"));
         assert!(ray_trace.contains("naadf_block_records"));
+        assert!(ray_trace.contains("naadf_chunk_records"));
+        assert!(ray_trace.contains("fn naadf_chunk_skip_for_step"));
         assert!(ray_trace.contains("fn naadf_directional_skip_for_step"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
         assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
@@ -374,9 +440,12 @@ mod tests {
             )
         }));
         assert!(build_blocks.contains("@compute"));
+        assert!(build_blocks.contains("naadf_voxel_records"));
         assert!(build_blocks.contains("naadf_raw_voxel_records"));
         assert!(build_blocks.contains("naadf_block_records"));
         assert!(build_blocks.contains("NAADF_NODE_UNIFORM_FULL"));
+        assert!(build_blocks.contains("cached_skip"));
+        assert!(build_blocks.contains("naadf_pack_voxel_record"));
         assert!(build_blocks.contains("uniform_material"));
     }
 
@@ -394,9 +463,55 @@ mod tests {
             )
         }));
         assert!(build_bounds.contains("@compute"));
-        assert!(build_bounds.contains("naadf_mask_bit_is_set"));
-        assert!(build_bounds.contains("naadf_pack_bounds_xy"));
-        assert!(build_bounds.contains("naadf_pack_bounds_z"));
+        assert!(build_bounds.contains("cached_skip"));
+        assert!(build_bounds.contains("cached_next_skip"));
+        assert!(build_bounds.contains("naadf_try_extend"));
+        assert!(build_bounds.contains("naadf_matching_bounds_mask"));
+        assert!(build_bounds.contains("naadf_block_records[base + 5u]"));
+    }
+
+    #[test]
+    fn wgsl_chunk_builder_writes_chunk_nodes_from_block_records() {
+        let build_chunks = include_str!("../../../assets/shaders/naadf/build_chunks.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(build_chunks, "shaders/naadf/build_chunks.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+        assert!(build_chunks.contains("@compute"));
+        assert!(build_chunks.contains("naadf_block_records"));
+        assert!(build_chunks.contains("naadf_chunk_records"));
+        assert!(build_chunks.contains("NAADF_VOXELS_PER_CHUNK"));
+        assert!(build_chunks.contains("all_empty"));
+        assert!(build_chunks.contains("all_full_same_material"));
+        assert!(build_chunks.contains("naadf_chunk_records[chunk_base + 0u]"));
+    }
+
+    #[test]
+    fn wgsl_chunk_bounds_builder_writes_chunk_skip_word() {
+        let build_chunk_bounds =
+            include_str!("../../../assets/shaders/naadf/build_chunk_bounds.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(
+            build_chunk_bounds,
+            "shaders/naadf/build_chunk_bounds.wgsl",
+        );
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+        assert!(build_chunk_bounds.contains("fn build_naadf_chunk_bounds"));
+        assert!(build_chunk_bounds.contains("naadf_find_chunk_slot"));
+        assert!(build_chunk_bounds.contains("naadf_count_loaded_empty_chunks"));
+        assert!(build_chunk_bounds.contains("naadf_chunk_records[base + 6u]"));
     }
 
     #[test]
@@ -459,6 +574,11 @@ mod tests {
                     if path == "shaders/naadf/ray_trace.wgsl"
             )
         }));
+        assert!(first_hit.contains("@compute"));
+        assert!(first_hit.contains("fn naadf_first_hit_preview"));
+        assert!(first_hit.contains("fn preview_naadf_first_hit_world"));
+        assert!(first_hit.contains("naadf_chunk_record_valid"));
+        assert!(first_hit.contains("naadf_first_hit_output"));
         assert!(first_hit.contains("fn preview_naadf_first_hit"));
         assert!(first_hit.contains("fn naadf_preview_material_color"));
     }
@@ -471,6 +591,20 @@ mod tests {
         assert!(composite.contains("NAADF_PREVIEW_SPLIT_VIEW"));
         assert!(composite.contains("NAADF_PREVIEW_PICTURE_IN_PICTURE"));
         assert!(composite.contains("fn naadf_preview_composite_color"));
+        assert!(composite.contains("naadf_composite_current_color"));
+        assert!(composite.contains("textureStore"));
+    }
+
+    #[test]
+    fn wgsl_preview_fullscreen_composite_declares_fragment_modes() {
+        let composite =
+            include_str!("../../../assets/shaders/naadf/preview_fullscreen_composite.wgsl");
+
+        assert!(composite.contains("@fragment"));
+        assert!(composite.contains("naadf_scene_color"));
+        assert!(composite.contains("naadf_preview_color"));
+        assert!(composite.contains("mode_split"));
+        assert!(composite.contains("textureLoad"));
     }
 
     #[test]
@@ -481,6 +615,8 @@ mod tests {
         assert!(temporal.contains("reset_history"));
         assert!(temporal.contains("fn naadf_temporal_accumulate"));
         assert!(temporal.contains("motion_valid"));
+        assert!(temporal.contains("naadf_temporal_history_color"));
+        assert!(temporal.contains("textureStore"));
     }
 
     #[test]
@@ -492,6 +628,8 @@ mod tests {
         assert!(spatial.contains("fn naadf_spatial_accumulate"));
         assert!(spatial.contains("depth_sigma"));
         assert!(spatial.contains("normal_sigma"));
+        assert!(spatial.contains("naadf_spatial_source_depth"));
+        assert!(spatial.contains("textureStore"));
     }
 
     fn wgsl_u32_const(source: &str, name: &str) -> u32 {

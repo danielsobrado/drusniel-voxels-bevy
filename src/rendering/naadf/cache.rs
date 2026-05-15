@@ -5,7 +5,11 @@ use super::config::NaadfConfig;
 use super::cpu_builder::NaadfBuildOptions;
 use super::dirty::NaadfDirtyChunkQueue;
 use super::extractor::{NaadfChunkExtractor, NaadfExtractionError};
-use super::layout::NaadfChunk;
+use super::layout::{
+    CHUNK_BOUND_FIELD_MAX, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
+};
 use super::stats::{NaadfCacheState, NaadfStats};
 use crate::voxel::world::VoxelWorld;
 
@@ -27,6 +31,7 @@ pub struct NaadfCacheBuildReport {
 impl NaadfCache {
     pub fn insert_chunk(&mut self, chunk: NaadfChunk) {
         self.chunks.insert(chunk.position, chunk);
+        propagate_chunk_skips(&mut self.chunks);
     }
 
     pub fn get(&self, chunk_pos: IVec3) -> Option<&NaadfChunk> {
@@ -38,7 +43,11 @@ impl NaadfCache {
     }
 
     pub fn remove_chunk(&mut self, chunk_pos: IVec3) -> Option<NaadfChunk> {
-        self.chunks.remove(&chunk_pos)
+        let removed = self.chunks.remove(&chunk_pos);
+        if removed.is_some() {
+            propagate_chunk_skips(&mut self.chunks);
+        }
+        removed
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&IVec3, &NaadfChunk)> {
@@ -103,6 +112,10 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
         queue.finish(chunk_pos);
     }
 
+    if report.rebuilt > 0 || report.removed_missing > 0 {
+        propagate_chunk_skips(&mut cache.chunks);
+    }
+
     report.deferred = queue.pending_len() as u32;
     cache.last_report = report;
     stats.loaded_chunks = cache.len() as u32;
@@ -117,10 +130,168 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
     };
 }
 
+pub fn propagate_chunk_skips(chunks: &mut HashMap<IVec3, NaadfChunk>) {
+    for chunk in chunks.values_mut() {
+        chunk.chunk_skip = PackedDirectionalBounds5Bit::zero();
+    }
+
+    for _ in 0..CHUNK_BOUND_FIELD_MAX {
+        let mut changed = false;
+        changed |= propagate_chunk_axis_phase(
+            chunks,
+            [
+                ChunkAxisExtension {
+                    direction: IVec3::NEG_X,
+                    bound_offset: CHUNK_BOUND_OFFSET_NEG_X,
+                    check_offsets: CHECK_AXES_FOR_NEG_X,
+                },
+                ChunkAxisExtension {
+                    direction: IVec3::X,
+                    bound_offset: CHUNK_BOUND_OFFSET_POS_X,
+                    check_offsets: CHECK_AXES_FOR_POS_X,
+                },
+            ],
+        );
+        changed |= propagate_chunk_axis_phase(
+            chunks,
+            [
+                ChunkAxisExtension {
+                    direction: IVec3::NEG_Y,
+                    bound_offset: CHUNK_BOUND_OFFSET_NEG_Y,
+                    check_offsets: CHECK_AXES_FOR_NEG_Y,
+                },
+                ChunkAxisExtension {
+                    direction: IVec3::Y,
+                    bound_offset: CHUNK_BOUND_OFFSET_POS_Y,
+                    check_offsets: CHECK_AXES_FOR_POS_Y,
+                },
+            ],
+        );
+        changed |= propagate_chunk_axis_phase(
+            chunks,
+            [
+                ChunkAxisExtension {
+                    direction: IVec3::NEG_Z,
+                    bound_offset: CHUNK_BOUND_OFFSET_NEG_Z,
+                    check_offsets: CHECK_AXES_FOR_NEG_Z,
+                },
+                ChunkAxisExtension {
+                    direction: IVec3::Z,
+                    bound_offset: CHUNK_BOUND_OFFSET_POS_Z,
+                    check_offsets: CHECK_AXES_FOR_POS_Z,
+                },
+            ],
+        );
+        if !changed {
+            break;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ChunkAxisExtension {
+    direction: IVec3,
+    bound_offset: u32,
+    check_offsets: [u32; 5],
+}
+
+const CHECK_AXES_FOR_NEG_X: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_NEG_X,
+    CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z,
+    CHUNK_BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_POS_X: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_POS_X,
+    CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z,
+    CHUNK_BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_NEG_Y: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_NEG_X,
+    CHUNK_BOUND_OFFSET_POS_X,
+    CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z,
+    CHUNK_BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_POS_Y: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_NEG_X,
+    CHUNK_BOUND_OFFSET_POS_X,
+    CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z,
+    CHUNK_BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_NEG_Z: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_NEG_X,
+    CHUNK_BOUND_OFFSET_POS_X,
+    CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z,
+];
+const CHECK_AXES_FOR_POS_Z: [u32; 5] = [
+    CHUNK_BOUND_OFFSET_NEG_X,
+    CHUNK_BOUND_OFFSET_POS_X,
+    CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_POS_Z,
+];
+
+fn propagate_chunk_axis_phase(
+    chunks: &mut HashMap<IVec3, NaadfChunk>,
+    extensions: [ChunkAxisExtension; 2],
+) -> bool {
+    let snapshot = chunks
+        .iter()
+        .map(|(pos, chunk)| (*pos, chunk.chunk_skip))
+        .collect::<HashMap<_, _>>();
+    let mut updates = Vec::new();
+
+    for (pos, chunk) in chunks.iter() {
+        if chunk.node.state() != NaadfNodeState::UniformEmpty {
+            continue;
+        }
+
+        let mut updated = snapshot[pos];
+        for extension in extensions {
+            let neighbor_pos = *pos + extension.direction;
+            let Some(neighbor) = chunks.get(&neighbor_pos) else {
+                continue;
+            };
+            if neighbor.node.state() != NaadfNodeState::UniformEmpty {
+                continue;
+            }
+            let neighbor_skip = snapshot[&neighbor_pos];
+            if extension
+                .check_offsets
+                .iter()
+                .any(|offset| neighbor_skip.get_at_offset(*offset) < updated.get_at_offset(*offset))
+            {
+                continue;
+            }
+            updated.add_one(extension.bound_offset);
+        }
+        if updated != snapshot[pos] {
+            updates.push((*pos, updated));
+        }
+    }
+
+    let changed = !updates.is_empty();
+    for (pos, skip) in updates {
+        if let Some(chunk) = chunks.get_mut(&pos) {
+            chunk.chunk_skip = skip;
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rendering::naadf::layout::CHUNK_BOUND_OFFSET_POS_X;
     use crate::voxel::chunk::Chunk;
+    use crate::voxel::types::VoxelType;
 
     #[test]
     fn extractor_reports_missing_chunks_without_creating_empty_chunks() {
@@ -145,5 +316,55 @@ mod tests {
 
         assert!(cache.contains_chunk(IVec3::ZERO));
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn chunk_skip_extends_across_loaded_empty_chunks_only() {
+        let mut cache = NaadfCache::default();
+        for x in 0..3 {
+            let mut chunk = Chunk::new(IVec3::new(x, 0, 0));
+            if x == 2 {
+                chunk.set(UVec3::ZERO, VoxelType::Rock);
+            }
+            cache.insert_chunk(crate::rendering::naadf::cpu_builder::build_naadf_chunk(
+                &chunk,
+                Default::default(),
+            ));
+        }
+
+        let first = cache.get(IVec3::ZERO).unwrap();
+        let second = cache.get(IVec3::X).unwrap();
+
+        assert_eq!(
+            first.chunk_skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_X),
+            1,
+            "first empty chunk should skip over the second loaded empty chunk"
+        );
+        assert_eq!(
+            second.chunk_skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_X),
+            0,
+            "second empty chunk is adjacent to an occupied chunk"
+        );
+    }
+
+    #[test]
+    fn chunk_skip_does_not_cross_unloaded_neighbors() {
+        let mut cache = NaadfCache::default();
+        cache.insert_chunk(crate::rendering::naadf::cpu_builder::build_naadf_chunk(
+            &Chunk::new(IVec3::ZERO),
+            Default::default(),
+        ));
+        cache.insert_chunk(crate::rendering::naadf::cpu_builder::build_naadf_chunk(
+            &Chunk::new(IVec3::new(2, 0, 0)),
+            Default::default(),
+        ));
+
+        let first = cache.get(IVec3::ZERO).unwrap();
+
+        assert_eq!(
+            first.chunk_skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_X),
+            0,
+            "missing chunk at +X must terminate chunk-level propagation"
+        );
     }
 }

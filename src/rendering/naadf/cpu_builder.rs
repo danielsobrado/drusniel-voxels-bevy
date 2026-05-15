@@ -75,6 +75,7 @@ pub fn build_naadf_chunk(chunk: &Chunk, options: NaadfBuildOptions) -> NaadfChun
     NaadfChunk {
         position: chunk.position(),
         node,
+        chunk_skip: Default::default(),
         blocks,
         occupancy,
         material_ids,

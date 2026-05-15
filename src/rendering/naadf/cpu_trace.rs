@@ -2,9 +2,12 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::constants::CHUNK_SIZE_I32;
+use crate::rendering::naadf::cache::propagate_chunk_skips;
 use crate::rendering::naadf::layout::{
     BOUND_OFFSET_NEG_X, BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X,
-    BOUND_OFFSET_POS_Y, BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, VOXELS_PER_BLOCK_AXIS,
+    BOUND_OFFSET_POS_Y, BOUND_OFFSET_POS_Z, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, VOXELS_PER_BLOCK_AXIS,
     block_coord_for_voxel, block_index_in_chunk, chunk_world_origin,
 };
 use crate::rendering::voxel_ray_backend::{
@@ -25,10 +28,11 @@ pub struct NaadfCpuRayBackend {
 
 impl NaadfCpuRayBackend {
     pub fn new(chunks: impl IntoIterator<Item = NaadfChunk>) -> Self {
-        let chunks = chunks
+        let mut chunks = chunks
             .into_iter()
             .map(|chunk| (chunk.position, chunk))
             .collect::<HashMap<_, _>>();
+        propagate_chunk_skips(&mut chunks);
         Self {
             stats: VoxelRayBackendStats {
                 ready: true,
@@ -95,7 +99,9 @@ impl NaadfCpuRayBackend {
             let safe_box = match chunk {
                 None => SafeBox::for_chunk(chunk_pos),
                 Some(chunk) => match chunk.node.state() {
-                    NaadfNodeState::UniformEmpty => SafeBox::for_chunk(chunk_pos),
+                    NaadfNodeState::UniformEmpty => {
+                        SafeBox::for_chunk_with_skip(chunk_pos, chunk.chunk_skip)
+                    }
                     NaadfNodeState::UniformFull => {
                         return (
                             Some(make_hit(
@@ -179,6 +185,27 @@ impl SafeBox {
         Self {
             min: origin,
             max: origin + IVec3::splat(CHUNK_SIZE_I32),
+        }
+    }
+
+    fn for_chunk_with_skip(
+        chunk_pos: IVec3,
+        skip: crate::rendering::naadf::layout::PackedDirectionalBounds5Bit,
+    ) -> Self {
+        let origin = chunk_world_origin(chunk_pos);
+        let neg = IVec3::new(
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_NEG_X) as i32,
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_NEG_Y) as i32,
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_NEG_Z) as i32,
+        );
+        let pos = IVec3::new(
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_X) as i32,
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_Y) as i32,
+            skip.get_at_offset(CHUNK_BOUND_OFFSET_POS_Z) as i32,
+        );
+        Self {
+            min: origin - neg * CHUNK_SIZE_I32,
+            max: origin + (IVec3::ONE + pos) * CHUNK_SIZE_I32,
         }
     }
 
@@ -612,6 +639,34 @@ mod tests {
                 "ray={ray_idx} origin={origin} dir={dir}"
             );
         }
+    }
+
+    #[test]
+    fn skip_traversal_uses_chunk_level_skip_across_empty_chunks() {
+        let empty_a = Chunk::new(IVec3::ZERO);
+        let empty_b = Chunk::new(IVec3::X);
+        let mut occupied = Chunk::new(IVec3::new(2, 0, 0));
+        occupied.set(UVec3::new(0, 4, 4), VoxelType::Rock);
+
+        let backend = NaadfCpuRayBackend::new([
+            build_naadf_chunk(&empty_a, NaadfBuildOptions::default()),
+            build_naadf_chunk(&empty_b, NaadfBuildOptions::default()),
+            build_naadf_chunk(&occupied, NaadfBuildOptions::default()),
+        ]);
+
+        let origin = Vec3::new(0.5, 4.5, 4.5);
+        let dir = Vec3::X;
+        let (skip_hit, skip_steps) = backend.trace_with_skip(origin, dir, 64.0);
+        let (dda_hit, dda_steps) = backend.trace_with_dda_stats(origin, dir, 64.0);
+
+        assert_eq!(
+            skip_hit.map(|hit| hit.world_voxel),
+            dda_hit.map(|hit| hit.world_voxel)
+        );
+        assert!(
+            skip_steps < dda_steps,
+            "chunk-level skip should reduce steps across loaded empty chunks: skip={skip_steps} dda={dda_steps}"
+        );
     }
 
     /// Skip-traversal should be *faster* than DDA in step count on sparse

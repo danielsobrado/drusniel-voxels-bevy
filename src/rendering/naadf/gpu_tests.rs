@@ -161,6 +161,21 @@ fn compare_one(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rendering::naadf::cpu_builder::{
+        NaadfBuildOptions, build_naadf_chunk, compute_directional_bounds, material_id_for_voxel,
+        propagate_block_skip_in_chunk, propagate_voxel_skip_in_block,
+    };
+    use crate::rendering::naadf::gpu_buffers::{
+        NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
+        pack_raw_voxel_record, pack_voxel_record,
+    };
+    use crate::rendering::naadf::layout::{
+        BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfNodeState, PackedNaadfNode,
+        VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS, block_index_in_chunk, voxel_index_in_block,
+        voxel_index_in_chunk,
+    };
+    use crate::voxel::chunk::Chunk;
+    use crate::voxel::types::VoxelType;
 
     #[test]
     fn input_record_uses_slot_for_voxel_and_material_bases() {
@@ -229,5 +244,252 @@ mod tests {
         }));
         assert!(source.contains("@compute"));
         assert!(source.contains("debug_trace_rays"));
+    }
+
+    #[test]
+    fn shader_mirror_records_match_cpu_upload_for_fixture_shapes() {
+        let fixtures = [
+            empty_chunk(IVec3::ZERO),
+            full_chunk(IVec3::new(1, 0, 0), VoxelType::Rock),
+            wall_chunk(IVec3::new(0, 1, 0), 0, 8),
+            wall_chunk(IVec3::new(0, 0, 1), 1, 7),
+            sparse_chunk(IVec3::new(-1, 2, -3)),
+        ];
+
+        for (slot, chunk) in fixtures.iter().enumerate() {
+            let naadf = build_naadf_chunk(chunk, NaadfBuildOptions::default());
+            let cpu_upload = pack_naadf_chunk_upload(&naadf, slot as u32);
+            let shader_mirror =
+                mirror_gpu_build_records(chunk, slot as u32, NaadfBuildOptions::default());
+
+            assert_eq!(
+                cpu_upload.chunk_record, shader_mirror.chunk_record,
+                "chunk record mismatch for fixture {slot}"
+            );
+            assert_eq!(
+                cpu_upload.block_records, shader_mirror.block_records,
+                "block record mismatch for fixture {slot}"
+            );
+            assert_eq!(
+                cpu_upload.voxel_records, shader_mirror.voxel_records,
+                "voxel record mismatch for fixture {slot}"
+            );
+            assert_eq!(
+                cpu_upload.raw_voxel_records, shader_mirror.raw_voxel_records,
+                "raw voxel record mismatch for fixture {slot}"
+            );
+            assert_eq!(
+                cpu_upload.material_records, shader_mirror.material_records,
+                "material record mismatch for fixture {slot}"
+            );
+        }
+    }
+
+    struct MirroredGpuRecords {
+        chunk_record: [u32; NAADF_PACKED_CHUNK_WORDS],
+        block_records: Vec<[u32; NAADF_PACKED_BLOCK_WORDS]>,
+        voxel_records: Vec<u32>,
+        raw_voxel_records: Vec<u32>,
+        material_records: Vec<u32>,
+    }
+
+    fn mirror_gpu_build_records(
+        chunk: &Chunk,
+        _slot: u32,
+        options: NaadfBuildOptions,
+    ) -> MirroredGpuRecords {
+        let mut occupancy = [false; crate::constants::CHUNK_VOLUME];
+        let mut materials = [0u16; crate::constants::CHUNK_VOLUME];
+        let mut occupied_count = 0usize;
+        let mut first_material = 0u16;
+        let mut uniform_material = true;
+
+        for (local, voxel) in chunk.iter() {
+            let index = voxel_index_in_chunk(local);
+            let material_id = material_id_for_voxel(voxel, options);
+            let occupied = material_id != 0;
+            occupancy[index] = occupied;
+            materials[index] = material_id;
+            if occupied {
+                occupied_count += 1;
+                if first_material == 0 {
+                    first_material = material_id;
+                } else if first_material != material_id {
+                    uniform_material = false;
+                }
+            }
+        }
+
+        let chunk_node = if occupied_count == 0 {
+            PackedNaadfNode::new(NaadfNodeState::UniformEmpty, 0)
+        } else if occupied_count == crate::constants::CHUNK_VOLUME && uniform_material {
+            PackedNaadfNode::new(NaadfNodeState::UniformFull, first_material as u32)
+        } else {
+            PackedNaadfNode::new(NaadfNodeState::Children, 0)
+        };
+
+        let mut blocks = vec![NaadfBlock::default(); BLOCKS_PER_CHUNK as usize];
+        let mut voxel_records = vec![0u32; crate::constants::CHUNK_VOLUME];
+        for block_z in 0..4 {
+            for block_y in 0..4 {
+                for block_x in 0..4 {
+                    let block_coord = UVec3::new(block_x, block_y, block_z);
+                    let block_index = block_index_in_chunk(block_coord);
+                    let mut block = mirror_gpu_build_block(block_coord, &occupancy, &materials);
+                    let voxel_skip = propagate_voxel_skip_in_block(block.occupancy_mask);
+                    for z in 0..VOXELS_PER_BLOCK_AXIS {
+                        for y in 0..VOXELS_PER_BLOCK_AXIS {
+                            for x in 0..VOXELS_PER_BLOCK_AXIS {
+                                let block_local = UVec3::new(x, y, z);
+                                let chunk_local = block_coord * VOXELS_PER_BLOCK_AXIS + block_local;
+                                let chunk_index = voxel_index_in_chunk(chunk_local);
+                                let local_index = voxel_index_in_block(block_local);
+                                voxel_records[chunk_index] = pack_voxel_record(
+                                    occupancy[chunk_index],
+                                    voxel_skip[local_index].0,
+                                );
+                            }
+                        }
+                    }
+                    block.directional_skip_blocks = Default::default();
+                    blocks[block_index] = block;
+                }
+            }
+        }
+        propagate_block_skip_in_chunk(&mut blocks);
+
+        MirroredGpuRecords {
+            chunk_record: [
+                chunk_node.0,
+                i32_to_u32_bits(chunk.position().x),
+                i32_to_u32_bits(chunk.position().y),
+                i32_to_u32_bits(chunk.position().z),
+                BLOCKS_PER_CHUNK,
+                crate::constants::CHUNK_VOLUME as u32,
+                0,
+                0,
+            ],
+            block_records: blocks.iter().map(mirror_pack_block_record).collect(),
+            voxel_records,
+            raw_voxel_records: occupancy
+                .iter()
+                .zip(materials.iter())
+                .map(|(occupied, material_id)| pack_raw_voxel_record(*occupied, *material_id))
+                .collect(),
+            material_records: materials
+                .iter()
+                .map(|material_id| *material_id as u32)
+                .collect(),
+        }
+    }
+
+    fn mirror_gpu_build_block(
+        block_coord: UVec3,
+        occupancy: &[bool; crate::constants::CHUNK_VOLUME],
+        materials: &[u16; crate::constants::CHUNK_VOLUME],
+    ) -> NaadfBlock {
+        let mut block = NaadfBlock::default();
+        let mut occupied_count = 0usize;
+        let mut first_material = 0u16;
+        let mut uniform_material = true;
+
+        for z in 0..VOXELS_PER_BLOCK_AXIS {
+            for y in 0..VOXELS_PER_BLOCK_AXIS {
+                for x in 0..VOXELS_PER_BLOCK_AXIS {
+                    let block_local = UVec3::new(x, y, z);
+                    let chunk_local = block_coord * VOXELS_PER_BLOCK_AXIS + block_local;
+                    let chunk_index = voxel_index_in_chunk(chunk_local);
+                    let block_index = voxel_index_in_block(block_local);
+                    block.material_ids[block_index] = materials[chunk_index];
+                    if occupancy[chunk_index] {
+                        block.occupancy_mask |= 1u64 << block_index;
+                        occupied_count += 1;
+                        if first_material == 0 {
+                            first_material = materials[chunk_index];
+                        } else if first_material != materials[chunk_index] {
+                            uniform_material = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        block.node = if occupied_count == 0 {
+            PackedNaadfNode::new(NaadfNodeState::UniformEmpty, 0)
+        } else if occupied_count == VOXELS_PER_BLOCK as usize && uniform_material {
+            PackedNaadfNode::new(NaadfNodeState::UniformFull, first_material as u32)
+        } else {
+            PackedNaadfNode::new(NaadfNodeState::Children, 0)
+        };
+        block.bounds = compute_directional_bounds(block.occupancy_mask);
+        block
+    }
+
+    fn mirror_pack_block_record(block: &NaadfBlock) -> [u32; NAADF_PACKED_BLOCK_WORDS] {
+        [
+            block.node.0,
+            mirror_pack_bounds(block.bounds),
+            (block.occupancy_mask & u32::MAX as u64) as u32,
+            (block.occupancy_mask >> 32) as u32,
+            block.bounds.neg_z as u32 | ((block.bounds.pos_z as u32) << 8),
+            block.directional_skip_blocks.0 as u32,
+            0,
+            0,
+        ]
+    }
+
+    fn mirror_pack_bounds(bounds: DirectionalBounds) -> u32 {
+        bounds.neg_x as u32
+            | ((bounds.pos_x as u32) << 8)
+            | ((bounds.neg_y as u32) << 16)
+            | ((bounds.pos_y as u32) << 24)
+    }
+
+    fn i32_to_u32_bits(value: i32) -> u32 {
+        u32::from_ne_bytes(value.to_ne_bytes())
+    }
+
+    fn empty_chunk(position: IVec3) -> Chunk {
+        Chunk::new(position)
+    }
+
+    fn full_chunk(position: IVec3, voxel: VoxelType) -> Chunk {
+        let mut chunk = Chunk::new(position);
+        for z in 0..16 {
+            for y in 0..16 {
+                for x in 0..16 {
+                    chunk.set(UVec3::new(x, y, z), voxel);
+                }
+            }
+        }
+        chunk
+    }
+
+    fn wall_chunk(position: IVec3, axis: usize, value: u32) -> Chunk {
+        let mut chunk = Chunk::new(position);
+        for z in 0..16 {
+            for y in 0..16 {
+                for x in 0..16 {
+                    let coord = [x, y, z];
+                    if coord[axis] == value {
+                        chunk.set(UVec3::new(x, y, z), VoxelType::Rock);
+                    }
+                }
+            }
+        }
+        chunk
+    }
+
+    fn sparse_chunk(position: IVec3) -> Chunk {
+        let mut chunk = Chunk::new(position);
+        for local in [
+            UVec3::new(1, 2, 3),
+            UVec3::new(5, 8, 13),
+            UVec3::new(15, 0, 7),
+            UVec3::new(9, 9, 9),
+        ] {
+            chunk.set(local, VoxelType::Rock);
+        }
+        chunk
     }
 }

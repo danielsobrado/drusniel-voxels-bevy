@@ -1,50 +1,100 @@
-#import "shaders/naadf/common.wgsl" NAADF_PACKED_BLOCK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_NODE_UNIFORM_EMPTY, NAADF_PACKED_BLOCK_WORDS, naadf_node_state
 
 @group(3) @binding(5) var<storage, read_write> naadf_block_records: array<u32>;
 
+var<workgroup> cached_skip: array<u32, 64>;
+var<workgroup> cached_next_skip: array<u32, 64>;
+var<workgroup> cached_occupied: array<u32, 64>;
+
 @compute @workgroup_size(64)
-fn build_naadf_bounds(@builtin(global_invocation_id) id: vec3<u32>) {
-    let block_index = id.x;
+fn build_naadf_bounds(
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(local_invocation_index) local_index: u32,
+) {
+    let chunk_index = group_id.x;
+    let block_index = chunk_index * NAADF_BLOCKS_PER_CHUNK + local_index;
     let base = block_index * NAADF_PACKED_BLOCK_WORDS;
-    let occupancy_low = naadf_block_records[base + 2u];
-    let occupancy_high = naadf_block_records[base + 3u];
+    let node = naadf_block_records[base + 0u];
+    let occupied = select(0u, 1u, naadf_node_state(node) != NAADF_NODE_UNIFORM_EMPTY);
+    cached_skip[local_index] = 0u;
+    cached_occupied[local_index] = occupied;
+    workgroupBarrier();
 
-    var neg_x = NAADF_VOXELS_PER_BLOCK_AXIS;
-    var pos_x = NAADF_VOXELS_PER_BLOCK_AXIS;
-    var neg_y = NAADF_VOXELS_PER_BLOCK_AXIS;
-    var pos_y = NAADF_VOXELS_PER_BLOCK_AXIS;
-    var neg_z = NAADF_VOXELS_PER_BLOCK_AXIS;
-    var pos_z = NAADF_VOXELS_PER_BLOCK_AXIS;
-
-    for (var bit = 0u; bit < 64u; bit = bit + 1u) {
-        if naadf_mask_bit_is_set(occupancy_low, occupancy_high, bit) {
-            let x = bit % 4u;
-            let y = (bit / 4u) % 4u;
-            let z = bit / 16u;
-            neg_x = min(neg_x, x);
-            pos_x = min(pos_x, 3u - x);
-            neg_y = min(neg_y, y);
-            pos_y = min(pos_y, 3u - y);
-            neg_z = min(neg_z, z);
-            pos_z = min(pos_z, 3u - z);
+    // Upstream ComputeBounds4 syncs after X, Y, and Z inside each of 3 passes.
+    for (var pass = 0u; pass < 3u; pass = pass + 1u) {
+        var cur = cached_skip[local_index];
+        let pos = naadf_unflatten4(local_index);
+        if occupied == 0u {
+            if pos.x > 0u {
+                cur = naadf_try_extend(cur, local_index - 1u, 0u, 0x3du);
+            }
+            if pos.x + 1u < 4u {
+                cur = naadf_try_extend(cur, local_index + 1u, 2u, 0x3eu);
+            }
         }
+        cached_next_skip[local_index] = cur;
+        workgroupBarrier();
+        cached_skip[local_index] = cached_next_skip[local_index];
+        workgroupBarrier();
+
+        cur = cached_skip[local_index];
+        if occupied == 0u {
+            if pos.y > 0u {
+                cur = naadf_try_extend(cur, local_index - 4u, 4u, 0x37u);
+            }
+            if pos.y + 1u < 4u {
+                cur = naadf_try_extend(cur, local_index + 4u, 6u, 0x3bu);
+            }
+        }
+        cached_next_skip[local_index] = cur;
+        workgroupBarrier();
+        cached_skip[local_index] = cached_next_skip[local_index];
+        workgroupBarrier();
+
+        cur = cached_skip[local_index];
+        if occupied == 0u {
+            if pos.z > 0u {
+                cur = naadf_try_extend(cur, local_index - 16u, 8u, 0x1fu);
+            }
+            if pos.z + 1u < 4u {
+                cur = naadf_try_extend(cur, local_index + 16u, 10u, 0x2fu);
+            }
+        }
+        cached_next_skip[local_index] = cur;
+        workgroupBarrier();
+        cached_skip[local_index] = cached_next_skip[local_index];
+        workgroupBarrier();
     }
 
-    naadf_block_records[base + 1u] = naadf_pack_bounds_xy(neg_x, pos_x, neg_y, pos_y);
-    naadf_block_records[base + 4u] = naadf_pack_bounds_z(neg_z, pos_z);
+    naadf_block_records[base + 5u] = cached_skip[local_index];
 }
 
-fn naadf_mask_bit_is_set(low: u32, high: u32, bit: u32) -> bool {
-    if bit < 32u {
-        return (low & (1u << bit)) != 0u;
+fn naadf_unflatten4(index: u32) -> vec3<u32> {
+    return vec3<u32>(index % 4u, (index / 4u) % 4u, index / 16u);
+}
+
+fn naadf_try_extend(cur: u32, neighbour_index: u32, bound_offset: u32, mask: u32) -> u32 {
+    if cached_occupied[neighbour_index] != 0u {
+        return cur;
     }
-    return (high & (1u << (bit - 32u))) != 0u;
+    let neighbour = cached_skip[neighbour_index];
+    if (naadf_matching_bounds_mask(neighbour, cur) & mask) != mask {
+        return cur;
+    }
+    let field = (cur >> bound_offset) & 0x3u;
+    if field >= 3u {
+        return cur;
+    }
+    return cur + (1u << bound_offset);
 }
 
-fn naadf_pack_bounds_xy(neg_x: u32, pos_x: u32, neg_y: u32, pos_y: u32) -> u32 {
-    return neg_x | (pos_x << 8u) | (neg_y << 16u) | (pos_y << 24u);
-}
-
-fn naadf_pack_bounds_z(neg_z: u32, pos_z: u32) -> u32 {
-    return neg_z | (pos_z << 8u);
+fn naadf_matching_bounds_mask(neighbour: u32, cur: u32) -> u32 {
+    var mask = 0u;
+    mask = mask | (select(0u, 1u, ((neighbour >> 0u) & 0x3u) >= ((cur >> 0u) & 0x3u)) << 0u);
+    mask = mask | (select(0u, 1u, ((neighbour >> 2u) & 0x3u) >= ((cur >> 2u) & 0x3u)) << 1u);
+    mask = mask | (select(0u, 1u, ((neighbour >> 4u) & 0x3u) >= ((cur >> 4u) & 0x3u)) << 2u);
+    mask = mask | (select(0u, 1u, ((neighbour >> 6u) & 0x3u) >= ((cur >> 6u) & 0x3u)) << 3u);
+    mask = mask | (select(0u, 1u, ((neighbour >> 8u) & 0x3u) >= ((cur >> 8u) & 0x3u)) << 4u);
+    mask = mask | (select(0u, 1u, ((neighbour >> 10u) & 0x3u) >= ((cur >> 10u) & 0x3u)) << 5u);
+    return mask;
 }
