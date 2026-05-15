@@ -179,6 +179,7 @@ struct RenderMeshRayGridProbe {
     offset_z: i32,
     world_x: f32,
     world_z: f32,
+    ray_origin_y: f32,
     expected_surface_y: Option<f32>,
     highest_render_hit_y: Option<f32>,
     surface_error: Option<f32>,
@@ -218,7 +219,20 @@ struct LodEvalProbe {
     effective_mesh_lod_now: Option<String>,
     last_logical_lod_at_mesh: Option<String>,
     last_meshed_lod: Option<String>,
-    mesh_is_stale: Option<bool>,
+    mesh_lod_mismatch: Option<bool>,
+    mesh_status: LodMeshStatus,
+    remesh_pending: bool,
+    remesh_reason_flags: u8,
+    remesh_reasons: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum LodMeshStatus {
+    Current,
+    RemeshPending,
+    Stale,
+    DebugUnavailable,
 }
 
 #[derive(Serialize)]
@@ -466,7 +480,7 @@ fn dump_terrain_hole_probe(
 
     let timestamp = timestamp_utc_compact();
     let dump = TerrainHoleProbeDump {
-        schema_version: 2,
+        schema_version: 3,
         timestamp_utc: timestamp.clone(),
         trigger: "Shift+F9".to_string(),
         player_world_position: player_pos.into(),
@@ -779,7 +793,8 @@ fn sample_render_mesh_ray_grid(
     target_pos: IVec3,
 ) -> Vec<RenderMeshRayGridProbe> {
     let mut probes = Vec::new();
-    let origin_y = target_pos.y as f32 + 32.0;
+    let bounds = world.bounds();
+    let origin_y = bounds.max_world_y as f32 + 2.0;
 
     for offset_z in -2..=2 {
         for offset_x in -2..=2 {
@@ -789,7 +804,7 @@ fn sample_render_mesh_ray_grid(
                 world,
                 world_x.floor() as i32,
                 world_z.floor() as i32,
-                target_pos.y,
+                bounds,
             );
             let (highest_render_hit_y, hit_chunk, hit_entity) = highest_render_mesh_hit_at(
                 world,
@@ -809,6 +824,7 @@ fn sample_render_mesh_ray_grid(
                 offset_z,
                 world_x,
                 world_z,
+                ray_origin_y: origin_y,
                 expected_surface_y,
                 highest_render_hit_y,
                 surface_error,
@@ -821,10 +837,8 @@ fn sample_render_mesh_ray_grid(
     probes
 }
 
-fn expected_surface_y_at(world: &VoxelWorld, x: i32, z: i32, target_y: i32) -> Option<f32> {
-    let y_top = target_y + 16;
-    let y_bottom = target_y - 64;
-    for y in (y_bottom..=y_top).rev() {
+fn expected_surface_y_at(world: &VoxelWorld, x: i32, z: i32, bounds: WorldBounds) -> Option<f32> {
+    for y in (bounds.min_world_y..=bounds.max_world_y).rev() {
         let sample = world.sample_voxel_for_collision(IVec3::new(x, y, z));
         if matches!(sample, BoundaryVoxelSample::InBounds(voxel) if voxel.is_solid()) {
             return Some(y as f32 + 1.0);
@@ -1015,6 +1029,10 @@ fn lod_eval_probe(
 ) -> Option<LodEvalProbe> {
     let chunk = world.get_chunk(chunk_pos);
     let current_lod = chunk.map(|chunk| chunk.lod_level());
+    let remesh_pending = chunk.is_some_and(|chunk| chunk.is_dirty());
+    let remesh_reason_flags = chunk
+        .map(|chunk| chunk.dirty_reason_flags())
+        .unwrap_or_default();
     let distance_xz = camera_pos.map(|camera_pos| terrain_lod_distance_xz(chunk_pos, camera_pos));
     let water_shore_guarded = water_lod_guard_chunks.contains(&chunk_pos);
     let computed_target_lod = current_lod.zip(distance_xz).map(|(current_lod, distance)| {
@@ -1027,10 +1045,11 @@ fn lod_eval_probe(
     });
     let effective_mesh_lod_now =
         effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
-    let mesh_is_stale = terrain_debug.map(|debug| {
+    let mesh_lod_mismatch = terrain_debug.map(|debug| {
         current_lod != Some(debug.logical_lod_at_mesh)
             || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
     });
+    let mesh_status = lod_mesh_status(mesh_lod_mismatch, remesh_pending);
 
     chunk?;
     Some(LodEvalProbe {
@@ -1046,8 +1065,21 @@ fn lod_eval_probe(
         effective_mesh_lod_now: effective_mesh_lod_now.map(lod_string),
         last_logical_lod_at_mesh: terrain_debug.map(|debug| lod_string(debug.logical_lod_at_mesh)),
         last_meshed_lod: terrain_debug.map(|debug| lod_string(debug.effective_lod_at_mesh)),
-        mesh_is_stale,
+        mesh_lod_mismatch,
+        mesh_status,
+        remesh_pending,
+        remesh_reason_flags,
+        remesh_reasons: dirty_reason_names(remesh_reason_flags),
     })
+}
+
+fn lod_mesh_status(mesh_lod_mismatch: Option<bool>, remesh_pending: bool) -> LodMeshStatus {
+    match mesh_lod_mismatch {
+        Some(false) => LodMeshStatus::Current,
+        Some(true) if remesh_pending => LodMeshStatus::RemeshPending,
+        Some(true) => LodMeshStatus::Stale,
+        None => LodMeshStatus::DebugUnavailable,
+    }
 }
 
 fn empty_cap_probe(world: &VoxelWorld, chunk_pos: IVec3) -> EmptyCapProbe {
@@ -1410,5 +1442,34 @@ impl From<UVec3> for UVec3Dump {
             y: value.y,
             z: value.z,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lod_mesh_status_reports_current_when_lod_tags_match() {
+        assert_eq!(lod_mesh_status(Some(false), false), LodMeshStatus::Current);
+        assert_eq!(lod_mesh_status(Some(false), true), LodMeshStatus::Current);
+    }
+
+    #[test]
+    fn lod_mesh_status_separates_pending_remesh_from_stale_mesh() {
+        assert_eq!(
+            lod_mesh_status(Some(true), true),
+            LodMeshStatus::RemeshPending
+        );
+        assert_eq!(lod_mesh_status(Some(true), false), LodMeshStatus::Stale);
+    }
+
+    #[test]
+    fn lod_mesh_status_reports_missing_debug_provenance() {
+        assert_eq!(
+            lod_mesh_status(None, false),
+            LodMeshStatus::DebugUnavailable
+        );
+        assert_eq!(lod_mesh_status(None, true), LodMeshStatus::DebugUnavailable);
     }
 }
