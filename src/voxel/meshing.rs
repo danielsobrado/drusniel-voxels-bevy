@@ -61,6 +61,17 @@ pub struct ChunkMesh {
     pub material_quality: TerrainMaterialQuality,
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TerrainMeshDebug {
+    pub logical_lod_at_mesh: LodLevel,
+    pub effective_lod_at_mesh: LodLevel,
+    pub target_mode_at_mesh: MeshMode,
+    pub neighbor_lods_at_mesh: NeighborLods,
+    pub missing_boundary_neighbors_at_mesh: u32,
+    pub empty_surface_cap_at_mesh: bool,
+    pub generated_frame: u32,
+}
+
 impl ExtractComponent for ChunkMesh {
     type QueryData = &'static ChunkMesh;
     type QueryFilter = ();

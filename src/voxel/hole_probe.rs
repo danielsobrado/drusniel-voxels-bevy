@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,7 +16,16 @@ use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
 use crate::player::{Player, classify_player_world_validity};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
-use crate::voxel::meshing::{ChunkMesh, WaterMesh};
+use crate::voxel::meshing::{
+    ChunkMesh, MeshMode, MeshSettings, TerrainMeshDebug, WaterMesh,
+    empty_chunk_has_surface_nets_boundary_surface,
+};
+use crate::voxel::plugin::{
+    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
+    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
+    terrain_lod_distance_xz, terrain_lod_hysteresis, water_shore_guarded_lod,
+};
+use crate::voxel::skirt::NeighborLods;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldBounds};
 
@@ -47,6 +57,7 @@ struct TerrainHoleProbeDump {
     columns: Vec<ColumnProbe>,
     physics: PhysicsProbe,
     render_mesh_ray_hits: Vec<RenderMeshRayProbe>,
+    render_mesh_ray_grid: Vec<RenderMeshRayGridProbe>,
     chunks: Vec<ChunkProbe>,
 }
 
@@ -163,6 +174,19 @@ struct RenderMeshRayProbe {
 }
 
 #[derive(Serialize)]
+struct RenderMeshRayGridProbe {
+    offset_x: i32,
+    offset_z: i32,
+    world_x: f32,
+    world_z: f32,
+    expected_surface_y: Option<f32>,
+    highest_render_hit_y: Option<f32>,
+    surface_error: Option<f32>,
+    hit_chunk: Option<IVec3Dump>,
+    hit_entity: Option<String>,
+}
+
+#[derive(Serialize)]
 struct ChunkProbe {
     chunk_position: IVec3Dump,
     exists_in_world: bool,
@@ -175,8 +199,36 @@ struct ChunkProbe {
     mesh_entity_from_world: Option<String>,
     water_mesh_entity_from_world: Option<String>,
     target_local_y_is_boundary: bool,
+    lod_eval: Option<LodEvalProbe>,
+    empty_cap: EmptyCapProbe,
     terrain_entity: Option<EntityProbe>,
     water_entity: Option<EntityProbe>,
+}
+
+#[derive(Serialize)]
+struct LodEvalProbe {
+    distance_xz: Option<f32>,
+    high_detail_distance: f32,
+    cull_distance: f32,
+    hysteresis: f32,
+    current_lod: Option<String>,
+    computed_target_lod: Option<String>,
+    water_shore_guarded: bool,
+    water_guard_distance: f32,
+    effective_mesh_lod_now: Option<String>,
+    last_logical_lod_at_mesh: Option<String>,
+    last_meshed_lod: Option<String>,
+    mesh_is_stale: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct EmptyCapProbe {
+    is_empty: bool,
+    empty_surface_cap_candidate: bool,
+    below_chunk_uniformity: Option<String>,
+    above_chunk_uniformity: Option<String>,
+    below_plane_solid_count: u32,
+    above_plane_solid_count: u32,
 }
 
 #[derive(Serialize)]
@@ -201,6 +253,23 @@ struct ChunkMeshProbe {
     triangle_count: u32,
     mesh_mode: String,
     material_quality: String,
+    logical_lod_at_mesh: Option<String>,
+    effective_lod_at_mesh: Option<String>,
+    target_mode_at_mesh: Option<String>,
+    neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
+    missing_boundary_neighbors_at_mesh: Option<u32>,
+    empty_surface_cap_at_mesh: Option<bool>,
+    generated_frame: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct NeighborLodsProbe {
+    neg_x: Option<String>,
+    pos_x: Option<String>,
+    neg_y: Option<String>,
+    pos_y: Option<String>,
+    neg_z: Option<String>,
+    pos_z: Option<String>,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -238,6 +307,7 @@ type TerrainEntityQuery<'w, 's> = Query<
         Option<&'static Mesh3d>,
         Option<&'static Transform>,
         Option<&'static ChunkMesh>,
+        Option<&'static TerrainMeshDebug>,
         Option<&'static WaterMesh>,
         Option<&'static Visibility>,
         Option<&'static InheritedVisibility>,
@@ -259,6 +329,8 @@ fn dump_terrain_hole_probe(
     terrain_entities: TerrainEntityQuery,
     meshes: Res<Assets<Mesh>>,
     spatial_query: Option<SpatialQuery>,
+    mesh_settings: Res<MeshSettings>,
+    lod_settings: Res<LodSettings>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -321,7 +393,19 @@ fn dump_terrain_hole_probe(
         target_pos,
         expected_surface_y,
     );
-    let chunks = sample_neighbor_chunks(&world, target_chunk, target_local, &terrain_entities);
+    let render_mesh_ray_grid =
+        sample_render_mesh_ray_grid(&world, &terrain_entities, &meshes, target_chunk, target_pos);
+    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
+    let chunks = sample_neighbor_chunks(
+        &world,
+        target_chunk,
+        target_local,
+        &terrain_entities,
+        camera_pos,
+        &mesh_settings,
+        &lod_settings,
+        &water_lod_guard_chunks,
+    );
     let classification = classify_probe(
         target_pos,
         target_local,
@@ -382,7 +466,7 @@ fn dump_terrain_hole_probe(
 
     let timestamp = timestamp_utc_compact();
     let dump = TerrainHoleProbeDump {
-        schema_version: 1,
+        schema_version: 2,
         timestamp_utc: timestamp.clone(),
         trigger: "Shift+F9".to_string(),
         player_world_position: player_pos.into(),
@@ -414,6 +498,7 @@ fn dump_terrain_hole_probe(
         columns,
         physics,
         render_mesh_ray_hits,
+        render_mesh_ray_grid,
         chunks,
     };
 
@@ -563,18 +648,20 @@ fn cast_down_ray(
             let hit_y = origin.y - hit.distance;
             let entity_probe = terrain_entities.get(hit.entity).ok();
             let chunk_position = entity_probe
-                .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh)
+                .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _)| chunk_mesh)
                 .map(|chunk_mesh| chunk_mesh.chunk_position.into());
-            let has_chunk_mesh = entity_probe
-                .is_some_and(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _)| chunk_mesh.is_some());
+            let has_chunk_mesh =
+                entity_probe.is_some_and(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _)| {
+                    chunk_mesh.is_some()
+                });
             let has_chunk_collider =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, chunk_collider, _, _)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, chunk_collider, _, _)| {
                     chunk_collider.is_some()
                 });
             let has_collider = entity_probe
-                .is_some_and(|(_, _, _, _, _, _, _, _, _, _, collider, _)| collider.is_some());
+                .is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, collider, _)| collider.is_some());
             let has_static_rigid_body =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, body)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, body)| {
                     matches!(body, Some(RigidBody::Static))
                 });
 
@@ -630,7 +717,7 @@ fn sample_render_mesh_rays(
                 else {
                     continue;
                 };
-                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _)) =
+                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _)) =
                     terrain_entities.get(entity)
                 else {
                     continue;
@@ -682,6 +769,125 @@ fn sample_render_mesh_rays(
     }
 
     hits
+}
+
+fn sample_render_mesh_ray_grid(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    center_chunk: IVec3,
+    target_pos: IVec3,
+) -> Vec<RenderMeshRayGridProbe> {
+    let mut probes = Vec::new();
+    let origin_y = target_pos.y as f32 + 32.0;
+
+    for offset_z in -2..=2 {
+        for offset_x in -2..=2 {
+            let world_x = target_pos.x as f32 + 0.5 + offset_x as f32 * 0.5;
+            let world_z = target_pos.z as f32 + 0.5 + offset_z as f32 * 0.5;
+            let expected_surface_y = expected_surface_y_at(
+                world,
+                world_x.floor() as i32,
+                world_z.floor() as i32,
+                target_pos.y,
+            );
+            let (highest_render_hit_y, hit_chunk, hit_entity) = highest_render_mesh_hit_at(
+                world,
+                terrain_entities,
+                meshes,
+                center_chunk,
+                world_x,
+                world_z,
+                origin_y,
+            );
+            let surface_error = highest_render_hit_y
+                .zip(expected_surface_y)
+                .map(|(hit_y, expected)| (hit_y - expected).abs());
+
+            probes.push(RenderMeshRayGridProbe {
+                offset_x,
+                offset_z,
+                world_x,
+                world_z,
+                expected_surface_y,
+                highest_render_hit_y,
+                surface_error,
+                hit_chunk,
+                hit_entity,
+            });
+        }
+    }
+
+    probes
+}
+
+fn expected_surface_y_at(world: &VoxelWorld, x: i32, z: i32, target_y: i32) -> Option<f32> {
+    let y_top = target_y + 16;
+    let y_bottom = target_y - 64;
+    for y in (y_bottom..=y_top).rev() {
+        let sample = world.sample_voxel_for_collision(IVec3::new(x, y, z));
+        if matches!(sample, BoundaryVoxelSample::InBounds(voxel) if voxel.is_solid()) {
+            return Some(y as f32 + 1.0);
+        }
+    }
+    None
+}
+
+fn highest_render_mesh_hit_at(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    center_chunk: IVec3,
+    world_x: f32,
+    world_z: f32,
+    origin_y: f32,
+) -> (Option<f32>, Option<IVec3Dump>, Option<String>) {
+    let mut best: Option<(f32, IVec3Dump, String)> = None;
+
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let chunk_pos = center_chunk + IVec3::new(dx, dy, dz);
+                let Some(entity) = world
+                    .get_chunk(chunk_pos)
+                    .and_then(|chunk| chunk.mesh_entity())
+                else {
+                    continue;
+                };
+                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _)) =
+                    terrain_entities.get(entity)
+                else {
+                    continue;
+                };
+                let Some(mesh3d) = mesh3d else {
+                    continue;
+                };
+                let Some(mesh) = meshes.get(&mesh3d.0) else {
+                    continue;
+                };
+                let transform = transform
+                    .map(|transform| transform.translation)
+                    .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+                let Some(hit_y) =
+                    cpu_mesh_vertical_ray_hit(mesh, transform, world_x, world_z, origin_y)
+                else {
+                    continue;
+                };
+                if best.as_ref().map_or(true, |(best_y, _, _)| hit_y > *best_y) {
+                    let hit_chunk = chunk_mesh
+                        .map(|chunk| chunk.chunk_position)
+                        .unwrap_or(chunk_pos)
+                        .into();
+                    best = Some((hit_y, hit_chunk, format!("{entity:?}")));
+                }
+            }
+        }
+    }
+
+    match best {
+        Some((hit_y, hit_chunk, entity)) => (Some(hit_y), Some(hit_chunk), Some(entity)),
+        None => (None, None, None),
+    }
 }
 
 fn cpu_mesh_vertical_ray_hit(
@@ -746,6 +952,10 @@ fn sample_neighbor_chunks(
     center_chunk: IVec3,
     target_local: UVec3,
     terrain_entities: &TerrainEntityQuery,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
 ) -> Vec<ChunkProbe> {
     let mut chunks = Vec::new();
     for dz in -1..=1 {
@@ -755,6 +965,9 @@ fn sample_neighbor_chunks(
                 let chunk = world.get_chunk(chunk_pos);
                 let mesh_entity = chunk.and_then(|chunk| chunk.mesh_entity());
                 let water_entity = chunk.and_then(|chunk| chunk.water_mesh_entity());
+                let terrain_debug = mesh_entity
+                    .and_then(|entity| terrain_entities.get(entity).ok())
+                    .and_then(|(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _)| terrain_debug);
 
                 chunks.push(ChunkProbe {
                     chunk_position: chunk_pos.into(),
@@ -770,6 +983,16 @@ fn sample_neighbor_chunks(
                     mesh_entity_from_world: mesh_entity.map(|entity| format!("{entity:?}")),
                     water_mesh_entity_from_world: water_entity.map(|entity| format!("{entity:?}")),
                     target_local_y_is_boundary: target_local.y == 0 || target_local.y == 15,
+                    lod_eval: lod_eval_probe(
+                        world,
+                        chunk_pos,
+                        camera_pos,
+                        mesh_settings,
+                        lod_settings,
+                        water_lod_guard_chunks,
+                        terrain_debug,
+                    ),
+                    empty_cap: empty_cap_probe(world, chunk_pos),
                     terrain_entity: mesh_entity
                         .and_then(|entity| entity_probe(entity, terrain_entities)),
                     water_entity: water_entity
@@ -781,12 +1004,99 @@ fn sample_neighbor_chunks(
     chunks
 }
 
+fn lod_eval_probe(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+    terrain_debug: Option<&TerrainMeshDebug>,
+) -> Option<LodEvalProbe> {
+    let chunk = world.get_chunk(chunk_pos);
+    let current_lod = chunk.map(|chunk| chunk.lod_level());
+    let distance_xz = camera_pos.map(|camera_pos| terrain_lod_distance_xz(chunk_pos, camera_pos));
+    let water_shore_guarded = water_lod_guard_chunks.contains(&chunk_pos);
+    let computed_target_lod = current_lod.zip(distance_xz).map(|(current_lod, distance)| {
+        water_shore_guarded_lod(
+            calculate_target_lod_with_hysteresis(distance, current_lod, lod_settings),
+            distance,
+            lod_settings,
+            water_shore_guarded,
+        )
+    });
+    let effective_mesh_lod_now =
+        effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
+    let mesh_is_stale = terrain_debug.map(|debug| {
+        current_lod != Some(debug.logical_lod_at_mesh)
+            || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
+    });
+
+    chunk?;
+    Some(LodEvalProbe {
+        distance_xz,
+        high_detail_distance: lod_settings.high_detail_distance,
+        cull_distance: lod_settings.cull_distance,
+        hysteresis: terrain_lod_hysteresis(lod_settings),
+        current_lod: current_lod.map(lod_string),
+        computed_target_lod: computed_target_lod.map(lod_string),
+        water_shore_guarded,
+        water_guard_distance: lod_settings.high_detail_distance
+            + WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
+        effective_mesh_lod_now: effective_mesh_lod_now.map(lod_string),
+        last_logical_lod_at_mesh: terrain_debug.map(|debug| lod_string(debug.logical_lod_at_mesh)),
+        last_meshed_lod: terrain_debug.map(|debug| lod_string(debug.effective_lod_at_mesh)),
+        mesh_is_stale,
+    })
+}
+
+fn empty_cap_probe(world: &VoxelWorld, chunk_pos: IVec3) -> EmptyCapProbe {
+    let is_empty = world
+        .get_chunk(chunk_pos)
+        .is_some_and(|chunk| chunk.uniformity() == ChunkUniformity::Empty);
+    let below_pos = chunk_pos + IVec3::NEG_Y;
+    let above_pos = chunk_pos + IVec3::Y;
+
+    EmptyCapProbe {
+        is_empty,
+        empty_surface_cap_candidate: is_empty
+            && empty_chunk_has_surface_nets_boundary_surface(world, chunk_pos),
+        below_chunk_uniformity: world
+            .get_chunk(below_pos)
+            .map(|chunk| uniformity_name(chunk.uniformity()).to_string()),
+        above_chunk_uniformity: world
+            .get_chunk(above_pos)
+            .map(|chunk| uniformity_name(chunk.uniformity()).to_string()),
+        below_plane_solid_count: cap_plane_solid_count(world, chunk_pos, -1),
+        above_plane_solid_count: cap_plane_solid_count(world, chunk_pos, CHUNK_SIZE_I32),
+    }
+}
+
+fn cap_plane_solid_count(world: &VoxelWorld, chunk_pos: IVec3, local_y: i32) -> u32 {
+    let origin = VoxelWorld::chunk_to_world(chunk_pos);
+    let y = origin.y + local_y;
+    let mut count = 0;
+    for x in 0..CHUNK_SIZE_I32 {
+        for z in 0..CHUNK_SIZE_I32 {
+            if world
+                .sample_voxel_for_terrain_meshing(IVec3::new(origin.x + x, y, origin.z + z))
+                .voxel()
+                .is_some_and(|voxel| voxel.is_solid())
+            {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option<EntityProbe> {
     let (
         entity,
         _mesh3d,
         _transform,
         chunk_mesh,
+        terrain_debug,
         water_mesh,
         visibility,
         inherited_visibility,
@@ -805,6 +1115,17 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
             triangle_count: chunk_mesh.triangle_count,
             mesh_mode: format!("{:?}", chunk_mesh.mesh_mode),
             material_quality: format!("{:?}", chunk_mesh.material_quality),
+            logical_lod_at_mesh: terrain_debug.map(|debug| lod_string(debug.logical_lod_at_mesh)),
+            effective_lod_at_mesh: terrain_debug
+                .map(|debug| lod_string(debug.effective_lod_at_mesh)),
+            target_mode_at_mesh: terrain_debug
+                .map(|debug| mesh_mode_string(debug.target_mode_at_mesh)),
+            neighbor_lods_at_mesh: terrain_debug
+                .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
+            missing_boundary_neighbors_at_mesh: terrain_debug
+                .map(|debug| debug.missing_boundary_neighbors_at_mesh),
+            empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
+            generated_frame: terrain_debug.map(|debug| debug.generated_frame),
         }),
         visibility: visibility.map(|visibility| format!("{visibility:?}")),
         inherited_visibility: inherited_visibility.map(|visibility| visibility.get()),
@@ -980,6 +1301,25 @@ fn lod_name(lod: LodLevel) -> &'static str {
         LodLevel::Lod2 => "Lod2",
         LodLevel::Lod3 => "Lod3",
         LodLevel::Culled => "Culled",
+    }
+}
+
+fn lod_string(lod: LodLevel) -> String {
+    lod_name(lod).to_string()
+}
+
+fn mesh_mode_string(mode: MeshMode) -> String {
+    format!("{mode:?}")
+}
+
+fn neighbor_lods_probe(neighbor_lods: NeighborLods) -> NeighborLodsProbe {
+    NeighborLodsProbe {
+        neg_x: neighbor_lods.neg_x.map(lod_string),
+        pos_x: neighbor_lods.pos_x.map(lod_string),
+        neg_y: neighbor_lods.neg_y.map(lod_string),
+        pos_y: neighbor_lods.pos_y.map(lod_string),
+        neg_z: neighbor_lods.neg_z.map(lod_string),
+        pos_z: neighbor_lods.pos_z.map(lod_string),
     }
 }
 

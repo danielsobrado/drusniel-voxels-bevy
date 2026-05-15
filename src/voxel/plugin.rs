@@ -59,7 +59,7 @@ const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
 const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
 const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
-const WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA: f32 = 80.0;
+pub(crate) const WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA: f32 = 80.0;
 const WATER_BODY_UPDATE_INTERVAL: f32 = 0.5;
 const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
 const WATER_BODY_LAKE_MIN_AREA: f32 = 128.0;
@@ -91,8 +91,8 @@ use crate::voxel::enclosure::{
 };
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 use crate::voxel::meshing::{
-    ChunkMesh, MeshMode, MeshSettings, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode,
-    WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
+    ChunkMesh, MeshMode, MeshSettings, TerrainMeshDebug, WaterBodyId, WaterBodyKind,
+    WaterBodyMaterialMode, WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_with_mode,
 };
 use crate::voxel::occlusion::{
@@ -2254,6 +2254,15 @@ fn mesh_dirty_chunks_system(
                 mesh_mode: target_mode,
                 material_quality: terrain_quality,
             };
+            let terrain_mesh_debug = TerrainMeshDebug {
+                logical_lod_at_mesh: lod_level,
+                effective_lod_at_mesh: mesh_lod_level,
+                target_mode_at_mesh: target_mode,
+                neighbor_lods_at_mesh: neighbor_lods,
+                missing_boundary_neighbors_at_mesh: missing_boundary_neighbors,
+                empty_surface_cap_at_mesh: empty_surface_neighbor,
+                generated_frame: frame.0,
+            };
 
             // Track meshing statistics
             chunk_stats.meshing_time_us += mesh_elapsed.as_micros() as u64;
@@ -2280,6 +2289,7 @@ fn mesh_dirty_chunks_system(
                                         Mesh3d(mesh_handle),
                                         MeshMaterial3d(blocky_mat.handle.clone()),
                                         chunk_mesh,
+                                        terrain_mesh_debug,
                                         NeedsCollider,
                                     ))
                                     .remove::<MeshMaterial3d<
@@ -2294,6 +2304,7 @@ fn mesh_dirty_chunks_system(
                                     Mesh3d(mesh_handle),
                                     MeshMaterial3d(triplanar_handle),
                                     chunk_mesh,
+                                    terrain_mesh_debug,
                                     NeedsCollider,
                                 ))
                                 .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
@@ -2326,6 +2337,7 @@ fn mesh_dirty_chunks_system(
                                         world_pos.z as f32,
                                     ),
                                     chunk_mesh,
+                                    terrain_mesh_debug,
                                     NeedsCollider,
                                     terrain_layers,
                                 ))
@@ -2341,6 +2353,7 @@ fn mesh_dirty_chunks_system(
                                     world_pos.z as f32,
                                 ),
                                 chunk_mesh,
+                                terrain_mesh_debug,
                                 NeedsCollider,
                                 terrain_layers,
                             ))
@@ -3822,11 +3835,11 @@ fn adjust_lod_for_integrated_gpu(
 /// `high_detail_distance` so a small near-band doesn't trap chunks at low LOD,
 /// and is hard-capped at 8 voxels so transitions can never stretch beyond half
 /// a chunk's worth of distance.
-fn terrain_lod_hysteresis(settings: &LodSettings) -> f32 {
+pub(crate) fn terrain_lod_hysteresis(settings: &LodSettings) -> f32 {
     terrain_lod_hysteresis_for(settings.high_detail_distance)
 }
 
-fn terrain_lod_hysteresis_for(high_detail_distance: f32) -> f32 {
+pub(crate) fn terrain_lod_hysteresis_for(high_detail_distance: f32) -> f32 {
     TERRAIN_LOD_HYSTERESIS
         .min(high_detail_distance * 0.25)
         .min(8.0)
@@ -3837,7 +3850,7 @@ fn terrain_lod_hysteresis_for(high_detail_distance: f32) -> f32 {
 /// Hysteresis is asymmetric: upgrades to higher detail fire eagerly (no `-h`
 /// buffer) so a chunk that crosses the near threshold becomes Lod0 immediately.
 /// Downgrades still need to exceed `threshold + h` to prevent flip-flopping.
-fn calculate_target_lod_with_hysteresis(
+pub(crate) fn calculate_target_lod_with_hysteresis(
     distance: f32,
     current_lod: LodLevel,
     settings: &LodSettings,
@@ -4028,7 +4041,7 @@ pub fn apply_visibility_culling_system(
 ///
 /// Uses hysteresis to prevent rapid LOD switching when camera is near thresholds.
 /// Throttled to every 0.25s and skipped when camera hasn't moved significantly.
-fn terrain_lod_distance_xz(chunk_pos: IVec3, camera_pos: Vec3) -> f32 {
+pub(crate) fn terrain_lod_distance_xz(chunk_pos: IVec3, camera_pos: Vec3) -> f32 {
     let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
     let chunk_center = Vec2::new(
         world_pos.x as f32 + CHUNK_SIZE_F32 * 0.5,
@@ -4206,7 +4219,7 @@ fn update_chunk_lod_system(
     );
 }
 
-fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSet<IVec3> {
+pub(crate) fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSet<IVec3> {
     let mut chunks = HashSet::new();
     for (chunk_pos, chunk) in world.chunk_entries() {
         if !chunk_contains_liquid(chunk) {
@@ -4258,7 +4271,7 @@ fn chunk_contains_liquid(chunk: &Chunk) -> bool {
     false
 }
 
-fn water_shore_guarded_lod(
+pub(crate) fn water_shore_guarded_lod(
     target_lod: LodLevel,
     distance: f32,
     settings: &LodSettings,
