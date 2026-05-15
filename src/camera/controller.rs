@@ -413,7 +413,8 @@ pub fn apply_taa_capabilities(
         return;
     }
 
-    let should_enable = settings_state.anti_aliasing == AntiAliasing::Taa && capabilities.taa_supported;
+    let should_enable =
+        settings_state.anti_aliasing == AntiAliasing::Taa && capabilities.taa_supported;
     for (entity, mut msaa, taa, sharpening) in cameras.iter_mut() {
         let mut camera = commands.entity(entity);
         if should_enable {

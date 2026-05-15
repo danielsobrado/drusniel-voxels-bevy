@@ -2,14 +2,14 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use log::warn;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::props::{PropConfig, PropDefinition};
@@ -21,15 +21,15 @@ use crate::runtime_commands::{
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
 use crate::voxel::meshing::{
-    generate_chunk_mesh_with_mode, MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode,
+    MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode, generate_chunk_mesh_with_mode,
 };
-use crate::voxel::model_io::{export_world, import_world_data, VoxelModelFormat};
+use crate::voxel::model_io::{VoxelModelFormat, export_world, import_world_data};
 use crate::voxel::persistence::{
-    self, read_world_data_from_bytes, EditorWorldMetadata, WorldData, WORLD_SAVE_PATH,
+    self, EditorWorldMetadata, WORLD_SAVE_PATH, WorldData, read_world_data_from_bytes,
 };
 use crate::voxel::plugin::{
-    build_terrain_neighbor_lods, effective_terrain_mesh_lod_for_chunk,
-    target_terrain_mesh_mode_for_lod, LodSettings, WaterBodyInfo, WaterBodyRegistry,
+    LodSettings, WaterBodyInfo, WaterBodyRegistry, build_terrain_neighbor_lods,
+    effective_terrain_mesh_lod_for_chunk, target_terrain_mesh_mode_for_lod,
 };
 use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -1318,9 +1318,11 @@ mod tests {
         assert_eq!(voxels.len(), CHUNK_SIZE * CHUNK_SIZE);
         assert_eq!(voxels[0]["position"], json!([0, 3, 0]));
         assert_eq!(voxels[1]["position"], json!([1, 3, 0]));
-        assert!(voxels
-            .iter()
-            .all(|voxel| voxel["material"] == json!("TopSoil")));
+        assert!(
+            voxels
+                .iter()
+                .all(|voxel| voxel["material"] == json!("TopSoil"))
+        );
         assert!(voxels.iter().all(|voxel| {
             voxel["exposedFaces"]
                 .as_array()
@@ -1354,14 +1356,18 @@ mod tests {
             .find(|voxel| voxel["position"] == json!([1, 3, 0]))
             .unwrap();
 
-        assert!(!left["exposedFaces"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("posX")));
-        assert!(!right["exposedFaces"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("negX")));
+        assert!(
+            !left["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("posX"))
+        );
+        assert!(
+            !right["exposedFaces"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("negX"))
+        );
 
         let upper_chunk = voxel_world.get_chunk(IVec3::new(0, 1, 0)).unwrap();
         let upper_payload = chunk_exposed_voxels_from_world(&voxel_world, upper_chunk);

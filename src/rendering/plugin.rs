@@ -30,8 +30,10 @@ use crate::rendering::quality::{
     RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
     sync_render_quality_preset,
 };
-use crate::rendering::ray_tracing::RayTracingSettings;
-use crate::rendering::ray_tracing::toggle_voxel_ray_backend_key;
+use crate::rendering::ray_tracing::{
+    RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
+    toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
+};
 use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::ssao::SsaoPlugin;
@@ -67,11 +69,13 @@ impl Plugin for RenderingPlugin {
 
         app.init_resource::<GraphicsCapabilities>()
             .insert_resource(RayTracingSettings::from_env_or_default())
+            .init_resource::<VoxelRayBackendNotice>()
             .init_resource::<RenderQualityPreset>()
             .add_systems(
                 Update,
                 (
                     toggle_voxel_ray_backend_key,
+                    update_voxel_ray_backend_notice.after(toggle_voxel_ray_backend_key),
                     sync_render_quality_preset,
                     apply_render_quality_preset.after(sync_render_quality_preset),
                     record_render_quality_counters.after(sync_render_quality_preset),
@@ -120,6 +124,7 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<BillboardMaterial>::default())
             // Register SimpleLodMaterial for distant props (no PBR)
             .add_plugins(MaterialPlugin::<SimpleLodMaterial>::default())
+            .add_systems(Startup, setup_voxel_ray_backend_notice)
             .add_systems(
                 Startup,
                 (

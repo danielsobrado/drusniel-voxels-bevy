@@ -3,6 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::rendering::capabilities::GraphicsCapabilities;
 
+const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
+const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
+const NAADF_RESTART_HINT: &str = "Restart with .\\startVoxels.ps1 -Naadf to enable NAADF.";
+
+#[cfg(feature = "naadf")]
+const NAADF_FEATURE_COMPILED: bool = true;
+#[cfg(not(feature = "naadf"))]
+const NAADF_FEATURE_COMPILED: bool = false;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoxelRayBackendMode {
@@ -76,6 +85,32 @@ pub struct RayTracingSettings {
     pub fallback_reason: Option<String>,
 }
 
+#[derive(Resource, Debug)]
+pub(crate) struct VoxelRayBackendNotice {
+    visible_until_secs: f64,
+}
+
+impl Default for VoxelRayBackendNotice {
+    fn default() -> Self {
+        Self {
+            visible_until_secs: f64::NEG_INFINITY,
+        }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct VoxelRayBackendNoticeText;
+
+impl VoxelRayBackendNotice {
+    fn show_for(&mut self, now_secs: f64, duration_secs: f64) {
+        self.visible_until_secs = now_secs + duration_secs;
+    }
+
+    fn visible(&self, now_secs: f64) -> bool {
+        now_secs < self.visible_until_secs
+    }
+}
+
 impl Default for RayTracingSettings {
     fn default() -> Self {
         Self {
@@ -93,16 +128,26 @@ impl Default for RayTracingSettings {
 
 impl RayTracingSettings {
     pub fn from_env_or_default() -> Self {
-        let mut settings = Self::default();
-        if std::env::var("DRUSNIEL_NAADF").is_ok_and(|value| {
+        let requested = std::env::var("DRUSNIEL_NAADF").is_ok_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "on"
             )
-        }) {
+        });
+        Self::with_naadf_env_request(requested)
+    }
+
+    fn with_naadf_env_request(naadf_requested: bool) -> Self {
+        let mut settings = Self::default();
+        if !naadf_requested {
+            return settings;
+        }
+        if NAADF_FEATURE_COMPILED {
             settings.voxel_backend = VoxelRayBackendMode::Naadf;
             settings.resolved_voxel_backend = VoxelRayBackendMode::Naadf;
             settings.backend_switch_generation = 1;
+        } else {
+            settings.fallback_reason = Some(NAADF_NOT_COMPILED_REASON.into());
         }
         settings
     }
@@ -186,10 +231,12 @@ fn is_naadf_cache_fallback(reason: &str) -> bool {
     reason.starts_with("NAADF cache ")
 }
 
-pub fn toggle_voxel_ray_backend_key(
+pub(crate) fn toggle_voxel_ray_backend_key(
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     mut settings: ResMut<RayTracingSettings>,
+    mut notice: ResMut<VoxelRayBackendNotice>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     if shift_held || !keys.just_pressed(KeyCode::F11) {
@@ -201,7 +248,15 @@ pub fn toggle_voxel_ray_backend_key(
         VoxelRayBackendMode::Naadf => VoxelRayBackendMode::Auto,
         VoxelRayBackendMode::Auto => VoxelRayBackendMode::CurrentSdf,
     };
+    if next == VoxelRayBackendMode::Naadf && !NAADF_FEATURE_COMPILED {
+        settings.fallback_reason = Some(NAADF_NOT_COMPILED_REASON.into());
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+        warn!("Voxel ray backend unchanged: {}", NAADF_NOT_COMPILED_REASON);
+        return;
+    }
+
     if settings.set_voxel_backend(next, capabilities.as_deref()) {
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         info!(
             "Voxel ray backend requested: {}, effective: {}, fallback: {} (F11 to cycle)",
             settings.voxel_backend.as_str(),
@@ -209,8 +264,81 @@ pub fn toggle_voxel_ray_backend_key(
             settings.fallback_reason.as_deref().unwrap_or("none")
         );
     } else if let Some(reason) = settings.fallback_reason.as_deref() {
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         warn!("Voxel ray backend unchanged: {}", reason);
     }
+}
+
+pub(crate) fn setup_voxel_ray_backend_notice(
+    mut commands: Commands,
+    time: Res<Time>,
+    settings: Res<RayTracingSettings>,
+    mut notice: ResMut<VoxelRayBackendNotice>,
+) {
+    if settings.voxel_backend != VoxelRayBackendMode::CurrentSdf
+        || settings.fallback_reason.is_some()
+    {
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+    }
+
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::srgba(0.9, 0.98, 1.0, 0.95)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(44.0),
+            left: Val::Px(10.0),
+            padding: UiRect::all(Val::Px(6.0)),
+            ..default()
+        },
+        Visibility::Hidden,
+        VoxelRayBackendNoticeText,
+    ));
+}
+
+pub(crate) fn update_voxel_ray_backend_notice(
+    time: Res<Time>,
+    notice: Res<VoxelRayBackendNotice>,
+    settings: Res<RayTracingSettings>,
+    mut query: Query<(&mut Text, &mut Visibility), With<VoxelRayBackendNoticeText>>,
+) {
+    let visible = notice.visible(time.elapsed_secs_f64());
+    for (mut text, mut visibility) in query.iter_mut() {
+        if visible {
+            let new_text = voxel_ray_backend_notice_text(&settings);
+            if **text != new_text {
+                **text = new_text;
+            }
+            if *visibility != Visibility::Visible {
+                *visibility = Visibility::Visible;
+            }
+        } else if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+fn voxel_ray_backend_notice_text(settings: &RayTracingSettings) -> String {
+    let mut text = format!(
+        "F11 voxel rays: requested {} / effective {}",
+        settings.voxel_backend.as_str(),
+        settings.effective_backend().as_str()
+    );
+    if let Some(reason) = settings.fallback_reason.as_deref() {
+        text.push_str(&format!("\nFallback: {reason}"));
+    }
+    if !NAADF_FEATURE_COMPILED {
+        text.push('\n');
+        text.push_str(NAADF_RESTART_HINT);
+    } else if settings.voxel_backend == VoxelRayBackendMode::Naadf {
+        text.push_str("\nNAADF cache/backend selected; final visual preview is not wired yet.");
+    }
+    text
 }
 
 #[cfg(test)]
@@ -268,5 +396,87 @@ mod tests {
             settings.fallback_reason.as_deref(),
             Some("NAADF cache stale; using CurrentSdf fallback")
         );
+    }
+
+    #[test]
+    fn notice_default_is_hidden_at_any_time() {
+        let notice = VoxelRayBackendNotice::default();
+        assert!(!notice.visible(0.0));
+        assert!(!notice.visible(1_000_000.0));
+    }
+
+    #[test]
+    fn notice_visible_within_window_only() {
+        let mut notice = VoxelRayBackendNotice::default();
+        notice.show_for(10.0, 4.0);
+        assert!(notice.visible(10.0));
+        assert!(notice.visible(13.999));
+        // Strict-less makes the upper boundary the first hidden frame.
+        assert!(!notice.visible(14.0));
+        assert!(!notice.visible(14.001));
+    }
+
+    #[test]
+    fn notice_text_reports_requested_and_effective_backend() {
+        let settings = RayTracingSettings::default();
+        let text = voxel_ray_backend_notice_text(&settings);
+        assert!(text.contains("requested current_sdf"));
+        assert!(text.contains("effective current_sdf"));
+    }
+
+    #[test]
+    fn notice_text_includes_fallback_reason_when_present() {
+        let settings = RayTracingSettings {
+            fallback_reason: Some("test reason".into()),
+            ..default()
+        };
+        let text = voxel_ray_backend_notice_text(&settings);
+        assert!(text.contains("Fallback: test reason"));
+    }
+
+    #[test]
+    #[cfg(not(feature = "naadf"))]
+    fn notice_text_includes_restart_hint_when_feature_missing() {
+        let settings = RayTracingSettings::default();
+        let text = voxel_ray_backend_notice_text(&settings);
+        assert!(text.contains("startVoxels.ps1 -Naadf"));
+    }
+
+    #[test]
+    #[cfg(not(feature = "naadf"))]
+    fn naadf_env_request_records_fallback_when_feature_missing() {
+        let settings = RayTracingSettings::with_naadf_env_request(true);
+        assert_eq!(settings.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+        assert_eq!(
+            settings.fallback_reason.as_deref(),
+            Some(NAADF_NOT_COMPILED_REASON)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "naadf")]
+    fn notice_text_includes_preview_hint_when_naadf_selected() {
+        let settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            ..default()
+        };
+        let text = voxel_ray_backend_notice_text(&settings);
+        assert!(text.contains("preview is not wired"));
+    }
+
+    #[test]
+    #[cfg(feature = "naadf")]
+    fn naadf_env_request_selects_naadf_when_feature_present() {
+        let settings = RayTracingSettings::with_naadf_env_request(true);
+        assert_eq!(settings.voxel_backend, VoxelRayBackendMode::Naadf);
+        assert_eq!(settings.resolved_voxel_backend, VoxelRayBackendMode::Naadf);
+        assert!(settings.fallback_reason.is_none());
+    }
+
+    #[test]
+    fn naadf_env_request_no_change_without_request() {
+        let settings = RayTracingSettings::with_naadf_env_request(false);
+        assert_eq!(settings.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+        assert!(settings.fallback_reason.is_none());
     }
 }

@@ -70,9 +70,36 @@ pub fn motion_blur_component(config: &CinematicConfig) -> Option<MotionBlur> {
         return None;
     }
 
+    if !motion_blur_supported_on_current_backend() {
+        warn_once!(
+            "Motion blur disabled on Windows DX12 because the shader fails FXC compilation; set DRUSNIEL_ENABLE_DX12_MOTION_BLUR=1 to force it"
+        );
+        return None;
+    }
+
     Some(MotionBlur {
         shutter_angle: config.motion_blur.shutter_angle,
         samples: config.motion_blur.samples,
+    })
+}
+
+fn motion_blur_supported_on_current_backend() -> bool {
+    motion_blur_supported_on_backend(
+        std::env::consts::OS,
+        env_flag_enabled("DRUSNIEL_ENABLE_DX12_MOTION_BLUR"),
+    )
+}
+
+fn motion_blur_supported_on_backend(target_os: &str, dx12_override: bool) -> bool {
+    target_os != "windows" || dx12_override
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
     })
 }
 
@@ -191,5 +218,26 @@ fn update_cinematic_transitions(
         if timer.is_finished() {
             state.transition_timer = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::motion_blur_supported_on_backend;
+
+    #[test]
+    fn motion_blur_is_disabled_on_windows_without_override() {
+        assert!(!motion_blur_supported_on_backend("windows", false));
+    }
+
+    #[test]
+    fn motion_blur_can_be_forced_on_windows_for_debugging() {
+        assert!(motion_blur_supported_on_backend("windows", true));
+    }
+
+    #[test]
+    fn motion_blur_remains_enabled_on_non_windows_backends() {
+        assert!(motion_blur_supported_on_backend("linux", false));
+        assert!(motion_blur_supported_on_backend("macos", false));
     }
 }

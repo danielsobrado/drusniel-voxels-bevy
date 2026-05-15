@@ -2,6 +2,76 @@ use bevy::prelude::*;
 
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_U32, CHUNK_VOLUME};
 
+/// Bit offset for the -X directional skip distance inside a packed bounds word.
+/// Layout matches cg-tuwien/NAADF `boundsCommon.fxh`: `-X|+X|-Y|+Y|-Z|+Z`, 2 bits each.
+pub const BOUND_OFFSET_NEG_X: u32 = 0;
+pub const BOUND_OFFSET_POS_X: u32 = 2;
+pub const BOUND_OFFSET_NEG_Y: u32 = 4;
+pub const BOUND_OFFSET_POS_Y: u32 = 6;
+pub const BOUND_OFFSET_NEG_Z: u32 = 8;
+pub const BOUND_OFFSET_POS_Z: u32 = 10;
+pub const BOUND_FIELD_MASK: u32 = 0b11;
+pub const BOUND_FIELD_MAX: u8 = 3;
+
+/// 6 directional skip distances packed as 2-bit fields (range 0..=3 per axis).
+/// `0` means "the cell itself blocks the ray in this direction"; `3` means
+/// "you can advance 3 cells in this direction before the safe envelope ends."
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PackedDirectionalBounds2Bit(pub u16);
+
+impl PackedDirectionalBounds2Bit {
+    pub const fn new(neg_x: u8, pos_x: u8, neg_y: u8, pos_y: u8, neg_z: u8, pos_z: u8) -> Self {
+        let raw = ((neg_x & 0b11) as u16) << BOUND_OFFSET_NEG_X
+            | ((pos_x & 0b11) as u16) << BOUND_OFFSET_POS_X
+            | ((neg_y & 0b11) as u16) << BOUND_OFFSET_NEG_Y
+            | ((pos_y & 0b11) as u16) << BOUND_OFFSET_POS_Y
+            | ((neg_z & 0b11) as u16) << BOUND_OFFSET_NEG_Z
+            | ((pos_z & 0b11) as u16) << BOUND_OFFSET_POS_Z;
+        Self(raw)
+    }
+
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    pub const fn saturated() -> Self {
+        Self::new(
+            BOUND_FIELD_MAX,
+            BOUND_FIELD_MAX,
+            BOUND_FIELD_MAX,
+            BOUND_FIELD_MAX,
+            BOUND_FIELD_MAX,
+            BOUND_FIELD_MAX,
+        )
+    }
+
+    pub fn get(self, direction: NaadfAxisDirection) -> u8 {
+        self.get_at_offset(bound_offset_for(direction))
+    }
+
+    pub const fn get_at_offset(self, offset: u32) -> u8 {
+        ((self.0 >> offset) & BOUND_FIELD_MASK as u16) as u8
+    }
+
+    pub fn add_one(&mut self, offset: u32) {
+        let cur = self.get_at_offset(offset);
+        if cur < BOUND_FIELD_MAX {
+            self.0 += 1u16 << offset;
+        }
+    }
+}
+
+pub const fn bound_offset_for(direction: NaadfAxisDirection) -> u32 {
+    match direction {
+        NaadfAxisDirection::NegX => BOUND_OFFSET_NEG_X,
+        NaadfAxisDirection::PosX => BOUND_OFFSET_POS_X,
+        NaadfAxisDirection::NegY => BOUND_OFFSET_NEG_Y,
+        NaadfAxisDirection::PosY => BOUND_OFFSET_POS_Y,
+        NaadfAxisDirection::NegZ => BOUND_OFFSET_NEG_Z,
+        NaadfAxisDirection::PosZ => BOUND_OFFSET_POS_Z,
+    }
+}
+
 pub const VOXELS_PER_BLOCK_AXIS: u32 = 4;
 pub const BLOCKS_PER_CHUNK_AXIS: u32 = 4;
 pub const VOXELS_PER_CHUNK_AXIS: u32 = CHUNK_SIZE_U32;
@@ -102,6 +172,11 @@ impl DirectionalBounds {
 pub struct NaadfBlock {
     pub node: PackedNaadfNode,
     pub bounds: DirectionalBounds,
+    /// Per-block directional skip distances, in *block* units within the
+    /// containing chunk. Encoded with [`PackedDirectionalBounds2Bit`] (range 0..=3).
+    /// Built by [`crate::rendering::naadf::cpu_builder`] using the upstream
+    /// `boundsCommon::ComputeBounds4` propagation rule.
+    pub directional_skip_blocks: PackedDirectionalBounds2Bit,
     pub occupancy_mask: u64,
     pub material_ids: [u16; VOXELS_PER_BLOCK as usize],
 }
@@ -111,6 +186,7 @@ impl Default for NaadfBlock {
         Self {
             node: PackedNaadfNode::new(NaadfNodeState::UniformEmpty, 0),
             bounds: DirectionalBounds::empty_block(),
+            directional_skip_blocks: PackedDirectionalBounds2Bit::zero(),
             occupancy_mask: 0,
             material_ids: [0; VOXELS_PER_BLOCK as usize],
         }
@@ -124,6 +200,11 @@ pub struct NaadfChunk {
     pub blocks: Vec<NaadfBlock>,
     pub occupancy: [bool; CHUNK_VOLUME],
     pub material_ids: [u16; CHUNK_VOLUME],
+    /// Per-voxel directional skip distances, in *voxel* units within the
+    /// containing block. Length [`CHUNK_VOLUME`], indexed via
+    /// [`voxel_index_in_chunk`]. Encoded with [`PackedDirectionalBounds2Bit`]
+    /// (range 0..=3). Built using the upstream `ComputeBounds4` rule.
+    pub voxel_skip: Vec<PackedDirectionalBounds2Bit>,
 }
 
 impl NaadfChunk {
@@ -259,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn wgsl_ray_trace_imports_layout_and_declares_dense_traversal() {
+    fn wgsl_ray_trace_imports_layout_and_uses_aadf_skip_records() {
         let ray_trace = include_str!("../../../assets/shaders/naadf/ray_trace.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(ray_trace, "shaders/naadf/ray_trace.wgsl");
 
@@ -273,6 +354,8 @@ mod tests {
         assert!(ray_trace.contains("fn trace_naadf_dense_debug"));
         assert!(ray_trace.contains("naadf_voxel_records"));
         assert!(ray_trace.contains("naadf_material_records"));
+        assert!(ray_trace.contains("naadf_block_records"));
+        assert!(ray_trace.contains("fn naadf_directional_skip_for_step"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
         assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
     }

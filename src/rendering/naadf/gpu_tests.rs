@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
-use crate::rendering::naadf::gpu_buffers::{NAADF_MATERIAL_RECORD_BYTES, NAADF_VOXEL_RECORD_BYTES};
+use crate::rendering::naadf::gpu_buffers::{
+    NAADF_BLOCK_RECORD_BYTES, NAADF_MATERIAL_RECORD_BYTES, NAADF_VOXEL_RECORD_BYTES,
+};
 use crate::rendering::voxel_ray_backend::{VoxelRayHit, VoxelRayPurpose};
 
 #[repr(C)]
@@ -63,6 +65,7 @@ impl NaadfGpuRayInputRecord {
     pub fn estimated_chunk_data_bytes() -> u32 {
         crate::constants::CHUNK_VOLUME as u32
             * (NAADF_VOXEL_RECORD_BYTES as u32 + NAADF_MATERIAL_RECORD_BYTES as u32)
+            + crate::rendering::naadf::layout::BLOCKS_PER_CHUNK * NAADF_BLOCK_RECORD_BYTES as u32
     }
 }
 

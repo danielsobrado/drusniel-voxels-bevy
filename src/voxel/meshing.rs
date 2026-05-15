@@ -2114,8 +2114,8 @@ fn sample_voxel_solid(
 }
 
 /// Surface Nets can assign a vertical chunk-boundary cap to the all-air chunk
-/// above terrain. Those chunks still need mesh/collider generation even though
-/// their own voxel payload is empty.
+/// above or below terrain. Those chunks still need mesh/collider generation even
+/// though their own voxel payload is empty.
 pub(crate) fn empty_chunk_has_surface_nets_boundary_surface(
     world: &VoxelWorld,
     chunk_pos: IVec3,
@@ -2403,11 +2403,10 @@ fn generate_sdf(
     sdf
 }
 
-/// Sample voxel at a world position, returns true if solid or liquid.
+/// Sample voxel at a world position, returns true if solid.
 /// Used for LOD sampling where coordinates may be outside the chunk.
 fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
-    let voxel = terrain_meshing_voxel_at(world, world_pos);
-    voxel.is_solid() || voxel.is_liquid()
+    terrain_meshing_voxel_at(world, world_pos).is_solid()
 }
 
 /// Generate an SDF array at LOD1 (half resolution) with multi-sample averaging.
@@ -3573,7 +3572,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::WATER_LEVEL;
+    use crate::constants::{CHUNK_VOLUME, WATER_LEVEL};
     use crate::rendering::ao_config::BakedAoConfig;
 
     fn ao_config() -> BakedAoConfig {
@@ -3759,6 +3758,10 @@ mod tests {
         for y in y_min..=y_max {
             world.set_voxel(IVec3::new(x, y, z), voxel);
         }
+    }
+
+    fn fill_chunk(world: &mut VoxelWorld, chunk_pos: IVec3, voxel: VoxelType) {
+        world.insert_chunk(Chunk::with_voxels(chunk_pos, [voxel; CHUNK_VOLUME]));
     }
 
     fn mesh_has_vertical_hit(
@@ -4051,7 +4054,18 @@ mod tests {
         );
         assert!(
             empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::new(1, 2, 1)),
-            "empty upper chunk must not be skipped because it owns the vertical boundary surface"
+            "empty upper chunk must stay dirty when it may own a vertical boundary cap"
+        );
+    }
+
+    #[test]
+    fn surface_nets_empty_chunk_above_fully_solid_neighbor_needs_terrain_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 2, 1));
+        fill_chunk(&mut world, IVec3::ZERO, VoxelType::Rock);
+
+        assert!(
+            empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::Y),
+            "empty chunk above a fully solid skipped chunk must own the exposed top cap"
         );
     }
 
@@ -4082,13 +4096,24 @@ mod tests {
     }
 
     #[test]
-    fn surface_nets_empty_chunk_below_overhang_needs_terrain_mesh() {
+    fn surface_nets_empty_chunk_below_mixed_overhang_needs_terrain_mesh() {
         let mut world = world_with_test_chunks(IVec3::new(1, 2, 1));
         world.set_voxel(IVec3::new(8, 16, 8), VoxelType::Sand);
 
         assert!(
             empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::ZERO),
-            "empty chunk below solid terrain must not be skipped because it owns the overhang boundary surface"
+            "empty lower chunk must stay dirty when it may own an overhang boundary cap"
+        );
+    }
+
+    #[test]
+    fn surface_nets_empty_chunk_below_fully_solid_neighbor_needs_terrain_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 2, 1));
+        fill_chunk(&mut world, IVec3::Y, VoxelType::Rock);
+
+        assert!(
+            empty_chunk_has_surface_nets_boundary_surface(&world, IVec3::ZERO),
+            "empty chunk below a fully solid skipped chunk may own the exposed ceiling cap"
         );
     }
 

@@ -368,7 +368,16 @@ pub fn generate_skirts(
         };
 
         let base_idx = positions.len() as u32;
-        let drop = Vec3::new(0.0, -config.depth, 0.0);
+        // Scale skirt depth with the LOD difference so a Lod0/Lod1 transition gets a
+        // deeper drop than the same-LOD baseline. step is the coarser side's step.
+        let transition_depth = neighbor_lods
+            .lod_for_face(edge.face)
+            .map(|neighbor_lod| {
+                let step = neighbor_lod.step_size().max(my_lod.step_size()).max(1) as f32;
+                config.depth.max(step * VOXEL_SIZE * 2.0)
+            })
+            .unwrap_or(config.depth);
+        let drop = Vec3::new(0.0, -transition_depth, 0.0);
         let lip_width = if emit_lip {
             neighbor_lods
                 .lod_for_face(edge.face)
@@ -703,6 +712,55 @@ mod tests {
         assert!(positions.is_empty());
         assert!(barycentric_uvs.is_empty());
         assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn lod_transition_skirt_drop_scales_with_neighbor_step() {
+        // Lod0 chunk facing a Lod1 neighbour: drop must be at least
+        // step(2) * VOXEL_SIZE(1) * 2 = 4.0 voxels, NOT the baseline 1.5.
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
+            neg_z: None,
+            pos_z: None,
+        };
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[side_edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        // Vertical-only skirt: 4 vertices = top0, top1, bot0, bot1.
+        assert_eq!(positions.len(), 4);
+        let drop_v0 = positions[0][1] - positions[2][1];
+        let drop_v1 = positions[1][1] - positions[3][1];
+        assert!(
+            (drop_v0 - 4.0).abs() < 1e-4,
+            "expected Lod0/Lod1 transition drop = 4.0, got {drop_v0}"
+        );
+        assert!(
+            (drop_v1 - 4.0).abs() < 1e-4,
+            "expected Lod0/Lod1 transition drop = 4.0, got {drop_v1}"
+        );
     }
 
     #[test]

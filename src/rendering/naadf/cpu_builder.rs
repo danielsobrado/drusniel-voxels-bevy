@@ -2,9 +2,12 @@ use bevy::prelude::*;
 
 use crate::constants::CHUNK_VOLUME;
 use crate::rendering::naadf::layout::{
-    BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk, NaadfNodeState, PackedNaadfNode,
-    VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS, block_coord_for_voxel, block_index_in_chunk,
-    local_coord_in_block, voxel_index_in_block, voxel_index_in_chunk,
+    BLOCKS_PER_CHUNK, BLOCKS_PER_CHUNK_AXIS, BOUND_FIELD_MAX, BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X, BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_POS_Z, DirectionalBounds, NaadfBlock, NaadfChunk, NaadfNodeState,
+    PackedDirectionalBounds2Bit, PackedNaadfNode, VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS,
+    block_coord_for_voxel, block_index_in_chunk, local_coord_in_block, voxel_index_in_block,
+    voxel_index_in_chunk,
 };
 use crate::voxel::chunk::Chunk;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -54,15 +57,20 @@ pub fn build_naadf_chunk(chunk: &Chunk, options: NaadfBuildOptions) -> NaadfChun
     };
 
     let mut blocks = vec![NaadfBlock::default(); BLOCKS_PER_CHUNK as usize];
+    let mut voxel_skip = vec![PackedDirectionalBounds2Bit::zero(); CHUNK_VOLUME];
     for block_z in 0..4 {
         for block_y in 0..4 {
             for block_x in 0..4 {
                 let block_coord = UVec3::new(block_x, block_y, block_z);
                 let block_index = block_index_in_chunk(block_coord);
-                blocks[block_index] = build_block(block_coord, &occupancy, &material_ids);
+                let block = build_block(block_coord, &occupancy, &material_ids);
+                let per_voxel = propagate_voxel_skip_in_block(block.occupancy_mask);
+                scatter_voxel_skip_into_chunk(block_coord, &per_voxel, &mut voxel_skip);
+                blocks[block_index] = block;
             }
         }
     }
+    propagate_block_skip_in_chunk(&mut blocks);
 
     NaadfChunk {
         position: chunk.position(),
@@ -70,6 +78,257 @@ pub fn build_naadf_chunk(chunk: &Chunk, options: NaadfBuildOptions) -> NaadfChun
         blocks,
         occupancy,
         material_ids,
+        voxel_skip,
+    }
+}
+
+/// Run the upstream `boundsCommon::ComputeBounds4` propagation rule across the
+/// 64 voxels of a single block, returning per-voxel directional skip distances
+/// (each axis 0..=3, packed into a `PackedDirectionalBounds2Bit`).
+///
+/// The values reflect the "safe envelope" semantics from the NAADF paper: a
+/// voxel's `+X` field is the number of *additional* empty voxels you can
+/// step into in `+X` from this voxel before the safe-region claim ends. Bounds
+/// are clamped to 3 because the field is 2 bits wide; the trace transitions to
+/// the per-block level when the safe envelope would extend past a block edge.
+pub fn propagate_voxel_skip_in_block(
+    occupancy_mask: u64,
+) -> [PackedDirectionalBounds2Bit; VOXELS_PER_BLOCK as usize] {
+    let mut bounds = [PackedDirectionalBounds2Bit::zero(); VOXELS_PER_BLOCK as usize];
+    let occupied = |idx: usize| occupancy_mask & (1u64 << idx) != 0;
+    propagate_bounds_4cubed(VOXELS_PER_BLOCK_AXIS, &occupied, &mut bounds);
+    bounds
+}
+
+/// Run the same propagation rule across the 64 blocks of a chunk, writing per
+/// block directional skip distances (in *block* units) into each block.
+pub fn propagate_block_skip_in_chunk(blocks: &mut [NaadfBlock]) {
+    debug_assert_eq!(blocks.len(), BLOCKS_PER_CHUNK as usize);
+    let mut bounds = [PackedDirectionalBounds2Bit::zero(); BLOCKS_PER_CHUNK as usize];
+    let occupied = |idx: usize| blocks[idx].node.state() != NaadfNodeState::UniformEmpty;
+    propagate_bounds_4cubed(BLOCKS_PER_CHUNK_AXIS, &occupied, &mut bounds);
+    for (block, skip) in blocks.iter_mut().zip(bounds.iter()) {
+        block.directional_skip_blocks = *skip;
+    }
+}
+
+/// Generic 4³ propagation matching `boundsCommon::ComputeBounds4`. `axis_size`
+/// must be 4. `is_occupied(i)` reports whether the cell at flat index `i` is
+/// occupied (rays terminate there). `bounds` is the writable per-cell output.
+fn propagate_bounds_4cubed(
+    axis_size: u32,
+    is_occupied: &dyn Fn(usize) -> bool,
+    bounds: &mut [PackedDirectionalBounds2Bit],
+) {
+    debug_assert_eq!(axis_size, 4);
+    let stride = axis_size as i32;
+    let total = (axis_size * axis_size * axis_size) as usize;
+    debug_assert_eq!(bounds.len(), total);
+
+    // Upstream ComputeBounds4 synchronizes after X, then Y, then Z inside each
+    // of the three passes. Later axis phases in a pass can see earlier growth.
+    for _ in 0..3 {
+        propagate_axis_phase(
+            stride,
+            total,
+            is_occupied,
+            bounds,
+            [
+                AxisExtension {
+                    neighbour_offset: -1,
+                    bound_offset: BOUND_OFFSET_NEG_X,
+                    check_offsets: CHECK_AXES_FOR_NEG_X,
+                    can_extend: |pos, _stride| pos.x > 0,
+                },
+                AxisExtension {
+                    neighbour_offset: 1,
+                    bound_offset: BOUND_OFFSET_POS_X,
+                    check_offsets: CHECK_AXES_FOR_POS_X,
+                    can_extend: |pos, stride| pos.x + 1 < stride,
+                },
+            ],
+        );
+        propagate_axis_phase(
+            stride,
+            total,
+            is_occupied,
+            bounds,
+            [
+                AxisExtension {
+                    neighbour_offset: -stride,
+                    bound_offset: BOUND_OFFSET_NEG_Y,
+                    check_offsets: CHECK_AXES_FOR_NEG_Y,
+                    can_extend: |pos, _stride| pos.y > 0,
+                },
+                AxisExtension {
+                    neighbour_offset: stride,
+                    bound_offset: BOUND_OFFSET_POS_Y,
+                    check_offsets: CHECK_AXES_FOR_POS_Y,
+                    can_extend: |pos, stride| pos.y + 1 < stride,
+                },
+            ],
+        );
+        propagate_axis_phase(
+            stride,
+            total,
+            is_occupied,
+            bounds,
+            [
+                AxisExtension {
+                    neighbour_offset: -stride * stride,
+                    bound_offset: BOUND_OFFSET_NEG_Z,
+                    check_offsets: CHECK_AXES_FOR_NEG_Z,
+                    can_extend: |pos, _stride| pos.z > 0,
+                },
+                AxisExtension {
+                    neighbour_offset: stride * stride,
+                    bound_offset: BOUND_OFFSET_POS_Z,
+                    check_offsets: CHECK_AXES_FOR_POS_Z,
+                    can_extend: |pos, stride| pos.z + 1 < stride,
+                },
+            ],
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AxisExtension {
+    neighbour_offset: i32,
+    bound_offset: u32,
+    check_offsets: [u32; 5],
+    can_extend: fn(IVec3, i32) -> bool,
+}
+
+fn propagate_axis_phase(
+    stride: i32,
+    total: usize,
+    is_occupied: &dyn Fn(usize) -> bool,
+    bounds: &mut [PackedDirectionalBounds2Bit],
+    extensions: [AxisExtension; 2],
+) {
+    let snapshot = bounds.to_vec();
+    for index in 0..total {
+        if is_occupied(index) {
+            continue;
+        }
+        let pos = unflatten(index as i32, stride);
+        let mut updated = snapshot[index];
+        for extension in extensions {
+            if !(extension.can_extend)(pos, stride) {
+                continue;
+            }
+            try_extend(
+                &snapshot,
+                is_occupied,
+                index,
+                extension.neighbour_offset,
+                extension.bound_offset,
+                extension.check_offsets,
+                &mut updated,
+            );
+        }
+        bounds[index] = updated;
+    }
+}
+
+/// The 5 direction offsets whose bounds must match for an extension in the
+/// indexed direction. Mirrors `MASK_M*` / `MASK_P*` in upstream
+/// `boundsCommon.fxh`: for each extension direction D, only the *opposite*
+/// direction (-D) is excluded — the neighbour's -D bound points back into the
+/// known-empty current cell and carries no new safety information.
+const CHECK_AXES_FOR_NEG_X: [u32; 5] = [
+    BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_NEG_Y,
+    BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_NEG_Z,
+    BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_POS_X: [u32; 5] = [
+    BOUND_OFFSET_POS_X,
+    BOUND_OFFSET_NEG_Y,
+    BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_NEG_Z,
+    BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_NEG_Y: [u32; 5] = [
+    BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_POS_X,
+    BOUND_OFFSET_NEG_Y,
+    BOUND_OFFSET_NEG_Z,
+    BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_POS_Y: [u32; 5] = [
+    BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_POS_X,
+    BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_NEG_Z,
+    BOUND_OFFSET_POS_Z,
+];
+const CHECK_AXES_FOR_NEG_Z: [u32; 5] = [
+    BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_POS_X,
+    BOUND_OFFSET_NEG_Y,
+    BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_NEG_Z,
+];
+const CHECK_AXES_FOR_POS_Z: [u32; 5] = [
+    BOUND_OFFSET_NEG_X,
+    BOUND_OFFSET_POS_X,
+    BOUND_OFFSET_NEG_Y,
+    BOUND_OFFSET_POS_Y,
+    BOUND_OFFSET_POS_Z,
+];
+
+fn try_extend(
+    snapshot: &[PackedDirectionalBounds2Bit],
+    is_occupied: &dyn Fn(usize) -> bool,
+    index: usize,
+    neighbour_offset: i32,
+    bound_offset: u32,
+    perpendicular_offsets: [u32; 5],
+    updated: &mut PackedDirectionalBounds2Bit,
+) {
+    let neighbour_index = index as i32 + neighbour_offset;
+    if neighbour_index < 0 || neighbour_index as usize >= snapshot.len() {
+        return;
+    }
+    let neighbour_index = neighbour_index as usize;
+    if is_occupied(neighbour_index) {
+        return;
+    }
+    let neighbour = snapshot[neighbour_index];
+    for offset in perpendicular_offsets {
+        if neighbour.get_at_offset(offset) < updated.get_at_offset(offset) {
+            return;
+        }
+    }
+    if updated.get_at_offset(bound_offset) < BOUND_FIELD_MAX {
+        updated.add_one(bound_offset);
+    }
+}
+
+fn unflatten(index: i32, stride: i32) -> IVec3 {
+    IVec3::new(
+        index % stride,
+        (index / stride) % stride,
+        index / (stride * stride),
+    )
+}
+
+fn scatter_voxel_skip_into_chunk(
+    block_coord: UVec3,
+    per_voxel: &[PackedDirectionalBounds2Bit; VOXELS_PER_BLOCK as usize],
+    chunk_skip: &mut [PackedDirectionalBounds2Bit],
+) {
+    for z in 0..VOXELS_PER_BLOCK_AXIS {
+        for y in 0..VOXELS_PER_BLOCK_AXIS {
+            for x in 0..VOXELS_PER_BLOCK_AXIS {
+                let block_local = UVec3::new(x, y, z);
+                let chunk_local = block_coord * VOXELS_PER_BLOCK_AXIS + block_local;
+                chunk_skip[voxel_index_in_chunk(chunk_local)] =
+                    per_voxel[voxel_index_in_block(block_local)];
+            }
+        }
     }
 }
 
@@ -203,6 +462,93 @@ mod tests {
                 neg_z: 0,
                 pos_z: 3,
             }
+        );
+    }
+
+    fn voxel_skip_at(chunk: &NaadfChunk, x: u32, y: u32, z: u32) -> PackedDirectionalBounds2Bit {
+        chunk.voxel_skip[voxel_index_in_chunk(UVec3::new(x, y, z))]
+    }
+
+    /// Block-corner occupied at (0,0,0). The empty voxel at (3,0,0) should see
+    /// 2 empty steps back toward the wall along -X; the voxel directly adjacent
+    /// at (1,0,0) should see 0 (its -X neighbour is the wall itself).
+    #[test]
+    fn voxel_skip_propagates_back_toward_corner_occupant() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(0, 0, 0), VoxelType::Rock);
+
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+
+        assert_eq!(
+            voxel_skip_at(&naadf, 1, 0, 0).get_at_offset(BOUND_OFFSET_NEG_X),
+            0
+        );
+        assert_eq!(
+            voxel_skip_at(&naadf, 2, 0, 0).get_at_offset(BOUND_OFFSET_NEG_X),
+            1
+        );
+        assert_eq!(
+            voxel_skip_at(&naadf, 3, 0, 0).get_at_offset(BOUND_OFFSET_NEG_X),
+            2
+        );
+    }
+
+    /// All-empty block ⇒ every voxel's `+X` and `+Y` bounds should saturate to
+    /// the block-local max-distance, which is `3 - local.{x,y}`. Beyond that the
+    /// trace transitions to the per-block skip.
+    #[test]
+    fn voxel_skip_saturates_inside_empty_block() {
+        let chunk = Chunk::new(IVec3::ZERO);
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+
+        for x in 0..4 {
+            for y in 0..4 {
+                let bounds = voxel_skip_at(&naadf, x, y, 0);
+                let expected_pos_x = 3 - x as u8;
+                let expected_pos_y = 3 - y as u8;
+                assert_eq!(
+                    bounds.get_at_offset(BOUND_OFFSET_POS_X),
+                    expected_pos_x,
+                    "pos_x at ({x},{y},0)"
+                );
+                assert_eq!(
+                    bounds.get_at_offset(BOUND_OFFSET_POS_Y),
+                    expected_pos_y,
+                    "pos_y at ({x},{y},0)"
+                );
+            }
+        }
+    }
+
+    /// Wall at x=8 ⇒ the empty block (0,0,0) (covering x∈[0,3]) can extend its
+    /// `+X` skip by exactly 1 block (covering [4,7]); block (1,0,0)'s `+X`
+    /// neighbour is the wall block and so cannot extend.
+    #[test]
+    fn block_skip_extends_to_the_block_before_a_wall() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        for y in 0..16 {
+            for z in 0..16 {
+                chunk.set(UVec3::new(8, y, z), VoxelType::Rock);
+            }
+        }
+
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+        let block_corner = &naadf.blocks[block_index_in_chunk(UVec3::new(0, 0, 0))];
+        let block_adjacent = &naadf.blocks[block_index_in_chunk(UVec3::new(1, 0, 0))];
+
+        assert_eq!(
+            block_corner
+                .directional_skip_blocks
+                .get_at_offset(BOUND_OFFSET_POS_X),
+            1,
+            "block (0,0,0) should extend +X by exactly 1 block before reaching the wall block"
+        );
+        assert_eq!(
+            block_adjacent
+                .directional_skip_blocks
+                .get_at_offset(BOUND_OFFSET_POS_X),
+            0,
+            "block (1,0,0)'s +X neighbour is the wall block, so no extension"
         );
     }
 }

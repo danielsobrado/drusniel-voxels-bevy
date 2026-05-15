@@ -479,7 +479,8 @@ pub fn pack_naadf_chunk_upload(chunk: &NaadfChunk, slot: u32) -> NaadfChunkUploa
     let voxel_records = chunk
         .occupancy
         .iter()
-        .map(|occupied| u32::from(*occupied))
+        .zip(chunk.voxel_skip.iter())
+        .map(|(occupied, skip)| pack_voxel_record(*occupied, skip.0))
         .collect::<Vec<_>>();
     let material_records = chunk
         .material_ids
@@ -524,6 +525,10 @@ pub fn pack_raw_voxel_record(occupied: bool, material_id: u16) -> u32 {
     (u32::from(occupied) << 31) | material_id as u32
 }
 
+pub fn pack_voxel_record(occupied: bool, directional_skip: u16) -> u32 {
+    (u32::from(occupied) << 31) | directional_skip as u32
+}
+
 fn pack_block_record(block: &NaadfBlock) -> [u32; NAADF_PACKED_BLOCK_WORDS] {
     [
         block.node.0,
@@ -531,7 +536,7 @@ fn pack_block_record(block: &NaadfBlock) -> [u32; NAADF_PACKED_BLOCK_WORDS] {
         (block.occupancy_mask & u32::MAX as u64) as u32,
         (block.occupancy_mask >> 32) as u32,
         ((block.bounds.neg_z as u32) | ((block.bounds.pos_z as u32) << 8)),
-        0,
+        block.directional_skip_blocks.0 as u32,
         0,
         0,
     ]
@@ -821,7 +826,10 @@ mod tests {
             crate::constants::CHUNK_VOLUME
         );
         let voxel_index = voxel_index_in_chunk(UVec3::new(1, 2, 3));
-        assert_eq!(upload.voxel_records[voxel_index], 1);
+        assert_eq!(
+            upload.voxel_records[voxel_index],
+            pack_voxel_record(true, naadf.voxel_skip[voxel_index].0)
+        );
         assert_eq!(upload.material_records[voxel_index], VoxelType::Rock as u32);
         assert_eq!(
             upload.raw_voxel_records[voxel_index],
@@ -834,5 +842,11 @@ mod tests {
     fn raw_voxel_record_packs_occupancy_and_material() {
         assert_eq!(pack_raw_voxel_record(false, 7), 7);
         assert_eq!(pack_raw_voxel_record(true, 7), 0x8000_0007);
+    }
+
+    #[test]
+    fn voxel_record_packs_occupancy_and_directional_skip() {
+        assert_eq!(pack_voxel_record(false, 0x0abc), 0x0abc);
+        assert_eq!(pack_voxel_record(true, 0x0abc), 0x8000_0abc);
     }
 }

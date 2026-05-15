@@ -1,8 +1,9 @@
-#import "shaders/naadf/common.wgsl" NAADF_NODE_UNIFORM_FULL, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state
-#import "shaders/naadf/layout.wgsl" naadf_chunk_world_origin, naadf_voxel_index_in_chunk
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state
+#import "shaders/naadf/layout.wgsl" naadf_block_coord_for_voxel, naadf_block_index_in_chunk, naadf_chunk_world_origin, naadf_local_coord_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read> naadf_voxel_records: array<u32>;
 @group(3) @binding(1) var<storage, read> naadf_material_records: array<u32>;
+@group(3) @binding(5) var<storage, read> naadf_block_records: array<u32>;
 
 struct NaadfRay {
     origin: vec3<f32>,
@@ -51,26 +52,35 @@ fn trace_naadf_dense_debug(
     }
 
     let direction = normalize(ray.direction);
-    var voxel = vec3<i32>(floor(ray.origin));
     let step = naadf_step_direction(direction);
-    var t_max = naadf_initial_t_max(ray.origin, direction, voxel, step);
-    let t_delta = naadf_t_delta(direction);
-    var traveled = 0.0;
+    let inv_direction_abs = naadf_t_delta(direction);
+    let entry_t = naadf_ray_chunk_entry(ray.origin, direction, chunk_pos);
+    if entry_t < 0.0 || entry_t > ray.max_distance {
+        return naadf_make_miss(0u);
+    }
+
+    var traveled = max(entry_t, 0.0);
     var normal = vec3<f32>(0.0);
     let chunk_origin = naadf_chunk_world_origin(chunk_pos);
     let chunk_end = chunk_origin + vec3<i32>(i32(NAADF_VOXELS_PER_CHUNK_AXIS));
+    let block_base_record = (voxel_base_record / NAADF_VOXELS_PER_CHUNK) *
+        NAADF_BLOCKS_PER_CHUNK * NAADF_PACKED_BLOCK_WORDS;
 
     for (var steps = 0u; steps < max_steps; steps = steps + 1u) {
         if traveled > ray.max_distance {
             break;
         }
+        let current_position = ray.origin + direction * traveled;
+        let cell_position = current_position + normal * -0.5;
+        let voxel = vec3<i32>(floor(cell_position));
         if all(voxel >= chunk_origin) && all(voxel < chunk_end) {
             let local = vec3<u32>(voxel - chunk_origin);
             let local_index = naadf_voxel_index_in_chunk(local);
-            if naadf_voxel_records[voxel_base_record + local_index] != 0u {
+            let voxel_record = naadf_voxel_records[voxel_base_record + local_index];
+            if naadf_voxel_record_occupied(voxel_record) {
                 return naadf_make_hit(
                     ray,
-                    ray.origin + direction * traveled,
+                    current_position,
                     voxel,
                     local,
                     normal,
@@ -78,28 +88,104 @@ fn trace_naadf_dense_debug(
                     steps,
                 );
             }
-        }
 
-        let axis = naadf_step_axis(t_max);
-        if axis == 0u {
-            voxel.x = voxel.x + step.x;
-            traveled = t_max.x;
-            t_max.x = t_max.x + t_delta.x;
-            normal = vec3<f32>(f32(-step.x), 0.0, 0.0);
-        } else if axis == 1u {
-            voxel.y = voxel.y + step.y;
-            traveled = t_max.y;
-            t_max.y = t_max.y + t_delta.y;
-            normal = vec3<f32>(0.0, f32(-step.y), 0.0);
+            let block_coord = naadf_block_coord_for_voxel(local);
+            let block_index = naadf_block_index_in_chunk(block_coord);
+            let block_record_base = block_base_record + block_index * NAADF_PACKED_BLOCK_WORDS;
+            let block_node = naadf_block_records[block_record_base];
+            let local_in_block = naadf_local_coord_in_block(local);
+            var bounds_in_dir = naadf_directional_skip_for_step(voxel_record, step);
+            if naadf_node_state(block_node) == NAADF_NODE_UNIFORM_EMPTY {
+                let block_skip_record = naadf_block_records[block_record_base + 5u];
+                bounds_in_dir = naadf_directional_skip_for_step(block_skip_record, step) *
+                    vec3<u32>(NAADF_VOXELS_PER_BLOCK_AXIS) +
+                    naadf_distance_to_block_edge(local_in_block, step);
+            }
+
+            let axis = naadf_step_axis_from_bounds(
+                current_position,
+                direction,
+                step,
+                normal,
+                bounds_in_dir,
+                inv_direction_abs,
+            );
+            let axis_distance = axis.distance;
+            if axis.axis == 0u {
+                normal = vec3<f32>(f32(-step.x), 0.0, 0.0);
+            } else if axis.axis == 1u {
+                normal = vec3<f32>(0.0, f32(-step.y), 0.0);
+            } else {
+                normal = vec3<f32>(0.0, 0.0, f32(-step.z));
+            }
+            traveled = traveled + max(axis_distance, 0.0001);
         } else {
-            voxel.z = voxel.z + step.z;
-            traveled = t_max.z;
-            t_max.z = t_max.z + t_delta.z;
-            normal = vec3<f32>(0.0, 0.0, f32(-step.z));
+            break;
         }
     }
 
     return naadf_make_miss(max_steps);
+}
+
+struct NaadfStepChoice {
+    axis: u32,
+    distance: f32,
+}
+
+fn naadf_voxel_record_occupied(record: u32) -> bool {
+    return (record & 0x80000000u) != 0u;
+}
+
+fn naadf_bounds_field(record: u32, offset: u32) -> u32 {
+    return (record >> offset) & 0x3u;
+}
+
+fn naadf_directional_skip_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {
+    return vec3<u32>(
+        naadf_bounds_field(record, select(0u, 2u, step.x > 0i)),
+        naadf_bounds_field(record, select(4u, 6u, step.y > 0i)),
+        naadf_bounds_field(record, select(8u, 10u, step.z > 0i)),
+    );
+}
+
+fn naadf_distance_to_block_edge(local: vec3<u32>, step: vec3<i32>) -> vec3<u32> {
+    let max_local = NAADF_VOXELS_PER_BLOCK_AXIS - 1u;
+    return vec3<u32>(
+        select(local.x, max_local - local.x, step.x > 0i),
+        select(local.y, max_local - local.y, step.y > 0i),
+        select(local.z, max_local - local.z, step.z > 0i),
+    );
+}
+
+fn naadf_step_axis_from_bounds(
+    current_position: vec3<f32>,
+    direction: vec3<f32>,
+    step: vec3<i32>,
+    previous_normal: vec3<f32>,
+    bounds_in_dir: vec3<u32>,
+    inv_direction_abs: vec3<f32>,
+) -> NaadfStepChoice {
+    let adjusted_position = current_position + previous_normal * -0.5;
+    let frac_position = fract(adjusted_position);
+    let is_negative = vec3<f32>(
+        select(0.0, 1.0, step.x < 0i),
+        select(0.0, 1.0, step.y < 0i),
+        select(0.0, 1.0, step.z < 0i),
+    );
+    let boundary_correction = abs(is_negative - frac_position);
+    let distance_to_exit = (
+        vec3<f32>(1.0) +
+        vec3<f32>(bounds_in_dir) -
+        (vec3<f32>(1.0) - abs(previous_normal)) * boundary_correction
+    ) * inv_direction_abs;
+    let axis = naadf_step_axis(distance_to_exit);
+    if axis == 0u {
+        return NaadfStepChoice(axis, distance_to_exit.x);
+    }
+    if axis == 1u {
+        return NaadfStepChoice(axis, distance_to_exit.y);
+    }
+    return NaadfStepChoice(axis, distance_to_exit.z);
 }
 
 fn naadf_make_hit(

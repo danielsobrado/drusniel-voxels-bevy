@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bevy::diagnostic::FrameCount;
+use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
@@ -48,9 +49,10 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 /// Maximum number of chunks to mesh per frame to prevent frame spikes.
 /// This throttles mesh generation during heavy updates (e.g., initial load, LOD transitions).
 const MAX_CHUNKS_PER_FRAME: usize = 4;
+const MAX_STARTUP_CHUNKS_PER_FRAME: usize = 12;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
-const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 1;
+const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 4;
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 4;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
@@ -165,11 +167,13 @@ impl Default for LodSettings {
 
 impl LodSettings {
     fn minimum_valid_cull_distance(high_detail_distance: f32) -> f32 {
-        high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0 + 1.0
+        high_detail_distance + terrain_lod_hysteresis_for(high_detail_distance) * 4.0 + 1.0
     }
 
     fn has_valid_distance_bands(&self) -> bool {
-        self.cull_distance > self.high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0
+        self.cull_distance
+            > self.high_detail_distance
+                + terrain_lod_hysteresis_for(self.high_detail_distance) * 4.0
     }
 
     pub fn clamp_distance_bands(&mut self) {
@@ -1969,6 +1973,29 @@ impl MeshDirtyReasonCounts {
     }
 }
 
+fn chunks_per_frame_limit_for_dirty_meshes(
+    reason_counts: &MeshDirtyReasonCounts,
+    lod_churn_only: bool,
+    generation_complete: bool,
+) -> usize {
+    if lod_churn_only {
+        return MAX_LOD_DIRTY_CHUNKS_PER_FRAME;
+    }
+
+    if generation_complete && reason_counts.generation > 0 && reason_counts.terrain_mutation == 0 {
+        return MAX_STARTUP_CHUNKS_PER_FRAME;
+    }
+
+    MAX_CHUNKS_PER_FRAME
+}
+
+#[derive(SystemParam)]
+struct MeshDirtyTimingParams<'w> {
+    frame: Res<'w, FrameCount>,
+    timing: ResMut<'w, AreaTimingRecorder>,
+    gen_state: Res<'w, ChunkGenerationState>,
+}
+
 fn mesh_dirty_chunks_system(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
@@ -1984,9 +2011,11 @@ fn mesh_dirty_chunks_system(
     mut chunk_stats: ResMut<RuntimeChunkStats>,
     mut material_logged: Local<bool>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
-    frame: Res<FrameCount>,
-    mut timing: ResMut<AreaTimingRecorder>,
+    mut timing_params: MeshDirtyTimingParams,
 ) {
+    let frame = &timing_params.frame;
+    let timing = &mut timing_params.timing;
+    let generation_complete = timing_params.gen_state.is_complete;
     let mesh_dirty_total_start = timing.enabled.then(Instant::now);
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
@@ -2041,11 +2070,11 @@ fn mesh_dirty_chunks_system(
         && (reason_counts.lod > 0
             || reason_counts.neighbor_lod > 0
             || reason_counts.water_material > 0);
-    let chunks_per_frame_limit = if lod_churn_only {
-        MAX_LOD_DIRTY_CHUNKS_PER_FRAME
-    } else {
-        MAX_CHUNKS_PER_FRAME
-    };
+    let chunks_per_frame_limit = chunks_per_frame_limit_for_dirty_meshes(
+        &reason_counts,
+        lod_churn_only,
+        generation_complete,
+    );
     let mut terrain_mesh_empty_but_solid_voxels = 0u32;
     let mut terrain_mesh_boundary_missing_neighbor = 0u32;
     let mut surface_nets_chunks_deferred_for_halo = 0u32;
@@ -3789,12 +3818,25 @@ fn adjust_lod_for_integrated_gpu(
     *applied = true;
 }
 
+/// Runtime hysteresis for terrain LOD switching. Scales down with
+/// `high_detail_distance` so a small near-band doesn't trap chunks at low LOD,
+/// and is hard-capped at 8 voxels so transitions can never stretch beyond half
+/// a chunk's worth of distance.
+fn terrain_lod_hysteresis(settings: &LodSettings) -> f32 {
+    terrain_lod_hysteresis_for(settings.high_detail_distance)
+}
+
+fn terrain_lod_hysteresis_for(high_detail_distance: f32) -> f32 {
+    TERRAIN_LOD_HYSTERESIS
+        .min(high_detail_distance * 0.25)
+        .min(8.0)
+}
+
 /// Calculates the target LOD level with hysteresis to prevent rapid switching.
 ///
-/// Hysteresis means the threshold to switch FROM a level is different than TO it:
-/// - To switch from Lod0 → Lod1: must exceed high_detail_distance + hysteresis
-/// - To switch from Lod1 → Lod0: must be within high_detail_distance - hysteresis
-/// This prevents flip-flopping when camera hovers near a threshold.
+/// Hysteresis is asymmetric: upgrades to higher detail fire eagerly (no `-h`
+/// buffer) so a chunk that crosses the near threshold becomes Lod0 immediately.
+/// Downgrades still need to exceed `threshold + h` to prevent flip-flopping.
 fn calculate_target_lod_with_hysteresis(
     distance: f32,
     current_lod: LodLevel,
@@ -3808,54 +3850,54 @@ fn calculate_target_lod_with_hysteresis(
         TERRAIN_LOD_HYSTERESIS
     );
 
+    let h = terrain_lod_hysteresis(settings);
+
     // Distance thresholds for LOD transitions
     // Lod0: 0 to high_detail_distance
     // Lod1: high_detail_distance to lod1_distance (midpoint to cull)
     // Lod2+: lod1_distance to cull_distance
     let lod1_distance = (settings.high_detail_distance + settings.cull_distance) * 0.5;
-    // Fix: Ensure lod2_distance is between lod1 and cull (midpoint of the remaining range)
     let lod2_distance = lod1_distance + (settings.cull_distance - lod1_distance) * 0.5;
 
     match current_lod {
         LodLevel::Lod0 => {
-            // Currently highest detail - need to go PAST threshold to switch to lower
-            if distance > settings.high_detail_distance + TERRAIN_LOD_HYSTERESIS {
+            if distance > settings.high_detail_distance + h {
                 LodLevel::Lod1
             } else {
                 LodLevel::Lod0
             }
         }
         LodLevel::Lod1 => {
-            // Check transitions in both directions
-            if distance < settings.high_detail_distance - TERRAIN_LOD_HYSTERESIS {
+            // Eager upgrade: any time the chunk enters the high-detail band, snap
+            // back to Lod0 without waiting for the extra hysteresis buffer.
+            if distance < settings.high_detail_distance {
                 LodLevel::Lod0
-            } else if distance > lod1_distance + TERRAIN_LOD_HYSTERESIS {
+            } else if distance > lod1_distance + h {
                 LodLevel::Lod2
             } else {
                 LodLevel::Lod1
             }
         }
         LodLevel::Lod2 => {
-            if distance < lod1_distance - TERRAIN_LOD_HYSTERESIS {
+            if distance < lod1_distance - h {
                 LodLevel::Lod1
-            } else if distance > lod2_distance + TERRAIN_LOD_HYSTERESIS {
+            } else if distance > lod2_distance + h {
                 LodLevel::Lod3
             } else {
                 LodLevel::Lod2
             }
         }
         LodLevel::Lod3 => {
-            if distance < lod2_distance - TERRAIN_LOD_HYSTERESIS {
+            if distance < lod2_distance - h {
                 LodLevel::Lod2
-            } else if distance > settings.cull_distance + TERRAIN_LOD_HYSTERESIS {
+            } else if distance > settings.cull_distance + h {
                 LodLevel::Culled
             } else {
                 LodLevel::Lod3
             }
         }
         LodLevel::Culled => {
-            // Currently culled - need to come INSIDE cull threshold to show
-            if distance < settings.cull_distance - TERRAIN_LOD_HYSTERESIS {
+            if distance < settings.cull_distance - h {
                 LodLevel::Lod3
             } else {
                 LodLevel::Culled
@@ -4093,7 +4135,10 @@ fn update_chunk_lod_system(
                 .get(chunk_pos)
                 .map(|last_frame| frame.0.saturating_sub(*last_frame) >= LOD_CHANGE_COOLDOWN_FRAMES)
                 .unwrap_or(true);
-            if !cooldown_elapsed {
+            // Cooldown only throttles downgrades; upgrades to higher detail must
+            // not be punished or stale LOD states can persist during movement.
+            let is_upgrade = target_lod.is_higher_detail_than(current_lod);
+            if !is_upgrade && !cooldown_elapsed {
                 continue;
             }
             lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
@@ -4167,11 +4212,34 @@ fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSet<IVec3> {
         if !chunk_contains_liquid(chunk) {
             continue;
         }
-        for offset in [IVec3::ZERO, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
-            chunks.insert(*chunk_pos + offset);
+        // Softer ring: a diamond of L1 radius 2 in XZ around each water chunk, plus
+        // one Y layer above/below. Prevents isolated lower-LOD islands at the
+        // shoreline where SDF averaging diverges most.
+        for dy in -1..=1 {
+            for dz in -2i32..=2 {
+                for dx in -2i32..=2 {
+                    if dx.abs() + dz.abs() > 2 {
+                        continue;
+                    }
+                    chunks.insert(*chunk_pos + IVec3::new(dx, dy, dz));
+                }
+            }
+        }
+    }
+    // Any chunk whose Y range straddles the waterline is fragile even without
+    // liquid voxels inside it; guard those too.
+    for (chunk_pos, _) in world.chunk_entries() {
+        if chunk_layer_intersects_waterline(*chunk_pos) {
+            chunks.insert(*chunk_pos);
         }
     }
     chunks
+}
+
+fn chunk_layer_intersects_waterline(chunk_pos: IVec3) -> bool {
+    let min_y = chunk_pos.y * CHUNK_SIZE_I32;
+    let max_y = min_y + CHUNK_SIZE_I32 - 1;
+    WATER_LEVEL >= min_y - 2 && WATER_LEVEL <= max_y + 2
 }
 
 fn chunk_contains_liquid(chunk: &Chunk) -> bool {
@@ -4243,6 +4311,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn terrain_lod_hysteresis_caps_at_eight_voxels() {
+        // At any practical high_detail_distance the runtime hysteresis is capped
+        // at 8 voxels so a single LOD band can never exceed half a chunk.
+        assert_eq!(terrain_lod_hysteresis_for(176.0), 8.0);
+        assert_eq!(terrain_lod_hysteresis_for(1_000.0), 8.0);
+    }
+
+    #[test]
+    fn terrain_lod_hysteresis_scales_down_for_small_distances() {
+        // Below ~32 voxels the cap shrinks: hd * 0.25 dominates so the cap
+        // never overruns the high-detail band itself.
+        assert_eq!(terrain_lod_hysteresis_for(16.0), 4.0);
+        assert_eq!(terrain_lod_hysteresis_for(8.0), 2.0);
+        assert_eq!(terrain_lod_hysteresis_for(0.0), 0.0);
+    }
+
+    #[test]
+    fn lod1_upgrades_eagerly_without_hysteresis_buffer() {
+        // Asymmetric thresholds: Lod0 -> Lod1 still needs the buffer, but
+        // Lod1 -> Lod0 snaps back the instant the chunk enters the high-detail
+        // band. This prevents isolated lower-LOD islands near the camera.
+        let settings = LodSettings::default();
+        let h = terrain_lod_hysteresis(&settings);
+
+        assert!(h > 0.0, "test pre-condition: hysteresis must be > 0");
+
+        // Just outside hd-h: previously this kept Lod1, now upgrades.
+        let just_inside = settings.high_detail_distance - 0.1;
+        assert_eq!(
+            calculate_target_lod_with_hysteresis(just_inside, LodLevel::Lod1, &settings),
+            LodLevel::Lod0
+        );
+
+        // Exactly at hd: also upgrades (strict-less compare against hd).
+        let at_threshold = settings.high_detail_distance;
+        assert_eq!(
+            calculate_target_lod_with_hysteresis(at_threshold, LodLevel::Lod1, &settings),
+            LodLevel::Lod1
+        );
+
+        // Lod0 -> Lod1 downgrade still requires the full hysteresis buffer.
+        let just_past_with_buffer = settings.high_detail_distance + h + 0.1;
+        assert_eq!(
+            calculate_target_lod_with_hysteresis(just_past_with_buffer, LodLevel::Lod0, &settings),
+            LodLevel::Lod1
+        );
+        let in_buffer = settings.high_detail_distance + h - 0.1;
+        assert_eq!(
+            calculate_target_lod_with_hysteresis(in_buffer, LodLevel::Lod0, &settings),
+            LodLevel::Lod0
+        );
+    }
+
+    #[test]
     fn default_lod_distances_keep_required_hysteresis_bands() {
         assert!(LodSettings::default().has_valid_distance_bands());
 
@@ -4256,19 +4378,24 @@ mod tests {
 
     #[test]
     fn lod_distance_clamp_preserves_four_hysteresis_bands() {
+        let hd = 120.0_f32;
         let mut settings = LodSettings {
-            high_detail_distance: 120.0,
-            cull_distance: 120.0 + TERRAIN_LOD_HYSTERESIS * 4.0,
+            high_detail_distance: hd,
+            cull_distance: hd + terrain_lod_hysteresis_for(hd) * 4.0,
             low_detail_mode: MeshMode::SurfaceNets,
         };
 
+        // `has_valid_distance_bands` is a strict-greater check, so the
+        // exact threshold value is rejected.
         assert!(!settings.has_valid_distance_bands());
 
         settings.clamp_distance_bands();
 
         assert!(settings.has_valid_distance_bands());
         assert!(
-            settings.cull_distance > settings.high_detail_distance + TERRAIN_LOD_HYSTERESIS * 4.0
+            settings.cull_distance
+                > settings.high_detail_distance
+                    + terrain_lod_hysteresis_for(settings.high_detail_distance) * 4.0
         );
     }
 
@@ -4365,21 +4492,50 @@ mod tests {
     }
 
     #[test]
-    fn water_shore_lod_guard_marks_horizontal_neighbors() {
-        let center = IVec3::new(1, 0, 1);
-        let mut world = VoxelWorld::new(IVec3::new(3, 1, 3));
+    fn water_shore_lod_guard_marks_diamond_ring_with_y_neighbors() {
+        let center = IVec3::new(2, 1, 2);
+        let mut world = VoxelWorld::new(IVec3::new(5, 3, 5));
         let mut chunk = Chunk::new(center);
         chunk.set(UVec3::new(8, 8, 8), VoxelType::Water);
         world.insert_chunk(chunk);
 
         let guarded = collect_water_shore_lod_guard_chunks(&world);
 
+        // Radius-0 and radius-1 cross.
         assert!(guarded.contains(&center));
         assert!(guarded.contains(&(center + IVec3::X)));
         assert!(guarded.contains(&(center + IVec3::NEG_X)));
         assert!(guarded.contains(&(center + IVec3::Z)));
         assert!(guarded.contains(&(center + IVec3::NEG_Z)));
-        assert!(!guarded.contains(&(center + IVec3::Y)));
+        // Diagonal neighbours (|dx|+|dz|=2) are inside the L1 diamond.
+        assert!(guarded.contains(&(center + IVec3::new(1, 0, 1))));
+        assert!(guarded.contains(&(center + IVec3::new(-1, 0, -1))));
+        // Radius-2 cross is inside the diamond.
+        assert!(guarded.contains(&(center + IVec3::new(2, 0, 0))));
+        assert!(guarded.contains(&(center + IVec3::new(0, 0, -2))));
+        // Outside the diamond (|dx|+|dz|=3) is NOT guarded.
+        assert!(!guarded.contains(&(center + IVec3::new(2, 0, 1))));
+        // One Y layer above/below IS guarded — softens vertical transitions
+        // where shoreline geometry straddles a chunk Y boundary.
+        assert!(guarded.contains(&(center + IVec3::Y)));
+        assert!(guarded.contains(&(center + IVec3::NEG_Y)));
+        // Two Y layers away is NOT guarded.
+        assert!(!guarded.contains(&(center + IVec3::new(0, 2, 0))));
+    }
+
+    #[test]
+    fn waterline_chunk_layer_is_guarded_without_liquid_voxels() {
+        // Chunk at y=1 spans world Y=16..31; WATER_LEVEL=18 sits in that range.
+        let chunk_pos = IVec3::new(0, 1, 0);
+        assert!(chunk_layer_intersects_waterline(chunk_pos));
+
+        let mut world = VoxelWorld::new(IVec3::new(1, 3, 1));
+        let chunk = Chunk::new(chunk_pos);
+        // No liquid voxels.
+        world.insert_chunk(chunk);
+
+        let guarded = collect_water_shore_lod_guard_chunks(&world);
+        assert!(guarded.contains(&chunk_pos));
     }
 
     #[test]
@@ -4486,9 +4642,11 @@ mod tests {
     #[test]
     fn neighbor_lods_use_effective_lod_for_empty_surface_nets_caps() {
         let mut world = VoxelWorld::new(IVec3::new(1, 2, 1));
-        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_chunk(Chunk::with_voxels(
+            IVec3::ZERO,
+            [VoxelType::Rock; CHUNK_VOLUME],
+        ));
         world.insert_chunk(Chunk::new(IVec3::Y));
-        world.set_voxel(IVec3::new(8, 15, 8), VoxelType::Sand);
         world
             .get_chunk_mut(IVec3::Y)
             .unwrap()
@@ -4709,6 +4867,59 @@ mod tests {
         assert!(!should_defer_runtime_chunk_stats_recompute(false, 100, 4));
         assert!(!should_defer_runtime_chunk_stats_recompute(true, 4, 4));
         assert!(should_defer_runtime_chunk_stats_recompute(true, 5, 4));
+    }
+
+    #[test]
+    fn generation_dirty_meshes_use_startup_burst() {
+        let reason_counts = MeshDirtyReasonCounts {
+            generation: 8,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            chunks_per_frame_limit_for_dirty_meshes(&reason_counts, false, true),
+            MAX_STARTUP_CHUNKS_PER_FRAME
+        );
+    }
+
+    #[test]
+    fn generation_dirty_meshes_keep_runtime_limit_before_generation_completes() {
+        let reason_counts = MeshDirtyReasonCounts {
+            generation: 8,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            chunks_per_frame_limit_for_dirty_meshes(&reason_counts, false, false),
+            MAX_CHUNKS_PER_FRAME
+        );
+    }
+
+    #[test]
+    fn terrain_mutation_dirty_meshes_keep_runtime_limit() {
+        let reason_counts = MeshDirtyReasonCounts {
+            generation: 8,
+            terrain_mutation: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            chunks_per_frame_limit_for_dirty_meshes(&reason_counts, false, true),
+            MAX_CHUNKS_PER_FRAME
+        );
+    }
+
+    #[test]
+    fn lod_churn_dirty_meshes_keep_lod_limit() {
+        let reason_counts = MeshDirtyReasonCounts {
+            lod: 8,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            chunks_per_frame_limit_for_dirty_meshes(&reason_counts, true, true),
+            MAX_LOD_DIRTY_CHUNKS_PER_FRAME
+        );
     }
 
     #[test]
