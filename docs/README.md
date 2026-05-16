@@ -6,6 +6,7 @@
 - [Shader weather rendering](./rendering/weather.md)
 - [NAADF implementation plan](./rendering/naadf-implementation-plan.md)
 - [NAADF Jira breakdown](./rendering/naadf-jira-breakdown.md)
+- [NAADF upstream parity](./rendering/naadf-upstream-parity.md)
 - [Witchcraft water finish](./witchcraft-water-finish.md)
 
 ## Editor sprint plan files

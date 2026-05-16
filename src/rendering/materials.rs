@@ -696,71 +696,106 @@ pub fn configure_triplanar_textures(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
-    let _timer = area_timer(&mut timing, frame.0, "Material Configure Triplanar");
     if *configured {
+        {
+            let _timer = area_timer(&mut timing, frame.0, "Material Configure Triplanar");
+        }
+        timing.record_count(frame.0, "Terrain Triplanar Textures Configured", 1.0);
         return;
     }
 
-    if let Some(handle) = mat_handle {
-        if let Some(material) = materials.get(&handle.handle) {
-            let textures = [
-                &material.grass_albedo,
-                &material.grass_normal,
-                &material.rock_albedo,
-                &material.rock_normal,
-                &material.sand_albedo,
-                &material.sand_normal,
-                &material.dirt_albedo,
-                &material.dirt_normal,
-            ];
+    let mut expected_textures = None;
+    let mut loaded_textures = None;
+    let mut textures_configured = None;
+    {
+        let _timer = area_timer(&mut timing, frame.0, "Material Configure Triplanar");
+        if let Some(handle) = mat_handle {
+            if let Some(material) = materials.get(&handle.handle) {
+                let textures = [
+                    &material.grass_albedo,
+                    &material.grass_normal,
+                    &material.rock_albedo,
+                    &material.rock_normal,
+                    &material.sand_albedo,
+                    &material.sand_normal,
+                    &material.dirt_albedo,
+                    &material.dirt_normal,
+                ];
 
-            let mut all_loaded = true;
-            for tex_opt in textures {
-                if let Some(tex_handle) = tex_opt {
-                    if let Some(image) = images.get_mut(tex_handle) {
-                        if image.texture_descriptor.mip_level_count == 1 {
-                            let width = image.texture_descriptor.size.width;
-                            let height = image.texture_descriptor.size.height;
-                            let mip_count =
-                                crate::rendering::mipmaps::calculate_mip_count(width, height);
-                            if crate::rendering::mipmaps::supports_mipmaps(
-                                image.texture_descriptor.format,
-                            ) {
-                                if let Some(data) = image.data.as_mut() {
+                let mut all_loaded = true;
+                let mut expected = 0u32;
+                let mut loaded = 0u32;
+                for tex_opt in textures {
+                    if let Some(tex_handle) = tex_opt {
+                        expected += 1;
+                        if let Some(image) = images.get_mut(tex_handle) {
+                            loaded += 1;
+                            if image.texture_descriptor.mip_level_count == 1 {
+                                let width = image.texture_descriptor.size.width;
+                                let height = image.texture_descriptor.size.height;
+                                let mip_count =
+                                    crate::rendering::mipmaps::calculate_mip_count(width, height);
+                                if crate::rendering::mipmaps::supports_mipmaps(
+                                    image.texture_descriptor.format,
+                                ) && let Some(data) = image.data.as_mut()
+                                {
                                     crate::rendering::mipmaps::generate_mipmaps_rgba8(
                                         data, width, height, mip_count,
                                     );
                                     image.texture_descriptor.mip_level_count = mip_count;
                                 }
                             }
-                        }
 
-                        // Set sampler to Repeat for tiling with trilinear filtering and anisotropy
-                        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-                            address_mode_u: ImageAddressMode::Repeat,
-                            address_mode_v: ImageAddressMode::Repeat,
-                            address_mode_w: ImageAddressMode::Repeat,
-                            mag_filter: ImageFilterMode::Linear,
-                            min_filter: ImageFilterMode::Linear,
-                            mipmap_filter: ImageFilterMode::Linear,
-                            // Enable anisotropic filtering for terrain viewed at oblique angles
-                            anisotropy_clamp: 16,
-                            ..default()
-                        });
-                    } else {
-                        // Texture not loaded yet
-                        all_loaded = false;
+                            // Set sampler to Repeat for tiling with trilinear filtering and anisotropy.
+                            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                address_mode_u: ImageAddressMode::Repeat,
+                                address_mode_v: ImageAddressMode::Repeat,
+                                address_mode_w: ImageAddressMode::Repeat,
+                                mag_filter: ImageFilterMode::Linear,
+                                min_filter: ImageFilterMode::Linear,
+                                mipmap_filter: ImageFilterMode::Linear,
+                                anisotropy_clamp: 16,
+                                ..default()
+                            });
+                        } else {
+                            all_loaded = false;
+                        }
                     }
                 }
-            }
 
-            // Only mark as configured if we successfully processed all textures (or at least checked them)
-            // If some are not loaded, we wait for next frame
-            if all_loaded {
-                *configured = true;
-                info!("Triplanar textures configured with anisotropic filtering");
+                expected_textures = Some(expected);
+                loaded_textures = Some(loaded);
+                if all_loaded {
+                    *configured = true;
+                    textures_configured = Some(1.0);
+                    info!("Triplanar textures configured with anisotropic filtering");
+                } else {
+                    textures_configured = Some(0.0);
+                }
             }
         }
+    }
+
+    if let Some(expected_textures) = expected_textures {
+        timing.record_count(
+            frame.0,
+            "Terrain Triplanar Textures Expected",
+            expected_textures as f64,
+        );
+    }
+    if let Some(loaded_textures) = loaded_textures {
+        timing.record_count(
+            frame.0,
+            "Terrain Triplanar Textures Loaded",
+            loaded_textures as f64,
+        );
+    }
+    if let Some(textures_configured) = textures_configured {
+        timing.record_count(
+            frame.0,
+            "Terrain Triplanar Textures Configured",
+            textures_configured,
+        );
     }
 }
 

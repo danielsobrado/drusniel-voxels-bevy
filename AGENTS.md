@@ -25,6 +25,13 @@ cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 
 7. If the change is visual, inspect the fixed checkpoint screenshots from the bench output. Do not accept a performance win that introduces visible regressions unless the tradeoff is intentional and documented.
 8. Outside bench mode, `VOXEL_RENDER_TIMING=1` enables the same render timing capture in the debug timing CSV for local diagnosis.
+9. For NAADF preview or GI changes, also measure initial visual stability. Run:
+
+```powershell
+rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-startup-stability.toml
+```
+
+Inspect the staged screenshots (`settle-120`, `settle-240`, `settle-360`, `settle-540`, `settle-720`, `settle-899`, `settle-1200`, `settle-1499`) and report the first `frame`/`elapsed_secs` in `summary.json` where the image is fully textured rather than the blue silhouette/early occupancy preview. Treat `ready_wait_secs` and `render_ready_secs` as runtime readiness only; they do not prove visual texture stability. Include those timings, NAADF preview counters, and any startup trace phase CSVs from the run.
 
 ## Expected Workflow
 

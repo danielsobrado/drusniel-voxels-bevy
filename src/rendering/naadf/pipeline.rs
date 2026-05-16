@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::atmosphere::{FogQuality, FogQualityTier, FogUniforms};
-use crate::rendering::render_timing::RenderTimingSink;
 
 use super::config::NaadfDenoiseQuality;
 use super::gpu_buffers::{
@@ -1217,34 +1216,6 @@ impl ViewNode for NaadfPreviewBuildNode {
                 composite_passes,
                 denoise_iterations,
                 reference_dispatches,
-            );
-        }
-        if let Some(timing) = world.get_resource::<RenderTimingSink>() {
-            timing.push_count("naadf.preview_pixels_last_frame", preview_pixels as f64);
-            timing.push_count(
-                "naadf.preview_first_hit_dispatches_last_frame",
-                first_hit_dispatches as f64,
-            );
-            timing.push_count(
-                "naadf.preview_gi_dispatches_last_frame",
-                gi_dispatches as f64,
-            );
-            timing.push_count(
-                "naadf.preview_spatial_dispatches_last_frame",
-                spatial_dispatches as f64,
-            );
-            timing.push_count(
-                "naadf.preview_temporal_dispatches_last_frame",
-                temporal_dispatches as f64,
-            );
-            timing.push_count(
-                "naadf.preview_composite_passes_last_frame",
-                composite_passes as f64,
-            );
-            timing.push_count("naadf.gi_rays_last_frame", gi_rays as f64);
-            timing.push_count(
-                "naadf.max_ray_steps_last_frame",
-                preview_settings.max_ray_steps as f64,
             );
         }
         if let Some(pass_stats) = world.get_resource::<NaadfPreviewPassStats>() {

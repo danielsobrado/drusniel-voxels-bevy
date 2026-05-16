@@ -1,8 +1,14 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::array_loader::AtlasMapping;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::{NaadfCacheState, NaadfConfig, NaadfStats};
+use crate::rendering::capabilities::GraphicsCapabilities;
+#[cfg(feature = "naadf")]
+use crate::rendering::naadf::{
+    NaadfCacheState, NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig, NaadfStats,
+};
 use crate::rendering::ray_tracing::RayTracingSettings;
+#[cfg(feature = "naadf")]
+use crate::rendering::ray_tracing::{ExperimentalRenderMode, VoxelRayBackendMode};
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
 use crate::vegetation::VegetationConfig;
@@ -65,6 +71,9 @@ impl Plugin for DebugUiPlugin {
                     apply_terrain_style_settings,
                 ),
             );
+
+        #[cfg(feature = "naadf")]
+        app.add_systems(Update, toggle_naadf_split_view_key);
 
         #[cfg(debug_assertions)]
         app.add_systems(Update, toggle_scene_visibility);
@@ -172,6 +181,15 @@ fn debug_settings_ui(
                 if let Some(config) = naadf_config.as_deref_mut() {
                     ui.checkbox(&mut config.enabled, "Enable NAADF cache");
                     ui.checkbox(
+                        &mut config.gpu.allow_integrated_gpu,
+                        "NAADF allow integrated GPU",
+                    );
+                    ui.checkbox(&mut config.gpu.prefer_gpu_builder, "NAADF prefer GPU builder");
+                    ui.checkbox(&mut config.gpu.debug_readback, "NAADF GPU debug readback");
+                    ui.checkbox(&mut config.debug.compare_cpu_gpu, "NAADF compare CPU/GPU");
+                    ui.checkbox(&mut config.debug.force_cpu_builder, "NAADF force CPU builder");
+                    ui.checkbox(&mut config.debug.force_gpu_builder, "NAADF force GPU builder");
+                    ui.checkbox(
                         &mut config.use_for_sun_visibility,
                         "Use NAADF sun visibility",
                     );
@@ -179,6 +197,113 @@ fn debug_settings_ui(
                     ui.checkbox(
                         &mut config.use_for_contact_shadows,
                         "Use NAADF contact shadows",
+                    );
+                    ui.checkbox(
+                        &mut config.preview.accumulation_enabled,
+                        "NAADF preview accumulation",
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.temporal_blend_factor, 0.0..=0.99)
+                            .text("NAADF temporal blend"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.max_ray_steps, 1..=1024)
+                            .text("NAADF preview ray steps"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.bounce_count, 0..=8)
+                            .text("NAADF preview bounces"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.gi_sky_strength, 0.0..=2.0)
+                            .text("NAADF GI sky strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.gi_bounce_strength, 0.0..=2.0)
+                            .text("NAADF GI bounce strength"),
+                    );
+                    ui.checkbox(&mut config.preview.denoise_enabled, "NAADF preview denoise");
+                    egui::ComboBox::from_label("NAADF denoise quality")
+                        .selected_text(match config.preview.denoise_quality {
+                            NaadfDenoiseQuality::Low => "Low",
+                            NaadfDenoiseQuality::Medium => "Medium",
+                            NaadfDenoiseQuality::High => "High",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut config.preview.denoise_quality,
+                                NaadfDenoiseQuality::Low,
+                                "Low",
+                            );
+                            ui.selectable_value(
+                                &mut config.preview.denoise_quality,
+                                NaadfDenoiseQuality::Medium,
+                                "Medium",
+                            );
+                            ui.selectable_value(
+                                &mut config.preview.denoise_quality,
+                                NaadfDenoiseQuality::High,
+                                "High",
+                            );
+                        });
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.spatial_radius, 0..=4)
+                            .text("NAADF spatial radius"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.spatial_depth_sigma, 0.001..=1.0)
+                            .text("NAADF spatial depth sigma"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.spatial_normal_sigma, 0.001..=1.0)
+                            .text("NAADF spatial normal sigma"),
+                    );
+                    ui.checkbox(
+                        &mut config.preview.reference_path_tracing_enabled,
+                        "NAADF reference path trace",
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.reference_sample_count, 1..=32)
+                            .text("NAADF reference samples"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.reference_sky_strength, 0.0..=2.0)
+                            .text("NAADF reference sky"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut config.preview.reference_indirect_strength,
+                            0.0..=2.0,
+                        )
+                        .text("NAADF reference indirect"),
+                    );
+                    ui.checkbox(&mut config.preview.show_miss_sky, "NAADF preview miss sky");
+                    egui::ComboBox::from_label("NAADF preview composite")
+                        .selected_text(match config.preview.composite_mode {
+                            NaadfPreviewCompositeModeConfig::Fullscreen => "Fullscreen",
+                            NaadfPreviewCompositeModeConfig::SplitView => "Split",
+                            NaadfPreviewCompositeModeConfig::PictureInPicture => "PIP",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut config.preview.composite_mode,
+                                NaadfPreviewCompositeModeConfig::Fullscreen,
+                                "Fullscreen",
+                            );
+                            ui.selectable_value(
+                                &mut config.preview.composite_mode,
+                                NaadfPreviewCompositeModeConfig::SplitView,
+                                "Split",
+                            );
+                            ui.selectable_value(
+                                &mut config.preview.composite_mode,
+                                NaadfPreviewCompositeModeConfig::PictureInPicture,
+                                "PIP",
+                            );
+                        });
+                    ui.add(
+                        egui::Slider::new(&mut config.preview.history_resolution_scale, 0.25..=1.0)
+                            .text("NAADF history scale"),
                     );
                 }
                 #[cfg(not(feature = "naadf"))]
@@ -236,6 +361,23 @@ fn debug_settings_ui(
                     ui.label(format!(
                         "NAADF GPU build queue: {} pending, oldest {} frames",
                         stats.gpu_build_queue_pending, stats.gpu_build_queue_oldest_age_frames
+                    ));
+                    ui.label(format!(
+                        "NAADF chunk bounds: {} updates, {} unknown stops, {} saturated fields, {} passes",
+                        stats.chunk_bound_updates_last_frame,
+                        stats.chunk_bound_skipped_unknown_neighbors_last_frame,
+                        stats.chunk_bound_saturated_fields_last_frame,
+                        stats.chunk_bound_propagation_passes_last_frame,
+                    ));
+                    ui.label(format!(
+                        "NAADF preview: {} pixels, passes FH/GI/S/T/D/R = {}/{}/{}/{}/{}/{}",
+                        stats.preview_pixels_last_frame,
+                        stats.preview_first_hit_dispatches_last_frame,
+                        stats.preview_gi_dispatches_last_frame,
+                        stats.preview_spatial_dispatches_last_frame,
+                        stats.preview_temporal_dispatches_last_frame,
+                        stats.preview_denoise_dispatches_last_frame,
+                        stats.preview_reference_dispatches_last_frame,
                     ));
                 }
             }
@@ -341,10 +483,60 @@ fn debug_settings_ui(
             ui.label("Press Shift+F9 to dump terrain hole probe JSON");
             ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
+            #[cfg(feature = "naadf")]
+            ui.label("Press Shift+N to toggle NAADF split view");
             ui.label("Press F11 to cycle voxel ray backend");
             ui.label("Press Shift+F11 to toggle enclosure culling");
         },
     );
+}
+
+#[cfg(feature = "naadf")]
+fn toggle_naadf_split_view_key(
+    keys: Res<ButtonInput<KeyCode>>,
+    capabilities: Option<Res<GraphicsCapabilities>>,
+    mut naadf_config: Option<ResMut<NaadfConfig>>,
+    mut ray_tracing: Option<ResMut<RayTracingSettings>>,
+) {
+    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !shift_held || alt_held || control_held || !keys.just_pressed(KeyCode::KeyN) {
+        return;
+    }
+
+    let Some(mut config) = naadf_config.take() else {
+        warn!("NAADF split view unchanged: NAADF config resource is unavailable");
+        return;
+    };
+    let Some(mut settings) = ray_tracing.take() else {
+        warn!("NAADF split view unchanged: ray tracing settings resource is unavailable");
+        return;
+    };
+
+    let split_active = settings.experimental_mode == ExperimentalRenderMode::NaadfPreview
+        && config.preview.composite_mode == NaadfPreviewCompositeModeConfig::SplitView;
+    if split_active {
+        settings.experimental_mode = ExperimentalRenderMode::Current;
+        config.preview.composite_mode = NaadfPreviewCompositeModeConfig::Fullscreen;
+        info!("NAADF split view: OFF (Shift+N to toggle)");
+        return;
+    }
+
+    settings.set_voxel_backend(VoxelRayBackendMode::Naadf, capabilities.as_deref());
+    if settings.voxel_backend != VoxelRayBackendMode::Naadf {
+        if let Some(reason) = settings.fallback_reason.as_deref() {
+            warn!("NAADF split view unchanged: {reason}");
+        } else {
+            warn!("NAADF split view unchanged: NAADF backend request was rejected");
+        }
+        return;
+    }
+
+    config.enabled = true;
+    config.preview.composite_mode = NaadfPreviewCompositeModeConfig::SplitView;
+    settings.experimental_mode = ExperimentalRenderMode::NaadfPreview;
+    info!("NAADF split view: ON (Shift+N to toggle)");
 }
 
 /// Toggle Sun shadows with F10
