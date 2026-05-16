@@ -34,7 +34,9 @@ fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let split_x = naadf_composite_params.mode_split.y;
 
     if mode < 0.5 {
-        return blended_preview;
+        // Fullscreen is pure NAADF: the preview texture already carries a
+        // miss-sky colour in RGB, so return it directly without scene blending.
+        return vec4<f32>(preview_color.rgb, current_color.a);
     }
     if mode < 1.5 {
         return select(current_color, blended_preview, uv.x <= split_x);

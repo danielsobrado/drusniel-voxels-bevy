@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::rendering::capabilities::GraphicsCapabilities;
+#[cfg(feature = "naadf")]
+use crate::rendering::naadf::{NaadfConfig, NaadfPreviewCompositeModeConfig};
 
 const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
 const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
@@ -237,35 +239,81 @@ pub(crate) fn toggle_voxel_ray_backend_key(
     capabilities: Option<Res<GraphicsCapabilities>>,
     mut settings: ResMut<RayTracingSettings>,
     mut notice: ResMut<VoxelRayBackendNotice>,
+    #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     if shift_held || !keys.just_pressed(KeyCode::F11) {
         return;
     }
 
-    let next = match settings.voxel_backend {
-        VoxelRayBackendMode::CurrentSdf => VoxelRayBackendMode::Naadf,
-        VoxelRayBackendMode::Naadf => VoxelRayBackendMode::Auto,
-        VoxelRayBackendMode::Auto => VoxelRayBackendMode::CurrentSdf,
-    };
-    if next == VoxelRayBackendMode::Naadf && !NAADF_FEATURE_COMPILED {
+    if !NAADF_FEATURE_COMPILED {
         settings.fallback_reason = Some(NAADF_NOT_COMPILED_REASON.into());
         notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         warn!("Voxel ray backend unchanged: {}", NAADF_NOT_COMPILED_REASON);
         return;
     }
 
-    if settings.set_voxel_backend(next, capabilities.as_deref()) {
-        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
-        info!(
-            "Voxel ray backend requested: {}, effective: {}, fallback: {} (F11 to cycle)",
-            settings.voxel_backend.as_str(),
-            settings.effective_backend().as_str(),
-            settings.fallback_reason.as_deref().unwrap_or("none")
-        );
-    } else if let Some(reason) = settings.fallback_reason.as_deref() {
+    #[cfg(not(feature = "naadf"))]
+    let next = VoxelRayBackendMode::CurrentSdf;
+
+    #[cfg(feature = "naadf")]
+    let (next, activate_preview) = {
+        let Some(config) = naadf_config.as_deref_mut() else {
+            settings.fallback_reason = Some("NAADF config resource is unavailable".into());
+            notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+            warn!("Voxel ray backend unchanged: NAADF config resource is unavailable");
+            return;
+        };
+
+        if settings.experimental_mode == ExperimentalRenderMode::NaadfPreview
+            && settings.voxel_backend == VoxelRayBackendMode::Naadf
+            && config.preview.composite_mode == NaadfPreviewCompositeModeConfig::Fullscreen
+        {
+            (VoxelRayBackendMode::CurrentSdf, false)
+        } else {
+            (VoxelRayBackendMode::Naadf, true)
+        }
+    };
+
+    let previous_experimental_mode = settings.experimental_mode;
+    let backend_changed = settings.set_voxel_backend(next, capabilities.as_deref());
+    if let Some(reason) = settings.fallback_reason.as_deref() {
         notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         warn!("Voxel ray backend unchanged: {}", reason);
+        return;
+    }
+
+    #[cfg(feature = "naadf")]
+    {
+        if let Some(config) = naadf_config.as_deref_mut() {
+            if activate_preview {
+                config.enabled = true;
+                config.debug.force_cpu_builder = true;
+                config.preview.composite_mode = NaadfPreviewCompositeModeConfig::Fullscreen;
+                settings.experimental_mode = ExperimentalRenderMode::NaadfPreview;
+            } else {
+                settings.experimental_mode = ExperimentalRenderMode::Current;
+                config.enabled = false;
+            }
+        }
+    }
+
+    if !backend_changed
+        && settings.reset_history_on_backend_switch
+        && settings.experimental_mode != previous_experimental_mode
+    {
+        settings.backend_switch_generation = settings.backend_switch_generation.saturating_add(1);
+    }
+
+    if backend_changed || settings.experimental_mode == ExperimentalRenderMode::NaadfPreview {
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+        info!(
+            "Voxel ray backend requested: {}, effective: {}, mode: {}, fallback: {} (F11 toggles NAADF preview)",
+            settings.voxel_backend.as_str(),
+            settings.effective_backend().as_str(),
+            settings.experimental_mode.as_str(),
+            settings.fallback_reason.as_deref().unwrap_or("none")
+        );
     }
 }
 
@@ -325,9 +373,10 @@ pub(crate) fn update_voxel_ray_backend_notice(
 
 fn voxel_ray_backend_notice_text(settings: &RayTracingSettings) -> String {
     let mut text = format!(
-        "F11 voxel rays: requested {} / effective {}",
+        "F11 voxel rays: requested {} / effective {}\nMode: {}",
         settings.voxel_backend.as_str(),
-        settings.effective_backend().as_str()
+        settings.effective_backend().as_str(),
+        settings.experimental_mode.as_str()
     );
     if let Some(reason) = settings.fallback_reason.as_deref() {
         text.push_str(&format!("\nFallback: {reason}"));
@@ -336,9 +385,11 @@ fn voxel_ray_backend_notice_text(settings: &RayTracingSettings) -> String {
         text.push('\n');
         text.push_str(NAADF_RESTART_HINT);
     } else if settings.voxel_backend == VoxelRayBackendMode::Naadf {
-        text.push_str(
-            "\nNAADF cache/backend selected; preview pipeline is available in NAADF preview mode.",
-        );
+        if settings.experimental_mode == ExperimentalRenderMode::NaadfPreview {
+            text.push_str("\nNAADF fullscreen preview active.");
+        } else {
+            text.push_str("\nNAADF cache/backend selected; F11 opens fullscreen preview.");
+        }
     }
     text
 }
@@ -424,6 +475,7 @@ mod tests {
         let text = voxel_ray_backend_notice_text(&settings);
         assert!(text.contains("requested current_sdf"));
         assert!(text.contains("effective current_sdf"));
+        assert!(text.contains("Mode: current"));
     }
 
     #[test]
@@ -460,10 +512,11 @@ mod tests {
     fn notice_text_includes_preview_status_when_naadf_selected() {
         let settings = RayTracingSettings {
             voxel_backend: VoxelRayBackendMode::Naadf,
+            experimental_mode: ExperimentalRenderMode::NaadfPreview,
             ..default()
         };
         let text = voxel_ray_backend_notice_text(&settings);
-        assert!(text.contains("preview pipeline is available"));
+        assert!(text.contains("fullscreen preview active"));
     }
 
     #[test]

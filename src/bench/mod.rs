@@ -108,6 +108,8 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub disable_instanced_props: bool,
     #[serde(default)]
+    pub disable_terrain_meshes: bool,
+    #[serde(default)]
     pub disable_water_meshes: bool,
     #[serde(default)]
     pub disable_buildings: bool,
@@ -321,6 +323,10 @@ struct BenchRenderReadySignature {
     terrain_full_triplanar_meshes: u32,
     terrain_cheap_triplanar_meshes: u32,
     terrain_triplanar_textures_configured: u32,
+    naadf_preview_active: u32,
+    naadf_preview_first_hit_dispatches: u32,
+    naadf_preview_composite_passes: u32,
+    naadf_preview_pixels: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -1019,6 +1025,7 @@ fn bench_world_persistence(scene: &BenchScene) -> WorldPersistence {
 fn apply_bench_render_toggles(
     toggles: Res<BenchRenderToggles>,
     mut visibility_queries: ParamSet<(
+        Query<&mut Visibility, (With<ChunkMesh>, Without<WaterMesh>)>,
         Query<&mut Visibility, With<WaterMesh>>,
         Query<&mut Visibility, With<BuildingMesh>>,
     )>,
@@ -1032,13 +1039,18 @@ fn apply_bench_render_toggles(
         ResMut<crate::rendering::naadf::NaadfConfig>,
     >,
 ) {
-    if toggles.disable_water_meshes {
+    if toggles.disable_terrain_meshes {
         for mut visibility in &mut visibility_queries.p0() {
             *visibility = Visibility::Hidden;
         }
     }
-    if toggles.disable_buildings {
+    if toggles.disable_water_meshes {
         for mut visibility in &mut visibility_queries.p1() {
+            *visibility = Visibility::Hidden;
+        }
+    }
+    if toggles.disable_buildings {
+        for mut visibility in &mut visibility_queries.p2() {
             *visibility = Visibility::Hidden;
         }
     }
@@ -3290,6 +3302,23 @@ fn record_bench_ready_counts(
 }
 
 fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRenderReadySignature> {
+    let naadf_preview_active = latest_counter_u32(timing, "naadf.preview_active").unwrap_or(0);
+    if naadf_preview_active > 0 {
+        return Some(BenchRenderReadySignature {
+            naadf_preview_active,
+            naadf_preview_first_hit_dispatches: latest_counter_u32(
+                timing,
+                "naadf.preview_first_hit_dispatches_last_frame",
+            )?,
+            naadf_preview_composite_passes: latest_counter_u32(
+                timing,
+                "naadf.preview_composite_passes_last_frame",
+            )?,
+            naadf_preview_pixels: latest_counter_u32(timing, "naadf.preview_pixels_last_frame")?,
+            ..Default::default()
+        });
+    }
+
     Some(BenchRenderReadySignature {
         opaque_items: latest_counter_u32(timing, "Render Phase Items Opaque3d Total")?,
         alpha_mask_items: latest_counter_u32(timing, "Render Phase Items AlphaMask3d Total")?,
@@ -3316,6 +3345,10 @@ fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRend
             timing,
             "Terrain Triplanar Textures Configured",
         )?,
+        naadf_preview_active: 0,
+        naadf_preview_first_hit_dispatches: 0,
+        naadf_preview_composite_passes: 0,
+        naadf_preview_pixels: 0,
     })
 }
 
@@ -3971,6 +4004,7 @@ chunk_load_radius = 6
 [render_toggles]
 voxel_ray_backend = "naadf"
 experimental_render_mode = "naadf_preview"
+disable_terrain_meshes = true
 naadf_force_cpu_builder = true
 naadf_radius_chunks = 3
 naadf_max_chunks = 384
@@ -3999,6 +4033,7 @@ hold_frames = 30
             toggles.experimental_render_mode.as_deref(),
             Some("naadf_preview")
         );
+        assert!(toggles.disable_terrain_meshes);
         assert_eq!(toggles.naadf_radius_chunks, Some(3));
         assert_eq!(toggles.naadf_max_chunks, Some(384));
         assert_eq!(toggles.naadf_max_chunk_updates_per_frame, Some(384));

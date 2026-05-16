@@ -485,7 +485,7 @@ fn debug_settings_ui(
             ui.label("Press F10 to toggle Sun Shadows");
             #[cfg(feature = "naadf")]
             ui.label("Press Shift+N to toggle NAADF split view");
-            ui.label("Press F11 to cycle voxel ray backend");
+            ui.label("Press F11 to toggle NAADF fullscreen preview");
             ui.label("Press Shift+F11 to toggle enclosure culling");
         },
     );

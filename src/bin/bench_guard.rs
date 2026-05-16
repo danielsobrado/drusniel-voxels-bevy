@@ -733,6 +733,13 @@ fn default_naadf_targets() -> Vec<NaadfGuardTarget> {
             baseline_checkpoint: None,
         },
         NaadfGuardTarget {
+            label: "preview_only".into(),
+            scene: "visual-regression-naadf-preview-only.toml".into(),
+            checkpoint: "naadf-preview-only".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+        NaadfGuardTarget {
             label: "live_lod_ridge".into(),
             scene: "visual-regression-naadf-live-lod.toml".into(),
             checkpoint: "naadf-live-lod-ridge-run".into(),

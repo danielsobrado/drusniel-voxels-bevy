@@ -32,6 +32,11 @@ rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regressi
 ```
 
 Inspect the staged screenshots (`settle-120`, `settle-240`, `settle-360`, `settle-540`, `settle-720`, `settle-899`, `settle-1200`, `settle-1499`) and report the first `frame`/`elapsed_secs` in `summary.json` where the image is fully textured rather than the blue silhouette/early occupancy preview. Treat `ready_wait_secs` and `render_ready_secs` as runtime readiness only; they do not prove visual texture stability. Include those timings, NAADF preview counters, and any startup trace phase CSVs from the run.
+10. For NAADF-only preview performance, run the fullscreen preview-only scene, which disables legacy terrain, water, buildings, shadows, reflections, and prop queues:
+
+```powershell
+rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview-only.toml
+```
 
 ## Expected Workflow
 
