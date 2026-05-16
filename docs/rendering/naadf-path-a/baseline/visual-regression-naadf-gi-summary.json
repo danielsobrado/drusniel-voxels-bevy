@@ -1,0 +1,2324 @@
+{
+  "schema_version": 3,
+  "scene": "visual-regression-naadf-gi.toml",
+  "seed": 12345,
+  "git_sha": "3406feb522d4bc4fe4b65cb24cf1f2ad0a5310e1",
+  "git_dirty": true,
+  "build_profile": "release",
+  "platform": "windows",
+  "bevy_version": "0.18.1",
+  "run_started_utc": "2026-05-16T11:30:42Z",
+  "duration_secs": 36.8612161,
+  "render_toggles": {
+    "disable_instanced_props": false,
+    "disable_terrain_meshes": false,
+    "disable_water_meshes": false,
+    "disable_buildings": false,
+    "disable_shadows": false,
+    "disable_reflection_cameras": true,
+    "force_instanced_props_transparent": false,
+    "force_cutout_props_alpha_mask": false,
+    "force_instanced_props_opaque": false,
+    "disable_prop_lod_hiding": false,
+    "disable_prop_shadow_lod": false,
+    "terrain_material_quality": "auto",
+    "disable_terrain_material_lod": false,
+    "prop_subcluster_grid": 0,
+    "quality_preset": null,
+    "voxel_ray_backend": "naadf",
+    "experimental_render_mode": "current_with_naadf_gi",
+    "naadf_force_cpu_builder": true,
+    "naadf_force_gpu_builder": null,
+    "naadf_max_chunk_updates_per_frame": 384,
+    "naadf_radius_chunks": 3,
+    "naadf_max_chunks": 384,
+    "naadf_max_upload_bytes_per_frame": 67108864,
+    "naadf_history_resolution_scale": 0.25,
+    "naadf_preview_max_ray_steps": null,
+    "naadf_preview_bounce_count": null,
+    "naadf_preview_spatial_radius": null,
+    "naadf_preview_composite_mode": null,
+    "naadf_preview_show_miss_sky": null
+  },
+  "checkpoints": [
+    {
+      "name": "naadf-gi-experimental",
+      "fog_tier": "off",
+      "render_features": {
+        "gtao": true,
+        "ssao": false,
+        "baked_ao_strength": 0.8,
+        "fog": false,
+        "god_rays": true,
+        "god_ray_intensity": 0.35,
+        "motion_blur": null,
+        "shadow_budget": true,
+        "ray_tracing": true,
+        "photo_mode": false,
+        "cinematic_mode": false
+      },
+      "median_frame_ms": 12.309666666666667,
+      "p99_frame_ms": 42.701,
+      "areas": {
+        "Collider Build": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        },
+        "Counter Billboard Alpha Coverage Max": {
+          "median_ms": 0.025267791748046876,
+          "p99_ms": 0.25267791748046875,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Alpha Coverage Min": {
+          "median_ms": 0.0032306671142578124,
+          "p99_ms": 0.032306671142578125,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Directional8 Count": {
+          "median_ms": 2.1,
+          "p99_ms": 21.0,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Generated Assets Loaded": {
+          "median_ms": 2.1,
+          "p99_ms": 21.0,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Missing Generated Assets": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Placeholder Blocked": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Billboard Texture Direction Switches": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.1,
+          "unit": "count"
+        },
+        "Counter Blocky Terrain Mesh Count": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Edge Water Faces Suppressed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Compositor Applied Pixels": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Compositor Skipped Disabled": {
+          "median_ms": 1287870.0,
+          "p99_ms": 1287870.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Compositor Skipped No Mask": {
+          "median_ms": 785730.0,
+          "p99_ms": 785730.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Compositor Skipped Too Far": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Mask Bodies": {
+          "median_ms": 7.0,
+          "p99_ms": 7.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Estimated Water Reflection Mask Pixels": {
+          "median_ms": 1287870.0,
+          "p99_ms": 1287870.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Chunks Considered": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Chunks Deferred": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Chunks Empty": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Chunks Spawned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Instances Spawned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Grass Particles Updated": {
+          "median_ms": 100.0,
+          "p99_ms": 200.0,
+          "calls_per_frame": 0.5,
+          "unit": "count"
+        },
+        "Counter Grass Particles Wrapped": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.5,
+          "unit": "count"
+        },
+        "Counter Grass Patches Checked": {
+          "median_ms": 10.55,
+          "p99_ms": 211.0,
+          "calls_per_frame": 0.05,
+          "unit": "count"
+        },
+        "Counter Grass Patches Despawned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.05,
+          "unit": "count"
+        },
+        "Counter Instanced Groups Dirtied By LOD": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.06666666666666667,
+          "unit": "count"
+        },
+        "Counter Invalid Water Meshes Suppressed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Invalid Water Reflection Candidates Suppressed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Large Prop Visibility Guard Expansions": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter MAX_CHUNKS_PER_FRAME Hit": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Chunks Deferred": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Chunks Frame Limit": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Chunks Processed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Chunks Queued": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Chunks Visit Limit": {
+          "median_ms": 64.0,
+          "p99_ms": 64.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty LOD Churn Only": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Reason Generation": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Reason LOD": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Reason Neighbor LOD": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Reason Terrain Mutation": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Reason Water Material": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Sort Window": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Mesh Dirty Stats Recompute Blocked": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Bounds From Mesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Bounds Heuristic Used": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Bounds Max Extent": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Bounds Max Radius": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Bounds Missing Mesh Fallback": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Groups Culled But Instance Sphere Intersects Frustum": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Groups Culled By Frustum": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop LOD Distance Scale": {
+          "median_ms": 0.8600000143051147,
+          "p99_ms": 0.8600000143051147,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop LOD Full Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.06666666666666667,
+          "unit": "count"
+        },
+        "Counter Prop LOD Hidden Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.06666666666666667,
+          "unit": "count"
+        },
+        "Counter Prop LOD Mid Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.06666666666666667,
+          "unit": "count"
+        },
+        "Counter Prop Shadows Disabled By LOD": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.06666666666666667,
+          "unit": "count"
+        },
+        "Counter Prop Subcluster Avg Instances Per Draw": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subcluster Draws": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subcluster Instances Culled": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subcluster Instances Queued": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subclusters Queued": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subclusters Total": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Prop Subclusters Visible": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Bytes Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Groups Examined": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Groups Skipped": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Groups Skipped Not Visible": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Groups Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Instances Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Shadow Instances Reused": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Buffer Shadow Instances Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Groups Examined": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Groups Inserted": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Groups Skipped": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Groups Updated": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Metadata Updates": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Shadow Instances Cloned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Shadow Vectors Cloned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Visible Instances Cloned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Extract Visible Vectors Cloned": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups 1 Instance": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups 17-64 Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups 2-4 Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups 5-16 Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups 65+ Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups Examined": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups Queued": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Groups Visible": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued AlphaMask": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Instances AlphaMask": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Instances Opaque": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Instances Transparent": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Opaque": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Total": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Props Queued Transparent": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Queue Draws": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Queue Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Queue Phase Views": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Queue Views": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Queue Visible Candidates": {
+          "median_ms": 612.0,
+          "p99_ms": 612.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Buffers Created": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Buffers Reused": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Buffers Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Draws": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Instances": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Lights": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Pipeline Builds": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Shadow Views": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Top Buckets Reported": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Visible Buffers Created": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Instancing Visible Buffers Uploaded": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3d Batchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3d Multidraw": {
+          "median_ms": 87.0,
+          "p99_ms": 87.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3d NonMesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3d Unbatchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3dPrepass Batchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3dPrepass Multidraw": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3dPrepass NonMesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins AlphaMask3dPrepass Unbatchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3d Batchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3d Multidraw": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3d NonMesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3d Unbatchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3dPrepass Batchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3dPrepass Multidraw": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3dPrepass NonMesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Opaque3dPrepass Unbatchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Shadow Batchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Shadow Multidraw": {
+          "median_ms": 560.0,
+          "p99_ms": 560.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Shadow NonMesh": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Bins Shadow Unbatchable": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3d Hidden Binned Bins": {
+          "median_ms": 87.0,
+          "p99_ms": 87.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3d Known Entity Items": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3d Per View Max": {
+          "median_ms": 87.0,
+          "p99_ms": 87.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3d Total": {
+          "median_ms": 87.0,
+          "p99_ms": 87.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3dPrepass Hidden Binned Bins": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3dPrepass Known Entity Items": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3dPrepass Per View Max": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items AlphaMask3dPrepass Total": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Buildings": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Exact Buildings": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Exact Instanced Props": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Exact Terrain": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Exact Unknown": {
+          "median_ms": 91.0,
+          "p99_ms": 91.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Exact Water": {
+          "median_ms": 86.0,
+          "p99_ms": 86.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Instanced Props": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3d Hidden Binned Bins": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3d Known Entity Items": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3d Per View Max": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3d Total": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3dPrepass Hidden Binned Bins": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3dPrepass Known Entity Items": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3dPrepass Per View Max": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Opaque3dPrepass Total": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Shadow Hidden Binned Bins": {
+          "median_ms": 560.0,
+          "p99_ms": 560.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Shadow Known Entity Items": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Shadow Per View Max": {
+          "median_ms": 353.0,
+          "p99_ms": 353.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Shadow Total": {
+          "median_ms": 560.0,
+          "p99_ms": 560.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Terrain": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Transparent3d Per View Max": {
+          "median_ms": 177.0,
+          "p99_ms": 177.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Transparent3d Total": {
+          "median_ms": 177.0,
+          "p99_ms": 177.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Unknown": {
+          "median_ms": 178.0,
+          "p99_ms": 178.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Items Water": {
+          "median_ms": 86.0,
+          "p99_ms": 86.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views AlphaMask3d": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views AlphaMask3dPrepass": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views Opaque3d": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views Opaque3dPrepass": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views Shadow": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Phase Views Transparent3d": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Render Quality Preset": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Shadow Quality": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Surface Nets Chunks Deferred For Halo": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain LOD Changes": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain LOD Changes Per Second": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain LOD Repeated Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality AtlasOnlyDebug Meshes": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality CheapTriplanar Meshes": {
+          "median_ms": 338.0,
+          "p99_ms": 338.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality FullTriplanar Meshes": {
+          "median_ms": 10.0,
+          "p99_ms": 10.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality SingleProjectionFar Meshes": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Material Quality WireframeDebug Meshes": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Mesh Boundary Missing Neighbor": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Mesh Degenerate Triangles Removed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Mesh Empty But Solid Voxels": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Mesh LOD Seam Repairs": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Terrain Triplanar Textures Configured": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Triplanar Terrain Mesh Count": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Visible Terrain Mesh Entities": {
+          "median_ms": 348.0,
+          "p99_ms": 348.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Visible Terrain Triangles": {
+          "median_ms": 198004.0,
+          "p99_ms": 198004.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Visible Terrain Vertices": {
+          "median_ms": 593808.0,
+          "p99_ms": 593808.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Visible Water Triangles": {
+          "median_ms": 172.0,
+          "p99_ms": 172.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Voxel Edits Applied": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Voxel Edits Rejected Bedrock": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Voxel Edits Rejected Below Floor": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Voxel Edits Rejected Out Of Bounds": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Air Boundaries Exposed": {
+          "median_ms": 90781.0,
+          "p99_ms": 90781.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Air Boundaries Sealed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Air Boundaries Total": {
+          "median_ms": 90781.0,
+          "p99_ms": 90781.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies Lake": {
+          "median_ms": 7.0,
+          "p99_ms": 7.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies Ocean": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies Pond": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies River": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies ShallowFlood": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Bodies Total": {
+          "median_ms": 12.0,
+          "p99_ms": 12.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Body Cheap Count": {
+          "median_ms": 6.0,
+          "p99_ms": 6.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Body Fancy Count": {
+          "median_ms": 6.0,
+          "p99_ms": 6.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Body Material Switches": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Chunks Forced Consistent By Body": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Body Unknown": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Compositor Pixel Matched": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Body Kind": {
+          "median_ms": 2.0,
+          "p99_ms": 2.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Material Far": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Material Mode": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Material Near": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Max Depth": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Nearest Triangles": {
+          "median_ms": 4.0,
+          "p99_ms": 4.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Reflection Active": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Debug Reflection Eligible": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Exposure Outside World Rejected": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Flood Fill Boundary Hits": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Mesh Entities": {
+          "median_ms": 413.0,
+          "p99_ms": 413.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Meshes Eligible For Reflection": {
+          "median_ms": 254.0,
+          "p99_ms": 254.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Meshes Nearest Distance": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Meshes Total": {
+          "median_ms": 413.0,
+          "p99_ms": 413.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Meshes View Visible": {
+          "median_ms": 86.0,
+          "p99_ms": 86.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Meshes Visible In Frustum": {
+          "median_ms": 254.0,
+          "p99_ms": 254.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Reflection Active": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Reflection Disabled No Visible Water": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Reflection Disabled Too Small": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Reflection Quality": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Reflection Sampled": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Refraction Enabled": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Refraction Strength": {
+          "median_ms": 0.029999999329447746,
+          "p99_ms": 0.029999999329447746,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Triangles Removed Sealed": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Weather Distortion Boost": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Water Weather Reflection Boost": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Ambient Mix": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Fog Mult": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather GodRay Intensity Mult": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Kind Code": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Overlay Density": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 2.0,
+          "unit": "count"
+        },
+        "Counter Weather Overlay Enabled": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Overlay Pass Active": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 2.0,
+          "unit": "count"
+        },
+        "Counter Weather Overlay Quality": {
+          "median_ms": 2.0,
+          "p99_ms": 2.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Puddle Normal Active": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Quality Code": {
+          "median_ms": 2.0,
+          "p99_ms": 2.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Rain Factor": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Shader Feature Mask": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Snow Factor": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter Weather Wetness": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.avg_ray_steps_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.chunks_resident": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.dirty_chunks_pending": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gi_rays_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_build_queue_oldest_age_frames": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_max_chunks": {
+          "median_ms": 384.0,
+          "p99_ms": 384.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_memory_bytes": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_slot_coverage": {
+          "median_ms": 1.0,
+          "p99_ms": 1.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_slots_available": {
+          "median_ms": 384.0,
+          "p99_ms": 384.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_slots_used": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.gpu_uploads_pending": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.max_ray_steps_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_active": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_composite_passes_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_denoise_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_first_hit_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_gi_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_node_stage_last_frame": {
+          "median_ms": 2.0,
+          "p99_ms": 2.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_pixels_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_reference_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_spatial_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.preview_temporal_dispatches_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.streaming_interest_chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.streaming_interest_missing_gpu_slots": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.streaming_interest_missing_gpu_slots_far_ring": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.uploaded_chunks_last_frame": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Counter naadf.uploaded_chunks_peak": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "count"
+        },
+        "Face Visibility": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Fog Submit": {
+          "median_ms": 0.004733333333333333,
+          "p99_ms": 0.011,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Foliage Fade": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU bloom": {
+          "median_ms": 0.23513333333333333,
+          "p99_ms": 0.275,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU early prepass": {
+          "median_ms": 1.03805,
+          "p99_ms": 2.06,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU early_mesh_preprocessing": {
+          "median_ms": 0.0222,
+          "p99_ms": 0.027,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU early_prepass_indirect_parameters_building": {
+          "median_ms": 0.026266666666666667,
+          "p99_ms": 0.03,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU late_mesh_preprocessing": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU main_indirect_parameters_building": {
+          "median_ms": 0.05881666666666667,
+          "p99_ms": 0.076,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU main_opaque_pass_3d": {
+          "median_ms": 0.024833333333333332,
+          "p99_ms": 0.032,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU main_transparent_pass_3d": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU shadow_directional_light_0_cascade_0": {
+          "median_ms": 0.000016666666666666667,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU shadow_directional_light_0_cascade_1": {
+          "median_ms": 0.000016666666666666667,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU shadow_directional_light_0_cascade_2": {
+          "median_ms": 0.9342,
+          "p99_ms": 1.873,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU shadow_directional_light_0_cascade_3": {
+          "median_ms": 0.8087333333333333,
+          "p99_ms": 1.694,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU tonemapping": {
+          "median_ms": 0.08916666666666667,
+          "p99_ms": 0.83,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU ui": {
+          "median_ms": 0.263,
+          "p99_ms": 0.263,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "GPU upscaling": {
+          "median_ms": 0.23723333333333332,
+          "p99_ms": 0.312,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "God Rays": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        },
+        "Grass Animate": {
+          "median_ms": 0.0022,
+          "p99_ms": 0.008,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Grass Collect": {
+          "median_ms": 0.017016666666666666,
+          "p99_ms": 0.034,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Grass Cull": {
+          "median_ms": 0.0003,
+          "p99_ms": 0.007,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Grass Wind": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "LOD Update": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Build Blocky Array": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Configure Building": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Configure Props": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Configure Triplanar": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Sync Fog": {
+          "median_ms": 0.00235,
+          "p99_ms": 0.004,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Sync Water": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Material Sync Weather": {
+          "median_ms": 0.0027833333333333334,
+          "p99_ms": 0.005,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Mesh Dirty": {
+          "median_ms": 0.008,
+          "p99_ms": 0.219,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Mesh Dirty Apply CPU": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Mesh Dirty Generate CPU": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Mesh Dirty Sort CPU": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Mesh Dirty Stats CPU": {
+          "median_ms": 0.006983333333333334,
+          "p99_ms": 0.217,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Cache Rebuild": {
+          "median_ms": 0.00021666666666666668,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Chunk Table Sync": {
+          "median_ms": 0.00006666666666666667,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Dirty Queue": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Entity Sync": {
+          "median_ms": 0.000033333333333333335,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF GPU Upload CPU": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Streaming": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "NAADF Upload Queue": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Octree Rebuild": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Prop Billboard": {
+          "median_ms": 0.000016666666666666667,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Prop Culling": {
+          "median_ms": 0.00065,
+          "p99_ms": 0.014,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Prop Spawn": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Reflection Render": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        },
+        "Render Graph CPU": {
+          "median_ms": 12.000200000000001,
+          "p99_ms": 14.86,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Ensure Shadow Pipeline": {
+          "median_ms": 0.00045,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Extract Groups": {
+          "median_ms": 0.0022333333333333333,
+          "p99_ms": 0.01,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Prepare Buffers": {
+          "median_ms": 0.025716666666666665,
+          "p99_ms": 0.037,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Queue Main CPU": {
+          "median_ms": 0.0123,
+          "p99_ms": 0.031,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Queue Props": {
+          "median_ms": 0.012633333333333333,
+          "p99_ms": 0.032,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Queue Shadows": {
+          "median_ms": 0.0023833333333333332,
+          "p99_ms": 0.007,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Instancing Queue Shadows CPU": {
+          "median_ms": 0.002,
+          "p99_ms": 0.006,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render ManageViews CPU": {
+          "median_ms": 5.815566666666666,
+          "p99_ms": 7.65,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render PhaseSort CPU": {
+          "median_ms": 6.358466666666666,
+          "p99_ms": 8.377,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Prepare CPU": {
+          "median_ms": 8.890266666666667,
+          "p99_ms": 11.613,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render PrepareAssets CPU": {
+          "median_ms": 4.106733333333334,
+          "p99_ms": 6.745,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render PrepareBindGroups CPU": {
+          "median_ms": 1.5864666666666667,
+          "p99_ms": 2.585,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render PrepareMeshes CPU": {
+          "median_ms": 5.040850000000001,
+          "p99_ms": 6.921,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render PrepareResources CPU": {
+          "median_ms": 6.9062,
+          "p99_ms": 8.881,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Present Acquire CPU": {
+          "median_ms": 5.290666666666667,
+          "p99_ms": 7.135,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render Queue CPU": {
+          "median_ms": 6.344516666666666,
+          "p99_ms": 8.371,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Render QueueMeshes CPU": {
+          "median_ms": 6.32475,
+          "p99_ms": 8.368,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU bloom": {
+          "median_ms": 0.11648333333333333,
+          "p99_ms": 0.202,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU early prepass": {
+          "median_ms": 0.020966666666666665,
+          "p99_ms": 0.031,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU early_mesh_preprocessing": {
+          "median_ms": 0.009583333333333334,
+          "p99_ms": 0.015,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU early_prepass_indirect_parameters_building": {
+          "median_ms": 0.0035499999999999998,
+          "p99_ms": 0.006,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU late_mesh_preprocessing": {
+          "median_ms": 0.00008333333333333333,
+          "p99_ms": 0.001,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU main_indirect_parameters_building": {
+          "median_ms": 0.0022166666666666667,
+          "p99_ms": 0.014,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU main_opaque_pass_3d": {
+          "median_ms": 0.012583333333333334,
+          "p99_ms": 0.019,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU main_transparent_pass_3d": {
+          "median_ms": 0.019899999999999998,
+          "p99_ms": 0.045,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU shadow_directional_light_0_cascade_0": {
+          "median_ms": 0.00615,
+          "p99_ms": 0.051,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU shadow_directional_light_0_cascade_1": {
+          "median_ms": 0.0037333333333333333,
+          "p99_ms": 0.047,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU shadow_directional_light_0_cascade_2": {
+          "median_ms": 0.0215,
+          "p99_ms": 0.043,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU shadow_directional_light_0_cascade_3": {
+          "median_ms": 0.021233333333333333,
+          "p99_ms": 0.044,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU tonemapping": {
+          "median_ms": 0.0011333333333333332,
+          "p99_ms": 0.003,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU ui": {
+          "median_ms": 0.008,
+          "p99_ms": 0.008,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "RenderGraph CPU upscaling": {
+          "median_ms": 0.0005,
+          "p99_ms": 0.002,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Visible Chunks": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Volumetric Fog": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        },
+        "Water Reflection Presence CPU": {
+          "median_ms": 0.19756666666666667,
+          "p99_ms": 0.245,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Water Reflection Update CPU": {
+          "median_ms": 0.0020833333333333333,
+          "p99_ms": 0.004,
+          "calls_per_frame": 1.0,
+          "unit": "ms"
+        },
+        "Water Sim": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        },
+        "Water Upload": {
+          "median_ms": 0.0,
+          "p99_ms": 0.0,
+          "calls_per_frame": 0.0,
+          "unit": "ms"
+        }
+      },
+      "runs": [
+        {
+          "frame_ms_median": 12.309666666666667,
+          "csv": "visual-regression-naadf-gi-naadf-gi-experimental-run0.csv",
+          "screenshot": "visual-regression-naadf-gi-naadf-gi-experimental-naadf-gi-settled-run0.png",
+          "screenshots": [
+            {
+              "name": "naadf-gi-settled",
+              "frame": 899,
+              "elapsed_secs": 28.8224482,
+              "path": "visual-regression-naadf-gi-naadf-gi-experimental-naadf-gi-settled-run0.png"
+            }
+          ],
+          "ray_probe": {
+            "origin": [
+              256.0,
+              82.0,
+              220.0
+            ],
+            "direction": [
+              0.5964809,
+              -0.41294828,
+              0.68824726
+            ],
+            "max_distance": 512.0,
+            "voxel_backend": "naadf",
+            "experimental_mode": "current_with_naadf_gi",
+            "high_lod_chunks": 8184,
+            "low_lod_chunks": 8,
+            "hit": {
+              "distance": 142.90001,
+              "world_voxel": [
+                341,
+                22,
+                318
+              ],
+              "chunk": [
+                21,
+                1,
+                19
+              ],
+              "local": [
+                5,
+                6,
+                14
+              ],
+              "voxel_type": "Sand",
+              "voxel_type_id": 5,
+              "solid": true,
+              "chunk_loaded": true,
+              "chunk_lod": "Lod0",
+              "chunk_lod_step": 1,
+              "chunk_dirty": false,
+              "chunk_dirty_reason_flags": 0,
+              "mesh_entity_present": true,
+              "water_mesh_entity_present": false
+            },
+            "terminal_sample": "InBounds(Sand)"
+          },
+          "ready_wait_frames": 535,
+          "ready_wait_secs": 10.006316,
+          "ready_stable_frames": 435,
+          "ready_timed_out": false,
+          "render_ready_wait_frames": 90,
+          "render_ready_secs": 1.1570413,
+          "render_ready_stable_frames": 89,
+          "render_ready_timed_out": false,
+          "gameplay_stall_events": 0,
+          "gameplay_failed": false,
+          "gameplay_min_horizontal_speed": 3.4028235e38,
+          "gameplay_min_y": 3.4028235e38,
+          "gameplay_fall_events": 0,
+          "gameplay_dig_attempts": 0,
+          "gameplay_dig_applied": 0,
+          "gameplay_dig_rejected_crust": 0,
+          "gameplay_dig_failed": false,
+          "ready_mesh_entities": 1475,
+          "ready_water_mesh_entities": 413
+        }
+      ]
+    }
+  ]
+}
