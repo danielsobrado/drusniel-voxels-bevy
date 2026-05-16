@@ -711,7 +711,7 @@ Details:
 - Ray traversal still does not consume bounds until CPU/GPU parity is proven.
 - Added shader metadata tests for the bounds builder and packed-bound helper functions.
 
-### NAADF-073: Incremental GPU Build Queue
+### NAADF-073: GPU Build Queue Diagnostics
 
 Updated:
 
@@ -722,15 +722,14 @@ Updated:
 
 Details:
 
-- Added `NaadfGpuBuildQueue` for budgeted GPU build work.
+- Added `NaadfGpuBuildQueue` for GPU build backlog diagnostics.
 - Queue de-duplicates chunk positions.
 - Rebuilt cache chunks enqueue GPU build work.
-- Queue supports budgeted draining through `take_budgeted`.
 - Queue ages pending chunks once per update while NAADF is enabled.
 - Stats expose pending GPU build count, oldest pending age, and total queued GPU builds.
 - Debug settings UI shows pending GPU build queue size and oldest age.
-- Actual compute dispatch is still deferred.
-- Added unit coverage for dedupe, budgeted draining across frames, and oldest-age reporting.
+- GPU builder dispatch still rebuilds the full allocated structure when `prefer_gpu_builder` is enabled; dirty-slot remapped dispatch is not implemented yet.
+- Added unit coverage for dedupe and oldest-age reporting.
 
 ### NAADF-080: Sun Visibility Query
 

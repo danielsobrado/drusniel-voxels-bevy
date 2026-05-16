@@ -21,6 +21,7 @@ pub struct NaadfStats {
     pub gpu_uploads_pending: u32,
     pub gpu_uploads_queued_total: u64,
     pub gpu_uploaded_chunks_last_frame: u32,
+    pub gpu_uploaded_chunks_peak: u32,
     pub gpu_uploaded_bytes_last_frame: u32,
     pub gpu_avg_ray_steps_last_frame: f32,
     pub gpu_max_ray_steps_last_frame: u32,
@@ -42,6 +43,8 @@ pub struct NaadfStats {
     pub preview_reference_dispatches_last_frame: u32,
     pub preview_node_stage_last_frame: u32,
     pub streaming_interest_chunks: u32,
+    pub streaming_interest_missing_gpu_slots: u32,
+    pub streaming_interest_missing_gpu_slots_far_ring: u32,
     pub entity_volumes: u32,
     pub entity_volume_voxels: u32,
 }

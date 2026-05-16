@@ -14,6 +14,7 @@ use super::entities::{NaadfEntityVolumeRecord, NaadfEntityVolumeRegistry};
 use super::layout::{BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk};
 use super::prepare::NaadfUploadBudget;
 use super::stats::{NaadfRenderStatsBridge, NaadfStats};
+use super::streaming::NaadfStreamingState;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
@@ -240,6 +241,10 @@ impl NaadfGpuUploadQueue {
             queued_total: self.queued_total,
         }
     }
+
+    pub fn pending_chunks(&self) -> impl Iterator<Item = IVec3> + '_ {
+        self.pending.iter().copied()
+    }
 }
 
 impl NaadfGpuBuffers {
@@ -315,9 +320,6 @@ pub fn extract_naadf_gpu_uploads(mut commands: Commands, mut main_world: ResMut<
         let Some(table) = world.get_resource::<NaadfGpuChunkTable>() else {
             return;
         };
-        extracted.lookup_records = table.lookup_records();
-        extracted.lookup_records_generation = table.generation();
-
         let budget = NaadfUploadBudget::from(config);
         while extracted.uploads.len() < budget.max_chunks as usize {
             let Some(chunk_pos) = upload_queue.pop_pending() else {
@@ -343,6 +345,10 @@ pub fn extract_naadf_gpu_uploads(mut commands: Commands, mut main_world: ResMut<
                 .saturating_add(upload.estimated_bytes);
             extracted.uploads.push(upload);
         }
+        let pending_chunks = upload_queue.pending_chunks().collect::<HashSet<_>>();
+        extracted.lookup_records = table.lookup_records_excluding(&pending_chunks);
+        extracted.lookup_records_generation =
+            lookup_generation_for_pending_uploads(table.generation(), &pending_chunks);
     });
 
     let upload_stats = main_world
@@ -488,6 +494,8 @@ pub fn sync_gpu_chunk_table_from_cache(
     config: Res<NaadfConfig>,
     cache: Res<NaadfCache>,
     mut table: ResMut<NaadfGpuChunkTable>,
+    mut upload_queue: ResMut<NaadfGpuUploadQueue>,
+    streaming_state: Res<NaadfStreamingState>,
     mut stats: ResMut<NaadfStats>,
     mut timing: Option<ResMut<AreaTimingRecorder>>,
     frame: Option<Res<FrameCount>>,
@@ -516,13 +524,64 @@ pub fn sync_gpu_chunk_table_from_cache(
         table.release_chunk(chunk_pos);
     }
 
-    for (chunk_pos, _) in cache.iter() {
-        if table.slot_for_chunk(*chunk_pos).is_none() {
+    let mut chunk_positions = cache
+        .iter()
+        .map(|(chunk_pos, _)| *chunk_pos)
+        .collect::<Vec<_>>();
+    prioritize_chunk_positions(&mut chunk_positions, &streaming_state);
+
+    let selected_chunks = chunk_positions
+        .iter()
+        .take(config.chunk_cache.max_chunks as usize)
+        .copied()
+        .collect::<HashSet<_>>();
+    let evicted_chunks = table
+        .assigned_chunks()
+        .filter(|chunk_pos| !selected_chunks.contains(chunk_pos))
+        .collect::<Vec<_>>();
+    for chunk_pos in evicted_chunks {
+        table.release_chunk(chunk_pos);
+    }
+
+    for chunk_pos in chunk_positions {
+        if !selected_chunks.contains(&chunk_pos) {
             break;
+        }
+        let already_assigned = table.slot(chunk_pos).is_some();
+        if table.slot_for_chunk(chunk_pos).is_none() {
+            break;
+        }
+        if !already_assigned {
+            upload_queue.queue(chunk_pos);
         }
     }
 
     sync_chunk_table_stats(&table, &mut stats);
+}
+
+fn prioritize_chunk_positions(
+    chunk_positions: &mut [IVec3],
+    streaming_state: &NaadfStreamingState,
+) {
+    let Some(center_chunk) = streaming_state.center_chunk() else {
+        chunk_positions.sort_by_key(|chunk_pos| (chunk_pos.x, chunk_pos.y, chunk_pos.z));
+        return;
+    };
+    let visible_chunks = streaming_state.visible_chunks();
+    chunk_positions.sort_by_cached_key(|chunk_pos| {
+        let delta = *chunk_pos - center_chunk;
+        (
+            if visible_chunks.contains(chunk_pos) {
+                0u8
+            } else {
+                1u8
+            },
+            delta.x * delta.x + delta.y * delta.y + delta.z * delta.z,
+            chunk_pos.x,
+            chunk_pos.y,
+            chunk_pos.z,
+        )
+    });
 }
 
 fn sync_chunk_table_stats(table: &NaadfGpuChunkTable, stats: &mut NaadfStats) {
@@ -954,9 +1013,14 @@ impl NaadfGpuChunkTable {
     }
 
     pub fn lookup_records(&self) -> Vec<[u32; 4]> {
+        self.lookup_records_excluding(&HashSet::new())
+    }
+
+    pub fn lookup_records_excluding(&self, excluded_chunks: &HashSet<IVec3>) -> Vec<[u32; 4]> {
         let mut records = self
             .chunk_to_slot
             .iter()
+            .filter(|(chunk_pos, _)| !excluded_chunks.contains(chunk_pos))
             .map(|(chunk_pos, slot)| {
                 [
                     i32_to_u32_bits(chunk_pos.x),
@@ -1008,6 +1072,25 @@ impl NaadfGpuChunkTable {
     pub fn is_empty(&self) -> bool {
         self.chunk_to_slot.is_empty()
     }
+}
+
+fn lookup_generation_for_pending_uploads(
+    table_generation: u64,
+    pending_chunks: &HashSet<IVec3>,
+) -> u64 {
+    let mut positions = pending_chunks.iter().copied().collect::<Vec<_>>();
+    positions.sort_by_key(|chunk_pos| (chunk_pos.x, chunk_pos.y, chunk_pos.z));
+    let mut generation = table_generation ^ ((positions.len() as u64) << 32);
+    for chunk_pos in positions {
+        generation = generation
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .wrapping_add(chunk_pos.x as i64 as u64)
+            .wrapping_mul(0xbf58_476d_1ce4_e5b9)
+            .wrapping_add(chunk_pos.y as i64 as u64)
+            .wrapping_mul(0x94d0_49bb_1331_11eb)
+            .wrapping_add(chunk_pos.z as i64 as u64);
+    }
+    generation
 }
 
 #[cfg(test)]
@@ -1083,6 +1166,51 @@ mod tests {
                 IVec3::new(-1, 5, 0),
                 IVec3::new(2, 0, 0),
             ]
+        );
+    }
+
+    #[test]
+    fn chunk_table_lookup_records_can_exclude_pending_uploads() {
+        let mut table = NaadfGpuChunkTable::with_capacity(4);
+        assert_eq!(table.slot_for_chunk(IVec3::ZERO), Some(0));
+        assert_eq!(table.slot_for_chunk(IVec3::X), Some(1));
+        let excluded = HashSet::from([IVec3::X]);
+
+        let records = table.lookup_records_excluding(&excluded);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(i32::from_ne_bytes(records[0][0].to_ne_bytes()), 0);
+        assert_eq!(records[0][3], 0);
+    }
+
+    #[test]
+    fn pending_uploads_change_lookup_generation() {
+        let none = HashSet::new();
+        let pending = HashSet::from([IVec3::new(1, 2, 3)]);
+
+        assert_ne!(
+            lookup_generation_for_pending_uploads(7, &none),
+            lookup_generation_for_pending_uploads(7, &pending)
+        );
+    }
+
+    #[test]
+    fn chunk_priority_puts_visible_near_chunks_before_retained_cache_chunks() {
+        let mut streaming_state = NaadfStreamingState::default();
+        streaming_state
+            .set_visible_for_test(IVec3::ZERO, [IVec3::new(3, 0, 0), IVec3::new(1, 0, 0)]);
+        let mut chunk_positions = vec![
+            IVec3::new(0, 0, 1),
+            IVec3::new(3, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(0, 0, 2),
+        ];
+
+        prioritize_chunk_positions(&mut chunk_positions, &streaming_state);
+
+        assert_eq!(
+            &chunk_positions[..2],
+            &[IVec3::new(1, 0, 0), IVec3::new(3, 0, 0)]
         );
     }
 

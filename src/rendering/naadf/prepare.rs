@@ -81,18 +81,6 @@ impl NaadfGpuBuildQueue {
         true
     }
 
-    pub fn take_budgeted(&mut self, max_chunks: u32) -> Vec<NaadfGpuBuildItem> {
-        let mut items = Vec::new();
-        while items.len() < max_chunks as usize {
-            let Some(item) = self.pending.pop_front() else {
-                break;
-            };
-            self.pending_set.remove(&item.chunk_pos);
-            items.push(item);
-        }
-        items
-    }
-
     pub fn increment_ages(&mut self) {
         for item in &mut self.pending {
             item.age_frames = item.age_frames.saturating_add(1);
@@ -177,25 +165,6 @@ mod tests {
 
         assert_eq!(queue.stats().pending, 1);
         assert_eq!(queue.stats().queued_total, 1);
-    }
-
-    #[test]
-    fn gpu_build_queue_takes_budgeted_items_across_frames() {
-        let mut queue = NaadfGpuBuildQueue::default();
-        queue.queue(IVec3::X);
-        queue.queue(IVec3::Y);
-        queue.queue(IVec3::Z);
-        queue.increment_ages();
-
-        let first = queue.take_budgeted(2);
-        let second = queue.take_budgeted(2);
-
-        assert_eq!(first.len(), 2);
-        assert_eq!(first[0].chunk_pos, IVec3::X);
-        assert_eq!(first[0].age_frames, 1);
-        assert_eq!(second.len(), 1);
-        assert_eq!(second[0].chunk_pos, IVec3::Z);
-        assert_eq!(queue.stats().pending, 0);
     }
 
     #[test]

@@ -51,10 +51,8 @@ mod naadf_gpu_layout {
 
     #[test]
     fn gpu_build_dispatch_matches_cpu_upload_for_all_fixtures() {
-        let Some(gpu) = pollster::block_on(GpuContext::new()) else {
-            eprintln!("skipping NAADF GPU layout dispatch test: no headless wgpu adapter");
-            return;
-        };
+        let gpu = pollster::block_on(GpuContext::new())
+            .expect("NAADF GPU layout dispatch test requires a headless wgpu adapter");
 
         for (path, contents) in naadf_fixture_files() {
             let fixture: NaadfFixture = ron::de::from_str(contents)

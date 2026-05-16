@@ -8,8 +8,12 @@ fn build_naadf_chunks(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_index) local_index: u32,
 ) {
+    if local_index != 0u {
+        return;
+    }
+
     let chunk_index = workgroup_id.x;
-    let block_base = (chunk_index * NAADF_BLOCKS_PER_CHUNK + local_index) * NAADF_PACKED_BLOCK_WORDS;
+    let block_base = chunk_index * NAADF_BLOCKS_PER_CHUNK * NAADF_PACKED_BLOCK_WORDS;
     let chunk_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
     if naadf_chunk_records[chunk_base + 4u] != NAADF_BLOCKS_PER_CHUNK ||
         naadf_chunk_records[chunk_base + 5u] != NAADF_VOXELS_PER_CHUNK {
@@ -36,17 +40,15 @@ fn build_naadf_chunks(
             other_payload == shared_material;
     }
 
-    if local_index == 0u {
-        var chunk_node = naadf_make_node(NAADF_NODE_CHILDREN, 0u);
-        if all_empty {
-            chunk_node = naadf_make_node(NAADF_NODE_UNIFORM_EMPTY, 0u);
-        } else if all_full_same_material {
-            chunk_node = naadf_make_node(NAADF_NODE_UNIFORM_FULL, shared_material);
-        }
-
-        naadf_chunk_records[chunk_base + 0u] = chunk_node;
-        naadf_chunk_records[chunk_base + 4u] = NAADF_BLOCKS_PER_CHUNK;
-        naadf_chunk_records[chunk_base + 5u] = NAADF_VOXELS_PER_CHUNK;
-        naadf_chunk_records[chunk_base + 7u] = 0u;
+    var chunk_node = naadf_make_node(NAADF_NODE_CHILDREN, 0u);
+    if all_empty {
+        chunk_node = naadf_make_node(NAADF_NODE_UNIFORM_EMPTY, 0u);
+    } else if all_full_same_material {
+        chunk_node = naadf_make_node(NAADF_NODE_UNIFORM_FULL, shared_material);
     }
+
+    naadf_chunk_records[chunk_base + 0u] = chunk_node;
+    naadf_chunk_records[chunk_base + 4u] = NAADF_BLOCKS_PER_CHUNK;
+    naadf_chunk_records[chunk_base + 5u] = NAADF_VOXELS_PER_CHUNK;
+    naadf_chunk_records[chunk_base + 7u] = 0u;
 }

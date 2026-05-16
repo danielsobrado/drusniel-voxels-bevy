@@ -242,6 +242,11 @@ pub struct NaadfPreviewTemporalHistory {
     slots: Mutex<HashMap<RetainedViewEntity, NaadfPreviewTemporalHistorySlot>>,
 }
 
+#[derive(Resource, Default)]
+pub struct NaadfPreviewScratchTextures {
+    slots: Mutex<HashMap<RetainedViewEntity, NaadfPreviewScratchTextureSlot>>,
+}
+
 struct NaadfPreviewTemporalHistorySlot {
     size: Extent3d,
     history_generation: u64,
@@ -251,6 +256,31 @@ struct NaadfPreviewTemporalHistorySlot {
     write_texture: Texture,
     read_moments_texture: Texture,
     write_moments_texture: Texture,
+}
+
+struct NaadfPreviewScratchTextureSlot {
+    size: Extent3d,
+    first_hit_texture: Texture,
+    first_hit_depth_texture: Texture,
+    first_hit_normal_texture: Texture,
+    first_hit_motion_texture: Texture,
+    gi_texture: Texture,
+    spatial_filtered_texture: Texture,
+    denoise_ping_texture: Option<Texture>,
+    denoise_pong_texture: Option<Texture>,
+    path_trace_texture: Option<Texture>,
+}
+
+struct NaadfPreviewScratchViews {
+    first_hit: TextureView,
+    first_hit_depth: TextureView,
+    first_hit_normal: TextureView,
+    first_hit_motion: TextureView,
+    gi: TextureView,
+    spatial_filtered: TextureView,
+    denoise_ping: Option<TextureView>,
+    denoise_pong: Option<TextureView>,
+    path_trace: Option<TextureView>,
 }
 
 #[derive(Resource, Default)]
@@ -277,6 +307,91 @@ impl NaadfPreviewPassStats {
 
     fn snapshot(&self) -> NaadfPreviewPassStatsSnapshot {
         *self.last_frame.lock().unwrap()
+    }
+}
+
+impl NaadfPreviewScratchTextures {
+    fn views_for_frame(
+        &self,
+        render_device: &bevy::render::renderer::RenderDevice,
+        view: RetainedViewEntity,
+        size: Extent3d,
+        needs_denoise: bool,
+        needs_path_trace: bool,
+    ) -> NaadfPreviewScratchViews {
+        let mut slots = self.slots.lock().unwrap();
+        let slot = slots.entry(view).or_insert_with(|| {
+            create_preview_scratch_texture_slot(
+                render_device,
+                size,
+                needs_denoise,
+                needs_path_trace,
+            )
+        });
+        if slot.size != size {
+            *slot = create_preview_scratch_texture_slot(
+                render_device,
+                size,
+                needs_denoise,
+                needs_path_trace,
+            );
+        }
+        if needs_denoise {
+            if slot.denoise_ping_texture.is_none() {
+                slot.denoise_ping_texture = Some(create_preview_texture(
+                    render_device,
+                    "naadf_preview_denoise_ping_texture",
+                    size,
+                ));
+            }
+            if slot.denoise_pong_texture.is_none() {
+                slot.denoise_pong_texture = Some(create_preview_texture(
+                    render_device,
+                    "naadf_preview_denoise_pong_texture",
+                    size,
+                ));
+            }
+        }
+        if needs_path_trace && slot.path_trace_texture.is_none() {
+            slot.path_trace_texture = Some(create_preview_texture(
+                render_device,
+                "naadf_preview_path_trace_texture",
+                size,
+            ));
+        }
+
+        NaadfPreviewScratchViews {
+            first_hit: slot
+                .first_hit_texture
+                .create_view(&TextureViewDescriptor::default()),
+            first_hit_depth: slot
+                .first_hit_depth_texture
+                .create_view(&TextureViewDescriptor::default()),
+            first_hit_normal: slot
+                .first_hit_normal_texture
+                .create_view(&TextureViewDescriptor::default()),
+            first_hit_motion: slot
+                .first_hit_motion_texture
+                .create_view(&TextureViewDescriptor::default()),
+            gi: slot
+                .gi_texture
+                .create_view(&TextureViewDescriptor::default()),
+            spatial_filtered: slot
+                .spatial_filtered_texture
+                .create_view(&TextureViewDescriptor::default()),
+            denoise_ping: slot
+                .denoise_ping_texture
+                .as_ref()
+                .map(|texture| texture.create_view(&TextureViewDescriptor::default())),
+            denoise_pong: slot
+                .denoise_pong_texture
+                .as_ref()
+                .map(|texture| texture.create_view(&TextureViewDescriptor::default())),
+            path_trace: slot
+                .path_trace_texture
+                .as_ref()
+                .map(|texture| texture.create_view(&TextureViewDescriptor::default())),
+        }
     }
 }
 
@@ -784,58 +899,28 @@ impl ViewNode for NaadfPreviewBuildNode {
             publish_preview_node_stage(world, 21);
             return Ok(());
         }
-        let preview_texture =
-            create_preview_texture(&render_device, "naadf_preview_first_hit_texture", size);
-        let preview_view = preview_texture.create_view(&TextureViewDescriptor::default());
-        let preview_depth_texture = create_preview_texture(
-            &render_device,
-            "naadf_preview_first_hit_depth_texture",
-            size,
-        );
-        let preview_depth_view =
-            preview_depth_texture.create_view(&TextureViewDescriptor::default());
-        let preview_normal_texture = create_preview_texture(
-            &render_device,
-            "naadf_preview_first_hit_normal_texture",
-            size,
-        );
-        let preview_normal_view =
-            preview_normal_texture.create_view(&TextureViewDescriptor::default());
-        let preview_motion_texture = create_preview_texture(
-            &render_device,
-            "naadf_preview_first_hit_motion_texture",
-            size,
-        );
-        let preview_motion_view =
-            preview_motion_texture.create_view(&TextureViewDescriptor::default());
-        let gi_texture = create_preview_texture(&render_device, "naadf_preview_gi_texture", size);
-        let gi_view = gi_texture.create_view(&TextureViewDescriptor::default());
-        let filtered_texture = create_preview_texture(
-            &render_device,
-            "naadf_preview_spatial_filtered_texture",
-            size,
-        );
-        let filtered_view = filtered_texture.create_view(&TextureViewDescriptor::default());
-        let denoise_ping = (denoise_iterations > 0).then(|| {
-            let texture =
-                create_preview_texture(&render_device, "naadf_preview_denoise_ping_texture", size);
-            let view = texture.create_view(&TextureViewDescriptor::default());
-            (texture, view)
-        });
-        let denoise_pong = (denoise_iterations > 0).then(|| {
-            let texture =
-                create_preview_texture(&render_device, "naadf_preview_denoise_pong_texture", size);
-            let view = texture.create_view(&TextureViewDescriptor::default());
-            (texture, view)
-        });
-        let path_trace_output = preview_settings.reference_path_tracing_enabled.then(|| {
-            let texture =
-                create_preview_texture(&render_device, "naadf_preview_path_trace_texture", size);
-            let view = texture.create_view(&TextureViewDescriptor::default());
-            (texture, view)
-        });
-        let Some(temporal_history) = world.get_resource::<NaadfPreviewTemporalHistory>() else {
+        let Some(scratch_textures) = world.get_resource::<NaadfPreviewScratchTextures>() else {
             publish_preview_node_stage(world, 22);
+            return Ok(());
+        };
+        let scratch_views = scratch_textures.views_for_frame(
+            &render_device,
+            extracted_view.retained_view_entity,
+            size,
+            denoise_iterations > 0,
+            preview_settings.reference_path_tracing_enabled,
+        );
+        let preview_view = scratch_views.first_hit;
+        let preview_depth_view = scratch_views.first_hit_depth;
+        let preview_normal_view = scratch_views.first_hit_normal;
+        let preview_motion_view = scratch_views.first_hit_motion;
+        let gi_view = scratch_views.gi;
+        let filtered_view = scratch_views.spatial_filtered;
+        let denoise_ping = scratch_views.denoise_ping;
+        let denoise_pong = scratch_views.denoise_pong;
+        let path_trace_output = scratch_views.path_trace;
+        let Some(temporal_history) = world.get_resource::<NaadfPreviewTemporalHistory>() else {
+            publish_preview_node_stage(world, 23);
             return Ok(());
         };
         let (
@@ -923,14 +1008,14 @@ impl ViewNode for NaadfPreviewBuildNode {
             let source_view = if iteration == 0 {
                 &temporal_output_view
             } else if iteration % 2 == 1 {
-                &denoise_ping.as_ref().unwrap().1
+                denoise_ping.as_ref().unwrap()
             } else {
-                &denoise_pong.as_ref().unwrap().1
+                denoise_pong.as_ref().unwrap()
             };
             let output_view = if iteration % 2 == 0 {
-                &denoise_ping.as_ref().unwrap().1
+                denoise_ping.as_ref().unwrap()
             } else {
-                &denoise_pong.as_ref().unwrap().1
+                denoise_pong.as_ref().unwrap()
             };
             denoise_groups.push(render_device.create_bind_group(
                 "naadf_denoise_bind_group",
@@ -1058,12 +1143,12 @@ impl ViewNode for NaadfPreviewBuildNode {
         let path_trace_source_view = if denoise_iterations == 0 {
             &temporal_output_view
         } else if denoise_iterations % 2 == 1 {
-            &denoise_ping.as_ref().unwrap().1
+            denoise_ping.as_ref().unwrap()
         } else {
-            &denoise_pong.as_ref().unwrap().1
+            denoise_pong.as_ref().unwrap()
         };
         let path_trace_group = if preview_settings.reference_path_tracing_enabled {
-            let path_trace_view = &path_trace_output.as_ref().unwrap().1;
+            let path_trace_view = path_trace_output.as_ref().unwrap();
             Some(render_device.create_bind_group(
                 "naadf_path_trace_bind_group",
                 &pipeline_cache.get_bind_group_layout(&pipelines.path_trace_layout),
@@ -1080,7 +1165,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             None
         };
         let composite_source_view = if path_trace_group.is_some() {
-            &path_trace_output.as_ref().unwrap().1
+            path_trace_output.as_ref().unwrap()
         } else {
             path_trace_source_view
         };
@@ -1445,72 +1530,30 @@ impl NaadfPreviewTemporalHistory {
         Mat4,
     ) {
         let mut slots = self.slots.lock().unwrap();
-        let first_frame = !slots.contains_key(&view);
         let current_clip_from_world = clip_from_world_matrix(world_from_view, clip_from_view);
-        let slot = slots
-            .entry(view)
-            .or_insert_with(|| NaadfPreviewTemporalHistorySlot {
-                size,
-                history_generation,
-                world_from_view,
-                clip_from_view,
-                read_texture: create_preview_texture(
-                    render_device,
-                    "naadf_preview_temporal_history_read_texture",
-                    size,
-                ),
-                write_texture: create_preview_texture(
-                    render_device,
-                    "naadf_preview_temporal_history_write_texture",
-                    size,
-                ),
-                read_moments_texture: create_moments_texture(
-                    render_device,
-                    "naadf_preview_temporal_moments_read_texture",
-                    size,
-                ),
-                write_moments_texture: create_moments_texture(
-                    render_device,
-                    "naadf_preview_temporal_moments_write_texture",
-                    size,
-                ),
-            });
-
-        let reset_history =
-            first_frame || slot.size != size || slot.history_generation != history_generation;
-        let previous_clip_from_world = if reset_history {
-            current_clip_from_world
-        } else {
-            clip_from_world_matrix(slot.world_from_view, slot.clip_from_view)
-        };
+        let reset_history = slots
+            .get(&view)
+            .is_none_or(|slot| slot.size != size || slot.history_generation != history_generation);
+        let previous_clip_from_world = slots
+            .get(&view)
+            .filter(|_| !reset_history)
+            .map(|slot| clip_from_world_matrix(slot.world_from_view, slot.clip_from_view))
+            .unwrap_or(current_clip_from_world);
         if reset_history {
-            *slot = NaadfPreviewTemporalHistorySlot {
-                size,
-                history_generation,
-                world_from_view,
-                clip_from_view,
-                read_texture: create_preview_texture(
+            slots.insert(
+                view,
+                create_preview_temporal_history_slot(
                     render_device,
-                    "naadf_preview_temporal_history_read_texture",
                     size,
+                    history_generation,
+                    world_from_view,
+                    clip_from_view,
                 ),
-                write_texture: create_preview_texture(
-                    render_device,
-                    "naadf_preview_temporal_history_write_texture",
-                    size,
-                ),
-                read_moments_texture: create_moments_texture(
-                    render_device,
-                    "naadf_preview_temporal_moments_read_texture",
-                    size,
-                ),
-                write_moments_texture: create_moments_texture(
-                    render_device,
-                    "naadf_preview_temporal_moments_write_texture",
-                    size,
-                ),
-            };
+            );
         }
+        let slot = slots
+            .get(&view)
+            .expect("NAADF temporal history slot exists");
 
         (
             slot.read_texture
@@ -1567,6 +1610,87 @@ fn preview_extent_from_viewport(width: u32, height: u32, resolution_scale: f32) 
         width: scaled_width,
         height: scaled_height,
         depth_or_array_layers: 1,
+    }
+}
+
+fn create_preview_scratch_texture_slot(
+    render_device: &bevy::render::renderer::RenderDevice,
+    size: Extent3d,
+    needs_denoise: bool,
+    needs_path_trace: bool,
+) -> NaadfPreviewScratchTextureSlot {
+    NaadfPreviewScratchTextureSlot {
+        size,
+        first_hit_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_first_hit_texture",
+            size,
+        ),
+        first_hit_depth_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_first_hit_depth_texture",
+            size,
+        ),
+        first_hit_normal_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_first_hit_normal_texture",
+            size,
+        ),
+        first_hit_motion_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_first_hit_motion_texture",
+            size,
+        ),
+        gi_texture: create_preview_texture(render_device, "naadf_preview_gi_texture", size),
+        spatial_filtered_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_spatial_filtered_texture",
+            size,
+        ),
+        denoise_ping_texture: needs_denoise.then(|| {
+            create_preview_texture(render_device, "naadf_preview_denoise_ping_texture", size)
+        }),
+        denoise_pong_texture: needs_denoise.then(|| {
+            create_preview_texture(render_device, "naadf_preview_denoise_pong_texture", size)
+        }),
+        path_trace_texture: needs_path_trace.then(|| {
+            create_preview_texture(render_device, "naadf_preview_path_trace_texture", size)
+        }),
+    }
+}
+
+fn create_preview_temporal_history_slot(
+    render_device: &bevy::render::renderer::RenderDevice,
+    size: Extent3d,
+    history_generation: u64,
+    world_from_view: Mat4,
+    clip_from_view: Mat4,
+) -> NaadfPreviewTemporalHistorySlot {
+    NaadfPreviewTemporalHistorySlot {
+        size,
+        history_generation,
+        world_from_view,
+        clip_from_view,
+        read_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_temporal_history_read_texture",
+            size,
+        ),
+        write_texture: create_preview_texture(
+            render_device,
+            "naadf_preview_temporal_history_write_texture",
+            size,
+        ),
+        read_moments_texture: create_moments_texture(
+            render_device,
+            "naadf_preview_temporal_moments_read_texture",
+            size,
+        ),
+        write_moments_texture: create_moments_texture(
+            render_device,
+            "naadf_preview_temporal_moments_write_texture",
+            size,
+        ),
     }
 }
 

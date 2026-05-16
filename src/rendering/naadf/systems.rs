@@ -41,6 +41,9 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
     stats.gpu_memory_bytes = snapshot.gpu_memory_bytes;
     stats.gpu_max_chunks = snapshot.gpu_max_chunks;
     stats.gpu_uploaded_chunks_last_frame = snapshot.gpu_uploaded_chunks_last_frame;
+    stats.gpu_uploaded_chunks_peak = stats
+        .gpu_uploaded_chunks_peak
+        .max(snapshot.gpu_uploaded_chunks_last_frame);
     stats.gpu_uploaded_bytes_last_frame = snapshot.gpu_uploaded_bytes_last_frame;
     stats.gpu_max_ray_steps_last_frame = snapshot.gpu_max_ray_steps_last_frame;
     stats.gi_rays_last_frame = snapshot.gi_rays_last_frame;
@@ -75,6 +78,34 @@ pub fn record_naadf_bench_counters(
     timing.record_count(frame.0, "naadf.chunks_resident", stats.loaded_chunks as f64);
     timing.record_count(
         frame.0,
+        "naadf.streaming_interest_chunks",
+        stats.streaming_interest_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_interest_missing_gpu_slots",
+        stats.streaming_interest_missing_gpu_slots as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_interest_missing_gpu_slots_far_ring",
+        stats.streaming_interest_missing_gpu_slots_far_ring as f64,
+    );
+    timing.record_count(frame.0, "naadf.gpu_slots_used", stats.gpu_slots_used as f64);
+    timing.record_count(
+        frame.0,
+        "naadf.gpu_slots_available",
+        stats.gpu_slots_available as f64,
+    );
+    timing.record_count(frame.0, "naadf.gpu_max_chunks", stats.gpu_max_chunks as f64);
+    let slot_coverage = if stats.loaded_chunks == 0 {
+        1.0
+    } else {
+        stats.gpu_slots_used as f64 / stats.loaded_chunks as f64
+    };
+    timing.record_count(frame.0, "naadf.gpu_slot_coverage", slot_coverage);
+    timing.record_count(
+        frame.0,
         "naadf.dirty_chunks_pending",
         stats.dirty_pending as f64,
     );
@@ -87,6 +118,16 @@ pub fn record_naadf_bench_counters(
         frame.0,
         "naadf.uploaded_chunks_last_frame",
         stats.gpu_uploaded_chunks_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.uploaded_chunks_peak",
+        stats.gpu_uploaded_chunks_peak as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.gpu_uploads_pending",
+        stats.gpu_uploads_pending as f64,
     );
     timing.record_count(
         frame.0,

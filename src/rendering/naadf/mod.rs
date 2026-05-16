@@ -192,6 +192,7 @@ impl Plugin for NaadfPlugin {
             .init_resource::<gpu_buffers::NaadfGpuUploadQueue>()
             .init_resource::<prepare::NaadfGpuBuildQueue>()
             .init_resource::<NaadfStats>()
+            .init_resource::<streaming::NaadfStreamingState>()
             .insert_resource(render_stats_bridge.clone())
             .init_resource::<NaadfCacheState>()
             .init_resource::<debug::NaadfDebugRayVisuals>()
@@ -202,12 +203,13 @@ impl Plugin for NaadfPlugin {
                 Update,
                 (
                     dirty::queue_existing_dirty_chunks,
+                    streaming::update_visible_region_cache,
                     cache::rebuild_naadf_cache_from_dirty_queue,
                     gpu_buffers::sync_gpu_chunk_table_from_cache,
                     gpu_buffers::queue_gpu_uploads_from_cache_report,
                     prepare::queue_gpu_builds_from_cache_report,
                     prepare::sync_gpu_build_queue_stats,
-                    streaming::update_visible_region_cache,
+                    streaming::sync_streaming_gpu_slot_stats,
                     entities::sync_naadf_entity_volume_registry,
                     systems::sync_naadf_stats_from_dirty_queue,
                     systems::sync_naadf_render_stats_bridge_to_stats,
@@ -242,6 +244,7 @@ impl Plugin for NaadfPlugin {
                 .init_resource::<gpu_buffers::NaadfEntityGpuBuffers>()
                 .init_resource::<gpu_buffers::NaadfGpuUploadStats>()
                 .init_resource::<pipeline::NaadfPreviewTemporalHistory>()
+                .init_resource::<pipeline::NaadfPreviewScratchTextures>()
                 .init_resource::<pipeline::NaadfPreviewPassStats>()
                 .add_systems(RenderStartup, pipeline::init_naadf_preview_build_pipelines)
                 .add_systems(
