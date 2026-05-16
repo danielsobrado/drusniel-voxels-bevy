@@ -4,7 +4,7 @@ use std::collections::{HashSet, VecDeque};
 
 use super::config::NaadfConfig;
 use super::streaming::{
-    vertical_stream_radius_chunks, visible_region_targets, world_position_to_chunk,
+    vertical_stream_radius_chunks, visible_loaded_region_targets, world_position_to_chunk,
 };
 use crate::camera::controller::PlayerCamera;
 use crate::performance::{AreaTimingRecorder, area_timer};
@@ -94,7 +94,8 @@ pub fn queue_existing_dirty_chunks(
                 .iter()
                 .next()
                 .map(|camera_transform| {
-                    visible_region_targets(
+                    visible_loaded_region_targets(
+                        &world,
                         world_position_to_chunk(camera_transform.translation()),
                         config.chunk_cache.radius_chunks.max(0),
                         vertical_stream_radius_chunks(config.chunk_cache.radius_chunks.max(0)),

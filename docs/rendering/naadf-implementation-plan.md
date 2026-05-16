@@ -91,7 +91,7 @@ rendering:
 naadf:
   enabled: false
   build_visible_chunks_only: true
-  max_chunk_updates_per_frame: 4
+  max_chunk_updates_per_frame: 16
   max_gpu_memory_mb: 512
   allow_integrated_gpu: false
   debug_visualize: false

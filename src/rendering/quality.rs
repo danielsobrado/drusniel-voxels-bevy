@@ -132,8 +132,8 @@ impl RenderQualityPreset {
     pub fn naadf_max_chunk_updates_per_frame(self) -> u32 {
         match self {
             Self::Low => 1,
-            Self::Medium => 2,
-            Self::High => 4,
+            Self::Medium => 4,
+            Self::High => 16,
             Self::Performance100 => 1,
         }
     }
@@ -141,8 +141,8 @@ impl RenderQualityPreset {
     pub fn naadf_max_upload_bytes_per_frame(self) -> u32 {
         match self {
             Self::Low => 1 * 1024 * 1024,
-            Self::Medium => 2 * 1024 * 1024,
-            Self::High => 4 * 1024 * 1024,
+            Self::Medium => 4 * 1024 * 1024,
+            Self::High => 16 * 1024 * 1024,
             Self::Performance100 => 1 * 1024 * 1024,
         }
     }

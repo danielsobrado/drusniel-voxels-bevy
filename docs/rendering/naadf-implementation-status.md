@@ -1287,14 +1287,47 @@ Results:
 - The non-visual `bench_guard` binary tests were run after adding configurable NAADF guard threshold expansion and frame regression checks.
 - The feature-gated NAADF config tests were run after adding explicit release-gate/default-off coverage.
 - Feature-gated dirty, prepare, layout, radiance, and GPU test-helper tests were rerun after the NAADF-FIX review batch.
+- `rtk cargo test --features naadf rendering::naadf --lib`: 119 tests passed after the loaded-chunk preview coverage fix.
+- `rtk cargo test --features naadf rendering::quality --lib`: 2 tests passed after raising High-quality NAADF warmup budgets.
+
+## 2026-05-16 Preview Coverage Follow-Up
+
+Manual split-view testing still showed missing high/far terrain after the visible-slot starvation fix. The follow-up diagnosis found a second coverage problem: the NAADF preview interest set was synthesized from fixed X/Y/Z offsets, so capacity could be spent on unloaded or empty positions while loaded `VoxelWorld` chunks that the normal renderer displayed were not selected.
+
+Updated behavior:
+
+- The NAADF visible interest set is now derived from loaded `VoxelWorld` chunks inside the NAADF stream radius.
+- The synthetic fallback target shape is circular in XZ instead of square, matching the legacy horizontal cull model more closely.
+- Default/manual preview coverage now uses `radius_chunks = 20`, matching `DEFAULT_CULL_DISTANCE = 320` at 16 units per chunk.
+- Default/manual GPU slot capacity is `8192`, with High-quality warmup budgets raised to 16 chunks / 16 MiB per frame.
+- The preview and startup-stability NAADF benches now run the 20-chunk / 8192-slot coverage path.
+
+Verification:
+
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview.toml`
+  - Run: `bench-runs/2026-05-16T08-05-08Z/summary.json`
+  - Median / p99 frame: 41.34 ms / 74.42 ms
+  - `naadf.streaming_interest_chunks = 7584`
+  - `naadf.gpu_slots_used = 7896`, `naadf.gpu_max_chunks = 8192`, `naadf.gpu_slots_available = 296`
+  - `naadf.streaming_interest_missing_gpu_slots = 0`
+  - `naadf.gpu_uploads_pending = 0`
+  - `naadf.uploaded_chunks_peak = 1309`
+  - Settled screenshot visually contains the high mountain cap and far structures.
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-startup-stability.toml`
+  - Run: `bench-runs/2026-05-16T08-12-27Z/summary.json`
+  - Median / p99 frame: 41.59 ms / 71.66 ms
+  - First staged screenshot at frame 120 (`elapsed_secs = 63.90`) was already visually stable for the tested checkpoint.
+  - Startup trace CSVs were emitted for wait-ready, render-ready, and settle phases.
+- `rtk cargo run --bin bench_guard -- bench-runs/2026-05-16T08-05-08Z/summary.json`: passed with one known warning for `naadf.max_ray_steps_last_frame = 256`.
+- `rtk cargo run --bin bench_guard -- bench-runs/2026-05-16T08-12-27Z/summary.json`: passed with the same known max-ray-steps warning.
 
 Known warning:
 
 - Existing warning in `src/main.rs`: unused variable `use_vulkan_on_windows`.
 
-## Verification Not Run
+## Historical Verification Not Run
 
-Per request, no visual/runtime verification has been run.
+Earlier NAADF batches deferred visual/runtime verification. The latest preview coverage follow-up above has now run the preview and startup-stability benches.
 
 Not run:
 

@@ -9,6 +9,7 @@ use super::gpu_buffers::NaadfGpuChunkTable;
 use super::stats::NaadfStats;
 use crate::camera::controller::PlayerCamera;
 use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::voxel::world::VoxelWorld;
 
 pub(crate) const MIN_VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;
 
@@ -45,6 +46,7 @@ impl NaadfStreamingState {
 
 pub fn update_visible_region_cache(
     config: Res<NaadfConfig>,
+    world: Res<VoxelWorld>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut state: ResMut<NaadfStreamingState>,
     mut cache: ResMut<NaadfCache>,
@@ -83,7 +85,8 @@ pub fn update_visible_region_cache(
     let hysteresis = config.chunk_cache.hysteresis_chunks.max(0);
     let max_chunks = config.chunk_cache.max_chunks as usize;
     let vertical_radius = vertical_stream_radius_chunks(radius);
-    let targets = visible_region_targets(center_chunk, radius, vertical_radius, max_chunks);
+    let targets =
+        visible_loaded_region_targets(&world, center_chunk, radius, vertical_radius, max_chunks);
     state.visible_chunks.clear();
     state.visible_chunks.extend(targets.iter().copied());
 
@@ -161,6 +164,9 @@ pub fn visible_region_targets(
     let mut horizontal_offsets = Vec::new();
     for z in -radius..=radius {
         for x in -radius..=radius {
+            if !within_horizontal_radius(x, z, radius) {
+                continue;
+            }
             horizontal_offsets.push(IVec2::new(x, z));
         }
     }
@@ -214,6 +220,22 @@ pub fn visible_region_targets(
     targets
 }
 
+pub fn visible_loaded_region_targets(
+    world: &VoxelWorld,
+    center: IVec3,
+    radius: i32,
+    vertical_radius: i32,
+    max_chunks: usize,
+) -> Vec<IVec3> {
+    let mut targets = world
+        .chunk_positions()
+        .filter(|chunk_pos| chunk_in_stream_region(center, *chunk_pos, radius, vertical_radius))
+        .collect::<Vec<_>>();
+    targets.sort_by_cached_key(|chunk_pos| chunk_priority_key(center, *chunk_pos));
+    targets.truncate(max_chunks);
+    targets
+}
+
 pub(crate) fn vertical_stream_radius_chunks(horizontal_radius: i32) -> i32 {
     horizontal_radius.max(MIN_VERTICAL_STREAM_RADIUS_CHUNKS)
 }
@@ -228,21 +250,50 @@ fn vertical_offsets_by_priority(radius: i32) -> Vec<i32> {
     offsets
 }
 
-pub fn should_evict_chunk(
+fn chunk_in_stream_region(
     center: IVec3,
     chunk_pos: IVec3,
     horizontal_radius: i32,
     vertical_radius: i32,
 ) -> bool {
     let delta = chunk_pos - center;
-    delta.x.abs() > horizontal_radius
-        || delta.z.abs() > horizontal_radius
-        || delta.y.abs() > vertical_radius
+    delta.y.abs() <= vertical_radius
+        && within_horizontal_radius(delta.x, delta.z, horizontal_radius)
+}
+
+fn within_horizontal_radius(x: i32, z: i32, radius: i32) -> bool {
+    let radius = radius.max(0) as i64;
+    let x = x as i64;
+    let z = z as i64;
+    x * x + z * z <= radius * radius
+}
+
+fn chunk_priority_key(center: IVec3, chunk_pos: IVec3) -> (i64, i32, bool, i32, i32, i32) {
+    let delta = chunk_pos - center;
+    let horizontal_distance = delta.x as i64 * delta.x as i64 + delta.z as i64 * delta.z as i64;
+    (
+        horizontal_distance,
+        delta.y.abs(),
+        delta.y < 0,
+        chunk_pos.x,
+        chunk_pos.y,
+        chunk_pos.z,
+    )
+}
+
+pub fn should_evict_chunk(
+    center: IVec3,
+    chunk_pos: IVec3,
+    horizontal_radius: i32,
+    vertical_radius: i32,
+) -> bool {
+    !chunk_in_stream_region(center, chunk_pos, horizontal_radius, vertical_radius)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxel::chunk::Chunk;
 
     #[test]
     fn visible_region_targets_include_center_and_respect_cap() {
@@ -267,8 +318,48 @@ mod tests {
         let targets = visible_region_targets(center, 12, vertical_stream_radius_chunks(12), 4096);
 
         assert!(targets.contains(&(center + IVec3::new(12, 0, 0))));
-        assert!(targets.contains(&(center + IVec3::new(-12, 2, -12))));
-        assert!(targets.contains(&(center + IVec3::new(12, -2, 12))));
+        assert!(targets.contains(&(center + IVec3::new(-12, 2, 0))));
+        assert!(targets.contains(&(center + IVec3::new(12, -2, 0))));
+        assert!(!targets.contains(&(center + IVec3::new(12, 0, 12))));
+    }
+
+    #[test]
+    fn visible_region_targets_cover_legacy_cull_radius_baseline() {
+        let center = IVec3::new(16, 1, 16);
+        let targets = visible_region_targets(center, 20, vertical_stream_radius_chunks(20), 8192);
+
+        assert!(targets.contains(&(center + IVec3::new(20, 0, 0))));
+        assert!(targets.contains(&(center + IVec3::new(0, 2, 20))));
+        assert!(!targets.contains(&(center + IVec3::new(20, 0, 20))));
+    }
+
+    #[test]
+    fn visible_loaded_region_targets_keep_loaded_high_and_far_chunks() {
+        let center = IVec3::new(16, 1, 16);
+        let mut world = VoxelWorld::new(IVec3::new(64, 32, 64));
+        let loaded_chunks = [
+            center,
+            center + IVec3::new(20, 8, 0),
+            center + IVec3::new(0, 8, 20),
+            center + IVec3::new(20, 21, 0),
+            center + IVec3::new(20, 8, 20),
+        ];
+        for chunk_pos in loaded_chunks {
+            world.insert_chunk(Chunk::new(chunk_pos));
+        }
+
+        let targets = visible_loaded_region_targets(
+            &world,
+            center,
+            20,
+            vertical_stream_radius_chunks(20),
+            8192,
+        );
+
+        assert!(targets.contains(&(center + IVec3::new(20, 8, 0))));
+        assert!(targets.contains(&(center + IVec3::new(0, 8, 20))));
+        assert!(!targets.contains(&(center + IVec3::new(20, 21, 0))));
+        assert!(!targets.contains(&(center + IVec3::new(20, 8, 20))));
     }
 
     #[test]
@@ -278,6 +369,7 @@ mod tests {
             MIN_VERTICAL_STREAM_RADIUS_CHUNKS
         );
         assert_eq!(vertical_stream_radius_chunks(12), 12);
+        assert_eq!(vertical_stream_radius_chunks(20), 20);
     }
 
     #[test]
@@ -285,6 +377,7 @@ mod tests {
         let center = IVec3::ZERO;
 
         assert!(!should_evict_chunk(center, IVec3::new(4, 0, 0), 4, 2));
+        assert!(should_evict_chunk(center, IVec3::new(4, 0, 4), 4, 2));
         assert!(should_evict_chunk(center, IVec3::new(5, 0, 0), 4, 2));
         assert!(should_evict_chunk(center, IVec3::new(0, 3, 0), 4, 2));
     }

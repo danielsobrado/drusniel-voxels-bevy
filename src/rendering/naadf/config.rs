@@ -209,7 +209,7 @@ fn default_true() -> bool {
 }
 
 fn default_radius_chunks() -> i32 {
-    12
+    20
 }
 
 fn default_hysteresis_chunks() -> i32 {
@@ -217,15 +217,15 @@ fn default_hysteresis_chunks() -> i32 {
 }
 
 fn default_max_chunks() -> u32 {
-    4096
+    8192
 }
 
 fn default_max_chunk_updates_per_frame() -> u32 {
-    4
+    16
 }
 
 fn default_max_upload_bytes_per_frame() -> u32 {
-    4 * 1024 * 1024
+    16 * 1024 * 1024
 }
 
 fn default_max_gpu_memory_mb() -> u32 {
