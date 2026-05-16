@@ -1,5 +1,5 @@
 seed = 12345
-duration_warmup_secs = 1.0
+duration_warmup_secs = 5.0
 median_runs = 1
 chunk_load_radius = 6
 freeze_terrain_lod_after_ready = false
@@ -8,22 +8,27 @@ world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 [render_toggles]
 voxel_ray_backend = "naadf"
 experimental_render_mode = "current_with_naadf_gi"
+disable_reflection_cameras = true
 naadf_force_cpu_builder = true
-naadf_max_chunk_updates_per_frame = 4
+naadf_radius_chunks = 3
+naadf_max_chunks = 384
+naadf_max_chunk_updates_per_frame = 384
+naadf_max_upload_bytes_per_frame = 67108864
+naadf_history_resolution_scale = 0.25
 
 [[checkpoint]]
 name = "naadf-live-lod-ridge-run"
 position = [256.0, 82.0, 220.0]
 look_at = [282.0, 64.0, 250.0]
 time_of_day = 0.42
-hold_frames = 180
+hold_frames = 900
 screenshot = true
 fog_tier = "off"
 motion = { kind = "run", end_position = [320.0, 82.0, 284.0], end_look_at = [344.0, 64.0, 304.0], look_sway_degrees = 10.0 }
 screenshot_points = [
-    { name = "start", frame = 0 },
-    { name = "mid", frame = 90 },
-    { name = "end", frame = 179 },
+    { name = "start", frame = 300 },
+    { name = "mid", frame = 600 },
+    { name = "end", frame = 899 },
 ]
 
 [[checkpoint]]
@@ -31,14 +36,14 @@ name = "naadf-live-lod-jump-water"
 position = [256.0, 86.0, 220.0]
 look_at = [284.0, 64.0, 250.0]
 time_of_day = 0.72
-hold_frames = 180
+hold_frames = 900
 screenshot = true
 fog_tier = "off"
 motion = { kind = "run_jump_look", end_position = [320.0, 86.0, 284.0], end_look_at = [348.0, 64.0, 312.0], jump_height = 8.0, bob_amplitude = 0.12, look_sway_degrees = 16.0 }
 screenshot_points = [
-    { name = "takeoff", frame = 0 },
-    { name = "apex", frame = 90 },
-    { name = "landing", frame = 179 },
+    { name = "takeoff", frame = 300 },
+    { name = "apex", frame = 600 },
+    { name = "landing", frame = 899 },
 ]
 
 [[checkpoint]]
@@ -46,12 +51,12 @@ name = "naadf-live-lod-forest-sweep"
 position = [292.0, 88.0, 304.0]
 look_at = [246.0, 62.0, 260.0]
 time_of_day = 0.3
-hold_frames = 180
+hold_frames = 900
 screenshot = true
 fog_tier = "off"
 motion = { kind = "run_look_sweep", end_position = [264.0, 88.0, 277.0], end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
 screenshot_points = [
-    { name = "left", frame = 0 },
-    { name = "center", frame = 90 },
-    { name = "right", frame = 179 },
+    { name = "left", frame = 300 },
+    { name = "center", frame = 600 },
+    { name = "right", frame = 899 },
 ]

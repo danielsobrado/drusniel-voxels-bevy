@@ -1,7 +1,13 @@
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashSet, VecDeque};
 
 use super::config::NaadfConfig;
+use super::streaming::{
+    VERTICAL_STREAM_RADIUS_CHUNKS, visible_region_targets, world_position_to_chunk,
+};
+use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]
@@ -64,15 +70,53 @@ impl NaadfDirtyChunkQueue {
 
 pub fn queue_existing_dirty_chunks(
     config: Res<NaadfConfig>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut world: ResMut<VoxelWorld>,
     mut queue: ResMut<NaadfDirtyChunkQueue>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Option<Res<FrameCount>>,
 ) {
+    let _timer = timing.as_deref_mut().map(|timing| {
+        area_timer(
+            timing,
+            frame.as_deref().map_or(0, |frame| frame.0),
+            "NAADF Dirty Queue",
+        )
+    });
+
     if !config.enabled {
         return;
     }
 
+    let visible_targets = if config.build_visible_chunks_only {
+        Some(
+            camera_query
+                .iter()
+                .next()
+                .map(|camera_transform| {
+                    visible_region_targets(
+                        world_position_to_chunk(camera_transform.translation()),
+                        config.chunk_cache.radius_chunks.max(0),
+                        VERTICAL_STREAM_RADIUS_CHUNKS,
+                        config.chunk_cache.max_chunks as usize,
+                    )
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default(),
+        )
+    } else {
+        None
+    };
+
     let dirty_chunks = world.take_derived_dirty_chunks();
     for chunk_pos in dirty_chunks {
+        if visible_targets
+            .as_ref()
+            .is_some_and(|targets| !targets.contains(&chunk_pos))
+        {
+            continue;
+        }
         queue.queue(chunk_pos);
     }
 }

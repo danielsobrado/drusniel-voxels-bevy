@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
     MainWorld,
@@ -9,9 +10,12 @@ use wgpu::DeviceType;
 
 use super::cache::NaadfCache;
 use super::config::NaadfConfig;
+use super::entities::{NaadfEntityVolumeRecord, NaadfEntityVolumeRegistry};
 use super::layout::{BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk};
 use super::prepare::NaadfUploadBudget;
-use super::stats::NaadfStats;
+use super::stats::{NaadfRenderStatsBridge, NaadfStats};
+use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
 pub const NAADF_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
@@ -19,6 +23,9 @@ pub const NAADF_MATERIAL_RECORD_BYTES: u64 = 4;
 pub const NAADF_BLOCK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_LOOKUP_RECORD_BYTES: u64 = 16;
+pub const NAADF_ENTITY_VOLUME_RECORD_VEC4S: usize = 17;
+pub const NAADF_ENTITY_VOLUME_RECORD_BYTES: u64 = NAADF_ENTITY_VOLUME_RECORD_VEC4S as u64 * 16;
+pub const NAADF_ENTITY_MATERIAL_RECORD_BYTES: u64 = 4;
 pub const NAADF_DEBUG_RAY_RECORDS: u64 = 1024;
 pub const NAADF_DEBUG_RAY_RECORD_BYTES: u64 = 64;
 pub const NAADF_STATS_BUFFER_BYTES: u64 = 256;
@@ -104,6 +111,7 @@ pub struct ExtractedNaadfGpuConfig {
     pub max_chunks: u32,
     pub max_gpu_memory_mb: u32,
     pub allow_integrated_gpu: bool,
+    pub prefer_gpu_builder: bool,
     pub debug_readback: bool,
 }
 
@@ -114,6 +122,7 @@ impl From<&NaadfConfig> for ExtractedNaadfGpuConfig {
             max_chunks: config.chunk_cache.max_chunks,
             max_gpu_memory_mb: config.chunk_cache.max_gpu_memory_mb,
             allow_integrated_gpu: config.gpu.allow_integrated_gpu,
+            prefer_gpu_builder: config.gpu.prefer_gpu_builder,
             debug_readback: config.gpu.debug_readback,
         }
     }
@@ -164,7 +173,30 @@ pub struct NaadfGpuUploadQueueStats {
 pub struct ExtractedNaadfGpuUploads {
     pub uploads: Vec<NaadfChunkUpload>,
     pub lookup_records: Vec<[u32; 4]>,
+    pub lookup_records_generation: u64,
     pub estimated_bytes: u32,
+}
+
+#[derive(Resource, Default, Debug)]
+pub struct ExtractedNaadfEntityGpuUploads {
+    pub entity_records: Vec<NaadfEntityGpuRecord>,
+    pub material_records: Vec<u32>,
+    pub entity_count: u32,
+    pub estimated_bytes: u32,
+}
+
+pub type NaadfEntityGpuRecord = [[f32; 4]; NAADF_ENTITY_VOLUME_RECORD_VEC4S];
+
+#[derive(Resource, Default)]
+pub struct NaadfEntityGpuBuffers {
+    allocation: Option<NaadfEntityGpuBufferAllocation>,
+}
+
+pub struct NaadfEntityGpuBufferAllocation {
+    pub entity_capacity: u64,
+    pub material_capacity: u64,
+    pub entity_record_buffer: Buffer,
+    pub entity_material_buffer: Buffer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,7 +275,17 @@ pub fn queue_gpu_uploads_from_cache_report(
     cache: Res<NaadfCache>,
     mut upload_queue: ResMut<NaadfGpuUploadQueue>,
     mut stats: ResMut<NaadfStats>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Option<Res<FrameCount>>,
 ) {
+    let _timer = timing.as_deref_mut().map(|timing| {
+        area_timer(
+            timing,
+            frame.as_deref().map_or(0, |frame| frame.0),
+            "NAADF Upload Queue",
+        )
+    });
+
     if !config.enabled {
         return;
     }
@@ -274,6 +316,7 @@ pub fn extract_naadf_gpu_uploads(mut commands: Commands, mut main_world: ResMut<
             return;
         };
         extracted.lookup_records = table.lookup_records();
+        extracted.lookup_records_generation = table.generation();
 
         let budget = NaadfUploadBudget::from(config);
         while extracted.uploads.len() < budget.max_chunks as usize {
@@ -312,6 +355,43 @@ pub fn extract_naadf_gpu_uploads(mut commands: Commands, mut main_world: ResMut<
         stats.gpu_uploads_queued_total = upload_stats.queued_total;
     }
 
+    commands.insert_resource(extracted);
+}
+
+pub fn extract_naadf_entity_gpu_uploads(mut commands: Commands, main_world: Res<MainWorld>) {
+    let mut extracted = ExtractedNaadfEntityGpuUploads::default();
+
+    let Some(config) = main_world.get_resource::<NaadfConfig>() else {
+        commands.insert_resource(extracted);
+        return;
+    };
+    if !config.enabled {
+        commands.insert_resource(extracted);
+        return;
+    }
+    let Some(registry) = main_world.get_resource::<NaadfEntityVolumeRegistry>() else {
+        commands.insert_resource(extracted);
+        return;
+    };
+
+    for record in registry.iter().filter(|record| record.occupied_voxels != 0) {
+        let material_base = extracted.material_records.len() as u32;
+        extracted.material_records.extend(
+            record
+                .material_ids
+                .iter()
+                .map(|material_id| *material_id as u32),
+        );
+        extracted
+            .entity_records
+            .push(pack_entity_volume_record(record, material_base));
+    }
+
+    extracted.entity_count = extracted.entity_records.len() as u32;
+    extracted.estimated_bytes = (extracted.entity_records.len() as u64
+        * NAADF_ENTITY_VOLUME_RECORD_BYTES
+        + extracted.material_records.len() as u64 * NAADF_ENTITY_MATERIAL_RECORD_BYTES)
+        as u32;
     commands.insert_resource(extracted);
 }
 
@@ -366,30 +446,42 @@ pub fn prepare_naadf_gpu_buffers(
     };
 }
 
-pub fn sync_naadf_gpu_status_to_main(
-    buffers: Res<NaadfGpuBuffers>,
-    uploads: Res<NaadfGpuUploadStats>,
-    main_world: Option<ResMut<MainWorld>>,
+pub fn prepare_naadf_entity_gpu_buffers(
+    uploads: Res<ExtractedNaadfEntityGpuUploads>,
+    render_device: Res<RenderDevice>,
+    mut buffers: ResMut<NaadfEntityGpuBuffers>,
 ) {
-    if !buffers.is_changed() && !uploads.is_changed() {
+    let entity_capacity = (uploads.entity_records.len() as u64).max(1);
+    let material_capacity = (uploads.material_records.len() as u64).max(1);
+    if buffers.allocation.as_ref().is_some_and(|allocation| {
+        allocation.entity_capacity >= entity_capacity
+            && allocation.material_capacity >= material_capacity
+    }) {
         return;
     }
 
-    let Some(mut main_world) = main_world else {
-        return;
-    };
-    let Some(mut stats) = main_world.get_resource_mut::<NaadfStats>() else {
-        return;
-    };
+    buffers.allocation = Some(create_naadf_entity_gpu_allocation(
+        &render_device,
+        entity_capacity,
+        material_capacity,
+    ));
+}
 
-    stats.gpu_memory_bytes = if buffers.status.allocated {
-        buffers.status.estimated_bytes
-    } else {
-        0
-    };
-    stats.gpu_max_chunks = buffers.status.max_chunks;
-    stats.gpu_uploaded_chunks_last_frame = uploads.uploaded_chunks_last_frame;
-    stats.gpu_uploaded_bytes_last_frame = uploads.uploaded_bytes_last_frame;
+pub fn sync_naadf_gpu_status_to_main(
+    buffers: Res<NaadfGpuBuffers>,
+    uploads: Res<NaadfGpuUploadStats>,
+    bridge: Res<NaadfRenderStatsBridge>,
+) {
+    bridge.publish_gpu_status(
+        if buffers.status.allocated {
+            buffers.status.estimated_bytes
+        } else {
+            0
+        },
+        buffers.status.max_chunks,
+        uploads.uploaded_chunks_last_frame,
+        uploads.uploaded_bytes_last_frame,
+    );
 }
 
 pub fn sync_gpu_chunk_table_from_cache(
@@ -397,7 +489,17 @@ pub fn sync_gpu_chunk_table_from_cache(
     cache: Res<NaadfCache>,
     mut table: ResMut<NaadfGpuChunkTable>,
     mut stats: ResMut<NaadfStats>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Option<Res<FrameCount>>,
 ) {
+    let _timer = timing.as_deref_mut().map(|timing| {
+        area_timer(
+            timing,
+            frame.as_deref().map_or(0, |frame| frame.0),
+            "NAADF Chunk Table Sync",
+        )
+    });
+
     table.set_capacity(config.chunk_cache.max_chunks);
 
     if !config.enabled {
@@ -438,7 +540,10 @@ pub fn upload_naadf_chunks_to_gpu(
     buffers: Res<NaadfGpuBuffers>,
     render_queue: Res<RenderQueue>,
     mut upload_stats: ResMut<NaadfGpuUploadStats>,
+    timing: Option<Res<RenderTimingSink>>,
+    mut last_lookup_upload: Local<Option<(u32, u64)>>,
 ) {
+    let _timer = render_timing_guard(timing.as_deref(), "NAADF GPU Upload CPU");
     upload_stats.uploaded_chunks_last_frame = 0;
     upload_stats.uploaded_bytes_last_frame = 0;
 
@@ -480,11 +585,49 @@ pub fn upload_naadf_chunks_to_gpu(
             .saturating_add(upload.estimated_bytes);
     }
 
-    render_queue.write_buffer(
-        &allocation.chunk_lookup_buffer,
-        0,
-        bytemuck::cast_slice(uploads.lookup_records.as_slice()),
+    let lookup_upload_key = (
+        allocation.plan.max_chunks,
+        uploads.lookup_records_generation,
     );
+    if *last_lookup_upload != Some(lookup_upload_key) {
+        render_queue.write_buffer(
+            &allocation.chunk_lookup_buffer,
+            0,
+            bytemuck::cast_slice(uploads.lookup_records.as_slice()),
+        );
+        *last_lookup_upload = Some(lookup_upload_key);
+    }
+}
+
+pub fn upload_naadf_entity_volumes_to_gpu(
+    uploads: Res<ExtractedNaadfEntityGpuUploads>,
+    buffers: Res<NaadfEntityGpuBuffers>,
+    render_queue: Res<RenderQueue>,
+) {
+    let Some(allocation) = buffers.allocation() else {
+        return;
+    };
+
+    if !uploads.entity_records.is_empty() {
+        render_queue.write_buffer(
+            &allocation.entity_record_buffer,
+            0,
+            bytemuck::cast_slice(uploads.entity_records.as_slice()),
+        );
+    }
+    if !uploads.material_records.is_empty() {
+        render_queue.write_buffer(
+            &allocation.entity_material_buffer,
+            0,
+            bytemuck::cast_slice(uploads.material_records.as_slice()),
+        );
+    }
+}
+
+impl NaadfEntityGpuBuffers {
+    pub fn allocation(&self) -> Option<&NaadfEntityGpuBufferAllocation> {
+        self.allocation.as_ref()
+    }
 }
 
 pub fn pack_naadf_chunk_upload(chunk: &NaadfChunk, slot: u32) -> NaadfChunkUpload {
@@ -536,6 +679,54 @@ pub fn pack_naadf_chunk_upload(chunk: &NaadfChunk, slot: u32) -> NaadfChunkUploa
         material_records,
         estimated_bytes,
     }
+}
+
+pub fn pack_entity_volume_record(
+    record: &NaadfEntityVolumeRecord,
+    material_base: u32,
+) -> NaadfEntityGpuRecord {
+    let local_from_world = record.world_from_local.to_matrix().inverse();
+    let world_from_local = record.world_from_local.to_matrix();
+    let previous_world_from_local = record.previous_world_from_local.to_matrix();
+    [
+        [
+            record.world_aabb_min.x,
+            record.world_aabb_min.y,
+            record.world_aabb_min.z,
+            material_base as f32,
+        ],
+        [
+            record.world_aabb_max.x,
+            record.world_aabb_max.y,
+            record.world_aabb_max.z,
+            record.material_ids.len() as f32,
+        ],
+        local_from_world.x_axis.to_array(),
+        local_from_world.y_axis.to_array(),
+        local_from_world.z_axis.to_array(),
+        local_from_world.w_axis.to_array(),
+        world_from_local.x_axis.to_array(),
+        world_from_local.y_axis.to_array(),
+        world_from_local.z_axis.to_array(),
+        world_from_local.w_axis.to_array(),
+        previous_world_from_local.x_axis.to_array(),
+        previous_world_from_local.y_axis.to_array(),
+        previous_world_from_local.z_axis.to_array(),
+        previous_world_from_local.w_axis.to_array(),
+        [
+            record.dimensions.x as f32,
+            record.dimensions.y as f32,
+            record.dimensions.z as f32,
+            record.occupied_voxels as f32,
+        ],
+        [
+            record.voxel_size.x,
+            record.voxel_size.y,
+            record.voxel_size.z,
+            record.local_origin.x,
+        ],
+        [record.local_origin.y, record.local_origin.z, 0.0, 0.0],
+    ]
 }
 
 pub fn pack_raw_voxel_record(occupied: bool, material_id: u16) -> u32 {
@@ -642,6 +833,30 @@ fn create_naadf_gpu_allocation(
     }
 }
 
+fn create_naadf_entity_gpu_allocation(
+    render_device: &RenderDevice,
+    entity_capacity: u64,
+    material_capacity: u64,
+) -> NaadfEntityGpuBufferAllocation {
+    let storage_usage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
+    NaadfEntityGpuBufferAllocation {
+        entity_record_buffer: create_buffer(
+            render_device,
+            "naadf_entity_volume_records",
+            entity_capacity * NAADF_ENTITY_VOLUME_RECORD_BYTES,
+            storage_usage,
+        ),
+        entity_material_buffer: create_buffer(
+            render_device,
+            "naadf_entity_material_records",
+            material_capacity * NAADF_ENTITY_MATERIAL_RECORD_BYTES,
+            storage_usage,
+        ),
+        entity_capacity,
+        material_capacity,
+    }
+}
+
 fn create_buffer(
     render_device: &RenderDevice,
     label: &'static str,
@@ -662,6 +877,7 @@ pub struct NaadfGpuChunkTable {
     free_slots: Vec<u32>,
     next_slot: u32,
     max_slots: u32,
+    generation: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -684,13 +900,24 @@ impl NaadfGpuChunkTable {
 
     pub fn set_capacity(&mut self, max_slots: u32) {
         if self.max_slots != max_slots {
-            *self = Self::with_capacity(max_slots);
+            let generation = self.generation.saturating_add(1);
+            *self = Self {
+                generation,
+                ..Self::with_capacity(max_slots)
+            };
         }
     }
 
     pub fn clear_allocations(&mut self) {
+        if self.chunk_to_slot.is_empty() && self.free_slots.is_empty() && self.next_slot == 0 {
+            return;
+        }
         let max_slots = self.max_slots;
-        *self = Self::with_capacity(max_slots);
+        let generation = self.generation.saturating_add(1);
+        *self = Self {
+            generation,
+            ..Self::with_capacity(max_slots)
+        };
     }
 
     pub fn slot_for_chunk(&mut self, chunk_pos: IVec3) -> Option<u32> {
@@ -707,12 +934,14 @@ impl NaadfGpuChunkTable {
             }
         })?;
         self.chunk_to_slot.insert(chunk_pos, slot);
+        self.generation = self.generation.saturating_add(1);
         Some(slot)
     }
 
     pub fn release_chunk(&mut self, chunk_pos: IVec3) -> Option<u32> {
         let slot = self.chunk_to_slot.remove(&chunk_pos)?;
         self.free_slots.push(slot);
+        self.generation = self.generation.saturating_add(1);
         Some(slot)
     }
 
@@ -745,6 +974,10 @@ impl NaadfGpuChunkTable {
             )
         });
         records
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn stats(&self) -> NaadfGpuChunkTableStats {
@@ -914,6 +1147,33 @@ mod tests {
             pack_raw_voxel_record(true, VoxelType::Rock as u16)
         );
         assert!(upload.estimated_bytes > 0);
+    }
+
+    #[test]
+    fn entity_volume_record_packs_transform_and_material_metadata() {
+        let transform = GlobalTransform::from(Transform::from_xyz(4.0, 5.0, 6.0));
+        let record = NaadfEntityVolumeRecord {
+            entity: Entity::from_raw_u32(42).unwrap(),
+            dimensions: UVec3::new(2, 3, 4),
+            voxel_size: Vec3::new(0.5, 1.0, 2.0),
+            local_origin: Vec3::new(-1.0, -2.0, -3.0),
+            world_from_local: transform,
+            previous_world_from_local: GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0)),
+            world_aabb_min: Vec3::new(3.0, 3.0, 3.0),
+            world_aabb_max: Vec3::new(5.0, 8.0, 14.0),
+            material_ids: vec![0; 24],
+            occupied_voxels: 7,
+            revision: 3,
+        };
+
+        let packed = pack_entity_volume_record(&record, 11);
+
+        assert_eq!(packed[0], [3.0, 3.0, 3.0, 11.0]);
+        assert_eq!(packed[1], [5.0, 8.0, 14.0, 24.0]);
+        assert_eq!(packed[13], [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(packed[14], [2.0, 3.0, 4.0, 7.0]);
+        assert_eq!(packed[15], [0.5, 1.0, 2.0, -1.0]);
+        assert_eq!(packed[16], [-2.0, -3.0, 0.0, 0.0]);
     }
 
     #[test]

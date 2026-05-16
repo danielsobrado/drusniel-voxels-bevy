@@ -1,4 +1,4 @@
-#import "shaders/naadf/ray_trace.wgsl" NaadfRay, trace_naadf_dense_debug
+#import "shaders/naadf/ray_trace.wgsl" NaadfRay, trace_naadf
 
 fn naadf_sun_visibility(
     origin: vec3<f32>,
@@ -16,7 +16,7 @@ fn naadf_sun_visibility(
         max_distance,
         1u,
     );
-    let hit = trace_naadf_dense_debug(
+    let hit = trace_naadf(
         ray,
         chunk_pos,
         chunk_node,
@@ -65,7 +65,7 @@ fn naadf_short_range_occlusion(
         max_distance,
         3u,
     );
-    let hit = trace_naadf_dense_debug(
+    let hit = trace_naadf(
         ray,
         chunk_pos,
         chunk_node,

@@ -21,7 +21,7 @@ fn build_naadf_bounds(
     workgroupBarrier();
 
     // Upstream ComputeBounds4 syncs after X, Y, and Z inside each of 3 passes.
-    for (var pass = 0u; pass < 3u; pass = pass + 1u) {
+    for (var pass_index = 0u; pass_index < 3u; pass_index = pass_index + 1u) {
         var cur = cached_skip[local_index];
         let pos = naadf_unflatten4(local_index);
         if occupied == 0u {

@@ -1,4 +1,4 @@
-#import "shaders/naadf/ray_trace.wgsl" NaadfRay, NaadfHit, trace_naadf_dense_debug
+#import "shaders/naadf/ray_trace.wgsl" NaadfRay, NaadfHit, trace_naadf
 
 struct NaadfDebugRayInput {
     origin_max_distance: vec4<f32>,
@@ -42,7 +42,7 @@ fn debug_trace_rays(@builtin(global_invocation_id) global_id: vec3<u32>) {
         input.origin_max_distance.w,
         u32(input.direction_purpose.w),
     );
-    let hit = trace_naadf_dense_debug(
+    let hit = trace_naadf(
         ray,
         input.chunk_pos.xyz,
         input.chunk_node,

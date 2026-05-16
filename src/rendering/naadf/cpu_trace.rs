@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::constants::CHUNK_SIZE_I32;
 use crate::rendering::naadf::cache::propagate_chunk_skips;
+use crate::rendering::naadf::entities::NaadfEntityVolumeRegistry;
 use crate::rendering::naadf::layout::{
     BOUND_OFFSET_NEG_X, BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X,
     BOUND_OFFSET_POS_Y, BOUND_OFFSET_POS_Z, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
@@ -23,6 +24,7 @@ const TRACE_EPSILON: f32 = 1.0e-4;
 #[derive(Default)]
 pub struct NaadfCpuRayBackend {
     chunks: HashMap<IVec3, NaadfChunk>,
+    entity_volumes: NaadfEntityVolumeRegistry,
     stats: VoxelRayBackendStats,
 }
 
@@ -40,7 +42,17 @@ impl NaadfCpuRayBackend {
                 ..default()
             },
             chunks,
+            entity_volumes: NaadfEntityVolumeRegistry::default(),
         }
+    }
+
+    pub fn with_entity_volumes(
+        chunks: impl IntoIterator<Item = NaadfChunk>,
+        entity_volumes: NaadfEntityVolumeRegistry,
+    ) -> Self {
+        let mut backend = Self::new(chunks);
+        backend.entity_volumes = entity_volumes;
+        backend
     }
 
     pub fn trace_with_stats(
@@ -60,6 +72,28 @@ impl NaadfCpuRayBackend {
     /// the safe AABB at the deepest available LOD (chunk → block → voxel) and
     /// advances the ray to whichever face it exits first.
     pub fn trace_with_skip(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_distance: f32,
+    ) -> (Option<VoxelRayHit>, u32) {
+        let (chunk_hit, chunk_steps) = self.trace_chunks_with_skip(origin, dir, max_distance);
+        let entity_hit = self.entity_volumes.trace(origin, dir, max_distance);
+        match (chunk_hit, entity_hit) {
+            (Some(chunk_hit), Some(entity_hit)) if entity_hit.distance < chunk_hit.distance => {
+                let steps = chunk_steps.saturating_add(entity_hit.steps);
+                (Some(entity_hit), steps)
+            }
+            (Some(chunk_hit), _) => (Some(chunk_hit), chunk_steps),
+            (None, Some(entity_hit)) => {
+                let steps = chunk_steps.saturating_add(entity_hit.steps);
+                (Some(entity_hit), steps)
+            }
+            (None, None) => (None, chunk_steps),
+        }
+    }
+
+    fn trace_chunks_with_skip(
         &self,
         origin: Vec3,
         dir: Vec3,
@@ -499,6 +533,7 @@ impl NaadfCpuRayBackend {
 mod tests {
     use super::*;
     use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
+    use crate::rendering::naadf::entities::{NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
     use rand::SeedableRng;
@@ -530,6 +565,62 @@ mod tests {
                 .trace(Vec3::ZERO, Vec3::X, 16.0, VoxelRayPurpose::Debug)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cpu_ray_backend_returns_dynamic_entity_hit_when_closer_than_terrain() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(8, 0, 0), VoxelType::Rock);
+
+        let entity = Entity::from_raw_u32(12).unwrap();
+        let transform = GlobalTransform::from(Transform::from_xyz(4.0, 0.0, 0.0));
+        let volume = NaadfEntityVoxelVolume::new(UVec3::ONE, Vec3::ONE, vec![7]).unwrap();
+        let mut registry = NaadfEntityVolumeRegistry::default();
+        registry.sync([(entity, &transform, &volume)]);
+        let backend = NaadfCpuRayBackend::with_entity_volumes(
+            [build_naadf_chunk(&chunk, NaadfBuildOptions::default())],
+            registry,
+        );
+
+        let hit = backend
+            .trace(
+                Vec3::new(0.0, 0.5, 0.5),
+                Vec3::X,
+                16.0,
+                VoxelRayPurpose::Debug,
+            )
+            .unwrap();
+
+        assert_eq!(hit.material_id, 7);
+        assert_eq!(hit.local, UVec3::ZERO);
+        assert!((hit.distance - 4.0).abs() <= 0.001);
+    }
+
+    #[test]
+    fn cpu_ray_backend_keeps_nearer_terrain_hit_before_dynamic_entity() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(3, 0, 0), VoxelType::Rock);
+
+        let entity = Entity::from_raw_u32(13).unwrap();
+        let transform = GlobalTransform::from(Transform::from_xyz(8.0, 0.0, 0.0));
+        let volume = NaadfEntityVoxelVolume::new(UVec3::ONE, Vec3::ONE, vec![7]).unwrap();
+        let mut registry = NaadfEntityVolumeRegistry::default();
+        registry.sync([(entity, &transform, &volume)]);
+        let backend = NaadfCpuRayBackend::with_entity_volumes(
+            [build_naadf_chunk(&chunk, NaadfBuildOptions::default())],
+            registry,
+        );
+
+        let hit = backend
+            .trace(
+                Vec3::new(0.0, 0.5, 0.5),
+                Vec3::X,
+                16.0,
+                VoxelRayPurpose::Debug,
+            )
+            .unwrap();
+
+        assert_eq!(hit.world_voxel, IVec3::new(3, 0, 0));
     }
 
     fn random_unit_dir(rng: &mut StdRng) -> Vec3 {

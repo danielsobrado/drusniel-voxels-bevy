@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::render_graph::RenderLabel;
 
+use super::config::{NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig};
 use crate::rendering::ray_tracing::{ExperimentalRenderMode, RayTracingSettings};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -11,6 +12,19 @@ pub struct NaadfPreviewSettings {
     pub max_ray_steps: u32,
     pub bounce_count: u32,
     pub accumulation_enabled: bool,
+    pub temporal_blend_factor: f32,
+    pub denoise_enabled: bool,
+    pub denoise_quality: NaadfDenoiseQuality,
+    pub spatial_radius: u32,
+    pub spatial_depth_sigma: f32,
+    pub spatial_normal_sigma: f32,
+    pub gi_sky_strength: f32,
+    pub gi_bounce_strength: f32,
+    pub reference_path_tracing_enabled: bool,
+    pub reference_sample_count: u32,
+    pub reference_sky_strength: f32,
+    pub reference_indirect_strength: f32,
+    pub show_miss_sky: bool,
     pub composite_mode: NaadfPreviewCompositeMode,
     pub history_resolution_scale: f32,
 }
@@ -37,6 +51,19 @@ impl Default for NaadfPreviewSettings {
             max_ray_steps: 256,
             bounce_count: 1,
             accumulation_enabled: false,
+            temporal_blend_factor: 0.85,
+            denoise_enabled: false,
+            denoise_quality: NaadfDenoiseQuality::default(),
+            spatial_radius: 1,
+            spatial_depth_sigma: 0.04,
+            spatial_normal_sigma: 0.25,
+            gi_sky_strength: 0.16,
+            gi_bounce_strength: 0.08,
+            reference_path_tracing_enabled: false,
+            reference_sample_count: 16,
+            reference_sky_strength: 0.22,
+            reference_indirect_strength: 0.18,
+            show_miss_sky: false,
             composite_mode: NaadfPreviewCompositeMode::SplitView,
             history_resolution_scale: 1.0,
         }
@@ -93,6 +120,52 @@ pub fn sync_naadf_preview_mode(
     apply_preview_mode_state(&ray_tracing, &mut state);
 }
 
+pub fn sync_naadf_preview_settings_from_config(
+    config: Res<NaadfConfig>,
+    mut settings: ResMut<NaadfPreviewSettings>,
+    mut pipeline_state: ResMut<NaadfPreviewPipelineState>,
+) {
+    if !config.is_changed() {
+        return;
+    }
+
+    let mut next = *settings;
+    apply_preview_config(&config, &mut next);
+
+    if *settings != next {
+        *settings = next;
+        pipeline_state.history_generation = pipeline_state.history_generation.saturating_add(1);
+    }
+}
+
+fn apply_preview_config(config: &NaadfConfig, settings: &mut NaadfPreviewSettings) {
+    let preview = &config.preview;
+    settings.max_ray_steps = preview.max_ray_steps.max(1);
+    settings.bounce_count = preview.bounce_count.min(8);
+    settings.accumulation_enabled = preview.accumulation_enabled;
+    settings.temporal_blend_factor = preview.temporal_blend_factor.clamp(0.0, 0.99);
+    settings.denoise_enabled = preview.denoise_enabled;
+    settings.denoise_quality = preview.denoise_quality;
+    settings.spatial_radius = preview.spatial_radius.min(4);
+    settings.spatial_depth_sigma = preview.spatial_depth_sigma.clamp(0.001, 1.0);
+    settings.spatial_normal_sigma = preview.spatial_normal_sigma.clamp(0.001, 1.0);
+    settings.gi_sky_strength = preview.gi_sky_strength.clamp(0.0, 2.0);
+    settings.gi_bounce_strength = preview.gi_bounce_strength.clamp(0.0, 2.0);
+    settings.reference_path_tracing_enabled = preview.reference_path_tracing_enabled;
+    settings.reference_sample_count = preview.reference_sample_count.clamp(1, 32);
+    settings.reference_sky_strength = preview.reference_sky_strength.clamp(0.0, 2.0);
+    settings.reference_indirect_strength = preview.reference_indirect_strength.clamp(0.0, 2.0);
+    settings.show_miss_sky = preview.show_miss_sky;
+    settings.composite_mode = match preview.composite_mode {
+        NaadfPreviewCompositeModeConfig::Fullscreen => NaadfPreviewCompositeMode::Fullscreen,
+        NaadfPreviewCompositeModeConfig::SplitView => NaadfPreviewCompositeMode::SplitView,
+        NaadfPreviewCompositeModeConfig::PictureInPicture => {
+            NaadfPreviewCompositeMode::PictureInPicture
+        }
+    };
+    settings.history_resolution_scale = preview.history_resolution_scale.clamp(0.125, 1.0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +207,8 @@ mod tests {
             NaadfPreviewSettings::default().composite_mode,
             NaadfPreviewCompositeMode::SplitView
         );
+        assert!(!NaadfPreviewSettings::default().denoise_enabled);
+        assert!(!NaadfPreviewSettings::default().reference_path_tracing_enabled);
     }
 
     #[test]
@@ -156,6 +231,58 @@ mod tests {
         assert_eq!(state.generation, 1);
         state.ensure_plan(NaadfPreviewHistoryPlan::for_resolution(640, 360));
         assert_eq!(state.generation, 2);
+    }
+
+    #[test]
+    fn preview_settings_apply_config_with_clamps() {
+        let mut settings = NaadfPreviewSettings::default();
+        let config = NaadfConfig {
+            preview: super::super::config::NaadfPreviewConfig {
+                max_ray_steps: 0,
+                bounce_count: 12,
+                accumulation_enabled: true,
+                temporal_blend_factor: 2.0,
+                denoise_enabled: false,
+                denoise_quality: NaadfDenoiseQuality::High,
+                spatial_radius: 9,
+                spatial_depth_sigma: 0.0,
+                spatial_normal_sigma: 2.0,
+                gi_sky_strength: 3.0,
+                gi_bounce_strength: -1.0,
+                reference_path_tracing_enabled: true,
+                reference_sample_count: 64,
+                reference_sky_strength: -1.0,
+                reference_indirect_strength: 3.0,
+                show_miss_sky: true,
+                composite_mode: NaadfPreviewCompositeModeConfig::PictureInPicture,
+                history_resolution_scale: 2.0,
+            },
+            ..default()
+        };
+
+        apply_preview_config(&config, &mut settings);
+
+        assert_eq!(settings.max_ray_steps, 1);
+        assert_eq!(settings.bounce_count, 8);
+        assert!(settings.accumulation_enabled);
+        assert_eq!(settings.temporal_blend_factor, 0.99);
+        assert!(!settings.denoise_enabled);
+        assert_eq!(settings.denoise_quality, NaadfDenoiseQuality::High);
+        assert_eq!(settings.spatial_radius, 4);
+        assert_eq!(settings.spatial_depth_sigma, 0.001);
+        assert_eq!(settings.spatial_normal_sigma, 1.0);
+        assert_eq!(settings.gi_sky_strength, 2.0);
+        assert_eq!(settings.gi_bounce_strength, 0.0);
+        assert!(settings.reference_path_tracing_enabled);
+        assert_eq!(settings.reference_sample_count, 32);
+        assert_eq!(settings.reference_sky_strength, 0.0);
+        assert_eq!(settings.reference_indirect_strength, 2.0);
+        assert!(settings.show_miss_sky);
+        assert_eq!(
+            settings.composite_mode,
+            NaadfPreviewCompositeMode::PictureInPicture
+        );
+        assert_eq!(settings.history_resolution_scale, 1.0);
     }
 }
 

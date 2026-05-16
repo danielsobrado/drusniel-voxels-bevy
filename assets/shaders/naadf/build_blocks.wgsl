@@ -2,6 +2,7 @@
 #import "shaders/naadf/layout.wgsl" naadf_voxel_index_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read_write> naadf_voxel_records: array<u32>;
+@group(3) @binding(1) var<storage, read_write> naadf_material_records: array<u32>;
 @group(3) @binding(4) var<storage, read> naadf_raw_voxel_records: array<u32>;
 @group(3) @binding(5) var<storage, read_write> naadf_block_records: array<u32>;
 
@@ -34,7 +35,7 @@ fn build_naadf_blocks(
     cached_skip[local_index] = 0u;
     workgroupBarrier();
 
-    for (var pass = 0u; pass < 3u; pass = pass + 1u) {
+    for (var pass_index = 0u; pass_index < 3u; pass_index = pass_index + 1u) {
         naadf_propagate_x_phase(local_index, block_local);
         naadf_propagate_y_phase(local_index, block_local);
         naadf_propagate_z_phase(local_index, block_local);
@@ -44,6 +45,7 @@ fn build_naadf_blocks(
         cached_occupied[local_index] != 0u,
         cached_skip[local_index],
     );
+    naadf_material_records[raw_chunk_base + chunk_voxel_index] = cached_material[local_index];
 
     if local_index == 0u {
         var occupied_count = 0u;

@@ -4,6 +4,7 @@ pub mod cpu_builder;
 pub mod cpu_trace;
 pub mod debug;
 pub mod dirty;
+pub mod entities;
 pub mod extractor;
 pub mod gpu_buffers;
 pub mod gpu_tests;
@@ -21,14 +22,16 @@ use bevy::prelude::*;
 use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
 use bevy::render::{ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
+use std::borrow::Cow;
 
 use crate::rendering::weather_overlay::WeatherOverlayLabel;
 
 pub use cache::{NaadfCache, NaadfCacheBuildReport};
-pub use config::NaadfConfig;
+pub use config::{NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig};
 pub use cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
 pub use cpu_trace::NaadfCpuRayBackend;
 pub use dirty::NaadfDirtyChunkQueue;
+pub use entities::{NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume};
 pub use extractor::{NaadfChunkExtractor, NaadfExtractionError};
 pub use gpu_buffers::{NaadfGpuBufferPlan, NaadfGpuBuffers, NaadfGpuChunkTable};
 pub use layout::NaadfChunk;
@@ -37,8 +40,50 @@ pub use stats::{NaadfCacheState, NaadfStats};
 
 pub struct NaadfPlugin;
 
+fn naadf_shader(path: &'static str) -> impl for<'a> Fn(&'static str, Cow<'a, str>) -> Shader {
+    move |source, _| Shader::from_wgsl(source, path)
+}
+
 impl Plugin for NaadfPlugin {
     fn build(&self, app: &mut App) {
+        let render_stats_bridge = stats::NaadfRenderStatsBridge::default();
+
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_COMMON_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/common.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_COMMON_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_LAYOUT_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/layout.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_LAYOUT_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_RAY_TRACE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/ray_trace.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_RAY_TRACE_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_LIGHTING_QUERIES_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/lighting_queries.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_LIGHTING_QUERIES_SHADER_PATH)
+        );
         load_internal_asset!(
             app,
             pipeline::NAADF_BUILD_BLOCKS_SHADER_HANDLE,
@@ -46,7 +91,7 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/build_blocks.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_BUILD_BLOCKS_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -55,7 +100,7 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/build_bounds.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_BUILD_BOUNDS_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -64,7 +109,7 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/build_chunks.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_BUILD_CHUNKS_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -73,7 +118,7 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/build_chunk_bounds.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_BUILD_CHUNK_BOUNDS_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -82,7 +127,16 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/first_hit.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_FIRST_HIT_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_GI_TRACE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/gi_trace.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_GI_TRACE_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -91,7 +145,7 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/spatial_resampling.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_SPATIAL_RESAMPLING_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -100,7 +154,25 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/temporal_accumulation.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_TEMPORAL_ACCUMULATION_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_DENOISE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/denoise.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_DENOISE_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_PATH_TRACE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/path_trace.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_PATH_TRACE_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -109,16 +181,18 @@ impl Plugin for NaadfPlugin {
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/naadf/preview_fullscreen_composite.wgsl"
             ),
-            Shader::from_wgsl
+            naadf_shader(pipeline::NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_PATH)
         );
 
         app.insert_resource(NaadfConfig::runtime_default())
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
+            .init_resource::<entities::NaadfEntityVolumeRegistry>()
             .init_resource::<gpu_buffers::NaadfGpuChunkTable>()
             .init_resource::<gpu_buffers::NaadfGpuUploadQueue>()
             .init_resource::<prepare::NaadfGpuBuildQueue>()
             .init_resource::<NaadfStats>()
+            .insert_resource(render_stats_bridge.clone())
             .init_resource::<NaadfCacheState>()
             .init_resource::<debug::NaadfDebugRayVisuals>()
             .init_resource::<preview::NaadfPreviewSettings>()
@@ -134,8 +208,11 @@ impl Plugin for NaadfPlugin {
                     prepare::queue_gpu_builds_from_cache_report,
                     prepare::sync_gpu_build_queue_stats,
                     streaming::update_visible_region_cache,
+                    entities::sync_naadf_entity_volume_registry,
                     systems::sync_naadf_stats_from_dirty_queue,
+                    systems::sync_naadf_render_stats_bridge_to_stats,
                     systems::sync_naadf_backend_fallback_policy,
+                    systems::record_naadf_bench_counters,
                 )
                     .chain()
                     .in_set(crate::voxel::plugin::VoxelTerrainSet::NaadfDirtyQueue),
@@ -144,17 +221,28 @@ impl Plugin for NaadfPlugin {
                 Update,
                 (debug::draw_debug_ray_hits, debug::draw_debug_chunks),
             )
-            .add_systems(Update, preview::sync_naadf_preview_mode);
+            .add_systems(
+                Update,
+                (
+                    preview::sync_naadf_preview_settings_from_config,
+                    preview::sync_naadf_preview_mode,
+                )
+                    .chain(),
+            );
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .insert_resource(render_stats_bridge)
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuConfig>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewPipelineState>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewSettings>()
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuUploads>()
+                .init_resource::<gpu_buffers::ExtractedNaadfEntityGpuUploads>()
                 .init_resource::<NaadfGpuBuffers>()
+                .init_resource::<gpu_buffers::NaadfEntityGpuBuffers>()
                 .init_resource::<gpu_buffers::NaadfGpuUploadStats>()
                 .init_resource::<pipeline::NaadfPreviewTemporalHistory>()
+                .init_resource::<pipeline::NaadfPreviewPassStats>()
                 .add_systems(RenderStartup, pipeline::init_naadf_preview_build_pipelines)
                 .add_systems(
                     ExtractSchedule,
@@ -162,6 +250,7 @@ impl Plugin for NaadfPlugin {
                         gpu_buffers::extract_naadf_gpu_config,
                         pipeline::extract_naadf_preview_pipeline_state,
                         gpu_buffers::extract_naadf_gpu_uploads,
+                        gpu_buffers::extract_naadf_entity_gpu_uploads,
                     )
                         .chain(),
                 )
@@ -169,14 +258,21 @@ impl Plugin for NaadfPlugin {
                     Render,
                     (
                         gpu_buffers::prepare_naadf_gpu_buffers,
+                        gpu_buffers::prepare_naadf_entity_gpu_buffers,
                         gpu_buffers::upload_naadf_chunks_to_gpu
                             .after(gpu_buffers::prepare_naadf_gpu_buffers),
+                        gpu_buffers::upload_naadf_entity_volumes_to_gpu
+                            .after(gpu_buffers::prepare_naadf_entity_gpu_buffers),
                     )
                         .in_set(RenderSystems::PrepareResources),
                 )
                 .add_systems(
                     Render,
-                    gpu_buffers::sync_naadf_gpu_status_to_main.in_set(RenderSystems::Cleanup),
+                    (
+                        gpu_buffers::sync_naadf_gpu_status_to_main,
+                        pipeline::sync_naadf_preview_pass_stats_to_main,
+                    )
+                        .in_set(RenderSystems::Cleanup),
                 );
             render_app.add_render_graph_node::<ViewNodeRunner<pipeline::NaadfPreviewBuildNode>>(
                 Core3d,

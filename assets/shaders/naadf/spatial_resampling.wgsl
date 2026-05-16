@@ -20,12 +20,18 @@ fn naadf_spatial_resampling(@builtin(global_invocation_id) id: vec3<u32>) {
 
     let coord = vec2<i32>(id.xy);
     let max_coord = vec2<i32>(output_size) - vec2<i32>(1);
-    let center_color = textureLoad(naadf_spatial_source_color, coord, 0).xyz;
+    let center_sample = textureLoad(naadf_spatial_source_color, coord, 0);
+    let center_color = center_sample.xyz;
     let center_depth = textureLoad(naadf_spatial_source_depth, coord, 0).x;
     let center_normal = textureLoad(naadf_spatial_source_normal, coord, 0).xyz * 2.0 - vec3<f32>(1.0);
 
+    if center_sample.a <= 0.0 {
+        textureStore(naadf_spatial_output, coord, center_sample);
+        return;
+    }
+
     if naadf_spatial_params.enabled == 0u || naadf_spatial_params.radius == 0u {
-        textureStore(naadf_spatial_output, coord, vec4<f32>(center_color, 1.0));
+        textureStore(naadf_spatial_output, coord, center_sample);
         return;
     }
 
@@ -40,7 +46,11 @@ fn naadf_spatial_resampling(@builtin(global_invocation_id) id: vec3<u32>) {
             }
 
             let sample_coord = clamp(coord + vec2<i32>(x, y), vec2<i32>(0), max_coord);
-            let sample_color = textureLoad(naadf_spatial_source_color, sample_coord, 0).xyz;
+            let sample = textureLoad(naadf_spatial_source_color, sample_coord, 0);
+            if sample.a <= 0.0 {
+                continue;
+            }
+            let sample_color = sample.xyz;
             let sample_depth = textureLoad(naadf_spatial_source_depth, sample_coord, 0).x;
             let sample_normal = textureLoad(naadf_spatial_source_normal, sample_coord, 0).xyz * 2.0 - vec3<f32>(1.0);
             let weight = naadf_spatial_weight(
@@ -57,7 +67,7 @@ fn naadf_spatial_resampling(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(
         naadf_spatial_output,
         coord,
-        vec4<f32>(accumulated_color / max(accumulated_weight, 0.0001), 1.0),
+        vec4<f32>(accumulated_color / max(accumulated_weight, 0.0001), center_sample.a),
     );
 }
 

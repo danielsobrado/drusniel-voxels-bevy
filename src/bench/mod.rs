@@ -29,8 +29,8 @@ use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl, WorldConfig};
-use crate::voxel::types::VoxelType;
-use crate::voxel::world::{VoxelEditResult, VoxelWorld, WorldBounds};
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld, WorldBounds};
 use avian3d::prelude::{LinearVelocity, Position};
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
@@ -52,9 +52,9 @@ const RENDER_READY_STABLE_FRAMES: u32 = 45;
 const RENDER_READY_MIN_FRAMES: u32 = 90;
 const RENDER_READY_TIMEOUT_SECS: f32 = 30.0;
 const GAMEPLAY_FALL_FAILURE_FRAMES: u32 = 6;
-const SCREENSHOT_WAIT_FRAMES: u32 = 60;
-const SCREENSHOT_WAIT_MIN_SECS: f32 = 3.0;
-const SCREENSHOT_WAIT_MAX_SECS: f32 = 30.0;
+const SCREENSHOT_WAIT_FRAMES: u32 = 240;
+const SCREENSHOT_WAIT_MIN_SECS: f32 = 5.0;
+const SCREENSHOT_WAIT_MAX_SECS: f32 = 120.0;
 const INVENTORY_SCREENSHOT_CATEGORY_LEAD_FRAMES: u32 = 4;
 const BENCH_BORDER_TURN_MIN_DIRECTION: f32 = 0.05;
 const BENCH_PATH_SAMPLE_DISTANCES: [f32; 4] = [3.0, 6.0, 12.0, 20.0];
@@ -63,6 +63,8 @@ const BENCH_PATH_MAX_STEP_UP: f32 = 2.25;
 const BENCH_PATH_MAX_DROP: f32 = 5.0;
 const BENCH_PATH_COLLIDER_PENALTY: f32 = 25.0;
 const BENCH_PATH_HEIGHT_PENALTY: f32 = 3.0;
+const BENCH_RAY_PROBE_MAX_DISTANCE: f32 = 512.0;
+const BENCH_RAY_PROBE_STEP: f32 = 0.1;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
@@ -141,6 +143,24 @@ pub struct BenchRenderToggles {
     pub naadf_force_gpu_builder: Option<bool>,
     #[serde(default)]
     pub naadf_max_chunk_updates_per_frame: Option<u32>,
+    #[serde(default)]
+    pub naadf_radius_chunks: Option<i32>,
+    #[serde(default)]
+    pub naadf_max_chunks: Option<u32>,
+    #[serde(default)]
+    pub naadf_max_upload_bytes_per_frame: Option<u32>,
+    #[serde(default)]
+    pub naadf_history_resolution_scale: Option<f32>,
+    #[serde(default)]
+    pub naadf_preview_max_ray_steps: Option<u32>,
+    #[serde(default)]
+    pub naadf_preview_bounce_count: Option<u32>,
+    #[serde(default)]
+    pub naadf_preview_spatial_radius: Option<u32>,
+    #[serde(default)]
+    pub naadf_preview_composite_mode: Option<String>,
+    #[serde(default)]
+    pub naadf_preview_show_miss_sky: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -298,6 +318,9 @@ struct BenchRenderReadySignature {
     queued_instanced_draws: u32,
     queued_instanced_instances: u32,
     water_reflection_sampled: u32,
+    terrain_full_triplanar_meshes: u32,
+    terrain_cheap_triplanar_meshes: u32,
+    terrain_triplanar_textures_configured: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -532,6 +555,8 @@ struct RunRecord {
     screenshot: Option<String>,
     screenshots: Vec<ScreenshotRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    ray_probe: Option<BenchRayProbeRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     startup_trace: Option<StartupTraceRecord>,
     ready_wait_frames: u32,
     ready_wait_secs: f32,
@@ -649,7 +674,39 @@ struct StartupTraceSeen {
 struct ScreenshotRecord {
     name: String,
     frame: u32,
+    elapsed_secs: f64,
     path: String,
+}
+
+#[derive(Serialize, Clone)]
+struct BenchRayProbeRecord {
+    origin: [f32; 3],
+    direction: [f32; 3],
+    max_distance: f32,
+    voxel_backend: String,
+    experimental_mode: String,
+    high_lod_chunks: u32,
+    low_lod_chunks: u32,
+    hit: Option<BenchRayProbeHitRecord>,
+    terminal_sample: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct BenchRayProbeHitRecord {
+    distance: f32,
+    world_voxel: [i32; 3],
+    chunk: [i32; 3],
+    local: [u32; 3],
+    voxel_type: String,
+    voxel_type_id: u8,
+    solid: bool,
+    chunk_loaded: bool,
+    chunk_lod: Option<String>,
+    chunk_lod_step: Option<u32>,
+    chunk_dirty: Option<bool>,
+    chunk_dirty_reason_flags: Option<u8>,
+    mesh_entity_present: Option<bool>,
+    water_mesh_entity_present: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -1007,26 +1064,111 @@ fn apply_bench_render_toggles(
             .as_deref()
             .and_then(VoxelRayBackendMode::parse)
         {
-            ray_tracing.set_voxel_backend(mode, capabilities.as_deref());
+            if ray_tracing.voxel_backend != mode {
+                ray_tracing.set_voxel_backend(mode, capabilities.as_deref());
+            }
         }
         if let Some(mode) = toggles
             .experimental_render_mode
             .as_deref()
             .and_then(ExperimentalRenderMode::parse)
         {
-            ray_tracing.experimental_mode = mode;
+            if ray_tracing.experimental_mode != mode {
+                ray_tracing.experimental_mode = mode;
+            }
         }
     }
     #[cfg(feature = "naadf")]
     if let Some(config) = naadf_config.as_deref_mut() {
+        let wants_naadf_backend = toggles
+            .voxel_ray_backend
+            .as_deref()
+            .and_then(VoxelRayBackendMode::parse)
+            .is_some_and(|mode| mode == VoxelRayBackendMode::Naadf);
+        let wants_naadf_preview = toggles
+            .experimental_render_mode
+            .as_deref()
+            .and_then(ExperimentalRenderMode::parse)
+            == Some(ExperimentalRenderMode::NaadfPreview);
+        let wants_naadf_gi = toggles
+            .experimental_render_mode
+            .as_deref()
+            .and_then(ExperimentalRenderMode::parse)
+            == Some(ExperimentalRenderMode::CurrentWithNaadfGi)
+            && crate::rendering::radiance_cascades::naadf_gi_shader_backend_available();
+        let enabled = wants_naadf_preview || (wants_naadf_backend && wants_naadf_gi);
+        if config.enabled != enabled {
+            config.enabled = enabled;
+        }
         if let Some(force_cpu) = toggles.naadf_force_cpu_builder {
-            config.debug.force_cpu_builder = force_cpu;
+            if config.debug.force_cpu_builder != force_cpu {
+                config.debug.force_cpu_builder = force_cpu;
+            }
         }
         if let Some(force_gpu) = toggles.naadf_force_gpu_builder {
-            config.debug.force_gpu_builder = force_gpu;
+            if config.debug.force_gpu_builder != force_gpu {
+                config.debug.force_gpu_builder = force_gpu;
+            }
         }
         if let Some(max_updates) = toggles.naadf_max_chunk_updates_per_frame {
-            config.chunk_cache.max_chunk_updates_per_frame = max_updates;
+            if config.chunk_cache.max_chunk_updates_per_frame != max_updates {
+                config.chunk_cache.max_chunk_updates_per_frame = max_updates;
+            }
+        }
+        if let Some(radius_chunks) = toggles.naadf_radius_chunks {
+            if config.chunk_cache.radius_chunks != radius_chunks {
+                config.chunk_cache.radius_chunks = radius_chunks;
+            }
+        }
+        if let Some(max_chunks) = toggles.naadf_max_chunks {
+            if config.chunk_cache.max_chunks != max_chunks {
+                config.chunk_cache.max_chunks = max_chunks;
+            }
+        }
+        if let Some(max_upload_bytes) = toggles.naadf_max_upload_bytes_per_frame {
+            if config.chunk_cache.max_upload_bytes_per_frame != max_upload_bytes {
+                config.chunk_cache.max_upload_bytes_per_frame = max_upload_bytes;
+            }
+        }
+        if let Some(history_resolution_scale) = toggles.naadf_history_resolution_scale {
+            if config.preview.history_resolution_scale != history_resolution_scale {
+                config.preview.history_resolution_scale = history_resolution_scale;
+            }
+        }
+        if let Some(max_ray_steps) = toggles.naadf_preview_max_ray_steps {
+            if config.preview.max_ray_steps != max_ray_steps {
+                config.preview.max_ray_steps = max_ray_steps;
+            }
+        }
+        if let Some(bounce_count) = toggles.naadf_preview_bounce_count {
+            if config.preview.bounce_count != bounce_count {
+                config.preview.bounce_count = bounce_count;
+            }
+        }
+        if let Some(spatial_radius) = toggles.naadf_preview_spatial_radius {
+            if config.preview.spatial_radius != spatial_radius {
+                config.preview.spatial_radius = spatial_radius;
+            }
+        }
+        if let Some(show_miss_sky) = toggles.naadf_preview_show_miss_sky {
+            if config.preview.show_miss_sky != show_miss_sky {
+                config.preview.show_miss_sky = show_miss_sky;
+            }
+        }
+        if let Some(composite_mode) = toggles.naadf_preview_composite_mode.as_deref() {
+            let composite_mode = match composite_mode {
+                "fullscreen" => {
+                    crate::rendering::naadf::NaadfPreviewCompositeModeConfig::Fullscreen
+                }
+                "split_view" => crate::rendering::naadf::NaadfPreviewCompositeModeConfig::SplitView,
+                "picture_in_picture" => {
+                    crate::rendering::naadf::NaadfPreviewCompositeModeConfig::PictureInPicture
+                }
+                _ => config.preview.composite_mode,
+            };
+            if config.preview.composite_mode != composite_mode {
+                config.preview.composite_mode = composite_mode;
+            }
         }
     }
 }
@@ -1698,6 +1840,136 @@ fn bench_direction_leaves_world_bounds(
         || (direction.z > BENCH_BORDER_TURN_MIN_DIRECTION && next_z >= max_z)
 }
 
+fn bench_center_ray_probe(
+    transform: &Transform,
+    world: &VoxelWorld,
+    chunk_stats: &RuntimeChunkStats,
+    toggles: &BenchRenderToggles,
+) -> BenchRayProbeRecord {
+    let origin = transform.translation;
+    let direction = transform.forward().as_vec3().normalize_or_zero();
+    let mut terminal_sample = None;
+    let mut hit = None;
+    let steps = (BENCH_RAY_PROBE_MAX_DISTANCE / BENCH_RAY_PROBE_STEP).ceil() as u32;
+
+    if direction.length_squared() > 0.0 {
+        for step in 0..=steps {
+            let distance = step as f32 * BENCH_RAY_PROBE_STEP;
+            let world_position = origin + direction * distance;
+            let world_voxel = world_position.floor().as_ivec3();
+            let sample = world.sample_voxel_for_interaction(world_voxel);
+            terminal_sample = Some(format!("{sample:?}"));
+            if let VoxelSample::InBounds(voxel_type) = sample {
+                if voxel_type != VoxelType::Air {
+                    hit = Some(bench_ray_probe_hit(
+                        world,
+                        distance,
+                        world_voxel,
+                        voxel_type,
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+
+    BenchRayProbeRecord {
+        origin: origin.to_array(),
+        direction: direction.to_array(),
+        max_distance: BENCH_RAY_PROBE_MAX_DISTANCE,
+        voxel_backend: toggles
+            .voxel_ray_backend
+            .clone()
+            .unwrap_or_else(|| "current_sdf".to_string()),
+        experimental_mode: toggles
+            .experimental_render_mode
+            .clone()
+            .unwrap_or_else(|| "current".to_string()),
+        high_lod_chunks: chunk_stats.high_lod_chunks,
+        low_lod_chunks: chunk_stats.low_lod_chunks,
+        hit,
+        terminal_sample,
+    }
+}
+
+fn bench_ray_probe_hit(
+    world: &VoxelWorld,
+    distance: f32,
+    world_voxel: IVec3,
+    voxel_type: VoxelType,
+) -> BenchRayProbeHitRecord {
+    let chunk_pos = VoxelWorld::world_to_chunk(world_voxel);
+    let local = VoxelWorld::world_to_local(world_voxel);
+    let chunk = world.get_chunk(chunk_pos);
+    let chunk_lod = chunk.map(|chunk| chunk.lod_level());
+
+    BenchRayProbeHitRecord {
+        distance,
+        world_voxel: world_voxel.to_array(),
+        chunk: chunk_pos.to_array(),
+        local: local.to_array(),
+        voxel_type: format!("{voxel_type:?}"),
+        voxel_type_id: voxel_type as u8,
+        solid: voxel_type.is_solid(),
+        chunk_loaded: chunk.is_some(),
+        chunk_lod: chunk_lod.map(|lod| format!("{lod:?}")),
+        chunk_lod_step: chunk_lod.map(|lod| lod.step_size()),
+        chunk_dirty: chunk.map(|chunk| chunk.is_dirty()),
+        chunk_dirty_reason_flags: chunk.map(|chunk| chunk.dirty_reason_flags()),
+        mesh_entity_present: chunk.map(|chunk| chunk.mesh_entity().is_some()),
+        water_mesh_entity_present: chunk.map(|chunk| chunk.water_mesh_entity().is_some()),
+    }
+}
+
+fn record_bench_ray_probe_counts(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    ray_probe: &BenchRayProbeRecord,
+) {
+    timing.record_count(
+        frame,
+        "Bench Ray Probe Hit",
+        ray_probe.hit.is_some() as u8 as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ray Probe High LOD Chunks",
+        ray_probe.high_lod_chunks as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ray Probe Low LOD Chunks",
+        ray_probe.low_lod_chunks as f64,
+    );
+    if let Some(hit) = ray_probe.hit.as_ref() {
+        timing.record_count(frame, "Bench Ray Probe Distance", hit.distance as f64);
+        timing.record_count(
+            frame,
+            "Bench Ray Probe Voxel Type Id",
+            hit.voxel_type_id as f64,
+        );
+        timing.record_count(frame, "Bench Ray Probe Solid", hit.solid as u8 as f64);
+        timing.record_count(
+            frame,
+            "Bench Ray Probe Chunk Loaded",
+            hit.chunk_loaded as u8 as f64,
+        );
+        if let Some(step) = hit.chunk_lod_step {
+            timing.record_count(frame, "Bench Ray Probe Chunk LOD Step", step as f64);
+        }
+        if let Some(dirty) = hit.chunk_dirty {
+            timing.record_count(frame, "Bench Ray Probe Chunk Dirty", dirty as u8 as f64);
+        }
+        if let Some(mesh_entity_present) = hit.mesh_entity_present {
+            timing.record_count(
+                frame,
+                "Bench Ray Probe Mesh Entity Present",
+                mesh_entity_present as u8 as f64,
+            );
+        }
+    }
+}
+
 fn run_bench_state_machine(
     mut commands: Commands,
     config: Res<BenchConfig>,
@@ -2163,6 +2435,12 @@ fn run_bench_state_machine(
         BenchPhase::Hold => {
             if state.hold_frames_left == 0 {
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                let ray_probe = camera.single().ok().map(|(transform, _)| {
+                    bench_center_ray_probe(transform, &world, &chunk_stats, &scene.render_toggles)
+                });
+                if let Some(ray_probe) = ray_probe.as_ref() {
+                    record_bench_ray_probe_counts(&mut timing, frame.0, ray_probe);
+                }
                 let csv_name =
                     run_file_name(&config.scene_path, checkpoint, None, state.run_index, "csv");
                 let csv_path = config.output_dir.join(&csv_name);
@@ -2196,6 +2474,7 @@ fn run_bench_state_machine(
                     .unwrap_or_default();
                 let screenshot = if checkpoint.screenshot && checkpoint.screenshot_points.is_empty()
                 {
+                    let elapsed_secs = state.started.elapsed().as_secs_f64();
                     let png_name = capture_bench_screenshot(
                         &mut commands,
                         &config,
@@ -2206,6 +2485,7 @@ fn run_bench_state_machine(
                     state.current_screenshots.push(ScreenshotRecord {
                         name: "end".to_string(),
                         frame: checkpoint.hold_frames,
+                        elapsed_secs,
                         path: png_name.clone(),
                     });
                     Some(png_name)
@@ -2227,6 +2507,7 @@ fn run_bench_state_machine(
                     csv: csv_name,
                     screenshot,
                     screenshots: state.current_screenshots.clone(),
+                    ray_probe,
                     startup_trace: state.startup_trace.take().map(|trace| {
                         trace.record(
                             frame.0,
@@ -2503,6 +2784,7 @@ fn finish_run(
         csv: String::new(),
         screenshot: None,
         screenshots: Vec::new(),
+        ray_probe: None,
         startup_trace: None,
         ready_wait_frames: 0,
         ready_wait_secs: 0.0,
@@ -2718,11 +3000,13 @@ fn capture_due_screenshots(
         .get(state.next_screenshot_point)
         .filter(|point| point.frame <= state.hold_elapsed_frames)
     {
+        let elapsed_secs = state.started.elapsed().as_secs_f64();
         let path =
             capture_bench_screenshot(commands, config, checkpoint, &point.name, state.run_index);
         state.current_screenshots.push(ScreenshotRecord {
             name: point.name.clone(),
             frame: point.frame,
+            elapsed_secs,
             path,
         });
         state.next_screenshot_point += 1;
@@ -3020,6 +3304,18 @@ fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRend
             "Render Instancing Queue Instances",
         )?,
         water_reflection_sampled: latest_counter_u32(timing, "Water Reflection Sampled")?,
+        terrain_full_triplanar_meshes: latest_counter_u32(
+            timing,
+            "Terrain Material Quality FullTriplanar Meshes",
+        )?,
+        terrain_cheap_triplanar_meshes: latest_counter_u32(
+            timing,
+            "Terrain Material Quality CheapTriplanar Meshes",
+        )?,
+        terrain_triplanar_textures_configured: latest_counter_u32(
+            timing,
+            "Terrain Triplanar Textures Configured",
+        )?,
     })
 }
 
@@ -3117,6 +3413,21 @@ fn record_bench_render_ready_counts(
         frame,
         "Bench Render Ready Water Reflection Sampled",
         signature.water_reflection_sampled as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Terrain FullTriplanar Meshes",
+        signature.terrain_full_triplanar_meshes as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Terrain CheapTriplanar Meshes",
+        signature.terrain_cheap_triplanar_meshes as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Render Ready Terrain Triplanar Textures Configured",
+        signature.terrain_triplanar_textures_configured as f64,
     );
 }
 
@@ -3646,6 +3957,61 @@ hold_frames = 30
         assert!(scene.startup_trace.capture_csv);
         assert_eq!(scene.startup_trace.max_phase_frames, 12_000);
         assert_eq!(scene.checkpoints.len(), 1);
+    }
+
+    #[test]
+    fn naadf_bench_cache_toggles_deserialize() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 6
+
+[render_toggles]
+voxel_ray_backend = "naadf"
+experimental_render_mode = "naadf_preview"
+naadf_force_cpu_builder = true
+naadf_radius_chunks = 3
+naadf_max_chunks = 384
+naadf_max_chunk_updates_per_frame = 384
+naadf_max_upload_bytes_per_frame = 67108864
+naadf_history_resolution_scale = 0.125
+naadf_preview_max_ray_steps = 128
+naadf_preview_bounce_count = 0
+naadf_preview_spatial_radius = 0
+naadf_preview_composite_mode = "picture_in_picture"
+naadf_preview_show_miss_sky = true
+
+[[checkpoint]]
+name = "startup"
+position = [0.0, 1.0, 2.0]
+look_at = [3.0, 4.0, 5.0]
+time_of_day = 0.25
+hold_frames = 30
+"#,
+        )
+        .expect("NAADF bench cache toggles should deserialize");
+
+        let toggles = scene.render_toggles;
+        assert_eq!(toggles.voxel_ray_backend.as_deref(), Some("naadf"));
+        assert_eq!(
+            toggles.experimental_render_mode.as_deref(),
+            Some("naadf_preview")
+        );
+        assert_eq!(toggles.naadf_radius_chunks, Some(3));
+        assert_eq!(toggles.naadf_max_chunks, Some(384));
+        assert_eq!(toggles.naadf_max_chunk_updates_per_frame, Some(384));
+        assert_eq!(toggles.naadf_max_upload_bytes_per_frame, Some(67_108_864));
+        assert_eq!(toggles.naadf_history_resolution_scale, Some(0.125));
+        assert_eq!(toggles.naadf_preview_max_ray_steps, Some(128));
+        assert_eq!(toggles.naadf_preview_bounce_count, Some(0));
+        assert_eq!(toggles.naadf_preview_spatial_radius, Some(0));
+        assert_eq!(
+            toggles.naadf_preview_composite_mode.as_deref(),
+            Some("picture_in_picture")
+        );
+        assert_eq!(toggles.naadf_preview_show_miss_sky, Some(true));
     }
 
     #[test]

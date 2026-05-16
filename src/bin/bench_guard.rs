@@ -71,7 +71,12 @@ struct NaadfGuardConfig {
     max_dirty_chunks_pending: f64,
     max_oldest_dirty_chunk_age_frames: f64,
     max_avg_ray_steps: f64,
+    max_ray_steps: f64,
     max_uploaded_chunks_per_frame: f64,
+    max_stage_invocations_per_frame: f64,
+    max_gi_rays_per_frame: f64,
+    max_cache_rebuild_ms: f64,
+    max_gpu_upload_ms: f64,
     max_frame_time_regression_percent: f64,
     targets: Vec<NaadfGuardTarget>,
 }
@@ -155,7 +160,12 @@ impl Default for NaadfGuardConfig {
             max_dirty_chunks_pending: 256.0,
             max_oldest_dirty_chunk_age_frames: 120.0,
             max_avg_ray_steps: 90.0,
+            max_ray_steps: 256.0,
             max_uploaded_chunks_per_frame: 8.0,
+            max_stage_invocations_per_frame: 4.0,
+            max_gi_rays_per_frame: 8_388_608.0,
+            max_cache_rebuild_ms: 5.0,
+            max_gpu_upload_ms: 5.0,
             max_frame_time_regression_percent: 10.0,
             targets: default_naadf_targets(),
         }
@@ -181,8 +191,28 @@ impl GuardConfig {
 
 impl NaadfGuardConfig {
     fn metric_checks(&self) -> Vec<GuardCheck> {
-        let mut checks = Vec::with_capacity(self.targets.len() * 5);
+        let mut checks = Vec::with_capacity(self.targets.len() * 15);
         for target in &self.targets {
+            checks.push(naadf_area_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "cache_rebuild",
+                "NAADF Cache Rebuild",
+                warning_threshold(self.max_cache_rebuild_ms),
+                self.max_cache_rebuild_ms,
+                "ms",
+            ));
+            checks.push(naadf_area_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "gpu_upload_cpu",
+                "NAADF GPU Upload CPU",
+                warning_threshold(self.max_gpu_upload_ms),
+                self.max_gpu_upload_ms,
+                "ms",
+            ));
             checks.push(naadf_metric_check(
                 &target.label,
                 &target.scene,
@@ -227,11 +257,61 @@ impl NaadfGuardConfig {
                 &target.label,
                 &target.scene,
                 &target.checkpoint,
+                "max_ray_steps",
+                "naadf.max_ray_steps_last_frame",
+                warning_threshold(self.max_ray_steps),
+                self.max_ray_steps,
+                "steps",
+            ));
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
                 "uploaded_chunks_per_frame",
                 "naadf.uploaded_chunks_last_frame",
                 warning_threshold(self.max_uploaded_chunks_per_frame),
                 self.max_uploaded_chunks_per_frame,
                 "count",
+            ));
+            for (metric_name, area) in [
+                (
+                    "first_hit_dispatches",
+                    "naadf.preview_first_hit_dispatches_last_frame",
+                ),
+                ("gi_dispatches", "naadf.preview_gi_dispatches_last_frame"),
+                (
+                    "spatial_dispatches",
+                    "naadf.preview_spatial_dispatches_last_frame",
+                ),
+                (
+                    "temporal_dispatches",
+                    "naadf.preview_temporal_dispatches_last_frame",
+                ),
+                (
+                    "composite_passes",
+                    "naadf.preview_composite_passes_last_frame",
+                ),
+            ] {
+                checks.push(naadf_metric_check(
+                    &target.label,
+                    &target.scene,
+                    &target.checkpoint,
+                    metric_name,
+                    area,
+                    warning_threshold(self.max_stage_invocations_per_frame),
+                    self.max_stage_invocations_per_frame,
+                    "count",
+                ));
+            }
+            checks.push(naadf_metric_check(
+                &target.label,
+                &target.scene,
+                &target.checkpoint,
+                "gi_rays",
+                "naadf.gi_rays_last_frame",
+                warning_threshold(self.max_gi_rays_per_frame),
+                self.max_gi_rays_per_frame,
+                "rays",
             ));
         }
         checks
@@ -649,8 +729,8 @@ fn default_naadf_targets() -> Vec<NaadfGuardTarget> {
             label: "preview".into(),
             scene: "visual-regression-naadf-preview.toml".into(),
             checkpoint: "naadf-preview-experimental".into(),
-            baseline_scene: Some("visual-regression-naadf-current.toml".into()),
-            baseline_checkpoint: Some("naadf-current-reference".into()),
+            baseline_scene: None,
+            baseline_checkpoint: None,
         },
         NaadfGuardTarget {
             label: "live_lod_ridge".into(),
@@ -674,6 +754,13 @@ fn default_naadf_targets() -> Vec<NaadfGuardTarget> {
             baseline_checkpoint: None,
         },
         NaadfGuardTarget {
+            label: "startup_stability".into(),
+            scene: "visual-regression-naadf-startup-stability.toml".into(),
+            checkpoint: "naadf-startup-stability".into(),
+            baseline_scene: None,
+            baseline_checkpoint: None,
+        },
+        NaadfGuardTarget {
             label: "dig_edit".into(),
             scene: "dig-edit-naadf-stability.toml".into(),
             checkpoint: "naadf-heavy-dig-edit".into(),
@@ -684,6 +771,33 @@ fn default_naadf_targets() -> Vec<NaadfGuardTarget> {
 }
 
 fn naadf_metric_check(
+    label: &str,
+    scene: &str,
+    checkpoint: &str,
+    metric_name: &str,
+    area: &str,
+    warn_gt: f64,
+    fail_gt: f64,
+    unit: &str,
+) -> GuardCheck {
+    GuardCheck {
+        name: format!("naadf_{label}_{metric_name}"),
+        scene: scene.into(),
+        checkpoint: checkpoint.into(),
+        area: format!("Counter {area}"),
+        field: "avg_ms".into(),
+        unit: unit.into(),
+        warn_gt: Some(warn_gt),
+        fail_gt: Some(fail_gt),
+        warn_lt: None,
+        fail_lt: None,
+        exists: false,
+        required: false,
+        skip_if: None,
+    }
+}
+
+fn naadf_area_check(
     label: &str,
     scene: &str,
     checkpoint: &str,

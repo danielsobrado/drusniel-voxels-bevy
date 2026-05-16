@@ -336,7 +336,9 @@ fn voxel_ray_backend_notice_text(settings: &RayTracingSettings) -> String {
         text.push('\n');
         text.push_str(NAADF_RESTART_HINT);
     } else if settings.voxel_backend == VoxelRayBackendMode::Naadf {
-        text.push_str("\nNAADF cache/backend selected; final visual preview is not wired yet.");
+        text.push_str(
+            "\nNAADF cache/backend selected; preview pipeline is available in NAADF preview mode.",
+        );
     }
     text
 }
@@ -455,13 +457,13 @@ mod tests {
 
     #[test]
     #[cfg(feature = "naadf")]
-    fn notice_text_includes_preview_hint_when_naadf_selected() {
+    fn notice_text_includes_preview_status_when_naadf_selected() {
         let settings = RayTracingSettings {
             voxel_backend: VoxelRayBackendMode::Naadf,
             ..default()
         };
         let text = voxel_ray_backend_notice_text(&settings);
-        assert!(text.contains("preview is not wired"));
+        assert!(text.contains("preview pipeline is available"));
     }
 
     #[test]

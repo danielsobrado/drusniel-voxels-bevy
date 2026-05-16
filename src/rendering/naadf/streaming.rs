@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::HashSet;
 
@@ -5,8 +6,10 @@ use super::cache::NaadfCache;
 use super::config::NaadfConfig;
 use super::dirty::NaadfDirtyChunkQueue;
 use super::stats::NaadfStats;
+use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 
-const VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;
+pub(crate) const VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;
 
 #[derive(Resource, Debug, Default)]
 pub struct NaadfStreamingState {
@@ -15,12 +18,22 @@ pub struct NaadfStreamingState {
 
 pub fn update_visible_region_cache(
     config: Res<NaadfConfig>,
-    camera_query: Query<&GlobalTransform, With<Camera>>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut state: Local<NaadfStreamingState>,
     mut cache: ResMut<NaadfCache>,
     mut dirty_queue: ResMut<NaadfDirtyChunkQueue>,
     mut stats: ResMut<NaadfStats>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Option<Res<FrameCount>>,
 ) {
+    let _timer = timing.as_deref_mut().map(|timing| {
+        area_timer(
+            timing,
+            frame.as_deref().map_or(0, |frame| frame.0),
+            "NAADF Streaming",
+        )
+    });
+
     if !config.enabled || !config.build_visible_chunks_only {
         state.interested_chunks.clear();
         return;
