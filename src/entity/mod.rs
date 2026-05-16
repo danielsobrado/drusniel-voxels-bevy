@@ -41,16 +41,6 @@ impl Default for EntitySpawnConfig {
 }
 
 // ============================================================================
-// Shared Spawn State
-// ============================================================================
-
-/// Consolidated spawn state for all entity types
-#[derive(Resource, Default)]
-pub struct EntitySpawnState {
-    // Placeholder if needed for other entities, currently empty as NPCs are removed
-}
-
-// ============================================================================
 // Shared Utilities
 // ============================================================================
 
@@ -142,7 +132,6 @@ impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
             .init_resource::<EquippedItem>()
-            .init_resource::<EntitySpawnState>()
             .init_resource::<EntitySpawnConfig>()
             .add_systems(
                 Update,

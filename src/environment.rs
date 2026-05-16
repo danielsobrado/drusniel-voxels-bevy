@@ -1,6 +1,6 @@
 use bevy::light::{
     CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight,
-    VolumetricLight,
+    SunDisk, VolumetricLight,
 };
 use bevy::prelude::*;
 use bevy_water::{
@@ -136,6 +136,7 @@ fn setup_atmosphere(mut commands: Commands) {
         }
         .build(),
         VolumetricLight, // Enable god rays
+        SunDisk::EARTH,
         Sun,
     ));
 }

@@ -6,6 +6,7 @@
 //! - Atmosphere settings (day/night cycle, fog, lighting)
 
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::light::SunDisk;
 use bevy::prelude::*;
 use bevy::ui::{FlexWrap, RelativeCursorPosition};
 use bevy::window::{
@@ -13,7 +14,7 @@ use bevy::window::{
 };
 
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
-use crate::environment::AtmosphereSettings;
+use crate::environment::{AtmosphereSettings, Sun};
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::water_reflection::WaterReflectionConfig;
@@ -2544,6 +2545,7 @@ pub fn handle_bevy_atmosphere_settings(
     sun_size_query: Query<(&Interaction, &SunSizeOption), (Changed<Interaction>, With<Button>)>,
     mut bevy_atmosphere_query: Query<&mut bevy::pbr::Atmosphere>,
     mut atmo_settings_query: Query<&mut bevy::pbr::AtmosphereSettings>,
+    mut sun_disk_query: Query<&mut SunDisk, With<Sun>>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -2587,10 +2589,24 @@ pub fn handle_bevy_atmosphere_settings(
     for (interaction, option) in sun_size_query.iter() {
         if *interaction == Interaction::Pressed {
             settings_state.sun_size = *option;
-            // Sun angular radius in radians (Earth sun is ~0.00465 rad = 0.27°)
-            // Note: This would need DirectionalLight modification in a full impl
-            // For now this is a placeholder for future sun disk rendering
+            let sun_disk = sun_disk_for_size(*option);
+            for mut disk in sun_disk_query.iter_mut() {
+                *disk = sun_disk.clone();
+            }
         }
+    }
+}
+
+fn sun_disk_for_size(option: SunSizeOption) -> SunDisk {
+    let angular_size = match option {
+        SunSizeOption::Small => SunDisk::EARTH.angular_size * 0.5,
+        SunSizeOption::Earth => SunDisk::EARTH.angular_size,
+        SunSizeOption::Large => SunDisk::EARTH.angular_size * 3.0,
+    };
+
+    SunDisk {
+        angular_size,
+        intensity: SunDisk::EARTH.intensity,
     }
 }
 

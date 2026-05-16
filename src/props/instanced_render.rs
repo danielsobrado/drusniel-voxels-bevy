@@ -54,6 +54,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
+use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 
 const SHADER_ASSET_PATH: &str = "shaders/instanced_prop.wgsl";
 const INTEGRATED_GROUP_INSTANCE_LIMIT: usize = 2048;
@@ -712,7 +713,7 @@ fn get_or_create_group(
                         shadow_version: 1,
                     },
                     NoIndirectDrawing,
-                    // TODO: keep props on layer 0 until reflection-layer membership is designed.
+                    RenderLayers::default().with(REFLECTION_RENDER_LAYER),
                 ))
                 .id();
             groups.groups.insert(
