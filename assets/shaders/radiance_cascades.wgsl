@@ -52,7 +52,7 @@ struct RadianceCascadeParams {
     
     // Camera
     camera_position: vec3<f32>,
-    _padding5: f32,
+    voxel_backend_query_mask: u32,
     inv_view_proj: mat4x4<f32>,
 }
 
@@ -84,6 +84,9 @@ const SDF_EPSILON: f32 = 0.001;
 const RAY_EPSILON: f32 = 0.01;
 const GI_BACKEND_CURRENT_SDF: u32 = 0u;
 const GI_BACKEND_NAADF: u32 = 1u;
+const NAADF_QUERY_GI_SECONDARY: u32 = 1u;
+const NAADF_QUERY_SUN_VISIBILITY: u32 = 2u;
+const NAADF_QUERY_TERRAIN_AO: u32 = 4u;
 
 // Cascade intervals (each cascade covers 4x the area of the previous)
 const CASCADE_SCALE: f32 = 4.0;
@@ -194,8 +197,13 @@ fn trace_naadf_gi_unavailable(origin: vec3<f32>, direction: vec3<f32>, max_dist:
     return result;
 }
 
-fn trace_gi_backend(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32) -> RayHit {
-    if params.voxel_backend == GI_BACKEND_NAADF {
+fn use_naadf_for_query(query_mask: u32) -> bool {
+    return params.voxel_backend == GI_BACKEND_NAADF &&
+        (params.voxel_backend_query_mask & query_mask) != 0u;
+}
+
+fn trace_gi_backend(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32, query_mask: u32) -> RayHit {
+    if use_naadf_for_query(query_mask) {
         return trace_naadf_gi_unavailable(origin, direction, max_dist);
     }
     return trace_current_sdf_gi(origin, direction, max_dist);
@@ -224,6 +232,21 @@ fn soft_shadow_sdf(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32, k: f3
     }
     
     return saturate(shadow);
+}
+
+fn soft_shadow_backend(origin: vec3<f32>, direction: vec3<f32>, max_dist: f32, k: f32) -> f32 {
+    if use_naadf_for_query(NAADF_QUERY_SUN_VISIBILITY) {
+        let hit = trace_naadf_gi_unavailable(origin, direction, max_dist);
+        return select(1.0, 0.0, hit.hit);
+    }
+    return soft_shadow_sdf(origin, direction, max_dist, k);
+}
+
+fn terrain_ao_backend(world_pos: vec3<f32>) -> f32 {
+    if use_naadf_for_query(NAADF_QUERY_TERRAIN_AO) {
+        return 1.0;
+    }
+    return saturate(sample_sdf_smooth(world_pos) * 2.0 + 0.5);
 }
 
 // ============================================================================
@@ -287,7 +310,7 @@ fn compute_direct_lighting(pos: vec3<f32>, normal: vec3<f32>, albedo: vec3<f32>)
     let n_dot_l = max(dot(normal, params.sun_direction), 0.0);
     
     // Shadow ray
-    let shadow = soft_shadow_sdf(pos + normal * params.normal_bias, params.sun_direction, 100.0, 16.0);
+    let shadow = soft_shadow_backend(pos + normal * params.normal_bias, params.sun_direction, 100.0, 16.0);
     
     // Direct sun
     let direct = params.sun_color * params.sun_intensity * n_dot_l * shadow;
@@ -343,7 +366,7 @@ fn trace_probe_ray(
 ) -> vec3<f32> {
     let max_dist = params.max_ray_distance * pow(CASCADE_SCALE, f32(cascade_level));
     
-    let hit = trace_gi_backend(origin, direction, max_dist);
+    let hit = trace_gi_backend(origin, direction, max_dist, NAADF_QUERY_GI_SECONDARY);
     
     if hit.hit {
         // Hit geometry - compute lighting at hit point
@@ -454,7 +477,7 @@ fn composite_gi(in: VertexOutput) -> @location(0) vec4<f32> {
     var gi_contribution = indirect * albedo * params.gi_intensity;
     
     // Add ambient occlusion from SDF
-    let ao = saturate(sample_sdf_smooth(world_pos) * 2.0 + 0.5);
+    let ao = terrain_ao_backend(world_pos);
     gi_contribution *= mix(1.0, ao, params.ambient_occlusion_strength);
     
     // Temporal blend with history

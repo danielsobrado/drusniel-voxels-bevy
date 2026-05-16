@@ -412,10 +412,17 @@ mod tests {
             matches!(
                 import,
                 bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
                     if path == "shaders/naadf/layout.wgsl"
             )
         }));
-        assert!(ray_trace.contains("fn trace_naadf_dense_debug"));
+        assert!(ray_trace.contains("fn trace_naadf"));
         assert!(ray_trace.contains("naadf_voxel_records"));
         assert!(ray_trace.contains("naadf_material_records"));
         assert!(ray_trace.contains("naadf_block_records"));
@@ -496,12 +503,12 @@ mod tests {
     fn wgsl_chunk_bounds_builder_writes_chunk_skip_word() {
         let build_chunk_bounds =
             include_str!("../../../assets/shaders/naadf/build_chunk_bounds.wgsl");
-        let shader = bevy_shader::Shader::from_wgsl(
+        let _shader = bevy_shader::Shader::from_wgsl(
             build_chunk_bounds,
             "shaders/naadf/build_chunk_bounds.wgsl",
         );
 
-        assert!(shader.imports().any(|import| {
+        assert!(_shader.imports().any(|import| {
             matches!(
                 import,
                 bevy_shader::ShaderImport::AssetPath(path)
@@ -509,8 +516,10 @@ mod tests {
             )
         }));
         assert!(build_chunk_bounds.contains("fn build_naadf_chunk_bounds"));
-        assert!(build_chunk_bounds.contains("naadf_find_chunk_slot"));
-        assert!(build_chunk_bounds.contains("naadf_count_loaded_empty_chunks"));
+        assert!(build_chunk_bounds.contains("naadf_lookup_chunk_slot"));
+        assert!(build_chunk_bounds.contains("naadf_count_axis_empty_chunks"));
+        assert!(build_chunk_bounds.contains("naadf_chunk_lookup_records"));
+        assert!(!build_chunk_bounds.contains("naadf_loaded_empty_perpendicular_slab"));
         assert!(build_chunk_bounds.contains("naadf_chunk_records[base + 6u]"));
     }
 
@@ -530,7 +539,7 @@ mod tests {
         assert!(lighting.contains("fn naadf_sun_visibility"));
         assert!(lighting.contains("fn naadf_terrain_ao_visibility"));
         assert!(lighting.contains("fn naadf_contact_shadow_visibility"));
-        assert!(lighting.contains("trace_naadf_dense_debug"));
+        assert!(lighting.contains("trace_naadf"));
     }
 
     #[test]
@@ -538,8 +547,15 @@ mod tests {
         let radiance = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(radiance.contains("voxel_backend: u32"));
+        assert!(radiance.contains("voxel_backend_query_mask: u32"));
         assert!(radiance.contains("const GI_BACKEND_NAADF"));
+        assert!(radiance.contains("const NAADF_QUERY_GI_SECONDARY"));
+        assert!(radiance.contains("const NAADF_QUERY_SUN_VISIBILITY"));
+        assert!(radiance.contains("const NAADF_QUERY_TERRAIN_AO"));
+        assert!(radiance.contains("fn use_naadf_for_query"));
         assert!(radiance.contains("fn trace_gi_backend"));
+        assert!(radiance.contains("fn soft_shadow_backend"));
+        assert!(radiance.contains("fn terrain_ao_backend"));
         assert!(!radiance.contains("trace_naadf_gi_fallback"));
         assert!(radiance.contains("let hit = trace_gi_backend"));
     }
@@ -565,22 +581,73 @@ mod tests {
     #[test]
     fn wgsl_first_hit_declares_preview_material_path() {
         let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
-        let shader = bevy_shader::Shader::from_wgsl(first_hit, "shaders/naadf/first_hit.wgsl");
 
-        assert!(shader.imports().any(|import| {
-            matches!(
-                import,
-                bevy_shader::ShaderImport::AssetPath(path)
-                    if path == "shaders/naadf/ray_trace.wgsl"
-            )
-        }));
+        assert!(first_hit.contains("#import \"shaders/naadf/ray_trace.wgsl\""));
+        assert!(!first_hit.contains("fn trace_naadf("));
         assert!(first_hit.contains("@compute"));
         assert!(first_hit.contains("fn naadf_first_hit_preview"));
         assert!(first_hit.contains("fn preview_naadf_first_hit_world"));
-        assert!(first_hit.contains("naadf_chunk_record_valid"));
+        assert!(first_hit.contains("trace_naadf_chunk"));
         assert!(first_hit.contains("naadf_first_hit_output"));
         assert!(first_hit.contains("fn preview_naadf_first_hit"));
+        assert!(first_hit.contains("fn naadf_preview_shaded_color"));
         assert!(first_hit.contains("fn naadf_preview_material_color"));
+        assert!(first_hit.contains("fog_color_start"));
+        assert!(first_hit.contains("fog_end_strength"));
+        assert!(first_hit.contains("fn naadf_apply_preview_fog"));
+        assert!(first_hit.contains("fn naadf_preview_miss_sky"));
+        assert!(first_hit.contains("sun_direction_pad"));
+        assert!(first_hit.contains("fn naadf_preview_sun_direction"));
+        assert!(first_hit.contains("struct NaadfEntityVolumeRecord"));
+        assert!(first_hit.contains("naadf_entity_volume_records"));
+        assert!(first_hit.contains("naadf_entity_material_records"));
+        assert!(first_hit.contains("fn preview_naadf_first_hit_entities"));
+        assert!(first_hit.contains("previous_world_from_local_x"));
+        assert!(first_hit.contains("previous_world_position"));
+        assert!(first_hit.contains("fn naadf_entity_previous_world_position"));
+    }
+
+    #[test]
+    fn wgsl_entity_volume_record_matches_rust_pack_order() {
+        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
+        let fields = wgsl_struct_fields(first_hit, "NaadfEntityVolumeRecord");
+
+        assert_eq!(
+            fields,
+            [
+                "world_aabb_min_material_base",
+                "world_aabb_max_material_count",
+                "local_from_world_x",
+                "local_from_world_y",
+                "local_from_world_z",
+                "local_from_world_w",
+                "world_from_local_x",
+                "world_from_local_y",
+                "world_from_local_z",
+                "world_from_local_w",
+                "previous_world_from_local_x",
+                "previous_world_from_local_y",
+                "previous_world_from_local_z",
+                "previous_world_from_local_w",
+                "dimensions_occupied",
+                "voxel_size_local_origin_x",
+                "local_origin_yz_pad",
+            ],
+            "WGSL NaadfEntityVolumeRecord order must match pack_entity_volume_record"
+        );
+        assert_eq!(
+            fields.len(),
+            crate::rendering::naadf::gpu_buffers::NAADF_ENTITY_VOLUME_RECORD_VEC4S
+        );
+    }
+
+    #[test]
+    fn wgsl_preview_lighting_uses_first_hit_shading() {
+        let preview_lighting = include_str!("../../../assets/shaders/naadf/preview_lighting.wgsl");
+
+        assert!(preview_lighting.contains("shade_naadf_preview"));
+        assert!(preview_lighting.contains("naadf_preview_shaded_color"));
+        assert!(!preview_lighting.contains("vec3<f32>(0.8)"));
     }
 
     #[test]
@@ -604,7 +671,23 @@ mod tests {
         assert!(composite.contains("naadf_scene_color"));
         assert!(composite.contains("naadf_preview_color"));
         assert!(composite.contains("mode_split"));
+        assert!(composite.contains("show_miss_sky"));
+        assert!(composite.contains("textureDimensions(naadf_scene_color)"));
+        assert!(composite.contains("preview_coord"));
+        assert!(composite.contains("blended_preview"));
         assert!(composite.contains("textureLoad"));
+    }
+
+    #[test]
+    fn wgsl_denoise_declares_edge_aware_compute_pass() {
+        let denoise = include_str!("../../../assets/shaders/naadf/denoise.wgsl");
+
+        assert!(denoise.contains("@compute"));
+        assert!(denoise.contains("fn naadf_denoise"));
+        assert!(denoise.contains("naadf_denoise_source_depth"));
+        assert!(denoise.contains("naadf_denoise_source_normal"));
+        assert!(denoise.contains("fn naadf_denoise_weight"));
+        assert!(denoise.contains("textureStore"));
     }
 
     #[test]
@@ -614,8 +697,16 @@ mod tests {
         assert!(temporal.contains("NaadfTemporalAccumulationParams"));
         assert!(temporal.contains("reset_history"));
         assert!(temporal.contains("fn naadf_temporal_accumulate"));
+        assert!(temporal.contains("fn naadf_temporal_accumulate_moments"));
+        assert!(temporal.contains("fn naadf_history_luminance_matches_current"));
+        assert!(temporal.contains("fn naadf_reproject_history_coord"));
+        assert!(temporal.contains("naadf_temporal_motion"));
+        assert!(temporal.contains("naadf_temporal_current_depth"));
         assert!(temporal.contains("motion_valid"));
+        assert!(temporal.contains("motion.z <= 0.0"));
         assert!(temporal.contains("naadf_temporal_history_color"));
+        assert!(temporal.contains("naadf_temporal_history_moments"));
+        assert!(temporal.contains("naadf_temporal_output_moments"));
         assert!(temporal.contains("textureStore"));
     }
 
@@ -629,7 +720,39 @@ mod tests {
         assert!(spatial.contains("depth_sigma"));
         assert!(spatial.contains("normal_sigma"));
         assert!(spatial.contains("naadf_spatial_source_depth"));
+        assert!(spatial.contains("center_sample.a"));
         assert!(spatial.contains("textureStore"));
+    }
+
+    #[test]
+    fn wgsl_gi_trace_declares_preview_compute_pass() {
+        let gi = include_str!("../../../assets/shaders/naadf/gi_trace.wgsl");
+
+        assert!(gi.contains("@compute"));
+        assert!(gi.contains("fn naadf_gi_trace"));
+        assert!(gi.contains("naadf_gi_source_depth"));
+        assert!(gi.contains("naadf_gi_source_normal"));
+        assert!(gi.contains("trace_naadf"));
+        assert!(gi.contains("fn naadf_gi_trace_world"));
+        assert!(gi.contains("fn naadf_gi_sun_visibility"));
+        assert!(gi.contains("sample_count"));
+        assert!(gi.contains("frame_index"));
+        assert!(gi.contains("sun_direction_pad"));
+        assert!(gi.contains("fn naadf_gi_sky_term"));
+    }
+
+    #[test]
+    fn wgsl_path_trace_declares_reference_compute_pass() {
+        let path_trace = include_str!("../../../assets/shaders/naadf/path_trace.wgsl");
+
+        assert!(path_trace.contains("@compute"));
+        assert!(path_trace.contains("fn naadf_path_trace_reference"));
+        assert!(path_trace.contains("naadf_path_trace_first_hit_color"));
+        assert!(path_trace.contains("naadf_path_trace_first_hit_depth"));
+        assert!(path_trace.contains("naadf_reference_indirect"));
+        assert!(path_trace.contains("naadf_reference_sample_offset"));
+        assert!(path_trace.contains("naadf_reference_hash"));
+        assert!(path_trace.contains("sample_count, 1u), 32u"));
     }
 
     fn wgsl_u32_const(source: &str, name: &str) -> u32 {
@@ -648,5 +771,28 @@ mod tests {
             if value.starts_with("0x") { 16 } else { 10 },
         )
         .unwrap_or_else(|err| panic!("invalid WGSL const {name}: {err}"))
+    }
+
+    fn wgsl_struct_fields(source: &str, name: &str) -> Vec<String> {
+        let prefix = format!("struct {name} {{");
+        let mut lines = source
+            .lines()
+            .skip_while(|line| line.trim() != prefix)
+            .skip(1);
+        let mut fields = Vec::new();
+        for line in &mut lines {
+            let trimmed = line.trim();
+            if trimmed == "}" {
+                return fields;
+            }
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
+            let Some((field, _ty)) = trimmed.trim_end_matches(',').split_once(':') else {
+                panic!("invalid WGSL field in struct {name}: {trimmed}");
+            };
+            fields.push(field.trim().to_string());
+        }
+        panic!("missing WGSL struct {name}");
     }
 }

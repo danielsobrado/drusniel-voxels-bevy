@@ -359,12 +359,18 @@ pub fn area_timer<'a>(
 pub fn reset_area_timing_frame(
     mut recorder: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
+    real_time: Res<Time<Real>>,
     diagnostics: Res<DiagnosticsStore>,
 ) {
     if recorder.enabled {
-        let frame_total_ms = diagnostics
-            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
-            .and_then(|diagnostic| diagnostic.value().or_else(|| diagnostic.smoothed()));
+        let real_delta_ms = real_time.delta_secs_f64() * 1000.0;
+        let frame_total_ms = if real_delta_ms.is_finite() && real_delta_ms > 0.0 {
+            Some(real_delta_ms)
+        } else {
+            diagnostics
+                .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+                .and_then(|diagnostic| diagnostic.value())
+        };
         recorder.reset_frame_with_total(frame.0, frame_total_ms);
     }
 }

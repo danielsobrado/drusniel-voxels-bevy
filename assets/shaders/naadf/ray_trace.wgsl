@@ -23,7 +23,7 @@ struct NaadfHit {
     normal: vec3<f32>,
 };
 
-fn trace_naadf_dense_debug(
+fn trace_naadf(
     ray: NaadfRay,
     chunk_pos: vec3<i32>,
     chunk_node: u32,
@@ -38,7 +38,7 @@ fn trace_naadf_dense_debug(
             return naadf_make_miss(0u);
         }
 
-        let hit_position = ray.origin + direction * entry_t;
+        let hit_position = ray.origin + direction * (entry_t + 0.0001);
         let world_voxel = vec3<i32>(floor(hit_position));
         let chunk_origin = naadf_chunk_world_origin(chunk_pos);
         return naadf_make_hit(
@@ -60,7 +60,7 @@ fn trace_naadf_dense_debug(
         return naadf_make_miss(0u);
     }
 
-    var traveled = max(entry_t, 0.0);
+    var traveled = max(entry_t, 0.0) + 0.0001;
     var normal = vec3<f32>(0.0);
     let chunk_origin = naadf_chunk_world_origin(chunk_pos);
     let chunk_end = chunk_origin + vec3<i32>(i32(NAADF_VOXELS_PER_CHUNK_AXIS));
@@ -156,6 +156,39 @@ fn trace_naadf_dense_debug(
 
 fn naadf_chunk_bounds_field(record: u32, offset: u32) -> u32 {
     return (record >> offset) & 0x1fu;
+}
+
+fn naadf_chunk_root_record(chunk_record_base: u32) -> u32 {
+    return naadf_chunk_records[chunk_record_base + 0u];
+}
+
+fn naadf_chunk_record_valid(chunk_record_base: u32) -> bool {
+    return naadf_chunk_records[chunk_record_base + 4u] == NAADF_BLOCKS_PER_CHUNK &&
+        naadf_chunk_records[chunk_record_base + 5u] == NAADF_VOXELS_PER_CHUNK;
+}
+
+fn trace_naadf_chunk(
+    ray: NaadfRay,
+    chunk_pos: vec3<i32>,
+    chunk_index: u32,
+    max_steps: u32,
+) -> NaadfHit {
+    let chunk_record_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
+    if chunk_record_base + 5u >= arrayLength(&naadf_chunk_records) {
+        return naadf_make_miss(0u);
+    }
+    if !naadf_chunk_record_valid(chunk_record_base) {
+        return naadf_make_miss(0u);
+    }
+    let voxel_base_record = chunk_index * NAADF_VOXELS_PER_CHUNK;
+    return trace_naadf(
+        ray,
+        chunk_pos,
+        naadf_chunk_root_record(chunk_record_base),
+        voxel_base_record,
+        voxel_base_record,
+        max_steps,
+    );
 }
 
 fn naadf_chunk_skip_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {

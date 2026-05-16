@@ -13,11 +13,19 @@ use std::collections::{HashSet, VecDeque};
 #[cfg(feature = "naadf")]
 use crate::performance::AreaTimingRecorder;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::NaadfStats;
+use crate::rendering::naadf::{NaadfConfig, NaadfStats};
 use crate::rendering::ray_tracing::{
     ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
 };
 use crate::voxel::world::VoxelWorld;
+
+const NAADF_QUERY_GI_SECONDARY: u32 = 1 << 0;
+#[cfg_attr(not(feature = "naadf"), allow(dead_code))]
+const NAADF_QUERY_SUN_VISIBILITY: u32 = 1 << 1;
+#[cfg_attr(not(feature = "naadf"), allow(dead_code))]
+const NAADF_QUERY_TERRAIN_AO: u32 = 1 << 2;
+#[cfg_attr(not(feature = "naadf"), allow(dead_code))]
+const NAADF_QUERY_CONTACT_SHADOW: u32 = 1 << 3;
 
 /// Plugin for Radiance Cascades global illumination
 pub struct RadianceCascadesPlugin;
@@ -90,6 +98,9 @@ pub struct RadianceCascadesConfig {
     /// Selected voxel ray backend for GI queries.
     pub voxel_backend: VoxelRayBackendMode,
 
+    /// Per-query NAADF routing mask for GI, sun visibility, terrain AO, and contact shadows.
+    pub voxel_backend_query_mask: u32,
+
     /// Last backend switch generation mirrored from ray tracing settings.
     pub backend_switch_generation: u64,
 }
@@ -112,6 +123,7 @@ impl Default for RadianceCascadesConfig {
             sdf_world_max: Vec3::new(256.0, 64.0, 256.0),
             incremental_sdf_updates: true,
             voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            voxel_backend_query_mask: 0,
             backend_switch_generation: 0,
         }
     }
@@ -156,16 +168,48 @@ impl Default for SdfVolumeState {
     }
 }
 
+#[cfg(feature = "naadf")]
+pub fn sync_radiance_cascades_voxel_backend(
+    ray_tracing: Res<RayTracingSettings>,
+    naadf_config: Option<Res<NaadfConfig>>,
+    mut config: ResMut<RadianceCascadesConfig>,
+    mut state: ResMut<SdfVolumeState>,
+) {
+    let query_mask = naadf_config
+        .as_deref()
+        .map(naadf_query_mask_from_config)
+        .unwrap_or_default();
+    apply_radiance_backend_selection(&ray_tracing, query_mask, &mut config, &mut state);
+}
+
+#[cfg(not(feature = "naadf"))]
 pub fn sync_radiance_cascades_voxel_backend(
     ray_tracing: Res<RayTracingSettings>,
     mut config: ResMut<RadianceCascadesConfig>,
     mut state: ResMut<SdfVolumeState>,
 ) {
-    apply_radiance_backend_selection(&ray_tracing, &mut config, &mut state);
+    apply_radiance_backend_selection(&ray_tracing, 0, &mut config, &mut state);
 }
 
 pub fn apply_radiance_backend_selection(
     ray_tracing: &RayTracingSettings,
+    naadf_query_mask: u32,
+    config: &mut RadianceCascadesConfig,
+    state: &mut SdfVolumeState,
+) {
+    apply_radiance_backend_selection_with_shader_support(
+        ray_tracing,
+        naadf_query_mask,
+        naadf_gi_shader_backend_available(),
+        config,
+        state,
+    );
+}
+
+fn apply_radiance_backend_selection_with_shader_support(
+    ray_tracing: &RayTracingSettings,
+    naadf_query_mask: u32,
+    shader_backend_available: bool,
     config: &mut RadianceCascadesConfig,
     state: &mut SdfVolumeState,
 ) {
@@ -174,15 +218,19 @@ pub fn apply_radiance_backend_selection(
         | ExperimentalRenderMode::CurrentWithNaadfGi
         | ExperimentalRenderMode::NaadfPreview => ray_tracing.effective_backend(),
     };
-    let target_backend = if requested_backend == VoxelRayBackendMode::Naadf
-        && !naadf_gi_shader_backend_available()
-    {
-        VoxelRayBackendMode::CurrentSdf
-    } else {
-        requested_backend
-    };
+    let target_backend =
+        if requested_backend == VoxelRayBackendMode::Naadf && !shader_backend_available {
+            VoxelRayBackendMode::CurrentSdf
+        } else {
+            requested_backend
+        };
 
     config.voxel_backend = target_backend;
+    config.voxel_backend_query_mask = if target_backend == VoxelRayBackendMode::Naadf {
+        naadf_query_mask
+    } else {
+        0
+    };
 
     if config.backend_switch_generation != ray_tracing.backend_switch_generation {
         config.backend_switch_generation = ray_tracing.backend_switch_generation;
@@ -192,6 +240,24 @@ pub fn apply_radiance_backend_selection(
             state.history_reset_generation = ray_tracing.backend_switch_generation;
         }
     }
+}
+
+#[cfg(feature = "naadf")]
+fn naadf_query_mask_from_config(config: &NaadfConfig) -> u32 {
+    let mut mask = 0;
+    if config.preview.bounce_count > 0 {
+        mask |= NAADF_QUERY_GI_SECONDARY;
+    }
+    if config.use_for_sun_visibility {
+        mask |= NAADF_QUERY_SUN_VISIBILITY;
+    }
+    if config.use_for_terrain_ao {
+        mask |= NAADF_QUERY_TERRAIN_AO;
+    }
+    if config.use_for_contact_shadows {
+        mask |= NAADF_QUERY_CONTACT_SHADOW;
+    }
+    mask
 }
 
 pub const fn naadf_gi_shader_backend_available() -> bool {
@@ -231,7 +297,7 @@ pub struct RadianceCascadeUniforms {
     pub backend_switch_generation: u32,
 
     pub camera_position: Vec3,
-    pub _padding5: f32,
+    pub voxel_backend_query_mask: u32,
 
     pub inv_view_proj: Mat4,
 }
@@ -513,7 +579,7 @@ pub fn create_radiance_uniforms(
         backend_switch_generation: config.backend_switch_generation as u32,
 
         camera_position: camera_pos,
-        _padding5: 0.0,
+        voxel_backend_query_mask: config.voxel_backend_query_mask,
 
         inv_view_proj,
     }
@@ -575,7 +641,9 @@ pub fn record_naadf_gi_counters(
 }
 
 pub fn estimated_naadf_gi_rays(config: &RadianceCascadesConfig) -> u64 {
-    if config.voxel_backend != VoxelRayBackendMode::Naadf {
+    if config.voxel_backend != VoxelRayBackendMode::Naadf
+        || config.voxel_backend_query_mask & NAADF_QUERY_GI_SECONDARY == 0
+    {
         return 0;
     }
     config.cascade_count as u64 * config.rays_per_probe as u64
@@ -768,9 +836,15 @@ mod tests {
             ..default()
         };
 
-        apply_radiance_backend_selection(&settings, &mut config, &mut state);
+        apply_radiance_backend_selection(
+            &settings,
+            NAADF_QUERY_GI_SECONDARY,
+            &mut config,
+            &mut state,
+        );
 
         assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+        assert_eq!(config.voxel_backend_query_mask, 0);
         assert_eq!(config.backend_switch_generation, 7);
         assert_eq!(state.frame_index, 0);
         assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
@@ -789,15 +863,63 @@ mod tests {
             ..default()
         };
 
-        apply_radiance_backend_selection(&settings, &mut config, &mut state);
+        apply_radiance_backend_selection(
+            &settings,
+            NAADF_QUERY_GI_SECONDARY,
+            &mut config,
+            &mut state,
+        );
 
         assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+        assert_eq!(config.voxel_backend_query_mask, 0);
+    }
+
+    #[test]
+    fn backend_selection_preserves_query_mask_when_shader_backend_is_available() {
+        let mut config = RadianceCascadesConfig::default();
+        let mut state = SdfVolumeState::default();
+        let settings = RayTracingSettings {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            resolved_voxel_backend: VoxelRayBackendMode::Naadf,
+            ..default()
+        };
+        let mask = NAADF_QUERY_GI_SECONDARY | NAADF_QUERY_SUN_VISIBILITY;
+
+        apply_radiance_backend_selection_with_shader_support(
+            &settings,
+            mask,
+            true,
+            &mut config,
+            &mut state,
+        );
+
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+        assert_eq!(config.voxel_backend_query_mask, mask);
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn naadf_query_mask_tracks_config_flags() {
+        let config = NaadfConfig {
+            use_for_sun_visibility: true,
+            use_for_terrain_ao: true,
+            use_for_contact_shadows: false,
+            ..default()
+        };
+
+        let mask = naadf_query_mask_from_config(&config);
+
+        assert_ne!(mask & NAADF_QUERY_GI_SECONDARY, 0);
+        assert_ne!(mask & NAADF_QUERY_SUN_VISIBILITY, 0);
+        assert_ne!(mask & NAADF_QUERY_TERRAIN_AO, 0);
+        assert_eq!(mask & NAADF_QUERY_CONTACT_SHADOW, 0);
     }
 
     #[test]
     fn radiance_uniforms_include_backend_selection() {
         let mut config = RadianceCascadesConfig {
             voxel_backend: VoxelRayBackendMode::Naadf,
+            voxel_backend_query_mask: NAADF_QUERY_GI_SECONDARY | NAADF_QUERY_TERRAIN_AO,
             backend_switch_generation: 9,
             ..default()
         };
@@ -813,6 +935,10 @@ mod tests {
         );
 
         assert_eq!(uniforms.voxel_backend, 1);
+        assert_eq!(
+            uniforms.voxel_backend_query_mask,
+            NAADF_QUERY_GI_SECONDARY | NAADF_QUERY_TERRAIN_AO
+        );
         assert_eq!(uniforms.backend_switch_generation, 9);
 
         config.voxel_backend = VoxelRayBackendMode::CurrentSdf;
@@ -825,6 +951,10 @@ mod tests {
             Mat4::IDENTITY,
         );
         assert_eq!(uniforms.voxel_backend, 0);
+        assert_eq!(
+            uniforms.voxel_backend_query_mask,
+            NAADF_QUERY_GI_SECONDARY | NAADF_QUERY_TERRAIN_AO
+        );
     }
 
     #[test]
@@ -833,6 +963,7 @@ mod tests {
             cascade_count: 4,
             rays_per_probe: 16,
             voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            voxel_backend_query_mask: NAADF_QUERY_GI_SECONDARY,
             ..default()
         };
 
@@ -840,5 +971,8 @@ mod tests {
 
         config.voxel_backend = VoxelRayBackendMode::Naadf;
         assert_eq!(estimated_naadf_gi_rays(&config), 64);
+
+        config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
+        assert_eq!(estimated_naadf_gi_rays(&config), 0);
     }
 }

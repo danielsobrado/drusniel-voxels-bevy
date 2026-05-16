@@ -1,5 +1,5 @@
 seed = 12345
-duration_warmup_secs = 1.0
+duration_warmup_secs = 5.0
 median_runs = 1
 chunk_load_radius = 6
 world_cache_path = "bench-runs/cache/visual-regression-world.bin"
@@ -7,16 +7,17 @@ world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 [render_toggles]
 voxel_ray_backend = "current_sdf"
 experimental_render_mode = "current"
+disable_reflection_cameras = true
 
 [[checkpoint]]
 name = "naadf-current-reference"
 position = [256.0, 82.0, 220.0]
 look_at = [282.0, 64.0, 250.0]
 time_of_day = 0.42
-hold_frames = 120
+hold_frames = 360
 screenshot = true
 fog_tier = "off"
-render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
 screenshot_points = [
-    { name = "reference", frame = 60 },
+    { name = "reference", frame = 359 },
 ]

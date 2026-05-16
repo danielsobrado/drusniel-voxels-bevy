@@ -6,7 +6,12 @@ max_gpu_memory_mb = 512
 max_dirty_chunks_pending = 256
 max_oldest_dirty_chunk_age_frames = 120
 max_avg_ray_steps = 90
+max_ray_steps = 256
 max_uploaded_chunks_per_frame = 8
+max_stage_invocations_per_frame = 4
+max_gi_rays_per_frame = 8388608
+max_cache_rebuild_ms = 5
+max_gpu_upload_ms = 5
 max_frame_time_regression_percent = 10
 
 [[check]]

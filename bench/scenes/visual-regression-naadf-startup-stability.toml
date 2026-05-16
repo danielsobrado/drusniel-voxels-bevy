@@ -4,6 +4,11 @@ median_runs = 1
 chunk_load_radius = 6
 world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 
+[startup_trace]
+enabled = true
+capture_csv = true
+max_phase_frames = 2400
+
 [render_toggles]
 voxel_ray_backend = "naadf"
 experimental_render_mode = "naadf_preview"
@@ -21,7 +26,7 @@ naadf_preview_composite_mode = "split_view"
 naadf_preview_show_miss_sky = true
 
 [[checkpoint]]
-name = "naadf-preview-experimental"
+name = "naadf-startup-stability"
 position = [292.0, 88.0, 304.0]
 look_at = [246.0, 62.0, 260.0]
 time_of_day = 0.3
@@ -30,12 +35,12 @@ screenshot = true
 fog_tier = "off"
 render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
 screenshot_points = [
-    { name = "preview-settle-120", frame = 120 },
-    { name = "preview-settle-240", frame = 240 },
-    { name = "preview-settle-360", frame = 360 },
-    { name = "preview-settle-540", frame = 540 },
-    { name = "preview-settle-720", frame = 720 },
-    { name = "preview-settle-899", frame = 899 },
-    { name = "preview-settle-1200", frame = 1200 },
-    { name = "preview-settled", frame = 1499 },
+    { name = "settle-120", frame = 120 },
+    { name = "settle-240", frame = 240 },
+    { name = "settle-360", frame = 360 },
+    { name = "settle-540", frame = 540 },
+    { name = "settle-720", frame = 720 },
+    { name = "settle-899", frame = 899 },
+    { name = "settle-1200", frame = 1200 },
+    { name = "settle-1499", frame = 1499 },
 ]

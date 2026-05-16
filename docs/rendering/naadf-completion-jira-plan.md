@@ -2,7 +2,7 @@
 
 Status: implementation in progress  
 Last reviewed: 2026-05-15  
-Scope: remaining work after CPU voxel/block/chunk skip propagation, CPU skip traversal, GPU upload packing, GPU build dispatch scaffolding, and WGSL skip traversal scaffolding.
+Scope: remaining work after CPU voxel/block/chunk skip propagation, CPU skip traversal, GPU upload packing, GPU build dispatch scaffolding, WGSL skip traversal scaffolding, preview GI, preview fog, denoise, dynamic entity-volume upload/traversal, and debug reference path tracing.
 
 ## Current Baseline
 
@@ -12,23 +12,46 @@ The local NAADF path now has:
 - CPU-built per-voxel 2-bit directional skip fields inside each block.
 - CPU-built per-block 2-bit directional skip fields inside each chunk.
 - CPU-built per-chunk 5-bit directional skip fields across loaded known-empty neighbor chunks.
+- Chunk-bound propagation diagnostics for last-frame bound updates, unknown/unloaded neighbor stops, saturated fields, and propagation pass count.
 - CPU skip traversal that consumes `voxel_skip` and `directional_skip_blocks`.
+- A `NaadfEntityVoxelVolume` component and registry for rotated dynamic voxel volumes, plus CPU ray tracing that selects the nearest terrain/entity hit.
+- GPU entity-volume extraction, storage buffers, material upload, and first-hit preview traversal against dynamic voxel volumes.
 - GPU upload packing where voxel records carry occupancy plus 12-bit directional skip data, block record word 5 carries per-block skip data, and chunk record word 6 carries per-chunk skip data.
 - GPU build shaders for block, voxel, block-bound, and chunk-node record generation.
-- GPU chunk-bound shader for safe contiguous loaded-empty chunk skips.
+- GPU chunk-bound shader for safe contiguous loaded-empty chunk skips with bounded perpendicular-slab validation.
 - WGSL traversal that reads `naadf_voxel_records`, `naadf_block_records`, and `naadf_chunk_records` and jumps by decoded AADF bounds.
+- Radiance cascade shader routing now carries a per-query NAADF mask for GI secondary rays, sun visibility, terrain AO, and contact shadows, while preserving current-SDF fallback when the NAADF shader backend is unavailable.
 - A Core3d render graph view node that dispatches NAADF GPU build stages, first-hit preview, and fullscreen preview compositing when preview mode is active.
-- First-hit color/depth/normal preview output plus an edge-aware spatial filter dispatch before fullscreen compositing.
+- First-hit color/depth/normal preview output plus preview fog, fog-tinted miss-sky RGB, a minimal GI estimate, edge-aware spatial filtering, temporal accumulation, low/medium/high multi-pass depth/normal-aware denoise, and an optional debug reference path-trace pass before fullscreen compositing.
 - A GPU chunk lookup buffer with sorted `(x, y, z, slot)` records; first-hit preview now walks chunk-space along the ray and binary-searches this table instead of brute-force scanning every valid chunk record.
-- Persistent per-view temporal preview history using ping-pong `rgba16float` textures in the render world.
-- Non-empty temporal and preview composite compute entry points.
+- Persistent per-view temporal preview history using ping-pong `rgba16float` color textures and `rg16float` moments textures in the render world, with depth-based camera reprojection from first-hit depth and conservative resets when history dimensions or generations change.
+- Alpha-preserving preview compositing, so first-hit misses stay transparent over the current scene instead of painting black.
+- Non-empty GI, temporal, spatial, denoise, reference path-trace, and preview composite compute entry points.
+- Config-backed preview controls for GPU/debug flags, ray steps, bounce count, GI strength, accumulation/blend, opt-in denoise quality, spatial filter radius/sigma, reference path-trace sample count/strength, miss-sky compositing, composite mode, and history scale, with debug UI toggles and last-frame preview pass counters. The history scale can size the NAADF preview/filter/history render targets below full resolution, and fullscreen compositing maps those scaled targets back to scene pixels.
 
 The remaining gaps are:
 
-- GPU chunk-bound construction now has a safe contiguous-neighbor shader path, but does not yet implement the full upstream queue/propagation solver with all perpendicular-bound constraints.
-- The preview render graph now allocates, dispatches, and composites a first-hit preview target through a GPU chunk lookup table. This removes the brute-force chunk scan, but it is still a first-hit preview path rather than the upstream full final renderer.
-- Spatial and temporal filtering are wired into the preview graph. The temporal path is persistent-history accumulation, not full motion-vector TAA or SVGF parity.
-- Missing upstream stages such as atmosphere integration, entity/dynamic voxel support, advanced GI, and SVGF denoise parity.
+- GPU chunk-bound construction now has a conservative bounded-slab shader path, but does not yet implement the full upstream queue/propagation solver.
+- The preview render graph now allocates, dispatches, and composites a first-hit preview target through a GPU chunk lookup table. This removes the brute-force chunk scan, but it is still a preview renderer rather than the upstream full final renderer.
+- Spatial, temporal, and denoise filtering are wired into the preview graph. The temporal path now keeps luminance moments, reprojects history using first-hit depth, and performs variance-based history rejection, but it still lacks per-object motion vectors and production TAA tuning.
+- GI is a conservative preview-stage indirect/sky estimate, and the debug reference pass now has configurable deterministic multi-sample screen-space validation, but neither is full upstream path tracing.
+- Missing upstream parity stages now center on full queue-based chunk propagation, per-object motion vectors/production TAA tuning, full multi-bounce/reference tracing parity, and visual/benchmark validation.
+
+## Current Ticket Status
+
+| Ticket | Status | Notes |
+| --- | --- | --- |
+| NAADF-CHUNK-001..004 | Implemented, needs benchmark/visual validation | CPU/GPU records carry chunk skips and traversal consumes voxel/block/chunk skip levels. Chunk-bound diagnostics report updates, unknown-neighbor stops, saturated fields, and passes. GPU chunk bounds use conservative bounded-slab validation rather than full upstream queue propagation. |
+| NAADF-GPUBUILD-001..004 | Implemented, needs GPU dispatch/readback validation | GPU build shaders are non-empty and write the fields traversal reads; CPU/shader-mirror parity now covers fixtures, deterministic mixed-material chunks, and water-opacity options, but full GPU dispatch/readback validation remains open. |
+| NAADF-PIPE-001..004 | Implemented, needs visual validation | Render graph node, first-hit preview, pass layouts, and composite are wired. |
+| NAADF-PIPE-005 | Partially implemented | HUD/fallback, config-backed GPU/debug flags and preview controls including composite mode, preview/history target scale, temporal blend, spatial filter controls, and GI/reference strength controls, debug UI toggles, and per-preview-pass counters exist; deeper editor/runtime command controls can still be expanded. |
+| NAADF-FILTER-001..002 | Implemented, needs visual validation | Temporal moments, depth-based history reprojection, variance rejection, and edge-aware spatial filtering are wired. Temporal blend and spatial radius/depth-sigma/normal-sigma are config-backed. |
+| NAADF-FILTER-003 | Implemented, needs visual validation | Low/medium/high depth/normal-aware denoise presets run as one, two, or three ping-pong passes after temporal accumulation. Denoise is available as an opt-in preview toggle so the default experimental preview stays within the frame guard. |
+| NAADF-GI-001 | Implemented for shader backend routing, needs validation | Radiance shader backend routing now includes per-query masks for GI secondary rays, sun visibility, terrain AO, and contact shadows. The shader still falls back to current SDF while the NAADF radiance buffer backend is unavailable; production query coverage still needs visual/perf validation. |
+| NAADF-GI-002 | Partially implemented | A deterministic preview GI compute pass exists with config-backed sky/bounce strengths; it is a conservative indirect/sky estimate, not full secondary-ray multi-bounce tracing. |
+| NAADF-UPSTREAM-001 | Partially implemented | Preview hits consume Drusniel fog uniforms and first-hit misses carry fog-tinted sky RGB through the filter chain behind a default-off composite toggle; cloud/atmosphere parity remains open. |
+| NAADF-UPSTREAM-002 | Implemented for CPU and preview GPU path | Dynamic voxel volumes have CPU tracing, GPU upload, and first-hit preview traversal. |
+| NAADF-UPSTREAM-003 | Partially implemented | A debug/off-by-default reference path-trace pass is wired with configurable deterministic 1..32 sample screen-space validation and strength controls; full upstream-quality reference tracing still needs true secondary rays and visual validation. |
 
 ## Delivery Strategy
 
@@ -148,7 +171,7 @@ Implementation notes:
 - For multi-chunk propagation, use queue-based expansion similar to upstream `boundsCalc.fx` rather than assuming a single 4x4x4 volume.
 - Clamp fields to the selected chunk bound range.
 - Unknown or unloaded chunk states must terminate propagation.
-- Record counters for propagation work: queued chunks, updated chunk bounds, skipped unknown neighbors, and saturated bounds.
+- Record counters for propagation work: queued chunks, updated chunk bounds, skipped unknown neighbors, and saturated bounds. CPU/cache-side last-frame counters are implemented; GPU dispatch/readback counters still need runtime validation.
 
 Acceptance criteria:
 

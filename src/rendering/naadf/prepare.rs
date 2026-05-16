@@ -161,7 +161,7 @@ pub fn sync_gpu_build_queue_stats_for_config(
 }
 
 pub const fn naadf_gpu_builder_dispatch_available() -> bool {
-    false
+    true
 }
 
 #[cfg(test)]
@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_build_queue_is_disabled_until_dispatch_exists() {
+    fn gpu_build_queue_is_disabled_until_gpu_builder_is_preferred() {
         let mut queue = NaadfGpuBuildQueue::default();
         queue.queue(IVec3::X);
 
@@ -227,5 +227,27 @@ mod tests {
 
         assert_eq!(stats.pending, 0);
         assert_eq!(stats.oldest_age_frames, 0);
+    }
+
+    #[test]
+    fn gpu_build_queue_ages_when_dispatch_is_available_and_preferred() {
+        let mut queue = NaadfGpuBuildQueue::default();
+        queue.queue(IVec3::X);
+
+        let stats = sync_gpu_build_queue_stats_for_config(
+            &NaadfConfig {
+                enabled: true,
+                gpu: super::super::config::NaadfGpuConfig {
+                    prefer_gpu_builder: true,
+                    ..default()
+                },
+                ..default()
+            },
+            &mut queue,
+        );
+
+        assert_eq!(stats.pending, 1);
+        assert_eq!(stats.oldest_age_frames, 1);
+        assert!(naadf_gpu_builder_dispatch_available());
     }
 }

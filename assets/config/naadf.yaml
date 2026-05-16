@@ -17,6 +17,26 @@ gpu:
   prefer_gpu_builder: false
   debug_readback: false
 
+preview:
+  max_ray_steps: 256
+  bounce_count: 1
+  accumulation_enabled: false
+  temporal_blend_factor: 0.85
+  denoise_enabled: false
+  denoise_quality: medium
+  spatial_radius: 1
+  spatial_depth_sigma: 0.04
+  spatial_normal_sigma: 0.25
+  gi_sky_strength: 0.16
+  gi_bounce_strength: 0.08
+  reference_path_tracing_enabled: false
+  reference_sample_count: 16
+  reference_sky_strength: 0.22
+  reference_indirect_strength: 0.18
+  show_miss_sky: false
+  composite_mode: split_view
+  history_resolution_scale: 1.0
+
 debug:
   visualize_chunks: false
   visualize_ray_steps: false

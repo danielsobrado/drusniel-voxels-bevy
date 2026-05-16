@@ -249,39 +249,46 @@ mod tests {
     #[test]
     fn shader_mirror_records_match_cpu_upload_for_fixture_shapes() {
         let fixtures = [
-            empty_chunk(IVec3::ZERO),
-            full_chunk(IVec3::new(1, 0, 0), VoxelType::Rock),
-            wall_chunk(IVec3::new(0, 1, 0), 0, 8),
-            wall_chunk(IVec3::new(0, 0, 1), 1, 7),
-            sparse_chunk(IVec3::new(-1, 2, -3)),
+            (empty_chunk(IVec3::ZERO), NaadfBuildOptions::default()),
+            (
+                full_chunk(IVec3::new(1, 0, 0), VoxelType::Rock),
+                NaadfBuildOptions::default(),
+            ),
+            (
+                wall_chunk(IVec3::new(0, 1, 0), 0, 8),
+                NaadfBuildOptions::default(),
+            ),
+            (
+                wall_chunk(IVec3::new(0, 0, 1), 1, 7),
+                NaadfBuildOptions::default(),
+            ),
+            (
+                sparse_chunk(IVec3::new(-1, 2, -3)),
+                NaadfBuildOptions::default(),
+            ),
+            (
+                water_column_chunk(IVec3::new(3, -2, 1)),
+                NaadfBuildOptions {
+                    water_is_opaque: true,
+                },
+            ),
         ];
 
-        for (slot, chunk) in fixtures.iter().enumerate() {
-            let naadf = build_naadf_chunk(chunk, NaadfBuildOptions::default());
-            let cpu_upload = pack_naadf_chunk_upload(&naadf, slot as u32);
-            let shader_mirror =
-                mirror_gpu_build_records(chunk, slot as u32, NaadfBuildOptions::default());
+        for (slot, (chunk, options)) in fixtures.iter().enumerate() {
+            assert_shader_mirror_matches_cpu_upload(chunk, slot as u32, *options);
+        }
+    }
 
-            assert_eq!(
-                cpu_upload.chunk_record, shader_mirror.chunk_record,
-                "chunk record mismatch for fixture {slot}"
-            );
-            assert_eq!(
-                cpu_upload.block_records, shader_mirror.block_records,
-                "block record mismatch for fixture {slot}"
-            );
-            assert_eq!(
-                cpu_upload.voxel_records, shader_mirror.voxel_records,
-                "voxel record mismatch for fixture {slot}"
-            );
-            assert_eq!(
-                cpu_upload.raw_voxel_records, shader_mirror.raw_voxel_records,
-                "raw voxel record mismatch for fixture {slot}"
-            );
-            assert_eq!(
-                cpu_upload.material_records, shader_mirror.material_records,
-                "material record mismatch for fixture {slot}"
-            );
+    #[test]
+    fn shader_mirror_records_match_cpu_upload_for_deterministic_random_chunks() {
+        for seed in 0..12u32 {
+            let position = IVec3::new(seed as i32 - 6, (seed as i32 % 5) - 2, seed as i32 * 2 - 9);
+            let chunk = deterministic_material_mix_chunk(position, 0x9e37_79b9 ^ seed);
+            let options = NaadfBuildOptions {
+                water_is_opaque: seed % 2 == 0,
+            };
+
+            assert_shader_mirror_matches_cpu_upload(&chunk, seed, options);
         }
     }
 
@@ -381,6 +388,47 @@ mod tests {
                 .map(|material_id| *material_id as u32)
                 .collect(),
         }
+    }
+
+    fn assert_shader_mirror_matches_cpu_upload(
+        chunk: &Chunk,
+        slot: u32,
+        options: NaadfBuildOptions,
+    ) {
+        let naadf = build_naadf_chunk(chunk, options);
+        let cpu_upload = pack_naadf_chunk_upload(&naadf, slot);
+        let shader_mirror = mirror_gpu_build_records(chunk, slot, options);
+
+        assert_eq!(
+            cpu_upload.chunk_record,
+            shader_mirror.chunk_record,
+            "chunk record mismatch for slot {slot} at {:?}",
+            chunk.position()
+        );
+        assert_eq!(
+            cpu_upload.block_records,
+            shader_mirror.block_records,
+            "block record mismatch for slot {slot} at {:?}",
+            chunk.position()
+        );
+        assert_eq!(
+            cpu_upload.voxel_records,
+            shader_mirror.voxel_records,
+            "voxel record mismatch for slot {slot} at {:?}",
+            chunk.position()
+        );
+        assert_eq!(
+            cpu_upload.raw_voxel_records,
+            shader_mirror.raw_voxel_records,
+            "raw voxel record mismatch for slot {slot} at {:?}",
+            chunk.position()
+        );
+        assert_eq!(
+            cpu_upload.material_records,
+            shader_mirror.material_records,
+            "material record mismatch for slot {slot} at {:?}",
+            chunk.position()
+        );
     }
 
     fn mirror_gpu_build_block(
@@ -490,6 +538,40 @@ mod tests {
         ] {
             chunk.set(local, VoxelType::Rock);
         }
+        chunk
+    }
+
+    fn water_column_chunk(position: IVec3) -> Chunk {
+        let mut chunk = Chunk::new(position);
+        for y in 0..16 {
+            chunk.set(UVec3::new(8, y, 8), VoxelType::Water);
+        }
+        chunk
+    }
+
+    fn deterministic_material_mix_chunk(position: IVec3, seed: u32) -> Chunk {
+        let mut state = seed;
+        let mut chunk = Chunk::new(position);
+        let materials = [
+            VoxelType::Rock,
+            VoxelType::Sand,
+            VoxelType::Clay,
+            VoxelType::Wood,
+            VoxelType::Water,
+        ];
+
+        for z in 0..16 {
+            for y in 0..16 {
+                for x in 0..16 {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    if state & 0xff < 48 {
+                        let material = materials[((state >> 8) as usize) % materials.len()];
+                        chunk.set(UVec3::new(x, y, z), material);
+                    }
+                }
+            }
+        }
+
         chunk
     }
 }

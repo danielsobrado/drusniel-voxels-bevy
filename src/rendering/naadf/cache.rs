@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -11,6 +12,7 @@ use super::layout::{
     CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
 };
 use super::stats::{NaadfCacheState, NaadfStats};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]
@@ -26,6 +28,15 @@ pub struct NaadfCacheBuildReport {
     pub deferred: u32,
     pub missing: Vec<IVec3>,
     pub rebuilt_chunks: Vec<IVec3>,
+    pub propagation: NaadfChunkPropagationReport,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaadfChunkPropagationReport {
+    pub passes: u32,
+    pub updated_bounds: u32,
+    pub skipped_unknown_neighbors: u32,
+    pub saturated_fields: u32,
 }
 
 impl NaadfCache {
@@ -79,11 +90,25 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
     mut cache: ResMut<NaadfCache>,
     mut stats: ResMut<NaadfStats>,
     mut state: ResMut<NaadfCacheState>,
+    mut timing: Option<ResMut<AreaTimingRecorder>>,
+    frame: Option<Res<FrameCount>>,
 ) {
+    let _timer = timing.as_deref_mut().map(|timing| {
+        area_timer(
+            timing,
+            frame.as_deref().map_or(0, |frame| frame.0),
+            "NAADF Cache Rebuild",
+        )
+    });
+
     if !config.enabled {
         state.ready = false;
         state.warming = false;
         state.fallback_reason = Some("NAADF disabled by config".to_string());
+        stats.chunk_bound_updates_last_frame = 0;
+        stats.chunk_bound_skipped_unknown_neighbors_last_frame = 0;
+        stats.chunk_bound_saturated_fields_last_frame = 0;
+        stats.chunk_bound_propagation_passes_last_frame = 0;
         return;
     }
 
@@ -113,12 +138,17 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
     }
 
     if report.rebuilt > 0 || report.removed_missing > 0 {
-        propagate_chunk_skips(&mut cache.chunks);
+        report.propagation = propagate_chunk_skips_with_report(&mut cache.chunks);
     }
 
     report.deferred = queue.pending_len() as u32;
+    let propagation = report.propagation;
     cache.last_report = report;
     stats.loaded_chunks = cache.len() as u32;
+    stats.chunk_bound_updates_last_frame = propagation.updated_bounds;
+    stats.chunk_bound_skipped_unknown_neighbors_last_frame = propagation.skipped_unknown_neighbors;
+    stats.chunk_bound_saturated_fields_last_frame = propagation.saturated_fields;
+    stats.chunk_bound_propagation_passes_last_frame = propagation.passes;
     state.ready = !cache.is_empty() && queue.pending_len() == 0;
     state.warming = queue.pending_len() > 0;
     state.fallback_reason = if state.ready {
@@ -131,11 +161,19 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
 }
 
 pub fn propagate_chunk_skips(chunks: &mut HashMap<IVec3, NaadfChunk>) {
+    propagate_chunk_skips_with_report(chunks);
+}
+
+pub fn propagate_chunk_skips_with_report(
+    chunks: &mut HashMap<IVec3, NaadfChunk>,
+) -> NaadfChunkPropagationReport {
     for chunk in chunks.values_mut() {
         chunk.chunk_skip = PackedDirectionalBounds5Bit::zero();
     }
 
+    let mut report = NaadfChunkPropagationReport::default();
     for _ in 0..CHUNK_BOUND_FIELD_MAX {
+        report.passes = report.passes.saturating_add(1);
         let mut changed = false;
         changed |= propagate_chunk_axis_phase(
             chunks,
@@ -151,6 +189,7 @@ pub fn propagate_chunk_skips(chunks: &mut HashMap<IVec3, NaadfChunk>) {
                     check_offsets: CHECK_AXES_FOR_POS_X,
                 },
             ],
+            &mut report,
         );
         changed |= propagate_chunk_axis_phase(
             chunks,
@@ -166,6 +205,7 @@ pub fn propagate_chunk_skips(chunks: &mut HashMap<IVec3, NaadfChunk>) {
                     check_offsets: CHECK_AXES_FOR_POS_Y,
                 },
             ],
+            &mut report,
         );
         changed |= propagate_chunk_axis_phase(
             chunks,
@@ -181,11 +221,14 @@ pub fn propagate_chunk_skips(chunks: &mut HashMap<IVec3, NaadfChunk>) {
                     check_offsets: CHECK_AXES_FOR_POS_Z,
                 },
             ],
+            &mut report,
         );
         if !changed {
             break;
         }
     }
+    report.saturated_fields = count_saturated_chunk_bound_fields(chunks);
+    report
 }
 
 #[derive(Clone, Copy)]
@@ -241,6 +284,7 @@ const CHECK_AXES_FOR_POS_Z: [u32; 5] = [
 fn propagate_chunk_axis_phase(
     chunks: &mut HashMap<IVec3, NaadfChunk>,
     extensions: [ChunkAxisExtension; 2],
+    report: &mut NaadfChunkPropagationReport,
 ) -> bool {
     let snapshot = chunks
         .iter()
@@ -257,6 +301,8 @@ fn propagate_chunk_axis_phase(
         for extension in extensions {
             let neighbor_pos = *pos + extension.direction;
             let Some(neighbor) = chunks.get(&neighbor_pos) else {
+                report.skipped_unknown_neighbors =
+                    report.skipped_unknown_neighbors.saturating_add(1);
                 continue;
             };
             if neighbor.node.state() != NaadfNodeState::UniformEmpty {
@@ -270,7 +316,11 @@ fn propagate_chunk_axis_phase(
             {
                 continue;
             }
+            if updated.get_at_offset(extension.bound_offset) >= CHUNK_BOUND_FIELD_MAX {
+                continue;
+            }
             updated.add_one(extension.bound_offset);
+            report.updated_bounds = report.updated_bounds.saturating_add(1);
         }
         if updated != snapshot[pos] {
             updates.push((*pos, updated));
@@ -286,10 +336,31 @@ fn propagate_chunk_axis_phase(
     changed
 }
 
+fn count_saturated_chunk_bound_fields(chunks: &HashMap<IVec3, NaadfChunk>) -> u32 {
+    const OFFSETS: [u32; 6] = [
+        CHUNK_BOUND_OFFSET_NEG_X,
+        CHUNK_BOUND_OFFSET_POS_X,
+        CHUNK_BOUND_OFFSET_NEG_Y,
+        CHUNK_BOUND_OFFSET_POS_Y,
+        CHUNK_BOUND_OFFSET_NEG_Z,
+        CHUNK_BOUND_OFFSET_POS_Z,
+    ];
+
+    chunks
+        .values()
+        .map(|chunk| {
+            OFFSETS
+                .iter()
+                .filter(|offset| chunk.chunk_skip.get_at_offset(**offset) >= CHUNK_BOUND_FIELD_MAX)
+                .count() as u32
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::naadf::layout::CHUNK_BOUND_OFFSET_POS_X;
+    use crate::rendering::naadf::layout::{CHUNK_BOUND_FIELD_MAX, CHUNK_BOUND_OFFSET_POS_X};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
 
@@ -366,5 +437,45 @@ mod tests {
             0,
             "missing chunk at +X must terminate chunk-level propagation"
         );
+    }
+
+    #[test]
+    fn chunk_propagation_report_counts_updates_and_unknown_neighbors() {
+        let mut chunks = HashMap::new();
+        for x in [0, 1, 3] {
+            let chunk = Chunk::new(IVec3::new(x, 0, 0));
+            let naadf =
+                crate::rendering::naadf::cpu_builder::build_naadf_chunk(&chunk, Default::default());
+            chunks.insert(naadf.position, naadf);
+        }
+
+        let report = propagate_chunk_skips_with_report(&mut chunks);
+
+        assert!(report.passes > 0);
+        assert!(report.updated_bounds > 0);
+        assert!(report.skipped_unknown_neighbors > 0);
+    }
+
+    #[test]
+    fn chunk_propagation_report_counts_saturated_fields() {
+        let mut chunks = HashMap::new();
+        for x in 0..=32 {
+            let chunk = Chunk::new(IVec3::new(x, 0, 0));
+            let naadf =
+                crate::rendering::naadf::cpu_builder::build_naadf_chunk(&chunk, Default::default());
+            chunks.insert(naadf.position, naadf);
+        }
+
+        let report = propagate_chunk_skips_with_report(&mut chunks);
+
+        assert_eq!(
+            chunks
+                .get(&IVec3::ZERO)
+                .unwrap()
+                .chunk_skip
+                .get_at_offset(CHUNK_BOUND_OFFSET_POS_X),
+            CHUNK_BOUND_FIELD_MAX
+        );
+        assert!(report.saturated_fields > 0);
     }
 }
