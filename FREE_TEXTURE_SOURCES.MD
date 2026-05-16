@@ -1,0 +1,400 @@
+# Free Texture Sources Guide
+
+All sources are CC0 (public domain) - no attribution required.
+
+---
+
+## Primary Sources
+
+| Source                  | Style                 | Best For                      | URL                                               |
+| ----------------------- | --------------------- | ----------------------------- | ------------------------------------------------- |
+| **3DTextures.me** | Stylized/Hand-painted | Buildings, Props              | https://3dtextures.me/category/stylized-textures/ |
+| **Poly Haven**    | Photorealistic        | Terrain (modify for stylized) | https://polyhaven.com/textures                    |
+| **ambientCG**     | Photorealistic PBR    | Ground, Rocks                 | https://ambientcg.com/                            |
+| **CGBookcase**    | Photorealistic        | Stone, Brick                  | https://www.cgbookcase.com/textures               |
+| **FreeStylized**  | Stylized              | Buildings, Environment        | https://freestylized.com/all-textures/            |
+
+---
+
+## Buildings (Full PBR)
+
+Download from **3DTextures.me** - already stylized with all maps included.
+
+### Wood Planks
+
+**Source:** https://3dtextures.me/2022/02/23/stylized-wood-wall-001/
+
+```
+Download -> Rename files:
+  Stylized_Wood_Wall_001_basecolor.jpg  -> albedo.png
+  Stylized_Wood_Wall_001_normal.jpg     -> normal.png
+  Stylized_Wood_Wall_001_roughness.jpg  -> roughness.png
+  Stylized_Wood_Wall_001_ambientOcclusion.jpg -> ao.png
+
+Place in:
+  assets/pbr/buildings/wood_plank/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+### Stone Brick
+
+**Source:** https://3dtextures.me/2021/08/20/stylized-stone-wall-001/
+
+```
+Place in:
+  assets/pbr/buildings/stone_brick/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+### Metal Plates
+
+**Source:** https://3dtextures.me/2022/06/15/stylized-metal-plates-001/
+
+```
+Place in:
+  assets/pbr/buildings/metal_plate/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  ├── metallic.png    # This one has metallic map
+  └── ao.png
+```
+
+### Thatch/Straw Roof
+
+**Source:** https://3dtextures.me/2021/11/03/stylized-straw-roof-001/
+
+```
+Place in:
+  assets/pbr/buildings/thatch/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+### Wood Shingles (Roof)
+
+**Source:** https://3dtextures.me/2021/11/10/stylized-wood-shingles-001/
+
+```
+Place in:
+  assets/pbr/buildings/wood_shingles/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+---
+
+## Terrain (Albedo + Normal Only)
+
+For Valheim style, download photorealistic then reduce saturation/add painterly filter in GIMP/Photoshop.
+
+### Grass
+
+**Source:** https://ambientcg.com/view?id=Grass001 (download 1K)
+
+```
+Download 1K-JPG:
+  Grass001_1K-JPG_Color.jpg    -> albedo.png
+  Grass001_1K-JPG_NormalGL.jpg -> normal.png
+  (Ignore other maps - using uniform roughness)
+
+Place in:
+  assets/pbr/terrain/grass/
+  ├── albedo.png
+  └── normal.png
+```
+
+### Dirt
+
+**Source:** https://ambientcg.com/view?id=Ground037 (download 1K)
+
+```
+Place in:
+  assets/pbr/terrain/dirt/
+  ├── albedo.png
+  └── normal.png
+```
+
+### Rock
+
+**Source:** https://ambientcg.com/view?id=Rock030 (download 1K)
+
+```
+Place in:
+  assets/pbr/terrain/rock/
+  ├── albedo.png
+  └── normal.png
+```
+
+### Sand
+
+**Source:** https://ambientcg.com/view?id=Ground054 (download 1K)
+
+```
+Place in:
+  assets/pbr/terrain/sand/
+  ├── albedo.png
+  └── normal.png
+```
+
+### Tilled Soil
+
+**Source:** https://ambientcg.com/view?id=Ground048 (download 1K)
+
+```
+Place in:
+  assets/pbr/terrain/tilled_soil/
+  ├── albedo.png
+  └── normal.png
+```
+
+---
+
+## Alternative: Stylized Terrain
+
+For already-stylized terrain textures:
+
+**Source:** https://3dtextures.me/2020/08/13/stylized-grass-001/
+
+```
+Place in:
+  assets/pbr/terrain/grass/
+  ├── albedo.png
+  └── normal.png
+```
+
+**Source:** https://3dtextures.me/2020/10/15/stylized-dirt-001/
+
+```
+Place in:
+  assets/pbr/terrain/dirt/
+  ├── albedo.png
+  └── normal.png
+```
+
+---
+
+## Props/Rocks (Medium Detail)
+
+### Large Rocks
+
+**Source:** https://3dtextures.me/2022/01/12/stylized-cliff-001/
+
+```
+Place in:
+  assets/pbr/props/rocks/rock_large/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+### Cobblestone (for paths)
+
+**Source:** https://3dtextures.me/2024/09/04/cobblestone-irregular-floor-001/
+
+```
+Place in:
+  assets/pbr/props/cobblestone/
+  ├── albedo.png
+  ├── normal.png
+  ├── roughness.png
+  └── ao.png
+```
+
+### Wood Crate
+
+**Source:** https://3dtextures.me/2021/09/29/stylized-crate-001/
+
+```
+Place in:
+  assets/pbr/props/containers/crate/
+  ├── albedo.png
+  └── normal.png
+```
+
+---
+
+## Crops (Minimal - Use Model Textures)
+
+Crops use GLTF models with baked textures from Quaternius.
+No separate texture downloads needed.
+
+**Models Source:** https://poly.pizza/bundle/Ultimate-Crops-Pack-8rnVIzNDye
+
+The GLTF files already include vertex colors and simple textures.
+
+---
+
+## Water (Shader-Driven)
+
+Water uses procedural normals, but you can add a flow/normal map:
+
+**Source:** https://ambientcg.com/view?id=Water002 (download 1K)
+
+```
+Only need normal map:
+  Water002_1K-JPG_NormalGL.jpg -> flow_normal.png
+
+Place in:
+  assets/pbr/water/
+  └── flow_normal.png
+```
+
+---
+
+## Complete Folder Structure
+
+```
+assets/
+|-- pbr/
+|   |-- buildings/
+|   |   |-- wood_plank/
+|   |   |   |-- albedo.png
+|   |   |   |-- normal.png
+|   |   |   |-- roughness.png
+|   |   |   `-- ao.png
+|   |   |-- stone_brick/
+|   |   |   `-- (same structure)
+|   |   |-- metal_plate/
+|   |   |   |-- albedo.png
+|   |   |   |-- normal.png
+|   |   |   |-- roughness.png
+|   |   |   |-- metallic.png
+|   |   |   `-- ao.png
+|   |   |-- thatch/
+|   |   |   `-- (same as wood_plank)
+|   |   `-- wood_shingles/
+|   |       `-- (same as wood_plank)
+|   |
+|   |-- terrain/
+|   |   |-- grass/
+|   |   |   |-- albedo.png
+|   |   |   `-- normal.png
+|   |   |-- dirt/
+|   |   |   `-- (same structure)
+|   |   |-- rock/
+|   |   |   `-- (same structure)
+|   |   |-- sand/
+|   |   |   `-- (same structure)
+|   |   `-- tilled_soil/
+|   |       `-- (same structure)
+|   |
+|   |-- props/
+|   |   |-- rocks/
+|   |   |   `-- rock_large/
+|   |   |       |-- albedo.png
+|   |   |       |-- normal.png
+|   |   |       |-- roughness.png
+|   |   |       `-- ao.png
+|   |   |-- cobblestone/
+|   |   |   `-- (same structure)
+|   |   `-- containers/
+|   |       |-- crate/
+|   |       |   |-- albedo.png
+|   |       |   `-- normal.png
+|   |       `-- barrel/
+|   |           `-- (same structure)
+|   |
+|   `-- water/
+|       `-- flow_normal.png
+|
+`-- models/
+    `-- crops/
+        |-- wheat/
+        |   |-- stage_1.glb
+        |   |-- stage_2.glb
+        |   |-- stage_3.glb
+        |   |-- stage_4.glb
+        |   `-- stage_5.glb
+        |-- carrot/
+        |   `-- (same structure)
+        `-- corn/
+            `-- (same structure)
+```
+
+---
+
+## Quick Download Script (PowerShell)
+
+```powershell
+# Create folder structure
+$folders = @(
+    "assets/pbr/buildings/wood_plank",
+    "assets/pbr/buildings/stone_brick",
+    "assets/pbr/buildings/metal_plate",
+    "assets/pbr/buildings/thatch",
+    "assets/pbr/buildings/wood_shingles",
+    "assets/pbr/terrain/grass",
+    "assets/pbr/terrain/dirt",
+    "assets/pbr/terrain/rock",
+    "assets/pbr/terrain/sand",
+    "assets/pbr/terrain/tilled_soil",
+    "assets/pbr/props/rocks/rock_large",
+    "assets/pbr/props/cobblestone",
+    "assets/pbr/props/containers/crate",
+    "assets/pbr/props/containers/barrel",
+    "assets/pbr/water",
+    "assets/models/crops/wheat",
+    "assets/models/crops/carrot",
+    "assets/models/crops/corn"
+)
+
+foreach ($folder in $folders) {
+    New-Item -ItemType Directory -Force -Path $folder
+    Write-Host "Created: $folder"
+}
+
+Write-Host "`nFolder structure created. Download textures manually from:"
+Write-Host "  Buildings: https://3dtextures.me/category/stylized-textures/"
+Write-Host "  Terrain:   https://ambientcg.com/"
+Write-Host "  Crops:     https://poly.pizza/bundle/Ultimate-Crops-Pack-8rnVIzNDye"
+```
+
+---
+
+## File Naming Convention
+
+When downloading, rename to this standard:
+
+| Downloaded Name                                       | Rename To         |
+| ----------------------------------------------------- | ----------------- |
+| `*_basecolor.*` or `*_Color.*` or `*_diffuse.*` | `albedo.png`    |
+| `*_normal.*` or `*_NormalGL.*`                    | `normal.png`    |
+| `*_roughness.*`                                     | `roughness.png` |
+| `*_metallic.*` or `*_Metalness.*`                 | `metallic.png`  |
+| `*_ambientOcclusion.*` or `*_AO.*`                | `ao.png`        |
+
+**Note:** Convert JPG to PNG if needed for consistency. Most engines handle both, but PNG avoids compression artifacts on normal maps.
+
+---
+
+## Stylization Tips
+
+If using photorealistic textures (Poly Haven, ambientCG) for Valheim style:
+
+1. **Reduce saturation** by 20-30%
+2. **Increase contrast** slightly
+3. **Apply slight blur** (0.5-1px Gaussian)
+4. **Reduce resolution** to 512x512 (intentional low-res look)
+5. **Optional:** Add subtle hand-painted overlay
+
+GIMP Filter chain:
+
+```
+Colors -> Hue-Saturation -> Saturation: -25
+Colors -> Curves -> S-curve for contrast
+Filters -> Blur -> Gaussian Blur -> 0.8px
+Image -> Scale Image -> 512x512
+```
+
