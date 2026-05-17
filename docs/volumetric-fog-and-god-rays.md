@@ -1,5 +1,7 @@
 # Volumetric Fog & God Rays Implementation
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Overview
 This document details the implementation of the volumetric fog system in **Drusniel Voxels**. The primary visual goal was to achieve a specific atmospheric style similar to *Valheim* or *Minecraft with shaders*:
 1.  **Crystal Clear Outdoors**: No heavy "milky" fog washing out the landscape.

@@ -1,5 +1,7 @@
 # Dirty Mesh Subsystem — Code Review
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 > [!NOTE]
 > Reviewed 2026-05-13 against `src/voxel/chunk.rs`, `src/voxel/plugin.rs`,
 > `src/voxel/world.rs`, `src/interaction/editing.rs`, `src/runtime_commands.rs`,

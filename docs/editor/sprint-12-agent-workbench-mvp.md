@@ -1,6 +1,8 @@
-# Sprint 12 — Agent Workbench MVP
+# Sprint 12 ï¿½ Agent Workbench MVP
 
-Phase: 4 — LLM-first editor
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 4 ï¿½ LLM-first editor
 
 ## Goal
 Make the UI readable and operable by an LLM agent.

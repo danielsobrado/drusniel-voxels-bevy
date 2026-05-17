@@ -1,5 +1,7 @@
 # v0.5
 
+Document status (2026-05-17): historical release/reference record; keep for versioned context, not current implementation instructions.
+
 * **Water Rendering Overhaul**: Custom water fragment over `bevy_water`, plus per-water-body presets, planar reflections, screen-space refraction, underwater caustics, and a CPU-driven wave-displacement sim for buoyancy.
 
   * **Per-Water-Body Presets**: Each connected water body (ocean, lake, river, pond, shallow flood) gets its own `WaterMaterial` parameters — wave amplitude/scale/count, reflection strength, Fresnel power, distortion strength, shallow/deep colour, base alpha, foam toggles, murkiness. Tuned in [assets/config/water.yaml](assets/config/water.yaml) under `body_presets`. Material LOD swaps fancy↔cheap material per body based on distance + triangle count + depth.

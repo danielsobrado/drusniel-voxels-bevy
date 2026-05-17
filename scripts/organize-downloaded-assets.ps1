@@ -250,10 +250,10 @@ foreach ($category in $categories) {
     }
 }
 
-$inventoryPath = "$TargetDir/ASSET_INVENTORY.md"
+$inventoryPath = "$TargetDir/asset-inventory.md"
 Set-Content -Path $inventoryPath -Value $inventory
 
-Write-ColorOutput "Inventory saved to: ASSET_INVENTORY.md" "Green"
+Write-ColorOutput "Inventory saved to: asset-inventory.md" "Green"
 Write-Host ""
 
 Write-ColorOutput "----------------------------------------" "Cyan"

@@ -1,6 +1,10 @@
 # Physics Features, Editor, and Performance Polish Implementation Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 Plan 3 translates the standalone Physics3D "features and polish" plan into this repo's Bevy/Rust stack.
+
+Status note (2026-05-17): this is a roadmap artifact. Some referenced files (for example, `physics-stacking-smoke.toml` and several planned physics modules) are not yet present in this codebase and should be read as pending targets.
 
 The JavaScript source plan finishes a custom engine with multi-point box-box manifolds, raycasting, sensors, filtering, auto-sleep, spawn-overlap resolution, deferred-removal cache eviction, a three.js debug helper, demos, and README docs. In this repo those features map to Avian 3D, Bevy ECS, runtime/editor diagnostics, bench scenes, and project authoring documentation.
 
@@ -201,7 +205,7 @@ rtk cargo test
 
 **Files:**
 
-- Create or modify: `bench/scenes/collider/physics-stacking-smoke.toml` (temporary placeholder until this scene is introduced)
+- Create or modify: `bench/scenes/collider/gameplay-movement-smoke.toml` for stacking/solver assertions until a dedicated `physics-stacking-smoke.toml` scene is introduced (not present in current tree)
 - Create or modify physics integration tests where practical
 - Modify: `src/physics/materials.rs` or settings only if tests reveal bad defaults
 
@@ -215,7 +219,7 @@ rtk cargo test
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/collider/physics-stacking-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 

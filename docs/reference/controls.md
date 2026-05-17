@@ -1,5 +1,7 @@
 # Controls
 
+Document status (2026-05-17): historical release/reference record; keep for versioned context, not current implementation instructions.
+
 Keyboard and mode reference for Drusniel Voxels.
 
 ## General

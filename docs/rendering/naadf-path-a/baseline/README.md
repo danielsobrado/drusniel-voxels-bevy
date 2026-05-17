@@ -1,5 +1,7 @@
 # Phase 0 Baseline Archive
 
+Document status (2026-05-17): current index/reference.
+
 Captured: 2026-05-16
 
 Source run: `bench-runs/2026-05-16T11-30-42Z`

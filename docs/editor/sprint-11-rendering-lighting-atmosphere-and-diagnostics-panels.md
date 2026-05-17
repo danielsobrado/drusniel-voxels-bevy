@@ -1,6 +1,8 @@
-# Sprint 11 — Rendering, lighting, atmosphere, and diagnostics panels
+# Sprint 11 ï¿½ Rendering, lighting, atmosphere, and diagnostics panels
 
-Phase: 3 — Domain-specific systems
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 3 ï¿½ Domain-specific systems
 
 ## Goal
 Expose rendering systems as editor controls and debug panels.

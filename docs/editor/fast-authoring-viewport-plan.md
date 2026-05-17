@@ -1,5 +1,7 @@
 # Fast authoring viewport plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 This plan defines the editor viewport as a fast authoring surface, not as a second game renderer.
 
 ## Viewport split

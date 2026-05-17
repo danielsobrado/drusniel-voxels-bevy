@@ -7,28 +7,28 @@ Game based on https://www.drusniel.com/ lore.
 
 ## Version History
 
-See [VERSION_HISTORY.MD](docs/reference/VERSION_HISTORY.MD) for release notes and historical feature summaries.
+See [version-history.md](docs/reference/version-history.md) for release notes and historical feature summaries.
 
 | Version | Summary | Main Image |
 | ------- | ------- | ---------- |
-| [v0.5](docs/reference/VERSION_V0_5.MD) | Current development version with water overhaul, NAADF experiments, performance work, collider benches, and the new editor. | ![v0.5 Editor Preview](docs/images/editor1.jpg) |
-| [v0.4](docs/reference/VERSION_V0_4.MD) | Rendering stack, GI, atmosphere, terrain tools, building systems, props, and persistence. | ![v0.4 Props and Vegetation](docs/images/v0.4-props1.jpg) |
-| [v0.3](docs/reference/VERSION_V0_3.MD) | PBR materials, triplanar splatting, surface-net fixes, and smoother slope movement. | ![v0.3 Preview](docs/images/V0.3.jpg) |
-| [v0.2](docs/reference/VERSION_V0_2.MD) | Procedural grass, terrain balance, water restoration, texture assets, and rendering polish. | ![v0.2 Preview](docs/images/V0.2.jpg) |
-| [v0.1](docs/reference/VERSION_V0_1.MD) | Initial implementation, chunk rendering fixes, and tilable terrain adjustments. | ![v0.1 Preview](docs/images/V0.1.jpg) |
+| [v0.5](docs/reference/version-v0-5.md) | Current development version with water overhaul, NAADF experiments, performance work, collider benches, and the new editor. | ![v0.5 Editor Preview](docs/images/editor1.jpg) |
+| [v0.4](docs/reference/version-v0-4.md) | Rendering stack, GI, atmosphere, terrain tools, building systems, props, and persistence. | ![v0.4 Props and Vegetation](docs/images/v0.4-props1.jpg) |
+| [v0.3](docs/reference/version-v0-3.md) | PBR materials, triplanar splatting, surface-net fixes, and smoother slope movement. | ![v0.3 Preview](docs/images/V0.3.jpg) |
+| [v0.2](docs/reference/version-v0-2.md) | Procedural grass, terrain balance, water restoration, texture assets, and rendering polish. | ![v0.2 Preview](docs/images/V0.2.jpg) |
+| [v0.1](docs/reference/version-v0-1.md) | Initial implementation, chunk rendering fixes, and tilable terrain adjustments. | ![v0.1 Preview](docs/images/V0.1.jpg) |
 
 ## Controls
 
-See [CONTROLS.MD](docs/reference/CONTROLS.MD) for the full keyboard and mode reference.
+See [controls.md](docs/reference/controls.md) for the full keyboard and mode reference.
 
 ## Profiling
 
-See [PROFILING.MD](docs/reference/PROFILING.MD) for profiling, benchmarking, and regression guard commands.
+See [profiling.md](docs/reference/profiling.md) for profiling, benchmarking, and regression guard commands.
 
 ## Free Texture Sources Guide
 
-See [FREE_TEXTURE_SOURCES.MD](docs/reference/FREE_TEXTURE_SOURCES.MD) for texture source links, folder layout, naming, and stylization notes.
+See [free-texture-sources.md](docs/reference/free-texture-sources.md) for texture source links, folder layout, naming, and stylization notes.
 
 ## Editor
 
-See [EDITOR.MD](docs/reference/EDITOR.MD) for desktop editor startup, build, and frontend development commands.
+See [editor.md](docs/reference/editor.md) for desktop editor startup, build, and frontend development commands.

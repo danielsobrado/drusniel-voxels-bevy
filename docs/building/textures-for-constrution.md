@@ -1,3 +1,7 @@
+# assets/config/building_materials.yaml
+
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Recommended Texture Maps by Category
 
 | Category | Albedo | Normal | Roughness | Metallic | AO | Parallax | Reason |
@@ -142,7 +146,7 @@ barrels_crates:
 Split into specialized shaders:
 
 ```
-src/rendering/shaders/
+assets/shaders/
 ├── building.wgsl      # Full PBR (5 maps + parallax)
 ├── terrain.wgsl       # Triplanar (2 maps + SSAO)
 ├── vegetation.wgsl    # Instanced (vertex colors + wind)

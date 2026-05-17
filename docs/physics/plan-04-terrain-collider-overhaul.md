@@ -1,5 +1,7 @@
 # Terrain Collider Overhaul Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 This plan tracks the terrain-collision rewrite for editable smooth voxel terrain. The first implementation slice is now in code: the existing render-mesh collider path is still active, but it is wrapped by explicit collision state, revisions, and bench counters so the next phases can be measured.
 
 ## Current Fit

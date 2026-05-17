@@ -1,5 +1,7 @@
 # Editor sprints 18-20 completion handoff
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 Date: 2026-05-04
 
 ## Included

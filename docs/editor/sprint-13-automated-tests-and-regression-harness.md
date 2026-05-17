@@ -1,6 +1,8 @@
-# Sprint 13 — Automated tests and regression harness
+# Sprint 13 ï¿½ Automated tests and regression harness
 
-Phase: 4 — LLM-first editor
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 4 ï¿½ LLM-first editor
 
 ## Goal
 Make the editor safe for LLM iteration.

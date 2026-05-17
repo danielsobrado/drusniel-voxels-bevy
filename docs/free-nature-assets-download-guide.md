@@ -1,5 +1,7 @@
 # Free Nature Assets Download Guide
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 This guide covers the recommended workflow for downloading and organizing free CC0 nature assets.
 
 ## Why Auto-Downloads Don't Work
@@ -34,7 +36,7 @@ The updated scripts:
 ### Quick Decision Tree
 
 - Do you want scripts to help at all?
-  - NO -> Use `docs/SIMPLE_MANUAL_GUIDE.md`
+  - NO -> Use `docs/simple-manual-guide.md`
   - YES -> Continue below
 
 - Are you comfortable with interactive scripts?
@@ -45,7 +47,7 @@ The updated scripts:
 
 ## Three Approaches Explained
 
-### 1. SIMPLE_MANUAL_GUIDE.md - Zero Automation
+### 1. simple-manual-guide.md - Zero Automation
 Best for: People who don't want to run scripts at all
 
 What it does:
@@ -54,7 +56,7 @@ What it does:
 - No automation, no complexity
 
 Steps:
-1. Open `docs/SIMPLE_MANUAL_GUIDE.md`
+1. Open `docs/simple-manual-guide.md`
 2. Download each ZIP manually (5 downloads)
 3. Extract and move files to folders (following guide)
 4. Done
@@ -164,9 +166,9 @@ Total download: ~330 MB compressed, ~1 GB extracted
 .\scripts\download-nature-assets.ps1 -SkipExisting:$false
 ```
 
-### If Using SIMPLE_MANUAL_GUIDE.md
+### If Using simple-manual-guide.md
 ```powershell
-Get-Content docs/SIMPLE_MANUAL_GUIDE.md
+Get-Content docs/simple-manual-guide.md
 ```
 
 ---
@@ -184,7 +186,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 - If using a different location, specify: `-DownloadsFolder "C:\Your\Path"`
 
 ### Everything failed
-- Fall back to `docs/SIMPLE_MANUAL_GUIDE.md`
+- Fall back to `docs/simple-manual-guide.md`
 - Manual approach always works
 
 ---

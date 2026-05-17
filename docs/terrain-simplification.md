@@ -1,5 +1,7 @@
 # Terrain Simplification - Mountains Without NPCs/Dungeons
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Overview
 
 Simplified the game world to focus on mountainous terrain exploration by removing NPCs and dungeon structures.

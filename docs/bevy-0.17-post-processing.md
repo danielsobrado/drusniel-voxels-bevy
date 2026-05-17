@@ -1,5 +1,9 @@
 # Commercial-quality post-processing in Bevy 0.17 for voxel games
 
+Document status (2026-05-17): historical Bevy 0.17 reference. The current repo baseline is Bevy 0.18.1, so verify every API snippet against current code and Bevy 0.18.1 docs before using it.
+
+Current code note: this document was written for Bevy 0.17-era post-processing APIs. It remains useful for rendering rationale and quality targets, but it is not the current implementation guide for this repo.
+
 Bevy 0.17 delivers a mature post-processing pipeline capable of achieving the polished aesthetic of games like Valheim -- combining stylized textures with modern lighting and effects. The key to commercial-quality graphics lies in properly configuring HDR rendering with TonyMcMapface tonemapping, subtle energy-conserving bloom, per-vertex ambient occlusion baked into voxel meshes, and cascade shadows tuned for large worlds. This report provides implementation guidance with working code examples for a Valheim/Skyrim-style 3D voxel game.
 
 Bevy 0.17 reorganized post-processing into dedicated modules (`bevy::post_process`, `bevy::anti_alias`) and introduced breaking changes -- HDR is now a separate `Hdr` marker component rather than a camera flag. The rendering pipeline supports VBAO ambient occlusion, deferred rendering with screen-space reflections, volumetric fog with god rays, and multiple anti-aliasing methods. Performance optimization relies on per-chunk mesh generation, greedy meshing, frustum culling, and Tracy-based GPU profiling.

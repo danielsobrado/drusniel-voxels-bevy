@@ -1,5 +1,7 @@
 # Editor
 
+Document status (2026-05-17): historical release/reference record; keep for versioned context, not current implementation instructions.
+
 The desktop editor lives in `editor/frontend` and runs as a Tauri app. Tauri owns the editor window and starts the Bevy editor runtime in backend mode automatically.
 
 ### Start The Desktop Editor

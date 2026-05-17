@@ -1,6 +1,8 @@
-# Sprint 8 — Voxel paint and texture atlas workflow
+# Sprint 8 ï¿½ Voxel paint and texture atlas workflow
 
-Phase: 2 — Core Editor Workflows
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 2 ï¿½ Core Editor Workflows
 
 ## Goal
 Build the material/atlas editing loop around the real block atlas mapping.
@@ -38,5 +40,5 @@ Your Bevy code already treats atlas mapping as runtime-editable and saveable to 
 - User can click atlas tile.
 - User can assign tile to grass top/side/bottom.
 - Dirty state appears.
-- Mock “Rebuild Texture Array” clears dirty state.
-- Mock “Save Mapping” produces serialized YAML preview.
+- Mock ï¿½Rebuild Texture Arrayï¿½ clears dirty state.
+- Mock ï¿½Save Mappingï¿½ produces serialized YAML preview.

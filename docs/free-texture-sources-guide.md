@@ -1,5 +1,7 @@
 # Free Texture Sources Guide
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 All sources are CC0 (public domain) - no attribution required.
 
 ---

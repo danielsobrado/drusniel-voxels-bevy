@@ -1,5 +1,7 @@
 # Shallow Water Waves Fix
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## Issue Description
 
 Shallow terrain water showed wave effects at **far distances** but waves **disappeared when close**. This appeared to be inverted behavior - waves should be more visible up close, not less.

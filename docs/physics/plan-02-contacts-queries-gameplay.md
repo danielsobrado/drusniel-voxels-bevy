@@ -1,6 +1,10 @@
 # Contacts, Solver Behavior, and Gameplay Physics Implementation Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 Plan 2 translates the standalone Physics3D "contacts and solver" plan into this repo's Bevy/Rust stack.
+
+Status note (2026-05-17): this is a roadmap artifact. The repo currently does not contain several of the listed files, so treat the file-level tasks as design intent and not as an immediate implementation map.
 
 The JavaScript source plan builds a custom narrowphase, contact cache, warm-started sequential impulse solver, position solver, and ten shape-pair algorithms. In this project those systems already belong to Avian 3D. The implementation work is therefore to expose, configure, verify, and use Avian's contact/solver behavior through project-level APIs, tests, diagnostics, and gameplay systems.
 
@@ -331,7 +335,7 @@ Read `bench-runs/<run>/summary.json` and report collider rows plus movement smok
 
 **Files:**
 
-- Create or modify: `bench/scenes/collider/physics-solver-smoke.toml` (temporary placeholder until this scene is introduced)
+- Create or modify: `bench/scenes/collider/gameplay-movement-smoke.toml` for solver assertions until a dedicated `physics-solver-smoke.toml` scene is introduced (not present in current tree)
 - Modify bench harness only if it needs controlled dynamic body assertions
 
 - [ ] Add a checkpoint for bouncy sphere behavior if the bench harness can spawn scripted physics bodies.
@@ -343,7 +347,7 @@ Read `bench-runs/<run>/summary.json` and report collider rows plus movement smok
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/collider/physics-solver-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 

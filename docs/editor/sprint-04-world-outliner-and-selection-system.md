@@ -1,6 +1,8 @@
-# Sprint 4 — World Outliner and selection system
+# Sprint 4 ï¿½ World Outliner and selection system
 
-Phase: 2 — Core Editor Workflows
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 2 ï¿½ Core Editor Workflows
 
 ## Goal
 Build the left-side tree as the main way to navigate the world.

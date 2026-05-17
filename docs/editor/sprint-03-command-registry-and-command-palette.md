@@ -1,6 +1,8 @@
-# Sprint 3 — Command registry and command palette
+# Sprint 3 ï¿½ Command registry and command palette
 
-Phase: 1 — Editor Shell MVP
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 1 ï¿½ Editor Shell MVP
 
 ## Goal
 Make the editor operable through menus, buttons, keyboard, and LLM agents using the same command system.

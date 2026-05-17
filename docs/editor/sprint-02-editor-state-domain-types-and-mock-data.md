@@ -1,6 +1,8 @@
-# Sprint 2 — Editor state, domain types, and mock data
+# Sprint 2 ï¿½ Editor state, domain types, and mock data
 
-Phase: 1 — Editor Shell MVP
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 1 ï¿½ Editor Shell MVP
 
 ## Goal
 Create the real data model before implementing workflows.
@@ -48,7 +50,7 @@ Create the real data model before implementing workflows.
   - `agentState`
   - `dirtyState`
 - Create mock data:
-  - 8–12 chunks
+  - 8ï¿½12 chunks
   - 3 protected areas
   - 4 water bodies
   - 20 props

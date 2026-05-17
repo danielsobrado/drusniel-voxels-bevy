@@ -1,5 +1,7 @@
 # Inventory Icon Requirements
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 These icons are used by the inventory UI.
 
 Location: `assets/textures/ui/inventory/`

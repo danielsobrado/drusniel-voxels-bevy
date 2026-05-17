@@ -1,5 +1,7 @@
 # Tauri Editor Headless Runtime Delivery Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 ## Goal
 
 Move the editor to a production desktop architecture where Tauri owns the editor window and the Bevy runtime runs as a backend process without opening its own editor window. The Tauri viewport renders runtime-provided world data inside the editor UI.

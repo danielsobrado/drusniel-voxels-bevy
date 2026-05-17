@@ -1,5 +1,9 @@
 # Grass Shader Fix for Bevy 0.17
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
+Current engine baseline: Bevy 0.18.1. The Bevy 0.17 API details in this document explain the original fix but are not current implementation guidance.
+
 ## Issue Summary
 
 The grass rendering system was failing with shader validation errors, preventing grass blades from appearing in the voxel world. Multiple issues were identified and fixed.

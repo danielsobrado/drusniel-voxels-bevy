@@ -1,5 +1,7 @@
 # Water Visual Regression Checklist
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 ## Scenes
 - `bench/scenes/water/lake-water-close.toml`
 - `bench/scenes/water/lake-water-mid.toml`

@@ -1,5 +1,7 @@
 # Profiling
 
+Document status (2026-05-17): historical release/reference record; keep for versioned context, not current implementation instructions.
+
 * **F3**: Show the in-game 60-frame CPU area timing table.
 * **F4**: Dump the current timing window as CSV to `perf-dumps/frame-<UTC>.csv`, including `__frame_total`.
 * **Tracy**: Run `cargo run --release --features tracy`, then connect with Tracy 0.11.x.

@@ -1,6 +1,8 @@
-# Sprint 6 — Viewport shell and overlays
+# Sprint 6 ï¿½ Viewport shell and overlays
 
-Phase: 2 — Core Editor Workflows
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 2 ï¿½ Core Editor Workflows
 
 ## Goal
 Make the center viewport feel like a real editor while still using a placeholder Bevy host.

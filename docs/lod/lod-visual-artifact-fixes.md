@@ -1,5 +1,7 @@
 # LOD Visual Artifact Fixes — Issue Tracker & Fix Plan
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 > Created: 2026-05-13 · Status: Planning
 > Scope: `src/voxel/meshing.rs`, `src/voxel/plugin.rs`, `src/voxel/skirt.rs`, `src/voxel/world.rs`, `src/voxel/chunk.rs`
 

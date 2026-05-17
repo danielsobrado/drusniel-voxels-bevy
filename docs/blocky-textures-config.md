@@ -1,5 +1,7 @@
 # Blocky Textures Configuration
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 This document describes the texture configuration system for blocky (V0.1 style) terrain rendering.
 
 ## Overview

@@ -1,5 +1,7 @@
 # MagicaVoxel .vox Import/Export Implementation Plan
 
+Document status (2026-05-17): historical implementation plan. The current codebase does not contain the proposed `src/voxel/vox_io/` module tree. The active lightweight model import/export implementation is `src/voxel/model_io.rs`; use this document for format/background rationale only, not as a current implementation map.
+
 ## Overview
 
 Add MagicaVoxel .vox file format support to enable:
@@ -16,7 +18,7 @@ vox-format = "0.2"
 
 **Why vox-format**: Supports both reading AND writing .vox files (unlike dot_vox which is read-only).
 
-## File Structure
+## Original Planned File Structure
 
 ```
 src/voxel/
@@ -31,7 +33,9 @@ src/voxel/
 
 ---
 
-## 1. Error Types (`src/voxel/vox_io/error.rs`)
+Current source of truth: `src/voxel/model_io.rs` provides the existing world model serialization surface. Add any future `.vox` support there or deliberately introduce a new module with updated architecture notes before following the old `vox_io` split.
+
+## 1. Error Types (historical target: `src/voxel/vox_io/error.rs`)
 
 ```rust
 use bevy::prelude::*;
@@ -65,7 +69,7 @@ pub enum VoxError {
 
 ---
 
-## 2. Color Mapping (`src/voxel/vox_io/color_mapping.rs`)
+## 2. Color Mapping (historical target: `src/voxel/vox_io/color_mapping.rs`)
 
 ### Reference Colors for Each VoxelType
 

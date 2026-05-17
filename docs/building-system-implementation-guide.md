@@ -1,5 +1,7 @@
 # Building System Implementation Guide for Voxel Games
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 Enshrouded takes a creative-freedom approach with no structural integrity, while Valheim and 7 Days to Die implement distinct stability systems--Valheim uses support value propagation through material hierarchies, and 7DTD calculates mass-based load limits. For a Rust/Bevy implementation, a hybrid grid-graph architecture with spatial hashing for snap points offers the best balance of performance and flexibility.
 
 ## Enshrouded's grid-based building prioritizes creative freedom

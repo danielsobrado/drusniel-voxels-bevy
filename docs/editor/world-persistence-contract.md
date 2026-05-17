@@ -1,5 +1,7 @@
 # World persistence contract
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 Sprint 14A exposes the existing Bevy voxel persistence system for editor backend use. It does not introduce a new file format.
 
 ## Default save

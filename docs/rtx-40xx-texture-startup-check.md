@@ -1,5 +1,7 @@
 # RTX 40xx Startup Texture Limit Check
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Purpose
 
 Document the startup risk of "too many textures" and a repeatable test plan.
@@ -9,7 +11,7 @@ Document the startup risk of "too many textures" and a repeatable test plan.
 - The largest single material is the building shader: 18 sampled textures plus 1 sampler.
   - Code: `src/rendering/building_material.rs`
   - Shader bindings: `assets/shaders/building.wgsl`
-- Bevy 0.17 defaults to `WgpuSettingsPriority::Functionality`, which uses the adapter limits.
+- On the current Bevy 0.18.1 baseline, adapter limits should still be used unless settings force a lower compatibility profile.
   - On an RTX 40xx, the adapter limit for sampled textures per stage is far above 18.
   - This should not panic on startup due to texture count.
 - The only likely startup failure for "too many textures" is forcing lower limits

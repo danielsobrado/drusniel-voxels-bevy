@@ -1,5 +1,7 @@
 # Prop Persistence & Precision Placement System
 
+Document status (2026-05-17): roadmap record, not current execution instructions. The current props code already has `src/props/persistence/`, `src/props/placement/terrain_analysis.rs`, `src/props/spawner.rs`, and related rendering/loading modules. This plan still contains several proposed modules that do not exist today (`src/props/placement/physics.rs`, `src/props/editor/commands.rs`, `src/voxel/terraforming.rs`, `src/ui/menu.rs`), so treat those as design targets that must be reconciled with the current code before implementation.
+
 ## Executive Summary
 
 This document outlines a comprehensive plan to replace the current procedural prop spawning system with a **persist-first architecture** that calculates precise, physics-based prop placements once and stores them permanently. This eliminates floating objects by using gravity simulation, collision detection, and pixel-wise terrain analysis for accurate initial placement.
@@ -104,27 +106,27 @@ saves/
 - Partial updates (only dirty chunks)
 - Manageable file sizes
 
-### 3. New Module Structure
+### 3. Proposed Module Structure
 
 ```
 src/props/
-  mod.rs                  # Existing (add new module exports)
-  config.rs               # Extract config loading (from loader.rs)
+  mod.rs                  # Present
+  config.rs               # Proposed extraction target; not currently present
   loader.rs               # Asset loading only
-  spawner.rs              # Simplified: load-from-json or trigger generation
+  spawner.rs              # Present; plan proposes a load-or-generate rewrite
   placement/
-    mod.rs                # Placement orchestration
-    physics.rs            # Gravity simulation & collision
-    terrain_analysis.rs   # Slope, normal, texture sampling
-    validation.rs         # Post-placement validation
+    mod.rs                # Present
+    physics.rs            # Proposed target; not currently present
+    terrain_analysis.rs   # Present
+    validation.rs         # Proposed target; not currently present
   persistence/
-    mod.rs                # Save/load coordination
-    schema.rs             # Rust structs matching JSON schema
-    serializer.rs         # JSON serialization with serde
-    migration.rs          # Version migration support
+    mod.rs                # Present
+    schema.rs             # Present
+    serializer.rs         # Present
+    migration.rs          # Proposed target; not currently present
   editor/
-    mod.rs                # Edit mode integration
-    commands.rs           # Persist shortcuts/menu
+    mod.rs                # Proposed target; not currently present
+    commands.rs           # Proposed target; not currently present
 ```
 
 ---

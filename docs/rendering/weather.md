@@ -1,5 +1,7 @@
 # Shader Weather Rendering
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 Drusniel weather is shader-first. The CPU owns a small `WeatherRuntime` resource and only updates uniforms, quality flags, and debug counters. Rain, snow, terrain wetness, puddles, snow tint, water reflection response, fog, and god-ray attenuation are evaluated in WGSL where practical.
 
 ## Runtime Selection

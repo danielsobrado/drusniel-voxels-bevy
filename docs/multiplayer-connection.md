@@ -1,5 +1,7 @@
 # Multiplayer Connection Requirements
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 This guide outlines the requirements for running a simple two-player multiplayer session where one player acts as the server host and the other joins as a client using an IP address, port, and password.
 
 ## Host (Server) Requirements

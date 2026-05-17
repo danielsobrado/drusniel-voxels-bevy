@@ -1,6 +1,6 @@
 # NAADF Completion JIRA Plan
 
-Status: implementation in progress  
+Status: implementation record and remaining-work breakdown  
 Last reviewed: 2026-05-15  
 Scope: remaining work after CPU voxel/block/chunk skip propagation, CPU skip traversal, GPU upload packing, GPU build dispatch scaffolding, WGSL skip traversal scaffolding, preview GI, preview fog, denoise, dynamic entity-volume upload/traversal, and debug reference path tracing.
 

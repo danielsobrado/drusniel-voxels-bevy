@@ -1,8 +1,12 @@
-# Avian vs bevy_rapier3d for Bevy 0.17 voxel games
+# Avian vs bevy_rapier3d Physics Backend Record
 
-Avian is the clear choice for your Bevy 0.17 voxel game with Surface Nets terrain. The decisive factor: bevy_rapier3d 0.32.0 only supports Bevy 0.16--there is no Bevy 0.17 support yet. Avian 0.4 fully supports Bevy 0.17 and introduces native voxel colliders specifically designed for Minecraft-style worlds, eliminating the ghost collision problems that plague trimesh terrain. Combined with a 3x performance improvement in version 0.4 and superior ECS integration, Avian addresses every critical requirement for your use case.
+Document status (2026-05-17): historical Bevy 0.17-era comparison. The current repo baseline is Bevy 0.18.1 with `avian3d = 0.5`; keep this document for rationale, not current dependency selection instructions.
 
-## Bevy 0.17 compatibility determines your choice
+Current code note: the decision recorded here has already been applied. The active physics backend is Avian 3D 0.5 on Bevy 0.18.1, with terrain collider code under `src/physics/`.
+
+Historically, Avian was the clear choice for the Bevy 0.17 voxel game with Surface Nets terrain. The decisive factor at the time: bevy_rapier3d 0.32.0 only supported Bevy 0.16--there was no Bevy 0.17 support yet. Avian 0.4 fully supported Bevy 0.17 and introduced native voxel colliders specifically designed for Minecraft-style worlds, eliminating the ghost collision problems that plague trimesh terrain. Combined with a 3x performance improvement in version 0.4 and superior ECS integration, Avian addressed every critical requirement for this use case.
+
+## Historical Bevy 0.17 compatibility context
 
 The compatibility situation is stark and decisive for immediate development:
 
@@ -133,8 +137,8 @@ For chunk updates, process mesh generation asynchronously using `AsyncComputeTas
 
 ## Conclusion
 
-Choose Avian 0.4 for your Bevy 0.17 voxel game. The decision is straightforward: it's the only option with Bevy 0.17 support, offers native voxel colliders that solve trimesh ghost collisions, provides better ECS integration, and has superior documentation. The 3x performance improvement in version 0.4 and simulation islands for large static worlds address the specific needs of voxel terrain.
+Historical conclusion: choose Avian 0.4 for the Bevy 0.17 voxel game. The current codebase has carried that decision forward as Avian 3D 0.5 on Bevy 0.18.1.
 
-bevy_rapier3d remains a solid engine with corporate backing and proven maturity, but the lack of Bevy 0.17 support and absence of native voxel colliders make it the inferior choice for this specific use case. If you were targeting Bevy 0.16 and valued stability over native ECS integration, Rapier would merit consideration--but that's not your situation.
+At the time, bevy_rapier3d remained a solid engine with corporate backing and proven maturity, but the lack of Bevy 0.17 support and absence of native voxel colliders made it the inferior choice for this specific use case. For current work, treat `Cargo.toml` and `docs/physics/README.md` as the source of truth.
 
 The community has increasingly converged on Avian as the "de-facto ECS native physics solution for Bevy." For a voxel game specifically, the native voxel collider support alone justifies the choice.

@@ -1,5 +1,7 @@
 # LOD Review Handoff
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 Date: 2026-05-12
 
 This file captures the interrupted follow-up to an external LOD subsystem review. No code changes were made before this handoff.

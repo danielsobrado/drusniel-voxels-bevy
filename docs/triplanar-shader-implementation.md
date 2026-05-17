@@ -1,8 +1,10 @@
 # Triplanar Shader Implementation
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 ## Overview
 
-This document describes the implementation of true triplanar texture mapping for Surface Nets terrain rendering in Bevy 0.17. Triplanar mapping eliminates texture stretching on steep slopes by sampling the texture from three orthogonal projections and blending based on surface normal.
+This document describes the implementation of true triplanar texture mapping for Surface Nets terrain rendering on the current Bevy 0.18.1 baseline. Triplanar mapping eliminates texture stretching on steep slopes by sampling the texture from three orthogonal projections and blending based on surface normal.
 
 ## Problem
 
@@ -83,7 +85,7 @@ wgpu error: Validation Error
 
 ### Cause
 
-Bevy 0.17's GPU-driven rendering uses bind group 2 for mesh/instance storage buffers, not material uniforms. Hardcoding the group number conflicts with Bevy's internal pipeline layout.
+Bevy's GPU-driven rendering uses bind group 2 for mesh/instance storage buffers, not material uniforms. Hardcoding the group number conflicts with Bevy's internal pipeline layout.
 
 ### Solution
 

@@ -1,5 +1,7 @@
 # Debugging Session: Blue Grass Rendering Artifacts
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## Issue Description
 Users reported instances of procedural grass rendering as solid blue or orange patches instead of the expected green/gold gradient. These artifacts appeared randomly mixed with correctly rendered grass and seemed to scale with density.
 

@@ -1,5 +1,7 @@
 # Terrain Generation Performance Review
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 This document analyzes the current procedural chunk generation pipeline (`generate_chunk_async` and `TerrainGenerator::get_voxel`) and identifies significant architectural bottlenecks causing excessive CPU overhead. 
 
 ## Identified Bottlenecks

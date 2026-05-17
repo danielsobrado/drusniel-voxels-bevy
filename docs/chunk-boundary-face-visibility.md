@@ -1,5 +1,7 @@
 # Chunk Boundary Face Visibility - Problem & Solution
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## The Problem
 
 When rendering a voxel world divided into chunks, faces at chunk boundaries were rendering incorrectly:

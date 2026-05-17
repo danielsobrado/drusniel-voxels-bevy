@@ -34,7 +34,7 @@ The updated scripts:
 ### Quick Decision Tree
 
 - Do you want scripts to help at all?
-  - NO -> Use `docs/SIMPLE_MANUAL_GUIDE.md`
+  - NO -> Use `docs/simple-manual-guide.md`
   - YES -> Continue below
 
 - Are you comfortable with interactive scripts?

@@ -1,5 +1,7 @@
 # Witchcraft water finish
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 Witchcraft is a focused final water finish block for the active voxel water shader. It does not replace the water pipeline and does not add fog, sky, lighting, temporal anti-aliasing, generated normals, raymarched reflections, depth buffer plumbing, or unrelated shaderpack systems.
 
 ## Scope

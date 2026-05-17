@@ -1,5 +1,15 @@
 # Documentation index
 
+Document status (2026-05-17): current index/reference.
+
+## Lifecycle semantics
+
+Every document in `docs/` declares a lifecycle status near the top. Treat `current index/reference` and `current technical note` docs as the best written orientation for their topic, but still verify code paths before editing. Treat `planning record`, `historical implementation/debug note`, and `historical release/reference record` docs as context: useful for rationale and lessons, not as direct execution instructions unless the plan is reconciled with the current code first.
+
+## Current engine baseline
+
+The current Rust runtime baseline is Bevy 0.18.1, as declared in `Cargo.toml` and `Cargo.lock`. Bevy 0.17 documents are historical references unless their status block explicitly says otherwise.
+
 ## Drusniel Voxels editor roadmap
 
 - [Editor build plan home](./editor/README.md)

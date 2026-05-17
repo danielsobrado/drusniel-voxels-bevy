@@ -1,6 +1,8 @@
-# Sprint 18 — Save/load, snapshots, and undo/redo
+# Sprint 18 ï¿½ Save/load, snapshots, and undo/redo
 
-Phase: 6 — Production hardening
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 6 ï¿½ Production hardening
 
 ## Goal
 Make editing safe.

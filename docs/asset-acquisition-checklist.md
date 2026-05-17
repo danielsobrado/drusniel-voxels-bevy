@@ -1,5 +1,7 @@
 # Asset Acquisition Checklist for Drusniel-Voxels
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 ## Strategy Overview
 
 | Priority | Source | Cost | Use Case |

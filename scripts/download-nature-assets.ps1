@@ -444,7 +444,7 @@ if (Test-Path $kaykitExtracted) {
 
 Write-Section "Generating Asset Inventory"
 
-$inventoryPath = "$TargetDir/ASSET_INVENTORY.md"
+$inventoryPath = "$TargetDir/asset-inventory.md"
 $inventory = @"
 # Nature Assets Inventory
 Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")

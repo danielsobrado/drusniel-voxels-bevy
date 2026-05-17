@@ -1,5 +1,7 @@
 # God Rays (Volumetric Light) Testing Log
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 This document tracks the ongoing effort to implement visible god rays (volumetric light shafts) in the voxel engine using Bevy's built-in volumetric fog system.
 
 ## Goal

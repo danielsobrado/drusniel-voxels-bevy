@@ -1,4 +1,7 @@
-Performance Analysis and Optimization of the Voxel Game
+# Performance Analysis and Optimization of the Voxel Game
+
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 Overview of the Performance Issue
 
 Even on a high-end PC (e.g. an RTX 4080), the voxel game’s frame rate dips to ~20–30 FPS during normal gameplay (even when the player is idle). This suggests a significant bottleneck in the engine’s usage of Bevy’s ECS and rendering pipeline. Initial world generation is known to be heavy, but here we focus on post-generation performance problems. The likely culprits include an excessive number of rendered entities (draw calls), inefficient updates (e.g. transforms or visibility), and lack of batching/instancing in rendering. Below we analyze potential hotspots and propose both immediate and long-term optimizations.

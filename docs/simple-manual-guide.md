@@ -1,5 +1,7 @@
 # Simple Manual Download Guide
 
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 If the automated scripts are not working, follow these steps manually.
 
 ## Step 1: Download the Assets
@@ -81,7 +83,7 @@ assets/models/
         `-- kenney/
 ```
 
-Extract and move files:
+Extract and move files into these target directories. Some directories may not exist until the corresponding pack has been downloaded and organized.
 
 Quaternius Nature MEGAKIT:
 - Trees -> `assets/models/vegetation/trees/quaternius/`

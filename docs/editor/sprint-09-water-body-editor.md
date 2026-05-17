@@ -1,6 +1,8 @@
-# Sprint 9 — Water body editor
+# Sprint 9 ï¿½ Water body editor
 
-Phase: 3 — Domain-specific systems
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 3 ï¿½ Domain-specific systems
 
 ## Goal
 Make water one of the strongest parts of the editor.

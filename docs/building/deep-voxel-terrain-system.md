@@ -1,5 +1,7 @@
 # Deep Voxel Terrain System: Complete Technical Guide for Bevy
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 **Bottom Line**: Building a 64-depth diggable voxel terrain with caves, bedrock, and water compatibility in Bevy requires a **hybrid collision approach** (voxel grid broadphase + trimesh narrowphase), **vertically-stacked 16^3 chunk sections** with palette compression, and **noise-based cave generation** that respects water table boundaries. Valheim's heightmap approach won't work for deep caves -- you need true 3D voxel storage. Expect **10-20MB terrain memory** for a 256x64x256 loaded area, with mesh generation at **50-200 microseconds per chunk** using optimized greedy meshing.
 
 ---

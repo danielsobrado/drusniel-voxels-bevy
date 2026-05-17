@@ -1,5 +1,7 @@
 # Entity Spawn Placeholder
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Status
 
 Cleaned up.

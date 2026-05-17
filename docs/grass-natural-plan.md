@@ -1,5 +1,9 @@
 # Make Grass Look Natural - Implementation Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Current engine baseline: Bevy 0.18.1. Any Bevy 0.17 notes below are historical debugging context and must be rechecked against the current shader/prepass APIs before implementation.
+
 ## Problem Statement
 
 The current grass is "chunky" because it's rendered as opaque crossed quads with a flat-color fragment shader and shadows disabled. The target look needs alpha-masked textured blades/clumps, real lighting/shadowing, and more variation (color/size/clumps) plus wind that bends tips more than bases.
@@ -389,7 +393,7 @@ Location[2] Float32x2 is not provided by the previous stage outputs
 
 **Future work:** Investigate Bevy's prepass_io module and proper custom prepass shader integration for better shadow support.
 
-See `docs/debugging_blue_vegetation.md` for investigation history of the blue artifact issue.
+See `docs/debugging-blue-vegetation.md` for investigation history of the blue artifact issue.
 
 ---
 

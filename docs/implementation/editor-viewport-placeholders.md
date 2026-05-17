@@ -1,5 +1,7 @@
 # Editor Viewport Placeholders
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Status
 
 Classified as legacy/mock frontend code; no runtime code change made.

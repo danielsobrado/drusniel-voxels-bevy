@@ -1,5 +1,7 @@
 # Autonomous Performance Loop — Implementation Brief
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 **Audience:** an AI coding agent picking this up cold.
 **Goal:** turn `drusniel-voxels` into a project where another agent (or the same one in a `/loop`) can run `cargo run --release -- --bench …`, read a JSON summary, decide what's slow, propose and apply a fix, re-run, and converge on a faster build — without a human in the path except for visual regression sign-off.
 
@@ -65,7 +67,7 @@ Phases A → B → C are linear. Phase D consumes A and B; it does not require C
 
 ### 3.1 Audit existing instrumentation
 
-The project already has `AreaTimingRecorder` and an `area_timer(...)` RAII helper in `src/performance/`. Read that module first; do **not** introduce a new framework. Extend it.
+The project already has `AreaTimingRecorder` and an `area_timer(...)` RAII helper in `src/performance.rs`. Read that module first; do **not** introduce a new framework. Extend it.
 
 Confirm or add `area_timer` calls in these systems (one short, stable name per area):
 
@@ -371,7 +373,7 @@ It is not allowed to:
 - Write new shaders or modify WGSL.
 - Change render-graph topology.
 - Add or remove crates.
-- Touch any file under `src/bench/` or `src/performance/` (avoid measuring with a moving ruler).
+- Touch any file under `src/bench/` or `src/performance.rs` (avoid measuring with a moving ruler).
 - Run for more than 30 minutes wall-clock without `--budget` permission.
 - Push, force-push, open PRs, or modify remotes. Local commits on a local branch only.
 
@@ -492,7 +494,7 @@ Hard exclusions. If you find yourself drifting toward any of these, stop and re-
 
 ## 9. Order of operations and stop conditions
 
-1. Read this file and `docs/performance-analysis-research.md`. Read `src/performance/`, `src/atmosphere/fog.rs`, `src/voxel/plugin.rs`, `assets/config/fog.yaml`. Time budget: 30 min. If anything in this brief contradicts what you observe in the code (e.g. `area_timer` is structured differently than described), trust the code and adapt — flag the discrepancy in the PR.
+1. Read this file and `docs/performance-analysis-research.md`. Read `src/performance.rs`, `src/atmosphere/fog.rs`, `src/voxel/plugin.rs`, `assets/config/fog.yaml`. Time budget: 30 min. If anything in this brief contradicts what you observe in the code (e.g. `area_timer` is structured differently than described), trust the code and adapt — flag the discrepancy in the PR.
 2. Implement Phase A. Validate by running and inspecting CSV output. Commit. Stop here and surface the diff for review before continuing — the user may have feedback that changes B/C/D.
 3. Implement Phase B. Validate two-runs-within-10%. Commit. Surface for review.
 4. Implement Phase C. Validate against `bench/scenes/visual/fog-tiers.toml`. Commit. Surface for review.
@@ -511,7 +513,7 @@ Hard exclusions. If you find yourself drifting toward any of these, stop and re-
 
 When all four phases are done, the workspace contains:
 
-- `src/performance/…` — extended timing, with p99 percentile tracking.
+- `src/performance.rs` — extended timing, with p99 percentile tracking.
 - `src/interaction/debug.rs` — F3 overlay table, F4 dump, fog tier display.
 - `src/bench/` — bench plugin, scene loader, screenshot, summary.json writer.
 - `bench/scenes/visual/default.toml`, `bench/scenes/visual/fog-tiers.toml`.

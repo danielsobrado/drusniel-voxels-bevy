@@ -1,5 +1,7 @@
 # Terrain Collider Overhaul Status
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 Date: 2026-05-12
 
 This document records what has been achieved so far for terrain collider correctness and performance. It covers the implemented changes, benchmark evidence, and remaining risks.

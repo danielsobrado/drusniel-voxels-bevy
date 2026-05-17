@@ -1,5 +1,7 @@
 # Gravity System Performance Issues
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 ## Status: Deactivated (2025-12-11)
 
 The gravity system implemented for handling disconnected voxels has been deactivated due to performance concerns.

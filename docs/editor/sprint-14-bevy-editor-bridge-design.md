@@ -1,6 +1,8 @@
-# Sprint 14 — Bevy editor bridge design
+# Sprint 14 ï¿½ Bevy editor bridge design
 
-Phase: 5 — Runtime integration
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 5 ï¿½ Runtime integration
 
 ## Goal
 Define the contract between React and Bevy before wiring it.

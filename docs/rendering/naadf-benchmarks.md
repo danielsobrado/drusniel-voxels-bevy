@@ -1,5 +1,7 @@
 # NAADF Benchmarks
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 NAADF performance work should use release benches and fixed scenes. Do not claim a performance improvement from debug builds.
 
 ## Scene Set

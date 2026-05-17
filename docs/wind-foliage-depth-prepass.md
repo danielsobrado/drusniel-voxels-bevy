@@ -1,5 +1,7 @@
 # Wind and Foliage
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 My first wind implementation used simple horizontal offset by tree height: the trunk base stayed fixed while the canopy moved side to side. It looked fine in mild wind, but in stronger gusts trees became visibly skewed rather than bent.
 
 I replaced that with segmented bending. Each tree is split into 10 vertical sections, and each section gets a larger rotation than the one below it. The result is smooth curvature from trunk to crown, with the base still anchored. This is done entirely in the vertex shader and had no measurable frame-time cost.

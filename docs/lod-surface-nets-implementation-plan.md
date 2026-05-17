@@ -1,5 +1,7 @@
 # LOD System Implementation Plan: Simplified Surface Nets for Distant Chunks
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 ## Executive Summary
 
 This document details the implementation plan for a proper Level-of-Detail (LOD) system that uses simplified Surface Nets meshes (via larger voxel step sizes) for distant chunks instead of the current approach where both High and Low LOD use identical meshes.
@@ -385,7 +387,7 @@ With 400-unit cull distance covering a 512x512 world:
 - [x] Vertex count tracking for measuring LOD effectiveness
 - [x] Per-chunk average statistics for verifying 75% reduction
 
-### Phase 5: Quality Assurance 🔄 IN PROGRESS
+### Phase 5: Quality Assurance (historical phase state: active at time of writing)
 - [ ] Visual testing at LOD boundaries
 - [ ] Verify no seams between High and Low LOD chunks
 - [ ] Test with different camera positions

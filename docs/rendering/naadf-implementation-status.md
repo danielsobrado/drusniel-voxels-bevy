@@ -1,6 +1,6 @@
 # NAADF Implementation Status
 
-Status: code-first implementation in progress  
+Status: implementation record with current caveats  
 Branch/worktree: `main`  
 Last updated: 2026-05-14  
 Visual verification: not run by request

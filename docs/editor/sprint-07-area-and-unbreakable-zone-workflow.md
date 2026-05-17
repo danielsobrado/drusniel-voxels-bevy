@@ -1,6 +1,8 @@
-# Sprint 7 — Area and unbreakable-zone workflow
+# Sprint 7 ï¿½ Area and unbreakable-zone workflow
 
-Phase: 2 — Core Editor Workflows
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 2 ï¿½ Core Editor Workflows
 
 ## Goal
 Build the first world-editing workflow: protected/unbreakable areas.

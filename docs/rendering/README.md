@@ -1,5 +1,7 @@
 # Rendering Documentation Index
 
+Document status (2026-05-17): current index/reference.
+
 ## NAADF path and lighting
 
 - [NAADF overview](naadf.md)

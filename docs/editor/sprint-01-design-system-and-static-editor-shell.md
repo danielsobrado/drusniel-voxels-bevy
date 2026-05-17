@@ -1,6 +1,8 @@
-# Sprint 1 — Design system and static editor shell
+# Sprint 1 ï¿½ Design system and static editor shell
 
-Phase: 1 — Editor Shell MVP
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 1 ï¿½ Editor Shell MVP
 
 ## Goal
 Convert the visual design into reusable UI primitives, not a giant one-file mockup.

@@ -1,6 +1,8 @@
-# Sprint 20 — Polish, documentation, and Codex/agent workflow
+# Sprint 20 ï¿½ Polish, documentation, and Codex/agent workflow
 
-Phase: 6 — Production hardening
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 6 ï¿½ Production hardening
 
 ## Goal
 Prepare the editor for continuous LLM-assisted development.
@@ -23,7 +25,7 @@ Prepare the editor for continuous LLM-assisted development.
 - Add component stories or examples.
 - Add keyboard shortcut reference.
 - Add help/about panel.
-- Add “LLM handoff” doc:
+- Add ï¿½LLM handoffï¿½ doc:
   - current sprint
   - known issues
   - next tasks

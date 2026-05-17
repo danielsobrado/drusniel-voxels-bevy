@@ -1,5 +1,7 @@
 # Physics Implementation Plans
 
+Document status (2026-05-17): current index/reference.
+
 This folder tracks the physics roadmap for this Bevy/Rust voxel project.
 
 The source plan was written for a standalone JavaScript physics engine. In this repo the translation is not a custom math/body/world engine. The project already uses:
@@ -8,6 +10,8 @@ The source plan was written for a standalone JavaScript physics engine. In this 
 - Avian 3D 0.5 for rigid bodies, colliders, collision detection, solving, broadphase, and spatial queries.
 - bevy-tnua and bevy-tnua-avian3d for the player controller.
 - Existing terrain collider generation in `src/physics/terrain_collider.rs`.
+
+Current status note (2026-05-17): the plan files still include module targets and scenes from this intermediate roadmap. The active physics code currently includes `plugin.rs`, `mod.rs`, `layers.rs`, `terrain_collider.rs`, and `terrain_collision_cache.rs`; other referenced files are planned for later implementation. Use them as implementation targets, not as a literal index of existing files.
 
 ## Plan Set
 

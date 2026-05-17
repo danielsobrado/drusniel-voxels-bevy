@@ -1,6 +1,8 @@
-# Sprint 19 — Performance and large-world UX
+# Sprint 19 ï¿½ Performance and large-world UX
 
-Phase: 6 — Production hardening
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 6 ï¿½ Production hardening
 
 ## Goal
 Make the editor handle thousands of objects and chunks.

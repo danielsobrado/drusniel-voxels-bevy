@@ -1,5 +1,7 @@
 # Drusniel Voxels Editor Build Plan
 
+Document status (2026-05-17): current index/reference.
+
 Phased roadmap for the editor rebuild and integration workstream.
 
 ## Phases

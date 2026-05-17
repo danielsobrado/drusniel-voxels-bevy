@@ -1,5 +1,7 @@
 # Grass Rendering Stripe Artifact Fix
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## Issue Description & Symptoms
 - Grass rendered in obvious rows/stripes with aligned shadows, breaking natural randomness.
 - Pattern most visible looking across flat terrain where triangles share similar `z` values.

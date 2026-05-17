@@ -1,5 +1,7 @@
 # Shadow Optimization: Local-Only Rendering + Shadow Budget
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 ## Goal
 
 Reduce shadow pass GPU cost by:

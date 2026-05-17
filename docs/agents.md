@@ -1,5 +1,7 @@
 # Markdown Organization Policy for docs/
 
+Document status (2026-05-17): current index/reference.
+
 This file defines conventions for markdown in `docs/` to keep documentation and
 investigations easy to find and harder to drift.
 
@@ -12,15 +14,16 @@ investigations easy to find and harder to drift.
 
 ## 2) Naming conventions
 
-- Use kebab-case file names.
+- Use lowercase kebab-case file names. `README.md` is the only docs/index exception.
 - Prefer descriptive names by area and intent (for example
   `path-a-contact-shadows-and-ao.md` rather than generic abbreviations).
 - Avoid ad-hoc root-level files for ongoing work unless they are globally shared.
 
 ## 3) Lifecycle state tags
 
+- Every committed markdown file in `docs/` should declare a lifecycle status near the top.
 - Active documentation belongs in the normal topic folder with no suffix.
-- WIP/investigative content should include `-investigation` or `-review` in the file name.
+- Temporary or investigative content should include `-investigation` or `-review` in the file name and a lifecycle note at the top.
 - Completed temporary notes should be moved to `docs/archive/` (create if needed).
 - Long-lived references should be consolidated behind topic indexes (for example
   `docs/rendering/README.md`, `docs/lod/README.md`).

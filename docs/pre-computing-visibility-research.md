@@ -1,4 +1,7 @@
-Visibility Optimization for Static Entities
+# Visibility Optimization for Static Entities
+
+Document status (2026-05-17): reference guide; validate external/tool details before use.
+
 Overview of the Problem
 
 In a large static world (e.g. voxel terrain with props), Bevy’s default culling iterates every visible entity each frame to perform frustum checks. This per-frame CPU cost can be significant, especially with thousands of static meshes. The goal is to reduce this overhead by precomputing visibility for static geometry and using that data to avoid redundant per-frame checks. Essentially, we want to leverage the static nature of terrain/props to skip iterating over objects that we know can’t possibly be visible from a given camera position or angle.

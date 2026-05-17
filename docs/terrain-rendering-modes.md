@@ -1,5 +1,7 @@
 # Terrain Rendering Modes
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 The voxel terrain system supports two mesh generation modes, each with different shaders for varying visual quality and performance characteristics.
 
 ## Mesh Modes

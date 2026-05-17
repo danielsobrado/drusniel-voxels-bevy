@@ -1,6 +1,8 @@
-# Sprint 17 — Protected areas runtime implementation
+# Sprint 17 ï¿½ Protected areas runtime implementation
 
-Phase: 5 — Runtime integration
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 5 ï¿½ Runtime integration
 
 ## Goal
 Turn protected/unbreakable areas from editor-only data into enforced game rules.

@@ -1,5 +1,7 @@
 # LOD Documentation Index
 
+Document status (2026-05-17): current index/reference.
+
 ## LOD implementation and review
 
 - [LOD implementation and review](lod-implementation-and-review.md)

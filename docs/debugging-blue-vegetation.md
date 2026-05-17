@@ -1,5 +1,7 @@
 # Debugging Blue Texture Regression
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## Issue
 Users reported a regression where vegetation (specifically grass) appeared "blue" or had "blue waves" moving through it.
 

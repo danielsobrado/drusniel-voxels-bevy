@@ -1,5 +1,7 @@
 # Chunk Seam Fix - Surface Nets Boundary Alignment
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## The Problem
 
 Dark cracks/seams were visible at chunk boundaries in the smooth terrain mesh. These appeared as thin dark lines where adjacent chunk meshes didn't connect properly.

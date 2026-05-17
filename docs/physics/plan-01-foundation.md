@@ -1,6 +1,10 @@
 # Physics Foundation Implementation Plan
 
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
 Plan 1 translates the JavaScript Physics3D foundation into this repo's Bevy/Rust architecture.
+
+Status note (2026-05-17): this is a roadmap artifact. The repo currently has a smaller active physics surface than the plan enumerates, so many listed files are planned targets rather than already-existing files. Use this document for intended behavior and sequencing, and treat file-level targets as "to be created/modified."
 
 ## Goal
 

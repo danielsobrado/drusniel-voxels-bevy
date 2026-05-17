@@ -1,5 +1,7 @@
 # Water Visuals Summary
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 ## Goal
 Improve close-range water visuals without a large performance hit, while keeping far water cheap.
 

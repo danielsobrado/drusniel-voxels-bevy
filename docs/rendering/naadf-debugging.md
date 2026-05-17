@@ -1,5 +1,7 @@
 # NAADF Debugging
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 NAADF diagnostics are available only when built with the `naadf` feature.
 
 ```bash

@@ -1,6 +1,8 @@
-# Sprint 5 — Inspector system
+# Sprint 5 ï¿½ Inspector system
 
-Phase: 2 — Core Editor Workflows
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 2 ï¿½ Core Editor Workflows
 
 ## Goal
 Build the right-side inspector as the main property editor.

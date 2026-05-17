@@ -1,6 +1,8 @@
-# Sprint 0 — Project setup and repo strategy
+# Sprint 0 ï¿½ Project setup and repo strategy
 
-Phase: 1 — Editor Shell MVP
+Document status (2026-05-17): planning record; use for rationale and sequencing, not as current execution instructions unless reconciled with code first.
+
+Phase: 1 ï¿½ Editor Shell MVP
 
 ## Goal
 Create a clean frontend/editor workspace without touching game runtime behavior yet.
@@ -30,19 +32,19 @@ Create a clean frontend/editor workspace without touching game runtime behavior 
   - `sonner`
   - `@playwright/test`
 - Add editor folders:
-  - `src/app`
-  - `src/components/editor`
-  - `src/features/viewport`
-  - `src/features/outliner`
-  - `src/features/inspector`
-  - `src/features/assets`
-  - `src/features/agent`
-  - `src/features/profiler`
-  - `src/features/console`
-  - `src/state`
-  - `src/commands`
-  - `src/mocks`
-  - `src/types`
+  - `editor/frontend/src/app`
+  - `editor/frontend/src/components/editor`
+  - `editor/frontend/src/features/viewport`
+  - `editor/frontend/src/features/outliner`
+  - `editor/frontend/src/features/inspector`
+  - `editor/frontend/src/features/assets`
+  - `editor/frontend/src/features/agent`
+  - `editor/frontend/src/features/profiler`
+  - `editor/frontend/src/features/console`
+  - `editor/frontend/src/state`
+  - `editor/frontend/src/commands`
+  - `editor/frontend/src/mocks`
+  - `editor/frontend/src/types`
 - Add strict TypeScript config.
 - Add Playwright config.
 - Add Storybook later, not in this sprint.

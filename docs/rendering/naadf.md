@@ -1,5 +1,7 @@
 # NAADF Rendering Backend
 
+Document status (2026-05-17): current technical note; verify file paths against code when editing.
+
 NAADF is an experimental voxel ray acceleration backend for Drusniel. It is a derived cache built from the authoritative `VoxelWorld`; it does not replace terrain chunks, terrain meshing, PBR materials, water, props, or the current shipping renderer.
 
 The current renderer remains the default. NAADF is opt-in through the Cargo feature and runtime config, and the checked-in config keeps it disabled.

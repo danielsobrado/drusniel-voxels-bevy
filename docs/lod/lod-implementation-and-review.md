@@ -1,5 +1,7 @@
 # LOD (Level of Detail) — Implementation Guide & Code Review
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
 > Last updated: 2026-05-12
 
 ## Table of Contents

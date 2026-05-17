@@ -1,8 +1,10 @@
 # Construction System Project Plan
 
+Document status (2026-05-17): mixed implementation record and roadmap. The implemented building surface is `src/building/mod.rs`, `src/building/types.rs`, `src/building/grid.rs`, `src/building/snap.rs`, and `src/building/ghost.rs`. Sections for materials, stability, collapse, build zones, persistence, audio, and config assets remain roadmap targets unless the code tree adds those modules later.
+
 ## Overview
 
-A modular building system inspired by Enshrouded/Valheim for a Bevy 0.17 voxel game with Surface Nets terrain. Uses Avian physics, Valheim-style stability propagation, and precomputed physics-based collapse.
+A modular building system inspired by Enshrouded/Valheim for the current Bevy 0.18.1 voxel game with Surface Nets terrain. Uses Avian physics, Valheim-style stability propagation, and precomputed physics-based collapse.
 
 ---
 
@@ -187,8 +189,8 @@ pub struct SnapPointDef {
 | Thatch   | 50         | 5          | 25%          | 40%            |
 
 **Deliverables**:
-- `src/building/materials.rs` - Material definitions
-- `assets/config/materials.yaml` - Material configuration
+- Planned target: `src/building/materials.rs` - Material definitions. This file is not present in the current tree.
+- Planned target: `assets/config/materials.yaml` - Material configuration. This file is not present in the current tree.
 
 ---
 
@@ -521,6 +523,8 @@ src/building/
 ---
 
 ## Configuration Files
+
+Current tree note: only `mod.rs`, `types.rs`, `grid.rs`, `snap.rs`, and `ghost.rs` exist under `src/building/`. The remaining entries in the preceding file-structure diagram are intended future modules, not files that a reader should expect to find today. No `assets/config/building/` directory is present today; building definitions are still hardcoded in the Rust building modules.
 
 ```
 assets/config/building/     # (TODO)

@@ -1,5 +1,9 @@
 # Phase 1 Rendering Enhancements - Complete
 
+Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+
+Current engine baseline: Bevy 0.18.1. Bevy 0.17 references below describe the historical implementation state at the time this completion note was written.
+
 This document summarizes the rendering enhancements implemented in Phase 1 of the visual quality improvements.
 
 ## Overview
