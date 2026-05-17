@@ -158,14 +158,6 @@ impl Material for GrassMaterial {
         "shaders/grass.wgsl".into()
     }
 
-    fn prepass_vertex_shader() -> ShaderRef {
-        "shaders/grass_prepass.wgsl".into()
-    }
-
-    fn prepass_fragment_shader() -> ShaderRef {
-        "shaders/grass_prepass.wgsl".into()
-    }
-
     fn enable_prepass() -> bool {
         // Bevy 0.18 prepass variants currently mismatch this custom alpha-cutout pipeline.
         // Keep prepass disabled until the shader IO is fully migrated.

@@ -263,14 +263,6 @@ impl Material for BillboardMaterial {
         "shaders/billboard.wgsl".into()
     }
 
-    fn prepass_vertex_shader() -> ShaderRef {
-        "shaders/billboard_prepass.wgsl".into()
-    }
-
-    fn prepass_fragment_shader() -> ShaderRef {
-        "shaders/billboard_prepass.wgsl".into()
-    }
-
     fn enable_prepass() -> bool {
         // Temporarily disabled for Bevy 0.18 runtime stability.
         false

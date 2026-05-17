@@ -409,6 +409,32 @@ fn inactive_weather_particle_classifier_is_not_shipped_as_shader() {
     );
 }
 
+#[test]
+fn disabled_foliage_prepass_shaders_are_not_registered_or_shipped() {
+    let grass_material = include_str!("../src/vegetation/grass_material.rs");
+    let billboard_material = include_str!("../src/props/billboard.rs");
+
+    assert!(
+        grass_material.contains("fn enable_prepass() -> bool") && grass_material.contains("false"),
+        "grass material should keep prepass disabled until its alpha-cutout prepass is migrated"
+    );
+    assert!(
+        billboard_material.contains("fn enable_prepass() -> bool")
+            && billboard_material.contains("false"),
+        "billboard material should keep prepass disabled until its alpha-cutout prepass is stable"
+    );
+    assert!(
+        !grass_material.contains("grass_prepass.wgsl")
+            && !std::path::Path::new("assets/shaders/grass_prepass.wgsl").exists(),
+        "disabled grass prepass shader should not be registered or shipped as active-looking"
+    );
+    assert!(
+        !billboard_material.contains("billboard_prepass.wgsl")
+            && !std::path::Path::new("assets/shaders/billboard_prepass.wgsl").exists(),
+        "disabled billboard prepass shader should not be registered or shipped as active-looking"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];
