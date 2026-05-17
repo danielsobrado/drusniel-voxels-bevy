@@ -268,7 +268,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT;
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     var debug_color = pbr_functions::apply_pbr_lighting(pbr_input);
-    return pbr_functions::main_pass_post_lighting_processing(pbr_input, debug_color);
+    debug_color = pbr_functions::main_pass_post_lighting_processing(pbr_input, debug_color);
+    return vec4<f32>(debug_color.rgb, 1.0);
 #endif
 
     let weights = triplanar_weights(world_normal);
@@ -458,5 +459,5 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     color = vec4<f32>(mix(color.rgb, vec3<f32>(1.0), line * 0.8), color.a);
 #endif
 
-    return color;
+    return vec4<f32>(color.rgb, 1.0);
 }

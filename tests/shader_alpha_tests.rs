@@ -67,6 +67,27 @@ fn opaque_prop_shaders_write_solid_alpha() {
 }
 
 #[test]
+fn opaque_terrain_shaders_write_solid_alpha() {
+    let triplanar = include_str!("../assets/shaders/triplanar_terrain.wgsl");
+    let blocky = include_str!("../assets/shaders/blocky_terrain.wgsl");
+
+    assert!(
+        triplanar.contains("return vec4<f32>(color.rgb, 1.0);"),
+        "triplanar terrain should not preserve sampled albedo alpha in the opaque render target"
+    );
+    assert!(
+        triplanar.contains("return vec4<f32>(debug_color.rgb, 1.0);"),
+        "triplanar atlas-debug output should keep the same opaque alpha contract"
+    );
+    assert!(
+        blocky.contains("return vec4<f32>(color.rgb, 1.0);"),
+        "blocky terrain should not preserve sampled texture-array alpha in the opaque render target"
+    );
+    assert_not_contains(triplanar, "return color;", "triplanar_terrain.wgsl");
+    assert_not_contains(blocky, "return color;", "blocky_terrain.wgsl");
+}
+
+#[test]
 fn depth_dependent_passes_have_depth_before_weather_overlay() {
     let weather_overlay = include_str!("../src/rendering/weather_overlay.rs");
     let compact_weather = weather_overlay

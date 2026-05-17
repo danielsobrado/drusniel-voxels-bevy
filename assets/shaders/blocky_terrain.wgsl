@@ -195,5 +195,5 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     }
 
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
-    return color;
+    return vec4<f32>(color.rgb, 1.0);
 }
