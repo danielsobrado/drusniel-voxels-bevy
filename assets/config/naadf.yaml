@@ -45,6 +45,7 @@ debug:
   force_cpu_builder: false
   force_gpu_builder: false
 
+use_for_gi_secondary: false
 use_for_sun_visibility: false
 use_for_terrain_ao: false
 use_for_contact_shadows: false

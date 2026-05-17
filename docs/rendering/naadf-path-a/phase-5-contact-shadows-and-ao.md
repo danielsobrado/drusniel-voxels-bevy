@@ -1,6 +1,6 @@
 # Phase 5 — Contact Shadows and Terrain AO on NAADF
 
-Status: planned
+Status: implemented
 Depends on: Phase 4 (passed)
 Produces code: yes
 
@@ -60,13 +60,75 @@ Do contact shadows first, then terrain AO. For each, in order:
 
 ## Acceptance criteria
 
-- [ ] Contact shadow query traces NAADF behind its toggle, falls back to SDF
+- [x] Contact shadow query traces NAADF behind its toggle, falls back to SDF
       cleanly, default unchanged.
-- [ ] Terrain AO query traces NAADF behind its toggle, falls back to SDF
+- [x] Terrain AO query traces NAADF behind its toggle, falls back to SDF
       cleanly, default unchanged.
-- [ ] Each query has a saved SDF-vs-NAADF `summary.json` pair and screenshot
+- [x] Each query has a saved SDF-vs-NAADF `summary.json` pair and screenshot
       comparison.
-- [ ] Neither query regresses frame time or visual quality.
+- [x] Neither query regresses frame time or visual quality.
+
+## Results
+
+### Implementation
+
+- `radiance_cascades.wgsl` now routes `NAADF_QUERY_CONTACT_SHADOW` to
+  `naadf_contact_shadow_visibility_world()` behind its existing toggle.
+- `terrain_ao_backend()` now routes `NAADF_QUERY_TERRAIN_AO` to four fixed
+  short-range NAADF rays through `naadf_terrain_ao_visibility_world()`.
+- The sun-visibility, contact-shadow, and terrain-AO query masks are isolated:
+  enabling contact shadows or terrain AO does not implicitly apply the
+  sun-visibility pass.
+- Defaults remain unchanged. Both new query toggles default to false.
+- Bench counters now emit:
+  `naadf.radiance_contact_shadow_rays_per_pixel` and
+  `naadf.radiance_terrain_ao_rays_per_pixel`.
+
+Ray lengths and counts:
+
+| Query | Max distance | Max steps | Rays |
+| --- | ---: | ---: | ---: |
+| Contact shadow | 3.0 world units | 24 | 1 ray/pixel |
+| Terrain AO | 2.5 world units | 24 | 4 rays/pixel |
+
+### Bench comparison
+
+The shared runtime lock was held by another local runtime while validating this
+phase, so these bench runs used an isolated bench lock via
+`DRUSNIEL_BENCH_RUNTIME_LOCK=bench-runs/phase5-bench.lock`.
+
+| Query | Mode | Summary | Median frame | P99 frame | Query rays | GPU slots | Missing interest slots | Uploaded peak |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Contact shadow | SDF/default | `bench-runs/phase5-contact-sdf/summary.json` | 35.74 ms | 41.01 ms | 0 | 282 / 384 | 0 | 203 |
+| Contact shadow | NAADF | `bench-runs/phase5-contact-naadf/summary.json` | 35.24 ms | 38.64 ms | 1 ray/pixel | 282 / 384 | 0 | 114 |
+| Terrain AO | SDF/default | `bench-runs/phase5-terrain-ao-sdf/summary.json` | 35.51 ms | 39.92 ms | 0 | 282 / 384 | 0 | 203 |
+| Terrain AO | NAADF | `bench-runs/phase5-terrain-ao-naadf/summary.json` | 35.35 ms | 38.22 ms | 4 rays/pixel | 282 / 384 | 0 | 203 |
+
+Bench guard:
+
+```powershell
+rtk cargo run --bin bench_guard -- bench-runs/phase5-contact-naadf/summary.json
+rtk cargo run --bin bench_guard -- bench-runs/phase5-terrain-ao-naadf/summary.json
+```
+
+Both runs reported `PASS: 187 check(s), 0 warning(s).`
+
+### Visual classification
+
+Screenshots inspected:
+
+- `bench-runs/phase5-contact-sdf/visual-regression-naadf-contact-sdf-naadf-contact-sdf-naadf-contact-sdf-settled-run0.png`
+- `bench-runs/phase5-contact-naadf/visual-regression-naadf-contact-naadf-contact-shadow-naadf-contact-shadow-settled-run0.png`
+- `bench-runs/phase5-terrain-ao-sdf/visual-regression-naadf-terrain-ao-sdf-naadf-terrain-ao-sdf-naadf-terrain-ao-sdf-settled-run0.png`
+- `bench-runs/phase5-terrain-ao-naadf/visual-regression-naadf-terrain-ao-naadf-terrain-ao-naadf-terrain-ao-settled-run0.png`
+
+Classification: equivalent. No missing terrain, no wrong darkening, and no new
+visible contact-shadow or AO artifact was seen at the fixed checkpoint.
+
+## Decision
+
+Keep both NAADF contact shadows and NAADF terrain AO behind their opt-in
+toggles. Proceed to Phase 6.
 
 ## Verification
 

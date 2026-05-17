@@ -6,7 +6,11 @@ use super::dirty::NaadfDirtyChunkQueue;
 use super::preview::NaadfPreviewPipelineState;
 use super::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
 use crate::performance::AreaTimingRecorder;
-use crate::rendering::ray_tracing::RayTracingSettings;
+use crate::rendering::radiance_cascades::{
+    NAADF_GI_SECONDARY_SAMPLES_PER_PIXEL, NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY,
+    NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState, radiance_cascade_pass_active,
+};
+use crate::rendering::ray_tracing::{RayTracingSettings, VoxelRayBackendMode};
 
 pub const NAADF_STALE_CACHE_AGE_FRAMES: u32 = 120;
 
@@ -63,6 +67,8 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
 pub fn record_naadf_bench_counters(
     stats: Res<NaadfStats>,
     preview_state: Res<NaadfPreviewPipelineState>,
+    radiance_config: Option<Res<RadianceCascadesConfig>>,
+    sdf_state: Option<Res<SdfVolumeState>>,
     mut timing: Option<ResMut<AreaTimingRecorder>>,
     frame: Res<FrameCount>,
 ) {
@@ -139,6 +145,58 @@ pub fn record_naadf_bench_counters(
         "naadf.max_ray_steps_last_frame",
         stats.gpu_max_ray_steps_last_frame as f64,
     );
+    let radiance_query_mask = radiance_config
+        .as_deref()
+        .filter(|config| config.enabled && config.voxel_backend == VoxelRayBackendMode::Naadf)
+        .map(|config| config.voxel_backend_query_mask)
+        .unwrap_or_default();
+
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_contact_shadow_rays_per_pixel",
+        if radiance_query_mask & NAADF_QUERY_CONTACT_SHADOW != 0 {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_gi_secondary_rays_per_pixel",
+        if radiance_query_mask & NAADF_QUERY_GI_SECONDARY != 0 {
+            NAADF_GI_SECONDARY_SAMPLES_PER_PIXEL as f64
+        } else {
+            0.0
+        },
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_terrain_ao_rays_per_pixel",
+        if radiance_query_mask & NAADF_QUERY_TERRAIN_AO != 0 {
+            4.0
+        } else {
+            0.0
+        },
+    );
+    if let Some(radiance_config) = radiance_config.as_deref() {
+        timing.record_count(
+            frame.0,
+            "naadf.radiance_cascade_pass_active",
+            radiance_cascade_pass_active(radiance_config) as u32 as f64,
+        );
+    }
+    if let Some(sdf_state) = sdf_state.as_deref() {
+        timing.record_count(
+            frame.0,
+            "naadf.sdf_volume_update_needed",
+            sdf_state.sdf_update_needed_last_frame as u32 as f64,
+        );
+        timing.record_count(
+            frame.0,
+            "naadf.sdf_volume_skipped_for_naadf",
+            sdf_state.sdf_updates_skipped_for_naadf as f64,
+        );
+    }
     timing.record_count(
         frame.0,
         "naadf.preview_first_hit_dispatches_last_frame",

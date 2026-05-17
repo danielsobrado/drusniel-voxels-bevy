@@ -5,33 +5,75 @@
 
 use bevy::asset::RenderAssetUsages;
 #[cfg(feature = "naadf")]
-use bevy::diagnostic::FrameCount;
+use bevy::asset::{load_internal_asset, uuid_handle};
+#[cfg(feature = "naadf")]
+use bevy::core_pipeline::{
+    FullscreenShader,
+    core_3d::graph::{Core3d, Node3d},
+    prepass::ViewPrepassTextures,
+};
 use bevy::prelude::*;
+#[cfg(feature = "naadf")]
+use bevy::render::render_graph::{
+    NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
+};
 use bevy::render::render_resource::*;
+#[cfg(feature = "naadf")]
+use bevy::render::renderer::{RenderContext, RenderDevice};
+#[cfg(feature = "naadf")]
+use bevy::render::view::{ExtractedView, ViewTarget};
+#[cfg(feature = "naadf")]
+use bevy::render::{ExtractSchedule, MainWorld, Render, RenderApp, RenderStartup, RenderSystems};
+#[cfg(feature = "naadf")]
+use bevy::shader::Shader;
+#[cfg(feature = "naadf")]
+use std::borrow::Cow;
 use std::collections::{HashSet, VecDeque};
 
 #[cfg(feature = "naadf")]
-use crate::performance::AreaTimingRecorder;
+use crate::atmosphere::FogUniforms;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::{NaadfConfig, NaadfStats};
+use crate::rendering::naadf::{NaadfCacheState, NaadfConfig, NaadfGpuChunkTable, NaadfStats};
 use crate::rendering::ray_tracing::{
     ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
 };
+#[cfg(feature = "naadf")]
+use crate::rendering::weather_overlay::WeatherOverlayLabel;
 use crate::voxel::world::VoxelWorld;
 
-const NAADF_QUERY_GI_SECONDARY: u32 = 1 << 0;
+#[cfg(feature = "naadf")]
+const RADIANCE_CASCADES_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("b965089a-9b56-4425-9d8f-d265b7dfcbde");
+
+pub(crate) const NAADF_QUERY_GI_SECONDARY: u32 = 1 << 0;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
 const NAADF_QUERY_SUN_VISIBILITY: u32 = 1 << 1;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
-const NAADF_QUERY_TERRAIN_AO: u32 = 1 << 2;
+pub(crate) const NAADF_QUERY_TERRAIN_AO: u32 = 1 << 2;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
-const NAADF_QUERY_CONTACT_SHADOW: u32 = 1 << 3;
+pub(crate) const NAADF_QUERY_CONTACT_SHADOW: u32 = 1 << 3;
+const NAADF_QUERY_ALL: u32 = NAADF_QUERY_GI_SECONDARY
+    | NAADF_QUERY_SUN_VISIBILITY
+    | NAADF_QUERY_TERRAIN_AO
+    | NAADF_QUERY_CONTACT_SHADOW;
+pub(crate) const NAADF_GI_SECONDARY_SAMPLES_PER_PIXEL: u32 = 2;
 
 /// Plugin for Radiance Cascades global illumination
 pub struct RadianceCascadesPlugin;
 
 impl Plugin for RadianceCascadesPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "naadf")]
+        load_internal_asset!(
+            app,
+            RADIANCE_CASCADES_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/radiance_cascades.wgsl"
+            ),
+            Shader::from_wgsl
+        );
+
         app.init_resource::<RadianceCascadesConfig>()
             .init_resource::<SdfVolumeState>()
             .add_systems(Startup, setup_radiance_cascades)
@@ -47,7 +89,34 @@ impl Plugin for RadianceCascadesPlugin {
         #[cfg(feature = "naadf")]
         app.add_systems(Update, record_naadf_gi_counters);
 
-        // Render app systems would go here for full implementation
+        #[cfg(feature = "naadf")]
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .init_resource::<ExtractedRadianceCascadesState>()
+                .init_resource::<ExtractedRadianceNaadfCacheState>()
+                .add_systems(RenderStartup, init_radiance_cascade_pipeline)
+                .add_systems(
+                    ExtractSchedule,
+                    (
+                        extract_radiance_cascades_state,
+                        extract_radiance_naadf_cache_state,
+                    )
+                        .chain(),
+                )
+                .add_systems(
+                    Render,
+                    prepare_radiance_cascade_naadf_bind_group
+                        .in_set(RenderSystems::PrepareBindGroups),
+                );
+            render_app.add_render_graph_node::<ViewNodeRunner<RadianceCascadesNode>>(
+                Core3d,
+                RadianceCascadesLabel,
+            );
+            render_app.add_render_graph_edges(
+                Core3d,
+                (WeatherOverlayLabel, RadianceCascadesLabel, Node3d::Bloom),
+            );
+        }
     }
 }
 
@@ -152,6 +221,12 @@ pub struct SdfVolumeState {
 
     /// Last GI history reset caused by a voxel backend switch.
     pub history_reset_generation: u64,
+
+    /// Whether the SDF volume update path was needed for the most recent frame.
+    pub sdf_update_needed_last_frame: bool,
+
+    /// Frames where all GI query classes were NAADF-routed and SDF update work was skipped.
+    pub sdf_updates_skipped_for_naadf: u64,
 }
 
 impl Default for SdfVolumeState {
@@ -164,6 +239,8 @@ impl Default for SdfVolumeState {
             initialized: false,
             prev_view_proj: Mat4::IDENTITY,
             history_reset_generation: 0,
+            sdf_update_needed_last_frame: true,
+            sdf_updates_skipped_for_naadf: 0,
         }
     }
 }
@@ -245,7 +322,7 @@ fn apply_radiance_backend_selection_with_shader_support(
 #[cfg(feature = "naadf")]
 fn naadf_query_mask_from_config(config: &NaadfConfig) -> u32 {
     let mut mask = 0;
-    if config.preview.bounce_count > 0 {
+    if config.use_for_gi_secondary {
         mask |= NAADF_QUERY_GI_SECONDARY;
     }
     if config.use_for_sun_visibility {
@@ -261,7 +338,585 @@ fn naadf_query_mask_from_config(config: &NaadfConfig) -> u32 {
 }
 
 pub const fn naadf_gi_shader_backend_available() -> bool {
-    false
+    cfg!(feature = "naadf")
+}
+
+#[cfg(feature = "naadf")]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+pub struct RadianceCascadesLabel;
+
+#[cfg(feature = "naadf")]
+#[derive(Resource, Clone, Default)]
+pub struct ExtractedRadianceCascadesState {
+    pub config: RadianceCascadesConfig,
+    pub frame_index: u32,
+    pub active: bool,
+    pub sun_direction: Vec3,
+}
+
+#[cfg(feature = "naadf")]
+#[derive(Resource)]
+pub struct RadianceCascadePipeline {
+    pub main_layout: BindGroupLayoutDescriptor,
+    pub sampler: Sampler,
+    _dummy_2d_texture: Texture,
+    pub dummy_2d_view: TextureView,
+    _dummy_3d_texture: Texture,
+    pub dummy_3d_view: TextureView,
+    pub hdr_pipeline_id: CachedRenderPipelineId,
+    pub sdr_pipeline_id: CachedRenderPipelineId,
+}
+
+#[cfg(feature = "naadf")]
+const RADIANCE_NAADF_VOXEL_RECORDS_BINDING: u32 = 0;
+#[cfg(feature = "naadf")]
+const RADIANCE_NAADF_MATERIAL_RECORDS_BINDING: u32 = 1;
+#[cfg(feature = "naadf")]
+const RADIANCE_NAADF_BLOCK_RECORDS_BINDING: u32 = 5;
+#[cfg(feature = "naadf")]
+const RADIANCE_NAADF_CHUNK_RECORDS_BINDING: u32 = 11;
+#[cfg(feature = "naadf")]
+const RADIANCE_NAADF_CHUNK_LOOKUP_BINDING: u32 = 20;
+
+#[cfg(feature = "naadf")]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExtractedRadianceNaadfCacheState {
+    pub ready: bool,
+}
+
+#[cfg(feature = "naadf")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RadianceCascadeNaadfBindingSource {
+    #[default]
+    Dummy,
+    Live {
+        max_chunks: u32,
+        estimated_bytes: u64,
+    },
+}
+
+#[cfg(feature = "naadf")]
+#[derive(Resource)]
+pub struct RadianceCascadeNaadfBindings {
+    pub layout: BindGroupLayout,
+    pub descriptor: BindGroupLayoutDescriptor,
+    dummy_buffer: Buffer,
+    pub bind_group: BindGroup,
+    pub source: RadianceCascadeNaadfBindingSource,
+}
+
+#[cfg(feature = "naadf")]
+pub fn extract_radiance_cascades_state(mut commands: Commands, main_world: Res<MainWorld>) {
+    let config = main_world
+        .get_resource::<RadianceCascadesConfig>()
+        .map(|config| config.clone())
+        .unwrap_or_default();
+    let frame_index = main_world
+        .get_resource::<SdfVolumeState>()
+        .map(|state| state.frame_index)
+        .unwrap_or_default();
+    let active = radiance_cascade_pass_active(&config);
+    let sun_direction = main_world
+        .get_resource::<FogUniforms>()
+        .map(|fog| fog.sun_dir.normalize_or_zero())
+        .unwrap_or_else(|| FogUniforms::default().sun_dir.normalize_or_zero());
+    commands.insert_resource(ExtractedRadianceCascadesState {
+        config,
+        frame_index,
+        active,
+        sun_direction,
+    });
+}
+
+#[cfg(feature = "naadf")]
+pub fn extract_radiance_naadf_cache_state(mut commands: Commands, main_world: Res<MainWorld>) {
+    let ready = main_world
+        .get_resource::<NaadfCacheState>()
+        .map(|state| state.ready)
+        .unwrap_or(false);
+    commands.insert_resource(ExtractedRadianceNaadfCacheState { ready });
+}
+
+#[cfg(feature = "naadf")]
+pub fn init_radiance_cascade_pipeline(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    fullscreen_shader: Res<FullscreenShader>,
+    pipeline_cache: Res<PipelineCache>,
+) {
+    let naadf_descriptor = BindGroupLayoutDescriptor::new(
+        "radiance_cascade_naadf_bind_group_layout",
+        &radiance_cascade_naadf_bind_group_layout_entries(),
+    );
+    let naadf_layout = render_device.create_bind_group_layout(
+        Some("radiance_cascade_naadf_bind_group_layout"),
+        &naadf_descriptor.entries,
+    );
+    let dummy_buffer = create_radiance_cascade_naadf_dummy_buffer(&render_device);
+    let bind_group = create_radiance_cascade_naadf_dummy_bind_group(
+        &render_device,
+        &naadf_layout,
+        &dummy_buffer,
+    );
+
+    let main_layout = radiance_cascade_main_bind_group_layout();
+    let empty_group_layout =
+        BindGroupLayoutDescriptor::new("radiance_cascade_empty_group_layout", &[]);
+    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+    let (dummy_2d_texture, dummy_2d_view) = create_radiance_dummy_texture(
+        &render_device,
+        "radiance_cascade_dummy_2d_texture",
+        TextureDimension::D2,
+        TextureViewDimension::D2,
+    );
+    let (dummy_3d_texture, dummy_3d_view) = create_radiance_dummy_texture(
+        &render_device,
+        "radiance_cascade_dummy_3d_texture",
+        TextureDimension::D3,
+        TextureViewDimension::D3,
+    );
+    let pipeline_descriptor =
+        |label: &'static str, format: TextureFormat| RenderPipelineDescriptor {
+            label: Some(Cow::from(label)),
+            layout: vec![
+                main_layout.clone(),
+                empty_group_layout.clone(),
+                empty_group_layout.clone(),
+                naadf_descriptor.clone(),
+            ],
+            vertex: fullscreen_shader.to_vertex_state(),
+            fragment: Some(FragmentState {
+                shader: RADIANCE_CASCADES_SHADER_HANDLE,
+                entry_point: Some(Cow::from("radiance_sun_visibility")),
+                targets: vec![Some(ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
+            ..default()
+        };
+    let hdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "radiance_cascades_passthrough_hdr",
+        ViewTarget::TEXTURE_FORMAT_HDR,
+    ));
+    let sdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "radiance_cascades_passthrough_sdr",
+        TextureFormat::bevy_default(),
+    ));
+
+    commands.insert_resource(RadianceCascadeNaadfBindings {
+        layout: naadf_layout,
+        descriptor: naadf_descriptor,
+        dummy_buffer,
+        bind_group,
+        source: RadianceCascadeNaadfBindingSource::Dummy,
+    });
+    commands.insert_resource(RadianceCascadePipeline {
+        main_layout,
+        sampler,
+        _dummy_2d_texture: dummy_2d_texture,
+        dummy_2d_view,
+        _dummy_3d_texture: dummy_3d_texture,
+        dummy_3d_view,
+        hdr_pipeline_id,
+        sdr_pipeline_id,
+    });
+}
+
+#[cfg(feature = "naadf")]
+pub fn prepare_radiance_cascade_naadf_bind_group(
+    mut bindings: ResMut<RadianceCascadeNaadfBindings>,
+    cache_state: Option<Res<ExtractedRadianceNaadfCacheState>>,
+    buffers: Option<Res<crate::rendering::naadf::gpu_buffers::NaadfGpuBuffers>>,
+    render_device: Res<RenderDevice>,
+) {
+    let ready = cache_state
+        .as_deref()
+        .map(|state| state.ready)
+        .unwrap_or(false);
+    let live = buffers
+        .as_deref()
+        .filter(|buffers| ready && buffers.status().allocated)
+        .and_then(|buffers| {
+            buffers
+                .allocation()
+                .map(|allocation| (buffers.status(), allocation))
+        });
+
+    let target_source = live
+        .map(|(status, _)| RadianceCascadeNaadfBindingSource::Live {
+            max_chunks: status.max_chunks,
+            estimated_bytes: status.estimated_bytes,
+        })
+        .unwrap_or(RadianceCascadeNaadfBindingSource::Dummy);
+
+    if bindings.source == target_source {
+        return;
+    }
+
+    let bind_group = if let Some((_, allocation)) = live {
+        render_device.create_bind_group(
+            Some("radiance_cascade_naadf_live_bind_group"),
+            &bindings.layout,
+            &BindGroupEntries::with_indices((
+                (
+                    RADIANCE_NAADF_VOXEL_RECORDS_BINDING,
+                    allocation.voxel_buffer.as_entire_binding(),
+                ),
+                (
+                    RADIANCE_NAADF_MATERIAL_RECORDS_BINDING,
+                    allocation.material_buffer.as_entire_binding(),
+                ),
+                (
+                    RADIANCE_NAADF_BLOCK_RECORDS_BINDING,
+                    allocation.block_buffer.as_entire_binding(),
+                ),
+                (
+                    RADIANCE_NAADF_CHUNK_RECORDS_BINDING,
+                    allocation.chunk_buffer.as_entire_binding(),
+                ),
+                (
+                    RADIANCE_NAADF_CHUNK_LOOKUP_BINDING,
+                    allocation.chunk_lookup_buffer.as_entire_binding(),
+                ),
+            )),
+        )
+    } else {
+        create_radiance_cascade_naadf_dummy_bind_group(
+            &render_device,
+            &bindings.layout,
+            &bindings.dummy_buffer,
+        )
+    };
+
+    bindings.bind_group = bind_group;
+    bindings.source = target_source;
+}
+
+#[cfg(feature = "naadf")]
+fn create_radiance_cascade_naadf_dummy_buffer(render_device: &RenderDevice) -> Buffer {
+    render_device.create_buffer(&BufferDescriptor {
+        label: Some("radiance_cascade_naadf_dummy_records"),
+        size: 16,
+        usage: BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    })
+}
+
+#[cfg(feature = "naadf")]
+fn create_radiance_cascade_naadf_dummy_bind_group(
+    render_device: &RenderDevice,
+    layout: &BindGroupLayout,
+    dummy_buffer: &Buffer,
+) -> BindGroup {
+    render_device.create_bind_group(
+        Some("radiance_cascade_naadf_dummy_bind_group"),
+        layout,
+        &BindGroupEntries::with_indices((
+            (
+                RADIANCE_NAADF_VOXEL_RECORDS_BINDING,
+                dummy_buffer.as_entire_binding(),
+            ),
+            (
+                RADIANCE_NAADF_MATERIAL_RECORDS_BINDING,
+                dummy_buffer.as_entire_binding(),
+            ),
+            (
+                RADIANCE_NAADF_BLOCK_RECORDS_BINDING,
+                dummy_buffer.as_entire_binding(),
+            ),
+            (
+                RADIANCE_NAADF_CHUNK_RECORDS_BINDING,
+                dummy_buffer.as_entire_binding(),
+            ),
+            (
+                RADIANCE_NAADF_CHUNK_LOOKUP_BINDING,
+                dummy_buffer.as_entire_binding(),
+            ),
+        )),
+    )
+}
+
+#[cfg(feature = "naadf")]
+fn radiance_cascade_naadf_bind_group_layout_entries() -> [BindGroupLayoutEntry; 5] {
+    [
+        naadf_radiance_storage_entry(RADIANCE_NAADF_VOXEL_RECORDS_BINDING),
+        naadf_radiance_storage_entry(RADIANCE_NAADF_MATERIAL_RECORDS_BINDING),
+        naadf_radiance_storage_entry(RADIANCE_NAADF_BLOCK_RECORDS_BINDING),
+        naadf_radiance_storage_entry(RADIANCE_NAADF_CHUNK_RECORDS_BINDING),
+        naadf_radiance_storage_entry(RADIANCE_NAADF_CHUNK_LOOKUP_BINDING),
+    ]
+}
+
+#[cfg(feature = "naadf")]
+fn naadf_radiance_storage_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::COMPUTE | ShaderStages::FRAGMENT,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn radiance_cascade_main_bind_group_layout() -> BindGroupLayoutDescriptor {
+    BindGroupLayoutDescriptor::new(
+        "radiance_cascade_main_bind_group_layout",
+        &[
+            uniform_buffer_entry(0),
+            texture_entry(1, TextureViewDimension::D3),
+            sampler_entry(2),
+            depth_texture_entry(3),
+            texture_entry(4, TextureViewDimension::D2),
+            texture_entry(5, TextureViewDimension::D2),
+            texture_entry(6, TextureViewDimension::D2),
+            texture_entry(7, TextureViewDimension::D2),
+            texture_entry(8, TextureViewDimension::D2),
+            texture_entry(9, TextureViewDimension::D2),
+            texture_entry(10, TextureViewDimension::D2),
+            texture_entry(11, TextureViewDimension::D2),
+            sampler_entry(12),
+        ],
+    )
+}
+
+#[cfg(feature = "naadf")]
+fn uniform_buffer_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn texture_entry(binding: u32, view_dimension: TextureViewDimension) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Float { filterable: true },
+            view_dimension,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn depth_texture_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Depth,
+            view_dimension: TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn sampler_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+        count: None,
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn create_radiance_dummy_texture(
+    render_device: &RenderDevice,
+    label: &'static str,
+    dimension: TextureDimension,
+    view_dimension: TextureViewDimension,
+) -> (Texture, TextureView) {
+    let texture = render_device.create_texture(&TextureDescriptor {
+        label: Some(label),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor {
+        dimension: Some(view_dimension),
+        ..default()
+    });
+    (texture, view)
+}
+
+#[cfg(feature = "naadf")]
+#[derive(Default)]
+pub struct RadianceCascadesNode;
+
+#[cfg(feature = "naadf")]
+impl ViewNode for RadianceCascadesNode {
+    type ViewQuery = (
+        &'static ViewTarget,
+        &'static ExtractedView,
+        &'static ViewPrepassTextures,
+    );
+
+    fn run<'w>(
+        &self,
+        _graph: &mut RenderGraphContext,
+        render_context: &mut RenderContext<'w>,
+        (view_target, extracted_view, prepass_textures): bevy::ecs::query::QueryItem<
+            'w,
+            '_,
+            Self::ViewQuery,
+        >,
+        world: &'w World,
+    ) -> Result<(), NodeRunError> {
+        let Some(state) = world.get_resource::<ExtractedRadianceCascadesState>() else {
+            return Ok(());
+        };
+        if !state.active {
+            return Ok(());
+        }
+        let Some(pipeline_res) = world.get_resource::<RadianceCascadePipeline>() else {
+            return Ok(());
+        };
+        let Some(naadf_bindings) = world.get_resource::<RadianceCascadeNaadfBindings>() else {
+            return Ok(());
+        };
+        let Some(depth_view) = prepass_textures.depth_view() else {
+            return Ok(());
+        };
+        let Some(normal_view) = prepass_textures.normal_view() else {
+            return Ok(());
+        };
+
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let pipeline_id = if view_target.main_texture_format() == ViewTarget::TEXTURE_FORMAT_HDR {
+            pipeline_res.hdr_pipeline_id
+        } else {
+            pipeline_res.sdr_pipeline_id
+        };
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
+            return Ok(());
+        };
+
+        let post_process = view_target.post_process_write();
+        let naadf_counts = radiance_naadf_counts(world, naadf_bindings);
+        let uniform_buffer = create_radiance_uniform_buffer(
+            render_context.render_device(),
+            state,
+            extracted_view,
+            naadf_counts,
+        );
+        let bind_group = render_context.render_device().create_bind_group(
+            "radiance_cascades_sun_visibility_bind_group",
+            &pipeline_cache.get_bind_group_layout(&pipeline_res.main_layout),
+            &BindGroupEntries::with_indices((
+                (0, uniform_buffer.as_entire_binding()),
+                (1, BindingResource::TextureView(&pipeline_res.dummy_3d_view)),
+                (2, BindingResource::Sampler(&pipeline_res.sampler)),
+                (3, BindingResource::TextureView(depth_view)),
+                (4, BindingResource::TextureView(normal_view)),
+                (5, BindingResource::TextureView(post_process.source)),
+                (6, BindingResource::TextureView(&pipeline_res.dummy_2d_view)),
+                (7, BindingResource::TextureView(&pipeline_res.dummy_2d_view)),
+                (8, BindingResource::TextureView(&pipeline_res.dummy_2d_view)),
+                (9, BindingResource::TextureView(&pipeline_res.dummy_2d_view)),
+                (
+                    10,
+                    BindingResource::TextureView(&pipeline_res.dummy_2d_view),
+                ),
+                (
+                    11,
+                    BindingResource::TextureView(&pipeline_res.dummy_2d_view),
+                ),
+                (12, BindingResource::Sampler(&pipeline_res.sampler)),
+            )),
+        );
+
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("radiance_cascades_sun_visibility_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: post_process.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        render_pass.set_render_pipeline(pipeline);
+        render_pass.set_bind_group(0, &bind_group, &[]);
+        render_pass.set_bind_group(3, &naadf_bindings.bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "naadf")]
+fn create_radiance_uniform_buffer(
+    render_device: &RenderDevice,
+    state: &ExtractedRadianceCascadesState,
+    view: &ExtractedView,
+    naadf_counts: UVec2,
+) -> Buffer {
+    let world_from_view = view.world_from_view.to_matrix();
+    let clip_from_world = view.clip_from_view * world_from_view.inverse();
+    let uniforms = create_radiance_uniforms_with_naadf_counts(
+        &state.config,
+        &SdfVolumeState {
+            frame_index: state.frame_index,
+            ..default()
+        },
+        world_from_view.w_axis.truncate(),
+        state.sun_direction,
+        Vec3::ONE,
+        clip_from_world.inverse(),
+        naadf_counts,
+    );
+    let mut uniform_buffer = encase::UniformBuffer::new(Vec::<u8>::new());
+    uniform_buffer.write(&uniforms).unwrap();
+    render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some("radiance_cascades_uniforms"),
+        contents: uniform_buffer.as_ref(),
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    })
+}
+
+#[cfg(feature = "naadf")]
+fn radiance_naadf_counts(world: &World, bindings: &RadianceCascadeNaadfBindings) -> UVec2 {
+    let chunk_count = match bindings.source {
+        RadianceCascadeNaadfBindingSource::Live { max_chunks, .. } => max_chunks,
+        RadianceCascadeNaadfBindingSource::Dummy => 0,
+    };
+    let lookup_count = world
+        .get_resource::<NaadfGpuChunkTable>()
+        .map(|table| table.stats().allocated_chunks)
+        .unwrap_or(0)
+        .min(chunk_count);
+
+    UVec2::new(chunk_count, lookup_count)
 }
 
 /// GPU uniforms for radiance cascades
@@ -298,6 +953,7 @@ pub struct RadianceCascadeUniforms {
 
     pub camera_position: Vec3,
     pub voxel_backend_query_mask: u32,
+    pub naadf_counts: UVec4,
 
     pub inv_view_proj: Mat4,
 }
@@ -486,6 +1142,11 @@ fn update_sdf_volume(
     }
 
     state.frame_index = state.frame_index.wrapping_add(1);
+    state.sdf_update_needed_last_frame = sdf_volume_update_needed(&config);
+    if !state.sdf_update_needed_last_frame {
+        state.sdf_updates_skipped_for_naadf = state.sdf_updates_skipped_for_naadf.saturating_add(1);
+        return;
+    }
 
     // In a full implementation, this would:
     // 1. Check for modified chunks in VoxelWorld
@@ -506,6 +1167,16 @@ fn update_sdf_volume(
         // Would dispatch incremental update compute shader here
         process_dirty_sdf_chunks(&mut state, 8);
     }
+}
+
+fn sdf_volume_update_needed(config: &RadianceCascadesConfig) -> bool {
+    if !config.enabled {
+        return false;
+    }
+    if config.voxel_backend != VoxelRayBackendMode::Naadf {
+        return true;
+    }
+    config.voxel_backend_query_mask & NAADF_QUERY_ALL != NAADF_QUERY_ALL
 }
 
 /// Update cascade parameters each frame
@@ -548,6 +1219,26 @@ pub fn create_radiance_uniforms(
     sun_color: Vec3,
     inv_view_proj: Mat4,
 ) -> RadianceCascadeUniforms {
+    create_radiance_uniforms_with_naadf_counts(
+        config,
+        state,
+        camera_pos,
+        sun_dir,
+        sun_color,
+        inv_view_proj,
+        UVec2::ZERO,
+    )
+}
+
+pub fn create_radiance_uniforms_with_naadf_counts(
+    config: &RadianceCascadesConfig,
+    state: &SdfVolumeState,
+    camera_pos: Vec3,
+    sun_dir: Vec3,
+    sun_color: Vec3,
+    inv_view_proj: Mat4,
+    naadf_counts: UVec2,
+) -> RadianceCascadeUniforms {
     RadianceCascadeUniforms {
         cascade_count: config.cascade_count,
         rays_per_probe: config.rays_per_probe,
@@ -580,6 +1271,7 @@ pub fn create_radiance_uniforms(
 
         camera_position: camera_pos,
         voxel_backend_query_mask: config.voxel_backend_query_mask,
+        naadf_counts: UVec4::new(naadf_counts.x, naadf_counts.y, 0, 0),
 
         inv_view_proj,
     }
@@ -596,48 +1288,15 @@ fn voxel_backend_code(backend: VoxelRayBackendMode) -> u32 {
 pub fn record_naadf_gi_counters(
     config: Res<RadianceCascadesConfig>,
     mut naadf_stats: Option<ResMut<NaadfStats>>,
-    mut timing: Option<ResMut<AreaTimingRecorder>>,
-    frame: Res<FrameCount>,
 ) {
     let gi_rays = estimated_naadf_gi_rays(&config);
     if let Some(stats) = naadf_stats.as_deref_mut() {
         stats.gi_rays_last_frame = gi_rays;
+        stats.radiance_contact_shadow_rays_per_pixel =
+            estimated_naadf_contact_shadow_rays_per_pixel(&config);
+        stats.radiance_terrain_ao_rays_per_pixel =
+            estimated_naadf_terrain_ao_rays_per_pixel(&config);
     }
-
-    let Some(timing) = timing.as_deref_mut() else {
-        return;
-    };
-    let Some(stats) = naadf_stats.as_deref() else {
-        return;
-    };
-
-    timing.record_count(
-        frame.0,
-        "naadf.gpu_memory_bytes",
-        stats.gpu_memory_bytes as f64,
-    );
-    timing.record_count(frame.0, "naadf.chunks_resident", stats.loaded_chunks as f64);
-    timing.record_count(
-        frame.0,
-        "naadf.dirty_chunks_pending",
-        stats.dirty_pending as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "naadf.gpu_build_queue_oldest_age_frames",
-        stats.gpu_build_queue_oldest_age_frames as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "naadf.uploaded_chunks_last_frame",
-        stats.gpu_uploaded_chunks_last_frame as f64,
-    );
-    timing.record_count(
-        frame.0,
-        "naadf.avg_ray_steps_last_frame",
-        stats.gpu_avg_ray_steps_last_frame as f64,
-    );
-    timing.record_count(frame.0, "naadf.gi_rays_last_frame", gi_rays as f64);
 }
 
 pub fn estimated_naadf_gi_rays(config: &RadianceCascadesConfig) -> u64 {
@@ -647,6 +1306,33 @@ pub fn estimated_naadf_gi_rays(config: &RadianceCascadesConfig) -> u64 {
         return 0;
     }
     config.cascade_count as u64 * config.rays_per_probe as u64
+}
+
+pub fn estimated_naadf_contact_shadow_rays_per_pixel(config: &RadianceCascadesConfig) -> u32 {
+    if config.voxel_backend == VoxelRayBackendMode::Naadf
+        && config.voxel_backend_query_mask & NAADF_QUERY_CONTACT_SHADOW != 0
+    {
+        1
+    } else {
+        0
+    }
+}
+
+pub fn estimated_naadf_terrain_ao_rays_per_pixel(config: &RadianceCascadesConfig) -> u32 {
+    if config.voxel_backend == VoxelRayBackendMode::Naadf
+        && config.voxel_backend_query_mask & NAADF_QUERY_TERRAIN_AO != 0
+    {
+        4
+    } else {
+        0
+    }
+}
+
+#[cfg_attr(not(feature = "naadf"), allow(dead_code))]
+pub(crate) fn radiance_cascade_pass_active(config: &RadianceCascadesConfig) -> bool {
+    config.enabled
+        && config.voxel_backend == VoxelRayBackendMode::Naadf
+        && config.voxel_backend_query_mask != 0
 }
 
 /// SDF volume data generation utilities
@@ -843,8 +1529,13 @@ mod tests {
             &mut state,
         );
 
-        assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
-        assert_eq!(config.voxel_backend_query_mask, 0);
+        if naadf_gi_shader_backend_available() {
+            assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
+            assert_eq!(config.voxel_backend_query_mask, NAADF_QUERY_GI_SECONDARY);
+        } else {
+            assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+            assert_eq!(config.voxel_backend_query_mask, 0);
+        }
         assert_eq!(config.backend_switch_generation, 7);
         assert_eq!(state.frame_index, 0);
         assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
@@ -901,6 +1592,7 @@ mod tests {
     #[test]
     fn naadf_query_mask_tracks_config_flags() {
         let config = NaadfConfig {
+            use_for_gi_secondary: true,
             use_for_sun_visibility: true,
             use_for_terrain_ao: true,
             use_for_contact_shadows: false,
@@ -913,6 +1605,34 @@ mod tests {
         assert_ne!(mask & NAADF_QUERY_SUN_VISIBILITY, 0);
         assert_ne!(mask & NAADF_QUERY_TERRAIN_AO, 0);
         assert_eq!(mask & NAADF_QUERY_CONTACT_SHADOW, 0);
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn default_naadf_config_keeps_path_a_queries_opt_in() {
+        let config = NaadfConfig::default();
+
+        assert_eq!(naadf_query_mask_from_config(&config), 0);
+    }
+
+    #[test]
+    fn sdf_volume_update_is_skipped_only_when_naadf_covers_every_query() {
+        let mut config = RadianceCascadesConfig::default();
+
+        assert!(sdf_volume_update_needed(&config));
+
+        config.voxel_backend = VoxelRayBackendMode::Naadf;
+        config.voxel_backend_query_mask = NAADF_QUERY_ALL;
+        assert!(!sdf_volume_update_needed(&config));
+
+        config.voxel_backend_query_mask = NAADF_QUERY_ALL & !NAADF_QUERY_GI_SECONDARY;
+        assert!(sdf_volume_update_needed(&config));
+
+        config.voxel_backend = VoxelRayBackendMode::CurrentSdf;
+        assert!(sdf_volume_update_needed(&config));
+
+        config.enabled = false;
+        assert!(!sdf_volume_update_needed(&config));
     }
 
     #[test]
@@ -958,6 +1678,24 @@ mod tests {
     }
 
     #[test]
+    fn radiance_uniforms_include_naadf_chunk_counts() {
+        let config = RadianceCascadesConfig::default();
+        let state = SdfVolumeState::default();
+
+        let uniforms = create_radiance_uniforms_with_naadf_counts(
+            &config,
+            &state,
+            Vec3::ZERO,
+            Vec3::Y,
+            Vec3::ONE,
+            Mat4::IDENTITY,
+            UVec2::new(384, 282),
+        );
+
+        assert_eq!(uniforms.naadf_counts, UVec4::new(384, 282, 0, 0));
+    }
+
+    #[test]
     fn estimated_naadf_gi_rays_only_counts_naadf_backend() {
         let mut config = RadianceCascadesConfig {
             cascade_count: 4,
@@ -974,5 +1712,114 @@ mod tests {
 
         config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
         assert_eq!(estimated_naadf_gi_rays(&config), 0);
+    }
+
+    #[test]
+    fn estimated_short_range_query_rays_only_count_enabled_naadf_queries() {
+        let mut config = RadianceCascadesConfig {
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            voxel_backend_query_mask: NAADF_QUERY_CONTACT_SHADOW | NAADF_QUERY_TERRAIN_AO,
+            ..default()
+        };
+
+        assert_eq!(estimated_naadf_contact_shadow_rays_per_pixel(&config), 0);
+        assert_eq!(estimated_naadf_terrain_ao_rays_per_pixel(&config), 0);
+
+        config.voxel_backend = VoxelRayBackendMode::Naadf;
+        assert_eq!(estimated_naadf_contact_shadow_rays_per_pixel(&config), 1);
+        assert_eq!(estimated_naadf_terrain_ao_rays_per_pixel(&config), 4);
+
+        config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
+        assert_eq!(estimated_naadf_contact_shadow_rays_per_pixel(&config), 0);
+        assert_eq!(estimated_naadf_terrain_ao_rays_per_pixel(&config), 0);
+    }
+
+    #[test]
+    fn radiance_cascade_pass_only_runs_when_a_naadf_query_is_enabled() {
+        let mut config = RadianceCascadesConfig {
+            enabled: true,
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            voxel_backend_query_mask: 0,
+            ..default()
+        };
+
+        assert!(!radiance_cascade_pass_active(&config));
+
+        config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
+        assert!(radiance_cascade_pass_active(&config));
+
+        config.voxel_backend = VoxelRayBackendMode::CurrentSdf;
+        assert!(!radiance_cascade_pass_active(&config));
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn radiance_naadf_bind_group_layout_declares_read_only_storage_buffers() {
+        let entries = radiance_cascade_naadf_bind_group_layout_entries();
+        let bindings: Vec<u32> = entries.iter().map(|entry| entry.binding).collect();
+
+        assert_eq!(bindings, vec![0, 1, 5, 11, 20]);
+        for entry in entries {
+            assert!(entry.visibility.contains(ShaderStages::FRAGMENT));
+            assert!(entry.visibility.contains(ShaderStages::COMPUTE));
+            assert_eq!(entry.count, None);
+            let BindingType::Buffer {
+                ty,
+                has_dynamic_offset,
+                min_binding_size,
+            } = entry.ty
+            else {
+                panic!("expected storage buffer binding");
+            };
+            assert_eq!(ty, BufferBindingType::Storage { read_only: true });
+            assert!(!has_dynamic_offset);
+            assert_eq!(min_binding_size, None);
+        }
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn radiance_shader_routes_sun_visibility_to_naadf_world_trace() {
+        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(shader.contains("fn soft_shadow_backend"));
+        assert!(shader.contains("use_naadf_for_query(NAADF_QUERY_SUN_VISIBILITY)"));
+        assert!(shader.contains("naadf_sun_visibility_world("));
+        assert!(shader.contains("naadf_chunk_count()"));
+        assert!(shader.contains("naadf_chunk_lookup_count()"));
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn radiance_shader_routes_phase5_queries_to_naadf_world_trace() {
+        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(shader.contains("const NAADF_QUERY_CONTACT_SHADOW: u32 = 8u"));
+        assert!(shader.contains("fn contact_shadow_backend"));
+        assert!(shader.contains("use_naadf_for_query(NAADF_QUERY_CONTACT_SHADOW)"));
+        assert!(shader.contains("naadf_contact_shadow_visibility_world("));
+        assert!(shader.contains("fn terrain_ao_backend"));
+        assert!(shader.contains("use_naadf_for_query(NAADF_QUERY_TERRAIN_AO)"));
+        assert!(shader.contains("naadf_terrain_ao_visibility_world("));
+        assert!(shader.contains("NAADF_CONTACT_SHADOW_DISTANCE"));
+        assert!(shader.contains("NAADF_TERRAIN_AO_DISTANCE"));
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn radiance_shader_routes_gi_secondary_to_naadf_world_trace() {
+        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(shader.contains("fn trace_naadf_gi"));
+        assert!(shader.contains("trace_naadf_world("));
+        assert!(shader.contains("naadf_world_surface_normal("));
+        assert!(shader.contains("use_naadf_for_query(query_mask)"));
+        assert!(shader.contains("return trace_naadf_gi(origin, direction, max_dist);"));
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn naadf_gi_shader_backend_is_selectable_when_feature_is_enabled() {
+        assert!(naadf_gi_shader_backend_available());
     }
 }

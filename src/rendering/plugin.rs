@@ -30,6 +30,7 @@ use crate::rendering::quality::{
     RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
     sync_render_quality_preset,
 };
+use crate::rendering::radiance_cascades::RadianceCascadesPlugin;
 use crate::rendering::ray_tracing::{
     RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
     toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
@@ -108,6 +109,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WeatherOverlayPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
+            // Path A lighting backend: inactive unless NAADF is selected and query routing is enabled.
+            .add_plugins(RadianceCascadesPlugin)
             .add_plugins(naadf_plugin())
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
             // Register TriplanarMaterial as a custom material type
@@ -179,4 +182,15 @@ fn naadf_plugin() {}
 fn render_timing_enabled(app: &App) -> bool {
     app.world().contains_resource::<crate::bench::BenchConfig>()
         || std::env::var_os("VOXEL_RENDER_TIMING").is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rendering_plugin_installs_radiance_cascades_path_a_pass() {
+        let source = include_str!("plugin.rs");
+
+        assert!(source.contains("use crate::rendering::radiance_cascades::RadianceCascadesPlugin"));
+        assert!(source.contains(".add_plugins(RadianceCascadesPlugin)"));
+    }
 }

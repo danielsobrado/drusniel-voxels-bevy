@@ -4,6 +4,7 @@ mod naadf_gpu_layout {
     use serde::Deserialize;
     use std::sync::mpsc;
     use voxel_builder::constants::CHUNK_VOLUME;
+    use voxel_builder::rendering::naadf::NaadfCpuRayBackend;
     use voxel_builder::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
     use voxel_builder::rendering::naadf::gpu_buffers::{
         NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
@@ -11,6 +12,7 @@ mod naadf_gpu_layout {
     };
     use voxel_builder::rendering::naadf::layout::BLOCKS_PER_CHUNK;
     use voxel_builder::rendering::naadf::layout::voxel_index_in_chunk;
+    use voxel_builder::rendering::voxel_ray_backend::VoxelRayPurpose;
     use voxel_builder::voxel::chunk::Chunk;
     use voxel_builder::voxel::types::{Voxel, VoxelType};
     use wgpu::util::DeviceExt;
@@ -20,6 +22,7 @@ mod naadf_gpu_layout {
     const CHUNK_BYTES: u64 = NAADF_PACKED_CHUNK_WORDS as u64 * 4;
     const LOOKUP_BYTES: u64 = 16;
     const PARAM_BYTES: u64 = 16;
+    const SUN_VISIBILITY_MAX_STEPS: u32 = 64;
 
     #[derive(Debug, Deserialize)]
     struct NaadfFixture {
@@ -42,6 +45,13 @@ mod naadf_gpu_layout {
         dir: Vec<f32>,
         max_distance: f32,
         hit: Option<Vec<u32>>,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+    struct SunVisibilityRayInput {
+        origin_max_distance: [f32; 4],
+        direction_purpose: [f32; 4],
     }
 
     struct GpuContext {
@@ -93,6 +103,47 @@ mod naadf_gpu_layout {
         }
     }
 
+    #[test]
+    fn gpu_sun_visibility_matches_cpu_for_all_fixtures() {
+        let gpu = pollster::block_on(GpuContext::new())
+            .expect("NAADF GPU sun visibility dispatch test requires a headless wgpu adapter");
+
+        for (path, contents) in naadf_fixture_files() {
+            let fixture: NaadfFixture = ron::de::from_str(contents)
+                .unwrap_or_else(|err| panic!("failed to parse {path}: {err}"));
+            let chunk = chunk_from_fixture(&fixture);
+            let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+            let rays = sun_visibility_rays(&fixture);
+            let cpu = NaadfCpuRayBackend::new([naadf.clone()]);
+            let expected = rays
+                .iter()
+                .map(|ray| {
+                    let hit = cpu
+                        .trace_with_stats(
+                            ray.origin(),
+                            ray.direction(),
+                            ray.max_distance(),
+                            VoxelRayPurpose::SunVisibility,
+                        )
+                        .0;
+                    u32::from(hit.is_none())
+                })
+                .collect::<Vec<_>>();
+            let actual = pollster::block_on(dispatch_gpu_sun_visibility(
+                &gpu,
+                &naadf,
+                &rays,
+                &fixture.name,
+            ));
+
+            assert_eq!(
+                expected, actual,
+                "NAADF GPU sun visibility mismatch: fixture={}, rays={:?}, expected_clear_flags={:?}, actual_clear_flags={:?}",
+                fixture.name, rays, expected, actual
+            );
+        }
+    }
+
     impl GpuContext {
         async fn new() -> Option<Self> {
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -124,6 +175,41 @@ mod naadf_gpu_layout {
         block_records: Vec<[u32; NAADF_PACKED_BLOCK_WORDS]>,
         voxel_records: Vec<u32>,
         material_records: Vec<u32>,
+    }
+
+    impl SunVisibilityRayInput {
+        fn new(origin: Vec3, direction: Vec3, max_distance: f32) -> Self {
+            let direction = direction.normalize_or_zero();
+            Self {
+                origin_max_distance: [origin.x, origin.y, origin.z, max_distance],
+                direction_purpose: [
+                    direction.x,
+                    direction.y,
+                    direction.z,
+                    VoxelRayPurpose::SunVisibility as u32 as f32,
+                ],
+            }
+        }
+
+        fn origin(self) -> Vec3 {
+            Vec3::new(
+                self.origin_max_distance[0],
+                self.origin_max_distance[1],
+                self.origin_max_distance[2],
+            )
+        }
+
+        fn direction(self) -> Vec3 {
+            Vec3::new(
+                self.direction_purpose[0],
+                self.direction_purpose[1],
+                self.direction_purpose[2],
+            )
+        }
+
+        fn max_distance(self) -> f32 {
+            self.origin_max_distance[3]
+        }
     }
 
     async fn dispatch_gpu_build(gpu: &GpuContext, chunk: &Chunk, label: &str) -> GpuBuildOutput {
@@ -193,6 +279,106 @@ mod naadf_gpu_layout {
             voxel_records,
             material_records,
         }
+    }
+
+    async fn dispatch_gpu_sun_visibility(
+        gpu: &GpuContext,
+        naadf: &voxel_builder::rendering::naadf::layout::NaadfChunk,
+        rays: &[SunVisibilityRayInput],
+        label: &str,
+    ) -> Vec<u32> {
+        let upload = pack_naadf_chunk_upload(naadf, 0);
+        let chunk_lookup_record = [
+            i32_to_u32_bits(naadf.position.x),
+            i32_to_u32_bits(naadf.position.y),
+            i32_to_u32_bits(naadf.position.z),
+            0,
+        ];
+        let params = [rays.len() as u32, SUN_VISIBILITY_MAX_STEPS, 1u32, 1u32];
+
+        let voxel_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_voxels",
+            bytemuck::cast_slice(&upload.voxel_records),
+        );
+        let material_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_materials",
+            bytemuck::cast_slice(&upload.material_records),
+        );
+        let block_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_blocks",
+            bytemuck::cast_slice(&upload.block_records),
+        );
+        let chunk_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_chunks",
+            bytemuck::cast_slice(&[upload.chunk_record]),
+        );
+        let lookup_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_chunk_lookup",
+            bytemuck::cast_slice(&[chunk_lookup_record]),
+        );
+        let ray_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_rays",
+            bytemuck::cast_slice(rays),
+        );
+        let output_buffer = storage_buffer(
+            &gpu.device,
+            "naadf_sun_test_visibility",
+            rays.len() as u64 * 4,
+        );
+        let params_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("naadf_sun_test_params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("naadf_sun_test_layout"),
+                entries: &[
+                    storage_entry(0, true),
+                    storage_entry(1, true),
+                    storage_entry(2, true),
+                    storage_entry(3, false),
+                    uniform_entry(4),
+                    storage_entry(5, true),
+                    storage_entry(11, true),
+                    storage_entry(20, true),
+                ],
+            });
+        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("naadf_sun_test_group"),
+            layout: &layout,
+            entries: &[
+                buffer_entry(0, &voxel_buffer),
+                buffer_entry(1, &material_buffer),
+                buffer_entry(2, &ray_buffer),
+                buffer_entry(3, &output_buffer),
+                buffer_entry(4, &params_buffer),
+                buffer_entry(5, &block_buffer),
+                buffer_entry(11, &chunk_buffer),
+                buffer_entry(20, &lookup_buffer),
+            ],
+        });
+        dispatch_shader(
+            gpu,
+            "sun_visibility_test",
+            sun_visibility_test_shader(),
+            "sun_visibility_test",
+            &layout,
+            &group,
+            (rays.len() as u32).div_ceil(64),
+        );
+
+        read_words(gpu, &output_buffer, rays.len() as u64 * 4).await
     }
 
     fn run_build_blocks(
@@ -505,11 +691,7 @@ mod naadf_gpu_layout {
 
     fn resolve_shader(source: &str) -> String {
         let common = include_str!("../assets/shaders/naadf/common.wgsl");
-        let layout = include_str!("../assets/shaders/naadf/layout.wgsl")
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("#import"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let layout = strip_imports(include_str!("../assets/shaders/naadf/layout.wgsl"));
         let mut resolved = String::new();
         for line in source.lines() {
             let trimmed = line.trim_start();
@@ -527,6 +709,63 @@ mod naadf_gpu_layout {
             }
         }
         resolved
+    }
+
+    fn sun_visibility_test_shader() -> String {
+        let common = include_str!("../assets/shaders/naadf/common.wgsl");
+        let layout = strip_imports(include_str!("../assets/shaders/naadf/layout.wgsl"));
+        let ray_trace = strip_imports(include_str!("../assets/shaders/naadf/ray_trace.wgsl"));
+        let world_trace = strip_imports(include_str!("../assets/shaders/naadf/world_trace.wgsl"));
+        let lighting_queries = strip_imports(include_str!(
+            "../assets/shaders/naadf/lighting_queries.wgsl"
+        ));
+        format!(
+            "{common}\n{layout}\n{ray_trace}\n{world_trace}\n{lighting_queries}\n{}",
+            r#"
+struct SunVisibilityRayInput {
+    origin_max_distance: vec4<f32>,
+    direction_purpose: vec4<f32>,
+}
+
+struct SunVisibilityParams {
+    ray_count: u32,
+    max_steps: u32,
+    chunk_count: u32,
+    chunk_lookup_count: u32,
+}
+
+@group(3) @binding(2) var<storage, read> sun_visibility_ray_inputs: array<SunVisibilityRayInput>;
+@group(3) @binding(3) var<storage, read_write> sun_visibility_ray_outputs: array<u32>;
+@group(3) @binding(4) var<uniform> sun_visibility_params: SunVisibilityParams;
+
+@compute @workgroup_size(64)
+fn sun_visibility_test(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    if index >= sun_visibility_params.ray_count {
+        return;
+    }
+
+    let input = sun_visibility_ray_inputs[index];
+    let visibility = naadf_sun_visibility_world(
+        input.origin_max_distance.xyz,
+        input.direction_purpose.xyz,
+        input.origin_max_distance.w,
+        sun_visibility_params.max_steps,
+        sun_visibility_params.chunk_count,
+        sun_visibility_params.chunk_lookup_count,
+    );
+    sun_visibility_ray_outputs[index] = select(0u, 1u, visibility > 0.5);
+}
+"#
+        )
+    }
+
+    fn strip_imports(source: &str) -> String {
+        source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("#import"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn raw_records_for_chunk(chunk: &Chunk) -> Vec<u32> {
@@ -663,6 +902,45 @@ mod naadf_gpu_layout {
     fn uvec3_from_fixture(value: &[u32]) -> UVec3 {
         assert_eq!(value.len(), 3, "fixture vector must have exactly 3 values");
         UVec3::new(value[0], value[1], value[2])
+    }
+
+    fn vec3_from_fixture(value: &[f32]) -> Vec3 {
+        assert_eq!(value.len(), 3, "fixture vector must have exactly 3 values");
+        Vec3::new(value[0], value[1], value[2])
+    }
+
+    fn sun_visibility_rays(fixture: &NaadfFixture) -> Vec<SunVisibilityRayInput> {
+        let sun_dirs = [
+            Vec3::new(-0.35, 0.85, -0.25).normalize(),
+            Vec3::new(0.45, 0.75, 0.48).normalize(),
+            Vec3::new(-0.2, 0.95, 0.05).normalize(),
+        ];
+        let mut origins = vec![
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(8.5, 8.5, 8.5),
+            Vec3::new(15.5, 1.5, 15.5),
+        ];
+        origins.extend(
+            fixture
+                .rays
+                .iter()
+                .map(|ray| vec3_from_fixture(&ray.origin)),
+        );
+
+        let mut rays = Vec::new();
+        for origin in origins {
+            for direction in sun_dirs {
+                rays.push(SunVisibilityRayInput::new(origin, direction, 48.0));
+            }
+        }
+        for fixture_ray in &fixture.rays {
+            rays.push(SunVisibilityRayInput::new(
+                vec3_from_fixture(&fixture_ray.origin),
+                vec3_from_fixture(&fixture_ray.dir),
+                fixture_ray.max_distance,
+            ));
+        }
+        rays
     }
 
     fn i32_to_u32_bits(value: i32) -> u32 {

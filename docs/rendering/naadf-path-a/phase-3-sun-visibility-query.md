@@ -1,6 +1,6 @@
 # Phase 3 — Sun Visibility / Soft Shadow on NAADF
 
-Status: planned
+Status: implemented
 Depends on: Phase 2
 Produces code: yes (first real behavior change)
 
@@ -90,7 +90,46 @@ keep both `summary.json` files for Phase 4.
 - Coordinate conversion errors surface here first. A wrong origin traces empty
   space and every surface reads as lit.
 
+## Implementation notes
+
+- `soft_shadow_backend()` now routes `NAADF_QUERY_SUN_VISIBILITY` to
+  `naadf_sun_visibility_world()` and keeps the existing SDF path for all
+  non-NAADF sun visibility.
+- The render-app cascade pass binds the live NAADF record buffers plus the
+  prepass depth/normal textures only when a NAADF query is active. Default
+  configuration still leaves the pass inactive.
+- Phase 3 uses a single hard NAADF visibility ray. Penumbra-quality work is
+  deferred to a later phase.
+- Bench toggles can force the query with
+  `naadf_use_for_sun_visibility = true`; the A/B scene pair is:
+  `bench/scenes/visual-regression-naadf-gi.toml` and
+  `bench/scenes/visual-regression-naadf-gi-sun.toml`.
+
+## Verification results
+
+```powershell
+rtk cargo check --features naadf
+rtk cargo test --features naadf rendering::radiance_cascades --lib
+rtk cargo test --features naadf rendering::naadf --lib
+rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml --bench-out bench-runs/phase3-sdf
+rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi-sun.toml --bench-out bench-runs/phase3-naadf-sun
+rtk cargo run --bin bench_guard -- bench-runs/phase3-sdf/summary.json
+rtk cargo run --bin bench_guard -- bench-runs/phase3-naadf-sun/summary.json
+```
+
+Measured A/B output:
+
+| Run | Summary | Median | P99 | Guard |
+| --- | --- | ---: | ---: | --- |
+| SDF/default sun query | `bench-runs/phase3-sdf/summary.json` | 58.99 ms | 92.22 ms | PASS, 0 warnings |
+| NAADF sun query | `bench-runs/phase3-naadf-sun/summary.json` | 40.24 ms | 55.30 ms | PASS, 0 warnings |
+
+Both settled screenshots rendered without an obvious visual regression in the
+checkpoint view. The run still reports `naadf.gi_rays_last_frame = 0`, as
+expected: this phase only moves sun visibility, not GI secondary rays.
+
 ## Exit gate
 
-Sun visibility traces NAADF behind the toggle, falls back cleanly, default
-unchanged, no visual or perf regression. Both A/B `summary.json` runs saved.
+Sun visibility traces NAADF behind the toggle, falls back cleanly through the
+existing backend selection, default remains unchanged, and both A/B
+`summary.json` files are saved.

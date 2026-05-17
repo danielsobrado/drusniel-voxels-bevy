@@ -1,5 +1,5 @@
-#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS
-#import "shaders/naadf/ray_trace.wgsl" NaadfRay, trace_naadf_chunk
+#import "shaders/naadf/ray_trace.wgsl" NaadfHit, NaadfRay
+#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world
 
 struct NaadfFirstHitParams {
     camera_origin_max_distance: vec4<f32>,
@@ -47,7 +47,6 @@ struct NaadfEntityVolumeRecord {
 @group(3) @binding(18) var naadf_first_hit_depth_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(19) var naadf_first_hit_normal_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(23) var naadf_first_hit_motion_output: texture_storage_2d<rgba16float, write>;
-@group(3) @binding(20) var<storage, read> naadf_chunk_lookup_records: array<vec4<u32>>;
 @group(3) @binding(21) var<storage, read> naadf_entity_volume_records: array<NaadfEntityVolumeRecord>;
 @group(3) @binding(22) var<storage, read> naadf_entity_material_records: array<u32>;
 
@@ -115,67 +114,24 @@ fn naadf_first_hit_motion(uv: vec2<f32>, ray: NaadfRay, preview: NaadfFirstHitPr
 }
 
 fn preview_naadf_first_hit_world(ray: NaadfRay, config: vec3<u32>) -> NaadfFirstHitPreview {
-    let max_steps = config.x;
-    let chunk_count = config.y;
-    let lookup_count = min(config.z, arrayLength(&naadf_chunk_lookup_records));
-    var miss = NaadfFirstHitPreview(
-        0u,
-        vec3<f32>(0.0),
-        ray.max_distance,
-        vec3<f32>(0.0),
-        vec3<f32>(0.0),
-        0u,
-    );
-    if lookup_count == 0u {
-        return miss;
+    let hit = trace_naadf_world(ray, config.x, config.y, config.z);
+    if hit.hit == 0u {
+        return naadf_first_hit_preview_miss(ray.max_distance);
     }
+    return preview_naadf_first_hit_from_hit(ray, hit, config);
+}
 
-    let direction = normalize(ray.direction);
-    let step = vec3<i32>(
-        select(-1i, 1i, direction.x >= 0.0),
-        select(-1i, 1i, direction.y >= 0.0),
-        select(-1i, 1i, direction.z >= 0.0),
+fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u32>) -> NaadfFirstHitPreview {
+    let world_pos = ray.origin + normalize(ray.direction) * hit.distance;
+    let normal = naadf_world_surface_normal(hit, config.y, config.z);
+    return NaadfFirstHitPreview(
+        hit.hit,
+        naadf_preview_shaded_color(hit.material_id, normal),
+        hit.distance,
+        normal,
+        world_pos,
+        hit.material_id,
     );
-    var chunk_pos = vec3<i32>(floor(ray.origin / f32(NAADF_VOXELS_PER_CHUNK_AXIS)));
-    let chunk_size = f32(NAADF_VOXELS_PER_CHUNK_AXIS);
-    let t_delta = vec3<f32>(chunk_size) / max(abs(direction), vec3<f32>(0.000001));
-    let next_boundary = (vec3<f32>(chunk_pos) + vec3<f32>(
-        select(0.0, 1.0, step.x > 0i),
-        select(0.0, 1.0, step.y > 0i),
-        select(0.0, 1.0, step.z > 0i),
-    )) * chunk_size;
-    var t_max = abs((next_boundary - ray.origin) / max(abs(direction), vec3<f32>(0.000001)));
-    var traveled = 0.0;
-
-    for (var chunk_step = 0u; chunk_step < max_steps; chunk_step = chunk_step + 1u) {
-        if traveled > ray.max_distance {
-            break;
-        }
-        let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
-        if chunk_index != 0xffffffffu && chunk_index < chunk_count {
-            let hit = preview_naadf_first_hit(ray, chunk_pos, chunk_index, max_steps);
-            if hit.hit != 0u {
-                return hit;
-            }
-        }
-
-        let axis = naadf_chunk_step_axis(t_max);
-        if axis == 0u {
-            chunk_pos.x = chunk_pos.x + step.x;
-            traveled = t_max.x + 0.0001;
-            t_max.x = t_max.x + t_delta.x;
-        } else if axis == 1u {
-            chunk_pos.y = chunk_pos.y + step.y;
-            traveled = t_max.y + 0.0001;
-            t_max.y = t_max.y + t_delta.y;
-        } else {
-            chunk_pos.z = chunk_pos.z + step.z;
-            traveled = t_max.z + 0.0001;
-            t_max.z = t_max.z + t_delta.z;
-        }
-    }
-
-    return miss;
 }
 
 fn preview_naadf_first_hit_entities(ray: NaadfRay, entity_count: u32) -> NaadfFirstHitPreview {
@@ -395,65 +351,6 @@ fn naadf_entity_previous_world_position(record: NaadfEntityVolumeRecord, local_p
     return (previous_world_from_local * vec4<f32>(local_position, 1.0)).xyz;
 }
 
-fn naadf_lookup_chunk_slot(chunk_pos: vec3<i32>, lookup_count: u32) -> u32 {
-    var low = 0u;
-    var high = lookup_count;
-    for (var i = 0u; i < 32u; i = i + 1u) {
-        if low >= high {
-            break;
-        }
-        let mid = (low + high) / 2u;
-        let record = naadf_chunk_lookup_records[mid];
-        let record_pos = vec3<i32>(
-            bitcast<i32>(record.x),
-            bitcast<i32>(record.y),
-            bitcast<i32>(record.z),
-        );
-        let comparison = naadf_compare_chunk_pos(record_pos, chunk_pos);
-        if comparison == 0i {
-            return record.w;
-        }
-        if comparison < 0i {
-            low = mid + 1u;
-        } else {
-            high = mid;
-        }
-    }
-    return 0xffffffffu;
-}
-
-fn naadf_compare_chunk_pos(a: vec3<i32>, b: vec3<i32>) -> i32 {
-    if a.x < b.x {
-        return -1i;
-    }
-    if a.x > b.x {
-        return 1i;
-    }
-    if a.y < b.y {
-        return -1i;
-    }
-    if a.y > b.y {
-        return 1i;
-    }
-    if a.z < b.z {
-        return -1i;
-    }
-    if a.z > b.z {
-        return 1i;
-    }
-    return 0i;
-}
-
-fn naadf_chunk_step_axis(t_max: vec3<f32>) -> u32 {
-    if t_max.x <= t_max.y && t_max.x <= t_max.z {
-        return 0u;
-    }
-    if t_max.y <= t_max.z {
-        return 1u;
-    }
-    return 2u;
-}
-
 fn naadf_apply_preview_fog(color: vec3<f32>, distance: f32) -> vec3<f32> {
     let fog_start = naadf_first_hit_params.fog_color_start.w;
     let fog_end = max(naadf_first_hit_params.fog_end_strength.x, fog_start + 0.001);
@@ -474,24 +371,6 @@ fn naadf_preview_miss_sky(ray_direction: vec3<f32>) -> vec3<f32> {
     let sun_amount = pow(max(dot(normalize(ray_direction), sun_direction), 0.0), 96.0);
     let sky = mix(horizon, zenith, up);
     return sky + vec3<f32>(1.0, 0.82, 0.55) * sun_amount * 0.45;
-}
-
-fn preview_naadf_first_hit(
-    ray: NaadfRay,
-    chunk_pos: vec3<i32>,
-    chunk_index: u32,
-    max_steps: u32,
-) -> NaadfFirstHitPreview {
-    let hit = trace_naadf_chunk(ray, chunk_pos, chunk_index, max_steps);
-    let world_pos = ray.origin + normalize(ray.direction) * hit.distance;
-    return NaadfFirstHitPreview(
-        hit.hit,
-        naadf_preview_shaded_color(hit.material_id, hit.normal),
-        hit.distance,
-        hit.normal,
-        world_pos,
-        hit.material_id,
-    );
 }
 
 fn naadf_preview_shaded_color(material_id: u32, normal: vec3<f32>) -> vec3<f32> {

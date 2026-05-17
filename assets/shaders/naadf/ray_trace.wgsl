@@ -110,7 +110,7 @@ fn trace_naadf(
                     current_position,
                     voxel,
                     local,
-                    normal,
+                    naadf_hit_face_normal(current_position, voxel, direction),
                     naadf_material_records[material_base_record + local_index],
                     steps,
                 );
@@ -154,6 +154,26 @@ fn trace_naadf(
     return naadf_make_miss(max_steps);
 }
 
+// Surface normal of a hit voxel face, derived from the ray position relative
+// to the voxel rather than the carried traversal step. The carried step normal
+// flips at block/chunk skip boundaries (the skip axis depends on bound
+// magnitude), which paints dark grid lines along those boundary planes.
+fn naadf_hit_face_normal(
+    position: vec3<f32>,
+    voxel: vec3<i32>,
+    direction: vec3<f32>,
+) -> vec3<f32> {
+    let local = position - vec3<f32>(voxel);
+    let face_dist = min(abs(local), abs(local - vec3<f32>(1.0)));
+    if face_dist.x <= face_dist.y && face_dist.x <= face_dist.z {
+        return vec3<f32>(-sign(direction.x), 0.0, 0.0);
+    }
+    if face_dist.y <= face_dist.z {
+        return vec3<f32>(0.0, -sign(direction.y), 0.0);
+    }
+    return vec3<f32>(0.0, 0.0, -sign(direction.z));
+}
+
 fn naadf_chunk_bounds_field(record: u32, offset: u32) -> u32 {
     return (record >> offset) & 0x1fu;
 }
@@ -189,6 +209,24 @@ fn trace_naadf_chunk(
         voxel_base_record,
         max_steps,
     );
+}
+
+fn naadf_chunk_voxel_occupied_at(chunk_index: u32, local: vec3<u32>) -> bool {
+    if any(local >= vec3<u32>(NAADF_VOXELS_PER_CHUNK_AXIS)) {
+        return false;
+    }
+    let chunk_record_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
+    if chunk_record_base + 5u >= arrayLength(&naadf_chunk_records) {
+        return false;
+    }
+    if !naadf_chunk_record_valid(chunk_record_base) {
+        return false;
+    }
+    let voxel_index = chunk_index * NAADF_VOXELS_PER_CHUNK + naadf_voxel_index_in_chunk(local);
+    if voxel_index >= arrayLength(&naadf_voxel_records) {
+        return false;
+    }
+    return naadf_voxel_record_occupied(naadf_voxel_records[voxel_index]);
 }
 
 fn naadf_chunk_skip_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {

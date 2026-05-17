@@ -163,6 +163,14 @@ pub struct BenchRenderToggles {
     pub naadf_preview_composite_mode: Option<String>,
     #[serde(default)]
     pub naadf_preview_show_miss_sky: Option<bool>,
+    #[serde(default)]
+    pub naadf_use_for_gi_secondary: Option<bool>,
+    #[serde(default)]
+    pub naadf_use_for_sun_visibility: Option<bool>,
+    #[serde(default)]
+    pub naadf_use_for_terrain_ao: Option<bool>,
+    #[serde(default)]
+    pub naadf_use_for_contact_shadows: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -1165,6 +1173,26 @@ fn apply_bench_render_toggles(
         if let Some(show_miss_sky) = toggles.naadf_preview_show_miss_sky {
             if config.preview.show_miss_sky != show_miss_sky {
                 config.preview.show_miss_sky = show_miss_sky;
+            }
+        }
+        if let Some(use_for_gi_secondary) = toggles.naadf_use_for_gi_secondary {
+            if config.use_for_gi_secondary != use_for_gi_secondary {
+                config.use_for_gi_secondary = use_for_gi_secondary;
+            }
+        }
+        if let Some(use_for_sun_visibility) = toggles.naadf_use_for_sun_visibility {
+            if config.use_for_sun_visibility != use_for_sun_visibility {
+                config.use_for_sun_visibility = use_for_sun_visibility;
+            }
+        }
+        if let Some(use_for_terrain_ao) = toggles.naadf_use_for_terrain_ao {
+            if config.use_for_terrain_ao != use_for_terrain_ao {
+                config.use_for_terrain_ao = use_for_terrain_ao;
+            }
+        }
+        if let Some(use_for_contact_shadows) = toggles.naadf_use_for_contact_shadows {
+            if config.use_for_contact_shadows != use_for_contact_shadows {
+                config.use_for_contact_shadows = use_for_contact_shadows;
             }
         }
         if let Some(composite_mode) = toggles.naadf_preview_composite_mode.as_deref() {
@@ -4016,6 +4044,10 @@ naadf_preview_bounce_count = 0
 naadf_preview_spatial_radius = 0
 naadf_preview_composite_mode = "picture_in_picture"
 naadf_preview_show_miss_sky = true
+naadf_use_for_gi_secondary = true
+naadf_use_for_sun_visibility = true
+naadf_use_for_terrain_ao = true
+naadf_use_for_contact_shadows = true
 
 [[checkpoint]]
 name = "startup"
@@ -4047,6 +4079,10 @@ hold_frames = 30
             Some("picture_in_picture")
         );
         assert_eq!(toggles.naadf_preview_show_miss_sky, Some(true));
+        assert_eq!(toggles.naadf_use_for_gi_secondary, Some(true));
+        assert_eq!(toggles.naadf_use_for_sun_visibility, Some(true));
+        assert_eq!(toggles.naadf_use_for_terrain_ao, Some(true));
+        assert_eq!(toggles.naadf_use_for_contact_shadows, Some(true));
     }
 
     #[test]

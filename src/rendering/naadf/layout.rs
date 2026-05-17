@@ -537,8 +537,12 @@ mod tests {
             )
         }));
         assert!(lighting.contains("fn naadf_sun_visibility"));
+        assert!(lighting.contains("trace_naadf_world"));
+        assert!(lighting.contains("fn naadf_sun_visibility_world"));
         assert!(lighting.contains("fn naadf_terrain_ao_visibility"));
+        assert!(lighting.contains("fn naadf_terrain_ao_visibility_world"));
         assert!(lighting.contains("fn naadf_contact_shadow_visibility"));
+        assert!(lighting.contains("fn naadf_contact_shadow_visibility_world"));
         assert!(lighting.contains("trace_naadf"));
     }
 
@@ -552,11 +556,16 @@ mod tests {
         assert!(radiance.contains("const NAADF_QUERY_GI_SECONDARY"));
         assert!(radiance.contains("const NAADF_QUERY_SUN_VISIBILITY"));
         assert!(radiance.contains("const NAADF_QUERY_TERRAIN_AO"));
+        assert!(radiance.contains("#import \"shaders/naadf/world_trace.wgsl\""));
+        assert!(radiance.contains("#import \"shaders/naadf/lighting_queries.wgsl\""));
+        assert!(radiance.contains("trace_naadf_world"));
+        assert!(radiance.contains("naadf_sun_visibility_world"));
         assert!(radiance.contains("fn use_naadf_for_query"));
         assert!(radiance.contains("fn trace_gi_backend"));
         assert!(radiance.contains("fn soft_shadow_backend"));
         assert!(radiance.contains("fn terrain_ao_backend"));
         assert!(!radiance.contains("trace_naadf_gi_fallback"));
+        assert!(radiance.contains("return trace_current_sdf_gi(origin, direction, max_dist);"));
         assert!(radiance.contains("let hit = trace_gi_backend"));
     }
 
@@ -583,13 +592,14 @@ mod tests {
         let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
 
         assert!(first_hit.contains("#import \"shaders/naadf/ray_trace.wgsl\""));
+        assert!(first_hit.contains("#import \"shaders/naadf/world_trace.wgsl\""));
         assert!(!first_hit.contains("fn trace_naadf("));
         assert!(first_hit.contains("@compute"));
         assert!(first_hit.contains("fn naadf_first_hit_preview"));
         assert!(first_hit.contains("fn preview_naadf_first_hit_world"));
-        assert!(first_hit.contains("trace_naadf_chunk"));
+        assert!(first_hit.contains("trace_naadf_world"));
         assert!(first_hit.contains("naadf_first_hit_output"));
-        assert!(first_hit.contains("fn preview_naadf_first_hit"));
+        assert!(first_hit.contains("fn preview_naadf_first_hit_from_hit"));
         assert!(first_hit.contains("fn naadf_preview_shaded_color"));
         assert!(first_hit.contains("fn naadf_preview_material_color"));
         assert!(first_hit.contains("fog_color_start"));
@@ -732,8 +742,9 @@ mod tests {
         assert!(gi.contains("fn naadf_gi_trace"));
         assert!(gi.contains("naadf_gi_source_depth"));
         assert!(gi.contains("naadf_gi_source_normal"));
-        assert!(gi.contains("trace_naadf"));
-        assert!(gi.contains("fn naadf_gi_trace_world"));
+        assert!(gi.contains("#import \"shaders/naadf/world_trace.wgsl\""));
+        assert!(gi.contains("trace_naadf_world"));
+        assert!(!gi.contains("fn naadf_gi_trace_world"));
         assert!(gi.contains("fn naadf_gi_sun_visibility"));
         assert!(gi.contains("sample_count"));
         assert!(gi.contains("frame_index"));

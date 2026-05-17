@@ -264,10 +264,6 @@ impl NeighborLods {
     }
 
     pub fn needs_vertical_skirt(&self, face: ChunkFace, my_lod: LodLevel) -> bool {
-        if matches!(face, ChunkFace::NegY | ChunkFace::PosY) {
-            return false;
-        }
-
         self.lod_for_face(face)
             .is_some_and(|n_lod| n_lod.is_lower_detail_than(my_lod))
     }
@@ -339,12 +335,6 @@ pub fn generate_skirts(
     }
 
     for edge in boundary_edges {
-        // Keep Y-face neighbor LODs for dirtying/debugging, but do not patch
-        // terrain altitude slices with world-down skirt geometry.
-        if matches!(edge.face, ChunkFace::NegY | ChunkFace::PosY) {
-            continue;
-        }
-
         let has_lower_lod_neighbor = neighbor_lods
             .lod_for_face(edge.face)
             .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
@@ -377,7 +367,17 @@ pub fn generate_skirts(
                 config.depth.max(step * VOXEL_SIZE * 2.0)
             })
             .unwrap_or(config.depth);
-        let drop = Vec3::new(0.0, -transition_depth, 0.0);
+        // Vertical (NegY/PosY) LOD boundaries cannot be hidden by a straight-down
+        // curtain — the crack there sits in a roughly horizontal surface. Instead
+        // extrude a short apron along the face normal toward the lower-detail
+        // neighbour so the T-junction is backed by terrain-coloured geometry
+        // rather than showing sky through the gap.
+        let drop = if matches!(edge.face, ChunkFace::NegY | ChunkFace::PosY) {
+            let apron = (transition_depth * 0.5).clamp(VOXEL_SIZE, VOXEL_SIZE * 3.0);
+            skirt_normal * apron
+        } else {
+            Vec3::new(0.0, -transition_depth, 0.0)
+        };
         let lip_width = if emit_lip {
             neighbor_lods
                 .lod_for_face(edge.face)
@@ -764,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_lod_vertical_neighbor_does_not_generate_skirt() {
+    fn lower_lod_vertical_neighbor_generates_apron_skirt() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -805,8 +805,17 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert!(positions.is_empty());
-        assert!(barycentric_uvs.is_empty());
-        assert!(indices.is_empty());
+        // A vertical LOD boundary toward a lower-detail neighbour now emits a
+        // short apron that backs the T-junction crack instead of leaving it open.
+        assert!(!positions.is_empty(), "expected vertical apron geometry");
+        assert!(!indices.is_empty());
+        // The apron extrudes along +Y (toward the PosY neighbour) past the
+        // boundary plane, bounded to a few voxels so it never becomes a wall.
+        let max_y = positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        assert!(max_y > 16.0, "apron should extrude past the boundary plane");
+        assert!(
+            max_y <= 16.0 + VOXEL_SIZE * 3.0 + 1e-4,
+            "apron must stay bounded, got {max_y}"
+        );
     }
 }

@@ -1,34 +1,82 @@
 # NAADF Release Gate
 
-NAADF remains disabled by default until this evidence is present for the current change set.
+Status: Path A release gate assessed on 2026-05-16; default promotion not passed.
 
-## Required Evidence
+NAADF remains disabled by default for the application. Path A lighting queries
+are implemented behind explicit toggles, but they do not default to NAADF
+traversal because the active render-app pass is not yet perf-neutral.
 
-- CPU/GPU record parity passes:
-  - `rtk cargo test --features naadf rendering::naadf::gpu_tests --lib`
+## Gate Checklist
+
+- [x] CPU/GPU traversal and record parity tests pass.
+  - `rtk cargo test --features naadf rendering::naadf --lib`
   - `rtk cargo test --features naadf --test naadf_gpu_layout`
-- Non-empty preview screenshots from:
-  - `bench/scenes/visual-regression-naadf-preview.toml`
-  - `bench/scenes/visual-regression-naadf-gi.toml`
-  - `bench/scenes/visual-regression-naadf-live-lod.toml`
-- Startup visual stability measured with:
-  - `rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-startup-stability.toml`
-  - Report the first staged screenshot `frame` and `elapsed_secs` from `summary.json` that is fully textured, not the blue silhouette/early occupancy preview.
-- The current renderer remains the default path when NAADF flags are not set.
-- Integrated-GPU fallback remains disabled by default and reports a fallback reason instead of allocating NAADF buffers.
-- `bench_guard` passes on the NAADF summary files:
-  - `rtk cargo run --bin bench_guard -- <summary.json> ...`
-- Known regressions are listed with the exact scene, checkpoint, metric, and screenshot.
+- [ ] Every NAADF-routed query has an SDF-vs-NAADF `summary.json` pair showing
+      win-or-neutral frame time on the validation machine.
+- [x] Visual regression screenshots show no unacceptable GI regression at the
+      fixed checkpoints.
+- [x] `bench_guard` passes on the NAADF GI and all-query benches.
+- [x] Cache warming and stale-cache fallback remain covered by backend-selection
+      tests; integrated GPU remains disabled by default.
+- [x] The current renderer remains the default when NAADF is not explicitly
+      selected.
+- [x] Known regressions or caveats are listed below.
 
-## Bench Scenes
+## Evidence
 
-- `visual-regression-naadf-current.toml`: current renderer baseline.
-- `visual-regression-naadf-preview.toml`: NAADF preview output after extended settling.
-- `visual-regression-naadf-gi.toml`: current renderer with NAADF GI path after extended settling.
-- `visual-regression-naadf-live-lod.toml`: moving-camera NAADF stability path after extended settling.
-- `visual-regression-naadf-startup-stability.toml`: staged startup screenshots for initial visual stability timing, including `settle-120`, `settle-240`, `settle-360`, `settle-540`, `settle-720`, `settle-899`, `settle-1200`, and `settle-1499`.
-- `dig-edit-naadf-stability.toml`: cache/edit stability path.
+### Parity and Unit Tests
 
-## Report Format
+- `rtk cargo check --features naadf`
+- `rtk cargo test --features naadf rendering::radiance_cascades --lib`
+  - 18 passed.
+- `rtk cargo test --features naadf rendering::naadf --lib`
+  - 119 passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`
+  - 2 passed.
 
-For each run, include the scene, summary path, checkpoint frame times, key NAADF counters, and inspected screenshot names. Do not claim release readiness if screenshots were captured before NAADF preview textures settled.
+### Query Benches
+
+| Query class | SDF summary | NAADF summary | Result |
+| --- | --- | --- | --- |
+| Sun visibility | `bench-runs/phase3-sdf/summary.json` | `bench-runs/phase3-naadf-sun/summary.json` | NAADF faster in Phase 4 validation: 58.99 -> 40.24 ms median, 92.22 -> 55.30 ms p99. |
+| Contact shadows | `bench-runs/phase5-contact-sdf/summary.json` | `bench-runs/phase5-contact-naadf/summary.json` | NAADF neutral/win: 35.74 -> 35.24 ms median, 41.01 -> 38.64 ms p99. |
+| Terrain AO | `bench-runs/phase5-terrain-ao-sdf/summary.json` | `bench-runs/phase5-terrain-ao-naadf/summary.json` | NAADF neutral/win: 35.51 -> 35.35 ms median, 39.92 -> 38.22 ms p99. |
+| GI secondary | `bench-runs/phase6-gi-sdf/summary.json` | `bench-runs/path-a-review-gi-secondary-active/summary.json` | Active NAADF pass is not perf-neutral: 36.97 -> 54.94 ms median, 39.13 -> 69.09 ms p99. |
+| All Path A queries | `bench-runs/path-a-review-default-routing-final/summary.json` | `bench-runs/path-a-review-all-active-final2/summary.json` | Active all-query path is opt-in only: default routing reports pass active 0 and all-query reports pass active 1 with 2/1/4 rays per pixel. |
+
+All accepted NAADF Phase 5, Phase 6, Phase 7, and review runs passed `bench_guard`
+with `PASS: 187 check(s), 0 warning(s).`
+
+### Visual Evidence
+
+Inspected fixed-checkpoint screenshots:
+
+- `bench-runs/phase5-contact-naadf/visual-regression-naadf-contact-naadf-contact-naadf-contact-settled-run0.png`
+- `bench-runs/phase5-terrain-ao-naadf/visual-regression-naadf-terrain-ao-naadf-terrain-ao-naadf-terrain-ao-settled-run0.png`
+- `bench-runs/path-a-review-gi-secondary-active/visual-regression-naadf-gi-secondary-naadf-gi-secondary-naadf-gi-secondary-settled-run0.png`
+- `bench-runs/path-a-review-all-active-final2/visual-regression-naadf-path-a-all-naadf-path-a-all-naadf-path-a-all-settled-run0.png`
+
+## Defaults
+
+Checked-in `assets/config/naadf.yaml` remains `enabled: false` and
+`gpu.allow_integrated_gpu: false`.
+
+When NAADF is selected and ready, these Path A query toggles default to false
+and must be enabled explicitly for opt-in review benches:
+
+- `use_for_gi_secondary`
+- `use_for_sun_visibility`
+- `use_for_terrain_ao`
+- `use_for_contact_shadows`
+
+## Known Caveats
+
+- The SDF volume update skip is implemented and tested, but the current SDF
+  update path is still a stub. The Phase 7 bench therefore proves the skip is
+  neutral, not that it is a meaningful performance win.
+- Active Path A GI-secondary/all-query routing is visually sane and guard-clean,
+  but not perf-neutral. It is not default-promotable yet.
+- Integrated-GPU fallback is verified by policy/configuration and backend tests;
+  this run did not include a physical integrated-GPU hardware pass.
+- NAADF Path A is a lighting backend. The legacy mesh/PBR/grass renderer still
+  draws the frame.

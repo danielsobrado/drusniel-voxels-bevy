@@ -18,8 +18,8 @@ const SPAWN_MAX_RADIUS: i32 = 160;
 const INITIAL_SPAWN_WAIT_LOG_FRAMES: u32 = 300;
 const LAST_SAFE_VERTICAL_TOLERANCE: f32 = 1.75;
 const GROUND_GUARD_HEIGHT_TOLERANCE: f32 = 2.75;
-const SURFACE_PENETRATION_TOLERANCE: f32 = 0.35;
 const GROUND_GUARD_LOG_INTERVAL_FRAMES: u32 = 60;
+const GROUND_GUARD_RECOVERY_DELAY_FRAMES: u32 = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValidSpawnLocation {
@@ -118,6 +118,7 @@ pub struct PlayerSpawnState {
     pub source_query_ground_fallbacks: u64,
     pub blocked_unknown_ground_frames: u64,
     pub last_ground_guard_log_frame: u32,
+    pub invalid_ground_frames: u32,
 }
 
 impl Default for PlayerSpawnState {
@@ -134,6 +135,7 @@ impl Default for PlayerSpawnState {
             source_query_ground_fallbacks: 0,
             blocked_unknown_ground_frames: 0,
             last_ground_guard_log_frame: 0,
+            invalid_ground_frames: 0,
         }
     }
 }
@@ -411,6 +413,7 @@ pub fn recover_player_from_invalid_ground(
     });
 
     if validity.is_valid() {
+        state.invalid_ground_frames = 0;
         if !near_pending_ground {
             return;
         }
@@ -425,6 +428,15 @@ pub fn recover_player_from_invalid_ground(
         }
 
         state.blocked_unknown_ground_frames = state.blocked_unknown_ground_frames.saturating_add(1);
+    }
+
+    if matches!(validity, PlayerWorldValidity::UndergroundInvalidSpawn) {
+        state.invalid_ground_frames = state.invalid_ground_frames.saturating_add(1);
+        if state.invalid_ground_frames < GROUND_GUARD_RECOVERY_DELAY_FRAMES {
+            return;
+        }
+    } else {
+        state.invalid_ground_frames = 0;
     }
 
     let recovery_target = find_collider_ready_recovery_target(
@@ -444,6 +456,7 @@ pub fn recover_player_from_invalid_ground(
         let previous_position = transform.translation;
         teleport_player(&mut transform, velocity, spawn.position);
         state.ground_guard_recoveries += 1;
+        state.invalid_ground_frames = 0;
         state.last_safe_grounded_position = Some(spawn.position);
         state.last_safe_ground_valid = true;
 
@@ -749,7 +762,7 @@ pub fn classify_player_world_validity(world: &VoxelWorld, position: Vec3) -> Pla
                 &SpawnColliderReadiness::default(),
                 false,
             ) {
-                if position.y + SURFACE_PENETRATION_TOLERANCE >= surface.position.y {
+                if position.y + LAST_SAFE_VERTICAL_TOLERANCE >= surface.position.y {
                     return PlayerWorldValidity::InValidWorld;
                 }
             }
@@ -1078,6 +1091,18 @@ mod tests {
         let world = world_with_surface(MIN_BREAKABLE_Y + 4, VoxelType::TopSoil);
         let surface_y = (MIN_BREAKABLE_Y + 5) as f32;
         let position = Vec3::new(4.5, surface_y - 0.05, 4.5);
+
+        assert_eq!(
+            classify_player_world_validity(&world, position),
+            PlayerWorldValidity::InValidWorld
+        );
+    }
+
+    #[test]
+    fn world_validity_tolerates_settled_player_center_in_surface_block() {
+        let world = world_with_surface(MIN_BREAKABLE_Y + 4, VoxelType::TopSoil);
+        let surface_y = (MIN_BREAKABLE_Y + 5) as f32;
+        let position = Vec3::new(4.5, surface_y - 0.8, 4.5);
 
         assert_eq!(
             classify_player_world_validity(&world, position),

@@ -77,6 +77,15 @@ impl Plugin for NaadfPlugin {
         );
         load_internal_asset!(
             app,
+            pipeline::NAADF_WORLD_TRACE_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/world_trace.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_WORLD_TRACE_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
             pipeline::NAADF_LIGHTING_QUERIES_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),

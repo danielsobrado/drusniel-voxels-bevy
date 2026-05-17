@@ -16,6 +16,11 @@ use bevy::window::PrimaryWindow;
 
 const EDITOR_SELECTION_RANGE: f32 = 512.0;
 
+/// Extended crosshair reach used while the Alt+B chunk-border overlay is on, so
+/// distant terrain (e.g. LOD cracks) can be aimed at, highlighted, and probed
+/// with Shift+F9. Falls back to `INTERACTION_RANGE` when the overlay is off.
+const DEBUG_TARGET_RANGE: f32 = 512.0;
+
 #[derive(Default)]
 pub(crate) struct EditorHoverDebugState {
     last_entity: Option<Entity>,
@@ -170,15 +175,22 @@ pub fn raycast_blocks(
 pub fn update_targeted_block(
     camera_query: Query<&Transform, With<crate::camera::controller::PlayerCamera>>,
     world: Res<VoxelWorld>,
+    debug_toggles: Res<crate::interaction::DebugDetailToggles>,
     mut targeted: ResMut<TargetedBlock>,
 ) {
     if let Ok(transform) = camera_query.single() {
         let origin = transform.translation;
         let direction = transform.forward().as_vec3();
 
-        if let Some((block_pos, normal)) =
-            raycast_blocks(origin, direction, &world, INTERACTION_RANGE)
-        {
+        // Reach farther while the Alt+B chunk-border overlay is on so distant
+        // LOD cracks can be targeted for the Shift+F9 terrain hole probe.
+        let range = if debug_toggles.show_chunk_borders {
+            DEBUG_TARGET_RANGE
+        } else {
+            INTERACTION_RANGE
+        };
+
+        if let Some((block_pos, normal)) = raycast_blocks(origin, direction, &world, range) {
             targeted.position = Some(block_pos);
             targeted.normal = Some(normal);
             targeted.voxel_type = world.sample_voxel_for_interaction(block_pos).voxel();

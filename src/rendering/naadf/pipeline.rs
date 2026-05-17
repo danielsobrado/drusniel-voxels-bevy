@@ -27,6 +27,7 @@ pub const NAADF_DEBUG_TRACE_WORKGROUP_SIZE: u32 = 64;
 pub const NAADF_COMMON_SHADER_PATH: &str = "shaders/naadf/common.wgsl";
 pub const NAADF_LAYOUT_SHADER_PATH: &str = "shaders/naadf/layout.wgsl";
 pub const NAADF_RAY_TRACE_SHADER_PATH: &str = "shaders/naadf/ray_trace.wgsl";
+pub const NAADF_WORLD_TRACE_SHADER_PATH: &str = "shaders/naadf/world_trace.wgsl";
 pub const NAADF_LIGHTING_QUERIES_SHADER_PATH: &str = "shaders/naadf/lighting_queries.wgsl";
 pub const NAADF_BUILD_BLOCKS_SHADER_PATH: &str = "shaders/naadf/build_blocks.wgsl";
 pub const NAADF_BUILD_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_bounds.wgsl";
@@ -51,6 +52,8 @@ pub const NAADF_LAYOUT_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("8e414d36-7f73-4517-b06e-242602f4ac3a");
 pub const NAADF_RAY_TRACE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("ee6d7760-fbe0-4498-9e0c-bfe50e165022");
+pub const NAADF_WORLD_TRACE_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("5c129290-de5e-4125-b0be-d128b5e187da");
 pub const NAADF_LIGHTING_QUERIES_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("010676cf-a5de-4b6a-8ef4-a0eb30867f40");
 pub const NAADF_BUILD_BLOCKS_SHADER_HANDLE: Handle<Shader> =

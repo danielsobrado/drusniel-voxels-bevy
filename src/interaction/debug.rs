@@ -24,7 +24,7 @@ use crate::rendering::water_reflection::{WaterReflectionMaskStats, WaterReflecti
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
 use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
-use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
@@ -138,6 +138,7 @@ pub struct DebugDetailToggles {
     pub show_prop_details: bool,
     pub show_performance: bool,
     pub show_timing_breakdown: bool,
+    pub show_chunk_borders: bool,
     pub volumetric_fog_enabled: bool,
 }
 
@@ -410,6 +411,19 @@ pub fn toggle_debug_details(
             }
         );
     }
+
+    // Chunk-border overlay toggle (Alt+B "Borders")
+    if alt_held && keyboard.just_pressed(KeyCode::KeyB) {
+        toggles.show_chunk_borders = !toggles.show_chunk_borders;
+        info!(
+            "Debug toggle: Chunk Borders = {}",
+            if toggles.show_chunk_borders {
+                "ON"
+            } else {
+                "OFF"
+            }
+        );
+    }
 }
 
 /// Toggle mesh mode with F5 key (Blocky <-> SurfaceNets).
@@ -433,6 +447,120 @@ pub fn toggle_mesh_mode(
         info!(
             "Mesh mode: {:?} (all LODs) (F5 to toggle)",
             mesh_settings.mode
+        );
+    }
+}
+
+/// Toggle terrain LOD with Alt+0 (debug): forces every loaded chunk to Lod0 so
+/// LOD-boundary artifacts can be told apart from genuine geometry. Press again
+/// to restore the previous LOD distances.
+pub fn toggle_terrain_lod(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut world: ResMut<crate::voxel::world::VoxelWorld>,
+    mut saved: Local<Option<std::collections::HashMap<IVec3, LodLevel>>>,
+) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if !alt_held || !keyboard.just_pressed(KeyCode::Digit0) {
+        return;
+    }
+
+    // Set each chunk's LOD directly: the distance-based LOD system only runs
+    // when the camera moves, so mutating LodSettings alone does nothing while
+    // standing still. The forced Lod0 therefore holds only while the camera is
+    // stationary — run this diagnostic without moving.
+    match saved.take() {
+        Some(previous) => {
+            for (chunk_pos, lod) in previous {
+                if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+                    chunk.set_lod_level(lod);
+                }
+            }
+            info!("Terrain LOD: restored distance-based LODs (Alt+0 to toggle)");
+        }
+        None => {
+            let positions: Vec<IVec3> = world.chunk_entries().map(|(pos, _)| *pos).collect();
+            let mut snapshot = std::collections::HashMap::new();
+            for chunk_pos in positions {
+                if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+                    snapshot.insert(chunk_pos, chunk.lod_level());
+                    chunk.set_lod_level(LodLevel::Lod0);
+                }
+            }
+            info!(
+                "Terrain LOD: forced {} chunks to Lod0 — stand still to keep it (Alt+0 to toggle)",
+                snapshot.len()
+            );
+            *saved = Some(snapshot);
+        }
+    }
+    world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::Lod);
+}
+
+/// Draws a wireframe box per loaded chunk, coloured by LOD level (Alt+B).
+///
+/// Lets LOD-boundary artifacts be matched to the chunk grid: the colours of the
+/// two boxes meeting at a crack reveal which LOD levels border there, and which
+/// axis the boundary is on. Lod0 green, Lod1 yellow, Lod2 orange, Lod3 red,
+/// Culled grey.
+pub fn draw_chunk_borders(
+    toggles: Res<DebugDetailToggles>,
+    world: Res<VoxelWorld>,
+    mut gizmos: Gizmos,
+    mut was_enabled: Local<bool>,
+) {
+    if !toggles.show_chunk_borders {
+        *was_enabled = false;
+        return;
+    }
+
+    // Log a numeric LOD histogram each time the overlay is switched on, so the
+    // LOD distribution can be read as data rather than guessed from box colours.
+    if !*was_enabled {
+        *was_enabled = true;
+        let mut counts = [0u32; 5];
+        for (_, chunk) in world.chunk_entries() {
+            if chunk.is_empty() {
+                continue;
+            }
+            let index = match chunk.lod_level() {
+                LodLevel::Lod0 => 0,
+                LodLevel::Lod1 => 1,
+                LodLevel::Lod2 => 2,
+                LodLevel::Lod3 => 3,
+                LodLevel::Culled => 4,
+            };
+            counts[index] += 1;
+        }
+        info!(
+            "Terrain chunk LOD distribution (non-empty): Lod0={} Lod1={} Lod2={} Lod3={} Culled={} (total {})",
+            counts[0],
+            counts[1],
+            counts[2],
+            counts[3],
+            counts[4],
+            counts.iter().sum::<u32>(),
+        );
+    }
+
+    let chunk_size = crate::constants::CHUNK_SIZE as f32;
+    for (_, chunk) in world.chunk_entries() {
+        // Skip pure-air chunks so the overlay only boxes actual terrain.
+        if chunk.is_empty() {
+            continue;
+        }
+        let origin = chunk.position().as_vec3() * chunk_size;
+        let center = origin + Vec3::splat(chunk_size * 0.5);
+        let color = match chunk.lod_level() {
+            LodLevel::Lod0 => Color::srgb(0.2, 0.9, 0.2),
+            LodLevel::Lod1 => Color::srgb(0.9, 0.9, 0.2),
+            LodLevel::Lod2 => Color::srgb(0.95, 0.55, 0.1),
+            LodLevel::Lod3 => Color::srgb(0.95, 0.2, 0.2),
+            LodLevel::Culled => Color::srgb(0.5, 0.5, 0.5),
+        };
+        gizmos.primitive_3d(
+            &Cuboid::new(chunk_size, chunk_size, chunk_size),
+            Isometry3d::from_translation(center),
+            color,
         );
     }
 }

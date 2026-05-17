@@ -53,8 +53,13 @@ const MAX_STARTUP_CHUNKS_PER_FRAME: usize = 12;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
 const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 4;
-const MAX_LOD_CHANGES_PER_UPDATE: usize = 4;
+// Raised from 4: at 4 changes/update the LOD backlog never drained, leaving
+// scattered chunks stuck at a stale LOD (isolated islands that crack).
+const MAX_LOD_CHANGES_PER_UPDATE: usize = 32;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
+/// Fixpoint iterations for the LOD coherence pass that removes isolated
+/// coarser-than-all-neighbours LOD islands.
+const LOD_COHERENCE_PASSES: u32 = 4;
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
 const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
@@ -4130,10 +4135,11 @@ fn update_chunk_lod_system(
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
     let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
+    // Pass 1 — compute each chunk's hysteresis/water-guarded desired LOD.
+    let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
+    let mut chunk_state: HashMap<IVec3, (LodLevel, f32)> = HashMap::new();
     for (chunk_pos, chunk) in world.chunk_entries() {
         let distance = terrain_lod_distance_xz(*chunk_pos, camera_pos);
-
-        // Use hysteresis-aware LOD calculation
         let current_lod = chunk.lod_level();
         let target_lod = water_shore_guarded_lod(
             calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings),
@@ -4141,21 +4147,73 @@ fn update_chunk_lod_system(
             &lod_settings,
             water_lod_guard_chunks.contains(chunk_pos),
         );
+        desired.insert(*chunk_pos, target_lod);
+        chunk_state.insert(*chunk_pos, (current_lod, distance));
+    }
 
-        if target_lod != current_lod {
-            let cooldown_elapsed = lod_transitions
-                .last_change_frame
-                .get(chunk_pos)
-                .map(|last_frame| frame.0.saturating_sub(*last_frame) >= LOD_CHANGE_COOLDOWN_FRAMES)
-                .unwrap_or(true);
-            // Cooldown only throttles downgrades; upgrades to higher detail must
-            // not be punished or stale LOD states can persist during movement.
-            let is_upgrade = target_lod.is_higher_detail_than(current_lod);
-            if !is_upgrade && !cooldown_elapsed {
-                continue;
+    // Pass 2 — LOD coherence. A chunk that is coarser than every loaded
+    // face-neighbour is an isolated LOD island, and an island carries up to six
+    // LOD-boundary cracks around it. Pull any such island up to match its
+    // coarsest face-neighbour so LOD stays spatially coherent.
+    const FACE_OFFSETS: [IVec3; 6] = [
+        IVec3::new(1, 0, 0),
+        IVec3::new(-1, 0, 0),
+        IVec3::new(0, 1, 0),
+        IVec3::new(0, -1, 0),
+        IVec3::new(0, 0, 1),
+        IVec3::new(0, 0, -1),
+    ];
+    for _ in 0..LOD_COHERENCE_PASSES {
+        let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
+        for (chunk_pos, &lod) in &desired {
+            let mut coarsest_neighbor: Option<LodLevel> = None;
+            let mut is_island = true;
+            for offset in FACE_OFFSETS {
+                let Some(&neighbor_lod) = desired.get(&(*chunk_pos + offset)) else {
+                    continue;
+                };
+                if !lod.is_lower_detail_than(neighbor_lod) {
+                    is_island = false;
+                }
+                coarsest_neighbor = Some(match coarsest_neighbor {
+                    Some(coarsest) if !neighbor_lod.is_lower_detail_than(coarsest) => coarsest,
+                    _ => neighbor_lod,
+                });
             }
-            lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
+            if is_island {
+                if let Some(target) = coarsest_neighbor {
+                    updates.push((*chunk_pos, target));
+                }
+            }
         }
+        if updates.is_empty() {
+            break;
+        }
+        for (pos, lod) in updates {
+            desired.insert(pos, lod);
+        }
+    }
+
+    // Pass 3 — turn coherent desired LODs into change candidates.
+    for (chunk_pos, &target_lod) in &desired {
+        let Some(&(current_lod, distance)) = chunk_state.get(chunk_pos) else {
+            continue;
+        };
+        if target_lod == current_lod {
+            continue;
+        }
+        let cooldown_elapsed = lod_transitions
+            .last_change_frame
+            .get(chunk_pos)
+            .map(|last_frame| frame.0.saturating_sub(*last_frame) >= LOD_CHANGE_COOLDOWN_FRAMES)
+            .unwrap_or(true);
+        // Cooldown only throttles downgrades; upgrades to higher detail must
+        // not be punished or stale LOD states can persist during movement.
+        let is_upgrade = target_lod.is_higher_detail_than(current_lod);
+        if !is_upgrade && !cooldown_elapsed {
+            continue;
+        }
+        lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
     }
 
     lod_candidates.sort_by(|a, b| {

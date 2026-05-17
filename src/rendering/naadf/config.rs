@@ -19,6 +19,8 @@ pub struct NaadfConfig {
     #[serde(default)]
     pub debug: NaadfDebugConfig,
     #[serde(default)]
+    pub use_for_gi_secondary: bool,
+    #[serde(default)]
     pub use_for_sun_visibility: bool,
     #[serde(default)]
     pub use_for_terrain_ao: bool,
@@ -135,6 +137,7 @@ impl Default for NaadfConfig {
             gpu: NaadfGpuConfig::default(),
             preview: NaadfPreviewConfig::default(),
             debug: NaadfDebugConfig::default(),
+            use_for_gi_secondary: false,
             use_for_sun_visibility: false,
             use_for_terrain_ao: false,
             use_for_contact_shadows: false,
@@ -300,6 +303,7 @@ mod tests {
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sky_strength, 0.22);
         assert_eq!(config.preview.reference_indirect_strength, 0.18);
+        assert!(!config.use_for_gi_secondary);
         assert!(!config.use_for_sun_visibility);
         assert!(!config.use_for_terrain_ao);
         assert!(!config.use_for_contact_shadows);
@@ -322,5 +326,9 @@ mod tests {
             NaadfPreviewCompositeModeConfig::SplitView
         );
         assert_eq!(config.chunk_cache.max_gpu_memory_mb, 512);
+        assert!(!config.use_for_gi_secondary);
+        assert!(!config.use_for_sun_visibility);
+        assert!(!config.use_for_terrain_ao);
+        assert!(!config.use_for_contact_shadows);
     }
 }

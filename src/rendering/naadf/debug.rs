@@ -123,14 +123,16 @@ pub fn draw_debug_chunks(
         return;
     }
 
+    // Cool-toned palette so NAADF chunk states never read as terrain LOD
+    // colours (the Alt+B LOD overlay uses green/yellow/orange/red).
     for (chunk_pos, _) in cache.iter() {
-        draw_chunk_outline(&mut gizmos, *chunk_pos, 0.0, Color::srgb(0.1, 0.8, 0.35));
+        draw_chunk_outline(&mut gizmos, *chunk_pos, 0.0, Color::srgb(0.2, 0.5, 1.0));
     }
     for chunk_pos in queue.pending_chunks() {
-        draw_chunk_outline(&mut gizmos, chunk_pos, 0.35, Color::srgb(1.0, 0.75, 0.1));
+        draw_chunk_outline(&mut gizmos, chunk_pos, 0.35, Color::srgb(0.7, 0.3, 1.0));
     }
     for chunk_pos in queue.in_flight_chunks() {
-        draw_chunk_outline(&mut gizmos, chunk_pos, 0.7, Color::srgb(1.0, 0.25, 0.15));
+        draw_chunk_outline(&mut gizmos, chunk_pos, 0.7, Color::srgb(1.0, 0.3, 0.85));
     }
 }
 

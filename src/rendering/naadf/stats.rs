@@ -33,6 +33,8 @@ pub struct NaadfStats {
     pub chunk_bound_saturated_fields_last_frame: u32,
     pub chunk_bound_propagation_passes_last_frame: u32,
     pub gi_rays_last_frame: u64,
+    pub radiance_contact_shadow_rays_per_pixel: u32,
+    pub radiance_terrain_ao_rays_per_pixel: u32,
     pub preview_pixels_last_frame: u64,
     pub preview_first_hit_dispatches_last_frame: u32,
     pub preview_gi_dispatches_last_frame: u32,

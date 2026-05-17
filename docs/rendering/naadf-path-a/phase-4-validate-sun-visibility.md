@@ -1,6 +1,6 @@
 # Phase 4 — Validate Sun Visibility (Decision Gate)
 
-Status: planned
+Status: implemented
 Depends on: Phase 3
 Produces code: tests and harness only
 
@@ -59,11 +59,85 @@ Write the outcome into this file and into `naadf-upstream-parity.md`.
 
 ## Acceptance criteria
 
-- [ ] CPU/GPU sun-visibility ray parity verified on all GI bench fixtures.
-- [ ] SDF vs NAADF `summary.json` comparison recorded with concrete numbers.
-- [ ] SDF vs NAADF screenshot diff classified.
-- [ ] The decision (keep / quality-only / stop) is written down with its
+- [x] CPU/GPU sun-visibility ray parity verified on all GI bench fixtures.
+- [x] SDF vs NAADF `summary.json` comparison recorded with concrete numbers.
+- [x] SDF vs NAADF screenshot diff classified.
+- [x] The decision (keep / quality-only / stop) is written down with its
       supporting numbers.
+
+## Results
+
+### CPU/GPU sun-visibility parity
+
+`tests/naadf_gpu_layout.rs` now includes a headless `wgpu` dispatch that imports
+the production NAADF `world_trace` and `lighting_queries` WGSL helpers, traces a
+fixed sun-visibility ray set, reads back the GPU clear/blocked result, and
+compares it against `NaadfCpuRayBackend` for every fixture in
+`tests/fixtures/naadf/`.
+
+Verified:
+
+```powershell
+rtk cargo test --features naadf --test naadf_gpu_layout
+rtk cargo test --features naadf --test naadf_cpu_layout
+rtk cargo test --features naadf rendering::naadf --lib
+```
+
+Result: all tests passed. The GPU sun-visibility dispatch matched CPU results
+for the full fixture set.
+
+### Bench comparison
+
+Phase 3 produced the A/B bench pair used for this gate:
+
+| Mode | Summary | Median frame | P99 frame | GPU slots | Interest chunks | Missing interest slots | Uploaded peak | GI rays |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SDF sun visibility | `bench-runs/phase3-sdf/summary.json` | 58.99 ms | 92.22 ms | 282 / 384 | 174 | 0 | 203 | 0 |
+| NAADF sun visibility | `bench-runs/phase3-naadf-sun/summary.json` | 40.24 ms | 55.30 ms | 282 / 384 | 174 | 0 | 114 | 0 |
+
+NAADF-specific timing rows in the NAADF-sun run stayed small:
+
+| Row | Median | P99 |
+| --- | ---: | ---: |
+| `NAADF Cache Rebuild` | 0.00002 ms | 0.001 ms |
+| `NAADF Chunk Table Sync` | 0.06278 ms | 0.117 ms |
+| `NAADF Dirty Queue` | 0.19983 ms | 0.410 ms |
+| `NAADF GPU Upload CPU` | 0.00000 ms | 0.000 ms |
+| `NAADF Streaming` | 0.09432 ms | 0.213 ms |
+
+`naadf.avg_ray_steps_last_frame` and `naadf.max_ray_steps_last_frame` remain
+zero in these runs because the radiance-cascade sun-visibility path does not yet
+publish per-query ray-step telemetry. That is an observability gap, not a gate
+failure for this phase.
+
+Bench guard:
+
+```powershell
+rtk cargo run --bin bench_guard -- bench-runs/phase3-naadf-sun/summary.json
+```
+
+Result: `PASS: 187 check(s), 0 warning(s).`
+
+### Visual classification
+
+Screenshots inspected:
+
+- `bench-runs/phase3-sdf/visual-regression-naadf-gi-naadf-gi-experimental-naadf-gi-settled-run0.png`
+- `bench-runs/phase3-naadf-sun/visual-regression-naadf-gi-sun-naadf-gi-sun-visibility-naadf-gi-sun-settled-run0.png`
+
+Classification: equivalent. No missing or wrong occlusion was visible at the
+fixed checkpoint. The NAADF run did not introduce obvious sun-shadow artifacts
+or terrain coverage loss.
+
+## Decision
+
+Keep NAADF sun visibility and proceed to Phase 5.
+
+The measured pair is neutral-to-better for this checkpoint and passes the visual
+gate. Treat the apparent frame-time win cautiously because this is one bench
+pair, not a broad performance claim. The gate evidence is strong enough to
+continue extending NAADF to contact shadows and terrain AO, but not enough to
+claim overall GI parity or a general renderer speedup.
 
 ## Verification
 

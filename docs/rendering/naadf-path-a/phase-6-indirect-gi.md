@@ -1,6 +1,6 @@
 # Phase 6 — Indirect GI Secondary Rays on NAADF
 
-Status: planned
+Status: completed; default promotion blocked by active-pass perf
 Depends on: Phase 5
 Produces code: yes
 
@@ -55,14 +55,41 @@ src/rendering/radiance_cascades.rs       (query mask wiring, history reset)
 - Fixed seed and fixed sample count under `--bench` so screenshots are
   reproducible.
 
+## Result
+
+`NAADF_QUERY_GI_SECONDARY` now routes through NAADF world traversal in
+`radiance_cascades.wgsl`. The live radiance pass uses two deterministic
+cosine-hemisphere secondary rays per pixel, converts NAADF hits back into the
+radiance `RayHit` shape, and adds the indirect term into the fullscreen
+radiance query output. The SDF backend remains the fallback when the effective
+voxel backend is not NAADF.
+
+Evidence:
+
+- Original SDF comparison: `bench-runs/phase6-gi-sdf/summary.json`
+  - 36.97 ms median, 39.13 ms p99.
+- Active-pass NAADF review run after `RadianceCascadesPlugin` registration:
+  `bench-runs/path-a-review-gi-secondary-active/summary.json`
+  - 54.94 ms median, 69.09 ms p99.
+  - `naadf.radiance_gi_secondary_rays_per_pixel`: 2.
+  - `naadf.gpu_slots_used`: 282 of 384, with 0 missing interest slots.
+- Guard: `bench-runs/path-a-review-gi-secondary-active-guard.log`
+  - `PASS: 187 check(s), 0 warning(s).`
+- Screenshot inspected:
+  - `bench-runs/path-a-review-gi-secondary-active/visual-regression-naadf-gi-secondary-naadf-gi-secondary-naadf-gi-secondary-settled-run0.png`
+
+The earlier `phase6-gi-naadf*` timings were superseded by the review run
+because the radiance-cascade render-app plugin was not installed at the time.
+They validated query configuration, not the active fullscreen radiance pass.
+
 ## Acceptance criteria
 
-- [ ] `trace_gi_backend` traces NAADF secondary rays for the GI query, behind
+- [x] `trace_gi_backend` traces NAADF secondary rays for the GI query, behind
       its toggle.
-- [ ] Indirect contribution is visible in controlled fixtures and absent when
+- [x] Indirect contribution is visible in controlled fixtures and absent when
       the query is disabled.
-- [ ] Backend switch resets GI history; no smear across the switch.
-- [ ] Warming / stale cache falls back to SDF.
+- [x] Backend switch resets GI history; no smear across the switch.
+- [x] Warming / stale cache falls back to SDF.
 - [ ] GI bench frame time and noise are within agreed limits of the Phase 0
       baseline; screenshots show no unacceptable regression.
 
@@ -85,5 +112,5 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 
 ## Exit gate
 
-NAADF indirect GI works behind a toggle, converges, falls back cleanly, and
-meets the bench/visual limits.
+NAADF indirect GI works behind a toggle and falls back cleanly, but the active
+pass is not default-promotable until the perf cost is reduced.

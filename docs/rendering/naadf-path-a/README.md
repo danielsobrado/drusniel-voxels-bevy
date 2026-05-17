@@ -1,6 +1,6 @@
 # NAADF Path A — NAADF as a GI Lighting Backend
 
-Status: planned
+Status: implemented; release gate not passed for default promotion
 Last reviewed: 2026-05-16
 Scope: route selected radiance-cascade GI queries through NAADF traversal
 instead of the current SDF volume, while keeping the legacy mesh renderer as
@@ -58,8 +58,19 @@ Path A fills in that stub. It does not invent new architecture.
 | 3 | [phase-3-sun-visibility-query.md](phase-3-sun-visibility-query.md) | Sun-visibility / soft shadow traces NAADF |
 | 4 | [phase-4-validate-sun-visibility.md](phase-4-validate-sun-visibility.md) | Decision gate on the sun-visibility result |
 | 5 | [phase-5-contact-shadows-and-ao.md](phase-5-contact-shadows-and-ao.md) | Contact shadow + terrain AO on NAADF |
-| 6 | [phase-6-indirect-gi.md](phase-6-indirect-gi.md) | Indirect GI secondary rays on NAADF |
-| 7 | [phase-7-defaults-and-release-gate.md](phase-7-defaults-and-release-gate.md) | Defaults flipped; release gate; SDF-drop evaluation |
+| 6 | [phase-6-indirect-gi.md](phase-6-indirect-gi.md) | Implemented: indirect GI secondary rays on NAADF; default blocked by active-pass perf |
+| 7 | [phase-7-defaults-and-release-gate.md](phase-7-defaults-and-release-gate.md) | Completed review: release gate assessed; defaults remain opt-in |
+
+## Completion Summary
+
+Path A is implemented behind explicit NAADF query toggles. The legacy renderer
+still draws the frame and remains the default path when NAADF is not selected.
+The active render-app pass is registered and bench-visible, but the default
+promotion gate did not pass because the active GI/all-query path is not yet
+perf-neutral.
+
+The release evidence is recorded in
+[`../naadf-release-gate.md`](../naadf-release-gate.md).
 
 ## Conventions
 

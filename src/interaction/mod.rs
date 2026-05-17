@@ -1097,6 +1097,8 @@ impl Plugin for InteractionPlugin {
                     debug::toggle_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_debug_details.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_mesh_mode.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::toggle_terrain_lod.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::draw_chunk_borders.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::render_world_bounds_debug_planes
