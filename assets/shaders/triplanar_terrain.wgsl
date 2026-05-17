@@ -7,6 +7,7 @@
 #import bevy_pbr::forward_io::VertexOutput
 #import bevy_pbr::{pbr_fragment, pbr_functions, pbr_types}
 #import bevy_pbr::mesh_view_bindings::globals
+#import bevy_pbr::mesh_view_bindings::view
 #import water_caustics
 #import weather_common
 
@@ -283,10 +284,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     // weight > 0.95 we skip the other 3 material branches entirely,
     // cutting texture reads from 24 → 6 (or 3 when distant).
     // Distance check: skip expensive normal maps on distant terrain
-    let frag_dist = length(pbr_input.world_position.xyz);
 #ifdef TERRAIN_CHEAP_TRIPLANAR
     let skip_normals = true;
 #else
+    let frag_dist = length(view.world_position - pbr_input.world_position.xyz);
     let skip_normals = frag_dist > 120.0; // normal maps invisible past 120 u
 #endif
 

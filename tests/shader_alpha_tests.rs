@@ -144,6 +144,24 @@ fn blocky_caustics_do_not_tint_vertical_lod_walls() {
 }
 
 #[test]
+fn triplanar_normal_lod_uses_camera_distance() {
+    let triplanar = include_str!("../assets/shaders/triplanar_terrain.wgsl");
+
+    assert!(
+        triplanar.contains("mesh_view_bindings::view"),
+        "triplanar terrain should import the view uniform for camera-relative LOD decisions"
+    );
+    assert!(
+        triplanar.contains("length(view.world_position - pbr_input.world_position.xyz)"),
+        "triplanar normal-map LOD should use camera distance, not distance from world origin"
+    );
+    assert!(
+        !triplanar.contains("let frag_dist = length(pbr_input.world_position.xyz);"),
+        "normal-map LOD must not depend on absolute world coordinates"
+    );
+}
+
+#[test]
 fn gtao_is_registered_as_a_real_post_process_node() {
     let gtao = include_str!("../src/rendering/gtao.rs");
     let gtao_shader = include_str!("../assets/shaders/gtao_main.wgsl");
