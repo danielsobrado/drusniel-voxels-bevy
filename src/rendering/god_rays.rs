@@ -40,6 +40,8 @@ use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabe
 use crate::weather::WeatherRuntime;
 
 const GOD_RAYS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
+const MIN_GOD_RAY_SAMPLES: u32 = 1;
+const MAX_GOD_RAY_SAMPLES: u32 = 128;
 
 /// Configuration for the screen-space god rays effect.
 #[derive(Resource, Clone)]
@@ -72,6 +74,10 @@ impl Default for GodRayConfig {
             threshold: 2.0,
         }
     }
+}
+
+fn clamp_god_ray_samples(num_samples: u32) -> u32 {
+    num_samples.clamp(MIN_GOD_RAY_SAMPLES, MAX_GOD_RAY_SAMPLES)
 }
 
 /// Render graph label for the god rays node.
@@ -116,7 +122,7 @@ fn sync_god_ray_config(fog_config: Option<Res<FogConfig>>, mut config: ResMut<Go
     config.decay = src.decay;
     config.density = src.density;
     config.weight = src.weight;
-    config.num_samples = src.num_samples;
+    config.num_samples = clamp_god_ray_samples(src.num_samples);
     config.threshold = src.threshold;
 }
 
@@ -172,7 +178,7 @@ fn compute_god_ray_frame_data(
             decay: config.decay,
             density: config.density,
             weight: config.weight,
-            num_samples: config.num_samples as i32,
+            num_samples: clamp_god_ray_samples(config.num_samples) as i32,
             threshold: config.threshold,
             rain_factor: weather
                 .as_deref()
@@ -448,5 +454,17 @@ impl Plugin for GodRayPlugin {
             Core3d,
             (WaterReflectionCompositorLabel, GodRaysLabel, Node3d::Bloom),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn god_ray_sample_count_is_clamped_for_uniforms() {
+        assert_eq!(clamp_god_ray_samples(0), MIN_GOD_RAY_SAMPLES);
+        assert_eq!(clamp_god_ray_samples(32), 32);
+        assert_eq!(clamp_god_ray_samples(512), MAX_GOD_RAY_SAMPLES);
     }
 }

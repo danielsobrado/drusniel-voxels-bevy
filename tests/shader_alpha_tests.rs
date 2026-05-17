@@ -85,6 +85,20 @@ fn depth_dependent_passes_have_depth_before_weather_overlay() {
 }
 
 #[test]
+fn god_rays_clamps_dynamic_sample_count_before_division() {
+    let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
+
+    assert!(
+        god_rays.contains("let sample_count = clamp(uniforms.num_samples, 1, 128);"),
+        "god rays must clamp runtime sample counts before using them in math or loops"
+    );
+    assert!(
+        god_rays.contains("/ f32(sample_count)") && god_rays.contains("i < sample_count"),
+        "god rays should use the clamped sample count for both ray stride and loop bounds"
+    );
+}
+
+#[test]
 fn terrain_materials_participate_in_depth_prepass() {
     let triplanar = include_str!("../src/rendering/triplanar_material.rs");
     let blocky = include_str!("../src/rendering/blocky_material.rs");

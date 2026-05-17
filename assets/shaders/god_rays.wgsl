@@ -56,8 +56,10 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     let sun_uv = uniforms.sun_screen_pos.xy;
 
+    let sample_count = clamp(uniforms.num_samples, 1, 128);
+
     // Direction from this pixel toward the sun in screen space
-    let delta_uv = (sun_uv - in.uv) * uniforms.density / f32(uniforms.num_samples);
+    let delta_uv = (sun_uv - in.uv) * uniforms.density / f32(sample_count);
 
     // March toward the sun, accumulating scattered light
     var uv = in.uv;
@@ -68,7 +70,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let weather_intensity_mult = clamp(1.0 - rain_factor * 0.55 - snow_factor * 0.1, 0.35, 1.0);
     let weather_threshold = max(uniforms.threshold * (1.0 - snow_factor * 0.18), 0.05);
 
-    for (var i = 0; i < uniforms.num_samples; i++) {
+    for (var i = 0; i < sample_count; i++) {
         uv += delta_uv;
 
         // Clamp to valid UV range
