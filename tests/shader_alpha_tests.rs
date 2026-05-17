@@ -339,6 +339,24 @@ fn volumetric_clouds_are_not_shipped_as_inactive_prototype_shaders() {
     );
 }
 
+#[test]
+fn inactive_sdf_and_stochastic_probe_prototypes_are_not_shipped_as_shaders() {
+    let radiance = include_str!("../assets/shaders/radiance_cascades.wgsl");
+
+    assert!(
+        radiance.contains("fn soft_shadow_backend"),
+        "active SDF-style shadow routing should live in the compiled radiance cascade shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/sdf_shadows.wgsl").exists(),
+        "unused standalone sdf_shadows.wgsl should not be shipped as an active-looking shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/stochastic_probes.wgsl").exists(),
+        "unused stochastic probe prototype shader should not be shipped as an active-looking shader"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];
