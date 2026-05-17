@@ -103,7 +103,7 @@ keep both `summary.json` files for Phase 4.
 - Bench toggles can force the query with
   `naadf_use_for_sun_visibility = true`; the A/B scene pair is:
   `bench/scenes/visual-regression-naadf-gi.toml` and
-  `bench/scenes/visual-regression-naadf-gi-sun.toml`.
+  `bench/scenes/naadf/visual-regression-naadf-gi-sun.toml`.
 
 ## Verification results
 
@@ -112,7 +112,7 @@ rtk cargo check --features naadf
 rtk cargo test --features naadf rendering::radiance_cascades --lib
 rtk cargo test --features naadf rendering::naadf --lib
 rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml --bench-out bench-runs/phase3-sdf
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi-sun.toml --bench-out bench-runs/phase3-naadf-sun
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi-sun.toml --bench-out bench-runs/phase3-naadf-sun
 rtk cargo run --bin bench_guard -- bench-runs/phase3-sdf/summary.json
 rtk cargo run --bin bench_guard -- bench-runs/phase3-naadf-sun/summary.json
 ```

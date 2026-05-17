@@ -1,0 +1,30 @@
+seed = 12345
+duration_warmup_secs = 5.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[render_toggles]
+voxel_ray_backend = "naadf"
+experimental_render_mode = "current_with_naadf_gi"
+disable_reflection_cameras = true
+naadf_force_cpu_builder = true
+naadf_radius_chunks = 3
+naadf_max_chunks = 384
+naadf_max_chunk_updates_per_frame = 384
+naadf_max_upload_bytes_per_frame = 67108864
+naadf_history_resolution_scale = 0.25
+naadf_use_for_sun_visibility = true
+
+[[checkpoint]]
+name = "naadf-gi-sun-visibility"
+position = [256.0, 82.0, 220.0]
+look_at = [282.0, 64.0, 250.0]
+time_of_day = 0.42
+hold_frames = 900
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
+screenshot_points = [
+    { name = "naadf-gi-sun-settled", frame = 899 },
+]
