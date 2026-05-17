@@ -159,6 +159,12 @@ impl Default for NaadfChunkCacheConfig {
 }
 
 impl NaadfConfig {
+    pub fn gpu_builder_enabled(&self) -> bool {
+        self.enabled
+            && !self.debug.force_cpu_builder
+            && (self.gpu.prefer_gpu_builder || self.debug.force_gpu_builder)
+    }
+
     pub fn load_or_default(path: impl AsRef<Path>) -> Self {
         load_config(path).unwrap_or_default()
     }
@@ -330,5 +336,24 @@ mod tests {
         assert!(!config.use_for_sun_visibility);
         assert!(!config.use_for_terrain_ao);
         assert!(!config.use_for_contact_shadows);
+    }
+
+    #[test]
+    fn gpu_builder_enabled_honors_debug_overrides() {
+        let mut config = NaadfConfig {
+            enabled: true,
+            ..default()
+        };
+
+        assert!(!config.gpu_builder_enabled());
+        config.gpu.prefer_gpu_builder = true;
+        assert!(config.gpu_builder_enabled());
+        config.debug.force_cpu_builder = true;
+        assert!(!config.gpu_builder_enabled());
+        config.gpu.prefer_gpu_builder = false;
+        config.debug.force_gpu_builder = true;
+        assert!(!config.gpu_builder_enabled());
+        config.debug.force_cpu_builder = false;
+        assert!(config.gpu_builder_enabled());
     }
 }

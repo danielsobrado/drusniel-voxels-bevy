@@ -615,6 +615,8 @@ mod tests {
         assert!(first_hit.contains("previous_world_from_local_x"));
         assert!(first_hit.contains("previous_world_position"));
         assert!(first_hit.contains("fn naadf_entity_previous_world_position"));
+        assert!(first_hit.contains("struct NaadfFirstHitStats"));
+        assert!(first_hit.contains("fn naadf_record_first_hit_telemetry"));
     }
 
     #[test]

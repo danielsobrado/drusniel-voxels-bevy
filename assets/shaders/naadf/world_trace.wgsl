@@ -1,6 +1,6 @@
 #import "shaders/naadf/common.wgsl" NAADF_VOXELS_PER_CHUNK_AXIS
 #import "shaders/naadf/layout.wgsl" naadf_chunk_world_origin
-#import "shaders/naadf/ray_trace.wgsl" NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk
+#import "shaders/naadf/ray_trace.wgsl" NAADF_MISS_REASON_CHUNK_BUDGET, NAADF_MISS_REASON_DISTANCE_CLAMP, NAADF_MISS_REASON_NO_LOOKUP, NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk
 
 @group(3) @binding(20) var<storage, read> naadf_chunk_lookup_records: array<vec4<u32>>;
 
@@ -12,7 +12,7 @@ fn trace_naadf_world(
 ) -> NaadfHit {
     let lookup_count = min(chunk_lookup_count, arrayLength(&naadf_chunk_lookup_records));
     if lookup_count == 0u {
-        return naadf_make_miss(max_steps);
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
     }
 
     let direction = normalize(ray.direction);
@@ -32,8 +32,12 @@ fn trace_naadf_world(
     var t_max = abs((next_boundary - ray.origin) / max(abs(direction), vec3<f32>(0.000001)));
     var traveled = 0.0;
 
+    var chunk_steps_taken = 0u;
+    var miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
     for (var chunk_step = 0u; chunk_step < max_steps; chunk_step = chunk_step + 1u) {
+        chunk_steps_taken = chunk_step + 1u;
         if traveled > ray.max_distance {
+            miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
             break;
         }
         let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
@@ -60,7 +64,7 @@ fn trace_naadf_world(
         }
     }
 
-    return naadf_make_miss(max_steps);
+    return naadf_make_miss(chunk_steps_taken, miss_reason);
 }
 
 fn naadf_lookup_chunk_slot(chunk_pos: vec3<i32>, lookup_count: u32) -> u32 {

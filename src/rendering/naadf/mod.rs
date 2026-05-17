@@ -271,6 +271,8 @@ impl Plugin for NaadfPlugin {
                     (
                         gpu_buffers::prepare_naadf_gpu_buffers,
                         gpu_buffers::prepare_naadf_entity_gpu_buffers,
+                        gpu_buffers::readback_naadf_gpu_stats
+                            .after(gpu_buffers::prepare_naadf_gpu_buffers),
                         gpu_buffers::upload_naadf_chunks_to_gpu
                             .after(gpu_buffers::prepare_naadf_gpu_buffers),
                         gpu_buffers::upload_naadf_entity_volumes_to_gpu

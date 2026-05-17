@@ -25,6 +25,14 @@ pub struct NaadfStats {
     pub gpu_uploaded_bytes_last_frame: u32,
     pub gpu_avg_ray_steps_last_frame: f32,
     pub gpu_max_ray_steps_last_frame: u32,
+    pub gpu_ray_samples_last_frame: u32,
+    pub first_hit_ray_hits_last_frame: u32,
+    pub first_hit_ray_misses_last_frame: u32,
+    pub first_hit_clean_misses_last_frame: u32,
+    pub first_hit_voxel_budget_misses_last_frame: u32,
+    pub first_hit_chunk_budget_misses_last_frame: u32,
+    pub first_hit_distance_clamps_last_frame: u32,
+    pub first_hit_no_lookup_misses_last_frame: u32,
     pub gpu_build_queue_pending: u32,
     pub gpu_build_queue_oldest_age_frames: u32,
     pub gpu_build_queue_queued_total: u64,
@@ -64,7 +72,16 @@ pub struct NaadfRenderStatsSnapshot {
     pub gpu_max_chunks: u32,
     pub gpu_uploaded_chunks_last_frame: u32,
     pub gpu_uploaded_bytes_last_frame: u32,
+    pub gpu_avg_ray_steps_last_frame: f32,
     pub gpu_max_ray_steps_last_frame: u32,
+    pub gpu_ray_samples_last_frame: u32,
+    pub first_hit_ray_hits_last_frame: u32,
+    pub first_hit_ray_misses_last_frame: u32,
+    pub first_hit_clean_misses_last_frame: u32,
+    pub first_hit_voxel_budget_misses_last_frame: u32,
+    pub first_hit_chunk_budget_misses_last_frame: u32,
+    pub first_hit_distance_clamps_last_frame: u32,
+    pub first_hit_no_lookup_misses_last_frame: u32,
     pub gi_rays_last_frame: u64,
     pub preview_pixels_last_frame: u64,
     pub preview_first_hit_dispatches_last_frame: u32,
@@ -101,8 +118,44 @@ impl NaadfRenderStatsBridge {
         snapshot.gpu_uploaded_bytes_last_frame = uploaded_bytes;
     }
 
-    pub fn publish_ray_step_budget(&self, max_ray_steps: u32) {
-        self.snapshot.lock().unwrap().gpu_max_ray_steps_last_frame = max_ray_steps;
+    pub fn publish_ray_steps(
+        &self,
+        average_steps: f32,
+        max_steps: u32,
+        ray_samples: u32,
+        miss_reason_counts: [u32; 6],
+    ) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        snapshot.gpu_avg_ray_steps_last_frame = average_steps;
+        snapshot.gpu_max_ray_steps_last_frame = max_steps;
+        snapshot.gpu_ray_samples_last_frame = ray_samples;
+        snapshot.first_hit_ray_hits_last_frame = miss_reason_counts[0];
+        snapshot.first_hit_ray_misses_last_frame = miss_reason_counts[1]
+            .saturating_add(miss_reason_counts[2])
+            .saturating_add(miss_reason_counts[3])
+            .saturating_add(miss_reason_counts[4])
+            .saturating_add(miss_reason_counts[5]);
+        snapshot.first_hit_clean_misses_last_frame = miss_reason_counts[1];
+        snapshot.first_hit_voxel_budget_misses_last_frame = miss_reason_counts[2];
+        snapshot.first_hit_chunk_budget_misses_last_frame = miss_reason_counts[3];
+        snapshot.first_hit_distance_clamps_last_frame = miss_reason_counts[4];
+        snapshot.first_hit_no_lookup_misses_last_frame = miss_reason_counts[5];
+    }
+
+    pub fn publish_ray_telemetry_words(&self, words: &[u32]) {
+        let ray_samples = words.first().copied().unwrap_or_default();
+        let total_steps = words.get(1).copied().unwrap_or_default();
+        let max_steps = words.get(2).copied().unwrap_or_default();
+        let mut miss_reason_counts = [0u32; 6];
+        for (index, count) in miss_reason_counts.iter_mut().enumerate() {
+            *count = words.get(3 + index).copied().unwrap_or_default();
+        }
+        let average_steps = if ray_samples == 0 {
+            0.0
+        } else {
+            total_steps as f32 / ray_samples as f32
+        };
+        self.publish_ray_steps(average_steps, max_steps, ray_samples, miss_reason_counts);
     }
 
     pub fn publish_gi_rays(&self, gi_rays: u64) {
@@ -144,5 +197,27 @@ impl Default for NaadfCacheState {
             warming: false,
             fallback_reason: Some("NAADF cache disabled until feature systems build it".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ray_telemetry_words_publish_average_max_and_miss_reasons() {
+        let bridge = NaadfRenderStatsBridge::default();
+
+        bridge.publish_ray_telemetry_words(&[5, 24, 9, 1, 1, 2, 0, 0, 1]);
+        let snapshot = bridge.snapshot();
+
+        assert_eq!(snapshot.gpu_ray_samples_last_frame, 5);
+        assert!((snapshot.gpu_avg_ray_steps_last_frame - 4.8).abs() < f32::EPSILON);
+        assert_eq!(snapshot.gpu_max_ray_steps_last_frame, 9);
+        assert_eq!(snapshot.first_hit_ray_hits_last_frame, 1);
+        assert_eq!(snapshot.first_hit_ray_misses_last_frame, 4);
+        assert_eq!(snapshot.first_hit_clean_misses_last_frame, 1);
+        assert_eq!(snapshot.first_hit_voxel_budget_misses_last_frame, 2);
+        assert_eq!(snapshot.first_hit_no_lookup_misses_last_frame, 1);
     }
 }

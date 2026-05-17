@@ -21,7 +21,15 @@ struct NaadfHit {
     world_voxel: vec3<i32>,
     local_voxel: vec3<u32>,
     normal: vec3<f32>,
+    miss_reason: u32,
 };
+
+const NAADF_MISS_REASON_NONE: u32 = 0u;
+const NAADF_MISS_REASON_CLEAN_EXIT: u32 = 1u;
+const NAADF_MISS_REASON_VOXEL_BUDGET: u32 = 2u;
+const NAADF_MISS_REASON_CHUNK_BUDGET: u32 = 3u;
+const NAADF_MISS_REASON_DISTANCE_CLAMP: u32 = 4u;
+const NAADF_MISS_REASON_NO_LOOKUP: u32 = 5u;
 
 fn trace_naadf(
     ray: NaadfRay,
@@ -35,7 +43,7 @@ fn trace_naadf(
         let direction = normalize(ray.direction);
         let entry_t = naadf_ray_chunk_entry(ray.origin, direction, chunk_pos);
         if entry_t < 0.0 || entry_t > ray.max_distance {
-            return naadf_make_miss(0u);
+            return naadf_make_miss(0u, NAADF_MISS_REASON_CLEAN_EXIT);
         }
 
         let hit_position = ray.origin + direction * (entry_t + 0.0001);
@@ -57,7 +65,7 @@ fn trace_naadf(
     let inv_direction_abs = naadf_t_delta(direction);
     let entry_t = naadf_ray_chunk_entry(ray.origin, direction, chunk_pos);
     if entry_t < 0.0 || entry_t > ray.max_distance {
-        return naadf_make_miss(0u);
+        return naadf_make_miss(0u, NAADF_MISS_REASON_CLEAN_EXIT);
     }
 
     var traveled = max(entry_t, 0.0) + 0.0001;
@@ -69,8 +77,12 @@ fn trace_naadf(
     let block_base_record = (voxel_base_record / NAADF_VOXELS_PER_CHUNK) *
         NAADF_BLOCKS_PER_CHUNK * NAADF_PACKED_BLOCK_WORDS;
 
+    var steps_taken = 0u;
+    var miss_reason = NAADF_MISS_REASON_VOXEL_BUDGET;
     for (var steps = 0u; steps < max_steps; steps = steps + 1u) {
+        steps_taken = steps + 1u;
         if traveled > ray.max_distance {
+            miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
             break;
         }
         let current_position = ray.origin + direction * traveled;
@@ -147,11 +159,12 @@ fn trace_naadf(
             }
             traveled = traveled + max(axis_distance, 0.0001);
         } else {
+            miss_reason = NAADF_MISS_REASON_CLEAN_EXIT;
             break;
         }
     }
 
-    return naadf_make_miss(max_steps);
+    return naadf_make_miss(steps_taken, miss_reason);
 }
 
 // Surface normal of a hit voxel face, derived from the ray position relative
@@ -195,10 +208,10 @@ fn trace_naadf_chunk(
 ) -> NaadfHit {
     let chunk_record_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
     if chunk_record_base + 5u >= arrayLength(&naadf_chunk_records) {
-        return naadf_make_miss(0u);
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
     }
     if !naadf_chunk_record_valid(chunk_record_base) {
-        return naadf_make_miss(0u);
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
     }
     let voxel_base_record = chunk_index * NAADF_VOXELS_PER_CHUNK;
     return trace_naadf(
@@ -324,10 +337,11 @@ fn naadf_make_hit(
         world_voxel,
         local_voxel,
         normal,
+        NAADF_MISS_REASON_NONE,
     );
 }
 
-fn naadf_make_miss(steps: u32) -> NaadfHit {
+fn naadf_make_miss(steps: u32, miss_reason: u32) -> NaadfHit {
     return NaadfHit(
         0u,
         0.0,
@@ -336,6 +350,7 @@ fn naadf_make_miss(steps: u32) -> NaadfHit {
         vec3<i32>(0),
         vec3<u32>(0u),
         vec3<f32>(0.0),
+        miss_reason,
     );
 }
 

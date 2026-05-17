@@ -123,7 +123,7 @@ impl From<&NaadfConfig> for ExtractedNaadfGpuConfig {
             max_chunks: config.chunk_cache.max_chunks,
             max_gpu_memory_mb: config.chunk_cache.max_gpu_memory_mb,
             allow_integrated_gpu: config.gpu.allow_integrated_gpu,
-            prefer_gpu_builder: config.gpu.prefer_gpu_builder,
+            prefer_gpu_builder: config.gpu_builder_enabled(),
             debug_readback: config.gpu.debug_readback,
         }
     }
@@ -147,6 +147,7 @@ pub struct NaadfGpuBufferAllocation {
     pub upload_buffer: Buffer,
     pub debug_ray_buffer: Buffer,
     pub stats_buffer: Buffer,
+    pub stats_readback_buffer: Buffer,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -683,6 +684,38 @@ pub fn upload_naadf_entity_volumes_to_gpu(
     }
 }
 
+pub fn readback_naadf_gpu_stats(
+    buffers: Res<NaadfGpuBuffers>,
+    render_device: Res<RenderDevice>,
+    bridge: Res<NaadfRenderStatsBridge>,
+) {
+    let Some(allocation) = buffers.allocation() else {
+        bridge.publish_ray_steps(0.0, 0, 0, [0; 6]);
+        return;
+    };
+    if !allocation.debug_readback {
+        bridge.publish_ray_steps(0.0, 0, 0, [0; 6]);
+        return;
+    }
+
+    let slice = allocation.stats_readback_buffer.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    let _ = render_device.poll(wgpu::PollType::wait_indefinitely());
+    if !matches!(receiver.recv(), Ok(Ok(()))) {
+        return;
+    }
+
+    let data = slice.get_mapped_range();
+    let words: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
+    drop(data);
+    allocation.stats_readback_buffer.unmap();
+
+    bridge.publish_ray_telemetry_words(&words);
+}
+
 impl NaadfEntityGpuBuffers {
     pub fn allocation(&self) -> Option<&NaadfEntityGpuBufferAllocation> {
         self.allocation.as_ref()
@@ -886,6 +919,12 @@ fn create_naadf_gpu_allocation(
             "naadf_stats",
             plan.stats_buffer_bytes,
             storage_usage | readback_usage,
+        ),
+        stats_readback_buffer: create_buffer(
+            render_device,
+            "naadf_stats_readback",
+            plan.stats_buffer_bytes,
+            BufferUsages::COPY_DST | BufferUsages::MAP_READ,
         ),
         plan,
         debug_readback,

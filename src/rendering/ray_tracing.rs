@@ -7,7 +7,7 @@ use crate::rendering::naadf::{NaadfConfig, NaadfPreviewCompositeModeConfig};
 
 const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
 const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
-const NAADF_RESTART_HINT: &str = "Restart with .\\scripts\\startVoxels.ps1 -Naadf to enable NAADF.";
+const NAADF_RESTART_HINT: &str = "Restart with scripts/startVoxels.ps1 -Naadf to enable NAADF.";
 
 #[cfg(feature = "naadf")]
 const NAADF_FEATURE_COMPILED: bool = true;

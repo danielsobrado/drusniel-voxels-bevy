@@ -87,6 +87,11 @@ impl NaadfGpuBuildQueue {
         }
     }
 
+    pub fn drain_pending(&mut self) {
+        self.pending.clear();
+        self.pending_set.clear();
+    }
+
     pub fn stats(&self) -> NaadfGpuBuildQueueStats {
         NaadfGpuBuildQueueStats {
             pending: self.pending.len(),
@@ -111,8 +116,7 @@ pub fn queue_gpu_builds_from_cache_report(
     cache: Res<NaadfCache>,
     mut build_queue: ResMut<NaadfGpuBuildQueue>,
 ) {
-    if !config.enabled || !config.gpu.prefer_gpu_builder || !naadf_gpu_builder_dispatch_available()
-    {
+    if !config.gpu_builder_enabled() || !naadf_gpu_builder_dispatch_available() {
         build_queue.clear();
         return;
     }
@@ -138,11 +142,10 @@ pub fn sync_gpu_build_queue_stats_for_config(
     config: &NaadfConfig,
     build_queue: &mut NaadfGpuBuildQueue,
 ) -> NaadfGpuBuildQueueStats {
-    if !config.enabled || !config.gpu.prefer_gpu_builder || !naadf_gpu_builder_dispatch_available()
-    {
+    if !config.gpu_builder_enabled() || !naadf_gpu_builder_dispatch_available() {
         build_queue.clear();
     } else {
-        build_queue.increment_ages();
+        build_queue.drain_pending();
     }
 
     build_queue.stats()
@@ -199,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_build_queue_ages_when_dispatch_is_available_and_preferred() {
+    fn gpu_build_queue_drains_when_dispatch_is_available_and_preferred() {
         let mut queue = NaadfGpuBuildQueue::default();
         queue.queue(IVec3::X);
 
@@ -215,8 +218,32 @@ mod tests {
             &mut queue,
         );
 
-        assert_eq!(stats.pending, 1);
-        assert_eq!(stats.oldest_age_frames, 1);
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.oldest_age_frames, 0);
+        assert_eq!(stats.queued_total, 1);
+        assert!(naadf_gpu_builder_dispatch_available());
+    }
+
+    #[test]
+    fn gpu_build_queue_uses_force_gpu_override() {
+        let mut queue = NaadfGpuBuildQueue::default();
+        queue.queue(IVec3::X);
+
+        let stats = sync_gpu_build_queue_stats_for_config(
+            &NaadfConfig {
+                enabled: true,
+                debug: super::super::config::NaadfDebugConfig {
+                    force_gpu_builder: true,
+                    ..default()
+                },
+                ..default()
+            },
+            &mut queue,
+        );
+
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.oldest_age_frames, 0);
+        assert_eq!(stats.queued_total, 1);
         assert!(naadf_gpu_builder_dispatch_available());
     }
 }

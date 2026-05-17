@@ -49,7 +49,18 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
         .gpu_uploaded_chunks_peak
         .max(snapshot.gpu_uploaded_chunks_last_frame);
     stats.gpu_uploaded_bytes_last_frame = snapshot.gpu_uploaded_bytes_last_frame;
+    stats.gpu_avg_ray_steps_last_frame = snapshot.gpu_avg_ray_steps_last_frame;
     stats.gpu_max_ray_steps_last_frame = snapshot.gpu_max_ray_steps_last_frame;
+    stats.gpu_ray_samples_last_frame = snapshot.gpu_ray_samples_last_frame;
+    stats.first_hit_ray_hits_last_frame = snapshot.first_hit_ray_hits_last_frame;
+    stats.first_hit_ray_misses_last_frame = snapshot.first_hit_ray_misses_last_frame;
+    stats.first_hit_clean_misses_last_frame = snapshot.first_hit_clean_misses_last_frame;
+    stats.first_hit_voxel_budget_misses_last_frame =
+        snapshot.first_hit_voxel_budget_misses_last_frame;
+    stats.first_hit_chunk_budget_misses_last_frame =
+        snapshot.first_hit_chunk_budget_misses_last_frame;
+    stats.first_hit_distance_clamps_last_frame = snapshot.first_hit_distance_clamps_last_frame;
+    stats.first_hit_no_lookup_misses_last_frame = snapshot.first_hit_no_lookup_misses_last_frame;
     stats.gi_rays_last_frame = snapshot.gi_rays_last_frame;
     stats.preview_pixels_last_frame = snapshot.preview_pixels_last_frame;
     stats.preview_first_hit_dispatches_last_frame =
@@ -144,6 +155,41 @@ pub fn record_naadf_bench_counters(
         frame.0,
         "naadf.max_ray_steps_last_frame",
         stats.gpu_max_ray_steps_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.ray_samples_last_frame",
+        stats.gpu_ray_samples_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_ray_hits_last_frame",
+        stats.first_hit_ray_hits_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_ray_misses_last_frame",
+        stats.first_hit_ray_misses_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_voxel_budget_misses_last_frame",
+        stats.first_hit_voxel_budget_misses_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_chunk_budget_misses_last_frame",
+        stats.first_hit_chunk_budget_misses_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_distance_clamps_last_frame",
+        stats.first_hit_distance_clamps_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.first_hit_no_lookup_misses_last_frame",
+        stats.first_hit_no_lookup_misses_last_frame as f64,
     );
     let radiance_query_mask = radiance_config
         .as_deref()

@@ -7,6 +7,7 @@ struct NaadfFirstHitParams {
     camera_right_aspect: vec4<f32>,
     camera_up_pad: vec4<f32>,
     config: vec4<u32>,
+    telemetry_config: vec4<u32>,
     fog_color_start: vec4<f32>,
     fog_end_strength: vec4<f32>,
     sun_direction_pad: vec4<f32>,
@@ -42,6 +43,18 @@ struct NaadfEntityVolumeRecord {
     local_origin_yz_pad: vec4<f32>,
 }
 
+struct NaadfFirstHitStats {
+    ray_count: atomic<u32>,
+    total_steps: atomic<u32>,
+    max_steps: atomic<u32>,
+    miss_reason_0_hits: atomic<u32>,
+    miss_reason_1_clean_exit: atomic<u32>,
+    miss_reason_2_voxel_budget: atomic<u32>,
+    miss_reason_3_chunk_budget: atomic<u32>,
+    miss_reason_4_distance_clamp: atomic<u32>,
+    miss_reason_5_no_lookup: atomic<u32>,
+}
+
 @group(3) @binding(16) var<uniform> naadf_first_hit_params: NaadfFirstHitParams;
 @group(3) @binding(17) var naadf_first_hit_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(18) var naadf_first_hit_depth_output: texture_storage_2d<rgba16float, write>;
@@ -49,6 +62,7 @@ struct NaadfEntityVolumeRecord {
 @group(3) @binding(23) var naadf_first_hit_motion_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(21) var<storage, read> naadf_entity_volume_records: array<NaadfEntityVolumeRecord>;
 @group(3) @binding(22) var<storage, read> naadf_entity_material_records: array<u32>;
+@group(3) @binding(24) var<storage, read_write> naadf_first_hit_stats: NaadfFirstHitStats;
 
 @compute @workgroup_size(8, 8, 1)
 fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -115,10 +129,33 @@ fn naadf_first_hit_motion(uv: vec2<f32>, ray: NaadfRay, preview: NaadfFirstHitPr
 
 fn preview_naadf_first_hit_world(ray: NaadfRay, config: vec3<u32>) -> NaadfFirstHitPreview {
     let hit = trace_naadf_world(ray, config.x, config.y, config.z);
+    naadf_record_first_hit_telemetry(hit);
     if hit.hit == 0u {
         return naadf_first_hit_preview_miss(ray.max_distance);
     }
     return preview_naadf_first_hit_from_hit(ray, hit, config);
+}
+
+fn naadf_record_first_hit_telemetry(hit: NaadfHit) {
+    if naadf_first_hit_params.telemetry_config.x == 0u {
+        return;
+    }
+    atomicAdd(&naadf_first_hit_stats.ray_count, 1u);
+    atomicAdd(&naadf_first_hit_stats.total_steps, hit.steps);
+    atomicMax(&naadf_first_hit_stats.max_steps, hit.steps);
+    if hit.hit != 0u {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_0_hits, 1u);
+    } else if hit.miss_reason == 1u {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_1_clean_exit, 1u);
+    } else if hit.miss_reason == 2u {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_2_voxel_budget, 1u);
+    } else if hit.miss_reason == 3u {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_3_chunk_budget, 1u);
+    } else if hit.miss_reason == 4u {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_4_distance_clamp, 1u);
+    } else {
+        atomicAdd(&naadf_first_hit_stats.miss_reason_5_no_lookup, 1u);
+    }
 }
 
 fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u32>) -> NaadfFirstHitPreview {

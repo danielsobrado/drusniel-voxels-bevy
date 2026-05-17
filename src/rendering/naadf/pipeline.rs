@@ -467,6 +467,7 @@ pub fn init_naadf_preview_build_pipelines(
             storage_buffer_entry(21, true),
             storage_buffer_entry(22, true),
             storage_texture_entry(23, TextureFormat::Rgba16Float),
+            storage_buffer_entry(24, false),
         ],
     );
     let gi_layout = BindGroupLayoutDescriptor::new(
@@ -785,9 +786,12 @@ impl ViewNode for NaadfPreviewBuildNode {
         };
 
         let pipeline_cache = world.resource::<PipelineCache>();
-        let gpu_builder_enabled = world
+        let gpu_config = world
             .get_resource::<super::gpu_buffers::ExtractedNaadfGpuConfig>()
-            .is_some_and(|config| config.prefer_gpu_builder);
+            .cloned()
+            .unwrap_or_default();
+        let gpu_builder_enabled = gpu_config.prefer_gpu_builder;
+        let telemetry_enabled = gpu_config.debug_readback;
         let build_blocks_pipeline = if gpu_builder_enabled {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_blocks_pipeline)
@@ -967,6 +971,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 allocation.plan.chunk_records as u32,
                 chunk_lookup_records,
                 entity_count,
+                telemetry_enabled,
                 previous_clip_from_world,
             ),
         );
@@ -1097,6 +1102,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                     entity_allocation.entity_material_buffer.as_entire_binding(),
                 ),
                 (23, BindingResource::TextureView(&preview_motion_view)),
+                (24, allocation.stats_buffer.as_entire_binding()),
             )),
         );
         let gi_group = render_device.create_bind_group(
@@ -1184,6 +1190,11 @@ impl ViewNode for NaadfPreviewBuildNode {
             )),
         );
 
+        if telemetry_enabled {
+            render_context
+                .command_encoder()
+                .clear_buffer(&allocation.stats_buffer, 0, None);
+        }
         let mut pass =
             render_context
                 .command_encoder()
@@ -1280,6 +1291,15 @@ impl ViewNode for NaadfPreviewBuildNode {
             );
         }
         drop(pass);
+        if telemetry_enabled {
+            render_context.command_encoder().copy_buffer_to_buffer(
+                &allocation.stats_buffer,
+                0,
+                &allocation.stats_readback_buffer,
+                0,
+                super::gpu_buffers::NAADF_STATS_BUFFER_BYTES,
+            );
+        }
         let gi_rays = if preview_settings.bounce_count > 0 {
             size.width as u64 * size.height as u64 * preview_settings.bounce_count.min(8) as u64
         } else {
@@ -1294,7 +1314,6 @@ impl ViewNode for NaadfPreviewBuildNode {
         let reference_dispatches = u32::from(preview_settings.reference_path_tracing_enabled);
         if let Some(bridge) = world.get_resource::<NaadfRenderStatsBridge>() {
             bridge.publish_gi_rays(gi_rays);
-            bridge.publish_ray_step_budget(preview_settings.max_ray_steps);
             bridge.publish_preview_passes(
                 preview_pixels,
                 first_hit_dispatches,
@@ -1358,6 +1377,7 @@ struct NaadfFirstHitParamsUniform {
     camera_right_aspect: Vec4,
     camera_up_pad: Vec4,
     config: UVec4,
+    telemetry_config: UVec4,
     fog_color_start: Vec4,
     fog_end_strength: Vec4,
     sun_direction_pad: Vec4,
@@ -1801,6 +1821,7 @@ fn first_hit_params_uniform(
     chunk_records: u32,
     chunk_lookup_records: u32,
     entity_records: u32,
+    telemetry_enabled: bool,
     previous_clip_from_world: Mat4,
 ) -> NaadfFirstHitParamsUniform {
     let camera = camera_basis_params(view);
@@ -1816,6 +1837,7 @@ fn first_hit_params_uniform(
             chunk_lookup_records,
             entity_records,
         ),
+        telemetry_config: UVec4::new(u32::from(telemetry_enabled), 0, 0, 0),
         fog_color_start: preview_settings.fog_color_start,
         fog_end_strength: preview_settings.fog_end_strength,
         sun_direction_pad: preview_settings.sun_direction,
