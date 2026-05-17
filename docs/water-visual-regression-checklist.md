@@ -1,12 +1,12 @@
 # Water Visual Regression Checklist
 
 ## Scenes
-- `bench/scenes/lake-water-close.toml`
-- `bench/scenes/lake-water-mid.toml`
-- `bench/scenes/lake-water-oblique-reflection.toml`
-- `bench/scenes/ocean-water-reference.toml`
-- `bench/scenes/river-water-reference.toml`
-- `bench/scenes/shallow-shore-reference.toml`
+- `bench/scenes/water/lake-water-close.toml`
+- `bench/scenes/water/lake-water-mid.toml`
+- `bench/scenes/water/lake-water-oblique-reflection.toml`
+- `bench/scenes/water/ocean-water-reference.toml`
+- `bench/scenes/water/river-water-reference.toml`
+- `bench/scenes/water/shallow-shore-reference.toml`
 
 ## Required Counters
 - `Counter Water Bodies Total`
@@ -27,3 +27,4 @@
 - Ocean remains active and wavy.
 - Shore foam appears only at edges.
 - LOD transitions do not visibly change the same lake.
+

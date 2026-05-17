@@ -12,7 +12,7 @@ Files:
 Bench command:
 
 ```powershell
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 ```
 
 Summary:

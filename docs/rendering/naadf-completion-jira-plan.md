@@ -448,7 +448,7 @@ Verification:
 
 ```powershell
 rtk cargo check --features naadf
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-PIPE-003: Add Render Graph Node For NAADF Preview
@@ -487,7 +487,7 @@ Verification:
 
 ```powershell
 rtk cargo check --features naadf
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-PIPE-004: Implement Preview Composite Pass
@@ -524,7 +524,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-PIPE-005: Add Runtime Controls And Diagnostics
@@ -600,7 +600,7 @@ Verification:
 
 ```powershell
 rtk cargo test --features naadf rendering::naadf::preview --lib
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-FILTER-002: Implement Spatial Resampling Entry Point
@@ -634,7 +634,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-FILTER-003: Add Denoise Split / A-Trous Equivalent
@@ -669,7 +669,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -708,7 +708,7 @@ Verification:
 
 ```powershell
 rtk cargo test --features naadf rendering::radiance_cascades --lib
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-GI-002: Implement Minimal GI Trace Pass
@@ -743,7 +743,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ## Epic NAADF-UPSTREAM: Optional Upstream Parity Extensions
@@ -779,7 +779,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 ### NAADF-UPSTREAM-002: Entity And Dynamic Voxel Support
@@ -861,8 +861,8 @@ Depends on: NAADF-PIPE-003
 Target files:
 
 ```text
-bench/scenes/visual-regression-naadf-preview.toml
-bench/scenes/visual-regression-naadf-gi.toml
+bench/scenes/naadf/visual-regression-naadf-preview.toml
+bench/scenes/naadf/visual-regression-naadf-gi.toml
 src/bench/*
 ```
 
@@ -885,7 +885,7 @@ Acceptance criteria:
 Verification:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression-naadf-preview.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml
 ```
 
 ### NAADF-VERIFY-002: Add Bench Guard Metrics
@@ -951,7 +951,7 @@ Verification:
 
 ```powershell
 rtk cargo test --features naadf rendering::naadf --lib
-rtk cargo run --release -- --bench bench/scenes/visual-regression-naadf-preview.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -995,3 +995,4 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 - Removing current SDF GI fallback.
 - Replacing Surface Nets, blocky terrain, water, props, weather, fog, or PBR materials.
 - Claiming performance improvements before release bench comparisons exist.
+

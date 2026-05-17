@@ -274,7 +274,7 @@ Measure runtime and editor viewport performance.
 - Run the repo release bench before and after runtime/viewport changes:
 
 ```powershell
-cargo run --release -- --bench bench/scenes/visual-regression.toml
+cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 - Compare `bench-runs/<run>/summary.json`.
@@ -320,3 +320,4 @@ cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 - The viewport renders sampled world surfaces, not full mesh buffers.
 - Desktop mode still depends on the local bridge being started externally until DVX-EDT-102 lands.
 - Release render benchmarks have not been run for the editor viewport work.
+

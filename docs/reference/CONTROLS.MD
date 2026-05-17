@@ -36,7 +36,7 @@ All F3 overlay sub-toggles use `Alt+`.
 * **Alt+N**: Toggle Multiplayer Debug Info
 * **Alt+C**: Toggle Chunk Statistics (uniformity, LOD, mesh counts)
 * **Alt+P**: Toggle Prop Debug (targeted prop, alpha/fade info)
-* **Alt+B**: Toggle Chunk Border Overlay (wireframe boxes per loaded chunk, colored by LOD)
+* **Alt+K**: Toggle Chunk Border Overlay (wireframe boxes per loaded chunk, colored by LOD)
 
 ### Adaptive GI Controls
 

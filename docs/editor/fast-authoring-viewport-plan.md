@@ -140,7 +140,7 @@ rtk npm run test:smoke
 - For changes that can affect rendering, terrain meshing, props, shadows, water, post-processing, or frame timing, follow the repo profiling workflow:
 
 ```bash
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 - Compare `bench-runs/<run>/summary.json`, inspect fixed checkpoint screenshots for visual changes, and run `bench_guard` when the change touches known bottlenecks.
@@ -153,3 +153,4 @@ rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
 - Voxel selection, brush preview, protected area overlays, chunk/grid overlays, dirty chunk feedback, and atlas previews are visible in the authoring viewport.
 - Runtime commands remain the source of truth for actual voxel, protected area, and atlas changes.
 - Protected/unbreakable areas are not represented as durable game rules until their persistence path is implemented.
+

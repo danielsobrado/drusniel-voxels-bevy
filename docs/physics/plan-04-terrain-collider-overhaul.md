@@ -8,7 +8,7 @@ This plan tracks the terrain-collision rewrite for editable smooth voxel terrain
 - `src/player/spawn.rs` and `src/player/input.rs` still use `ChunkCollider` plus `NeedsCollider` as the gameplay readiness source.
 - `VoxelWorld::sample_voxel_for_collision` already provides conservative sampling for missing chunks, horizontal world bounds, and the bedrock crust.
 - Surface Nets visual meshing already samples a padded boundary, so the overhaul should not start by changing visual mesh padding.
-- `bench/scenes/collider-walk-log.toml` is the required route bench for collider work.
+- `bench/scenes/collider/collider-walk-log.toml` is the required route bench for collider work.
 
 ## Target Architecture
 
@@ -35,7 +35,7 @@ The render mesh should stop being the authoritative terrain collider. The prefer
 
 ## Acceptance Criteria
 
-- Zero uncontrolled player fall-throughs in `bench/scenes/collider-walk-log.toml`.
+- Zero uncontrolled player fall-throughs in `bench/scenes/collider/collider-walk-log.toml`.
 - Zero stale terrain collider revisions published.
 - Player support-prism readiness is at least 99.9 percent during normal traversal.
 - Foreground collider swap time remains inside the chosen frame budget.
@@ -53,3 +53,4 @@ Phase 1 is partially implemented:
 - unit tests for state classification and revision transitions
 
 Next implementation slice: build the authoritative occupancy cache without changing the live collider payload.
+

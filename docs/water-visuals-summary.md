@@ -168,7 +168,7 @@ The toggles also accept env overrides: `VOXEL_WATER_GERSTNER`, `VOXEL_WATER_VORO
 Each Noble-derived WGSL file credits "Noble Shaders by Belmu (GPL-3.0)". This repo has no explicit license file, so distributing these ports may impose GPL-3.0 obligations on the combined shader work.
 
 ### Bench Notes
-Attempted `cargo run --release -- --bench bench/scenes/visual-regression.toml`:
+Attempted `cargo run --release -- --bench bench/scenes/visual/visual-regression.toml`:
 - Toggles off run: `bench-runs/2026-05-10T10-20-42Z`
 - Toggles on run via env vars: `bench-runs/2026-05-10T10-30-44Z`
 - No `summary.json` was written because the bench hit readiness/render-ready timeouts. The off run timed out on `ridge-run-noon` and `jump-water-sunset`; the on run produced checkpoint CSVs/screenshots but was stopped by the command timeout before summary finalization.
@@ -179,3 +179,4 @@ Common CSV snapshot, not a replacement for `summary.json`:
 - `jump-water-sunset`: `__frame_total` 13.108 ms off vs 16.901 ms on; `Render Graph CPU` 7.254 ms off vs 5.129 ms on.
 
 Because the required summaries were not produced and the common runs used cheap water, these numbers are diagnostic only. A valid before/after needs the bench ready-state issue fixed or a forced-fancy water bench variant that completes and writes `summary.json`.
+

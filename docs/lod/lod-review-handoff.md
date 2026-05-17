@@ -11,7 +11,7 @@ This file captures the interrupted follow-up to an external LOD subsystem review
 - A release visual-regression baseline was started with:
 
 ```bash
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 - The run was stopped before completion at the user's request to create this handoff.
@@ -78,7 +78,7 @@ After code changes:
 ```bash
 rtk cargo test meshing::tests::lod0_transition_boundary_sdf_matches_lower_lod_neighbor_sample
 rtk cargo test voxel::plugin::tests
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 Then inspect:
@@ -94,3 +94,4 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
 Report any bench readiness timeouts or missing screenshots plainly.
+

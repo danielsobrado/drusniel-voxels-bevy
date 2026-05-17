@@ -754,7 +754,7 @@ These are the invariants that should remain true while optimizing further:
 | Initial spawn | `src/player/spawn.rs` | Spawn waits/recovery uses collider readiness and terrain cache. |
 | Player movement guard | `src/player/input.rs` | Movement avoids unknown/pending ground columns. |
 | Collider walk bench | `src/bench/mod.rs` | Gameplay readiness gate, collider counters, route/fall-through metrics. |
-| Collider route scene | `bench/scenes/collider-walk-log.toml` | Main regression scene for spawn, old-hole route, and dig crust. |
+| Collider route scene | `bench/scenes/collider/collider-walk-log.toml` | Main regression scene for spawn, old-hole route, and dig crust. |
 
 ## Failure Mode Playbook
 
@@ -869,7 +869,7 @@ __frame_total
 Use the required release bench and guard:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
+rtk cargo run --release -- --bench bench/scenes/collider/collider-walk-log.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -878,7 +878,7 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 Required bench command:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
+rtk cargo run --release -- --bench bench/scenes/collider/collider-walk-log.toml
 ```
 
 Latest measured run:
@@ -1026,3 +1026,4 @@ The following criteria are currently met by the latest bench run:
 6. Consider a dirty-chunk set for `TerrainCollisionCache` so steady-state cache updates do not allocate and sort all chunk mesh positions.
 7. Optimize `filled_core_coords` only if the voxel collider mode becomes a validated target; it is not on the default trimesh path.
 8. Consider an explicit `Empty` or `NoGeometry` state if failed-bake counters include valid air-only chunks.
+

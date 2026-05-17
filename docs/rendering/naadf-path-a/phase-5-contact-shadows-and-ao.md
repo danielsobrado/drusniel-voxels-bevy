@@ -135,7 +135,7 @@ toggles. Proceed to Phase 6.
 ```powershell
 rtk cargo check --features naadf
 rtk cargo test --features naadf rendering::radiance_cascades --lib
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 

@@ -93,7 +93,7 @@ the unused NAADF bindings are expensive.
 ```powershell
 rtk cargo check --features naadf
 rtk cargo test --features naadf rendering::radiance_cascades --lib
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -104,7 +104,7 @@ rtk cargo check
 rtk cargo check --features naadf
 rtk cargo test --features naadf rendering::radiance_cascades --lib
 rtk cargo test --features naadf rendering::naadf --lib
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 rtk cargo run --bin bench_guard -- bench-runs/2026-05-16T14-33-26Z/summary.json
 ```
 

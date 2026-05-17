@@ -109,13 +109,30 @@ fn resolve_bench_scene_path(requested: &Path) -> PathBuf {
         return requested.to_path_buf();
     };
 
-    let fallback = Path::new("bench")
-        .join("scenes")
-        .join("naadf")
-        .join(file_name);
+    let scenes_root = Path::new("bench").join("scenes");
 
-    if fallback.exists() {
-        return fallback;
+    let direct = scenes_root.join(file_name);
+    if direct.exists() {
+        return direct;
+    }
+
+    let mut dirs = vec![scenes_root];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+
+            if path.file_name() == Some(file_name) {
+                return path;
+            }
+        }
     }
 
     requested.to_path_buf()

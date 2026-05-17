@@ -504,11 +504,11 @@ Tasks:
 - Add bench scenes:
 
 ```text
-bench/scenes/visual-regression-naadf-current.toml
-bench/scenes/visual-regression-naadf-gi.toml
-bench/scenes/visual-regression-naadf-preview.toml
-bench/scenes/gameplay-movement-naadf-smoke.toml
-bench/scenes/dig-edit-naadf-stability.toml
+bench/scenes/naadf/visual-regression-naadf-current.toml
+bench/scenes/naadf/visual-regression-naadf-gi.toml
+bench/scenes/naadf/visual-regression-naadf-preview.toml
+bench/scenes/naadf/gameplay-movement-naadf-smoke.toml
+bench/scenes/naadf/dig-edit-naadf-stability.toml
 ```
 
 - Extend `bench_guard` for max NAADF memory, max dirty queue age, max average ray steps, max frame-time regression, and screenshot diff thresholds if available.
@@ -559,16 +559,16 @@ All performance-sensitive NAADF work must follow the repo profiling rules.
 Baseline:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 Useful variants:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression-high.toml
-rtk cargo run --release -- --bench bench/scenes/visual-regression-performance100.toml
-rtk cargo run --release -- --bench bench/scenes/visual-regression-live-lod.toml
-rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression-high.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression-performance100.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression-live-lod.toml
+rtk cargo run --release -- --bench bench/scenes/collider/collider-walk-log.toml
 ```
 
 For every claimed improvement:
@@ -616,3 +616,4 @@ v0.7:
 v0.8+:
   Decide whether NAADF can become a primary terrain renderer.
 ```
+

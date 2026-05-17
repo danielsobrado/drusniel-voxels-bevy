@@ -62,10 +62,10 @@ rtk cargo test --features naadf --test naadf_gpu_layout
 Release evidence before claiming visual or performance parity:
 
 ```powershell
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-current.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-startup-stability.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-current.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-startup-stability.toml
 rtk cargo run --bin bench_guard -- <summary.json> ...
 ```
 

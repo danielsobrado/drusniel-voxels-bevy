@@ -87,7 +87,7 @@ src/rendering/naadf/pipeline.rs         (shader path + handle constant)
 ```powershell
 rtk cargo check --features naadf
 rtk cargo test --features naadf rendering::naadf --lib
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml
 ```
 
 Compare the preview bench fixed-checkpoint screenshots against the pre-phase

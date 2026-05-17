@@ -32,7 +32,8 @@ This system does not implement weather physics. It does not spawn CPU rain or sn
 Weather changes that affect rendering should be checked with a release bench:
 
 ```powershell
-cargo run --release -- --bench bench/scenes/visual-regression.toml
+cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 Compare `bench-runs/<run>/summary.json` before and after. Use the weather counters and timing rows such as `Weather Rain Factor`, `Weather Overlay Density`, `Weather Overlay Pass Active`, `Material Sync Weather`, `Weather Fog Mult`, `Weather GodRay Intensity Mult`, and water weather boost counters. Do not add overlapping timing rows together.
+

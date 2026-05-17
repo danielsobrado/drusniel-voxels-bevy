@@ -6,10 +6,10 @@ Keep profiling in the loop as features are added. Rendering work in this repo is
 
 - Use `cargo run --release -- --bench ...` for any change that could affect frame time, render passes, terrain meshing, props, water, shadows, or post effects.
 - Prefer the deterministic visual bench scenes so runs are comparable:
-  - `bench/scenes/visual-regression.toml`
-  - `bench/scenes/visual-regression-high.toml`
-  - `bench/scenes/visual-regression-performance100.toml`
-  - `bench/scenes/visual-regression-live-lod.toml`
+  - `bench/scenes/visual/visual-regression.toml`
+  - `bench/scenes/visual/visual-regression-high.toml`
+  - `bench/scenes/visual/visual-regression-performance100.toml`
+  - `bench/scenes/visual/visual-regression-live-lod.toml`
 - Compare the generated `bench-runs/<run>/summary.json` before and after the change.
 - Do not sum broad timing rows such as Render Graph, Render Prepare, QueueMeshes, or nested prepare brackets. Treat them as separate symptoms.
 - Use the fixed screenshot checkpoints from the bench output to check visual stability.

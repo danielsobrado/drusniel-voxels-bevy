@@ -7,31 +7,31 @@ NAADF performance work should use release benches and fixed scenes. Do not claim
 Current reference:
 
 ```bash
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-current.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-current.toml
 ```
 
 GI experiment:
 
 ```bash
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 ```
 
 Preview experiment:
 
 ```bash
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml
 ```
 
 Live LOD stress:
 
 ```bash
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-live-lod.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-live-lod.toml
 ```
 
 Heavy edit stress:
 
 ```bash
-rtk cargo run --release --features naadf -- --bench bench/scenes/dig-edit-naadf-stability.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/dig-edit-naadf-stability.toml
 ```
 
 ## A/B Workflow

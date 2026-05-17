@@ -7,9 +7,9 @@
 ### Benchmarking
 
 ```powershell
-cargo run --release -- --bench bench/scenes/default.toml
-cargo run --release -- --bench bench/scenes/visual-regression.toml
-cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+cargo run --release -- --bench bench/scenes/visual/default.toml
+cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
+cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 Output: 
@@ -29,14 +29,14 @@ Before a checkpoint starts moving, the bench now waits for both terrain readines
 
 Bench scenes can also set `[render_toggles]` for A/B diagnosis only: `disable_instanced_props`, `disable_water_meshes`, `disable_buildings`, `disable_shadows`, `disable_reflection_cameras`, `force_instanced_props_transparent`, `force_cutout_props_alpha_mask`, `force_instanced_props_opaque`, `disable_prop_lod_hiding`, `disable_prop_shadow_lod`, `terrain_material_quality`, `disable_terrain_material_lod`, `prop_subcluster_grid`, and `quality_preset`. Terrain material quality accepts `auto`, `full_triplanar`, `cheap_triplanar`, `single_projection_far`, or `atlas_only_debug`; `prop_subcluster_grid` accepts `0`, `2`, or `4`; `quality_preset` accepts `low`, `medium`, `high`, or `performance100`. 
 
-`Performance100` keeps near-field terrain on the High path while tightening prop LOD/shadow distances, switching far terrain material earlier, and lowering nearby water reflection cost. For example, `bench/scenes/forest-ab-disable-instanced-props.toml` runs the forest look sweep with prop instancing removed from the render queue.
+`Performance100` keeps near-field terrain on the High path while tightening prop LOD/shadow distances, switching far terrain material earlier, and lowering nearby water reflection cost. For example, `bench/scenes/forest/forest-ab-disable-instanced-props.toml` runs the forest look sweep with prop instancing removed from the render queue.
 
-`bench/scenes/visual-regression-performance100.toml` runs the deterministic visual paths with the 100 FPS performance preset enabled.
+`bench/scenes/visual/visual-regression-performance100.toml` runs the deterministic visual paths with the 100 FPS performance preset enabled.
 
-`bench/scenes/visual-regression-high.toml` pins the same paths to the High preset for direct A/B comparison.
+`bench/scenes/visual/visual-regression-high.toml` pins the same paths to the High preset for direct A/B comparison.
 
 
-`bench/scenes/visual-regression-live-lod.toml` runs the same visual paths with `freeze_terrain_lod_after_ready = false` to profile live terrain LOD behavior during camera motion.
+`bench/scenes/visual/visual-regression-live-lod.toml` runs the same visual paths with `freeze_terrain_lod_after_ready = false` to profile live terrain LOD behavior during camera motion.
 
 Run the regression guard after a visual bench to catch known render bottlenecks:
 
@@ -50,4 +50,5 @@ Pass both the visual bench and direct-water summaries when validating water refl
 ```powershell
 cargo run --bin bench_guard -- bench-runs/<visual-run>/summary.json bench-runs/<direct-water-run>/summary.json
 ```
+
 

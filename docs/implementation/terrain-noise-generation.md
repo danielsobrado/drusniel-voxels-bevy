@@ -37,7 +37,8 @@ This failed before the targeted tests ran because Windows could not mmap the lar
 Baseline visual regression bench was attempted before the change with an isolated bench lock because the shared runtime lock was already held:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 The bench acquired the isolated lock and reached `ridge-run-noon`, then exited nonzero after a render-ready timeout. No usable before/after `summary.json` comparison was produced for this item.
+

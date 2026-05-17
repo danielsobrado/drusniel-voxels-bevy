@@ -54,7 +54,7 @@ A four-phase implementation. Each phase ends in a runnable, verifiable artifact.
 |---|---|---|
 | **A** Telemetry | F3 overlay shows per-area frame breakdown; F4 dumps CSV; `--features tracy` builds and connects | The user can read where time is spent in any frame |
 | **B** Bench harness | `cargo run --release -- --bench <scene.toml>` runs scripted camera, dumps `summary.json` per checkpoint | A second invocation of the same scene reproduces median frame time within ±10% |
-| **C** Fog cleanup | `FogQuality { Off, Low, Medium, High }` resource, default `Medium`, integrated-GPU auto-`Off`, night gating, throttled atmosphere update | Bench against `bench/scenes/fog-tiers.toml` shows monotonic `Volumetric Fog` cost decrease across tiers |
+| **C** Fog cleanup | `FogQuality { Off, Low, Medium, High }` resource, default `Medium`, integrated-GPU auto-`Off`, night gating, throttled atmosphere update | Bench against `bench/scenes/visual/fog-tiers.toml` shows monotonic `Volumetric Fog` cost decrease across tiers |
 | **D** Autonomous loop driver | `tools/perf-loop/` Rust (or Python) script that runs the bench, parses `summary.json`, selects the hottest area against a rule table, opens a branch, applies a candidate fix, re-runs, commits if faster, reverts if not | Running `tools/perf-loop --budget 10` produces 0–10 commits, each with a measurable improvement, and a `loop-report.md` |
 
 Phases A → B → C are linear. Phase D consumes A and B; it does not require C to be merged but works better with it as a smoke test.
@@ -159,7 +159,7 @@ Add (or reuse if already present) `clap` and parse:
 
 ### 4.2 Scene file format
 
-TOML, hand-editable. Place a working example at `bench/scenes/default.toml`:
+TOML, hand-editable. Place a working example at `bench/scenes/visual/default.toml`:
 
 ```toml
 seed = 12345
@@ -185,7 +185,7 @@ hold_frames = 240
 screenshot = true
 ```
 
-A second scene `bench/scenes/fog-tiers.toml` visits one fixed location with `fog_tier` cycling `high → medium → low → off`. This is the smoke test for Phase C.
+A second scene `bench/scenes/visual/fog-tiers.toml` visits one fixed location with `fog_tier` cycling `high → medium → low → off`. This is the smoke test for Phase C.
 
 ### 4.3 Bench plugin
 
@@ -265,13 +265,13 @@ Schema (this is the **stable contract** Phase D reads — do not change without 
 Add a "Benchmarking" subsection under "Profiling":
 
 ```
-cargo run --release -- --bench bench/scenes/default.toml
+cargo run --release -- --bench bench/scenes/visual/default.toml
 # Output: bench-runs/<timestamp>/summary.json + per-checkpoint CSV + screenshots
 ```
 
 ### 4.6 Phase B — Done means
 
-- `cargo run --release -- --bench bench/scenes/default.toml` exits 0 and produces a complete `summary.json` with one entry per checkpoint, all `median_frame_ms` numeric (no `null`s), `__frame_total` row present in every CSV.
+- `cargo run --release -- --bench bench/scenes/visual/default.toml` exits 0 and produces a complete `summary.json` with one entry per checkpoint, all `median_frame_ms` numeric (no `null`s), `__frame_total` row present in every CSV.
 - Two consecutive runs against the same scene file produce median frame ms within ±10% per checkpoint (the determinism check). If not, document the residual nondeterminism source in the PR — do not paper over it.
 - Without `--bench`, the game boots normally — full regression check.
 - PR includes the actual `summary.json` from a real run, pasted inline.
@@ -299,7 +299,7 @@ Default `current_preset` in `assets/config/fog.yaml` changes from `god_rays` →
 
 ### 5.1 Phase C — Done means
 
-- Bench `cargo run --release -- --bench bench/scenes/fog-tiers.toml` runs to completion. The resulting `summary.json` shows monotonic `Volumetric Fog` cost decrease across `high → medium → low → off`. If it doesn't, the tier plumbing is broken — fix it, do not ship.
+- Bench `cargo run --release -- --bench bench/scenes/visual/fog-tiers.toml` runs to completion. The resulting `summary.json` shows monotonic `Volumetric Fog` cost decrease across `high → medium → low → off`. If it doesn't, the tier plumbing is broken — fix it, do not ship.
 - Three screenshots (noon outdoors, sunset outdoors, indoors with sunbeams) at default tier `Medium` show fog still reads as fog.
 - Forcing `GraphicsCapabilities::integrated_gpu = true` (temporary patch — revert before commit) auto-disables fog and the F3 overlay reflects this.
 
@@ -314,7 +314,7 @@ This is the headline deliverable. A standalone tool at `tools/perf-loop/` that d
 ### 6.1 Invocation
 
 ```
-tools/perf-loop --budget 10 --scene bench/scenes/default.toml --baseline-runs 3
+tools/perf-loop --budget 10 --scene bench/scenes/visual/default.toml --baseline-runs 3
 ```
 
 Flags:
@@ -322,7 +322,7 @@ Flags:
 | Flag | Meaning | Default |
 |---|---|---|
 | `--budget N` | Max iterations before stopping | 5 |
-| `--scene <path>` | Bench scene to drive each iteration | `bench/scenes/default.toml` |
+| `--scene <path>` | Bench scene to drive each iteration | `bench/scenes/visual/default.toml` |
 | `--baseline-runs N` | Run baseline this many times before iteration 1 to establish noise floor | 3 |
 | `--target-area <name>` | If set, optimize only this area; otherwise pick hottest by avg cost rank | unset |
 | `--min-improvement-ms <f>` | Minimum frame_ms median improvement to accept | 0.5 |
@@ -422,7 +422,7 @@ Generated at the end of the run, committed to the branch root:
 # Perf loop report
 
 - Branch: perf/auto-2026-05-01T12-34-56Z
-- Scene: bench/scenes/default.toml
+- Scene: bench/scenes/visual/default.toml
 - Budget: 10, used: 4
 - Baseline median frame ms: 16.40
 - Final median frame ms:    11.20  (-5.20 ms, -31.7%)
@@ -495,7 +495,7 @@ Hard exclusions. If you find yourself drifting toward any of these, stop and re-
 1. Read this file and `docs/performance-analysis-research.md`. Read `src/performance/`, `src/atmosphere/fog.rs`, `src/voxel/plugin.rs`, `assets/config/fog.yaml`. Time budget: 30 min. If anything in this brief contradicts what you observe in the code (e.g. `area_timer` is structured differently than described), trust the code and adapt — flag the discrepancy in the PR.
 2. Implement Phase A. Validate by running and inspecting CSV output. Commit. Stop here and surface the diff for review before continuing — the user may have feedback that changes B/C/D.
 3. Implement Phase B. Validate two-runs-within-10%. Commit. Surface for review.
-4. Implement Phase C. Validate against `bench/scenes/fog-tiers.toml`. Commit. Surface for review.
+4. Implement Phase C. Validate against `bench/scenes/visual/fog-tiers.toml`. Commit. Surface for review.
 5. Implement Phase D. Run `--dry-run` against `main`, then a real `--budget 3` run, attach `loop-report.md` to the PR.
 
 **Stop and ask for guidance** if any of these happens:
@@ -514,7 +514,7 @@ When all four phases are done, the workspace contains:
 - `src/performance/…` — extended timing, with p99 percentile tracking.
 - `src/interaction/debug.rs` — F3 overlay table, F4 dump, fog tier display.
 - `src/bench/` — bench plugin, scene loader, screenshot, summary.json writer.
-- `bench/scenes/default.toml`, `bench/scenes/fog-tiers.toml`.
+- `bench/scenes/visual/default.toml`, `bench/scenes/visual/fog-tiers.toml`.
 - `src/atmosphere/fog.rs` + `src/atmosphere/config.rs` + `assets/config/fog.yaml` — `FogQuality`, gating, throttling.
 - `src/menu/settings.rs` + `src/menu/settings_persistence.rs` — fog quality dropdown.
 - `tools/perf-loop/` — the loop driver, with rule table, tests, and CLI.
@@ -525,3 +525,4 @@ When all four phases are done, the workspace contains:
 - `bench-runs/<timestamp>/summary.json` + CSVs + screenshots — at least one real run committed to demonstrate the harness works.
 
 The user's only manual step in the long-term loop is: glance at the screenshots, accept or reject the visual change, push the branch.
+

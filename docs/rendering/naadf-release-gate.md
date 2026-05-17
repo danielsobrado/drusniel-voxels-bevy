@@ -42,7 +42,13 @@ traversal because the active render-app pass is not yet perf-neutral.
 | Contact shadows | `bench-runs/phase5-contact-sdf/summary.json` | `bench-runs/phase5-contact-naadf/summary.json` | NAADF neutral/win: 35.74 -> 35.24 ms median, 41.01 -> 38.64 ms p99. |
 | Terrain AO | `bench-runs/phase5-terrain-ao-sdf/summary.json` | `bench-runs/phase5-terrain-ao-naadf/summary.json` | NAADF neutral/win: 35.51 -> 35.35 ms median, 39.92 -> 38.22 ms p99. |
 | GI secondary | `bench-runs/phase6-gi-sdf/summary.json` | `bench-runs/path-a-review-gi-secondary-active/summary.json` | Active NAADF pass is not perf-neutral: 36.97 -> 54.94 ms median, 39.13 -> 69.09 ms p99. |
-| All Path A queries | `bench-runs/path-a-review-default-routing-final/summary.json` | `bench-runs/path-a-review-all-active-final2/summary.json` | Active all-query path is opt-in only: default routing reports pass active 0 and all-query reports pass active 1 with 2/1/4 rays per pixel. |
+| All Path A queries | `bench-runs/path-a-review-default-routing-final/summary.json` | `bench-runs/deep-review-all-active/summary.json` | Active all-query path is opt-in only: default routing reports pass active 0, and the 2026-05-17 review run reports pass active 1 with 2/1/4 rays per pixel at 40.31 ms median / 57.80 ms p99. |
+
+The sun/contact/AO per-query rows predate the `naadf.radiance_cascade_pass_active`
+counter, so they are retained as historical per-query timing evidence. Use the
+all-query review run above as the current proof that the render-app pass is
+active and NAADF-routed until those individual scenes are rerun with current
+counters.
 
 All accepted NAADF Phase 5, Phase 6, Phase 7, and review runs passed `bench_guard`
 with `PASS: 187 check(s), 0 warning(s).`

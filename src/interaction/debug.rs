@@ -412,8 +412,10 @@ pub fn toggle_debug_details(
         );
     }
 
-    // Chunk-border overlay toggle (Alt+B "Borders")
-    if alt_held && keyboard.just_pressed(KeyCode::KeyB) {
+    // Chunk-border overlay toggle (Alt+K). Moved off Alt+B because KeyB also
+    // drives building mode and the prop-bounds debug toggle, so Alt+B fired all
+    // three at once and locked out movement/aiming.
+    if alt_held && keyboard.just_pressed(KeyCode::KeyK) {
         toggles.show_chunk_borders = !toggles.show_chunk_borders;
         info!(
             "Debug toggle: Chunk Borders = {}",
@@ -496,7 +498,7 @@ pub fn toggle_terrain_lod(
     world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::Lod);
 }
 
-/// Draws a wireframe box per loaded chunk, coloured by LOD level (Alt+B).
+/// Draws a wireframe box per loaded chunk, coloured by LOD level (Alt+K).
 ///
 /// Lets LOD-boundary artifacts be matched to the chunk grid: the colours of the
 /// two boxes meeting at a crack reveal which LOD levels border there, and which

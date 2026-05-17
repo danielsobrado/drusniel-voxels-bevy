@@ -154,11 +154,11 @@ Updated:
 
 Added:
 
-- `bench/scenes/visual-regression-naadf-current.toml`
-- `bench/scenes/visual-regression-naadf-gi.toml`
-- `bench/scenes/visual-regression-naadf-preview.toml`
-- `bench/scenes/gameplay-movement-naadf-smoke.toml`
-- `bench/scenes/dig-edit-naadf-stability.toml`
+- `bench/scenes/naadf/visual-regression-naadf-current.toml`
+- `bench/scenes/naadf/visual-regression-naadf-gi.toml`
+- `bench/scenes/naadf/visual-regression-naadf-preview.toml`
+- `bench/scenes/naadf/gameplay-movement-naadf-smoke.toml`
+- `bench/scenes/naadf/dig-edit-naadf-stability.toml`
 
 Details:
 
@@ -842,7 +842,7 @@ Details:
 
 Added:
 
-- `bench/scenes/visual-regression-naadf-live-lod.toml`
+- `bench/scenes/naadf/visual-regression-naadf-live-lod.toml`
 
 Details:
 
@@ -947,7 +947,7 @@ Details:
 
 Updated:
 
-- `bench/scenes/dig-edit-naadf-stability.toml`
+- `bench/scenes/naadf/dig-edit-naadf-stability.toml`
 
 Details:
 
@@ -1304,7 +1304,7 @@ Updated behavior:
 
 Verification:
 
-- `rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-preview.toml`
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview.toml`
   - Run: `bench-runs/2026-05-16T08-05-08Z/summary.json`
   - Median / p99 frame: 41.34 ms / 74.42 ms
   - `naadf.streaming_interest_chunks = 7584`
@@ -1313,7 +1313,7 @@ Verification:
   - `naadf.gpu_uploads_pending = 0`
   - `naadf.uploaded_chunks_peak = 1309`
   - Settled screenshot visually contains the high mountain cap and far structures.
-- `rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-startup-stability.toml`
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-startup-stability.toml`
   - Run: `bench-runs/2026-05-16T08-12-27Z/summary.json`
   - Median / p99 frame: 41.59 ms / 71.66 ms
   - First staged screenshot at frame 120 (`elapsed_secs = 63.90`) was already visually stable for the tested checkpoint.

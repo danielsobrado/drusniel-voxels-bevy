@@ -90,7 +90,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 4: Spawn-Overlap Preflight And Resolution
@@ -131,7 +131,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 6: Collision Filtering Hardening
@@ -174,7 +174,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 8: Raycast And Shape Query Polish
@@ -219,7 +219,7 @@ rtk cargo run --release -- --bench bench/scenes/physics-stacking-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
-If a new bench is too broad, extend `bench/scenes/gameplay-movement-smoke.toml` and document the reason.
+If a new bench is too broad, extend `bench/scenes/collider/gameplay-movement-smoke.toml` and document the reason.
 
 ## Task 10: Runtime Physics Debug Overlay
 
@@ -282,7 +282,7 @@ Then rebuild the editor runtime sidecar and restart the desktop editor from `edi
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 Compare collider build rows before and after cache work.
@@ -304,8 +304,8 @@ Compare collider build rows before and after cache work.
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/visual-regression-performance100.toml
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression-performance100.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 14: Bench Counters And Guardrails
@@ -325,7 +325,7 @@ rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -346,7 +346,7 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 Run any new smoke scene added by this task.
@@ -392,7 +392,7 @@ rtk cargo test
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -427,3 +427,4 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ## Engine Status After Plan 3
 
 The project has a production-oriented Bevy/Avian physics workflow: documented authoring, verified contact behavior, filtered queries, sensors, debug visibility, and performance guardrails.
+

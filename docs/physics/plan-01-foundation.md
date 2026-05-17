@@ -123,7 +123,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 Read `bench-runs/<run>/summary.json` and report collider build/update rows plus movement smoke status.
@@ -145,7 +145,7 @@ Read `bench-runs/<run>/summary.json` and report collider build/update rows plus 
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 7: Add Physics Query Facade
@@ -172,7 +172,7 @@ rtk cargo test physics
 
 **Files:**
 
-- Create or modify: `bench/scenes/gameplay-movement-smoke.toml`
+- Create or modify: `bench/scenes/collider/gameplay-movement-smoke.toml`
 - Modify bench harness only if it needs a physics assertion hook
 
 - [ ] Keep the existing player sprint/jump stall assertions.
@@ -183,7 +183,7 @@ rtk cargo test physics
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -212,3 +212,4 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 - Material tuning for friction, restitution, and slopes.
 - Dynamic props and projectile behavior.
 - Editor diagnostics and runtime physics panels.
+

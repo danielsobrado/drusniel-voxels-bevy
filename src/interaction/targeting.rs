@@ -16,7 +16,7 @@ use bevy::window::PrimaryWindow;
 
 const EDITOR_SELECTION_RANGE: f32 = 512.0;
 
-/// Extended crosshair reach used while the Alt+B chunk-border overlay is on, so
+/// Extended crosshair reach used while the Alt+K chunk-border overlay is on, so
 /// distant terrain (e.g. LOD cracks) can be aimed at, highlighted, and probed
 /// with Shift+F9. Falls back to `INTERACTION_RANGE` when the overlay is off.
 const DEBUG_TARGET_RANGE: f32 = 512.0;
@@ -182,7 +182,7 @@ pub fn update_targeted_block(
         let origin = transform.translation;
         let direction = transform.forward().as_vec3();
 
-        // Reach farther while the Alt+B chunk-border overlay is on so distant
+        // Reach farther while the Alt+K chunk-border overlay is on so distant
         // LOD cracks can be targeted for the Shift+F9 terrain hole probe.
         let range = if debug_toggles.show_chunk_borders {
             DEBUG_TARGET_RANGE

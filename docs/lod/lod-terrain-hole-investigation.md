@@ -149,7 +149,7 @@ boundary plane).
 | --- | --- | --- | --- |
 | 1 | Vertical skirt apron for Y-face LOD boundaries | `skirt.rs` | **On-target after all** — the prior session built this, then wrongly concluded the crack was not a LOD boundary and demoted it. It is the right area; it is just too small/conditional (see "mitigation insufficient"). Unverified visually. |
 | 2 | `Alt+0` force-Lod0 toggle | `interaction/debug.rs` | Diagnostic. Direct-sets every chunk to Lod0 with snapshot/restore; recomputes if the camera moves. |
-| 3a | `Alt+B` chunk-border overlay + LOD histogram | `interaction/debug.rs` | Diagnostic. **This overlay produced the corrected finding** once read properly. |
+| 3a | `Alt+K` chunk-border overlay + LOD histogram | `interaction/debug.rs` | Diagnostic. **This overlay produced the corrected finding** once read properly. (Toggle key moved off `Alt+B`, which collided with building mode + prop-bounds debug.) |
 | 3b | LOD coherence pass + `MAX_LOD_CHANGES_PER_UPDATE` 4→32 | `plugin.rs` | Targets LOD island scatter. The 4→32 bump *reduces* transition backlog and so should reduce vertical-mismatch crack churn — partially relevant to the real bug, not a full fix. |
 | 4 | NAADF debug overlay recoloured to a cool palette | `rendering/naadf/debug.rs` | Cleanup; avoids overlay confusion. |
 
@@ -174,7 +174,7 @@ boundary plane).
 - **Shift+F9** — terrain hole probe; dumps `debug/terrain-hole-probe-*.json`
   with per-chunk LOD, neighbour LODs, and surface-mismatch flags. **Use this to
   confirm the hypothesis.**
-- **Alt+B** — chunk-border overlay, box per terrain chunk coloured by LOD
+- **Alt+K** — chunk-border overlay, box per terrain chunk coloured by LOD
   (Lod0 green, Lod1 yellow, Lod2 orange, Lod3 red, Culled grey); logs the LOD
   histogram on enable.
 - **Alt+0** — force every loaded chunk to Lod0 (snapshot + restore). Run it

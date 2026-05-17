@@ -33,8 +33,9 @@ Use the narrowest verification that covers the change, then run the gameplay ben
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
 For editor-visible physics changes, rebuild the editor runtime sidecar and restart the desktop editor from `editor/frontend` before reporting that the editor path was verified.
+

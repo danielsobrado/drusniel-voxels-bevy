@@ -117,7 +117,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 5: Primitive Body Authoring Coverage
@@ -196,7 +196,7 @@ rtk cargo test physics_solver_behavior
 
 ```powershell
 rtk cargo test physics_solver_behavior
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 9: Collision Filtering
@@ -237,7 +237,7 @@ rtk cargo test physics::layers
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 11: Physics Query Facade Integration
@@ -300,7 +300,7 @@ rtk cargo test physics
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/visual-regression-performance100.toml
+rtk cargo run --release -- --bench bench/scenes/visual/visual-regression-performance100.toml
 ```
 
 Report relevant frame timing, prop, and physics rows if prop physics changes affect scene scale.
@@ -322,7 +322,7 @@ Report relevant frame timing, prop, and physics rows if prop physics changes aff
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 Read `bench-runs/<run>/summary.json` and report collider rows plus movement smoke status.
@@ -347,7 +347,7 @@ rtk cargo run --release -- --bench bench/scenes/physics-solver-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
-If adding a new bench scene is too broad, extend `bench/scenes/gameplay-movement-smoke.toml` instead and document the choice.
+If adding a new bench scene is too broad, extend `bench/scenes/collider/gameplay-movement-smoke.toml` instead and document the choice.
 
 ## Task 16: Contact Diagnostics
 
@@ -367,7 +367,7 @@ If adding a new bench scene is too broad, extend `bench/scenes/gameplay-movement
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 ```
 
 ## Task 17: Regression And Performance Review
@@ -387,7 +387,7 @@ rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
 
 ```powershell
 rtk cargo test
-rtk cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/gameplay-movement-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
@@ -423,3 +423,4 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ## Plan 3 Preview
 
 Plan 3 adds runtime/editor diagnostics, collider cache policy, large-world physics budgets, editor-side physics inspection, and a physics authoring guide. It may also add deeper solver/contact visualization if debugging shows a concrete need.
+

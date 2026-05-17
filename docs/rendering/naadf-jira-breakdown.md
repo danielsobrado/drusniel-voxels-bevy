@@ -293,9 +293,9 @@ Files:
 
 ```text
 src/bench/mod.rs
-bench/scenes/visual-regression-naadf-current.toml
-bench/scenes/visual-regression-naadf-gi.toml
-bench/scenes/gameplay-movement-naadf-smoke.toml
+bench/scenes/naadf/visual-regression-naadf-current.toml
+bench/scenes/naadf/visual-regression-naadf-gi.toml
+bench/scenes/naadf/gameplay-movement-naadf-smoke.toml
 ```
 
 Fields:
@@ -1001,10 +1001,10 @@ Goal: validate value before preview renderer.
 Files:
 
 ```text
-bench/scenes/visual-regression-naadf-current.toml
-bench/scenes/visual-regression-naadf-gi.toml
-bench/scenes/visual-regression-naadf-live-lod.toml
-bench/scenes/dig-edit-naadf-stability.toml
+bench/scenes/naadf/visual-regression-naadf-current.toml
+bench/scenes/naadf/visual-regression-naadf-gi.toml
+bench/scenes/naadf/visual-regression-naadf-live-lod.toml
+bench/scenes/naadf/dig-edit-naadf-stability.toml
 ```
 
 Acceptance criteria:
@@ -1127,7 +1127,7 @@ Goal: prove digging/sculpting does not leave broken lighting or hitches.
 Files:
 
 ```text
-bench/scenes/dig-edit-naadf-stability.toml
+bench/scenes/naadf/dig-edit-naadf-stability.toml
 src/bench/mod.rs
 ```
 

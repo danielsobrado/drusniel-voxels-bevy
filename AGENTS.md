@@ -8,13 +8,13 @@ This repo has an active rendering/performance workflow. Treat profiling as part 
 2. Use release benches for performance claims:
 
 ```powershell
-cargo run --release -- --bench bench/scenes/visual-regression.toml
+cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 ```
 
 3. Benchmark variants already exist for common A/B work:
-   - `bench/scenes/visual-regression-high.toml`
-   - `bench/scenes/visual-regression-performance100.toml`
-   - `bench/scenes/visual-regression-live-lod.toml`
+   - `bench/scenes/visual/visual-regression-high.toml`
+   - `bench/scenes/visual/visual-regression-performance100.toml`
+   - `bench/scenes/visual/visual-regression-live-lod.toml`
 4. Read `bench-runs/<run>/summary.json` and compare before/after numbers. Do not add broad timing rows together because some are parent/child or overlapping brackets.
 5. For render investigations, use the built-in counters and timing rows first. If a change claims an improvement, report which rows changed and by how much.
 6. Run the regression guard when the change touches known bottlenecks:
@@ -53,7 +53,7 @@ If you did not profile a performance-sensitive change, say that explicitly inste
 Use the collider walk bench when changing spawn placement, player movement, terrain colliders, terrain readiness, or fall-through guards:
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/collider-walk-log.toml
+rtk cargo run --release -- --bench bench/scenes/collider/collider-walk-log.toml
 ```
 
 This bench drives spawn-adjacent routes, a historical fall-through route, and a dig-crust checkpoint that digs beneath the player and verifies the hard crust rejects below-floor/bedrock edits. It logs player coordinates, validity, collider readiness, stall events, fall-through events, and dig/crust rejection counters, and uses simple path steering to turn at borders and avoid missing ground or steep/blocking terrain.
@@ -198,3 +198,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+

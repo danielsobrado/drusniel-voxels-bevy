@@ -24,7 +24,7 @@ shaders depend on.
 - Run the GI bench scene:
 
   ```powershell
-  rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+  rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
   ```
 
 - Copy the resulting `bench-runs/<run>/summary.json` and fixed-checkpoint
@@ -188,7 +188,7 @@ must add the contact-shadow query site before it can route that mask.
 ## Verification
 
 ```powershell
-rtk cargo run --release --features naadf -- --bench bench/scenes/visual-regression-naadf-gi.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-gi.toml
 ```
 
 ## Risks
