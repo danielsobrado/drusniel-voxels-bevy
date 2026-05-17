@@ -192,7 +192,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(vec3<f32>(blend), 1.0);
     }
     if !reflection_enabled {
-        return base_scene;
+        return vec4<f32>(base_scene.rgb, 1.0);
     }
 
     return vec4<f32>(mix(base_scene.rgb, reflection.rgb, blend), 1.0);

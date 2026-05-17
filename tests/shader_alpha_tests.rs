@@ -21,6 +21,7 @@ fn fullscreen_post_passes_scrub_scene_alpha() {
         ("radiance_cascades.wgsl", radiance_cascades),
     ] {
         assert_not_contains(shader, "return scene;", name);
+        assert_not_contains(shader, "return base_scene;", name);
         assert_not_contains(shader, "scene.a", name);
         assert_not_contains(shader, "base_scene.a", name);
     }

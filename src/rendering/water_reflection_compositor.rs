@@ -23,7 +23,7 @@ use bevy::render::{
         BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
         Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
         RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-        ShaderType, TextureSampleType, binding_types,
+        ShaderType, TextureFormat, TextureSampleType, binding_types,
     },
     renderer::{RenderContext, RenderDevice},
     texture::GpuImage,
@@ -225,7 +225,8 @@ fn extract_reflection_texture(world: &mut World) {
 struct CompositorPipeline {
     layout: BindGroupLayoutDescriptor,
     sampler: Sampler,
-    pipeline_id: CachedRenderPipelineId,
+    hdr_pipeline_id: CachedRenderPipelineId,
+    sdr_pipeline_id: CachedRenderPipelineId,
 }
 
 fn init_compositor_pipeline(
@@ -252,26 +253,36 @@ fn init_compositor_pipeline(
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
-    let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
-        label: Some("water_reflection_compositor_pipeline".into()),
-        layout: vec![layout.clone()],
-        vertex: fullscreen_shader.to_vertex_state(),
-        fragment: Some(FragmentState {
-            shader: COMPOSITOR_SHADER_HANDLE,
-            targets: vec![Some(ColorTargetState {
-                format: ViewTarget::TEXTURE_FORMAT_HDR,
-                blend: None,
-                write_mask: ColorWrites::ALL,
-            })],
+    let pipeline_descriptor =
+        |label: &'static str, format: TextureFormat| RenderPipelineDescriptor {
+            label: Some(label.into()),
+            layout: vec![layout.clone()],
+            vertex: fullscreen_shader.to_vertex_state(),
+            fragment: Some(FragmentState {
+                shader: COMPOSITOR_SHADER_HANDLE,
+                targets: vec![Some(ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    });
+        };
+    let hdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "water_reflection_compositor_pipeline_hdr",
+        ViewTarget::TEXTURE_FORMAT_HDR,
+    ));
+    let sdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "water_reflection_compositor_pipeline_sdr",
+        TextureFormat::bevy_default(),
+    ));
 
     commands.insert_resource(CompositorPipeline {
         layout,
         sampler,
-        pipeline_id,
+        hdr_pipeline_id,
+        sdr_pipeline_id,
     });
 }
 
@@ -333,7 +344,12 @@ impl ViewNode for CompositorNode {
             return Ok(());
         };
         let pipeline_cache = world.resource::<PipelineCache>();
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
+        let pipeline_id = if view_target.main_texture_format() == ViewTarget::TEXTURE_FORMAT_HDR {
+            pipeline_res.hdr_pipeline_id
+        } else {
+            pipeline_res.sdr_pipeline_id
+        };
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
             return Ok(());
         };
 
@@ -405,6 +421,28 @@ impl ViewNode for CompositorNode {
         render_pass.draw(0..3, 0..1);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn compositor_shader_scrubs_disabled_reflection_alpha() {
+        let shader = include_str!("../../assets/shaders/water_reflection_compositor.wgsl");
+
+        assert!(shader.contains("return vec4<f32>(base_scene.rgb, 1.0);"));
+        assert!(!shader.contains("return base_scene;"));
+    }
+
+    #[test]
+    fn compositor_queues_hdr_and_sdr_pipelines() {
+        let source = include_str!("water_reflection_compositor.rs");
+
+        assert!(source.contains("hdr_pipeline_id"));
+        assert!(source.contains("sdr_pipeline_id"));
+        assert!(source.contains("ViewTarget::TEXTURE_FORMAT_HDR"));
+        assert!(source.contains("TextureFormat::bevy_default()"));
+        assert!(source.contains("view_target.main_texture_format()"));
     }
 }
 
