@@ -551,7 +551,8 @@ fn sync_water_reflection_debug_view(
     }
 
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if shift_held && keys.just_pressed(KeyCode::F9) {
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if shift_held && alt_held && keys.just_pressed(KeyCode::F9) {
         *mode = mode.next();
         info!("Water reflection debug view: {:?}", *mode);
     }

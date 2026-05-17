@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,22 +14,24 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
-use crate::player::{Player, classify_player_world_validity};
+use crate::player::{classify_player_world_validity, Player};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{
-    ChunkMesh, MeshMode, MeshSettings, TerrainMeshDebug, WaterMesh,
-    empty_chunk_has_surface_nets_boundary_surface,
+    empty_chunk_has_surface_nets_boundary_surface, ChunkMesh, MeshMode, MeshSettings,
+    TerrainMeshDebug, WaterMesh,
 };
 use crate::voxel::plugin::{
-    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
-    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    terrain_lod_distance_xz, terrain_lod_hysteresis, water_shore_guarded_lod,
+    calculate_target_lod_with_hysteresis, collect_water_shore_lod_guard_chunks,
+    effective_terrain_mesh_lod_for_chunk, terrain_lod_distance_xz, terrain_lod_hysteresis,
+    water_shore_guarded_lod, LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
 };
 use crate::voxel::skirt::NeighborLods;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldBounds};
 
 pub struct TerrainHoleProbePlugin;
+
+const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 7;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
@@ -58,6 +60,8 @@ struct TerrainHoleProbeDump {
     physics: PhysicsProbe,
     render_mesh_ray_hits: Vec<RenderMeshRayProbe>,
     render_mesh_ray_grid: Vec<RenderMeshRayGridProbe>,
+    camera_ray: Option<CameraRayProbe>,
+    camera_ray_fan: Option<CameraRayFan>,
     chunks: Vec<ChunkProbe>,
 }
 
@@ -175,16 +179,121 @@ struct RenderMeshRayProbe {
 
 #[derive(Serialize)]
 struct RenderMeshRayGridProbe {
+    sample_kind: RenderMeshRayGridSampleKind,
     offset_x: i32,
     offset_z: i32,
     world_x: f32,
     world_z: f32,
+    ray_origin: Vec3Dump,
     ray_origin_y: f32,
+    ray_direction: Vec3Dump,
     expected_surface_y: Option<f32>,
     highest_render_hit_y: Option<f32>,
+    render_hit_point: Option<Vec3Dump>,
+    render_hit_chunk: Option<IVec3Dump>,
+    render_hit_local_point: Option<Vec3Dump>,
+    signed_surface_error: Option<f32>,
+    abs_surface_error: Option<f32>,
     surface_error: Option<f32>,
+    nearest_chunk_faces: Vec<BoundaryDistanceProbe>,
     hit_chunk: Option<IVec3Dump>,
     hit_entity: Option<String>,
+    chunk_state: Option<FanGapChunkState>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum RenderMeshRayGridSampleKind {
+    TargetVertical,
+    CameraHeightFan,
+}
+
+/// Camera look-ray cast against the terrain *render meshes*, used to catch
+/// see-through LOD cracks: the targeting voxel-raycast passes straight through
+/// such a gap and locks onto solid terrain behind it, so it can never land on
+/// the crack. This ray instead reports where the ray enters solid voxel data
+/// versus where it first meets a front-facing render triangle.
+#[derive(Serialize)]
+struct CameraRayProbe {
+    origin: Vec3Dump,
+    direction: Vec3Dump,
+    max_distance: f32,
+    /// Distance at which the ray first enters solid voxel data.
+    first_voxel_solid_distance: Option<f32>,
+    /// Distance at which the ray last leaves solid voxel data.
+    last_voxel_solid_distance: Option<f32>,
+    /// Nearest front-facing render-mesh triangle hit.
+    first_front_render_hit: Option<CameraRayHit>,
+    /// All render-mesh hits along the ray, sorted by distance (capped).
+    render_hits: Vec<CameraRayHit>,
+    /// Set when the ray enters solid voxel data with no render surface there.
+    see_through_gap: Option<SeeThroughGap>,
+}
+
+#[derive(Serialize, Clone)]
+struct CameraRayHit {
+    distance: f32,
+    point: Vec3Dump,
+    /// True if the triangle faces the ray origin (a visible surface front).
+    front_face: bool,
+    chunk_position: Option<IVec3Dump>,
+    entity: String,
+}
+
+#[derive(Serialize)]
+struct SeeThroughGap {
+    voxel_surface_distance: f32,
+    first_front_render_hit_distance: Option<f32>,
+    gap_length: f32,
+    note: String,
+}
+
+/// A cone of camera rays around the crosshair. A single ray needs pixel-perfect
+/// aim to land on a small crack at distance; the fan lets a rough aim at the
+/// crack cluster catch any solid-before-render candidate inside the cone.
+#[derive(Serialize)]
+struct CameraRayFan {
+    half_angle_degrees: f32,
+    grid_size: u32,
+    rays_total: u32,
+    rays_with_gap: u32,
+    gaps: Vec<FanGap>,
+}
+
+#[derive(Serialize)]
+struct FanGap {
+    grid_x: u32,
+    grid_y: u32,
+    direction: Vec3Dump,
+    voxel_surface_distance: f32,
+    first_front_render_hit_distance: Option<f32>,
+    gap_length: f32,
+    surface_point: Vec3Dump,
+    surface_chunk: IVec3Dump,
+    surface_local_point: Vec3Dump,
+    nearest_chunk_faces: Vec<BoundaryDistanceProbe>,
+    surface_chunk_state: FanGapChunkState,
+}
+
+#[derive(Serialize)]
+struct BoundaryDistanceProbe {
+    face: String,
+    distance_voxels: f32,
+}
+
+#[derive(Serialize)]
+struct FanGapChunkState {
+    exists_in_world: bool,
+    lod_level: Option<String>,
+    dirty: Option<bool>,
+    dirty_reason_flags: Option<u8>,
+    dirty_reasons: Vec<String>,
+    uniformity: Option<String>,
+    mesh_entity_from_world: Option<String>,
+    lod_eval: Option<LodEvalProbe>,
+    neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
+    empty_surface_cap_at_mesh: Option<bool>,
+    empty_cap: EmptyCapProbe,
 }
 
 #[derive(Serialize)]
@@ -368,10 +477,11 @@ fn dump_terrain_hole_probe(
                 .map(|transform| transform.translation())
         })
         .unwrap_or(Vec3::ZERO);
-    let camera_pos = camera_query
-        .single()
-        .ok()
-        .map(|transform| transform.translation());
+    let camera_transform = camera_query.single().ok();
+    let camera_pos = camera_transform.map(|transform| transform.translation());
+    let camera_dir = camera_transform.map(|transform| transform.forward().as_vec3());
+    let camera_right = camera_transform.map(|transform| transform.right().as_vec3());
+    let camera_up = camera_transform.map(|transform| transform.up().as_vec3());
     let target_pos = targeted.position.unwrap_or_else(|| {
         IVec3::new(
             player_pos.x.floor() as i32,
@@ -382,6 +492,7 @@ fn dump_terrain_hole_probe(
     let target_chunk = VoxelWorld::world_to_chunk(target_pos);
     let target_local = VoxelWorld::world_to_local(target_pos);
     let target_voxel = world.sample_voxel_for_collision(target_pos).voxel();
+    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
 
     let columns = sample_columns(&world, target_pos, 2);
     let physics = PhysicsProbe {
@@ -407,9 +518,74 @@ fn dump_terrain_hole_probe(
         target_pos,
         expected_surface_y,
     );
-    let render_mesh_ray_grid =
-        sample_render_mesh_ray_grid(&world, &terrain_entities, &meshes, target_chunk, target_pos);
-    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
+    let render_mesh_ray_grid = sample_render_mesh_ray_grid(
+        &world,
+        &terrain_entities,
+        &meshes,
+        target_chunk,
+        target_pos,
+        camera_pos,
+        camera_dir,
+        camera_right,
+        camera_up,
+        &mesh_settings,
+        &lod_settings,
+        &water_lod_guard_chunks,
+    );
+    log_camera_height_grid_summary(&render_mesh_ray_grid);
+    let camera_ray = match (camera_pos, camera_dir) {
+        (Some(camera_pos), Some(camera_dir)) => Some(sample_camera_ray(
+            &world,
+            &terrain_entities,
+            &meshes,
+            camera_pos,
+            camera_dir,
+            512.0,
+        )),
+        _ => None,
+    };
+    if let Some(gap) = camera_ray
+        .as_ref()
+        .and_then(|ray| ray.see_through_gap.as_ref())
+    {
+        warn!(
+            "Camera-ray probe: solid-before-render candidate at {:.1}m; \
+             nearest front render surface at {:?}, distance delta {:.1}m \
+             (may be hole or depressed surface)",
+            gap.voxel_surface_distance, gap.first_front_render_hit_distance, gap.gap_length,
+        );
+    }
+    let camera_ray_fan = match (camera_pos, camera_dir, camera_right, camera_up) {
+        (Some(pos), Some(forward), Some(right), Some(up)) => Some(sample_camera_ray_fan(
+            &world,
+            &terrain_entities,
+            &meshes,
+            pos,
+            forward,
+            right,
+            up,
+            512.0,
+            &mesh_settings,
+            &lod_settings,
+            &water_lod_guard_chunks,
+        )),
+        _ => None,
+    };
+    if let Some(fan) = &camera_ray_fan {
+        if fan.rays_with_gap > 0 {
+            warn!(
+                "Camera-ray fan: {} of {} rays found solid-before-render candidates in the {} degree cone \
+                 (may be hole or depressed surface)",
+                fan.rays_with_gap, fan.rays_total, fan.half_angle_degrees,
+            );
+        } else {
+            info!(
+                "Camera-ray fan: 0 of {} rays found solid-before-render candidates in the {} degree cone \
+                 around the crosshair.",
+                fan.rays_total, fan.half_angle_degrees,
+            );
+        }
+    }
     let chunks = sample_neighbor_chunks(
         &world,
         target_chunk,
@@ -480,7 +656,7 @@ fn dump_terrain_hole_probe(
 
     let timestamp = timestamp_utc_compact();
     let dump = TerrainHoleProbeDump {
-        schema_version: 3,
+        schema_version: TERRAIN_HOLE_PROBE_SCHEMA_VERSION,
         timestamp_utc: timestamp.clone(),
         trigger: "Shift+F9".to_string(),
         player_world_position: player_pos.into(),
@@ -513,6 +689,8 @@ fn dump_terrain_hole_probe(
         physics,
         render_mesh_ray_hits,
         render_mesh_ray_grid,
+        camera_ray,
+        camera_ray_fan,
         chunks,
     };
 
@@ -785,12 +963,20 @@ fn sample_render_mesh_rays(
     hits
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sample_render_mesh_ray_grid(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
     meshes: &Assets<Mesh>,
     center_chunk: IVec3,
     target_pos: IVec3,
+    camera_pos: Option<Vec3>,
+    camera_forward: Option<Vec3>,
+    camera_right: Option<Vec3>,
+    camera_up: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
 ) -> Vec<RenderMeshRayGridProbe> {
     let mut probes = Vec::new();
     let bounds = world.bounds();
@@ -818,23 +1004,457 @@ fn sample_render_mesh_ray_grid(
             let surface_error = highest_render_hit_y
                 .zip(expected_surface_y)
                 .map(|(hit_y, expected)| (hit_y - expected).abs());
+            let signed_surface_error = highest_render_hit_y
+                .zip(expected_surface_y)
+                .map(|(hit_y, expected)| hit_y - expected);
+            let render_hit_point =
+                highest_render_hit_y.map(|hit_y| Vec3::new(world_x, hit_y, world_z));
+            let (render_hit_local_point, nearest_chunk_faces, chunk_state) =
+                render_mesh_ray_grid_hit_metadata(
+                    world,
+                    terrain_entities,
+                    hit_chunk,
+                    render_hit_point,
+                    camera_pos,
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                );
 
             probes.push(RenderMeshRayGridProbe {
+                sample_kind: RenderMeshRayGridSampleKind::TargetVertical,
                 offset_x,
                 offset_z,
                 world_x,
                 world_z,
+                ray_origin: Vec3::new(world_x, origin_y, world_z).into(),
                 ray_origin_y: origin_y,
+                ray_direction: Vec3::NEG_Y.into(),
                 expected_surface_y,
                 highest_render_hit_y,
+                render_hit_point: render_hit_point.map(Into::into),
+                render_hit_chunk: hit_chunk,
+                render_hit_local_point,
+                signed_surface_error,
+                abs_surface_error: surface_error,
                 surface_error,
+                nearest_chunk_faces,
                 hit_chunk,
                 hit_entity,
+                chunk_state,
             });
         }
     }
 
+    append_camera_height_fan_samples(
+        &mut probes,
+        world,
+        terrain_entities,
+        meshes,
+        camera_pos,
+        camera_forward,
+        camera_right,
+        camera_up,
+        bounds,
+        mesh_settings,
+        lod_settings,
+        water_lod_guard_chunks,
+    );
+
     probes
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_camera_height_fan_samples(
+    probes: &mut Vec<RenderMeshRayGridProbe>,
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    camera_pos: Option<Vec3>,
+    camera_forward: Option<Vec3>,
+    camera_right: Option<Vec3>,
+    camera_up: Option<Vec3>,
+    bounds: WorldBounds,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) {
+    const HALF_ANGLE_DEGREES: f32 = 6.0;
+    const GRID_SIZE: i32 = 7;
+    const MAX_DISTANCE: f32 = 512.0;
+
+    let (Some(camera_pos), Some(camera_forward), Some(camera_right), Some(camera_up)) =
+        (camera_pos, camera_forward, camera_right, camera_up)
+    else {
+        return;
+    };
+
+    let half_angle = HALF_ANGLE_DEGREES.to_radians();
+    let half_grid = GRID_SIZE / 2;
+    for grid_y in 0..GRID_SIZE {
+        for grid_x in 0..GRID_SIZE {
+            let fx = (grid_x as f32 / (GRID_SIZE - 1) as f32) * 2.0 - 1.0;
+            let fy = (grid_y as f32 / (GRID_SIZE - 1) as f32) * 2.0 - 1.0;
+            let ray_direction = (camera_forward + camera_right * (fx * half_angle).tan()
+                - camera_up * (fy * half_angle).tan())
+            .normalize_or_zero();
+            if ray_direction == Vec3::ZERO {
+                continue;
+            }
+
+            let ray_probe = sample_camera_ray(
+                world,
+                terrain_entities,
+                meshes,
+                camera_pos,
+                ray_direction,
+                MAX_DISTANCE,
+            );
+            let render_hit = ray_probe.first_front_render_hit.as_ref();
+            let render_hit_point = render_hit.map(|hit| vec3_from_dump(hit.point));
+            let reference_point = render_hit_point.or_else(|| {
+                ray_probe
+                    .first_voxel_solid_distance
+                    .map(|distance| camera_pos + ray_direction * distance)
+            });
+            let world_x = reference_point.map_or(camera_pos.x, |point| point.x);
+            let world_z = reference_point.map_or(camera_pos.z, |point| point.z);
+            let expected_surface_y = reference_point.and_then(|point| {
+                expected_surface_y_at(
+                    world,
+                    point.x.floor() as i32,
+                    point.z.floor() as i32,
+                    bounds,
+                )
+            });
+            let highest_render_hit_y = render_hit_point.map(|point| point.y);
+            let signed_surface_error = highest_render_hit_y
+                .zip(expected_surface_y)
+                .map(|(hit_y, expected)| hit_y - expected);
+            let abs_surface_error = signed_surface_error.map(f32::abs);
+            let render_hit_chunk = render_hit.and_then(|hit| hit.chunk_position);
+            let hit_entity = render_hit.map(|hit| hit.entity.clone());
+            let (render_hit_local_point, nearest_chunk_faces, chunk_state) =
+                render_mesh_ray_grid_hit_metadata(
+                    world,
+                    terrain_entities,
+                    render_hit_chunk,
+                    render_hit_point,
+                    Some(camera_pos),
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                );
+
+            probes.push(RenderMeshRayGridProbe {
+                sample_kind: RenderMeshRayGridSampleKind::CameraHeightFan,
+                offset_x: grid_x - half_grid,
+                offset_z: grid_y - half_grid,
+                world_x,
+                world_z,
+                ray_origin: camera_pos.into(),
+                ray_origin_y: camera_pos.y,
+                ray_direction: ray_direction.into(),
+                expected_surface_y,
+                highest_render_hit_y,
+                render_hit_point: render_hit_point.map(Into::into),
+                render_hit_chunk,
+                render_hit_local_point,
+                signed_surface_error,
+                abs_surface_error,
+                surface_error: abs_surface_error,
+                nearest_chunk_faces,
+                hit_chunk: render_hit_chunk,
+                hit_entity,
+                chunk_state,
+            });
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_mesh_ray_grid_hit_metadata(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    hit_chunk: Option<IVec3Dump>,
+    hit_point: Option<Vec3>,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> (
+    Option<Vec3Dump>,
+    Vec<BoundaryDistanceProbe>,
+    Option<FanGapChunkState>,
+) {
+    let Some(hit_chunk) = hit_chunk else {
+        return (None, Vec::new(), None);
+    };
+    let chunk_pos = ivec3_from_dump(hit_chunk);
+    let render_hit_local_point =
+        hit_point.map(|point| point - VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+    let nearest_faces = render_hit_local_point
+        .map(nearest_chunk_faces)
+        .unwrap_or_default();
+    let chunk_state = camera_pos.map(|camera_pos| {
+        fan_gap_chunk_state(
+            world,
+            chunk_pos,
+            terrain_entities,
+            camera_pos,
+            mesh_settings,
+            lod_settings,
+            water_lod_guard_chunks,
+        )
+    });
+
+    (
+        render_hit_local_point.map(Into::into),
+        nearest_faces,
+        chunk_state,
+    )
+}
+
+fn log_camera_height_grid_summary(samples: &[RenderMeshRayGridProbe]) {
+    const NEAR_FACE_THRESHOLD_VOXELS: f32 = 2.0;
+
+    let camera_samples = samples
+        .iter()
+        .filter(|sample| sample.sample_kind == RenderMeshRayGridSampleKind::CameraHeightFan);
+    let mut camera_sample_count = 0;
+    let mut signed_sample_count = 0;
+    let mut groups: BTreeMap<(String, String, String), Vec<f32>> = BTreeMap::new();
+    let mut mesh_status_counts: BTreeMap<String, u32> = BTreeMap::new();
+    let mut pending_or_stale_count = 0u32;
+    let mut worst_negative_sample: Option<&RenderMeshRayGridProbe> = None;
+
+    for sample in camera_samples {
+        camera_sample_count += 1;
+        let mesh_status = mesh_status_label_for_height_sample(sample);
+        *mesh_status_counts.entry(mesh_status.clone()).or_default() += 1;
+        if height_sample_mesh_pending_or_stale(sample) {
+            pending_or_stale_count += 1;
+        }
+        let Some(signed_error) = sample.signed_surface_error else {
+            continue;
+        };
+        signed_sample_count += 1;
+
+        let lod = rendered_lod_label_for_height_sample(sample);
+        let region = if sample
+            .nearest_chunk_faces
+            .iter()
+            .any(|face| face.distance_voxels <= NEAR_FACE_THRESHOLD_VOXELS)
+        {
+            "near_face"
+        } else {
+            "interior"
+        }
+        .to_string();
+
+        groups
+            .entry((lod, mesh_status.clone(), region))
+            .or_default()
+            .push(signed_error);
+
+        if signed_error < 0.0
+            && worst_negative_sample.map_or(true, |worst| {
+                signed_error < worst.signed_surface_error.unwrap_or(f32::INFINITY)
+            })
+        {
+            worst_negative_sample = Some(sample);
+        }
+    }
+
+    if camera_sample_count == 0 {
+        info!("Camera height fan: skipped because no camera transform was available");
+        return;
+    }
+    if signed_sample_count == 0 {
+        info!(
+            "Camera height fan: 0 of {} samples had both a front render hit and voxel surface",
+            camera_sample_count,
+        );
+        return;
+    }
+
+    info!(
+        "Camera height fan: {} of {} samples have signed render-vs-voxel height errors",
+        signed_sample_count, camera_sample_count,
+    );
+    if pending_or_stale_count > 0 {
+        warn!(
+            "Camera height fan: {} of {} samples are pending/stale; rendered mesh LOD may not match the overlay/current chunk LOD yet",
+            pending_or_stale_count, camera_sample_count,
+        );
+    }
+    if !mesh_status_counts.is_empty() {
+        info!(
+            "Camera height fan: mesh_status counts {}",
+            format_mesh_status_counts(&mesh_status_counts),
+        );
+    }
+    for ((lod, mesh_status, region), values) in &groups {
+        if let Some((min, median, max)) = signed_error_min_median_max(values) {
+            info!(
+                "Camera height fan: rendered_lod={} mesh_status={} region={} count={} signed_error min/median/max={:.2}/{:.2}/{:.2}",
+                lod,
+                mesh_status,
+                region,
+                values.len(),
+                min,
+                median,
+                max,
+            );
+        }
+    }
+
+    let lod0_interior_median =
+        median_for_camera_height_group(&groups, "Lod0", "Current", "interior");
+    let lod1_interior_median =
+        median_for_camera_height_group(&groups, "Lod1", "Current", "interior");
+    if let (Some(lod0), Some(lod1)) = (lod0_interior_median, lod1_interior_median) {
+        info!(
+            "Camera height fan: Current rendered Lod1 interior median minus Current rendered Lod0 interior median = {:.2}",
+            lod1 - lod0,
+        );
+    } else if pending_or_stale_count > 0 {
+        info!(
+            "Camera height fan: skipped Lod1-minus-Lod0 interior delta because one or both Current rendered-LOD groups were absent"
+        );
+    }
+
+    if let Some(sample) = worst_negative_sample {
+        let chunk = sample
+            .render_hit_chunk
+            .map(format_ivec3_dump)
+            .unwrap_or_else(|| "none".to_string());
+        let local = sample
+            .render_hit_local_point
+            .map(format_vec3_dump)
+            .unwrap_or_else(|| "none".to_string());
+        let nearest_faces = format_nearest_faces(&sample.nearest_chunk_faces);
+        info!(
+            "Camera height fan: worst negative sample error={:.2} chunk={} local={} current_lod={} rendered_lod={} mesh_status={} nearest_faces={}",
+            sample.signed_surface_error.unwrap_or_default(),
+            chunk,
+            local,
+            current_lod_label_for_height_sample(sample),
+            rendered_lod_label_for_height_sample(sample),
+            mesh_status_label_for_height_sample(sample),
+            nearest_faces,
+        );
+    }
+}
+
+fn current_lod_label_for_height_sample(sample: &RenderMeshRayGridProbe) -> String {
+    sample
+        .chunk_state
+        .as_ref()
+        .and_then(|state| state.lod_level.as_deref())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn rendered_lod_label_for_height_sample(sample: &RenderMeshRayGridProbe) -> String {
+    sample
+        .chunk_state
+        .as_ref()
+        .and_then(|state| state.lod_eval.as_ref())
+        .and_then(|eval| {
+            eval.last_meshed_lod
+                .as_deref()
+                .or(eval.last_logical_lod_at_mesh.as_deref())
+                .or(eval.effective_mesh_lod_now.as_deref())
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| current_lod_label_for_height_sample(sample))
+}
+
+fn mesh_status_label_for_height_sample(sample: &RenderMeshRayGridProbe) -> String {
+    sample
+        .chunk_state
+        .as_ref()
+        .and_then(|state| state.lod_eval.as_ref())
+        .map(|eval| format!("{:?}", eval.mesh_status))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn height_sample_mesh_pending_or_stale(sample: &RenderMeshRayGridProbe) -> bool {
+    sample
+        .chunk_state
+        .as_ref()
+        .and_then(|state| {
+            state.lod_eval.as_ref().map(|eval| {
+                eval.remesh_pending
+                    || eval.mesh_status != LodMeshStatus::Current
+                    || (eval.last_meshed_lod.is_some()
+                        && state.lod_level.is_some()
+                        && eval.last_meshed_lod != state.lod_level)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn format_mesh_status_counts(counts: &BTreeMap<String, u32>) -> String {
+    counts
+        .iter()
+        .map(|(status, count)| format!("{status}:{count}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn median_for_camera_height_group(
+    groups: &BTreeMap<(String, String, String), Vec<f32>>,
+    lod: &str,
+    mesh_status: &str,
+    region: &str,
+) -> Option<f32> {
+    groups
+        .get(&(lod.to_string(), mesh_status.to_string(), region.to_string()))
+        .and_then(|values| signed_error_min_median_max(values))
+        .map(|(_, median, _)| median)
+}
+
+fn signed_error_min_median_max(values: &[f32]) -> Option<(f32, f32, f32)> {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let min = *sorted.first()?;
+    let max = *sorted.last()?;
+    let mid = sorted.len() / 2;
+    let median = if sorted.len() % 2 == 0 {
+        (sorted[mid - 1] + sorted[mid]) * 0.5
+    } else {
+        sorted[mid]
+    };
+    Some((min, median, max))
+}
+
+fn format_nearest_faces(faces: &[BoundaryDistanceProbe]) -> String {
+    if faces.is_empty() {
+        return "none".to_string();
+    }
+    faces
+        .iter()
+        .map(|face| format!("{}:{:.1}", face.face, face.distance_voxels))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_vec3_dump(value: Vec3Dump) -> String {
+    format!("{:.2},{:.2},{:.2}", value.x, value.y, value.z)
+}
+
+fn format_ivec3_dump(value: IVec3Dump) -> String {
+    format!("{},{},{}", value.x, value.y, value.z)
+}
+
+fn vec3_from_dump(value: Vec3Dump) -> Vec3 {
+    Vec3::new(value.x, value.y, value.z)
+}
+
+fn ivec3_from_dump(value: IVec3Dump) -> IVec3 {
+    IVec3::new(value.x, value.y, value.z)
 }
 
 fn expected_surface_y_at(world: &VoxelWorld, x: i32, z: i32, bounds: WorldBounds) -> Option<f32> {
@@ -911,31 +1531,66 @@ fn cpu_mesh_vertical_ray_hit(
     world_z: f32,
     origin_y: f32,
 ) -> Option<f32> {
+    let mut best_hit = None;
+    for_each_mesh_triangle(mesh, translation, |p0, p1, p2| {
+        if let Some(hit_y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2) {
+            if best_hit.map_or(true, |best| hit_y > best) {
+                best_hit = Some(hit_y);
+            }
+        }
+    })?;
+    best_hit
+}
+
+enum MeshIndexSlice<'a> {
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+}
+
+impl MeshIndexSlice<'_> {
+    fn len(&self) -> usize {
+        match self {
+            MeshIndexSlice::U16(indices) => indices.len(),
+            MeshIndexSlice::U32(indices) => indices.len(),
+        }
+    }
+
+    fn get(&self, index: usize) -> usize {
+        match self {
+            MeshIndexSlice::U16(indices) => indices[index] as usize,
+            MeshIndexSlice::U32(indices) => indices[index] as usize,
+        }
+    }
+}
+
+fn mesh_indices(mesh: &Mesh) -> Option<MeshIndexSlice<'_>> {
+    match mesh.indices()? {
+        Indices::U16(indices) => Some(MeshIndexSlice::U16(indices)),
+        Indices::U32(indices) => Some(MeshIndexSlice::U32(indices)),
+    }
+}
+
+fn for_each_mesh_triangle(
+    mesh: &Mesh,
+    translation: Vec3,
+    mut visit: impl FnMut(Vec3, Vec3, Vec3),
+) -> Option<()> {
     let Some(VertexAttributeValues::Float32x3(positions)) =
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return None;
     };
     let indices = mesh_indices(mesh)?;
-    let mut best_hit = None;
-    for tri in indices.chunks_exact(3) {
-        let p0 = Vec3::from_array(positions[tri[0] as usize]) + translation;
-        let p1 = Vec3::from_array(positions[tri[1] as usize]) + translation;
-        let p2 = Vec3::from_array(positions[tri[2] as usize]) + translation;
-        if let Some(hit_y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2) {
-            if best_hit.map_or(true, |best| hit_y > best) {
-                best_hit = Some(hit_y);
-            }
-        }
+    let index_count = indices.len() - indices.len() % 3;
+    let mut tri = 0;
+    while tri < index_count {
+        let p0 = Vec3::from_array(positions[indices.get(tri)]) + translation;
+        let p1 = Vec3::from_array(positions[indices.get(tri + 1)]) + translation;
+        let p2 = Vec3::from_array(positions[indices.get(tri + 2)]) + translation;
+        visit(p0, p1, p2);
+        tri += 3;
     }
-    best_hit
-}
-
-fn mesh_indices(mesh: &Mesh) -> Option<Vec<u32>> {
-    match mesh.indices()? {
-        Indices::U16(indices) => Some(indices.iter().map(|index| *index as u32).collect()),
-        Indices::U32(indices) => Some(indices.clone()),
-    }
+    Some(())
 }
 
 fn vertical_ray_triangle_hit_y(
@@ -958,6 +1613,370 @@ fn vertical_ray_triangle_hit_y(
         (y <= origin_y).then_some(y)
     } else {
         None
+    }
+}
+
+fn sample_camera_ray(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    camera_pos: Vec3,
+    camera_dir: Vec3,
+    max_distance: f32,
+) -> CameraRayProbe {
+    let dir = camera_dir.normalize_or_zero();
+    let mut render_hits: Vec<CameraRayHit> = Vec::new();
+
+    if dir != Vec3::ZERO {
+        for (entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _) in
+            terrain_entities.iter()
+        {
+            let Some(chunk_mesh) = chunk_mesh else {
+                continue;
+            };
+            let Some(mesh3d) = mesh3d else {
+                continue;
+            };
+            let Some(mesh) = meshes.get(&mesh3d.0) else {
+                continue;
+            };
+            let translation = transform
+                .map(|transform| transform.translation)
+                .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_mesh.chunk_position).as_vec3());
+            if !ray_intersects_chunk_bounds(camera_pos, dir, translation, max_distance) {
+                continue;
+            }
+            collect_camera_ray_mesh_hits(
+                mesh,
+                translation,
+                camera_pos,
+                dir,
+                max_distance,
+                entity,
+                chunk_mesh.chunk_position,
+                &mut render_hits,
+            );
+        }
+    }
+
+    render_hits.sort_by(|a, b| {
+        a.distance
+            .partial_cmp(&b.distance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let first_front_render_hit = render_hits.iter().find(|hit| hit.front_face).cloned();
+
+    let mut first_voxel_solid_distance = None;
+    let mut last_voxel_solid_distance = None;
+    if dir != Vec3::ZERO {
+        let step = 0.25_f32;
+        let mut traveled = 0.0_f32;
+        while traveled <= max_distance {
+            let point = camera_pos + dir * traveled;
+            let voxel = IVec3::new(
+                point.x.floor() as i32,
+                point.y.floor() as i32,
+                point.z.floor() as i32,
+            );
+            if matches!(
+                world.sample_voxel_for_terrain_meshing(voxel),
+                BoundaryVoxelSample::InBounds(voxel) if voxel.is_solid()
+            ) {
+                first_voxel_solid_distance.get_or_insert(traveled);
+                last_voxel_solid_distance = Some(traveled);
+            }
+            traveled += step;
+        }
+    }
+
+    let see_through_gap = match (first_voxel_solid_distance, &first_front_render_hit) {
+        (Some(voxel_distance), Some(render_hit)) if render_hit.distance > voxel_distance + 1.0 => {
+            Some(SeeThroughGap {
+                voxel_surface_distance: voxel_distance,
+                first_front_render_hit_distance: Some(render_hit.distance),
+                gap_length: render_hit.distance - voxel_distance,
+                note: "Camera ray entered solid voxel data before the nearest front-facing \
+                       render surface; this may be a true hole or an intact depressed surface."
+                    .to_string(),
+            })
+        }
+        (Some(voxel_distance), None) => Some(SeeThroughGap {
+            voxel_surface_distance: voxel_distance,
+            first_front_render_hit_distance: None,
+            gap_length: max_distance - voxel_distance,
+            note: "Camera ray entered solid voxel data but never hit a front-facing render \
+                   surface within range; this is a solid-before-render candidate."
+                .to_string(),
+        }),
+        _ => None,
+    };
+
+    render_hits.truncate(32);
+
+    CameraRayProbe {
+        origin: camera_pos.into(),
+        direction: dir.into(),
+        max_distance,
+        first_voxel_solid_distance,
+        last_voxel_solid_distance,
+        first_front_render_hit,
+        render_hits,
+        see_through_gap,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_camera_ray_mesh_hits(
+    mesh: &Mesh,
+    translation: Vec3,
+    origin: Vec3,
+    dir: Vec3,
+    max_distance: f32,
+    entity: Entity,
+    chunk_position: IVec3,
+    hits: &mut Vec<CameraRayHit>,
+) {
+    let _ = for_each_mesh_triangle(mesh, translation, |p0, p1, p2| {
+        if let Some((distance, front_face)) = ray_triangle_hit(origin, dir, p0, p1, p2) {
+            if distance <= max_distance {
+                hits.push(CameraRayHit {
+                    distance,
+                    point: (origin + dir * distance).into(),
+                    front_face,
+                    chunk_position: Some(chunk_position.into()),
+                    entity: format!("{entity:?}"),
+                });
+            }
+        }
+    });
+}
+
+fn ray_intersects_chunk_bounds(
+    origin: Vec3,
+    dir: Vec3,
+    chunk_origin: Vec3,
+    max_distance: f32,
+) -> bool {
+    let pad = 4.0;
+    let min = chunk_origin - Vec3::splat(pad);
+    let max = chunk_origin + Vec3::splat(CHUNK_SIZE_I32 as f32 + pad);
+    let mut near = 0.0_f32;
+    let mut far = max_distance;
+
+    for axis in 0..3 {
+        let origin_axis = origin[axis];
+        let dir_axis = dir[axis];
+        if dir_axis.abs() < 1e-6 {
+            if origin_axis < min[axis] || origin_axis > max[axis] {
+                return false;
+            }
+            continue;
+        }
+
+        let inv_dir = 1.0 / dir_axis;
+        let mut t0 = (min[axis] - origin_axis) * inv_dir;
+        let mut t1 = (max[axis] - origin_axis) * inv_dir;
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        near = near.max(t0);
+        far = far.min(t1);
+        if near > far {
+            return false;
+        }
+    }
+
+    far >= 0.0 && near <= max_distance
+}
+
+/// Möller–Trumbore ray/triangle test. Returns `(distance, front_face)` where
+/// `front_face` is true when the triangle normal faces the ray origin.
+fn ray_triangle_hit(origin: Vec3, dir: Vec3, p0: Vec3, p1: Vec3, p2: Vec3) -> Option<(f32, bool)> {
+    let edge1 = p1 - p0;
+    let edge2 = p2 - p0;
+    let pvec = dir.cross(edge2);
+    let det = edge1.dot(pvec);
+    if det.abs() < 1e-7 {
+        return None;
+    }
+    let inv_det = 1.0 / det;
+    let tvec = origin - p0;
+    let u = tvec.dot(pvec) * inv_det;
+    if !(-1e-4..=1.0 + 1e-4).contains(&u) {
+        return None;
+    }
+    let qvec = tvec.cross(edge1);
+    let v = dir.dot(qvec) * inv_det;
+    if v < -1e-4 || u + v > 1.0 + 1e-4 {
+        return None;
+    }
+    let distance = edge2.dot(qvec) * inv_det;
+    if distance < 0.0 {
+        return None;
+    }
+    let front_face = dir.dot(edge1.cross(edge2)) < 0.0;
+    Some((distance, front_face))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_camera_ray_fan(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    camera_right: Vec3,
+    camera_up: Vec3,
+    max_distance: f32,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> CameraRayFan {
+    const HALF_ANGLE_DEGREES: f32 = 10.0;
+    const GRID_SIZE: u32 = 9;
+
+    let half_angle = HALF_ANGLE_DEGREES.to_radians();
+    let mut gaps: Vec<FanGap> = Vec::new();
+    let mut rays_total = 0;
+
+    for grid_y in 0..GRID_SIZE {
+        for grid_x in 0..GRID_SIZE {
+            let fx = (grid_x as f32 / (GRID_SIZE - 1) as f32) * 2.0 - 1.0;
+            let fy = (grid_y as f32 / (GRID_SIZE - 1) as f32) * 2.0 - 1.0;
+            let dir = (camera_forward + camera_right * (fx * half_angle).tan()
+                - camera_up * (fy * half_angle).tan())
+            .normalize_or_zero();
+            if dir == Vec3::ZERO {
+                continue;
+            }
+            rays_total += 1;
+
+            let probe = sample_camera_ray(
+                world,
+                terrain_entities,
+                meshes,
+                camera_pos,
+                dir,
+                max_distance,
+            );
+            if let Some(gap) = probe.see_through_gap {
+                let surface_point = camera_pos + dir * gap.voxel_surface_distance;
+                let surface_chunk = VoxelWorld::world_to_chunk(IVec3::new(
+                    surface_point.x.floor() as i32,
+                    surface_point.y.floor() as i32,
+                    surface_point.z.floor() as i32,
+                ));
+                let chunk_origin = VoxelWorld::chunk_to_world(surface_chunk).as_vec3();
+                let surface_local_point = surface_point - chunk_origin;
+                gaps.push(FanGap {
+                    grid_x,
+                    grid_y,
+                    direction: dir.into(),
+                    voxel_surface_distance: gap.voxel_surface_distance,
+                    first_front_render_hit_distance: gap.first_front_render_hit_distance,
+                    gap_length: gap.gap_length,
+                    surface_point: surface_point.into(),
+                    surface_chunk: surface_chunk.into(),
+                    surface_local_point: surface_local_point.into(),
+                    nearest_chunk_faces: nearest_chunk_faces(surface_local_point),
+                    surface_chunk_state: fan_gap_chunk_state(
+                        world,
+                        surface_chunk,
+                        terrain_entities,
+                        camera_pos,
+                        mesh_settings,
+                        lod_settings,
+                        water_lod_guard_chunks,
+                    ),
+                });
+            }
+        }
+    }
+
+    CameraRayFan {
+        half_angle_degrees: HALF_ANGLE_DEGREES,
+        grid_size: GRID_SIZE,
+        rays_total,
+        rays_with_gap: gaps.len() as u32,
+        gaps,
+    }
+}
+
+fn nearest_chunk_faces(local_point: Vec3) -> Vec<BoundaryDistanceProbe> {
+    let chunk_size = CHUNK_SIZE_I32 as f32;
+    let mut distances = vec![
+        BoundaryDistanceProbe {
+            face: "neg_x".to_string(),
+            distance_voxels: local_point.x,
+        },
+        BoundaryDistanceProbe {
+            face: "pos_x".to_string(),
+            distance_voxels: chunk_size - local_point.x,
+        },
+        BoundaryDistanceProbe {
+            face: "neg_y".to_string(),
+            distance_voxels: local_point.y,
+        },
+        BoundaryDistanceProbe {
+            face: "pos_y".to_string(),
+            distance_voxels: chunk_size - local_point.y,
+        },
+        BoundaryDistanceProbe {
+            face: "neg_z".to_string(),
+            distance_voxels: local_point.z,
+        },
+        BoundaryDistanceProbe {
+            face: "pos_z".to_string(),
+            distance_voxels: chunk_size - local_point.z,
+        },
+    ];
+    distances.sort_by(|a, b| {
+        a.distance_voxels
+            .partial_cmp(&b.distance_voxels)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    distances.truncate(3);
+    distances
+}
+
+fn fan_gap_chunk_state(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    terrain_entities: &TerrainEntityQuery,
+    camera_pos: Vec3,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> FanGapChunkState {
+    let chunk = world.get_chunk(chunk_pos);
+    let mesh_entity = chunk.and_then(|chunk| chunk.mesh_entity());
+    let terrain_debug = mesh_entity
+        .and_then(|entity| terrain_entities.get(entity).ok())
+        .and_then(|(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _)| terrain_debug);
+
+    FanGapChunkState {
+        exists_in_world: chunk.is_some(),
+        lod_level: chunk.map(|chunk| lod_name(chunk.lod_level()).to_string()),
+        dirty: chunk.map(|chunk| chunk.is_dirty()),
+        dirty_reason_flags: chunk.map(|chunk| chunk.dirty_reason_flags()),
+        dirty_reasons: chunk
+            .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
+            .unwrap_or_default(),
+        uniformity: chunk.map(|chunk| uniformity_name(chunk.uniformity()).to_string()),
+        mesh_entity_from_world: mesh_entity.map(|entity| format!("{entity:?}")),
+        lod_eval: lod_eval_probe(
+            world,
+            chunk_pos,
+            Some(camera_pos),
+            mesh_settings,
+            lod_settings,
+            water_lod_guard_chunks,
+            terrain_debug,
+        ),
+        neighbor_lods_at_mesh: terrain_debug
+            .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
+        empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
+        empty_cap: empty_cap_probe(world, chunk_pos),
     }
 }
 

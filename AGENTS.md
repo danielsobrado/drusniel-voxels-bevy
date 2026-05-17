@@ -62,9 +62,11 @@ Runtime, editor viewport, and bench launches share the same runtime lock by defa
 
 ## Editor Runtime Verification
 
-After any task that changes the editor, the Bevy runtime, Tauri integration, viewport behavior, or editor-visible UI, rebuild the editor runtime sidecar and restart the desktop editor so the change can be tested in the running app.
+Rebuild the editor runtime sidecar and restart the desktop editor only when the task changes an editor-facing path: the editor UI, Tauri integration, editor bridge/protocol, editor native viewport behavior, editor runtime sidecar packaging, or behavior that was explicitly requested to be verified inside the desktop editor.
 
-Use the existing editor scripts from `editor/frontend`; do not assume Rust code changes are visible in the editor until the sidecar has been rebuilt and the editor has been restarted.
+Main play-game runtime, rendering, meshing, benchmark, and gameplay diagnostics do not require starting or restarting the desktop editor unless the user asks to verify them through the editor. For those tasks, verify with the relevant game binary, bench scene, or targeted runtime probe instead.
+
+When editor verification is relevant, use the existing editor scripts from `editor/frontend`; do not assume Rust code changes are visible in the editor until the sidecar has been rebuilt and the editor has been restarted.
 
 ## Rule
 

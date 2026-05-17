@@ -1,140 +1,326 @@
 # LOD Terrain Hole Investigation
 
-Status: **root cause identified** (Lod0↔Lod1 X/Z chunk-boundary seam) — **fix 1
-applied; visual + bench verification pending.**
-Last updated: 2026-05-17 (revised after Shift+F9 probe `20260517-030902`)
+Status: **seam fix implemented; visual bench pending.** Diagnostics (the
+schema-7 signed-height fan + the Alt+0 test) isolated the live defect to **X/Z
+LOD-seam transition geometry**, not low-LOD interior sampling. Fix 3 resolved
+the interior depression (confirmed by captures `111234`/`111255`). Fix 4 now
+makes the X/Z transition apron drape along the surface tangent instead of
+forming a horizontal flap. Visual LOD bench verification is still pending.
+Last updated: 2026-05-17 (revised after capture 115052 confirmed the apron and the steep-slope clamp follow-up landed)
 Scope touched (prior session): `src/voxel/skirt.rs`, `src/voxel/plugin.rs`,
 `src/interaction/debug.rs`, `src/rendering/naadf/debug.rs`
-This revision: investigation, a diagnostic-reach tweak
-(`src/interaction/targeting.rs`, `src/interaction/debug.rs` key move), and
-**fix 1** — full boundary-band coarsening in `src/voxel/meshing.rs`.
+This investigation: camera-ray/fan diagnostics + hotkey separation, **fix 1**
+boundary-cell coarsening and **fix 3** centered low-LOD density kernel in
+`src/voxel/meshing.rs`, **fix 2** step-sized X/Z transition aprons and **fix 4**
+surface-tangent apron drape in `src/voxel/skirt.rs`.
 
 ---
 
 ## Current state — read this first
 
 The reported artifact — dark see-through cracks/gashes on distant terrain that
-**disappear as the camera gets closer** — is **not fixed**, but is now
-**root-caused** from a Shift+F9 terrain-hole probe.
+**disappear as the camera gets closer** — was split into **two distinct
+problems** that the early probes conflated:
 
-**Root cause: a Lod0↔Lod1 chunk-boundary seam on an X or Z chunk face.** A Lod1
-chunk meshes its surface ~1–2.5 voxels *below* the true voxel surface; its Lod0
-neighbour meshes at the true surface. The Lod0 side's weld mitigation (one-plane
-SDF coarsening + a straight-down skirt) does not close that step on steep
-terrain, so a see-through gap opens at the seam.
+1. **See-through holes** at Lod0/Lod1 chunk-boundary seams (X/Z faces). Real
+   missing render geometry. Addressed by fixes 1 + 2.
+2. **Low-LOD height depression.** A Lod1 chunk's meshed surface did not sit at
+   the same height as its Lod0 neighbour. Addressed by fix 3.
 
-Two earlier "decisive findings" were **both wrong** and are corrected here:
+**Where it stands (captures `111234` / `111255`):**
 
-- The first handoff claimed "uniform Lod0, not a LOD artifact." Disproved by the
-  Alt+K overlay (Lod1 chunks sit on the cracks).
-- The previous revision of this doc claimed the seam was on the **vertical
-  (Y) axis**. Disproved by the probe: every vertical column in the probed
-  neighbourhood is LOD-coherent. **The boundaries are on X and Z faces.**
+- **Fix 3 worked — the interior depression is resolved.** Lod1 *interior*
+  signed height vs Lod0 interior is now −0.33 / −0.13 voxel, inside the ±0.5
+  integer-sampling floor. **Stop tuning low-LOD interior sampling.**
+- **The live defect is the X/Z LOD seam.** All large errors are in the
+  `near_face` buckets — `111255` Lod0 `near_face` spans −0.31 → **+1.78**. The
+  artifact is now **transition / apron / skirt geometry at the seam**, not a
+  whole Lod1 chunk sitting low. See *Live defect: the X/Z seam*.
+- The **Alt+0 test ran**: forcing every chunk to Lod0 and waiting for the
+  remesh queue to drain made the artifact **disappear** → it is **LOD
+  geometry**, not shading / material / AO.
+
+Fixes 1-4 are **in code; not bench verified.** Current targeted test state:
+`cargo test --lib voxel::meshing` → **29 passed** and
+`cargo test --lib voxel::skirt` → **8 passed**.
+
+Earlier "decisive findings" that were **wrong** and are corrected here:
+
+- "Uniform Lod0, not a LOD artifact" — disproved by the Alt+K overlay (Lod1
+  chunks sit on the cracks).
+- "The seam is on the vertical (Y) axis" — disproved by probe `030902`: every
+  vertical column is LOD-coherent. The boundaries are on **X and Z faces**.
+- "Coarsen more inboard SDF planes" — a broad inboard SDF-band trial made the
+  scene visibly worse (`052046`, many blue strips) and was **reverted**. Only
+  the two-plane boundary-cell coarsening (fix 1) was kept.
 
 ---
 
 ## Symptom
 
-- Dark see-through patches and thin gashes on terrain at a distance.
+- Dark see-through patches / thin gashes on terrain at a distance.
 - They **disappear when the camera moves closer.**
-- They **churn / flicker while the camera moves** and tend to settle when
-  stationary.
-- Seen on the **legacy mesh renderer** (Surface Nets + LOD + skirts). NAADF off.
+- They **churn / flicker while the camera moves**, settle when stationary.
+- Legacy mesh renderer (Surface Nets + LOD + skirts). NAADF off.
 
 ---
 
-## Probe evidence (`debug/terrain-hole-probe-20260517-030902.json`)
+## Root cause
 
-Target voxel `(152,74,349)` = Sand, chunk `(9,4,21)` local `(8,10,13)`.
+Terrain LOD is **XZ-distance-based** (`terrain_lod_distance_xz`), so a vertical
+column shares one LOD — the only LOD boundaries are between horizontally
+adjacent columns, i.e. **X/Z chunk faces**. Two coupled defects there:
 
-**LOD map of the 27-chunk neighbourhood:**
+### A. Low-LOD surface depression (the phase error)
 
-| Axis | Observation | Meaning |
+The low-LOD SDF replaced each `step³` voxel block with one density value
+(`sample_lod_density_at_world_pos`). The averaging itself is fine — a box filter
+is zero-phase — **but the value was stored at the block's lower corner, not its
+centre.** `coarse_aligned_lod_sample_base` returned `base` and the block sampled
+was `[base, base+step)`, whose true centre is `base + step/2`. The mesh places
+the lattice point at `base`, so the reconstructed surface landed `~step/2` voxel
+toward −X/−Y/−Z of where the averaged field actually crosses zero. The −Y
+component sinks the patch; on a slope the −X/−Z components project onto the
+slope and add more apparent drop — measured as ~1–2.5 voxels.
+
+### B. See-through holes at the seam
+
+A Lod1 chunk sat ~2 voxels below its Lod0 neighbour (defect A), and the Lod0
+weld mitigation could not bridge it:
+
+- **SDF coarsening was one plane deep.** `lower_detail_transition_step` coarsened
+  only the outermost padded plane, so the boundary Surface-Nets *cell* kept its
+  inner corner at fine resolution and its vertices did not coincide with the
+  fully-coarse Lod1 boundary vertices.
+- **The skirt was a decorative lip.** The X/Z transition apron was only
+  `step*0.08` wide (clamped `0.16..0.30` voxel), far too thin to back a gap a
+  whole voxel inside the coarse side.
+
+"Disappears up close": as the camera nears, the Lod1 chunk promotes to Lod0,
+both sides mesh identically, the step and the gap vanish.
+
+---
+
+## Fixes applied (in code; not visually/bench verified)
+
+### Fix 1 — two-plane boundary-cell coarsening (`meshing.rs`)
+
+`lower_detail_transition_step_for_padded_size` coarsens the **two** outermost
+padded planes per X/Z face (`px <= 1` / `px >= padded-2`), so the Surface-Nets
+cell that welds to a lower-detail neighbour is fully coarse, not half-fine.
+Regression test: `lod0_transition_coarsens_full_boundary_band_not_just_outer_plane`.
+A broader inboard band was tried and **reverted** (made the artifact worse).
+
+### Fix 2 — step-sized X/Z transition aprons (`skirt.rs`)
+
+X/Z transition aprons now span the coarse sampling step (`2.0` voxels for a
+Lod0/Lod1 seam) instead of the old `0.16..0.30` voxel lip, steep side edges emit
+the apron too, and the vertical skirt drops from the apron edge.
+
+### Fix 3 — centered low-LOD density kernel (`meshing.rs`)
+
+`coarse_aligned_lod_sample_base*` was renamed `centered_lod_sample_base*` and now
+subtracts `step/2`, so the `step³` density footprint is **centred on the lattice
+point** instead of starting at it. This removes the phase error of defect A.
+
+It is the **shared** sampler — both `generate_low_lod_sdf` (Lod1/2/3 chunks) and
+`generate_sdf`'s transition band ([meshing.rs](../../src/voxel/meshing.rs)) call
+it — so the Lod0 transition band and the Lod1 chunk shift **together** and the
+weld is preserved. This was the trap; it was avoided.
+
+Regression test: `low_lod_density_filter_is_centered_on_lattice_sample` (centred
+kernel yields half-solid density at the true surface plane). Passes.
+
+### Fix 4 — surface-tangent X/Z transition apron drape (`skirt.rs`)
+
+Fix 2's step-sized apron was horizontal. On a steep slope that can form a proud
+flap over the lower-detail side. The apron now projects the X/Z face-normal
+offset onto the local surface tangent derived from each boundary vertex normal,
+then scales that tangent so the apron still spans the coarse sampling step. On
+downhill faces it drops as it extends into the lower-detail neighbour instead
+of floating horizontally.
+
+**Clamp follow-up.** The first cut of the drape clamped `offset.y` on its own to
+`width*2`. That truncated the drop on *steep* slopes while leaving the
+horizontal reach full — lifting the apron off the surface again (capture
+`115052` still showed +1.90 on a Lod0 `near_face` sample). Corrected: the cap is
+now applied to the along-surface *scale*, so a steep apron simply reaches less
+far horizontally and stays glued to the slope.
+
+Regression tests:
+
+- `lod_transition_apron_drapes_downhill_instead_of_forming_horizontal_flap`
+  locks the skirt-level geometry on a 45° edge.
+- `lod_transition_apron_stays_on_steep_slope_without_floating` — a ~70° edge;
+  asserts the apron tracks the slope and never floats above it (guards the
+  clamp follow-up).
+- `steep_lod0_lod1_x_seam_transition_stays_near_reference_surface` meshes a
+  synthetic steep Lod0/Lod1 X seam and compares the transition seam against an
+  all-Lod0 reference seam with a measured tolerance.
+
+---
+
+## The unavoidable 0.5-voxel residual
+
+Fix 3 does not make Lod1 *match* Lod0 — it **flips the sign** of the flat-terrain
+offset:
+
+| | Lod1 flat surface | vs Lod0 (y = 7.5) |
 | --- | --- | --- |
-| Y | Each column holds one LOD at y=3,4,5 (`x9,z21`=Lod1; `x10`=Lod0; `x9,z22`=Lod0) | **No Y-axis LOD boundary.** Columns are LOD-coherent. |
-| X | Lod1 at x≤9, Lod0 at x=10 | Lod0↔Lod1 seam on an **X face**. |
-| Z | Lod1 at z≤21, Lod0 at z=22 | Lod0↔Lod1 seam on a **Z face**. |
+| Before fix 3 (corner kernel) | y = **7.0** | 0.5 **below** |
+| After fix 3 (centered kernel) | y = **8.0** | 0.5 **above** |
 
-- Every chunk: `dirty=false`, `mesh_status=current`, `mesh_lod_mismatch=false`
-  → **not staleness, not a transient remesh backlog.**
-- `missing_boundary_neighbors_at_mesh=0` everywhere → not a missing-neighbour
-  meshing bug.
-- 5×5 render-ray grid (all inside the Lod1 chunk `9,4,21`): the rendered
-  surface is **1.0–2.5 voxels below `expected_surface_y`** (the voxel-data
-  truth) in *all* 24 cells; 5 cells exceed the 2.0 mismatch threshold.
-- One grid cell (`wz=350.5`, ~1.5 voxels from the z=352 Lod0/Lod1 seam)
-  **returned no triangle hit in the whole 27-chunk set — a genuine mesh hole.**
-- `classification.mesh_surface_mismatch=false` is a false negative: the
-  classifier tests only the exact crosshair pixel (error 1.93, just under 2.0).
-  The crosshair landed mid-chunk; the grid around it shows the real mismatch.
+Why exact match is **impossible with integer voxel sampling**:
 
----
+- Lod0 corner-samples a 1-wide voxel → its surface lands at `face − 0.5` (= 7.5
+  for a face at y=8).
+- A Lod1 2-wide integer block can place the zero-crossing only at **7.0**
+  (window `[P, P+2)`) or **8.0** (window `[P−1, P+1)`) — never 7.5. Hitting 7.5
+  needs a window starting at a fractional offset (α = 2/3), which integer voxel
+  sampling cannot do.
 
-## Mechanism
+So a `±0.5` voxel Lod0/Lod1 mismatch is the **floor** for any integer-block
+low-LOD sampler. Fix 3 chose the `+0.5` (proud) side. Note this is arguably the
+*more accurate* side: centered Lod1 at y=8 sits on the **true terrain face**;
+it is Lod0 that renders 0.5 below the face by its own corner convention.
 
-1. Terrain LOD is **XZ-distance-based** (`terrain_lod_distance_xz`), so a whole
-   vertical column shares one LOD — hence no Y boundary, and the only LOD
-   boundaries are between **horizontally adjacent columns** (X/Z faces).
-2. A **Lod1** chunk samples density over 2×2×2 blocks; its Surface-Nets
-   isosurface sits up to ~one step (≈2 voxels) off the true surface — measured
-   here as a systematic ~2-voxel **downward** offset.
-3. Its **Lod0** neighbour meshes at the true surface. So across the shared X/Z
-   face the two meshes disagree in height by ~2 voxels.
-4. The intended weld: the finer **Lod0** chunk, toward a lower-detail neighbour,
-   (a) coarsens its boundary SDF and (b) emits a skirt. Both are inadequate:
-   - **SDF coarsening is one plane deep.** `lower_detail_transition_step`
-     ([meshing.rs:2280](../../src/voxel/meshing.rs#L2280)) coarsens only the
-     outermost padded plane (`px==1` / `px==padded-1`). The boundary
-     Surface-Nets *cells* still have their inner corners at fine resolution, so
-     the Lod0 boundary vertices do not coincide with the fully-coarse Lod1
-     boundary vertices — the overlap geometry does not match.
-   - **The skirt is a straight-down curtain.** For X/Z faces `generate_skirts`
-     ([skirt.rs:375](../../src/voxel/skirt.rs#L375)) drops `(0,-depth,0)`. On a
-     steep mountain face the seam is in a near-vertical surface; a vertical
-     curtain runs parallel to the gap instead of covering it.
-5. Result: an unwelded ~2-voxel step → the see-through crack.
-6. **"Disappears up close"**: as the camera nears, the Lod1 chunk promotes to
-   Lod0; both sides mesh at the true surface; the step vanishes; the seam welds.
+### Retargeted flat-surface test
+
+The old `voxel::meshing::tests::lod1_flat_surface_matches_lod0_mesh_height`
+asserted exact Lod0/Lod1 flat-surface agreement within `0.05` voxel. That was
+not achievable with integer-block low-LOD sampling. It has been retargeted as
+`lod1_flat_surface_stays_within_half_voxel_of_lod0`, guarding the real contract:
+Lod1 must stay within the known half-voxel floor instead of matching Lod0
+exactly. Do not "fix" this by reverting fix 3.
+
+Eliminating the residual entirely would require moving Lod0 itself onto the true
+face (+0.5, i.e. centre-sampling Lod0 too) — a change touching *all* terrain
+meshing. Not worth it for 0.5 voxel unless the residual proves visible.
 
 ---
 
-## Candidate fixes (ranked)
+## Live defect: the X/Z seam (post-fix-3)
 
-1. **Coarsen the finer chunk's full boundary band, not one plane.** ✅ **DONE**
-   — `lower_detail_transition_step_for_padded_size` now coarsens the two
-   outermost padded planes per X/Z face (`px <= 1` / `px >= padded-2`) instead
-   of only the outermost one, so the Surface-Nets cell that welds to a
-   lower-detail neighbour is fully coarse and its boundary edge drops to the
-   coarse neighbour's surface height. Regression test:
-   `lod0_transition_coarsens_full_boundary_band_not_just_outer_plane`
-   (`voxel::` suite 112 → 113 passing). Visual + bench verification pending.
-2. **Make the skirt cover the real step.** Extrude the X/Z skirt along the
-   surface normal (or size it to the measured LOD height offset, ~step voxels)
-   instead of a fixed straight-down curtain — the same reasoning that motivated
-   the Y-face apron, applied to X/Z faces on steep terrain.
-3. **Reduce the Lod1 surface offset** (e.g. bias the low-LOD density sampling so
-   the isosurface tracks the true surface more closely). Helps everywhere but
-   does not by itself guarantee a weld.
+With fix 3 in, the low-LOD *interior* is correct. Captures `111234`/`111255`
+localise the remaining artifact entirely to the **X/Z Lod0/Lod1 seam**, and the
+error is **bidirectional**:
 
-`1` + `2` together are likely needed: `1` removes the geometric step, `2`
-guarantees no daylight if any residual mismatch remains.
+- Lod1 `near_face` samples run *low* (down to −0.76) — the side-gap / hole side.
+- Lod0 `near_face` samples run *high* — up to **+1.78** above voxel truth.
 
-**Note:** the previous revision's candidate "per-column atomic LOD update" is
-**dropped** — the probe shows columns are already LOD-coherent and the meshes
-are current, so there is no transient column split to fix.
+A +1.78 is geometry **sticking up**; a larger or longer skirt cannot fix it.
+
+**Confirmed — the apron is the proud error.** Capture `115052` put the peak
+**+1.90** on a Lod0 `near_face` sample, and the Lod0 chunk is exactly the side
+that emits the transition apron toward a Lod1 neighbour. The apron extrudes a
+~2-voxel offset from the boundary edge; on a steep slope a horizontal — or
+clamp-truncated — flap juts out over terrain that is ~`2·slope` lower, so its
+outer edge floats well above the true surface ≈ the measured +1.90.
+
+**Fixed (fix 4 + clamp follow-up):** the apron drapes along the surface tangent,
+and the steep-slope cap now shortens the along-surface reach instead of
+truncating the drop — so the apron stays glued to the slope. This targets
+`src/voxel/skirt.rs` apron geometry only — **not** the low-LOD SDF sampler (keep
+fix 3) and **not** a bigger skirt.
 
 ---
 
-## Patches from the prior session — honest status
+## Known diagnostic limitation — the see-through fan conflates two faults
 
-| # | Patch | File(s) | Status |
-| --- | --- | --- | --- |
-| 1 | Vertical (Y-face) skirt apron | `skirt.rs` | **Off-target.** The probe shows the seam is X/Z, not Y. Harmless; leave it, but it does not touch this bug. |
-| 2 | `Alt+0` force-Lod0 toggle | `interaction/debug.rs` | Diagnostic. Direct-sets every chunk to Lod0 with snapshot/restore. |
-| 3a | Chunk-border overlay + LOD histogram | `interaction/debug.rs` | Diagnostic. Toggle key **moved from Alt+B to Alt+K** (Alt+B collided with building mode + prop-bounds debug and locked out movement/aiming). This overlay + Shift+F9 produced the root cause. |
-| 3b | LOD coherence pass + `MAX_LOD_CHANGES_PER_UPDATE` 4→32 | `plugin.rs` | Reduces transition backlog. Not the crack (the crack is steady-state). |
-| 4 | NAADF debug overlay recoloured | `rendering/naadf/debug.rs` | Cleanup; avoids overlay confusion. |
-| 5 | Crosshair reach extended to 512 m while the chunk-border overlay is on | `interaction/targeting.rs` | Diagnostic — lets distant cracks be targeted for Shift+F9. (This revision.) |
+`camera_ray_fan`'s gap test is `first_voxel_solid + 1.0 < first_front_render_hit`.
+A surface that is **depressed but intact** (defect A) makes a grazing camera ray
+enter solid voxel data *before* it reaches the lowered render mesh — which trips
+the gap test even though there is no hole. So:
+
+- The fan's gap **count is not a hole count** and not an improvement metric.
+  A capture reporting "27/81 gaps" may be mostly the depression misread, not 27
+  holes.
+- A see-through hole and a height depression need **separate** measurements.
+
+Schema 7 now measures **signed surface error** (render-hit height minus
+voxel-truth height), not just hole presence. The old `camera_ray_fan` count is
+still recorded, but the console now labels it as a solid-before-render
+candidate because it can be either a true hole or a depressed intact surface.
+
+---
+
+## Capture history (provenance, condensed)
+
+- `030902` — established X/Z (not Y) Lod0/Lod1 seams; columns LOD-coherent;
+  chunks `current`/not-dirty; render grid 1.0–2.5 voxel below truth; one grid
+  MISS = a real hole.
+- `043621` — inconclusive (center ray hit intact terrain); revealed the
+  Shift+F9 / water-reflection-debug hotkey collision (now fixed).
+- `045158` — `9/81` fan gaps; pinpointed a side-seam MISS strip one voxel inside
+  the coarse side of a `z=400` boundary → motivated fix 2.
+- `050853` — gaps remained; one gap in Lod0 `21,4,25` motivated (wrongly) an
+  inboard SDF-band expansion.
+- `052046` — `20/81` gaps + many blue strips: the inboard SDF-band expansion was
+  **falsified visually and reverted**.
+- `075633` — schema 6, `27/81` fan gaps but small render-grid errors. This count
+  is unreliable (see *Known diagnostic limitation*) and the capture mixes
+  hole-detection with height-error questions.
+- `100025` / `100037` — schema 7 confirmed an Alt+0 timing trap. Immediately
+  after Alt+0, the overlay/current LOD switched to Lod0, but several visible
+  meshes still reported `last_meshed_lod=Lod1`, `mesh_status=remesh_pending`,
+  `dirty=true`. After waiting for the remesh queue to drain, the artifact
+  disappeared. Conclusion: the remaining visible depression is LOD geometry or
+  LOD seam behavior, not a persistent material/shading issue. The `100037`
+  mislabel also exposed a probe bug — the height-fan summary grouped samples by
+  *logical* `lod_level`, not `last_meshed_lod`; fixed.
+- `111234` / `111255` — clean schema-7 captures, grouped by `last_meshed_lod` +
+  `mesh_status` (`Current` meshes only). Lod1 *interior* vs Lod0 interior
+  −0.33 / −0.13 (within the ±0.5 floor → **fix 3 confirmed**). All large errors
+  in `near_face`; peak **+1.78** on a Lod0 near-face sample. `camera_ray_fan`
+  down to 4–7/81 candidates. → interior fixed, defect isolated to the seam.
+- `115052` — Lod1 pristine (interior −0.12 → −0.00); peak **+1.90** on a Lod0
+  `near_face` sample. Confirmed the proud error is the Lod0-side transition
+  apron, and that the fix-4 drape still floated on steep slopes because of the
+  `offset.y` clamp → motivated the clamp follow-up (see *Fix 4*).
+
+---
+
+## Diagnostics available (keys)
+
+- **Shift+F9** — terrain hole probe → `debug/terrain-hole-probe-*.json`
+  (schema 7): per-chunk LOD, neighbour LODs, surface-mismatch flags,
+  `camera_ray`, `camera_ray_fan`, and an extended `render_mesh_ray_grid`.
+  `render_mesh_ray_grid` contains both `sample_kind=target_vertical` samples
+  and the 7×7, 6-degree `sample_kind=camera_height_fan` samples with signed
+  surface error, hit chunk/local position, nearest faces, and chunk LOD state.
+  The `target_*`/`classification` fields describe the voxel-raycast target,
+  which can pass *through* a see-through gap onto terrain behind it; for the
+  remaining depression, read the signed `camera_height_fan` entries first.
+- **Alt+Shift+F9** — water reflection debug cycle (moved off Shift+F9, which had
+  been contaminating probe captures).
+- **Alt+K** — chunk-border overlay coloured by LOD (Lod0 green, Lod1 yellow,
+  Lod2 orange, Lod3 red, Culled grey); logs the LOD histogram on enable. While
+  on, crosshair reach is extended to 512 m.
+- **Alt+0** — force every loaded chunk to Lod0 (snapshot + restore). Run
+  stationary and **wait for the remesh queue to drain** — the overlay turns
+  green immediately, but meshes redraw through the dirty queue, so a green
+  overlay alone does not prove the rendered mesh changed. Used here to confirm
+  the artifact is LOD geometry (it vanished once all chunks re-meshed Lod0).
+
+---
+
+## Next steps (ranked)
+
+Diagnostics are done — the defect was localised to the X/Z seam. The
+reproducible tests and apron fix are now implemented. The remaining work is
+visual/runtime verification and any follow-up from that result.
+
+### 1. Verify on the bench
+
+Per `CLAUDE.md`, the synthetic test proves the unit; the **mountain** is proven
+by the visual LOD bench (`visual-regression-naadf-live-lod.toml`, before/after
+`summary.json` + screenshots). Do not claim the artifact fixed from the unit
+test alone.
+
+### 2. Re-probe manually only if the bench or screenshot still shows a seam
+
+Use schema 7 and read only `mesh_status=Current` rows. The expected result is no
+large `near_face` positive flap and no new solid-before-render cluster.
 
 ---
 
@@ -142,52 +328,14 @@ are current, so there is no transient column split to fix.
 
 | Hypothesis | Why |
 | --- | --- |
-| "Uniform Lod0 / base-mesh bug" | Disproved by Alt+K overlay — Lod1 chunks sit on the cracks. |
-| Y-axis (vertical) LOD T-junction | Disproved by probe — every column is LOD-coherent; boundaries are X/Z. |
-| Re-mesh staleness / transient backlog | Probe: all chunks `dirty=false`, `status=current`. |
-| Missing-neighbour meshing bug | Probe: `missing_boundary_neighbors_at_mesh=0`. |
+| "Uniform Lod0 / base-mesh bug" | Alt+K overlay — Lod1 chunks sit on the cracks. |
+| Y-axis (vertical) LOD T-junction | Probe `030902` — every column is LOD-coherent; boundaries are X/Z. |
+| Re-mesh staleness / transient backlog | Probe — all chunks `dirty=false`, `status=current`. |
+| Missing-neighbour meshing bug | Probe — `missing_boundary_neighbors_at_mesh=0`. |
+| "Coarsen more inboard SDF planes" | `052046` — broad inboard band made the artifact worse; reverted. |
 | NAADF renderer bug | Cracks on the legacy renderer; NAADF off. |
-| Ray-distance / step-budget cutoff | Legacy cull distance (320) exceeds visible range. |
 
 ---
-
-## Diagnostics available (keys)
-
-- **Shift+F9** — terrain hole probe; dumps `debug/terrain-hole-probe-*.json`
-  (schema 4) with per-chunk LOD, neighbour LODs, surface-mismatch flags, a
-  render-ray grid, and a **`camera_ray`** block: the camera look-ray cast
-  against the render meshes. `camera_ray.see_through_gap` is set when the ray
-  enters solid voxel data with no render surface there — the crack, captured
-  directly (a `SEE-THROUGH GAP` `warn!` is logged too). Use this for
-  see-through cracks: the voxel-raycast target passes through the gap and locks
-  onto terrain behind it, so the `target_*`/`classification` fields describe
-  healthy terrain, not the crack — read `camera_ray` instead.
-- **Alt+K** — chunk-border overlay; box per terrain chunk coloured by LOD
-  (Lod0 green, Lod1 yellow, Lod2 orange, Lod3 red, Culled grey); logs the LOD
-  histogram on enable. While it is on, the crosshair reach is extended to 512 m
-  so distant cracks can be targeted.
-- **Alt+0** — force every loaded chunk to Lod0 (snapshot + restore). Run
-  stationary. Cracks vanishing under Alt+0 is direct confirmation of a
-  LOD-boundary artifact.
-
----
-
-## Open threads for the next conversation (ranked)
-
-1. **Verify fix 1 visually.** With Alt+K on, return to the probed seam (mountain
-   shoulder near chunk `9,4,21`) and check the crack is gone or much reduced.
-   Re-probe with Shift+F9 aimed **exactly on the seam** and confirm the
-   render-ray-grid surface-error collapses and the mesh hole at `wz≈350.5` is
-   filled.
-2. **Bench fix 1** on `visual-regression-naadf-live-lod.toml`; per `CLAUDE.md`,
-   capture before/after `summary.json` — the extra boundary-band coarse
-   sampling adds some meshing cost (one more padded plane per X/Z face sampled
-   as a 2×2×2 block instead of a single voxel).
-3. **If a hairline seam remains, implement candidate fix 2** (normal-aligned /
-   step-sized X/Z skirt) as the backstop. Fix 1 drops the fine chunk's boundary
-   edge to the coarse height but cannot make a fine 1-unit cell and a coarse
-   2-unit cell place vertices identically; any residual sub-voxel gap is the
-   skirt's job.
 
 ## Related docs
 

@@ -20,7 +20,8 @@ Keyboard and mode reference for Drusniel Voxels.
 * **F7**: Toggle Grass Visibility (debug builds only)
 * **F8**: Toggle Terrain AO Style (V0.3 soft <-> Full baked AO)
 * **F9**: Toggle Ambient Occlusion (SSAO & GTAO)
-* **Shift+F9**: Dump terrain hole probe JSON and cycle water reflection debug view
+* **Shift+F9**: Dump terrain hole probe JSON
+* **Alt+Shift+F9**: Cycle water reflection debug view
 * **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 * **Shift+F10**: Dump water visual probe JSON
 * **F11**: Toggle NAADF fullscreen preview (NAADF builds only)

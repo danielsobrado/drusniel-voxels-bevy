@@ -653,9 +653,9 @@ Details:
 
 - Added `NaadfDebugRayVisuals` resource for GPU ray readback visualization data.
 - Added conversion from GPU ray input/output records into ray endpoints, optional hit positions, normals, and step counts.
-- Added average GPU ray step tracking through `NaadfStats`.
+- Added GPU ray step tracking through `NaadfStats`, including first-hit preview average/max steps, sample count, and miss-reason counters from render-path readback.
 - Added gizmo drawing for debug rays and hit normals behind `naadf.debug.visualize_ray_steps`.
-- Debug settings UI now shows average GPU ray steps.
+- Debug settings UI now shows first-hit average/max GPU ray steps, sample count, and miss-reason buckets.
 - Added unit coverage for readback-to-visual conversion and average-step calculation.
 - Visual execution was not run by request.
 

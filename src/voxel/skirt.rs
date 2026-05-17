@@ -278,7 +278,7 @@ impl NeighborLods {
     }
 }
 
-fn edge_supports_transition_lip(edge: &BoundaryEdge) -> bool {
+fn edge_prefers_upward_transition_normals(edge: &BoundaryEdge) -> bool {
     let avg_up = (edge.v0_normal.y + edge.v1_normal.y) * 0.5;
     let min_up = edge.v0_normal.y.min(edge.v1_normal.y);
     avg_up > 0.35 || min_up > 0.15
@@ -286,6 +286,35 @@ fn edge_supports_transition_lip(edge: &BoundaryEdge) -> bool {
 
 fn upward_biased_normal(normal: Vec3) -> Vec3 {
     (normal * 0.2 + Vec3::Y * 0.8).normalize_or_zero()
+}
+
+fn transition_apron_offset(face_normal: Vec3, surface_normal: Vec3, width: f32) -> Vec3 {
+    if width <= 0.0 {
+        return Vec3::ZERO;
+    }
+
+    let surface_normal = surface_normal.normalize_or_zero();
+    if surface_normal == Vec3::ZERO {
+        return face_normal * width;
+    }
+
+    let tangent = face_normal - surface_normal * face_normal.dot(surface_normal);
+    let outward = tangent.dot(face_normal);
+    if outward.abs() < 1e-4 {
+        return face_normal * width;
+    }
+
+    // Full drape reaches `width` horizontally along the surface. On steep
+    // terrain that plunges deep; cap the drop — but cap it by shortening the
+    // along-surface reach, so the apron stays glued to the slope. Clamping
+    // `offset.y` on its own lifts the apron off the surface and leaves a proud
+    // horizontal flap floating above the terrain (the ~+1.9-voxel artifact).
+    let mut scale = width / outward;
+    let max_drop = width * 2.0;
+    if tangent.y.abs() > 1e-4 {
+        scale = scale.min(max_drop / tangent.y.abs());
+    }
+    tangent * scale
 }
 
 fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx: u32) {
@@ -338,13 +367,13 @@ pub fn generate_skirts(
         let has_lower_lod_neighbor = neighbor_lods
             .lod_for_face(edge.face)
             .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
-        let supports_transition_lip = has_lower_lod_neighbor && edge_supports_transition_lip(edge);
-        let needs_lip = !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
+        let needs_transition_apron =
+            !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
         let needs_vertical_candidate =
             !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
         let needs_vertical = needs_vertical_candidate;
-        let emit_lip = needs_lip && supports_transition_lip;
-        if !emit_lip && !needs_vertical {
+        let emit_transition_apron = needs_transition_apron;
+        if !emit_transition_apron && !needs_vertical {
             continue;
         }
 
@@ -360,13 +389,11 @@ pub fn generate_skirts(
         let base_idx = positions.len() as u32;
         // Scale skirt depth with the LOD difference so a Lod0/Lod1 transition gets a
         // deeper drop than the same-LOD baseline. step is the coarser side's step.
-        let transition_depth = neighbor_lods
+        let transition_step = neighbor_lods
             .lod_for_face(edge.face)
-            .map(|neighbor_lod| {
-                let step = neighbor_lod.step_size().max(my_lod.step_size()).max(1) as f32;
-                config.depth.max(step * VOXEL_SIZE * 2.0)
-            })
-            .unwrap_or(config.depth);
+            .map(|neighbor_lod| neighbor_lod.step_size().max(my_lod.step_size()).max(1) as f32)
+            .unwrap_or_else(|| my_lod.step_size().max(1) as f32);
+        let transition_depth = config.depth.max(transition_step * VOXEL_SIZE * 2.0);
         // Vertical (NegY/PosY) LOD boundaries cannot be hidden by a straight-down
         // curtain — the crack there sits in a roughly horizontal surface. Instead
         // extrude a short apron along the face normal toward the lower-detail
@@ -378,69 +405,70 @@ pub fn generate_skirts(
         } else {
             Vec3::new(0.0, -transition_depth, 0.0)
         };
-        let lip_width = if emit_lip {
-            neighbor_lods
-                .lod_for_face(edge.face)
-                .map(|lod| {
-                    let step = lod.step_size().max(my_lod.step_size()).max(1) as f32;
-                    (step * VOXEL_SIZE * 0.08).clamp(VOXEL_SIZE * 0.08, VOXEL_SIZE * 0.30)
-                })
-                .unwrap_or(VOXEL_SIZE * 0.08)
+        let apron_width = if emit_transition_apron {
+            // The probe caught real holes one voxel inside the coarse side of a
+            // Lod0/Lod1 Z seam. A decorative sub-voxel lip cannot cover that;
+            // the apron must span at least the coarser sampling step.
+            (transition_step * VOXEL_SIZE).clamp(VOXEL_SIZE, VOXEL_SIZE * 3.0)
         } else {
             0.0
         };
-        let lip_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.015, 0.0);
+        let apron_drop = Vec3::new(0.0, -VOXEL_SIZE * 0.03, 0.0);
 
         let top0 = edge.v0_pos;
         let top1 = edge.v1_pos;
-        let lip0 = top0 + skirt_normal * lip_width + lip_drop;
-        let lip1 = top1 + skirt_normal * lip_width + lip_drop;
+        let apron0 =
+            top0 + transition_apron_offset(skirt_normal, edge.v0_normal, apron_width) + apron_drop;
+        let apron1 =
+            top1 + transition_apron_offset(skirt_normal, edge.v1_normal, apron_width) + apron_drop;
 
         let blend_factor = 0.2;
         let blended_normal0 =
             (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
         let blended_normal1 =
             (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
-        let vertical_normal0 = if emit_lip {
+        let use_upward_transition_normals =
+            has_lower_lod_neighbor && edge_prefers_upward_transition_normals(edge);
+        let transition_normal0 = if use_upward_transition_normals {
             upward_biased_normal(edge.v0_normal)
         } else {
             blended_normal0
         };
-        let vertical_normal1 = if emit_lip {
+        let transition_normal1 = if use_upward_transition_normals {
             upward_biased_normal(edge.v1_normal)
         } else {
             blended_normal1
         };
 
-        let (vertical_top0, vertical_top1) = if emit_lip {
+        let (vertical_top0, vertical_top1) = if emit_transition_apron {
             positions.push(top0.to_array());
-            normals.push(upward_biased_normal(edge.v0_normal).to_array());
+            normals.push(transition_normal0.to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v0_weights);
 
             positions.push(top1.to_array());
-            normals.push(upward_biased_normal(edge.v1_normal).to_array());
+            normals.push(transition_normal1.to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
-            positions.push(lip0.to_array());
-            normals.push(upward_biased_normal(edge.v0_normal).to_array());
+            positions.push(apron0.to_array());
+            normals.push(transition_normal0.to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v0_weights);
 
-            positions.push(lip1.to_array());
-            normals.push(upward_biased_normal(edge.v1_normal).to_array());
+            positions.push(apron1.to_array());
+            normals.push(transition_normal1.to_array());
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
             push_quad_barycentrics(barycentric_uvs);
             push_boundary_quad_indices(indices, edge.face, base_idx);
-            (lip0, lip1)
+            (apron0, apron1)
         } else {
             (top0, top1)
         };
 
-        if emit_lip && !needs_vertical {
+        if emit_transition_apron && !needs_vertical {
             continue;
         }
 
@@ -453,22 +481,22 @@ pub fn generate_skirts(
         let bot1 = vertical_top1 + drop;
 
         positions.push(vertical_top0.to_array());
-        normals.push(vertical_normal0.to_array());
+        normals.push(transition_normal0.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v0_weights);
 
         positions.push(vertical_top1.to_array());
-        normals.push(vertical_normal1.to_array());
+        normals.push(transition_normal1.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
         positions.push(bot0.to_array());
-        normals.push(vertical_normal0.to_array());
+        normals.push(transition_normal0.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v0_weights);
 
         positions.push(bot1.to_array());
-        normals.push(vertical_normal1.to_array());
+        normals.push(transition_normal1.to_array());
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
@@ -499,6 +527,34 @@ mod tests {
             v1_pos: Vec3::new(16.0, 4.5, 6.0),
             v0_normal: Vec3::X,
             v1_normal: Vec3::X,
+            v0_weights: [1.0, 0.0, 0.0, 0.0],
+            v1_weights: [1.0, 0.0, 0.0, 0.0],
+            face: ChunkFace::PosX,
+        }
+    }
+
+    fn downhill_edge_on_pos_x() -> BoundaryEdge {
+        let normal = Vec3::new(1.0, 1.0, 0.0).normalize();
+        BoundaryEdge {
+            v0_pos: Vec3::new(16.0, 4.0, 2.0),
+            v1_pos: Vec3::new(16.0, 4.5, 6.0),
+            v0_normal: normal,
+            v1_normal: normal,
+            v0_weights: [1.0, 0.0, 0.0, 0.0],
+            v1_weights: [1.0, 0.0, 0.0, 0.0],
+            face: ChunkFace::PosX,
+        }
+    }
+
+    fn steep_downhill_edge_on_pos_x() -> BoundaryEdge {
+        // ~70-degree slope descending toward +X — the surface normal tilts hard
+        // toward +X, the regime where the old apron clamp left a proud flap.
+        let normal = Vec3::new(0.94, 0.34, 0.0).normalize();
+        BoundaryEdge {
+            v0_pos: Vec3::new(16.0, 12.0, 2.0),
+            v1_pos: Vec3::new(16.0, 12.5, 6.0),
+            v0_normal: normal,
+            v1_normal: normal,
             v0_weights: [1.0, 0.0, 0.0, 0.0],
             v1_weights: [1.0, 0.0, 0.0, 0.0],
             face: ChunkFace::PosX,
@@ -540,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn lod_transition_adds_narrow_top_lip_without_outward_drop() {
+    fn lod_transition_adds_step_sized_top_apron() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -576,12 +632,12 @@ mod tests {
         assert_eq!(barycentric_uvs.len(), 8);
         assert_eq!(indices.len(), 12);
         assert!(
-            positions[2][0] > 16.0 && positions[2][0] <= 16.31,
-            "transition lip should cover the boundary without painting a broad patch"
+            (positions[2][0] - 18.0).abs() < 1e-4,
+            "Lod0/Lod1 transition apron should span the Lod1 sample step"
         );
         assert!(
             positions[2][1] < positions[0][1] && positions[3][1] < positions[1][1],
-            "transition lip should have a small downward bias to avoid z-fighting"
+            "transition apron should have a small downward bias to avoid z-fighting"
         );
         assert!(
             normals[4][1] > 0.95 && normals[5][1] > 0.95,
@@ -590,12 +646,113 @@ mod tests {
         assert!(
             (positions[6][0] - positions[4][0]).abs() < 0.001
                 && (positions[7][0] - positions[5][0]).abs() < 0.001,
-            "transition skirt should drop from the lip instead of stepping farther into the neighbor"
+            "transition skirt should drop from the apron instead of stepping farther into the neighbor"
         );
     }
 
     #[test]
-    fn lower_lod_side_edge_uses_only_vertical_skirt() {
+    fn lod_transition_apron_drapes_downhill_instead_of_forming_horizontal_flap() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
+            neg_z: None,
+            pos_z: None,
+        };
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[downhill_edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert_eq!(positions.len(), 8);
+        assert!((positions[2][0] - 18.0).abs() < 1e-4);
+        assert!((positions[3][0] - 18.0).abs() < 1e-4);
+        assert!(
+            positions[2][1] < positions[0][1] - 1.5 && positions[3][1] < positions[1][1] - 1.5,
+            "transition apron should follow the downhill tangent instead of floating horizontally"
+        );
+    }
+
+    #[test]
+    fn lod_transition_apron_stays_on_steep_slope_without_floating() {
+        // Regression for the ~+1.9-voxel proud apron. On a steep slope the
+        // apron must drape *along* the surface; the earlier independent
+        // `offset.y` clamp truncated the drop and left the apron floating
+        // above the terrain.
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+        let edge = steep_downhill_edge_on_pos_x();
+
+        generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[edge.clone()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert_eq!(positions.len(), 8);
+        // tan(slope) = n.x / n.y for the surface normal.
+        let slope = edge.v0_normal.x / edge.v0_normal.y;
+        for (apron_idx, top) in [(2usize, edge.v0_pos), (3usize, edge.v1_pos)] {
+            let apron = Vec3::from_array(positions[apron_idx]);
+            let dx = apron.x - top.x;
+            assert!(dx > 0.0, "apron must extend toward the lower-LOD neighbour");
+            // The apron edge must sit on the draped surface (top.y - dx*slope),
+            // never float above it — and never above the boundary edge itself.
+            let draped_y = top.y - dx * slope;
+            assert!(
+                apron.y <= top.y,
+                "apron floated above the boundary edge: apron.y={}, top.y={}",
+                apron.y,
+                top.y,
+            );
+            assert!(
+                (apron.y - draped_y).abs() < 0.2,
+                "apron must track the steep slope, not float: apron.y={}, draped_y={}",
+                apron.y,
+                draped_y,
+            );
+        }
+    }
+
+    #[test]
+    fn lower_lod_side_edge_gets_step_sized_apron_and_vertical_skirt() {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
@@ -627,14 +784,16 @@ mod tests {
             &neighbor_lods,
         );
 
-        assert_eq!(positions.len(), 4);
-        assert_eq!(barycentric_uvs.len(), 4);
-        assert_eq!(indices.len(), 6);
+        assert_eq!(positions.len(), 8);
+        assert_eq!(barycentric_uvs.len(), 8);
+        assert_eq!(indices.len(), 12);
         assert!(
-            positions
-                .iter()
-                .all(|position| (position[0] - 16.0).abs() < 0.001),
-            "side edges should not emit horizontal lips over the neighbor terrain"
+            (positions[2][0] - 18.0).abs() < 1e-4,
+            "side-edge apron should span the Lod1 sample step"
+        );
+        assert!(
+            normals[4][0] > 0.95 && normals[5][0] > 0.95,
+            "side-edge vertical skirt should keep side-like normals"
         );
     }
 
@@ -749,10 +908,10 @@ mod tests {
             &neighbor_lods,
         );
 
-        // Vertical-only skirt: 4 vertices = top0, top1, bot0, bot1.
-        assert_eq!(positions.len(), 4);
-        let drop_v0 = positions[0][1] - positions[2][1];
-        let drop_v1 = positions[1][1] - positions[3][1];
+        // Apron + vertical skirt: bottom vertices are 6 and 7.
+        assert_eq!(positions.len(), 8);
+        let drop_v0 = positions[4][1] - positions[6][1];
+        let drop_v1 = positions[5][1] - positions[7][1];
         assert!(
             (drop_v0 - 4.0).abs() < 1e-4,
             "expected Lod0/Lod1 transition drop = 4.0, got {drop_v0}"

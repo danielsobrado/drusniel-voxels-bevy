@@ -87,16 +87,16 @@ observability/correctness gate rather than a proven performance win.
   - `naadf.radiance_cascade_pass_active`: 0.
   - GI/contact/AO query counters: 0 / 0 / 0 rays per pixel.
   - SDF update needed: 1.
-- Opt-in all-query active run: `bench-runs/path-a-review-all-active-final2/summary.json`
-  - 46.60 ms median, 69.23 ms p99.
+- Opt-in all-query active run: `bench-runs/deep-review-all-active/summary.json`
+  - 40.31 ms median, 57.80 ms p99.
   - `naadf.radiance_cascade_pass_active`: 1.
   - GI/contact/AO query counters: 2 / 1 / 4 rays per pixel.
   - 282 slots used, 0 missing interest slots, 203 uploaded chunks peak.
 - SDF update needed: 0; SDF skip counter advances.
-- Guard: `bench-runs/path-a-review-all-active-final2-guard.log`
+- Guard: `bench-runs/deep-review-all-active-guard.log`
   - `PASS: 187 check(s), 0 warning(s).`
 - Screenshot inspected:
-  - `bench-runs/path-a-review-all-active-final2/visual-regression-naadf-path-a-all-naadf-path-a-all-naadf-path-a-all-settled-run0.png`
+  - `bench-runs/deep-review-all-active/visual-regression-naadf-path-a-all-naadf-path-a-all-naadf-path-a-all-settled-run0.png`
 
 ## Acceptance criteria
 

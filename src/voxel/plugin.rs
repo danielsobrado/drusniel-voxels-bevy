@@ -3852,9 +3852,14 @@ pub(crate) fn terrain_lod_hysteresis_for(high_detail_distance: f32) -> f32 {
 
 /// Calculates the target LOD level with hysteresis to prevent rapid switching.
 ///
+/// The target is the distance band directly — a chunk that loads far away
+/// reaches Lod2/Lod3 in a single update instead of climbing one rung per
+/// update. The old one-rung state machine, combined with the per-update change
+/// cap, left distant chunks stuck at Lod0/Lod1.
+///
 /// Hysteresis is asymmetric: upgrades to higher detail fire eagerly (no `-h`
-/// buffer) so a chunk that crosses the near threshold becomes Lod0 immediately.
-/// Downgrades still need to exceed `threshold + h` to prevent flip-flopping.
+/// buffer) so a chunk that crosses a near threshold sharpens immediately.
+/// Coarsening still needs to exceed `threshold + h` to prevent flip-flopping.
 pub(crate) fn calculate_target_lod_with_hysteresis(
     distance: f32,
     current_lod: LodLevel,
@@ -3877,50 +3882,40 @@ pub(crate) fn calculate_target_lod_with_hysteresis(
     let lod1_distance = (settings.high_detail_distance + settings.cull_distance) * 0.5;
     let lod2_distance = lod1_distance + (settings.cull_distance - lod1_distance) * 0.5;
 
-    match current_lod {
-        LodLevel::Lod0 => {
-            if distance > settings.high_detail_distance + h {
-                LodLevel::Lod1
-            } else {
-                LodLevel::Lod0
-            }
-        }
-        LodLevel::Lod1 => {
-            // Eager upgrade: any time the chunk enters the high-detail band, snap
-            // back to Lod0 without waiting for the extra hysteresis buffer.
-            if distance < settings.high_detail_distance {
-                LodLevel::Lod0
-            } else if distance > lod1_distance + h {
-                LodLevel::Lod2
-            } else {
-                LodLevel::Lod1
-            }
-        }
-        LodLevel::Lod2 => {
-            if distance < lod1_distance - h {
-                LodLevel::Lod1
-            } else if distance > lod2_distance + h {
-                LodLevel::Lod3
-            } else {
-                LodLevel::Lod2
-            }
-        }
-        LodLevel::Lod3 => {
-            if distance < lod2_distance - h {
-                LodLevel::Lod2
-            } else if distance > settings.cull_distance + h {
-                LodLevel::Culled
-            } else {
-                LodLevel::Lod3
-            }
-        }
-        LodLevel::Culled => {
-            if distance < settings.cull_distance - h {
-                LodLevel::Lod3
-            } else {
-                LodLevel::Culled
-            }
-        }
+    // Coarsening thresholds: Lod0|1 at high_detail_distance, Lod1|2 at
+    // lod1_distance, Lod2|3 at lod2_distance, Lod3|Culled at cull_distance.
+    let thresholds = [
+        settings.high_detail_distance,
+        lod1_distance,
+        lod2_distance,
+        settings.cull_distance,
+    ];
+
+    // Rank 0..=4 == Lod0..=Culled: how many coarsening thresholds `distance`
+    // has cleared. `offset` shifts every threshold outward.
+    let band = |offset: f32| -> u8 {
+        thresholds
+            .iter()
+            .filter(|threshold| distance >= **threshold + offset)
+            .count() as u8
+    };
+
+    // Asymmetric hysteresis: a chunk may sharpen eagerly (plain thresholds) but
+    // only coarsens once it clears `threshold + h`. While the current LOD is
+    // inside `[lazy, eager]` it is kept; outside it the chunk jumps straight to
+    // the correct band — so a freshly loaded distant chunk reaches Lod2/Lod3 in
+    // one update instead of one rung per update.
+    let eager = band(0.0);
+    let lazy = band(h);
+    let current_rank = 4 - current_lod.detail_value();
+    let target_rank = current_rank.clamp(lazy, eager);
+
+    match target_rank {
+        0 => LodLevel::Lod0,
+        1 => LodLevel::Lod1,
+        2 => LodLevel::Lod2,
+        3 => LodLevel::Lod3,
+        _ => LodLevel::Culled,
     }
 }
 

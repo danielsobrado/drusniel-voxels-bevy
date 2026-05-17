@@ -34,7 +34,7 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts,
+    extract_boundary_edges, generate_skirts, ChunkFace, NeighborLods, SkirtConfig,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -46,7 +46,7 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
@@ -2256,13 +2256,20 @@ fn lower_detail_transition_step_for_padded_size(
 ) -> Option<i32> {
     let mut transition_step = my_lod.step_size();
 
-    for (face, on_boundary_sample_row) in [
-        (ChunkFace::NegX, px == 1),
-        (ChunkFace::PosX, px == padded_size - 1),
-        (ChunkFace::NegZ, pz == 1),
-        (ChunkFace::PosZ, pz == padded_size - 1),
+    // Coarsen the two outermost padded planes on each X/Z face, not just the
+    // single outermost one. The Surface-Nets cell that welds this chunk to a
+    // lower-detail neighbour straddles the shared boundary and uses *both*
+    // outer planes as its corners. Coarsening only the outermost plane leaves
+    // that cell's inner corner at fine resolution, so its boundary vertex sits
+    // at the fine (true) surface height while the neighbour's coarse vertex
+    // sits ~one step lower — and a see-through seam opens between them.
+    for (face, on_boundary_band) in [
+        (ChunkFace::NegX, px <= 1),
+        (ChunkFace::PosX, px >= padded_size - 2),
+        (ChunkFace::NegZ, pz <= 1),
+        (ChunkFace::PosZ, pz >= padded_size - 2),
     ] {
-        if !on_boundary_sample_row {
+        if !on_boundary_band {
             continue;
         }
 
@@ -2292,25 +2299,6 @@ fn lower_detail_transition_step(
         pz,
         LOD0_PADDED_SIZE,
     )
-}
-
-fn sample_lod_density_at_world_pos(world: &VoxelWorld, base_world_pos: IVec3, step: i32) -> f32 {
-    let mut solid_count = 0;
-    let sample_count = step * step * step;
-
-    for dz in 0..step {
-        for dy in 0..step {
-            for dx in 0..step {
-                let world_pos = base_world_pos + IVec3::new(dx, dy, dz);
-                if sample_voxel_at_world_pos(world, world_pos) {
-                    solid_count += 1;
-                }
-            }
-        }
-    }
-
-    let density = solid_count as f32 / sample_count as f32;
-    1.0 - 2.0 * density
 }
 
 fn generate_low_lod_sdf<const N: usize>(
@@ -2346,12 +2334,12 @@ fn generate_low_lod_sdf<const N: usize>(
                     step,
                     effective_step,
                 );
-                sdf[idx] = sample_lod_density_at_world_pos(world, base_world_pos, effective_step);
+                sdf[idx] = sample_lod_sdf_at_world_pos(world, base_world_pos);
             }
         }
     }
 
-    sdf
+    smooth_lod_sdf_interior(&sdf, padded_size, linearize, 0.5)
 }
 
 fn coarse_aligned_lod_sample_base(
@@ -2382,6 +2370,56 @@ fn coarse_aligned_lod_sample_base_with_stride(
     chunk_origin + aligned
 }
 
+fn sample_lod_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> f32 {
+    if sample_voxel_at_world_pos(world, world_pos) {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+fn smooth_lod_sdf_interior<const N: usize>(
+    sdf: &[f32; N],
+    padded_size: u32,
+    linearize: impl Fn([u32; 3]) -> u32,
+    current_weight: f32,
+) -> [f32; N] {
+    if padded_size < 5 {
+        return *sdf;
+    }
+
+    let neighbor_weight = 1.0 - current_weight;
+    let mut smoothed = *sdf;
+    let last_interior = padded_size - 3;
+
+    for z in 2..=last_interior {
+        for y in 2..=last_interior {
+            for x in 2..=last_interior {
+                let idx = linearize([x, y, z]) as usize;
+                let current = sdf[idx];
+                let neighbors = [
+                    sdf[linearize([x - 1, y, z]) as usize],
+                    sdf[linearize([x + 1, y, z]) as usize],
+                    sdf[linearize([x, y - 1, z]) as usize],
+                    sdf[linearize([x, y + 1, z]) as usize],
+                    sdf[linearize([x, y, z - 1]) as usize],
+                    sdf[linearize([x, y, z + 1]) as usize],
+                ];
+
+                if neighbors
+                    .iter()
+                    .any(|&neighbor| (neighbor > 0.0) != (current > 0.0))
+                {
+                    let neighbor_avg = neighbors.iter().sum::<f32>() / neighbors.len() as f32;
+                    smoothed[idx] = current * current_weight + neighbor_avg * neighbor_weight;
+                }
+            }
+        }
+    }
+
+    smoothed
+}
+
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
 /// This is the LOD0 (high detail) version - samples every voxel.
@@ -2401,7 +2439,7 @@ fn generate_sdf(
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
         if let Some(step) = lower_detail_transition_step(my_lod, neighbor_lods, px, py, pz) {
             let base_world_pos = coarse_aligned_lod_sample_base(chunk_origin, px, py, pz, step);
-            sdf[i] = sample_lod_density_at_world_pos(world, base_world_pos, step);
+            sdf[i] = sample_lod_sdf_at_world_pos(world, base_world_pos);
         } else {
             let is_solid = sample_voxel_solid(chunk, world, chunk_origin, px, py, pz);
             // SDF: negative inside solid, positive in air
@@ -2420,13 +2458,13 @@ fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> bool {
     terrain_meshing_voxel_at(world, world_pos).is_solid()
 }
 
-/// Generate an SDF array at LOD1 (half resolution) with multi-sample averaging.
+/// Generate an SDF array at LOD1 (half resolution).
 /// Returns a 10x10x10 grid (1000 elements) instead of 18x18x18 (5832).
 /// Vertex positions must be scaled by step_size (2) after mesh generation.
 ///
-/// Instead of sampling a single voxel per cell, this samples all voxels in the
-/// 2x2x2 region covered by each LOD cell and computes a weighted density.
-/// This creates smoother SDF gradients that reduce stair-stepping on slopes.
+/// Low-LOD samples use the same lattice-voxel convention as LOD0 to avoid
+/// phase-shifting terrain downward, then smooth only interior SDF values to
+/// reduce stair-stepping without moving boundary samples.
 fn generate_sdf_lod1(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -3662,7 +3700,7 @@ mod tests {
         let chunk_pos = IVec3::new(1, 0, 2);
         let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
         let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
-        world.set_voxel(chunk_origin + IVec3::new(17, 5, 5), VoxelType::Rock);
+        world.set_voxel(chunk_origin + IVec3::new(16, 4, 4), VoxelType::Rock);
 
         let chunk = world.get_chunk(chunk_pos).unwrap();
         let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
@@ -3690,12 +3728,47 @@ mod tests {
         let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
         let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
 
-        assert_eq!(raw_sdf[boundary_idx], 1.0);
         assert_eq!(
             transition_sdf[boundary_idx],
             neighbor_lod1_sdf[neighbor_boundary_idx]
         );
-        assert_eq!(transition_sdf[boundary_idx], 0.75);
+        assert_eq!(transition_sdf[boundary_idx], -1.0);
+        assert_eq!(raw_sdf[boundary_idx], transition_sdf[boundary_idx]);
+    }
+
+    #[test]
+    fn lod0_transition_coarsens_full_boundary_band_not_just_outer_plane() {
+        // The Surface-Nets cell that welds a Lod0 chunk to a lower-detail
+        // neighbour straddles the boundary and uses the two outermost padded
+        // planes as corners. Both must be coarsened; coarsening only the
+        // outermost plane leaves the weld cell's inner corner at fine
+        // resolution and a seam opens. This guards the inner plane
+        // (px == LOD0_PADDED_SIZE - 2), which the original one-plane
+        // transition left untouched.
+        let chunk_pos = IVec3::new(1, 0, 2);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
+        // Solid voxel one aligned coarse step in from the PosX boundary. The
+        // fine sample at the inner plane (local x = 15) misses it; the
+        // lower-detail-aligned sample at local x = 14 picks it up.
+        world.set_voxel(chunk_origin + IVec3::new(14, 4, 4), VoxelType::Rock);
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let no_transition_lods = NeighborLods::default();
+        let transition_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let inner_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 2, 5, 5]) as usize;
+
+        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods);
+        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods);
+
+        // Fine sampling at the inner plane misses the voxel.
+        assert_eq!(raw_sdf[inner_idx], 1.0);
+        // The transition must coarsen the inner plane too.
+        assert_eq!(transition_sdf[inner_idx], -1.0);
     }
 
     #[test]
@@ -3722,6 +3795,190 @@ mod tests {
     }
 
     #[test]
+    fn low_lod_sdf_samples_lattice_voxel_not_forward_box() {
+        let mut world = world_with_test_chunks(IVec3::ONE);
+        let sample_pos = IVec3::new(8, 8, 8);
+
+        world.set_voxel(sample_pos + IVec3::ONE, VoxelType::Rock);
+        assert_eq!(sample_lod_sdf_at_world_pos(&world, sample_pos), 1.0);
+
+        world.set_voxel(sample_pos, VoxelType::Rock);
+        assert_eq!(sample_lod_sdf_at_world_pos(&world, sample_pos), -1.0);
+    }
+
+    #[test]
+    fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
+        let chunk_pos = IVec3::ZERO;
+        let mut world = world_with_test_chunks(IVec3::ONE);
+        for x in 0..CHUNK_SIZE_I32 {
+            for y in 0..8 {
+                for z in 0..CHUNK_SIZE_I32 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let lod0_mesh = generate_chunk_mesh_surface_nets(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            NeighborLods::default(),
+            &SkirtConfig::default(),
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+        let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
+            chunk,
+            &world,
+            LodLevel::Lod1,
+            NeighborLods::default(),
+            &SkirtConfig::default(),
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+
+        let max_lod0_y = lod0_mesh
+            .solid
+            .positions
+            .iter()
+            .map(|pos| pos[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_lod1_y = lod1_mesh
+            .solid
+            .positions
+            .iter()
+            .map(|pos| pos[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(
+            max_lod1_y <= max_lod0_y + VOXEL_SIZE * 0.05,
+            "LOD1 flat surface should not overshoot LOD0: LOD1 y={max_lod1_y}, LOD0 y={max_lod0_y}"
+        );
+        assert!(
+            max_lod0_y - max_lod1_y <= VOXEL_SIZE * 0.55,
+            "LOD1 flat surface should stay within half a voxel of LOD0: LOD1 y={max_lod1_y}, LOD0 y={max_lod0_y}"
+        );
+    }
+
+    #[test]
+    fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 1));
+        fill_steep_x_slope(&mut world);
+
+        let lod0_chunk_pos = IVec3::new(1, 1, 0);
+        let lod1_chunk_pos = IVec3::new(2, 1, 0);
+        let lod0_chunk = world.get_chunk(lod0_chunk_pos).unwrap();
+        let lod1_chunk = world.get_chunk(lod1_chunk_pos).unwrap();
+        let lod0_origin = VoxelWorld::chunk_to_world(lod0_chunk_pos);
+        let lod1_origin = VoxelWorld::chunk_to_world(lod1_chunk_pos);
+        let skirt_config = SkirtConfig::default();
+        let samples = [
+            Vec3::new(31.5, 0.0, 8.5),
+            Vec3::new(32.25, 0.0, 8.5),
+            Vec3::new(32.75, 0.0, 8.5),
+            Vec3::new(33.5, 0.0, 8.5),
+        ];
+
+        let reference_left = generate_chunk_mesh_surface_nets(
+            lod0_chunk,
+            &world,
+            LodLevel::Lod0,
+            NeighborLods {
+                pos_x: Some(LodLevel::Lod0),
+                ..Default::default()
+            },
+            &skirt_config,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+        let reference_right = generate_chunk_mesh_surface_nets(
+            lod1_chunk,
+            &world,
+            LodLevel::Lod0,
+            NeighborLods {
+                neg_x: Some(LodLevel::Lod0),
+                ..Default::default()
+            },
+            &skirt_config,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+        let reference_meshes = [
+            (&reference_left.solid, lod0_origin),
+            (&reference_right.solid, lod1_origin),
+        ];
+        let reference_max_abs_error = samples
+            .iter()
+            .map(|sample| {
+                let hit_y =
+                    highest_vertical_hit_y_for_meshes(&reference_meshes, sample.x, sample.z)
+                        .expect("all-Lod0 reference seam should have a vertical hit");
+                let expected_y = expected_surface_face_y_at(
+                    &world,
+                    sample.x.floor() as i32,
+                    sample.z.floor() as i32,
+                )
+                .expect("synthetic slope should have a voxel surface");
+                (hit_y - expected_y).abs()
+            })
+            .fold(0.0_f32, f32::max);
+
+        let transition_left = generate_chunk_mesh_surface_nets(
+            lod0_chunk,
+            &world,
+            LodLevel::Lod0,
+            NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            &skirt_config,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+        let transition_right = generate_chunk_mesh_surface_nets_lod1(
+            lod1_chunk,
+            &world,
+            LodLevel::Lod1,
+            NeighborLods {
+                neg_x: Some(LodLevel::Lod0),
+                ..Default::default()
+            },
+            &skirt_config,
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+        let transition_meshes = [
+            (&transition_left.solid, lod0_origin),
+            (&transition_right.solid, lod1_origin),
+        ];
+        let tolerance = reference_max_abs_error + VOXEL_SIZE * 0.5;
+
+        for sample in samples {
+            let hit_y = highest_vertical_hit_y_for_meshes(&transition_meshes, sample.x, sample.z)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Lod0/Lod1 transition seam should have a vertical hit at x={}, z={}",
+                        sample.x, sample.z
+                    )
+                });
+            let expected_y = expected_surface_face_y_at(
+                &world,
+                sample.x.floor() as i32,
+                sample.z.floor() as i32,
+            )
+            .expect("synthetic slope should have a voxel surface");
+            let signed_error = hit_y - expected_y;
+            assert!(
+                signed_error.abs() <= tolerance,
+                "Lod0/Lod1 transition seam signed error {signed_error:.2} exceeded reference-derived tolerance {tolerance:.2} at x={}, z={} (hit_y={hit_y:.2}, expected_y={expected_y:.2}, reference_max_abs_error={reference_max_abs_error:.2})",
+                sample.x,
+                sample.z,
+            );
+        }
+    }
+
+    #[test]
     fn low_lod_transition_boundary_sdf_matches_coarser_neighbor_sample() {
         let chunk_pos = IVec3::new(1, 0, 0);
         let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
@@ -3733,7 +3990,7 @@ mod tests {
                 }
             }
         }
-        world.set_voxel(chunk_origin + IVec3::new(23, 8, 0), VoxelType::Rock);
+        world.set_voxel(chunk_origin + IVec3::new(16, 8, 0), VoxelType::Rock);
 
         let chunk = world.get_chunk(chunk_pos).unwrap();
         let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
@@ -3755,7 +4012,7 @@ mod tests {
             transition_sdf[boundary_idx],
             neighbor_lod3_sdf[neighbor_boundary_idx]
         );
-        assert_eq!(transition_sdf[boundary_idx], 1.0 - 2.0 / 512.0);
+        assert_eq!(transition_sdf[boundary_idx], -1.0);
     }
 
     fn set_column(
@@ -3791,6 +4048,58 @@ mod tests {
             }
         }
         false
+    }
+
+    fn highest_vertical_hit_y_for_meshes(
+        meshes: &[(&MeshData, IVec3)],
+        world_x: f32,
+        world_z: f32,
+    ) -> Option<f32> {
+        let origin_y = meshes
+            .iter()
+            .map(|(_, chunk_origin)| chunk_origin.y as f32 + 48.0)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mut best_hit = None;
+        for (mesh, chunk_origin) in meshes {
+            for tri in mesh.indices.chunks_exact(3) {
+                let p0 = Vec3::from_array(mesh.positions[tri[0] as usize]) + chunk_origin.as_vec3();
+                let p1 = Vec3::from_array(mesh.positions[tri[1] as usize]) + chunk_origin.as_vec3();
+                let p2 = Vec3::from_array(mesh.positions[tri[2] as usize]) + chunk_origin.as_vec3();
+                if let Some(hit_y) =
+                    vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2)
+                {
+                    if best_hit.map_or(true, |best| hit_y > best) {
+                        best_hit = Some(hit_y);
+                    }
+                }
+            }
+        }
+        best_hit
+    }
+
+    fn expected_surface_face_y_at(world: &VoxelWorld, x: i32, z: i32) -> Option<f32> {
+        let bounds = world.bounds();
+        for y in (bounds.min_world_y..=bounds.max_world_y).rev() {
+            if matches!(
+                world.sample_voxel_for_collision(IVec3::new(x, y, z)),
+                VoxelSample::InBounds(voxel) if voxel.is_solid()
+            ) {
+                return Some(y as f32 + VOXEL_SIZE);
+            }
+        }
+        None
+    }
+
+    fn fill_steep_x_slope(world: &mut VoxelWorld) {
+        let bounds = world.bounds();
+        for x in bounds.horizontal_min.x..=bounds.horizontal_max.x {
+            let surface_y = 44 - x / 2;
+            for z in bounds.horizontal_min.y..=bounds.horizontal_max.y {
+                for y in bounds.min_world_y..surface_y {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
     }
 
     fn vertical_ray_triangle_hit_y(

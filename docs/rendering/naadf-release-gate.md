@@ -60,7 +60,7 @@ Inspected fixed-checkpoint screenshots:
 - `bench-runs/phase5-contact-naadf/visual-regression-naadf-contact-naadf-contact-naadf-contact-settled-run0.png`
 - `bench-runs/phase5-terrain-ao-naadf/visual-regression-naadf-terrain-ao-naadf-terrain-ao-naadf-terrain-ao-settled-run0.png`
 - `bench-runs/path-a-review-gi-secondary-active/visual-regression-naadf-gi-secondary-naadf-gi-secondary-naadf-gi-secondary-settled-run0.png`
-- `bench-runs/path-a-review-all-active-final2/visual-regression-naadf-path-a-all-naadf-path-a-all-naadf-path-a-all-settled-run0.png`
+- `bench-runs/deep-review-all-active/visual-regression-naadf-path-a-all-naadf-path-a-all-naadf-path-a-all-settled-run0.png`
 
 ## Defaults
 
