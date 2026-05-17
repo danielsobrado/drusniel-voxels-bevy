@@ -348,7 +348,6 @@ pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
     uuid_handle!("a42e6f9b-5c81-4a0d-a6f7-6e45e9ef0001");
 pub const GERSTNER_WAVES_HANDLE: Handle<Shader> =
     uuid_handle!("4c8c8d38-6c4b-4d3e-b48a-5bd7f8198f39");
-pub const WATER_FOAM_HANDLE: Handle<Shader> = uuid_handle!("b2c3d4e5-f6a7-8901-bcde-f01234567890");
 pub const NOBLE_GERSTNER_HANDLE: Handle<Shader> =
     uuid_handle!("e8a0c196-9db0-4db7-a623-3c8f57c20e01");
 pub const NOBLE_FOAM_HANDLE: Handle<Shader> = uuid_handle!("d301db2d-50ef-4f6f-a22e-704278a756d1");
@@ -385,15 +384,6 @@ impl Plugin for EnhancedWaterPlugin {
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/shaders/gerstner_waves.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            WATER_FOAM_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/water_foam.wgsl"
             ),
             Shader::from_wgsl
         );

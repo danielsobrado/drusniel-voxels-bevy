@@ -357,6 +357,38 @@ fn inactive_sdf_and_stochastic_probe_prototypes_are_not_shipped_as_shaders() {
     );
 }
 
+#[test]
+fn inactive_vegetation_and_water_foam_prototypes_are_not_shipped_as_shaders() {
+    let grass = include_str!("../assets/shaders/grass.wgsl");
+    let water_fragment = include_str!("../assets/shaders/water_fragment.wgsl");
+    let water = include_str!("../src/rendering/water.rs");
+
+    assert!(
+        grass.contains("fn simple_wrap_lighting"),
+        "active vegetation SSS should live in the compiled grass shader"
+    );
+    assert!(
+        water_fragment.contains("#import noble_foam"),
+        "active water foam should route through the compiled Noble foam shader"
+    );
+    assert!(
+        !water.contains("WATER_FOAM_HANDLE") && !water.contains("/assets/shaders/water_foam.wgsl"),
+        "unused water_foam.wgsl should not be registered as an internal shader asset"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/sss_vegetation.wgsl").exists(),
+        "unused standalone sss_vegetation.wgsl should not be shipped as an active-looking shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/wind_animation.wgsl").exists(),
+        "unused standalone wind_animation.wgsl should not be shipped as an active-looking shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/water_foam.wgsl").exists(),
+        "unused standalone water_foam.wgsl should not be shipped as an active-looking shader"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];
