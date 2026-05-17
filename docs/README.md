@@ -8,6 +8,9 @@
 - [NAADF Jira breakdown](./rendering/naadf-jira-breakdown.md)
 - [NAADF upstream parity](./rendering/naadf-upstream-parity.md)
 - [Witchcraft water finish](./witchcraft-water-finish.md)
+- [Rendering docs index](./rendering/README.md)
+- [LOD docs index](./lod/README.md)
+- [Physics docs index](./physics/README.md)
 
 ## Editor sprint plan files
 
