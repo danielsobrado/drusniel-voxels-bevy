@@ -291,6 +291,25 @@ fn contact_shadows_are_not_shipped_as_unused_placeholder_shader() {
     );
 }
 
+#[test]
+fn volumetric_clouds_are_not_shipped_as_inactive_prototype_shaders() {
+    let rendering_mod = include_str!("../src/rendering/mod.rs");
+
+    assert!(
+        !rendering_mod.contains("volumetric_clouds"),
+        "inactive volumetric cloud prototypes should not be advertised from the rendering module"
+    );
+    assert!(
+        !std::path::Path::new("src/rendering/volumetric_clouds.rs").exists(),
+        "unused volumetric_clouds.rs prototype should not be compiled as an active-looking module"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/volumetric_clouds.wgsl").exists()
+            && !std::path::Path::new("assets/shaders/cloud_noise.wgsl").exists(),
+        "unused volumetric cloud prototype shaders should not be shipped as active-looking assets"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];

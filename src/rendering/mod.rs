@@ -13,7 +13,6 @@
 //! - [`capabilities`] - GPU capability detection
 //! - [`cinematic`] - Cinematic camera sequences
 //! - [`photo_mode`] - Photo mode for screenshots
-//! - [`volumetric_clouds`] - Raymarched volumetric clouds
 //! - [`radiance_cascades`] - Radiance Cascades global illumination
 
 pub mod adaptive_gi;
@@ -42,7 +41,6 @@ pub mod render_timing;
 pub mod shadow_budget;
 pub mod ssao;
 pub mod triplanar_material;
-pub mod volumetric_clouds;
 pub mod voxel_ray_backend;
 pub mod water;
 pub mod water_displacement;
