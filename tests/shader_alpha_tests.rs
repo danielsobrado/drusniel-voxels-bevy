@@ -104,8 +104,16 @@ fn alpha_mask_vegetation_discards_instead_of_writing_translucent_scene_alpha() {
         billboard.contains("return vec4<f32>(final_color, 1.0);"),
         "accepted billboard alpha-mask pixels should write solid scene alpha"
     );
-    assert_not_contains(grass, "return vec4<f32>(final_color, final_alpha);", "grass.wgsl");
-    assert_not_contains(billboard, "return vec4<f32>(final_color, tex_color.a);", "billboard.wgsl");
+    assert_not_contains(
+        grass,
+        "return vec4<f32>(final_color, final_alpha);",
+        "grass.wgsl",
+    );
+    assert_not_contains(
+        billboard,
+        "return vec4<f32>(final_color, tex_color.a);",
+        "billboard.wgsl",
+    );
 }
 
 #[test]

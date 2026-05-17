@@ -246,20 +246,7 @@ fn create_body_water_materials(
     } else {
         preset.clarity.max(0.0)
     };
-    let edge_scale = match kind {
-        WaterBodyKind::Ocean => settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT,
-        WaterBodyKind::Lake | WaterBodyKind::Pond => {
-            (settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT * 1.45).max(0.1)
-        }
-        WaterBodyKind::River | WaterBodyKind::ShallowFlood | WaterBodyKind::Unknown => {
-            settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT
-        }
-    };
-    let edge_scale = if water_ripple_lines_disabled() {
-        -edge_scale.abs()
-    } else {
-        edge_scale
-    };
+    let edge_scale = water_edge_scale(kind, settings);
 
     let mut water_extension = BevyWaterMaterial {
         amplitude: wave_amplitude,
@@ -357,6 +344,24 @@ fn water_specular_transmission(kind: WaterBodyKind) -> f32 {
         WaterBodyKind::Lake | WaterBodyKind::River | WaterBodyKind::Pond => 0.04,
         WaterBodyKind::ShallowFlood => 0.01,
         WaterBodyKind::Unknown => 0.05,
+    }
+}
+
+fn water_edge_scale(kind: WaterBodyKind, settings: &WaterSettings) -> f32 {
+    let edge_scale = match kind {
+        WaterBodyKind::Ocean => settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT,
+        WaterBodyKind::Lake | WaterBodyKind::Pond => {
+            (settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT * 1.45).max(0.1)
+        }
+        WaterBodyKind::River | WaterBodyKind::ShallowFlood | WaterBodyKind::Unknown => {
+            settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT
+        }
+    };
+
+    if water_ripple_lines_disabled() {
+        -edge_scale.abs()
+    } else {
+        edge_scale
     }
 }
 
@@ -481,6 +486,21 @@ mod water_material_tests {
         assert!(water_reflectance(ocean) < ocean.reflection_strength);
         assert!(water_reflectance(ocean) <= 0.46);
     }
+
+    #[test]
+    fn still_water_keeps_expanded_shoreline_edge_scale() {
+        let settings = WaterSettings {
+            edge_scale: 0.4,
+            ..default()
+        };
+        let ocean = water_edge_scale(WaterBodyKind::Ocean, &settings);
+        let lake = water_edge_scale(WaterBodyKind::Lake, &settings);
+        let pond = water_edge_scale(WaterBodyKind::Pond, &settings);
+
+        assert!(lake > ocean);
+        assert_eq!(lake, pond);
+        assert!(lake >= 0.1);
+    }
 }
 
 pub fn sync_voxel_water_material_overrides(
@@ -572,12 +592,7 @@ pub fn sync_voxel_water_material_overrides(
                 debug_solid_color,
                 witchcraft_params,
             );
-            let edge_scale = settings.edge_scale * VOXEL_WATER_EDGE_SCALE_MULT;
-            mat.extension.edge_scale = if water_ripple_lines_disabled() {
-                -edge_scale.abs()
-            } else {
-                edge_scale
-            };
+            mat.extension.edge_scale = water_edge_scale(kind, &settings);
             mat.extension.coord_offset = Vec2::ZERO;
             mat.extension.coord_scale = Vec2::splat(VOXEL_WATER_WAVE_UV_SCALE);
             mat.extension.quality = settings.water_quality.into();
