@@ -201,7 +201,7 @@ rtk cargo test
 
 **Files:**
 
-- Create or modify: `bench/scenes/physics-stacking-smoke.toml`
+- Create or modify: `bench/scenes/collider/physics-stacking-smoke.toml` (temporary placeholder until this scene is introduced)
 - Create or modify physics integration tests where practical
 - Modify: `src/physics/materials.rs` or settings only if tests reveal bad defaults
 
@@ -215,7 +215,7 @@ rtk cargo test
 
 ```powershell
 rtk cargo test physics
-rtk cargo run --release -- --bench bench/scenes/physics-stacking-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/physics-stacking-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 

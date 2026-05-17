@@ -331,7 +331,7 @@ Read `bench-runs/<run>/summary.json` and report collider rows plus movement smok
 
 **Files:**
 
-- Create or modify: `bench/scenes/physics-solver-smoke.toml`
+- Create or modify: `bench/scenes/collider/physics-solver-smoke.toml` (temporary placeholder until this scene is introduced)
 - Modify bench harness only if it needs controlled dynamic body assertions
 
 - [ ] Add a checkpoint for bouncy sphere behavior if the bench harness can spawn scripted physics bodies.
@@ -343,7 +343,7 @@ Read `bench-runs/<run>/summary.json` and report collider rows plus movement smok
 **Verification:**
 
 ```powershell
-rtk cargo run --release -- --bench bench/scenes/physics-solver-smoke.toml
+rtk cargo run --release -- --bench bench/scenes/collider/physics-solver-smoke.toml
 rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
