@@ -22,7 +22,7 @@ use bevy::render::{
         BufferDescriptor, BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites,
         FragmentState, Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
         RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-        ShaderType, TextureSampleType, binding_types,
+        ShaderType, TextureFormat, TextureSampleType, binding_types,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
     view::ViewTarget,
@@ -140,7 +140,8 @@ struct WeatherOverlayPipeline {
     layout: BindGroupLayoutDescriptor,
     sampler: Sampler,
     uniform_buffer: Buffer,
-    pipeline_id: CachedRenderPipelineId,
+    hdr_pipeline_id: CachedRenderPipelineId,
+    sdr_pipeline_id: CachedRenderPipelineId,
 }
 
 fn init_weather_overlay_pipeline(
@@ -168,27 +169,37 @@ fn init_weather_overlay_pipeline(
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
-        label: Some("weather_overlay_pipeline".into()),
-        layout: vec![layout.clone()],
-        vertex: fullscreen_shader.to_vertex_state(),
-        fragment: Some(FragmentState {
-            shader: WEATHER_OVERLAY_SHADER_HANDLE,
-            targets: vec![Some(ColorTargetState {
-                format: ViewTarget::TEXTURE_FORMAT_HDR,
-                blend: None,
-                write_mask: ColorWrites::ALL,
-            })],
+    let pipeline_descriptor =
+        |label: &'static str, format: TextureFormat| RenderPipelineDescriptor {
+            label: Some(label.into()),
+            layout: vec![layout.clone()],
+            vertex: fullscreen_shader.to_vertex_state(),
+            fragment: Some(FragmentState {
+                shader: WEATHER_OVERLAY_SHADER_HANDLE,
+                targets: vec![Some(ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    });
+        };
+    let hdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "weather_overlay_pipeline_hdr",
+        ViewTarget::TEXTURE_FORMAT_HDR,
+    ));
+    let sdr_pipeline_id = pipeline_cache.queue_render_pipeline(pipeline_descriptor(
+        "weather_overlay_pipeline_sdr",
+        TextureFormat::bevy_default(),
+    ));
 
     commands.insert_resource(WeatherOverlayPipeline {
         layout,
         sampler,
         uniform_buffer,
-        pipeline_id,
+        hdr_pipeline_id,
+        sdr_pipeline_id,
     });
 }
 
@@ -219,7 +230,12 @@ impl ViewNode for WeatherOverlayNode {
             return Ok(());
         };
         let pipeline_cache = world.resource::<PipelineCache>();
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
+        let pipeline_id = if view_target.main_texture_format() == ViewTarget::TEXTURE_FORMAT_HDR {
+            pipeline_res.hdr_pipeline_id
+        } else {
+            pipeline_res.sdr_pipeline_id
+        };
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
             return Ok(());
         };
 
@@ -348,4 +364,18 @@ fn record_overlay_counts(
     timing.push_count("Weather Overlay Quality", quality as f64);
     timing.push_count("Weather Overlay Density", density as f64);
     timing.push_count("Weather Overlay Pass Active", pass_active as u32 as f64);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn weather_overlay_queues_hdr_and_sdr_pipelines() {
+        let source = include_str!("weather_overlay.rs");
+
+        assert!(source.contains("hdr_pipeline_id"));
+        assert!(source.contains("sdr_pipeline_id"));
+        assert!(source.contains("ViewTarget::TEXTURE_FORMAT_HDR"));
+        assert!(source.contains("TextureFormat::bevy_default()"));
+        assert!(source.contains("view_target.main_texture_format()"));
+    }
 }
