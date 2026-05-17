@@ -261,11 +261,11 @@ fn internal_shader_handles_are_unique_for_water_and_god_rays() {
     let water = include_str!("../src/rendering/water.rs");
     let god_rays = include_str!("../src/rendering/god_rays.rs");
 
-    let gerstner_uuid = water
+    let noble_gerstner_uuid = water
         .lines()
-        .skip_while(|line| !line.contains("GERSTNER_WAVES_HANDLE"))
+        .skip_while(|line| !line.contains("NOBLE_GERSTNER_HANDLE"))
         .find_map(uuid_from_line)
-        .expect("GERSTNER_WAVES_HANDLE should use uuid_handle!");
+        .expect("NOBLE_GERSTNER_HANDLE should use uuid_handle!");
     let god_rays_uuid = god_rays
         .lines()
         .skip_while(|line| !line.contains("GOD_RAYS_SHADER_HANDLE"))
@@ -273,7 +273,7 @@ fn internal_shader_handles_are_unique_for_water_and_god_rays() {
         .expect("GOD_RAYS_SHADER_HANDLE should use uuid_handle!");
 
     assert_ne!(
-        gerstner_uuid, god_rays_uuid,
+        noble_gerstner_uuid, god_rays_uuid,
         "internal shader handles must not alias the same asset UUID"
     );
 }
@@ -432,6 +432,40 @@ fn disabled_foliage_prepass_shaders_are_not_registered_or_shipped() {
         !billboard_material.contains("billboard_prepass.wgsl")
             && !std::path::Path::new("assets/shaders/billboard_prepass.wgsl").exists(),
         "disabled billboard prepass shader should not be registered or shipped as active-looking"
+    );
+}
+
+#[test]
+fn inactive_legacy_water_and_sdf_volume_shaders_are_not_shipped() {
+    let water = include_str!("../src/rendering/water.rs");
+    let water_fragment = include_str!("../assets/shaders/water_fragment.wgsl");
+    let radiance = include_str!("../assets/shaders/radiance_cascades.wgsl");
+
+    assert!(
+        water_fragment.contains("#import noble_gerstner")
+            && water_fragment.contains("#import noble_detail_normals"),
+        "active water waves/detail normals should use the compiled Noble shader modules"
+    );
+    assert!(
+        radiance.contains("@group(0) @binding(1) var sdf_volume: texture_3d<f32>;"),
+        "active radiance SDF sampling should live in the compiled radiance cascade shader"
+    );
+    assert!(
+        !water.contains("GERSTNER_WAVES_HANDLE")
+            && !water.contains("/assets/shaders/gerstner_waves.wgsl"),
+        "unused legacy gerstner_waves.wgsl should not be registered as an internal shader asset"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/gerstner_waves.wgsl").exists(),
+        "unused legacy gerstner_waves.wgsl should not be shipped as an active-looking shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/water_detail_normals.wgsl").exists(),
+        "unused texture-bound water_detail_normals.wgsl should not be shipped as active-looking"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/sdf_volume.wgsl").exists(),
+        "unused sdf_volume.wgsl compute prototype should not be shipped as active-looking"
     );
 }
 
