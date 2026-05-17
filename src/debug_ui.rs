@@ -307,7 +307,7 @@ fn debug_settings_ui(
                     );
                 }
                 #[cfg(not(feature = "naadf"))]
-                ui.label("NAADF feature: not compiled. Start with .\\startVoxels.ps1 -Naadf.");
+                ui.label("NAADF feature: not compiled. Start with .\\scripts\\startVoxels.ps1 -Naadf.");
                 #[cfg(feature = "naadf")]
                 if let Some(cache_state) = naadf_cache_state.as_deref() {
                     ui.label(format!(

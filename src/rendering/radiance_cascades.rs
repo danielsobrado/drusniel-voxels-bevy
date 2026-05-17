@@ -56,7 +56,6 @@ const NAADF_QUERY_ALL: u32 = NAADF_QUERY_GI_SECONDARY
     | NAADF_QUERY_SUN_VISIBILITY
     | NAADF_QUERY_TERRAIN_AO
     | NAADF_QUERY_CONTACT_SHADOW;
-pub(crate) const NAADF_GI_SECONDARY_SAMPLES_PER_PIXEL: u32 = 2;
 
 /// Plugin for Radiance Cascades global illumination
 pub struct RadianceCascadesPlugin;

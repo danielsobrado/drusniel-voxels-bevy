@@ -90,7 +90,7 @@ pub struct BenchConfig {
 
 impl BenchConfig {
     pub fn from_cli(cli: &BenchCli) -> Option<Self> {
-        let scene_path = cli.bench.clone()?;
+        let scene_path = resolve_bench_scene_path(cli.bench.as_ref()?);
         let output_dir = cli.bench_out.clone().unwrap_or_else(default_output_dir);
         Some(Self {
             scene_path,
@@ -98,6 +98,27 @@ impl BenchConfig {
             headless: cli.bench_headless,
         })
     }
+}
+
+fn resolve_bench_scene_path(requested: &Path) -> PathBuf {
+    if requested.exists() {
+        return requested.to_path_buf();
+    }
+
+    let Some(file_name) = requested.file_name() else {
+        return requested.to_path_buf();
+    };
+
+    let fallback = Path::new("bench")
+        .join("scenes")
+        .join("naadf")
+        .join(file_name);
+
+    if fallback.exists() {
+        return fallback;
+    }
+
+    requested.to_path_buf()
 }
 
 #[derive(Resource)]

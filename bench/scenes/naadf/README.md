@@ -1,22 +1,29 @@
 # NAADF Benchmark Scene Index
 
-This directory stores NAADF comparison and exploratory scenes that are not part of the core rendering bench set.
+This directory is the canonical location for NAADF benchmark scenes.
 
-## Active policy
+## Policy
 
-- Scenes in `bench/scenes/` are treated as active/standard.
-- Scenes in `bench/scenes/naadf/` are treated as **temporary** unless explicitly promoted back to
-  `bench/scenes/` with an explicit note in `docs/rendering/naadf-benchmarks.md`.
-- Do not leave active CI/automated references pointed at files in this directory.
-- Keep run artifacts (`bench-runs/...`) and image references near the doc entry that owns the scene.
+- `bench/scenes/` contains general benchmark scenes.
+- `bench/scenes/naadf/` contains all NAADF-specific scenes, including regression, preview, and validation variants.
+- Keep this directory as the source of truth for NAADF scene ownership and runtime examples.
+- Keep run artifacts (`bench-runs/...`) and image references near the doc entry that owns each scene.
 
-## Temporary NAADF scenes
+## NAADF scenes in this folder
 
+- `dig-edit-naadf-stability.toml`
+- `gameplay-movement-naadf-smoke.toml`
 - `visual-regression-naadf-contact-sdf.toml`
 - `visual-regression-naadf-contact.toml`
+- `visual-regression-naadf-current.toml`
 - `visual-regression-naadf-gi-secondary.toml`
 - `visual-regression-naadf-gi-sun.toml`
+- `visual-regression-naadf-gi.toml`
+- `visual-regression-naadf-live-lod.toml`
 - `visual-regression-naadf-path-a-all.toml`
+- `visual-regression-naadf-preview-only.toml`
+- `visual-regression-naadf-preview.toml`
+- `visual-regression-naadf-startup-stability.toml`
 - `visual-regression-naadf-terrain-ao-sdf.toml`
 - `visual-regression-naadf-terrain-ao.toml`
 
