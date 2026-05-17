@@ -238,6 +238,20 @@ fn pcss_is_not_advertised_as_active_without_shader_integration() {
     );
 }
 
+#[test]
+fn contact_shadows_are_not_shipped_as_unused_placeholder_shader() {
+    let grass = include_str!("../assets/shaders/grass.wgsl");
+
+    assert!(
+        grass.contains("fn compute_grass_self_shadow"),
+        "grass contact shadows should live in the compiled grass material shader"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/contact_shadows.wgsl").exists(),
+        "unused standalone contact_shadows.wgsl should not be shipped as an active-looking shader"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];
