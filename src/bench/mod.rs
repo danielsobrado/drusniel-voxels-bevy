@@ -202,6 +202,14 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub naadf_preview_show_miss_sky: Option<bool>,
     #[serde(default)]
+    pub naadf_preview_local_lights_enabled: Option<bool>,
+    #[serde(default)]
+    pub naadf_preview_local_light_limit: Option<u32>,
+    #[serde(default)]
+    pub naadf_preview_local_light_shadows_enabled: Option<bool>,
+    #[serde(default)]
+    pub naadf_spawn_demo_lights: bool,
+    #[serde(default)]
     pub naadf_use_for_gi_secondary: Option<bool>,
     #[serde(default)]
     pub naadf_use_for_sun_visibility: Option<bool>,
@@ -1016,6 +1024,7 @@ impl Plugin for BenchPlugin {
                 Update,
                 (
                     apply_bench_render_toggles,
+                    sync_bench_naadf_demo_lights,
                     record_startup_trace_observations_system,
                     run_bench_state_machine,
                 )
@@ -1213,6 +1222,22 @@ fn apply_bench_render_toggles(
                 config.preview.show_miss_sky = show_miss_sky;
             }
         }
+        if let Some(local_lights_enabled) = toggles.naadf_preview_local_lights_enabled {
+            if config.preview.local_lights_enabled != local_lights_enabled {
+                config.preview.local_lights_enabled = local_lights_enabled;
+            }
+        }
+        if let Some(local_light_limit) = toggles.naadf_preview_local_light_limit {
+            if config.preview.local_light_limit != local_light_limit {
+                config.preview.local_light_limit = local_light_limit;
+            }
+        }
+        if let Some(local_light_shadows_enabled) = toggles.naadf_preview_local_light_shadows_enabled
+        {
+            if config.preview.local_light_shadows_enabled != local_light_shadows_enabled {
+                config.preview.local_light_shadows_enabled = local_light_shadows_enabled;
+            }
+        }
         if let Some(use_for_gi_secondary) = toggles.naadf_use_for_gi_secondary {
             if config.use_for_gi_secondary != use_for_gi_secondary {
                 config.use_for_gi_secondary = use_for_gi_secondary;
@@ -1248,6 +1273,65 @@ fn apply_bench_render_toggles(
                 config.preview.composite_mode = composite_mode;
             }
         }
+    }
+}
+
+#[derive(Component)]
+struct BenchNaadfDemoLight;
+
+fn sync_bench_naadf_demo_lights(
+    mut commands: Commands,
+    toggles: Res<BenchRenderToggles>,
+    lights: Query<Entity, With<BenchNaadfDemoLight>>,
+) {
+    if !toggles.naadf_spawn_demo_lights {
+        for entity in &lights {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    if !lights.is_empty() {
+        return;
+    }
+
+    for (position, color, intensity, range) in [
+        (
+            Vec3::new(246.0, 66.0, 259.0),
+            Color::srgb(1.0, 0.56, 0.24),
+            55_000.0,
+            74.0,
+        ),
+        (
+            Vec3::new(286.0, 66.0, 296.0),
+            Color::srgb(1.0, 0.48, 0.18),
+            42_000.0,
+            58.0,
+        ),
+        (
+            Vec3::new(216.0, 74.0, 238.0),
+            Color::srgb(0.95, 0.62, 0.32),
+            36_000.0,
+            52.0,
+        ),
+        (
+            Vec3::new(180.0, 69.0, 310.0),
+            Color::srgb(0.80, 0.62, 0.42),
+            24_000.0,
+            46.0,
+        ),
+    ] {
+        commands.spawn((
+            PointLight {
+                color,
+                intensity,
+                range,
+                shadows_enabled: true,
+                ..default()
+            },
+            Transform::from_translation(position),
+            BenchNaadfDemoLight,
+        ));
     }
 }
 
@@ -4082,6 +4166,10 @@ naadf_preview_bounce_count = 0
 naadf_preview_spatial_radius = 0
 naadf_preview_composite_mode = "picture_in_picture"
 naadf_preview_show_miss_sky = true
+naadf_preview_local_lights_enabled = true
+naadf_preview_local_light_limit = 12
+naadf_preview_local_light_shadows_enabled = true
+naadf_spawn_demo_lights = true
 naadf_use_for_gi_secondary = true
 naadf_use_for_sun_visibility = true
 naadf_use_for_terrain_ao = true
@@ -4117,6 +4205,13 @@ hold_frames = 30
             Some("picture_in_picture")
         );
         assert_eq!(toggles.naadf_preview_show_miss_sky, Some(true));
+        assert_eq!(toggles.naadf_preview_local_lights_enabled, Some(true));
+        assert_eq!(toggles.naadf_preview_local_light_limit, Some(12));
+        assert_eq!(
+            toggles.naadf_preview_local_light_shadows_enabled,
+            Some(true)
+        );
+        assert!(toggles.naadf_spawn_demo_lights);
         assert_eq!(toggles.naadf_use_for_gi_secondary, Some(true));
         assert_eq!(toggles.naadf_use_for_sun_visibility, Some(true));
         assert_eq!(toggles.naadf_use_for_terrain_ao, Some(true));

@@ -41,6 +41,10 @@ pub struct NaadfStats {
     pub chunk_bound_saturated_fields_last_frame: u32,
     pub chunk_bound_propagation_passes_last_frame: u32,
     pub gi_rays_last_frame: u64,
+    pub local_lights_visible: u32,
+    pub local_lights_uploaded: u32,
+    pub local_lights_culled: u32,
+    pub local_light_shadow_rays_last_frame: u64,
     pub radiance_contact_shadow_rays_per_pixel: u32,
     pub radiance_terrain_ao_rays_per_pixel: u32,
     pub preview_pixels_last_frame: u64,
@@ -83,6 +87,10 @@ pub struct NaadfRenderStatsSnapshot {
     pub first_hit_distance_clamps_last_frame: u32,
     pub first_hit_no_lookup_misses_last_frame: u32,
     pub gi_rays_last_frame: u64,
+    pub local_lights_visible: u32,
+    pub local_lights_uploaded: u32,
+    pub local_lights_culled: u32,
+    pub local_light_shadow_rays_last_frame: u64,
     pub preview_pixels_last_frame: u64,
     pub preview_first_hit_dispatches_last_frame: u32,
     pub preview_gi_dispatches_last_frame: u32,
@@ -160,6 +168,21 @@ impl NaadfRenderStatsBridge {
 
     pub fn publish_gi_rays(&self, gi_rays: u64) {
         self.snapshot.lock().unwrap().gi_rays_last_frame = gi_rays;
+    }
+
+    pub fn publish_local_lights(&self, visible: u32, uploaded: u32, culled: u32, shadow_rays: u64) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        snapshot.local_lights_visible = visible;
+        snapshot.local_lights_uploaded = uploaded;
+        snapshot.local_lights_culled = culled;
+        snapshot.local_light_shadow_rays_last_frame = shadow_rays;
+    }
+
+    pub fn publish_local_light_shadow_rays(&self, shadow_rays: u64) {
+        self.snapshot
+            .lock()
+            .unwrap()
+            .local_light_shadow_rays_last_frame = shadow_rays;
     }
 
     pub fn publish_preview_passes(

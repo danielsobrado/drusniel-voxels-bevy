@@ -19,6 +19,7 @@ use super::gpu_buffers::{
     ExtractedNaadfEntityGpuUploads, ExtractedNaadfGpuUploads, NaadfEntityGpuBuffers,
     NaadfGpuBuffers,
 };
+use super::local_lights::{ExtractedNaadfLocalLights, NaadfLocalLightGpuBuffers};
 use super::preview::{NaadfPreviewCompositeMode, NaadfPreviewPipelineState, NaadfPreviewSettings};
 use super::stats::NaadfRenderStatsBridge;
 
@@ -106,6 +107,9 @@ pub struct ExtractedNaadfPreviewSettings {
     pub spatial_normal_sigma: f32,
     pub gi_sky_strength: f32,
     pub gi_bounce_strength: f32,
+    pub local_lights_enabled: bool,
+    pub local_light_limit: u32,
+    pub local_light_shadows_enabled: bool,
     pub reference_path_tracing_enabled: bool,
     pub reference_sample_count: u32,
     pub reference_sky_strength: f32,
@@ -155,6 +159,9 @@ impl ExtractedNaadfPreviewSettings {
             spatial_normal_sigma: settings.spatial_normal_sigma.clamp(0.001, 1.0),
             gi_sky_strength: settings.gi_sky_strength.clamp(0.0, 2.0),
             gi_bounce_strength: settings.gi_bounce_strength.clamp(0.0, 2.0),
+            local_lights_enabled: settings.local_lights_enabled,
+            local_light_limit: settings.local_light_limit.clamp(1, 64),
+            local_light_shadows_enabled: settings.local_light_shadows_enabled,
             reference_path_tracing_enabled: settings.reference_path_tracing_enabled,
             reference_sample_count: settings.reference_sample_count,
             reference_sky_strength: settings.reference_sky_strength.clamp(0.0, 2.0),
@@ -468,6 +475,7 @@ pub fn init_naadf_preview_build_pipelines(
             storage_buffer_entry(22, true),
             storage_texture_entry(23, TextureFormat::Rgba16Float),
             storage_buffer_entry(24, false),
+            storage_buffer_entry(25, true),
         ],
     );
     let gi_layout = BindGroupLayoutDescriptor::new(
@@ -949,6 +957,22 @@ impl ViewNode for NaadfPreviewBuildNode {
             .get_resource::<ExtractedNaadfEntityGpuUploads>()
             .map(|uploads| uploads.entity_count)
             .unwrap_or_default();
+        let Some(local_light_allocation) = world
+            .get_resource::<NaadfLocalLightGpuBuffers>()
+            .and_then(NaadfLocalLightGpuBuffers::allocation)
+        else {
+            publish_preview_node_stage(world, 24);
+            return Ok(());
+        };
+        let local_lights = world
+            .get_resource::<ExtractedNaadfLocalLights>()
+            .cloned()
+            .unwrap_or_default();
+        let local_light_count = if preview_settings.local_lights_enabled {
+            local_lights.uploaded
+        } else {
+            0
+        };
         let chunk_lookup_records = world
             .get_resource::<ExtractedNaadfGpuUploads>()
             .map(|uploads| uploads.lookup_records.len() as u32)
@@ -971,6 +995,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 allocation.plan.chunk_records as u32,
                 chunk_lookup_records,
                 entity_count,
+                local_light_count,
                 telemetry_enabled,
                 previous_clip_from_world,
             ),
@@ -1103,6 +1128,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 ),
                 (23, BindingResource::TextureView(&preview_motion_view)),
                 (24, allocation.stats_buffer.as_entire_binding()),
+                (25, local_light_allocation.buffer.as_entire_binding()),
             )),
         );
         let gi_group = render_device.create_bind_group(
@@ -1306,6 +1332,13 @@ impl ViewNode for NaadfPreviewBuildNode {
             0
         };
         let preview_pixels = size.width as u64 * size.height as u64;
+        let local_light_shadow_rays = if preview_settings.local_light_shadows_enabled
+            && preview_settings.local_lights_enabled
+        {
+            preview_pixels * local_light_count as u64
+        } else {
+            0
+        };
         let first_hit_dispatches = 1;
         let gi_dispatches = u32::from(preview_settings.bounce_count > 0);
         let spatial_dispatches = 1;
@@ -1314,6 +1347,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         let reference_dispatches = u32::from(preview_settings.reference_path_tracing_enabled);
         if let Some(bridge) = world.get_resource::<NaadfRenderStatsBridge>() {
             bridge.publish_gi_rays(gi_rays);
+            bridge.publish_local_light_shadow_rays(local_light_shadow_rays);
             bridge.publish_preview_passes(
                 preview_pixels,
                 first_hit_dispatches,
@@ -1378,6 +1412,7 @@ struct NaadfFirstHitParamsUniform {
     camera_up_pad: Vec4,
     config: UVec4,
     telemetry_config: UVec4,
+    local_light_config: UVec4,
     fog_color_start: Vec4,
     fog_end_strength: Vec4,
     sun_direction_pad: Vec4,
@@ -1821,6 +1856,7 @@ fn first_hit_params_uniform(
     chunk_records: u32,
     chunk_lookup_records: u32,
     entity_records: u32,
+    local_light_records: u32,
     telemetry_enabled: bool,
     previous_clip_from_world: Mat4,
 ) -> NaadfFirstHitParamsUniform {
@@ -1838,6 +1874,20 @@ fn first_hit_params_uniform(
             entity_records,
         ),
         telemetry_config: UVec4::new(u32::from(telemetry_enabled), 0, 0, 0),
+        local_light_config: UVec4::new(
+            if preview_settings.local_lights_enabled {
+                local_light_records.min(preview_settings.local_light_limit)
+            } else {
+                0
+            },
+            u32::from(
+                preview_settings.local_lights_enabled
+                    && preview_settings.local_light_shadows_enabled
+                    && local_light_records > 0,
+            ),
+            0,
+            0,
+        ),
         fog_color_start: preview_settings.fog_color_start,
         fog_end_strength: preview_settings.fog_end_strength,
         sun_direction_pad: preview_settings.sun_direction,

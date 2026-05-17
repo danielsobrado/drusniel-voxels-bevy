@@ -62,6 +62,10 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
     stats.first_hit_distance_clamps_last_frame = snapshot.first_hit_distance_clamps_last_frame;
     stats.first_hit_no_lookup_misses_last_frame = snapshot.first_hit_no_lookup_misses_last_frame;
     stats.gi_rays_last_frame = snapshot.gi_rays_last_frame;
+    stats.local_lights_visible = snapshot.local_lights_visible;
+    stats.local_lights_uploaded = snapshot.local_lights_uploaded;
+    stats.local_lights_culled = snapshot.local_lights_culled;
+    stats.local_light_shadow_rays_last_frame = snapshot.local_light_shadow_rays_last_frame;
     stats.preview_pixels_last_frame = snapshot.preview_pixels_last_frame;
     stats.preview_first_hit_dispatches_last_frame =
         snapshot.preview_first_hit_dispatches_last_frame;
@@ -272,6 +276,26 @@ pub fn record_naadf_bench_counters(
         frame.0,
         "naadf.gi_rays_last_frame",
         stats.gi_rays_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.local_lights_visible",
+        stats.local_lights_visible as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.local_lights_uploaded",
+        stats.local_lights_uploaded as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.local_lights_culled",
+        stats.local_lights_culled as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.local_light_shadow_rays_last_frame",
+        stats.local_light_shadow_rays_last_frame as f64,
     );
     timing.record_count(
         frame.0,

@@ -79,6 +79,12 @@ pub struct NaadfPreviewConfig {
     #[serde(default = "default_preview_gi_bounce_strength")]
     pub gi_bounce_strength: f32,
     #[serde(default)]
+    pub local_lights_enabled: bool,
+    #[serde(default = "default_preview_local_light_limit")]
+    pub local_light_limit: u32,
+    #[serde(default)]
+    pub local_light_shadows_enabled: bool,
+    #[serde(default)]
     pub reference_path_tracing_enabled: bool,
     #[serde(default = "default_preview_reference_sample_count")]
     pub reference_sample_count: u32,
@@ -193,6 +199,9 @@ impl Default for NaadfPreviewConfig {
             spatial_normal_sigma: default_preview_spatial_normal_sigma(),
             gi_sky_strength: default_preview_gi_sky_strength(),
             gi_bounce_strength: default_preview_gi_bounce_strength(),
+            local_lights_enabled: false,
+            local_light_limit: default_preview_local_light_limit(),
+            local_light_shadows_enabled: false,
             reference_path_tracing_enabled: false,
             reference_sample_count: default_preview_reference_sample_count(),
             reference_sky_strength: default_preview_reference_sky_strength(),
@@ -273,6 +282,10 @@ fn default_preview_gi_bounce_strength() -> f32 {
     0.08
 }
 
+fn default_preview_local_light_limit() -> u32 {
+    16
+}
+
 fn default_preview_reference_sample_count() -> u32 {
     16
 }
@@ -306,6 +319,9 @@ mod tests {
         assert_eq!(config.preview.spatial_normal_sigma, 0.25);
         assert_eq!(config.preview.gi_sky_strength, 0.16);
         assert_eq!(config.preview.gi_bounce_strength, 0.08);
+        assert!(!config.preview.local_lights_enabled);
+        assert_eq!(config.preview.local_light_limit, 16);
+        assert!(!config.preview.local_light_shadows_enabled);
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sky_strength, 0.22);
         assert_eq!(config.preview.reference_indirect_strength, 0.18);
@@ -324,6 +340,9 @@ mod tests {
         assert_eq!(config.preview.max_ray_steps, 256);
         assert!(!config.preview.denoise_enabled);
         assert_eq!(config.preview.denoise_quality, NaadfDenoiseQuality::Medium);
+        assert!(!config.preview.local_lights_enabled);
+        assert_eq!(config.preview.local_light_limit, 16);
+        assert!(!config.preview.local_light_shadows_enabled);
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sample_count, 16);
         assert!(!config.preview.show_miss_sky);

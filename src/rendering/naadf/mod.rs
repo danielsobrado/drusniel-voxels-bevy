@@ -9,6 +9,7 @@ pub mod extractor;
 pub mod gpu_buffers;
 pub mod gpu_tests;
 pub mod layout;
+pub mod local_lights;
 pub mod pipeline;
 pub mod prepare;
 pub mod preview;
@@ -35,6 +36,7 @@ pub use entities::{NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume};
 pub use extractor::{NaadfChunkExtractor, NaadfExtractionError};
 pub use gpu_buffers::{NaadfGpuBufferPlan, NaadfGpuBuffers, NaadfGpuChunkTable};
 pub use layout::NaadfChunk;
+pub use local_lights::{NAADF_LOCAL_LIGHT_MAX_RECORDS, NaadfLocalLightRecord};
 pub use prepare::{NaadfUploadBudget, NaadfUploadPlan};
 pub use stats::{NaadfCacheState, NaadfStats};
 
@@ -247,9 +249,11 @@ impl Plugin for NaadfPlugin {
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuConfig>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewPipelineState>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewSettings>()
+                .init_resource::<local_lights::ExtractedNaadfLocalLights>()
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuUploads>()
                 .init_resource::<gpu_buffers::ExtractedNaadfEntityGpuUploads>()
                 .init_resource::<NaadfGpuBuffers>()
+                .init_resource::<local_lights::NaadfLocalLightGpuBuffers>()
                 .init_resource::<gpu_buffers::NaadfEntityGpuBuffers>()
                 .init_resource::<gpu_buffers::NaadfGpuUploadStats>()
                 .init_resource::<pipeline::NaadfPreviewTemporalHistory>()
@@ -261,6 +265,7 @@ impl Plugin for NaadfPlugin {
                     (
                         gpu_buffers::extract_naadf_gpu_config,
                         pipeline::extract_naadf_preview_pipeline_state,
+                        local_lights::extract_naadf_local_lights,
                         gpu_buffers::extract_naadf_gpu_uploads,
                         gpu_buffers::extract_naadf_entity_gpu_uploads,
                     )
@@ -270,11 +275,14 @@ impl Plugin for NaadfPlugin {
                     Render,
                     (
                         gpu_buffers::prepare_naadf_gpu_buffers,
+                        local_lights::prepare_naadf_local_light_gpu_buffer,
                         gpu_buffers::prepare_naadf_entity_gpu_buffers,
                         gpu_buffers::readback_naadf_gpu_stats
                             .after(gpu_buffers::prepare_naadf_gpu_buffers),
                         gpu_buffers::upload_naadf_chunks_to_gpu
                             .after(gpu_buffers::prepare_naadf_gpu_buffers),
+                        local_lights::upload_naadf_local_lights
+                            .after(local_lights::prepare_naadf_local_light_gpu_buffer),
                         gpu_buffers::upload_naadf_entity_volumes_to_gpu
                             .after(gpu_buffers::prepare_naadf_entity_gpu_buffers),
                     )

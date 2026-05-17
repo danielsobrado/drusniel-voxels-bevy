@@ -8,12 +8,8 @@
 
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 #import "shaders/naadf/ray_trace.wgsl" NaadfRay
-#import "shaders/naadf/world_trace.wgsl" { naadf_world_surface_normal, trace_naadf_world }
-#import "shaders/naadf/lighting_queries.wgsl" {
-    naadf_sun_visibility_world,
-    naadf_terrain_ao_visibility_world,
-    naadf_contact_shadow_visibility_world,
-}
+#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world
+#import "shaders/naadf/lighting_queries.wgsl" naadf_sun_visibility_world, naadf_terrain_ao_visibility_world, naadf_contact_shadow_visibility_world
 
 // ============================================================================
 // Uniforms

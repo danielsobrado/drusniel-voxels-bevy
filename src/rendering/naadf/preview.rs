@@ -20,6 +20,9 @@ pub struct NaadfPreviewSettings {
     pub spatial_normal_sigma: f32,
     pub gi_sky_strength: f32,
     pub gi_bounce_strength: f32,
+    pub local_lights_enabled: bool,
+    pub local_light_limit: u32,
+    pub local_light_shadows_enabled: bool,
     pub reference_path_tracing_enabled: bool,
     pub reference_sample_count: u32,
     pub reference_sky_strength: f32,
@@ -59,6 +62,9 @@ impl Default for NaadfPreviewSettings {
             spatial_normal_sigma: 0.25,
             gi_sky_strength: 0.16,
             gi_bounce_strength: 0.08,
+            local_lights_enabled: false,
+            local_light_limit: 16,
+            local_light_shadows_enabled: false,
             reference_path_tracing_enabled: false,
             reference_sample_count: 16,
             reference_sky_strength: 0.22,
@@ -151,6 +157,9 @@ fn apply_preview_config(config: &NaadfConfig, settings: &mut NaadfPreviewSetting
     settings.spatial_normal_sigma = preview.spatial_normal_sigma.clamp(0.001, 1.0);
     settings.gi_sky_strength = preview.gi_sky_strength.clamp(0.0, 2.0);
     settings.gi_bounce_strength = preview.gi_bounce_strength.clamp(0.0, 2.0);
+    settings.local_lights_enabled = preview.local_lights_enabled;
+    settings.local_light_limit = preview.local_light_limit.clamp(1, 64);
+    settings.local_light_shadows_enabled = preview.local_light_shadows_enabled;
     settings.reference_path_tracing_enabled = preview.reference_path_tracing_enabled;
     settings.reference_sample_count = preview.reference_sample_count.clamp(1, 32);
     settings.reference_sky_strength = preview.reference_sky_strength.clamp(0.0, 2.0);
@@ -209,6 +218,9 @@ mod tests {
         );
         assert!(!NaadfPreviewSettings::default().denoise_enabled);
         assert!(!NaadfPreviewSettings::default().reference_path_tracing_enabled);
+        assert!(!NaadfPreviewSettings::default().local_lights_enabled);
+        assert_eq!(NaadfPreviewSettings::default().local_light_limit, 16);
+        assert!(!NaadfPreviewSettings::default().local_light_shadows_enabled);
     }
 
     #[test]
@@ -249,6 +261,9 @@ mod tests {
                 spatial_normal_sigma: 2.0,
                 gi_sky_strength: 3.0,
                 gi_bounce_strength: -1.0,
+                local_lights_enabled: true,
+                local_light_limit: 999,
+                local_light_shadows_enabled: true,
                 reference_path_tracing_enabled: true,
                 reference_sample_count: 64,
                 reference_sky_strength: -1.0,
@@ -273,6 +288,9 @@ mod tests {
         assert_eq!(settings.spatial_normal_sigma, 1.0);
         assert_eq!(settings.gi_sky_strength, 2.0);
         assert_eq!(settings.gi_bounce_strength, 0.0);
+        assert!(settings.local_lights_enabled);
+        assert_eq!(settings.local_light_limit, 64);
+        assert!(settings.local_light_shadows_enabled);
         assert!(settings.reference_path_tracing_enabled);
         assert_eq!(settings.reference_sample_count, 32);
         assert_eq!(settings.reference_sky_strength, 0.0);

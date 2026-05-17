@@ -8,6 +8,7 @@ struct NaadfFirstHitParams {
     camera_up_pad: vec4<f32>,
     config: vec4<u32>,
     telemetry_config: vec4<u32>,
+    local_light_config: vec4<u32>,
     fog_color_start: vec4<f32>,
     fog_end_strength: vec4<f32>,
     sun_direction_pad: vec4<f32>,
@@ -55,6 +56,12 @@ struct NaadfFirstHitStats {
     miss_reason_5_no_lookup: atomic<u32>,
 }
 
+struct NaadfLocalLightRecord {
+    position_radius: vec4<f32>,
+    color_intensity: vec4<f32>,
+    flags_shadow_pad: vec4<u32>,
+}
+
 @group(3) @binding(16) var<uniform> naadf_first_hit_params: NaadfFirstHitParams;
 @group(3) @binding(17) var naadf_first_hit_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(18) var naadf_first_hit_depth_output: texture_storage_2d<rgba16float, write>;
@@ -63,6 +70,7 @@ struct NaadfFirstHitStats {
 @group(3) @binding(21) var<storage, read> naadf_entity_volume_records: array<NaadfEntityVolumeRecord>;
 @group(3) @binding(22) var<storage, read> naadf_entity_material_records: array<u32>;
 @group(3) @binding(24) var<storage, read_write> naadf_first_hit_stats: NaadfFirstHitStats;
+@group(3) @binding(25) var<storage, read> naadf_local_light_records: array<NaadfLocalLightRecord>;
 
 @compute @workgroup_size(8, 8, 1)
 fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -161,9 +169,11 @@ fn naadf_record_first_hit_telemetry(hit: NaadfHit) {
 fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u32>) -> NaadfFirstHitPreview {
     let world_pos = ray.origin + normalize(ray.direction) * hit.distance;
     let normal = naadf_world_surface_normal(hit, config.y, config.z);
+    let albedo = naadf_preview_material_color(hit.material_id);
+    let base_color = naadf_preview_shaded_color_with_albedo(albedo, normal);
     return NaadfFirstHitPreview(
         hit.hit,
-        naadf_preview_shaded_color(hit.material_id, normal),
+        base_color + naadf_preview_local_light_color(albedo, world_pos, normal, config),
         hit.distance,
         normal,
         world_pos,
@@ -263,7 +273,13 @@ fn preview_naadf_entity_volume(ray: NaadfRay, record: NaadfEntityVolumeRecord) -
                 let previous_world_position = naadf_entity_previous_world_position(record, local_hit);
                 return NaadfFirstHitPreview(
                     1u,
-                    naadf_preview_shaded_color(material_id, world_normal),
+                    naadf_preview_shaded_color(material_id, world_normal) +
+                        naadf_preview_local_light_color(
+                            naadf_preview_material_color(material_id),
+                            ray.origin + normalize(ray.direction) * distance,
+                            world_normal,
+                            naadf_first_hit_params.config.xyz,
+                        ),
                     distance,
                     world_normal,
                     previous_world_position,
@@ -412,12 +428,73 @@ fn naadf_preview_miss_sky(ray_direction: vec3<f32>) -> vec3<f32> {
 
 fn naadf_preview_shaded_color(material_id: u32, normal: vec3<f32>) -> vec3<f32> {
     let albedo = naadf_preview_material_color(material_id);
+    return naadf_preview_shaded_color_with_albedo(albedo, normal);
+}
+
+fn naadf_preview_shaded_color_with_albedo(albedo: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     let sun_direction = naadf_preview_sun_direction();
     let sky_direction = vec3<f32>(0.0, 1.0, 0.0);
     let diffuse = max(dot(normalize(normal), sun_direction), 0.0);
     let sky = clamp(dot(normalize(normal), sky_direction) * 0.5 + 0.5, 0.0, 1.0);
     let ambient = mix(0.22, 0.42, sky);
     return albedo * (ambient + diffuse * 0.72);
+}
+
+fn naadf_preview_local_light_color(
+    albedo: vec3<f32>,
+    world_pos: vec3<f32>,
+    normal: vec3<f32>,
+    trace_config: vec3<u32>,
+) -> vec3<f32> {
+    let count = min(naadf_first_hit_params.local_light_config.x, arrayLength(&naadf_local_light_records));
+    if count == 0u {
+        return vec3<f32>(0.0);
+    }
+
+    var contribution = vec3<f32>(0.0);
+    let surface_normal = normalize(normal);
+    let shadows_enabled = naadf_first_hit_params.local_light_config.y != 0u;
+    for (var index = 0u; index < count; index = index + 1u) {
+        let light = naadf_local_light_records[index];
+        let light_position = light.position_radius.xyz;
+        let radius = max(light.position_radius.w, 0.001);
+        let to_light = light_position - world_pos;
+        let distance = length(to_light);
+        if distance <= 0.001 || distance >= radius {
+            continue;
+        }
+
+        let light_dir = to_light / distance;
+        let ndotl = max(dot(surface_normal, light_dir), 0.0);
+        if ndotl <= 0.0 {
+            continue;
+        }
+
+        if shadows_enabled && (light.flags_shadow_pad.x & 1u) != 0u {
+            let shadow_origin = world_pos + surface_normal * 0.08;
+            let shadow_ray = NaadfRay(
+                shadow_origin,
+                light_dir,
+                max(distance - 0.12, 0.0),
+                3u,
+            );
+            let shadow_hit = trace_naadf_world(
+                shadow_ray,
+                trace_config.x,
+                trace_config.y,
+                trace_config.z,
+            );
+            if shadow_hit.hit != 0u {
+                continue;
+            }
+        }
+
+        let falloff = clamp(1.0 - distance / radius, 0.0, 1.0);
+        let attenuation = falloff * falloff;
+        contribution = contribution + albedo * light.color_intensity.xyz *
+            light.color_intensity.w * attenuation * ndotl;
+    }
+    return contribution;
 }
 
 fn naadf_preview_sun_direction() -> vec3<f32> {
