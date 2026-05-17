@@ -389,6 +389,26 @@ fn inactive_vegetation_and_water_foam_prototypes_are_not_shipped_as_shaders() {
     );
 }
 
+#[test]
+fn inactive_weather_particle_classifier_is_not_shipped_as_shader() {
+    let rendering_plugin = include_str!("../src/rendering/plugin.rs");
+    let weather_overlay = include_str!("../assets/shaders/weather_overlay.wgsl");
+
+    assert!(
+        weather_overlay.contains("rain_streak_mask") && weather_overlay.contains("snow_flake_mask"),
+        "active precipitation rendering should live in the fullscreen weather overlay shader"
+    );
+    assert!(
+        !rendering_plugin.contains("WEATHER_PARTICLE_CLASSIFY_HANDLE")
+            && !rendering_plugin.contains("/assets/shaders/weather_particle_classify.wgsl"),
+        "inert weather particle classifier should not be registered as an internal shader asset"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/weather_particle_classify.wgsl").exists(),
+        "unused weather_particle_classify.wgsl should not be shipped as an active-looking shader"
+    );
+}
+
 fn uuid_from_line(line: &str) -> Option<&str> {
     let start = line.find("uuid_handle!(\"")? + "uuid_handle!(\"".len();
     let rest = &line[start..];

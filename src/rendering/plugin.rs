@@ -1,8 +1,6 @@
-use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::render::{Render, RenderApp, RenderSystems};
-use bevy::shader::Shader;
 
 use crate::props::billboard::BillboardMaterial;
 use crate::props::lod_material::SimpleLodMaterial;
@@ -12,8 +10,8 @@ use crate::rendering::atlas::load_texture_atlas;
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMesh};
 use crate::rendering::capabilities::{
-    GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
-    sync_capabilities_to_main,
+    detect_graphics_capabilities, sync_capabilities_to_main, GraphicsCapabilities,
+    GraphicsDetectionSet,
 };
 use crate::rendering::cinematic::CinematicPlugin;
 use crate::rendering::god_rays::GodRayPlugin;
@@ -27,13 +25,13 @@ use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::quality::{
-    RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
-    sync_render_quality_preset,
+    apply_render_quality_preset, record_render_quality_counters, sync_render_quality_preset,
+    RenderQualityPreset,
 };
 use crate::rendering::radiance_cascades::RadianceCascadesPlugin;
 use crate::rendering::ray_tracing::{
-    RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
-    toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
+    setup_voxel_ray_backend_notice, toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
+    RayTracingSettings, VoxelRayBackendNotice,
 };
 use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;
@@ -47,23 +45,10 @@ use crate::rendering::water_visual_probe::WaterVisualProbePlugin;
 use crate::rendering::weather_overlay::WeatherOverlayPlugin;
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishPlugin;
 
-const WEATHER_PARTICLE_CLASSIFY_HANDLE: Handle<Shader> =
-    uuid_handle!("ab4a4d6a-2a5d-4bc8-87a8-c267789f72cb");
-
 pub struct RenderingPlugin;
 
 impl Plugin for RenderingPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            WEATHER_PARTICLE_CLASSIFY_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/weather_particle_classify.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-
         if render_timing_enabled(app) {
             install_render_timing(app);
         }
