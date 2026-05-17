@@ -1179,8 +1179,8 @@ fn water_body_allows_reflection_sampling(body_info: Option<&WaterBodyInfo>) -> b
 }
 
 fn update_water_mask_camera(
-    config: Res<WaterReflectionConfig>,
     presence: Res<WaterPresence>,
+    status: Res<WaterReflectionStatus>,
     main_camera: Query<
         (&Transform, &Projection),
         (
@@ -1200,8 +1200,15 @@ fn update_water_mask_camera(
     for (mut mask_transform, mut mask_projection, mut camera) in &mut mask_camera {
         *mask_transform = *main_transform;
         *mask_projection = main_projection.clone();
-        camera.is_active = config.enabled && presence.visible_meshes > 0;
+        camera.is_active = water_mask_camera_should_render(&presence, &status);
     }
+}
+
+fn water_mask_camera_should_render(
+    presence: &WaterPresence,
+    status: &WaterReflectionStatus,
+) -> bool {
+    status.sample_reflection && presence.visible_meshes > 0
 }
 
 fn distance_to_aabb_xz(position: Vec3, aabb: OctreeAabb) -> f32 {
@@ -1454,5 +1461,31 @@ mod tests {
         };
 
         assert!(!reflection_presence_out_of_range(&presence, &config));
+    }
+
+    #[test]
+    fn water_mask_camera_follows_reflection_sampling_status() {
+        let presence = WaterPresence {
+            visible_meshes: 1,
+            eligible_meshes: 1,
+            ..default()
+        };
+        let mut status = WaterReflectionStatus {
+            active: false,
+            sample_reflection: true,
+            reason: WaterReflectionReason::Throttled,
+            ..default()
+        };
+
+        assert!(water_mask_camera_should_render(&presence, &status));
+
+        status.sample_reflection = false;
+        status.reason = WaterReflectionReason::TooSmall;
+
+        assert!(!water_mask_camera_should_render(&presence, &status));
+        assert!(!water_mask_camera_should_render(
+            &WaterPresence::default(),
+            &status
+        ));
     }
 }
