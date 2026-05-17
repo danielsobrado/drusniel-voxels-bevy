@@ -11,12 +11,14 @@ fn fullscreen_post_passes_scrub_scene_alpha() {
     let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
     let weather_overlay = include_str!("../assets/shaders/weather_overlay.wgsl");
     let gtao = include_str!("../assets/shaders/gtao_main.wgsl");
+    let radiance_cascades = include_str!("../assets/shaders/radiance_cascades.wgsl");
 
     for (name, shader) in [
         ("water_reflection_compositor.wgsl", water_compositor),
         ("god_rays.wgsl", god_rays),
         ("weather_overlay.wgsl", weather_overlay),
         ("gtao_main.wgsl", gtao),
+        ("radiance_cascades.wgsl", radiance_cascades),
     ] {
         assert_not_contains(shader, "return scene;", name);
         assert_not_contains(shader, "scene.a", name);

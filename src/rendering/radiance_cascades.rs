@@ -6,6 +6,7 @@
 use bevy::asset::RenderAssetUsages;
 #[cfg(feature = "naadf")]
 use bevy::asset::{load_internal_asset, uuid_handle};
+use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 #[cfg(feature = "naadf")]
 use bevy::core_pipeline::{
     FullscreenShader,
@@ -32,6 +33,8 @@ use std::collections::{HashSet, VecDeque};
 
 #[cfg(feature = "naadf")]
 use crate::atmosphere::FogUniforms;
+#[cfg(feature = "naadf")]
+use crate::rendering::god_rays::GodRaysLabel;
 #[cfg(feature = "naadf")]
 use crate::rendering::naadf::{NaadfCacheState, NaadfConfig, NaadfGpuChunkTable, NaadfStats};
 use crate::rendering::ray_tracing::{
@@ -80,6 +83,7 @@ impl Plugin for RadianceCascadesPlugin {
                 Update,
                 (
                     sync_radiance_cascades_voxel_backend,
+                    configure_radiance_cascade_camera_prepass,
                     update_sdf_volume,
                     update_cascade_params,
                 )
@@ -113,7 +117,12 @@ impl Plugin for RadianceCascadesPlugin {
             );
             render_app.add_render_graph_edges(
                 Core3d,
-                (WeatherOverlayLabel, RadianceCascadesLabel, Node3d::Bloom),
+                (
+                    GodRaysLabel,
+                    RadianceCascadesLabel,
+                    WeatherOverlayLabel,
+                    Node3d::Bloom,
+                ),
             );
         }
     }
@@ -991,6 +1000,22 @@ pub struct CascadeTextures {
 #[derive(Component, Clone, Copy)]
 pub struct RadianceCascadesCamera;
 
+fn configure_radiance_cascade_camera_prepass(
+    mut commands: Commands,
+    config: Res<RadianceCascadesConfig>,
+    cameras: Query<Entity, (With<Camera3d>, Without<RadianceCascadesCamera>)>,
+) {
+    if !radiance_cascade_pass_active(&config) {
+        return;
+    }
+
+    for entity in cameras.iter() {
+        commands
+            .entity(entity)
+            .insert((RadianceCascadesCamera, DepthPrepass, NormalPrepass));
+    }
+}
+
 /// Quality presets for Radiance Cascades
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RadianceCascadesQuality {
@@ -1749,6 +1774,62 @@ mod tests {
 
         config.voxel_backend = VoxelRayBackendMode::CurrentSdf;
         assert!(!radiance_cascade_pass_active(&config));
+    }
+
+    #[test]
+    fn radiance_shader_uses_bevy_reversed_z_and_flipped_ndc_y() {
+        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(shader.contains("fn is_sky_depth"));
+        assert!(shader.contains("return depth <= 0.001"));
+        assert!(shader.contains("fn uv_to_ndc"));
+        assert!(shader.contains("uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0)"));
+        assert!(!shader.contains("if depth >= 0.9999"));
+        assert!(!shader.contains("if depth >= 1.0"));
+    }
+
+    #[test]
+    fn radiance_shader_scrubs_final_alpha() {
+        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+
+        assert!(!shader.contains("return scene;"));
+        assert!(!shader.contains("scene.a"));
+        assert!(shader.contains("return vec4<f32>(scene.rgb, 1.0);"));
+        assert!(
+            shader.contains(
+                "return vec4(scene.rgb * direct_shadow * ao_factor + secondary_gi, 1.0);"
+            )
+        );
+    }
+
+    #[test]
+    fn radiance_pass_runs_before_weather_overlay() {
+        let source = include_str!("radiance_cascades.rs");
+        let compact = source.split_whitespace().collect::<Vec<_>>().join(" ");
+        let old_order = ["WeatherOverlayLabel", "RadianceCascadesLabel"].join(", ");
+
+        assert!(compact.contains("GodRaysLabel, RadianceCascadesLabel, WeatherOverlayLabel"));
+        assert!(!compact.contains(&old_order));
+    }
+
+    #[test]
+    fn active_radiance_pass_enables_depth_and_normal_prepass() {
+        let mut app = App::new();
+        let camera = app.world_mut().spawn(Camera3d::default()).id();
+        app.insert_resource(RadianceCascadesConfig {
+            enabled: true,
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            voxel_backend_query_mask: NAADF_QUERY_SUN_VISIBILITY,
+            ..default()
+        });
+        app.add_systems(Update, configure_radiance_cascade_camera_prepass);
+
+        app.update();
+
+        let world = app.world();
+        assert!(world.get::<RadianceCascadesCamera>(camera).is_some());
+        assert!(world.get::<DepthPrepass>(camera).is_some());
+        assert!(world.get::<NormalPrepass>(camera).is_some());
     }
 
     #[cfg(feature = "naadf")]

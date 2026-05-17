@@ -375,9 +375,17 @@ fn get_probe_position(cascade_level: u32, probe_index: vec2<u32>, screen_size: v
     return vec2<f32>(probe_index) * cascade_spacing;
 }
 
+fn uv_to_ndc(uv: vec2<f32>) -> vec2<f32> {
+    return uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
+}
+
+fn is_sky_depth(depth: f32) -> bool {
+    return depth <= 0.001;
+}
+
 /// Reconstruct world position from depth
 fn reconstruct_world_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
-    let ndc = vec4<f32>(uv * 2.0 - 1.0, depth, 1.0);
+    let ndc = vec4<f32>(uv_to_ndc(uv), depth, 1.0);
     let world_h = params.inv_view_proj * ndc;
     return world_h.xyz / world_h.w;
 }
@@ -567,7 +575,8 @@ fn compute_probe_radiance(
 /// Cascade update pass - updates one cascade level
 @fragment
 fn radiance_passthrough(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(gbuffer_albedo, linear_sampler, in.uv);
+    let scene = textureSample(gbuffer_albedo, linear_sampler, in.uv);
+    return vec4<f32>(scene.rgb, 1.0);
 }
 
 @fragment
@@ -575,8 +584,8 @@ fn radiance_sun_visibility(in: FullscreenVertexOutput) -> @location(0) vec4<f32>
     let uv = in.uv;
     let scene = textureSample(gbuffer_albedo, linear_sampler, uv);
     let depth = depth_at_uv(uv);
-    if depth >= 0.9999 {
-        return scene;
+    if is_sky_depth(depth) {
+        return vec4<f32>(scene.rgb, 1.0);
     }
 
     let world_pos = reconstruct_world_position(uv, depth);
@@ -604,7 +613,7 @@ fn radiance_sun_visibility(in: FullscreenVertexOutput) -> @location(0) vec4<f32>
     }
     let secondary_gi = radiance_secondary_gi(world_pos, normal, scene.rgb, uv);
 
-    return vec4(scene.rgb * direct_shadow * ao_factor + secondary_gi, scene.a);
+    return vec4(scene.rgb * direct_shadow * ao_factor + secondary_gi, 1.0);
 }
 
 @fragment
@@ -618,7 +627,7 @@ fn update_cascade(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     
     // Sample G-buffer
     let depth = depth_at_uv(uv);
-    if depth >= 1.0 {
+    if is_sky_depth(depth) {
         // Sky pixel
         return vec4<f32>(0.0);
     }
@@ -642,8 +651,8 @@ fn composite_gi(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     
     // Sample G-buffer
     let depth = depth_at_uv(uv);
-    if depth >= 1.0 {
-        discard;
+    if is_sky_depth(depth) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
     
     let world_pos = reconstruct_world_position(uv, depth);
