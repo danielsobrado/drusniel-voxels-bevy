@@ -265,6 +265,10 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     let fade_alpha = mix(min_alpha, 1.0, near_fade);
     let final_alpha = alpha * fade_alpha;
 
+    if final_alpha < 0.5 {
+        discard;
+    }
+
     if fade_alpha < 0.999 {
         let dither = interleaved_gradient_noise(input.clip_position.xy);
         if final_alpha < dither {
@@ -277,5 +281,5 @@ fn fragment(input: FragmentInput) -> @location(0) vec4<f32> {
     let fog_factor = clamp((distance - material.fog_start) / fog_range, 0.0, 1.0) * material.aerial_strength;
     let final_color = mix(shadowed_color, material.fog_color.rgb, fog_factor);
 
-    return vec4<f32>(final_color, final_alpha);
+    return vec4<f32>(final_color, 1.0);
 }

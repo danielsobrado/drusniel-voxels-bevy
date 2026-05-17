@@ -88,6 +88,27 @@ fn opaque_terrain_shaders_write_solid_alpha() {
 }
 
 #[test]
+fn alpha_mask_vegetation_discards_instead_of_writing_translucent_scene_alpha() {
+    let grass = include_str!("../assets/shaders/grass.wgsl");
+    let billboard = include_str!("../assets/shaders/billboard.wgsl");
+
+    assert!(
+        grass.contains("if final_alpha < 0.5"),
+        "grass alpha-mask pixels should be discarded by the shader cutoff"
+    );
+    assert!(
+        grass.contains("return vec4<f32>(final_color, 1.0);"),
+        "accepted grass alpha-mask pixels should write solid scene alpha"
+    );
+    assert!(
+        billboard.contains("return vec4<f32>(final_color, 1.0);"),
+        "accepted billboard alpha-mask pixels should write solid scene alpha"
+    );
+    assert_not_contains(grass, "return vec4<f32>(final_color, final_alpha);", "grass.wgsl");
+    assert_not_contains(billboard, "return vec4<f32>(final_color, tex_color.a);", "billboard.wgsl");
+}
+
+#[test]
 fn depth_dependent_passes_have_depth_before_weather_overlay() {
     let weather_overlay = include_str!("../src/rendering/weather_overlay.rs");
     let compact_weather = weather_overlay

@@ -145,5 +145,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Apply aerial perspective fog
     let final_color = mix(tex_color.rgb, uniforms.fog_color.rgb, in.fog_factor * 0.5);
 
-    return vec4<f32>(final_color, tex_color.a);
+    return vec4<f32>(final_color, 1.0);
 }
