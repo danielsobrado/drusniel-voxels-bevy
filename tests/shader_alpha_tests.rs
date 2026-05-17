@@ -282,7 +282,6 @@ fn internal_shader_handles_are_unique_for_water_and_god_rays() {
 fn pcss_is_not_advertised_as_active_without_shader_integration() {
     let pcss = include_str!("../src/rendering/pcss.rs");
     let pcss_config = include_str!("../assets/config/pcss.yaml");
-    let pcss_shader = include_str!("../assets/shaders/pcss_shadows.wgsl");
 
     assert!(
         pcss.contains("config.enabled = false"),
@@ -297,12 +296,8 @@ fn pcss_is_not_advertised_as_active_without_shader_integration() {
         "PCSS config should not default to an advertised active state"
     );
     assert!(
-        !pcss_shader.contains("@group("),
-        "PCSS utility shader should not declare hard-coded bind groups"
-    );
-    assert!(
-        !pcss_shader.contains("vec3<f32>(0.5, 0.5, 0.5)"),
-        "PCSS utility shader should not fabricate placeholder shadow coordinates"
+        !std::path::Path::new("assets/shaders/pcss_shadows.wgsl").exists(),
+        "inactive PCSS utility shader should not be shipped as an active-looking shader"
     );
 }
 
