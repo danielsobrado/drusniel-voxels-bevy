@@ -30,7 +30,7 @@ use crate::rendering::cinematic::{
 };
 use crate::rendering::cinematic_config::CinematicConfig;
 use crate::rendering::god_rays::GodRayConfig;
-use crate::rendering::gtao::GtaoSettings;
+use crate::rendering::gtao::{GtaoSettings, gtao_settings_from_config};
 use crate::rendering::photo_mode::PhotoModeState;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::ray_tracing::RayTracingSettings;
@@ -2099,7 +2099,7 @@ fn set_shadow_budget_enabled(world: &mut World, enabled: bool) {
 }
 
 fn set_gtao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
-    if enabled && integrated_gpu_ao_disabled(world) {
+    if enabled && integrated_gpu_gtao_disabled(world) {
         return Err(
             "GTAO cannot be enabled on an integrated GPU with the current AO config.".to_string(),
         );
@@ -2134,28 +2134,8 @@ fn set_gtao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn gtao_settings_from_config(config: &AmbientOcclusionConfig) -> GtaoSettings {
-    let Some(gtao) = config.gtao.as_ref() else {
-        return GtaoSettings::default();
-    };
-
-    GtaoSettings {
-        slice_count: gtao.slice_count,
-        steps_per_slice: gtao.steps_per_slice,
-        radius: gtao.radius,
-        falloff_range: gtao.falloff_range,
-        final_value_power: gtao.final_value_power,
-        sample_distribution_power: gtao.sample_distribution_power,
-        thin_occluder_compensation: gtao.thin_occluder_compensation,
-        depth_mip_sampling_offset: gtao.depth_mip_sampling_offset,
-        enable_denoise: gtao.denoise.enabled,
-        denoise_spatial_radius: gtao.denoise.spatial_radius,
-        denoise_temporal_blend: gtao.denoise.temporal_blend,
-    }
-}
-
 fn set_ssao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
-    if enabled && integrated_gpu_ao_disabled(world) {
+    if enabled && integrated_gpu_ssao_disabled(world) {
         return Err(
             "SSAO cannot be enabled on an integrated GPU with the current AO config.".to_string(),
         );
@@ -2193,7 +2173,25 @@ fn set_ssao_enabled(world: &mut World, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn integrated_gpu_ao_disabled(world: &World) -> bool {
+fn integrated_gpu_gtao_disabled(world: &World) -> bool {
+    let integrated = world
+        .get_resource::<GraphicsCapabilities>()
+        .is_some_and(|capabilities| capabilities.integrated_gpu);
+    let disable_on_integrated =
+        world
+            .get_resource::<AmbientOcclusionConfig>()
+            .is_some_and(|config| {
+                config
+                    .gtao
+                    .as_ref()
+                    .map(|gtao| gtao.disable_on_integrated_gpu)
+                    .unwrap_or(config.ssao.disable_on_integrated_gpu)
+            });
+
+    integrated && disable_on_integrated
+}
+
+fn integrated_gpu_ssao_disabled(world: &World) -> bool {
     let integrated = world
         .get_resource::<GraphicsCapabilities>()
         .is_some_and(|capabilities| capabilities.integrated_gpu);
@@ -2495,7 +2493,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
             "gtaoSliceCount": gtao.map(|config| config.slice_count).unwrap_or(0),
             "gtaoStepsPerSlice": gtao.map(|config| config.steps_per_slice).unwrap_or(0),
             "gtaoRadius": gtao.map(|config| config.radius).unwrap_or(0.0),
-            "gtaoTemporalDenoise": gtao.is_some_and(|config| config.denoise.enabled),
+            "gtaoTemporalDenoise": false,
             "ssaoSupported": ssao_supported(world),
             "ssaoEnabled": ao.is_some_and(|config| config.ssao.enabled),
             "bakedAoStrength": baked_ao_strength(world),

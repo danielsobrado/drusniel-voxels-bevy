@@ -20,10 +20,7 @@ Phase 1 focused on four major rendering features to improve visual quality:
 
 **Files:**
 - `src/rendering/gtao.rs` - Main GTAO pipeline implementation
-- `src/rendering/gtao_noise.rs` - Blue noise texture generation
-- `assets/shaders/gtao_main.wgsl` - Main GTAO horizon-based AO shader
-- `assets/shaders/gtao_prepass.wgsl` - Depth-normal prepass shader
-- `assets/shaders/gtao_denoise.wgsl` - Spatial-temporal denoise shader
+- `assets/shaders/gtao_main.wgsl` - Depth-aware fullscreen AO shader
 - `assets/config/gtao.yaml` - Configuration file
 
 **Features:**
@@ -142,16 +139,15 @@ All rendering features are config-driven via YAML files in `assets/config/`:
 ### Quality Presets
 
 **GTAO Quality Levels:**
-| Preset | Slices | Steps | Radius | Denoise |
-|--------|--------|-------|--------|---------|
-| Low | 2 | 2 | 1.5m | Off |
-| Medium | 2 | 3 | 2.0m | Spatial only |
-| High | 3 | 3 | 2.5m | Full |
-| Ultra | 4 | 4 | 3.0m | Extended |
+| Preset | Slices | Steps | Radius |
+|--------|--------|-------|--------|
+| Low | 2 | 2 | 1.5m |
+| Medium | 2 | 3 | 2.0m |
+| High | 3 | 3 | 2.5m |
+| Ultra | 4 | 4 | 3.0m |
 
 ### Performance Considerations
 - GTAO automatically disables on integrated GPUs (configurable)
-- Denoise pass can be disabled for lower-end hardware
 - Volumetric clouds use temporal reprojection to reduce per-frame cost
 - Weather particles are GPU-accelerated via compute shaders
 

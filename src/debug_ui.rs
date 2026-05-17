@@ -1,7 +1,9 @@
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
+use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::rendering::array_loader::AtlasMapping;
 #[cfg(feature = "naadf")]
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::gtao::gtao_settings_from_config;
 #[cfg(feature = "naadf")]
 use crate::rendering::naadf::{
     NaadfCacheState, NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig, NaadfStats,
@@ -355,8 +357,17 @@ fn debug_settings_ui(
                         stats.gpu_uploaded_bytes_last_frame
                     ));
                     ui.label(format!(
-                        "NAADF GPU avg ray steps: {:.1}",
-                        stats.gpu_avg_ray_steps_last_frame
+                        "NAADF GPU ray steps: {:.1} avg / {} max / {} samples",
+                        stats.gpu_avg_ray_steps_last_frame,
+                        stats.gpu_max_ray_steps_last_frame,
+                        stats.gpu_ray_samples_last_frame,
+                    ));
+                    ui.label(format!(
+                        "NAADF first-hit misses: {} clean, {} voxel budget, {} chunk budget, {} distance",
+                        stats.first_hit_clean_misses_last_frame,
+                        stats.first_hit_voxel_budget_misses_last_frame,
+                        stats.first_hit_chunk_budget_misses_last_frame,
+                        stats.first_hit_distance_clamps_last_frame,
                     ));
                     ui.label(format!(
                         "NAADF GPU build queue: {} pending, oldest {} frames",
@@ -481,6 +492,7 @@ fn debug_settings_ui(
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
             ui.label("Press Shift+F9 to dump terrain hole probe JSON");
+            ui.label("Press Alt+Shift+F9 to cycle water reflection debug view");
             ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");
             #[cfg(feature = "naadf")]
@@ -580,6 +592,7 @@ fn toggle_ao_style(
 fn toggle_ssao_key(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    ao_config: Option<Res<AmbientOcclusionConfig>>,
     cameras: Query<
         (
             Entity,
@@ -595,20 +608,42 @@ fn toggle_ssao_key(
         *ssao_enabled = !*ssao_enabled;
         for (entity, existing_ssao, existing_gtao) in cameras.iter() {
             if *ssao_enabled {
-                // Re-enable SS AO features
-                if existing_ssao.is_none() {
-                    commands
-                        .entity(entity)
-                        .insert(bevy::pbr::ScreenSpaceAmbientOcclusion::default());
+                let use_gtao = ao_config
+                    .as_ref()
+                    .and_then(|config| config.gtao.as_ref())
+                    .is_some_and(|gtao| gtao.enabled);
+                if use_gtao {
+                    if existing_ssao.is_some() {
+                        commands
+                            .entity(entity)
+                            .remove::<bevy::pbr::ScreenSpaceAmbientOcclusion>();
+                    }
+                    if existing_gtao.is_none() {
+                        let gtao = ao_config
+                            .as_ref()
+                            .map(|config| gtao_settings_from_config(config))
+                            .unwrap_or_default();
+                        commands.entity(entity).insert((
+                            gtao,
+                            bevy::core_pipeline::prepass::DepthPrepass,
+                            bevy::core_pipeline::prepass::NormalPrepass,
+                        ));
+                    }
+                    info!("GTAO: ON (F9 to toggle)");
+                } else {
+                    if existing_gtao.is_some() {
+                        commands
+                            .entity(entity)
+                            .remove::<crate::rendering::gtao::GtaoSettings>();
+                    }
+                    if existing_ssao.is_none() {
+                        commands
+                            .entity(entity)
+                            .insert(bevy::pbr::ScreenSpaceAmbientOcclusion::default());
+                    }
+                    info!("SSAO: ON (F9 to toggle)");
                 }
-                if existing_gtao.is_none() {
-                    commands
-                        .entity(entity)
-                        .insert(crate::rendering::gtao::GtaoSettings::default());
-                }
-                info!("SSAO/GTAO: ON (F9 to toggle)");
             } else {
-                // Disable all SS AO features
                 if existing_ssao.is_some() {
                     commands
                         .entity(entity)
@@ -619,7 +654,7 @@ fn toggle_ssao_key(
                         .entity(entity)
                         .remove::<crate::rendering::gtao::GtaoSettings>();
                 }
-                info!("SSAO/GTAO: OFF (F9 to toggle)");
+                info!("Screen-space AO: OFF (F9 to toggle)");
             }
         }
     }

@@ -10,11 +10,13 @@ fn fullscreen_post_passes_scrub_scene_alpha() {
     let water_compositor = include_str!("../assets/shaders/water_reflection_compositor.wgsl");
     let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
     let weather_overlay = include_str!("../assets/shaders/weather_overlay.wgsl");
+    let gtao = include_str!("../assets/shaders/gtao_main.wgsl");
 
     for (name, shader) in [
         ("water_reflection_compositor.wgsl", water_compositor),
         ("god_rays.wgsl", god_rays),
         ("weather_overlay.wgsl", weather_overlay),
+        ("gtao_main.wgsl", gtao),
     ] {
         assert_not_contains(shader, "return scene;", name);
         assert_not_contains(shader, "scene.a", name);
@@ -149,6 +151,23 @@ fn gtao_is_registered_as_a_real_post_process_node() {
     assert!(
         gtao_shader.contains("scene_texture") && gtao_shader.contains("depth_texture"),
         "GTAO shader should sample scene color and prepass depth"
+    );
+    assert!(
+        gtao_shader.contains("center_depth <= 0.001"),
+        "GTAO should treat Bevy reversed-Z near-zero depth as sky/far clear"
+    );
+    assert!(
+        gtao_shader.contains("sample_depth - center_depth"),
+        "GTAO occluder tests should compare closer reversed-Z samples against the center depth"
+    );
+    assert!(
+        gtao_shader.contains("4u") && !gtao_shader.contains(", 2u)"),
+        "GTAO shader should allow the configured High/Ultra 3-4 sample quality"
+    );
+    assert!(
+        !std::path::Path::new("assets/shaders/gtao_prepass.wgsl").exists()
+            && !std::path::Path::new("assets/shaders/gtao_denoise.wgsl").exists(),
+        "inactive GTAO prototype shaders should not be shipped as active-looking assets"
     );
 }
 

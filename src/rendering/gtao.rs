@@ -86,7 +86,7 @@ pub struct GtaoCamera;
 /// GTAO quality settings - configures the algorithm parameters
 #[derive(Component, Clone, ExtractComponent)]
 pub struct GtaoSettings {
-    /// Number of slices (directions) to sample - 2 or 3 recommended
+    /// Number of slices (directions) to sample - 2 to 4 recommended
     pub slice_count: u32,
     /// Samples per direction - 2-4 recommended
     pub steps_per_slice: u32,
@@ -100,14 +100,6 @@ pub struct GtaoSettings {
     pub sample_distribution_power: f32,
     /// Reduces over-darkening from thin occluders (0.0-1.0)
     pub thin_occluder_compensation: f32,
-    /// Mip offset for sampling far depth
-    pub depth_mip_sampling_offset: f32,
-    /// Reserved for the future temporal denoise pass.
-    pub enable_denoise: bool,
-    /// Reserved spatial filter radius for the future denoise pass.
-    pub denoise_spatial_radius: u32,
-    /// Reserved temporal blend factor for the future denoise pass.
-    pub denoise_temporal_blend: f32,
 }
 
 impl Default for GtaoSettings {
@@ -120,10 +112,6 @@ impl Default for GtaoSettings {
             final_value_power: 2.0,
             sample_distribution_power: 2.0,
             thin_occluder_compensation: 0.0,
-            depth_mip_sampling_offset: 1.0,
-            enable_denoise: true,
-            denoise_spatial_radius: 2,
-            denoise_temporal_blend: 0.95,
         }
     }
 }
@@ -139,7 +127,7 @@ pub struct GtaoSettingsUniform {
     pub final_value_power: f32,
     pub sample_distribution_power: f32,
     pub thin_occluder_compensation: f32,
-    pub depth_mip_sampling_offset: f32,
+    pub _padding: f32,
 }
 
 impl GtaoSettingsUniform {
@@ -160,7 +148,7 @@ impl From<&GtaoSettings> for GtaoSettingsUniform {
             final_value_power: settings.final_value_power,
             sample_distribution_power: settings.sample_distribution_power,
             thin_occluder_compensation: settings.thin_occluder_compensation,
-            depth_mip_sampling_offset: settings.depth_mip_sampling_offset,
+            _padding: 0.0,
         }
     }
 }
@@ -188,58 +176,51 @@ fn detect_gtao_support(
             || matches!(info.device_type, DeviceType::IntegratedGpu);
     }
 
-    if config.ssao.disable_on_integrated_gpu && is_integrated {
+    let gtao_config = config.gtao.as_ref();
+    let disable_on_integrated = gtao_config
+        .map(|gtao| gtao.disable_on_integrated_gpu)
+        .unwrap_or(config.ssao.disable_on_integrated_gpu);
+
+    if disable_on_integrated && is_integrated {
         supported.0 = false;
         warn!("GTAO disabled: Integrated GPU detected ({})", adapter_name);
         return;
     }
 
-    supported.0 = config.ssao.enabled;
+    supported.0 = gtao_config.is_some_and(|gtao| gtao.enabled);
     info!("GTAO support: {} (GPU: {})", supported.0, adapter_name);
 }
 
-/// Returns GTAO settings based on quality configuration
+/// Returns GTAO settings from the active numeric GTAO configuration.
+pub fn gtao_settings_from_config(config: &AmbientOcclusionConfig) -> GtaoSettings {
+    let Some(gtao) = config.gtao.as_ref() else {
+        return GtaoSettings::default();
+    };
+
+    GtaoSettings {
+        slice_count: gtao.slice_count,
+        steps_per_slice: gtao.steps_per_slice,
+        radius: gtao.radius,
+        falloff_range: gtao.falloff_range,
+        final_value_power: gtao.final_value_power,
+        sample_distribution_power: gtao.sample_distribution_power,
+        thin_occluder_compensation: gtao.thin_occluder_compensation,
+    }
+}
+
+/// Returns GTAO component for a camera if supported and enabled.
 pub fn gtao_camera_components(
     config: &AmbientOcclusionConfig,
     supported: &GtaoSupported,
 ) -> Option<GtaoSettings> {
-    if !supported.0 || !config.ssao.enabled {
+    let Some(gtao_config) = config.gtao.as_ref() else {
+        return None;
+    };
+    if !supported.0 || !gtao_config.enabled {
         return None;
     }
 
-    let settings = match config.ssao.quality.to_lowercase().as_str() {
-        "low" => GtaoSettings {
-            slice_count: 2,
-            steps_per_slice: 2,
-            radius: 1.5,
-            enable_denoise: false,
-            ..default()
-        },
-        "medium" => GtaoSettings {
-            slice_count: 2,
-            steps_per_slice: 3,
-            radius: 2.0,
-            enable_denoise: true,
-            denoise_spatial_radius: 1,
-            ..default()
-        },
-        "high" => GtaoSettings {
-            slice_count: 3,
-            steps_per_slice: 3,
-            radius: 2.5,
-            ..default()
-        },
-        "ultra" => GtaoSettings {
-            slice_count: 4,
-            steps_per_slice: 4,
-            radius: 3.0,
-            denoise_spatial_radius: 3,
-            ..default()
-        },
-        _ => GtaoSettings::default(),
-    };
-
-    Some(settings)
+    Some(gtao_settings_from_config(config))
 }
 
 fn configure_camera_gtao(

@@ -18,6 +18,7 @@
 
 pub mod adaptive_gi;
 pub mod ao_config;
+pub mod ao_msaa;
 pub mod array_loader;
 pub mod atlas;
 pub mod blocky_material;
@@ -28,7 +29,6 @@ pub mod cinematic_config;
 pub mod cutscene;
 pub mod god_rays;
 pub mod gtao;
-pub mod gtao_noise;
 pub mod materials;
 pub mod mipmaps;
 pub mod pcss;

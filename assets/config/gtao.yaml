@@ -31,27 +31,6 @@ gtao:
   # Reduces over-darkening from thin geometry
   thin_occluder_compensation: 0.0
   
-  # Depth mip sampling offset for distant samples
-  depth_mip_sampling_offset: 1.0
-  
-  # Temporal denoising
-  denoise:
-    enabled: true
-    # Spatial filter radius (0-4)
-    spatial_radius: 2
-    # Spatial filter sigma (Gaussian blur)
-    spatial_sigma: 1.5
-    # Temporal blend factor (0.0-1.0)
-    # Higher = more temporal smoothing, can cause ghosting
-    temporal_blend: 0.95
-    # Edge detection thresholds
-    depth_threshold: 0.1
-    normal_threshold: 0.3
-  
-  # Bent normals output for directional occlusion
-  # Used for specular occlusion and GI
-  bent_normals: true
-  
   # Fallback settings
   disable_on_integrated_gpu: true
 

@@ -14,7 +14,7 @@ struct GtaoSettings {
     final_value_power: f32,
     sample_distribution_power: f32,
     thin_occluder_compensation: f32,
-    depth_mip_sampling_offset: f32,
+    _padding: f32,
 };
 
 @group(0) @binding(3) var<uniform> settings: GtaoSettings;
@@ -28,12 +28,12 @@ fn depth_at(uv: vec2<f32>) -> f32 {
 }
 
 fn depth_weight(center_depth: f32) -> f32 {
-    return smoothstep(0.9995, 0.08, center_depth);
+    return smoothstep(0.001, 0.05, center_depth);
 }
 
 fn sample_occlusion(uv: vec2<f32>, center_depth: f32, texel_size: vec2<f32>) -> f32 {
-    let slices = min(max(settings.slice_count, 1u), 2u);
-    let steps = min(max(settings.steps_per_slice, 1u), 2u);
+    let slices = min(max(settings.slice_count, 1u), 4u);
+    let steps = min(max(settings.steps_per_slice, 1u), 4u);
     let radius_px = max(settings.radius, 0.25) * 4.0;
     let falloff = max(settings.falloff_range, 0.001);
 
@@ -52,8 +52,9 @@ fn sample_occlusion(uv: vec2<f32>, center_depth: f32, texel_size: vec2<f32>) -> 
                 let sign = select(-1.0, 1.0, side == 1u);
                 let sample_uv = clamp(uv + dir * sign * dist_px * texel_size, vec2<f32>(0.0), vec2<f32>(1.0));
                 let sample_depth = depth_at(sample_uv);
-                let depth_delta = center_depth - sample_depth;
-                let blocker = smoothstep(0.00005, 0.0035 * falloff, depth_delta);
+                let depth_delta = sample_depth - center_depth;
+                let sample_geometry = step(0.001, sample_depth);
+                let blocker = smoothstep(0.00005, 0.0035 * falloff, depth_delta) * sample_geometry;
                 let distance_fade = 1.0 - t;
                 occlusion = occlusion + blocker * distance_fade;
                 sample_count = sample_count + 1.0;
@@ -72,7 +73,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scene = textureSample(scene_texture, scene_sampler, uv);
     let center_depth = depth_at(uv);
 
-    if center_depth >= 0.9995 {
+    if center_depth <= 0.001 {
         return vec4<f32>(scene.rgb, 1.0);
     }
 

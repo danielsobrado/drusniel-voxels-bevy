@@ -20,20 +20,7 @@ pub struct GtaoConfig {
     pub final_value_power: f32,
     pub sample_distribution_power: f32,
     pub thin_occluder_compensation: f32,
-    pub depth_mip_sampling_offset: f32,
-    pub denoise: GtaoDenoiseConfig,
-    pub bent_normals: bool,
     pub disable_on_integrated_gpu: bool,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct GtaoDenoiseConfig {
-    pub enabled: bool,
-    pub spatial_radius: u32,
-    pub spatial_sigma: f32,
-    pub temporal_blend: f32,
-    pub depth_threshold: f32,
-    pub normal_threshold: f32,
 }
 
 #[derive(Deserialize, Clone)]
@@ -71,16 +58,6 @@ impl Default for AmbientOcclusionConfig {
                 final_value_power: 2.0,
                 sample_distribution_power: 2.0,
                 thin_occluder_compensation: 0.0,
-                depth_mip_sampling_offset: 1.0,
-                denoise: GtaoDenoiseConfig {
-                    enabled: true,
-                    spatial_radius: 2,
-                    spatial_sigma: 1.5,
-                    temporal_blend: 0.95,
-                    depth_threshold: 0.1,
-                    normal_threshold: 0.3,
-                },
-                bent_normals: true,
                 disable_on_integrated_gpu: true,
             }),
             baked: BakedAoConfig {
