@@ -1351,6 +1351,19 @@ Not run:
 - No NAADF shader is loaded into a render pipeline yet.
 - No visual output should change from these code paths unless a user explicitly toggles backend state, and even then the real render path still falls back to current behavior.
 
+## Planned: Local Point Lights And Torches
+
+NAADF preview local-light support is documented in
+`docs/rendering/naadf-local-lights-plan.md`.
+
+Planned implementation is default-off and phased:
+
+- Extract Bevy `PointLight` entities into capped NAADF local-light records.
+- Upload those records to the render app for NAADF preview shaders.
+- Add direct primary-hit point-light shading first.
+- Add a dedicated local-light bench before considering GI bounce integration.
+- Keep Path A radiance-cascade integration out of the first milestone.
+
 ## Remaining Work
 
 GPU batch after CPU parity:
