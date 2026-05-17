@@ -27,7 +27,7 @@ naadf_preview_composite_mode = "fullscreen"
 naadf_preview_show_miss_sky = true
 naadf_preview_local_lights_enabled = true
 naadf_preview_local_light_limit = 16
-naadf_preview_local_light_shadows_enabled = true
+naadf_preview_local_light_shadows_enabled = false
 naadf_spawn_demo_lights = true
 
 [[checkpoint]]
