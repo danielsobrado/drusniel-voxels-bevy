@@ -68,8 +68,7 @@ impl NaadfGpuBufferPlan {
         let voxel_records = max_chunks as u64 * crate::constants::CHUNK_VOLUME as u64;
         let raw_voxel_records = voxel_records;
         let material_records = voxel_records;
-        let mip_traversal_records =
-            max_chunks as u64 * super::layout::MIP_CELLS_PER_CHUNK as u64;
+        let mip_traversal_records = max_chunks as u64 * super::layout::MIP_CELLS_PER_CHUNK as u64;
         let mip_payload_records = mip_traversal_records;
         let mip_bounds_records = mip_traversal_records;
         let block_records = max_chunks as u64 * super::layout::BLOCKS_PER_CHUNK as u64;
@@ -78,8 +77,7 @@ impl NaadfGpuBufferPlan {
         let voxel_buffer_bytes = voxel_records * NAADF_VOXEL_RECORD_BYTES;
         let raw_voxel_buffer_bytes = raw_voxel_records * NAADF_RAW_VOXEL_RECORD_BYTES;
         let material_buffer_bytes = material_records * NAADF_MATERIAL_RECORD_BYTES;
-        let mip_traversal_buffer_bytes =
-            mip_traversal_records * NAADF_MIP_TRAVERSAL_RECORD_BYTES;
+        let mip_traversal_buffer_bytes = mip_traversal_records * NAADF_MIP_TRAVERSAL_RECORD_BYTES;
         let mip_payload_buffer_bytes = mip_payload_records * NAADF_MIP_PAYLOAD_RECORD_BYTES;
         let mip_bounds_buffer_bytes = mip_bounds_records * NAADF_MIP_BOUNDS_RECORD_BYTES;
         let block_buffer_bytes = block_records * NAADF_BLOCK_RECORD_BYTES;
@@ -1307,10 +1305,7 @@ mod tests {
         assert_eq!(plan.voxel_records, 8192);
         assert_eq!(plan.raw_voxel_records, 8192);
         assert_eq!(plan.material_records, 8192);
-        assert_eq!(
-            plan.mip_traversal_records,
-            2 * MIP_CELLS_PER_CHUNK as u64
-        );
+        assert_eq!(plan.mip_traversal_records, 2 * MIP_CELLS_PER_CHUNK as u64);
         assert_eq!(plan.mip_payload_records, plan.mip_traversal_records);
         assert_eq!(plan.mip_bounds_records, plan.mip_traversal_records);
         assert_eq!(plan.block_records, 128);

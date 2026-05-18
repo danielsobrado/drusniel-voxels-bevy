@@ -2,7 +2,7 @@
 # Run manually after a bench; this is not part of normal cargo build/check.
 
 [naadf]
-max_gpu_memory_mb = 512
+max_gpu_memory_mb = 1024
 max_dirty_chunks_pending = 256
 max_oldest_dirty_chunk_age_frames = 120
 max_avg_ray_steps = 90

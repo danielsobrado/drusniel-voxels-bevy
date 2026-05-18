@@ -475,7 +475,10 @@ mod tests {
             wgsl_u32_const(common, "NAADF_CHUNK_BOUND_FIELD_MASK"),
             CHUNK_BOUND_FIELD_MASK
         );
-        assert_eq!(wgsl_u32_const(common, "NAADF_MIP_LEVEL_COUNT"), MIP_LEVEL_COUNT);
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_MIP_LEVEL_COUNT"),
+            MIP_LEVEL_COUNT
+        );
         assert_eq!(
             wgsl_u32_const(common, "NAADF_MIP_CELLS_PER_CHUNK"),
             MIP_CELLS_PER_CHUNK
@@ -499,10 +502,12 @@ mod tests {
         assert_eq!(traversal.child_mask(), 0b1010_0101);
         assert!(traversal.thin_or_hole());
         assert_eq!(payload.material_id(), 42);
-        assert_eq!(mip_cell_index(4, UVec3::ZERO), (MIP_CELLS_PER_CHUNK - 1) as usize);
         assert_eq!(
-            NaadfMipBoundsRecord::new(1, 2, 3, 4, 5, 6)
-                .get_at_offset(MIP_BOUND_OFFSET_POS_Z),
+            mip_cell_index(4, UVec3::ZERO),
+            (MIP_CELLS_PER_CHUNK - 1) as usize
+        );
+        assert_eq!(
+            NaadfMipBoundsRecord::new(1, 2, 3, 4, 5, 6).get_at_offset(MIP_BOUND_OFFSET_POS_Z),
             6
         );
     }
@@ -569,8 +574,7 @@ mod tests {
     #[test]
     fn wgsl_world_trace_declares_chunk_lookup_and_boundary_helpers() {
         let world_trace = include_str!("../../../assets/shaders/naadf/world_trace.wgsl");
-        let shader =
-            bevy_shader::Shader::from_wgsl(world_trace, "shaders/naadf/world_trace.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(world_trace, "shaders/naadf/world_trace.wgsl");
 
         assert!(shader.imports().any(|import| {
             matches!(

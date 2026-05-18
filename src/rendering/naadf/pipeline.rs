@@ -892,8 +892,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             None
         };
         let build_mips_pipeline = if gpu_builder_enabled {
-            let Some(pipeline) =
-                pipeline_cache.get_compute_pipeline(pipelines.build_mips_pipeline)
+            let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.build_mips_pipeline)
             else {
                 publish_preview_node_stage(world, 12);
                 return Ok(());
@@ -1235,7 +1234,10 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (23, BindingResource::TextureView(&preview_motion_view)),
                 (24, allocation.stats_buffer.as_entire_binding()),
                 (25, local_light_allocation.buffer.as_entire_binding()),
-                (39, BindingResource::TextureView(&terrain_albedo.texture_view)),
+                (
+                    39,
+                    BindingResource::TextureView(&terrain_albedo.texture_view),
+                ),
                 (40, BindingResource::Sampler(&terrain_albedo.sampler)),
             )),
         );
