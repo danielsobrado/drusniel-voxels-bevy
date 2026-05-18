@@ -761,8 +761,7 @@ mod tests {
     #[test]
     fn wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel() {
         let froxel = include_str!("../../../assets/shaders/naadf/froxel_sun_mask.wgsl");
-        let shader =
-            bevy_shader::Shader::from_wgsl(froxel, "shaders/naadf/froxel_sun_mask.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(froxel, "shaders/naadf/froxel_sun_mask.wgsl");
 
         assert!(shader.imports().any(|import| {
             matches!(

@@ -36,10 +36,10 @@ use crate::atmosphere::FogConfig;
 use crate::camera::controller::PlayerCamera;
 use crate::environment::Sun;
 use crate::performance::AreaTimingRecorder;
-use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
-use crate::weather::WeatherRuntime;
 #[cfg(feature = "naadf")]
 use crate::rendering::naadf::froxel::NaadfFroxelSunMaskState;
+use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
+use crate::weather::WeatherRuntime;
 
 const GOD_RAYS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
 const MIN_GOD_RAY_SAMPLES: u32 = 1;

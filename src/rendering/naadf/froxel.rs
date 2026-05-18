@@ -20,8 +20,9 @@ pub fn sync_naadf_froxel_sun_mask_state(
     let resolution = config.froxel_sun_mask.resolution_uvec3();
     let rays_per_full_update = froxel_ray_count(resolution);
     let max_rays_per_frame = config.froxel_sun_mask.max_rays_per_frame.max(1);
-    let frames_per_full_update =
-        rays_per_full_update.div_ceil(max_rays_per_frame as u64).min(u32::MAX as u64) as u32;
+    let frames_per_full_update = rays_per_full_update
+        .div_ceil(max_rays_per_frame as u64)
+        .min(u32::MAX as u64) as u32;
     let active = config.enabled
         && config.use_for_sun_visibility
         && config.froxel_sun_mask.enabled
@@ -37,11 +38,7 @@ pub fn sync_naadf_froxel_sun_mask_state(
     stats.froxel_sun_mask_active = active as u32;
     stats.froxel_sun_mask_rays_per_full_update = rays_per_full_update;
     stats.froxel_sun_mask_max_rays_per_frame = if active { max_rays_per_frame } else { 0 };
-    stats.froxel_sun_mask_frames_per_full_update = if active {
-        frames_per_full_update
-    } else {
-        0
-    };
+    stats.froxel_sun_mask_frames_per_full_update = if active { frames_per_full_update } else { 0 };
 }
 
 pub fn froxel_ray_count(resolution: UVec3) -> u64 {

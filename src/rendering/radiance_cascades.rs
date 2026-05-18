@@ -1365,9 +1365,9 @@ pub fn record_naadf_gi_counters(
             estimated_naadf_contact_shadow_rays_per_pixel(&config);
         stats.radiance_terrain_ao_rays_per_pixel =
             estimated_naadf_terrain_ao_rays_per_pixel(&config);
-        stats.radiance_short_range_rays_per_pixel =
-            stats.radiance_contact_shadow_rays_per_pixel
-                .saturating_add(stats.radiance_terrain_ao_rays_per_pixel);
+        stats.radiance_short_range_rays_per_pixel = stats
+            .radiance_contact_shadow_rays_per_pixel
+            .saturating_add(stats.radiance_terrain_ao_rays_per_pixel);
     }
 }
 

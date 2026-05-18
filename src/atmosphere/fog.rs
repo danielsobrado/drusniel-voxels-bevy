@@ -833,8 +833,10 @@ fn update_fog_from_atmosphere(
         // God rays preset uses 50x multiplier for visible shafts in near-zero density fog
         let base_intensity = 1200.0 * daylight + 100.0 * night;
         let time_modifier = 1.0 + twilight * 1.5;
-        volume.light_intensity =
-            base_intensity * time_modifier * preset_config.light_intensity * naadf_froxel_fog_factor;
+        volume.light_intensity = base_intensity
+            * time_modifier
+            * preset_config.light_intensity
+            * naadf_froxel_fog_factor;
 
         volume.scattering = smoothing.current_scattering;
         // mie_direction controls forward scattering asymmetry
