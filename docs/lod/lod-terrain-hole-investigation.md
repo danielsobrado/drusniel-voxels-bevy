@@ -340,8 +340,11 @@ the wall itself.
   and other LOD pairs keep current behaviour.
 - Snap is **face-level**: all boundary vertices on that face succeed or none
   are moved.
-- On successful snap, suppress the X/Z apron/vertical skirt for that face.
-  Skirts remain the strict fallback for snap-failed known X/Z LOD seams.
+- On successful snap, suppress the vertical X/Z skirt wall for that face but
+  keep a short draped apron-only seal. The snap bends the fine boundary to the
+  coarse iso-surface; the apron covers the 1-2 voxel coarse-side reach that a
+  camera ray can still see through before it reaches the Lod1 surface.
+  Full skirts remain the strict fallback for snap-failed known X/Z LOD seams.
 - The coarse iso-height helper uses the same coarse lattice sampling convention
   as the low-LOD SDF path, scans the vertical coarse column, and accepts exactly
   one solid-to-air crossing.
@@ -376,6 +379,42 @@ the wall itself.
   6.378 ms but still failed ridge/jump mesh-dirty p99 and forest frame p99. The
   visual bench remains an honest non-signoff; manual probe recapture is still
   needed to verify the visible mountain seam after LOD convergence.
+- Fresh manual capture `20260518-141536` was LOD-converged:
+  48/48 camera-height samples with errors had `current_lod == computed_target_lod`.
+  Interior Lod0/Lod1 medians matched (`-0.63` vs `-0.62`), so this was not the
+  old low-LOD interior sink. The decisive miss was the central camera ray:
+  it entered solid at 222.25 m and hit no front-facing render surface. The ray
+  landed in Lod1 chunk `10,2,20`, about 1.14 voxels inside its `pos_x` face,
+  with a Lod0 neighbour on that face. The Lod0 neighbour had snap stats for
+  the matching `neg_x` face, proving the snap worked but full face filtering
+  left no geometry spanning the coarse-side reach. Current code now retains an
+  apron-only seal on snapped faces while still suppressing the vertical wall.
+- Visual LOD bench run `bench-runs/2026-05-18T14-33-39Z` measured the apron-only
+  seal build. Screenshots were generated and did not show a broad new visual
+  regression in the inspected ridge/forest checkpoints, but `bench_guard` still
+  failed existing live-LOD timing rows: ridge/jump `Mesh Dirty:p99` 11.527 /
+  11.905 ms, forest `Mesh Dirty:p99` passed at 0.205 ms, and forest frame p99
+  failed at 44.869 ms. This is still not a performance sign-off.
+- Fresh manual capture `20260518-145803` still showed large negative signed
+  errors, but not in a clean Lod0/Lod1 interior pattern: Lod1-minus-Lod0
+  interior median was only `+0.16`, the worst sample was near `neg_y`, and one
+  sample hit outside the chunk body (`local.x=-1.0`). The probe could not yet
+  distinguish main Surface Nets triangles from transition triangles, so schema
+  8 adds `mesh_section` tagging (`main_surface`, `transition_apron`,
+  `vertical_skirt`, `transition_geometry`, `unknown`) plus mesh-section counts
+  to stop apron/skirt hits being misread as the terrain surface.
+- Fresh screenshot after schema 8 showed visible direct Lod0-to-Lod2 adjacency.
+  That is outside the original Lod0/Lod1 V1 weld scope. Current code now tightens
+  LOD coherence so face-neighbour jumps are clamped to one LOD step, and the
+  boundary snap/apron-only path is generalized to any X/Z Surface Nets face with
+  a known lower-detail neighbour, not only Lod0-to-Lod1.
+- Visual LOD bench run `bench-runs/2026-05-18T17-04-48Z` measured the generalized
+  snap plus one-step LOD coherence. It generated screenshots, but every checkpoint
+  still hit render-ready timeout. `bench_guard` failed three rows and warned one:
+  ridge `Mesh Dirty:p99` 12.153 ms fail, jump `Mesh Dirty:p99` 8.792 ms warn,
+  forest `Mesh Dirty:p99` 14.583 ms fail, and forest frame p99 62.656 ms fail.
+  This is not a performance sign-off; manual schema 8 probe recapture is still
+  needed for the visible seam.
 - Visual LOD bench run `bench-runs/2026-05-17T17-32-24Z` completed and produced
   screenshots, but every checkpoint hit render-ready timeout. `bench_guard`
   passed live-LOD mesh-dirty p99 rows (0.149-0.204 ms) and failed

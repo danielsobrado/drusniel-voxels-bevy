@@ -10,15 +10,15 @@ use bevy_mesh::{Indices, VertexAttributeValues};
 use serde::Serialize;
 
 use crate::camera::controller::PlayerCamera;
-use crate::constants::CHUNK_SIZE_I32;
+use crate::constants::{CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
 use crate::player::{Player, classify_player_world_validity};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{
-    ChunkMesh, LodTransitionSnapStats, MeshMode, MeshSettings, TerrainMeshDebug, WaterMesh,
-    empty_chunk_has_surface_nets_boundary_surface,
+    ChunkMesh, LodTransitionSnapStats, MeshMode, MeshSettings, TerrainMeshDebug,
+    TerrainMeshSectionStats, WaterMesh, empty_chunk_has_surface_nets_boundary_surface,
 };
 use crate::voxel::plugin::{
     LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
@@ -31,7 +31,7 @@ use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldB
 
 pub struct TerrainHoleProbePlugin;
 
-const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 7;
+const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 8;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
@@ -195,6 +195,7 @@ struct RenderMeshRayGridProbe {
     signed_surface_error: Option<f32>,
     abs_surface_error: Option<f32>,
     surface_error: Option<f32>,
+    render_hit_mesh_section: Option<MeshTriangleSectionProbe>,
     nearest_chunk_faces: Vec<BoundaryDistanceProbe>,
     hit_chunk: Option<IVec3Dump>,
     hit_entity: Option<String>,
@@ -238,6 +239,18 @@ struct CameraRayHit {
     front_face: bool,
     chunk_position: Option<IVec3Dump>,
     entity: String,
+    mesh_section: MeshTriangleSectionProbe,
+    triangle_start_index: u32,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MeshTriangleSectionProbe {
+    MainSurface,
+    TransitionApron,
+    VerticalSkirt,
+    TransitionGeometry,
+    Unknown,
 }
 
 #[derive(Serialize)]
@@ -267,6 +280,7 @@ struct FanGap {
     direction: Vec3Dump,
     voxel_surface_distance: f32,
     first_front_render_hit_distance: Option<f32>,
+    first_front_render_mesh_section: Option<MeshTriangleSectionProbe>,
     gap_length: f32,
     surface_point: Vec3Dump,
     surface_chunk: IVec3Dump,
@@ -293,6 +307,7 @@ struct FanGapChunkState {
     lod_eval: Option<LodEvalProbe>,
     neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
     lod_transition_snap_at_mesh: Option<LodTransitionSnapStatsProbe>,
+    mesh_sections_at_mesh: Option<TerrainMeshSectionStatsProbe>,
     empty_surface_cap_at_mesh: Option<bool>,
     empty_cap: EmptyCapProbe,
 }
@@ -385,6 +400,15 @@ struct ChunkMeshProbe {
     empty_surface_cap_at_mesh: Option<bool>,
     generated_frame: Option<u32>,
     lod_transition_snap: Option<LodTransitionSnapStatsProbe>,
+    mesh_sections: Option<TerrainMeshSectionStatsProbe>,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct TerrainMeshSectionStatsProbe {
+    main_surface_vertex_count: u32,
+    main_surface_index_count: u32,
+    transition_apron_index_count: u32,
+    vertical_skirt_index_count: u32,
 }
 
 #[derive(Serialize)]
@@ -1003,15 +1027,16 @@ fn sample_render_mesh_ray_grid(
                 world_z.floor() as i32,
                 bounds,
             );
-            let (highest_render_hit_y, hit_chunk, hit_entity) = highest_render_mesh_hit_at(
-                world,
-                terrain_entities,
-                meshes,
-                center_chunk,
-                world_x,
-                world_z,
-                origin_y,
-            );
+            let (highest_render_hit_y, hit_chunk, hit_entity, render_hit_mesh_section) =
+                highest_render_mesh_hit_at(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    center_chunk,
+                    world_x,
+                    world_z,
+                    origin_y,
+                );
             let surface_error = highest_render_hit_y
                 .zip(expected_surface_y)
                 .map(|(hit_y, expected)| (hit_y - expected).abs());
@@ -1049,6 +1074,7 @@ fn sample_render_mesh_ray_grid(
                 signed_surface_error,
                 abs_surface_error: surface_error,
                 surface_error,
+                render_hit_mesh_section,
                 nearest_chunk_faces,
                 hit_chunk,
                 hit_entity,
@@ -1139,6 +1165,7 @@ fn append_camera_height_fan_samples(
                 )
             });
             let highest_render_hit_y = render_hit_point.map(|point| point.y);
+            let render_hit_mesh_section = render_hit.map(|hit| hit.mesh_section);
             let signed_surface_error = highest_render_hit_y
                 .zip(expected_surface_y)
                 .map(|(hit_y, expected)| hit_y - expected);
@@ -1174,6 +1201,7 @@ fn append_camera_height_fan_samples(
                 signed_surface_error,
                 abs_surface_error,
                 surface_error: abs_surface_error,
+                render_hit_mesh_section,
                 nearest_chunk_faces,
                 hit_chunk: render_hit_chunk,
                 hit_entity,
@@ -1235,6 +1263,7 @@ fn log_camera_height_grid_summary(samples: &[RenderMeshRayGridProbe]) {
     let mut camera_sample_count = 0;
     let mut signed_sample_count = 0;
     let mut groups: BTreeMap<(String, String, String), Vec<f32>> = BTreeMap::new();
+    let mut section_groups: BTreeMap<String, Vec<f32>> = BTreeMap::new();
     let mut mesh_status_counts: BTreeMap<String, u32> = BTreeMap::new();
     let mut pending_or_stale_count = 0u32;
     let mut worst_negative_sample: Option<&RenderMeshRayGridProbe> = None;
@@ -1265,6 +1294,10 @@ fn log_camera_height_grid_summary(samples: &[RenderMeshRayGridProbe]) {
 
         groups
             .entry((lod, mesh_status.clone(), region))
+            .or_default()
+            .push(signed_error);
+        section_groups
+            .entry(mesh_section_label(sample.render_hit_mesh_section).to_string())
             .or_default()
             .push(signed_error);
 
@@ -1319,6 +1352,18 @@ fn log_camera_height_grid_summary(samples: &[RenderMeshRayGridProbe]) {
             );
         }
     }
+    for (section, values) in &section_groups {
+        if let Some((min, median, max)) = signed_error_min_median_max(values) {
+            info!(
+                "Camera height fan: mesh_section={} count={} signed_error min/median/max={:.2}/{:.2}/{:.2}",
+                section,
+                values.len(),
+                min,
+                median,
+                max,
+            );
+        }
+    }
 
     let lod0_interior_median =
         median_for_camera_height_group(&groups, "Lod0", "Current", "interior");
@@ -1346,15 +1391,26 @@ fn log_camera_height_grid_summary(samples: &[RenderMeshRayGridProbe]) {
             .unwrap_or_else(|| "none".to_string());
         let nearest_faces = format_nearest_faces(&sample.nearest_chunk_faces);
         info!(
-            "Camera height fan: worst negative sample error={:.2} chunk={} local={} current_lod={} rendered_lod={} mesh_status={} nearest_faces={}",
+            "Camera height fan: worst negative sample error={:.2} chunk={} local={} mesh_section={} current_lod={} rendered_lod={} mesh_status={} nearest_faces={}",
             sample.signed_surface_error.unwrap_or_default(),
             chunk,
             local,
+            mesh_section_label(sample.render_hit_mesh_section),
             current_lod_label_for_height_sample(sample),
             rendered_lod_label_for_height_sample(sample),
             mesh_status_label_for_height_sample(sample),
             nearest_faces,
         );
+    }
+}
+
+fn mesh_section_label(section: Option<MeshTriangleSectionProbe>) -> &'static str {
+    match section {
+        Some(MeshTriangleSectionProbe::MainSurface) => "main_surface",
+        Some(MeshTriangleSectionProbe::TransitionApron) => "transition_apron",
+        Some(MeshTriangleSectionProbe::VerticalSkirt) => "vertical_skirt",
+        Some(MeshTriangleSectionProbe::TransitionGeometry) => "transition_geometry",
+        Some(MeshTriangleSectionProbe::Unknown) | None => "unknown",
     }
 }
 
@@ -1486,8 +1542,13 @@ fn highest_render_mesh_hit_at(
     world_x: f32,
     world_z: f32,
     origin_y: f32,
-) -> (Option<f32>, Option<IVec3Dump>, Option<String>) {
-    let mut best: Option<(f32, IVec3Dump, String)> = None;
+) -> (
+    Option<f32>,
+    Option<IVec3Dump>,
+    Option<String>,
+    Option<MeshTriangleSectionProbe>,
+) {
+    let mut best: Option<(f32, IVec3Dump, String, MeshTriangleSectionProbe)> = None;
 
     for dz in -1..=1 {
         for dy in -1..=1 {
@@ -1499,8 +1560,21 @@ fn highest_render_mesh_hit_at(
                 else {
                     continue;
                 };
-                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _)) =
-                    terrain_entities.get(entity)
+                let Ok((
+                    entity,
+                    mesh3d,
+                    transform,
+                    chunk_mesh,
+                    terrain_debug,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                )) = terrain_entities.get(entity)
                 else {
                     continue;
                 };
@@ -1513,26 +1587,45 @@ fn highest_render_mesh_hit_at(
                 let transform = transform
                     .map(|transform| transform.translation)
                     .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
-                let Some(hit_y) =
-                    cpu_mesh_vertical_ray_hit(mesh, transform, world_x, world_z, origin_y)
-                else {
+                let Some(hit) = cpu_mesh_vertical_ray_hit_with_debug(
+                    mesh,
+                    transform,
+                    world_x,
+                    world_z,
+                    origin_y,
+                    terrain_debug,
+                ) else {
                     continue;
                 };
-                if best.as_ref().map_or(true, |(best_y, _, _)| hit_y > *best_y) {
+                if best
+                    .as_ref()
+                    .map_or(true, |(best_y, _, _, _)| hit.y > *best_y)
+                {
                     let hit_chunk = chunk_mesh
                         .map(|chunk| chunk.chunk_position)
                         .unwrap_or(chunk_pos)
                         .into();
-                    best = Some((hit_y, hit_chunk, format!("{entity:?}")));
+                    best = Some((hit.y, hit_chunk, format!("{entity:?}"), hit.mesh_section));
                 }
             }
         }
     }
 
     match best {
-        Some((hit_y, hit_chunk, entity)) => (Some(hit_y), Some(hit_chunk), Some(entity)),
-        None => (None, None, None),
+        Some((hit_y, hit_chunk, entity, mesh_section)) => (
+            Some(hit_y),
+            Some(hit_chunk),
+            Some(entity),
+            Some(mesh_section),
+        ),
+        None => (None, None, None, None),
     }
+}
+
+#[derive(Clone, Copy)]
+struct VerticalMeshHit {
+    y: f32,
+    mesh_section: MeshTriangleSectionProbe,
 }
 
 fn cpu_mesh_vertical_ray_hit(
@@ -1542,14 +1635,41 @@ fn cpu_mesh_vertical_ray_hit(
     world_z: f32,
     origin_y: f32,
 ) -> Option<f32> {
+    cpu_mesh_vertical_ray_hit_with_debug(mesh, translation, world_x, world_z, origin_y, None)
+        .map(|hit| hit.y)
+}
+
+fn cpu_mesh_vertical_ray_hit_with_debug(
+    mesh: &Mesh,
+    translation: Vec3,
+    world_x: f32,
+    world_z: f32,
+    origin_y: f32,
+    terrain_debug: Option<&TerrainMeshDebug>,
+) -> Option<VerticalMeshHit> {
     let mut best_hit = None;
-    for_each_mesh_triangle(mesh, translation, |p0, p1, p2| {
-        if let Some(hit_y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2) {
-            if best_hit.map_or(true, |best| hit_y > best) {
-                best_hit = Some(hit_y);
+    for_each_mesh_triangle_with_indices(
+        mesh,
+        translation,
+        |triangle_start_index, indices, p0, p1, p2| {
+            if let Some(hit_y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, p0, p1, p2)
+            {
+                if best_hit.map_or(true, |best: VerticalMeshHit| hit_y > best.y) {
+                    best_hit = Some(VerticalMeshHit {
+                        y: hit_y,
+                        mesh_section: classify_mesh_triangle_section(
+                            terrain_debug,
+                            triangle_start_index,
+                            indices,
+                            p0,
+                            p1,
+                            p2,
+                        ),
+                    });
+                }
             }
-        }
-    })?;
+        },
+    )?;
     best_hit
 }
 
@@ -1581,10 +1701,10 @@ fn mesh_indices(mesh: &Mesh) -> Option<MeshIndexSlice<'_>> {
     }
 }
 
-fn for_each_mesh_triangle(
+fn for_each_mesh_triangle_with_indices(
     mesh: &Mesh,
     translation: Vec3,
-    mut visit: impl FnMut(Vec3, Vec3, Vec3),
+    mut visit: impl FnMut(usize, [usize; 3], Vec3, Vec3, Vec3),
 ) -> Option<()> {
     let Some(VertexAttributeValues::Float32x3(positions)) =
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -1598,10 +1718,60 @@ fn for_each_mesh_triangle(
         let p0 = Vec3::from_array(positions[indices.get(tri)]) + translation;
         let p1 = Vec3::from_array(positions[indices.get(tri + 1)]) + translation;
         let p2 = Vec3::from_array(positions[indices.get(tri + 2)]) + translation;
-        visit(p0, p1, p2);
+        visit(
+            tri,
+            [indices.get(tri), indices.get(tri + 1), indices.get(tri + 2)],
+            p0,
+            p1,
+            p2,
+        );
         tri += 3;
     }
     Some(())
+}
+
+fn classify_mesh_triangle_section(
+    terrain_debug: Option<&TerrainMeshDebug>,
+    triangle_start_index: usize,
+    vertex_indices: [usize; 3],
+    p0: Vec3,
+    p1: Vec3,
+    p2: Vec3,
+) -> MeshTriangleSectionProbe {
+    let Some(debug) = terrain_debug else {
+        return MeshTriangleSectionProbe::Unknown;
+    };
+    let stats = debug.mesh_section_stats;
+    if triangle_start_index < stats.main_surface_index_count as usize
+        || vertex_indices
+            .iter()
+            .all(|index| *index < stats.main_surface_vertex_count as usize)
+    {
+        return MeshTriangleSectionProbe::MainSurface;
+    }
+
+    let transition_index_count =
+        stats.transition_apron_index_count + stats.vertical_skirt_index_count;
+    if transition_index_count == 0 {
+        return MeshTriangleSectionProbe::Unknown;
+    }
+    if stats.vertical_skirt_index_count == 0 {
+        return MeshTriangleSectionProbe::TransitionApron;
+    }
+    if stats.transition_apron_index_count == 0 {
+        return MeshTriangleSectionProbe::VerticalSkirt;
+    }
+
+    let min_y = p0.y.min(p1.y).min(p2.y);
+    let max_y = p0.y.max(p1.y).max(p2.y);
+    let y_span = max_y - min_y;
+    if y_span >= VOXEL_SIZE * 1.25 {
+        MeshTriangleSectionProbe::VerticalSkirt
+    } else if stats.transition_apron_index_count > 0 {
+        MeshTriangleSectionProbe::TransitionApron
+    } else {
+        MeshTriangleSectionProbe::TransitionGeometry
+    }
 }
 
 fn vertical_ray_triangle_hit_y(
@@ -1639,7 +1809,7 @@ fn sample_camera_ray(
     let mut render_hits: Vec<CameraRayHit> = Vec::new();
 
     if dir != Vec3::ZERO {
-        for (entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _) in
+        for (entity, mesh3d, transform, chunk_mesh, terrain_debug, _, _, _, _, _, _, _, _) in
             terrain_entities.iter()
         {
             let Some(chunk_mesh) = chunk_mesh else {
@@ -1665,6 +1835,7 @@ fn sample_camera_ray(
                 max_distance,
                 entity,
                 chunk_mesh.chunk_position,
+                terrain_debug,
                 &mut render_hits,
             );
         }
@@ -1745,21 +1916,35 @@ fn collect_camera_ray_mesh_hits(
     max_distance: f32,
     entity: Entity,
     chunk_position: IVec3,
+    terrain_debug: Option<&TerrainMeshDebug>,
     hits: &mut Vec<CameraRayHit>,
 ) {
-    let _ = for_each_mesh_triangle(mesh, translation, |p0, p1, p2| {
-        if let Some((distance, front_face)) = ray_triangle_hit(origin, dir, p0, p1, p2) {
-            if distance <= max_distance {
-                hits.push(CameraRayHit {
-                    distance,
-                    point: (origin + dir * distance).into(),
-                    front_face,
-                    chunk_position: Some(chunk_position.into()),
-                    entity: format!("{entity:?}"),
-                });
+    let _ = for_each_mesh_triangle_with_indices(
+        mesh,
+        translation,
+        |triangle_start_index, indices, p0, p1, p2| {
+            if let Some((distance, front_face)) = ray_triangle_hit(origin, dir, p0, p1, p2) {
+                if distance <= max_distance {
+                    hits.push(CameraRayHit {
+                        distance,
+                        point: (origin + dir * distance).into(),
+                        front_face,
+                        chunk_position: Some(chunk_position.into()),
+                        entity: format!("{entity:?}"),
+                        mesh_section: classify_mesh_triangle_section(
+                            terrain_debug,
+                            triangle_start_index,
+                            indices,
+                            p0,
+                            p1,
+                            p2,
+                        ),
+                        triangle_start_index: triangle_start_index as u32,
+                    });
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 fn ray_intersects_chunk_bounds(
@@ -1870,7 +2055,7 @@ fn sample_camera_ray_fan(
                 dir,
                 max_distance,
             );
-            if let Some(gap) = probe.see_through_gap {
+            if let Some(gap) = &probe.see_through_gap {
                 let surface_point = camera_pos + dir * gap.voxel_surface_distance;
                 let surface_chunk = VoxelWorld::world_to_chunk(IVec3::new(
                     surface_point.x.floor() as i32,
@@ -1885,6 +2070,10 @@ fn sample_camera_ray_fan(
                     direction: dir.into(),
                     voxel_surface_distance: gap.voxel_surface_distance,
                     first_front_render_hit_distance: gap.first_front_render_hit_distance,
+                    first_front_render_mesh_section: probe
+                        .first_front_render_hit
+                        .as_ref()
+                        .map(|hit| hit.mesh_section),
                     gap_length: gap.gap_length,
                     surface_point: surface_point.into(),
                     surface_chunk: surface_chunk.into(),
@@ -1988,6 +2177,8 @@ fn fan_gap_chunk_state(
             .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
         lod_transition_snap_at_mesh: terrain_debug
             .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
+        mesh_sections_at_mesh: terrain_debug
+            .map(|debug| mesh_section_stats_probe(debug.mesh_section_stats)),
         empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
         empty_cap: empty_cap_probe(world, chunk_pos),
     }
@@ -2192,6 +2383,8 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
             generated_frame: terrain_debug.map(|debug| debug.generated_frame),
             lod_transition_snap: terrain_debug
                 .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
+            mesh_sections: terrain_debug
+                .map(|debug| mesh_section_stats_probe(debug.mesh_section_stats)),
         }),
         visibility: visibility.map(|visibility| format!("{visibility:?}")),
         inherited_visibility: inherited_visibility.map(|visibility| visibility.get()),
@@ -2396,6 +2589,15 @@ fn lod_transition_snap_stats_probe(stats: LodTransitionSnapStats) -> LodTransiti
         snapped_faces: face_mask_names(stats.snapped_face_mask),
         fallback_faces: face_mask_names(stats.fallback_face_mask),
         snapped_vertex_count: stats.snapped_vertex_count,
+    }
+}
+
+fn mesh_section_stats_probe(stats: TerrainMeshSectionStats) -> TerrainMeshSectionStatsProbe {
+    TerrainMeshSectionStatsProbe {
+        main_surface_vertex_count: stats.main_surface_vertex_count,
+        main_surface_index_count: stats.main_surface_index_count,
+        transition_apron_index_count: stats.transition_apron_index_count,
+        vertical_skirt_index_count: stats.vertical_skirt_index_count,
     }
 }
 

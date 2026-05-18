@@ -2339,6 +2339,7 @@ fn mesh_dirty_chunks_system(
                 empty_surface_cap_at_mesh: empty_surface_neighbor,
                 generated_frame: frame.0,
                 lod_transition_snap_stats: mesh_result.lod_transition_snap_stats,
+                mesh_section_stats: mesh_result.mesh_section_stats,
             };
 
             // Track meshing statistics
@@ -4248,6 +4249,12 @@ fn update_chunk_lod_system(
                 let Some(&neighbor_lod) = desired.get(&(*chunk_pos + offset)) else {
                     continue;
                 };
+                if let Some(upgraded_lod) =
+                    lod_upgrade_for_face_neighbor_coherence(lod, neighbor_lod)
+                {
+                    updates.push((*chunk_pos, upgraded_lod));
+                    break;
+                }
                 if !lod.is_lower_detail_than(neighbor_lod) {
                     is_island = false;
                 }
@@ -4387,6 +4394,23 @@ pub(crate) fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSe
         }
     }
     chunks
+}
+
+fn max_lod_for_face_neighbor(neighbor_lod: LodLevel) -> LodLevel {
+    match neighbor_lod {
+        LodLevel::Lod0 => LodLevel::Lod1,
+        LodLevel::Lod1 => LodLevel::Lod2,
+        LodLevel::Lod2 => LodLevel::Lod3,
+        LodLevel::Lod3 | LodLevel::Culled => LodLevel::Culled,
+    }
+}
+
+fn lod_upgrade_for_face_neighbor_coherence(
+    lod: LodLevel,
+    neighbor_lod: LodLevel,
+) -> Option<LodLevel> {
+    let max_lod = max_lod_for_face_neighbor(neighbor_lod);
+    lod.is_lower_detail_than(max_lod).then_some(max_lod)
 }
 
 fn chunk_layer_intersects_waterline(chunk_pos: IVec3) -> bool {
@@ -4641,6 +4665,30 @@ mod tests {
                 true
             ),
             LodLevel::Culled
+        );
+    }
+
+    #[test]
+    fn lod_coherence_rejects_multi_step_face_jumps() {
+        assert_eq!(
+            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod2, LodLevel::Lod0),
+            Some(LodLevel::Lod1)
+        );
+        assert_eq!(
+            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod3, LodLevel::Lod1),
+            Some(LodLevel::Lod2)
+        );
+        assert_eq!(
+            lod_upgrade_for_face_neighbor_coherence(LodLevel::Culled, LodLevel::Lod2),
+            Some(LodLevel::Lod3)
+        );
+        assert_eq!(
+            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod1, LodLevel::Lod0),
+            None
+        );
+        assert_eq!(
+            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod0, LodLevel::Lod2),
+            None
         );
     }
 

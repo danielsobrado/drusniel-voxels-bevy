@@ -240,6 +240,12 @@ impl Default for SkirtConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkirtGenerationStats {
+    pub transition_apron_index_count: u32,
+    pub vertical_skirt_index_count: u32,
+}
+
 /// Neighbor LOD information for adaptive skirts.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NeighborLods {
@@ -358,9 +364,42 @@ pub fn generate_skirts(
     config: &SkirtConfig,
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
-) {
+) -> SkirtGenerationStats {
+    generate_skirts_with_apron_only_faces(
+        positions,
+        normals,
+        uvs,
+        barycentric_uvs,
+        material_weights,
+        indices,
+        boundary_edges,
+        config,
+        my_lod,
+        neighbor_lods,
+        0,
+    )
+}
+
+/// Generate skirt geometry, treating faces in `apron_only_face_mask` as
+/// transition-apron-only seals. This is used after a snap weld: the snapped
+/// fine boundary still needs a short draped surface over the coarse-side gap,
+/// but must not emit the old vertical curtain.
+pub fn generate_skirts_with_apron_only_faces(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    barycentric_uvs: &mut Vec<[f32; 2]>,
+    material_weights: &mut Vec<[f32; 4]>,
+    indices: &mut Vec<u32>,
+    boundary_edges: &[BoundaryEdge],
+    config: &SkirtConfig,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    apron_only_face_mask: u8,
+) -> SkirtGenerationStats {
+    let mut stats = SkirtGenerationStats::default();
     if config.depth <= 0.0 {
-        return;
+        return stats;
     }
 
     for edge in boundary_edges {
@@ -371,7 +410,8 @@ pub fn generate_skirts(
             !config.adaptive || neighbor_lods.needs_transition_apron(edge.face, my_lod);
         let needs_vertical_candidate =
             !config.adaptive || neighbor_lods.needs_vertical_skirt(edge.face, my_lod);
-        let needs_vertical = needs_vertical_candidate;
+        let apron_only = apron_only_face_mask & chunk_face_mask(edge.face) != 0;
+        let needs_vertical = needs_vertical_candidate && !apron_only;
         let emit_transition_apron = needs_transition_apron;
         if !emit_transition_apron && !needs_vertical {
             continue;
@@ -463,6 +503,7 @@ pub fn generate_skirts(
 
             push_quad_barycentrics(barycentric_uvs);
             push_boundary_quad_indices(indices, edge.face, base_idx);
+            stats.transition_apron_index_count += 6;
             (apron0, apron1)
         } else {
             (top0, top1)
@@ -502,7 +543,15 @@ pub fn generate_skirts(
 
         push_quad_barycentrics(barycentric_uvs);
         push_boundary_quad_indices(indices, edge.face, vertical_idx);
+        stats.vertical_skirt_index_count += 6;
     }
+
+    stats
+}
+
+#[inline]
+fn chunk_face_mask(face: ChunkFace) -> u8 {
+    1 << face as u8
 }
 
 #[cfg(test)]
@@ -647,6 +696,45 @@ mod tests {
             (positions[6][0] - positions[4][0]).abs() < 0.001
                 && (positions[7][0] - positions[5][0]).abs() < 0.001,
             "transition skirt should drop from the apron instead of stepping farther into the neighbor"
+        );
+    }
+
+    #[test]
+    fn snapped_lod_transition_face_emits_apron_without_vertical_wall() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        generate_skirts_with_apron_only_faces(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+            chunk_face_mask(ChunkFace::PosX),
+        );
+
+        assert_eq!(positions.len(), 4);
+        assert_eq!(barycentric_uvs.len(), 4);
+        assert_eq!(indices.len(), 6);
+        assert!(
+            (positions[2][0] - 18.0).abs() < 1e-4,
+            "snap seal apron should still cover the Lod1 sample step"
         );
     }
 

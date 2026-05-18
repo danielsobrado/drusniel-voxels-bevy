@@ -34,8 +34,8 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, compute_boundary_flags, extract_boundary_edges,
-    generate_skirts,
+    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, compute_boundary_flags,
+    extract_boundary_edges, generate_skirts_with_apron_only_faces,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -72,6 +72,34 @@ pub struct TerrainMeshDebug {
     pub empty_surface_cap_at_mesh: bool,
     pub generated_frame: u32,
     pub lod_transition_snap_stats: LodTransitionSnapStats,
+    pub mesh_section_stats: TerrainMeshSectionStats,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerrainMeshSectionStats {
+    pub main_surface_vertex_count: u32,
+    pub main_surface_index_count: u32,
+    pub transition_apron_index_count: u32,
+    pub vertical_skirt_index_count: u32,
+}
+
+impl TerrainMeshSectionStats {
+    fn from_main_surface(mesh: &MeshData) -> Self {
+        Self {
+            main_surface_vertex_count: mesh.positions.len() as u32,
+            main_surface_index_count: mesh.indices.len() as u32,
+            ..Default::default()
+        }
+    }
+
+    fn add_skirt_stats(&mut self, stats: SkirtGenerationStats) {
+        self.transition_apron_index_count = self
+            .transition_apron_index_count
+            .saturating_add(stats.transition_apron_index_count);
+        self.vertical_skirt_index_count = self
+            .vertical_skirt_index_count
+            .saturating_add(stats.vertical_skirt_index_count);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -345,6 +373,7 @@ pub struct ChunkMeshResult {
     pub water: MeshData,
     pub water_stats: WaterMeshingStats,
     pub lod_transition_snap_stats: LodTransitionSnapStats,
+    pub mesh_section_stats: TerrainMeshSectionStats,
 }
 
 // =============================================================================
@@ -792,6 +821,7 @@ pub fn generate_chunk_mesh(
         water: water_mesh,
         water_stats,
         lod_transition_snap_stats: LodTransitionSnapStats::default(),
+        mesh_section_stats: TerrainMeshSectionStats::default(),
     }
 }
 
@@ -2776,7 +2806,7 @@ fn snap_column_for_face(chunk_origin: IVec3, local: Vec3, face: ChunkFace) -> Op
     }
 }
 
-fn snap_lod0_boundary_vertices_to_lod1_neighbor(
+fn snap_boundary_vertices_to_lower_detail_neighbor(
     solid_mesh: &mut MeshData,
     local_positions: &mut [Vec3],
     chunk: &Chunk,
@@ -2787,7 +2817,7 @@ fn snap_lod0_boundary_vertices_to_lod1_neighbor(
     neighbor_lods: &NeighborLods,
 ) -> LodTransitionSnapStats {
     let mut stats = LodTransitionSnapStats::default();
-    if my_lod != LodLevel::Lod0 || solid_mesh.positions.len() != local_positions.len() {
+    if my_lod.step_size() == 0 || solid_mesh.positions.len() != local_positions.len() {
         return stats;
     }
 
@@ -2798,7 +2828,10 @@ fn snap_lod0_boundary_vertices_to_lod1_neighbor(
         ChunkFace::NegZ,
         ChunkFace::PosZ,
     ] {
-        if neighbor_lod_for_face(neighbor_lods, face) != Some(LodLevel::Lod1) {
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
             continue;
         }
 
@@ -2813,7 +2846,7 @@ fn snap_lod0_boundary_vertices_to_lod1_neighbor(
                 continue;
             };
             let Some(world_y) =
-                coarse_lod_iso_height_for_column(world, column.x, column.y, LodLevel::Lod1)
+                coarse_lod_iso_height_for_column(world, column.x, column.y, neighbor_lod)
             else {
                 failed = true;
                 break;
@@ -3259,7 +3292,7 @@ pub fn generate_chunk_mesh_surface_nets(
         }
     }
 
-    let lod_transition_snap_stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -3270,8 +3303,10 @@ pub fn generate_chunk_mesh_surface_nets(
         &neighbor_lods,
     );
 
+    let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+
     if !solid_mesh.indices.is_empty() {
-        let mut boundary_edges = extract_boundary_edges(
+        let boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
             &solid_mesh.normals,
@@ -3279,14 +3314,11 @@ pub fn generate_chunk_mesh_surface_nets(
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
         );
-        if lod_transition_snap_stats.snapped_face_mask != 0 {
-            boundary_edges.retain(|edge| !lod_transition_snap_stats.face_snapped(edge.face));
-        }
 
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        generate_skirts(
+        let skirt_stats = generate_skirts_with_apron_only_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -3297,7 +3329,9 @@ pub fn generate_chunk_mesh_surface_nets(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
+            lod_transition_snap_stats.snapped_face_mask,
         );
+        mesh_section_stats.add_skirt_stats(skirt_stats);
     }
 
     // Generate water mesh using the extracted helper
@@ -3314,6 +3348,7 @@ pub fn generate_chunk_mesh_surface_nets(
         water: water_mesh,
         water_stats,
         lod_transition_snap_stats,
+        mesh_section_stats,
     }
 }
 
@@ -3453,6 +3488,19 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         }
     }
 
+    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+        &mut solid_mesh,
+        &mut local_positions,
+        chunk,
+        world,
+        chunk_origin,
+        chunk_center,
+        my_lod,
+        &neighbor_lods,
+    );
+
+    let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_edges = extract_boundary_edges(
@@ -3467,7 +3515,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        generate_skirts(
+        let skirt_stats = generate_skirts_with_apron_only_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -3478,7 +3526,9 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
+            lod_transition_snap_stats.snapped_face_mask,
         );
+        mesh_section_stats.add_skirt_stats(skirt_stats);
     }
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
@@ -3495,7 +3545,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
-        lod_transition_snap_stats: LodTransitionSnapStats::default(),
+        lod_transition_snap_stats,
+        mesh_section_stats,
     }
 }
 
@@ -3635,6 +3686,19 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         }
     }
 
+    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+        &mut solid_mesh,
+        &mut local_positions,
+        chunk,
+        world,
+        chunk_origin,
+        chunk_center,
+        my_lod,
+        &neighbor_lods,
+    );
+
+    let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_edges = extract_boundary_edges(
@@ -3649,7 +3713,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        generate_skirts(
+        let skirt_stats = generate_skirts_with_apron_only_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -3660,7 +3724,9 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
+            lod_transition_snap_stats.snapped_face_mask,
         );
+        mesh_section_stats.add_skirt_stats(skirt_stats);
     }
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
@@ -3677,7 +3743,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
-        lod_transition_snap_stats: LodTransitionSnapStats::default(),
+        lod_transition_snap_stats,
+        mesh_section_stats,
     }
 }
 
@@ -3817,6 +3884,19 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         }
     }
 
+    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+        &mut solid_mesh,
+        &mut local_positions,
+        chunk,
+        world,
+        chunk_origin,
+        chunk_center,
+        my_lod,
+        &neighbor_lods,
+    );
+
+    let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_edges = extract_boundary_edges(
@@ -3831,7 +3911,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        generate_skirts(
+        let skirt_stats = generate_skirts_with_apron_only_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -3842,7 +3922,9 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
+            lod_transition_snap_stats.snapped_face_mask,
         );
+        mesh_section_stats.add_skirt_stats(skirt_stats);
     }
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
@@ -3859,7 +3941,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
-        lod_transition_snap_stats: LodTransitionSnapStats::default(),
+        lod_transition_snap_stats,
+        mesh_section_stats,
     }
 }
 
@@ -4443,7 +4526,7 @@ mod tests {
         ];
         let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
 
-        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             &mut solid_mesh,
             &mut local_positions,
             world.get_chunk(chunk_pos).unwrap(),
@@ -4487,7 +4570,7 @@ mod tests {
         ];
         let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
 
-        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             &mut solid_mesh,
             &mut local_positions,
             world.get_chunk(chunk_pos).unwrap(),
@@ -4530,7 +4613,7 @@ mod tests {
             .positions
             .push(scale_vertex_from_center(original_local, chunk_center));
 
-        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             &mut solid_mesh,
             &mut local_positions,
             world.get_chunk(IVec3::ZERO).unwrap(),
@@ -5066,6 +5149,7 @@ pub fn generate_chunk_mesh_with_mode(
                         water: MeshData::new(),
                         water_stats: WaterMeshingStats::default(),
                         lod_transition_snap_stats: LodTransitionSnapStats::default(),
+                        mesh_section_stats: TerrainMeshSectionStats::default(),
                     }
                 }
             }
