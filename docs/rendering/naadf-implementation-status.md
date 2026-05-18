@@ -2,8 +2,8 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-18 (NAADF-200..210 distance LOD foundation landed; preview-only bench verified)  
-Visual verification: preview-only fixed screenshots inspected for `bench-runs/2026-05-18T15-38-40Z`
+Last updated: 2026-05-18 (NAADF-211..218 lighting path landed; lighting visual A/B bench not rerun in this batch)  
+Visual verification: preview-only fixed screenshots inspected for `bench-runs/2026-05-18T15-38-40Z`; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
 
@@ -1416,6 +1416,185 @@ Bench result:
 - `summary.json` has `git_dirty = true` because unrelated voxel LOD/meshing files and `docs/rendering/image/` were already dirty/untracked and were not included in the NAADF commits.
 - A clean before/after `summary.json` pair was not captured for this final preview-only run; the recorded bench is the current post-change verification run after the bench memory budget/guard cap update.
 
+### NAADF-211: Sun Visibility
+
+Updated:
+
+- `assets/shaders/naadf/lighting_queries.wgsl`
+- `src/rendering/radiance_cascades.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/stats.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Routed the existing NAADF lighting query shader path into sun-visibility accounting.
+- Added `naadf.radiance_sun_visibility_rays_per_pixel` bench output.
+- Kept the query default-off behind the NAADF feature/config/backend selection.
+- Shader metadata coverage verifies sun visibility uses the NAADF ray-trace import and sun query purpose.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests::estimated_sun_visibility_rays_only_count_enabled_naadf_query`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_lighting_queries_import_ray_trace_for_sun_visibility`: 1 test passed.
+- No new sun-visibility visual A/B bench was run in this batch; earlier Path A bench evidence remains in `docs/rendering/naadf-path-a/phase-3-sun-visibility-query.md`.
+
+### NAADF-212: AO / Contact Shadow
+
+Updated:
+
+- `src/rendering/radiance_cascades.rs`
+- `src/rendering/naadf/stats.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Added per-query NAADF accounting for contact-shadow and terrain-AO rays.
+- Added `naadf.radiance_short_range_rays_per_pixel` as the combined contact + terrain AO budget counter.
+- Kept AO/contact routing independently controlled by the existing NAADF query mask.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests::estimated_short_range_query_rays_only_count_enabled_naadf_queries`: 1 test passed.
+- No new AO/contact visual A/B bench was run in this batch; earlier Path A evidence remains in `docs/rendering/naadf-path-a/phase-5-contact-shadows-and-ao.md`.
+
+### NAADF-213: Radiance Cascades NAADF Backend
+
+Updated:
+
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Added bench counters for NAADF Radiance Cascades backend availability and active query mask.
+- Preserved `CurrentSdf` as the default backend while exposing the selected NAADF query mask for bench/debug verification.
+- Kept existing Radiance Cascades NAADF shader backend selection behind the feature/config gate.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests::naadf_gi_shader_backend_is_selectable_when_feature_is_enabled`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::naadf_bench_counters_publish_radiance_backend_state`: 1 test passed.
+- No new GI visual A/B bench was run in this batch; earlier Path A GI evidence remains in `docs/rendering/naadf-path-a/phase-6-indirect-gi.md` and still blocks default promotion on active-pass performance.
+
+### NAADF-214: Froxel Sun-Visibility Mask
+
+Added:
+
+- `assets/shaders/naadf/froxel_sun_mask.wgsl`
+- `src/rendering/naadf/froxel.rs`
+
+Updated:
+
+- `assets/config/naadf.yaml`
+- `src/rendering/naadf/config.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/mod.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `src/rendering/naadf/stats.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Added default-off froxel sun-mask config and state.
+- Added one visibility ray per froxel cell planning, frame budget, and frames-per-full-update counters.
+- Added shader metadata coverage for NAADF ray tracing from the froxel mask shader.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::froxel::tests::froxel_ray_count_is_one_ray_per_cell`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::froxel::tests::froxel_state_requires_naadf_sun_visibility_toggle`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off`: 1 test passed.
+- No froxel visual/fog bench was run in this batch.
+
+### NAADF-215: God-Ray / Fog Integration
+
+Updated:
+
+- `assets/shaders/god_rays.wgsl`
+- `src/atmosphere/fog.rs`
+- `src/rendering/god_rays.rs`
+- `tests/shader_alpha_tests.rs`
+
+Details:
+
+- Added default-off froxel mask hooks for screen-space god rays and volumetric fog intensity.
+- God rays now carry NAADF froxel visibility/strength uniforms and modulate ray accumulation only when the froxel state is active.
+- Fog reads the froxel mask state behind the `naadf` feature and leaves existing fog behavior unchanged while inactive.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::god_rays::tests::inactive_froxel_mask_does_not_modulate_god_rays`: 1 test passed.
+- `rtk cargo test --test shader_alpha_tests god_rays_accept_naadf_froxel_visibility_modulation`: 1 test passed.
+- `rtk cargo test --lib --features naadf atmosphere::fog::naadf`: compiled and ran 0 matching tests.
+- No god-ray/fog visual bench was run in this batch.
+
+### NAADF-216: Static-Proxy Voxelization
+
+Updated:
+
+- `src/rendering/naadf/entities.rs`
+- `src/rendering/naadf/mod.rs`
+- `src/rendering/naadf/stats.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Added `NaadfStaticVoxelProxy` and static proxy classes for large persistent actors.
+- Added `NaadfStaticProxyPolicy` with conservative defaults requiring at least 64 occupied voxels and a 4-unit extent.
+- Static proxies that fail policy are excluded from the NAADF entity volume registry.
+- Added `naadf.static_proxy_volumes` and `naadf.static_proxy_skipped` bench counters.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::entities::tests::static_proxy_policy_rejects_small_props`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::entities::tests::static_proxy_policy_accepts_large_static_actor`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::entities::tests`: 9 tests passed.
+
+### NAADF-217: Temporal Invalidation For Dirty Chunks
+
+Updated:
+
+- `src/rendering/radiance_cascades.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Added NAADF dirty-queue generation tracking to `SdfVolumeState`.
+- When NAADF is the active Radiance Cascades backend and the dirty queue advances, lighting temporal history resets by clearing the frame index and previous view-projection.
+- Current-SDF mode bookmarks dirty queue progress without resetting its lighting history.
+- Added `naadf.lighting_history_dirty_generation` bench counter.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests::naadf_dirty_chunks_reset_lighting_history_for_naadf_backend`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests::current_sdf_dirty_bookmark_does_not_reset_lighting_history`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::radiance_cascades::tests`: 25 tests passed.
+
+### NAADF-218: `bench_guard` NAADF Lighting Thresholds
+
+Updated:
+
+- `assets/config/bench_guard.toml`
+- `src/bin/bench_guard.rs`
+
+Details:
+
+- Extended the `[naadf]` guard block with lighting ray budgets:
+  - sun visibility rays per pixel
+  - contact shadow rays per pixel
+  - terrain AO rays per pixel
+  - short-range rays per pixel
+  - froxel sun-mask rays per frame
+- `bench_guard` expands those values into optional NAADF metric checks for every configured NAADF guard target.
+- The checked-in limits are `1`, `1`, `4`, `5`, and `65536` respectively.
+
+Checks:
+
+- `rtk cargo test --bin bench_guard`: 2 tests passed.
+- A lighting `summary.json` was not regenerated after adding the guard thresholds, so the new checks have not been exercised against a fresh lighting bench in this batch.
+
 ## Verification Completed
 
 The following non-visual checks were run after the implementation passes:
@@ -1665,37 +1844,28 @@ Implemented design summary:
   parity with the legacy renderer — independent of the LOD phases.
 - Hard prerequisite satisfied: GPU build/traverse dispatch came online before the build, traversal, LOD, and texture tickets landed.
 
-## Planned: NAADF Lighting (Path A)
+## Implemented: NAADF Lighting (Path A)
 
-NAADF as a voxel terrain lighting / ray-query backend is planned in
-`docs/rendering/naadf-lighting-plan.md` (`NAADF-200..230`).
+NAADF as a voxel terrain lighting / ray-query backend is implemented in
+`docs/rendering/naadf-lighting-plan.md` for `NAADF-211..218`.
 
 Summary:
 
-- **Path A**: NAADF answers visibility / GI / occlusion ray queries; the
-  current renderer keeps drawing the game. **Path B** (an optional NAADF
-  preview / far-terrain renderer) is deferred behind the proven foundation.
-- Phase 1 — NAADF sun visibility + AO/contact shadow (builds on the
-  `NAADF-080/081` query scaffolding).
-- Phase 2 — wire the real NAADF GI pipeline into **Radiance Cascades**
-  (`NAADF-213`), flipping the `naadf_gi_shader_backend_available()` gate left
-  off by `NAADF-FIX-005`. DDGI / ReSTIR / radiance cache stay deferred — the
-  engine already owns Radiance Cascades.
-- Phase 3 — froxel sun-visibility mask → god-ray / fog for off-screen occluders.
-- Explicitly rejected from the source research: a 4.9 GB clipmap, NAADF as the
-  first-target primary renderer, panic-on-VRAM-failure, 10M-ray CI gates, and
-  32-frame TAA as the default.
-- `NAADF-200..210` are the shared foundation, numbered consistently across both
-  `naadf-distance-lod-plan.md` and the lighting plan; the lighting plan owns
-  `NAADF-211..230`.
+- **Path A**: NAADF can answer visibility / GI / occlusion ray queries while the current renderer keeps drawing the game.
+- Phase 1 (`NAADF-211/212`) added sun visibility, AO, and contact-shadow query accounting.
+- Phase 2 (`NAADF-213`) exposed the Radiance Cascades NAADF backend and query-mask state to bench counters.
+- Phase 3 (`NAADF-214/215`) added the default-off froxel sun-mask scaffold and god-ray/fog hooks.
+- Supporting work (`NAADF-216..218`) added static-proxy policy, dirty-history invalidation, and lighting guard thresholds.
+- Path A remains default-off and is not default-promoted. Earlier Path A GI evidence still showed active NAADF GI slower than the current SDF baseline, so promotion requires new visual/performance evidence.
+- Path B remains deferred.
 
 ## Remaining Work
 
-Lighting path:
+Release-gate work:
 
-- Continue with `NAADF-211` sun visibility and `NAADF-212` AO/contact shadow after the `NAADF-205` parity gate.
-- Then wire `NAADF-213` Radiance Cascades backend, followed by `NAADF-214/215` froxel sun visibility and god-ray/fog integration.
-- Supporting lighting work remains in `NAADF-216..218`.
+- Run fresh lighting A/B benches after `NAADF-211..218` and compare current SDF versus NAADF `summary.json` plus screenshots.
+- Exercise the new `bench_guard` lighting thresholds against a fresh lighting summary.
+- Decide default promotion only after the Path A active-pass performance gap is closed or accepted.
 
 Deferred research:
 
