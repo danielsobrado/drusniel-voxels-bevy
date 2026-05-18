@@ -303,6 +303,16 @@ pub fn record_naadf_bench_counters(
         "naadf.froxel_sun_mask_frames_per_full_update",
         stats.froxel_sun_mask_frames_per_full_update as f64,
     );
+    timing.record_count(
+        frame.0,
+        "naadf.static_proxy_volumes",
+        stats.static_proxy_volumes as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.static_proxy_skipped",
+        stats.static_proxy_skipped as f64,
+    );
     if let Some(radiance_config) = radiance_config.as_deref() {
         timing.record_count(
             frame.0,

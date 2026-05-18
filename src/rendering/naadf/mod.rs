@@ -33,7 +33,10 @@ pub use config::{NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConf
 pub use cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
 pub use cpu_trace::NaadfCpuRayBackend;
 pub use dirty::NaadfDirtyChunkQueue;
-pub use entities::{NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume};
+pub use entities::{
+    NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume, NaadfStaticProxyClass,
+    NaadfStaticProxyPolicy, NaadfStaticVoxelProxy,
+};
 pub use extractor::{NaadfChunkExtractor, NaadfExtractionError};
 pub use gpu_buffers::{NaadfGpuBufferPlan, NaadfGpuBuffers, NaadfGpuChunkTable};
 pub use layout::NaadfChunk;
@@ -218,6 +221,7 @@ impl Plugin for NaadfPlugin {
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
             .init_resource::<entities::NaadfEntityVolumeRegistry>()
+            .init_resource::<entities::NaadfStaticProxyPolicy>()
             .init_resource::<froxel::NaadfFroxelSunMaskState>()
             .init_resource::<gpu_buffers::NaadfGpuChunkTable>()
             .init_resource::<gpu_buffers::NaadfGpuUploadQueue>()

@@ -15,6 +15,24 @@ pub struct NaadfEntityVoxelVolume {
     pub revision: u64,
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NaadfStaticVoxelProxy {
+    pub class: NaadfStaticProxyClass,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NaadfStaticProxyClass {
+    Building,
+    RockFormation,
+    LargeTree,
+}
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct NaadfStaticProxyPolicy {
+    pub min_occupied_voxels: u32,
+    pub min_extent: f32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NaadfEntityVolumeError {
     ZeroDimension,
@@ -124,6 +142,30 @@ impl NaadfEntityVoxelVolume {
             max = max.max(world);
         }
         (min, max)
+    }
+}
+
+impl Default for NaadfStaticVoxelProxy {
+    fn default() -> Self {
+        Self {
+            class: NaadfStaticProxyClass::Building,
+        }
+    }
+}
+
+impl Default for NaadfStaticProxyPolicy {
+    fn default() -> Self {
+        Self {
+            min_occupied_voxels: 64,
+            min_extent: 4.0,
+        }
+    }
+}
+
+impl NaadfStaticProxyPolicy {
+    pub fn allows(&self, volume: &NaadfEntityVoxelVolume) -> bool {
+        volume.occupied_voxels() >= self.min_occupied_voxels
+            && (volume.voxel_size * volume.dimensions.as_vec3()).max_element() >= self.min_extent
     }
 }
 
@@ -310,7 +352,13 @@ impl NaadfEntityVolumeRecord {
 }
 
 pub fn sync_naadf_entity_volume_registry(
-    query: Query<(Entity, &GlobalTransform, &NaadfEntityVoxelVolume)>,
+    query: Query<(
+        Entity,
+        &GlobalTransform,
+        &NaadfEntityVoxelVolume,
+        Option<&NaadfStaticVoxelProxy>,
+    )>,
+    policy: Res<NaadfStaticProxyPolicy>,
     mut registry: ResMut<NaadfEntityVolumeRegistry>,
     mut stats: ResMut<NaadfStats>,
     mut timing: Option<ResMut<AreaTimingRecorder>>,
@@ -324,9 +372,24 @@ pub fn sync_naadf_entity_volume_registry(
         )
     });
 
-    registry.sync(query.iter());
+    let mut static_proxy_volumes = 0u32;
+    let mut static_proxy_skipped = 0u32;
+    registry.sync(query.iter().filter_map(
+        |(entity, transform, volume, static_proxy)| {
+            if static_proxy.is_some() {
+                if !policy.allows(volume) {
+                    static_proxy_skipped = static_proxy_skipped.saturating_add(1);
+                    return None;
+                }
+                static_proxy_volumes = static_proxy_volumes.saturating_add(1);
+            }
+            Some((entity, transform, volume))
+        },
+    ));
     stats.entity_volumes = registry.len() as u32;
     stats.entity_volume_voxels = registry.total_occupied_voxels();
+    stats.static_proxy_volumes = static_proxy_volumes;
+    stats.static_proxy_skipped = static_proxy_skipped;
 }
 
 pub fn entity_voxel_index(local: UVec3, dimensions: UVec3) -> usize {
@@ -470,6 +533,24 @@ mod tests {
         let record = registry.get(entity).unwrap();
         assert_eq!(record.world_from_local, current_transform);
         assert_eq!(record.previous_world_from_local, current_transform);
+    }
+
+    #[test]
+    fn static_proxy_policy_rejects_small_props() {
+        let volume = NaadfEntityVoxelVolume::new(UVec3::new(2, 2, 2), Vec3::ONE, vec![1; 8])
+            .unwrap();
+        let policy = NaadfStaticProxyPolicy::default();
+
+        assert!(!policy.allows(&volume));
+    }
+
+    #[test]
+    fn static_proxy_policy_accepts_large_static_actor() {
+        let volume =
+            NaadfEntityVoxelVolume::new(UVec3::new(4, 4, 4), Vec3::ONE, vec![1; 64]).unwrap();
+        let policy = NaadfStaticProxyPolicy::default();
+
+        assert!(policy.allows(&volume));
     }
 
     #[test]

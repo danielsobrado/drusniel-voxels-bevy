@@ -53,6 +53,8 @@ pub struct NaadfStats {
     pub froxel_sun_mask_rays_per_full_update: u64,
     pub froxel_sun_mask_max_rays_per_frame: u32,
     pub froxel_sun_mask_frames_per_full_update: u32,
+    pub static_proxy_volumes: u32,
+    pub static_proxy_skipped: u32,
     pub preview_pixels_last_frame: u64,
     pub preview_first_hit_dispatches_last_frame: u32,
     pub preview_gi_dispatches_last_frame: u32,
