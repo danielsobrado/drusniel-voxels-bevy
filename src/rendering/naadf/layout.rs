@@ -757,7 +757,7 @@ mod tests {
 
         assert!(systems.contains("naadf.radiance_backend_available"));
         assert!(systems.contains("naadf.radiance_query_mask"));
-        assert!(systems.contains("naadf_gi_shader_backend_available()"));
+        assert!(systems.contains("naadf_gi_shader_backend_available(Some(&config)"));
     }
 
     #[test]

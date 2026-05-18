@@ -269,6 +269,8 @@ impl Default for SdfVolumeState {
 pub fn sync_radiance_cascades_voxel_backend(
     ray_tracing: Res<RayTracingSettings>,
     naadf_config: Option<Res<NaadfConfig>>,
+    naadf_cache_state: Option<Res<NaadfCacheState>>,
+    naadf_stats: Option<Res<NaadfStats>>,
     mut config: ResMut<RadianceCascadesConfig>,
     mut state: ResMut<SdfVolumeState>,
 ) {
@@ -276,7 +278,18 @@ pub fn sync_radiance_cascades_voxel_backend(
         .as_deref()
         .map(naadf_query_mask_from_config)
         .unwrap_or_default();
-    apply_radiance_backend_selection(&ray_tracing, query_mask, &mut config, &mut state);
+    let shader_backend_available = naadf_gi_shader_backend_available(
+        naadf_config.as_deref(),
+        naadf_cache_state.as_deref(),
+        naadf_stats.as_deref(),
+    );
+    apply_radiance_backend_selection_with_shader_support(
+        &ray_tracing,
+        query_mask,
+        shader_backend_available,
+        &mut config,
+        &mut state,
+    );
 }
 
 #[cfg(feature = "naadf")]
@@ -328,7 +341,7 @@ pub fn apply_radiance_backend_selection(
     apply_radiance_backend_selection_with_shader_support(
         ray_tracing,
         naadf_query_mask,
-        naadf_gi_shader_backend_available(),
+        false,
         config,
         state,
     );
@@ -388,8 +401,29 @@ fn naadf_query_mask_from_config(config: &NaadfConfig) -> u32 {
     mask
 }
 
+#[cfg(feature = "naadf")]
+pub fn naadf_gi_shader_backend_available(
+    config: Option<&NaadfConfig>,
+    cache_state: Option<&NaadfCacheState>,
+    stats: Option<&NaadfStats>,
+) -> bool {
+    let (Some(config), Some(cache_state), Some(stats)) = (config, cache_state, stats) else {
+        return false;
+    };
+
+    config.enabled
+        && config.debug.allow_unverified_post_205
+        && cache_state.ready
+        && stats.gpu_slots_used > 0
+        && stats.gpu_uploads_pending == 0
+        && stats.gpu_build_queue_pending == 0
+        && stats.dirty_pending == 0
+        && stats.dirty_in_flight == 0
+}
+
+#[cfg(not(feature = "naadf"))]
 pub const fn naadf_gi_shader_backend_available() -> bool {
-    cfg!(feature = "naadf")
+    false
 }
 
 #[cfg(feature = "naadf")]
@@ -1590,7 +1624,7 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_mirrors_ray_tracing_and_resets_history() {
+    fn backend_selection_without_runtime_naadf_proof_falls_back_and_resets_history() {
         let mut config = RadianceCascadesConfig::default();
         let mut state = SdfVolumeState {
             frame_index: 44,
@@ -1611,13 +1645,8 @@ mod tests {
             &mut state,
         );
 
-        if naadf_gi_shader_backend_available() {
-            assert_eq!(config.voxel_backend, VoxelRayBackendMode::Naadf);
-            assert_eq!(config.voxel_backend_query_mask, NAADF_QUERY_GI_SECONDARY);
-        } else {
-            assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
-            assert_eq!(config.voxel_backend_query_mask, 0);
-        }
+        assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
+        assert_eq!(config.voxel_backend_query_mask, 0);
         assert_eq!(config.backend_switch_generation, 7);
         assert_eq!(state.frame_index, 0);
         assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
@@ -2024,7 +2053,50 @@ mod tests {
 
     #[cfg(feature = "naadf")]
     #[test]
-    fn naadf_gi_shader_backend_is_selectable_when_feature_is_enabled() {
-        assert!(naadf_gi_shader_backend_available());
+    fn naadf_gi_shader_backend_requires_runtime_gate_and_ready_gpu_cache() {
+        let config = NaadfConfig {
+            enabled: true,
+            debug: crate::rendering::naadf::config::NaadfDebugConfig {
+                allow_unverified_post_205: true,
+                ..default()
+            },
+            ..default()
+        };
+        let cache_state = NaadfCacheState {
+            ready: true,
+            warming: false,
+            fallback_reason: None,
+        };
+        let stats = NaadfStats {
+            gpu_slots_used: 1,
+            ..default()
+        };
+
+        assert!(naadf_gi_shader_backend_available(
+            Some(&config),
+            Some(&cache_state),
+            Some(&stats)
+        ));
+
+        let blocked_config = NaadfConfig {
+            enabled: true,
+            ..default()
+        };
+        assert!(!naadf_gi_shader_backend_available(
+            Some(&blocked_config),
+            Some(&cache_state),
+            Some(&stats)
+        ));
+
+        let pending_upload_stats = NaadfStats {
+            gpu_slots_used: 1,
+            gpu_uploads_pending: 1,
+            ..default()
+        };
+        assert!(!naadf_gi_shader_backend_available(
+            Some(&config),
+            Some(&cache_state),
+            Some(&pending_upload_stats)
+        ));
     }
 }

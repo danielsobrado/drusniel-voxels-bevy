@@ -148,9 +148,22 @@ impl From<&NaadfConfig> for ExtractedNaadfGpuConfig {
             max_gpu_memory_mb: config.chunk_cache.max_gpu_memory_mb,
             allow_integrated_gpu: config.gpu.allow_integrated_gpu,
             prefer_gpu_builder: config.gpu_builder_enabled(),
-            debug_readback: config.gpu.debug_readback,
+            debug_readback: config.gpu.debug_readback && naadf_gpu_debug_readback_allowed(),
         }
     }
+}
+
+pub fn naadf_gpu_debug_readback_allowed() -> bool {
+    cfg!(debug_assertions) || env_flag_enabled("DRUSNIEL_NAADF_DEBUG_READBACK")
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 #[derive(Resource, Default)]

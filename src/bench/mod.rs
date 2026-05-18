@@ -1163,11 +1163,13 @@ fn apply_bench_render_toggles(
             .experimental_render_mode
             .as_deref()
             .and_then(ExperimentalRenderMode::parse)
-            == Some(ExperimentalRenderMode::CurrentWithNaadfGi)
-            && crate::rendering::radiance_cascades::naadf_gi_shader_backend_available();
+            == Some(ExperimentalRenderMode::CurrentWithNaadfGi);
         let enabled = wants_naadf_preview || (wants_naadf_backend && wants_naadf_gi);
         if config.enabled != enabled {
             config.enabled = enabled;
+        }
+        if wants_naadf_gi {
+            config.debug.allow_unverified_post_205 = true;
         }
         if let Some(force_cpu) = toggles.naadf_force_cpu_builder {
             if config.debug.force_cpu_builder != force_cpu {

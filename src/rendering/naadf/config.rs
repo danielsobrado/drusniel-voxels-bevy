@@ -134,6 +134,8 @@ pub struct NaadfDebugConfig {
     pub force_cpu_builder: bool,
     #[serde(default)]
     pub force_gpu_builder: bool,
+    #[serde(default)]
+    pub allow_unverified_post_205: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -225,6 +227,10 @@ impl NaadfConfig {
         if env_flag_enabled("DRUSNIEL_NAADF_DEBUG_READBACK") {
             config.enabled = true;
             config.gpu.debug_readback = true;
+        }
+        if env_flag_enabled("DRUSNIEL_NAADF_ALLOW_UNVERIFIED_POST_205") {
+            config.enabled = true;
+            config.debug.allow_unverified_post_205 = true;
         }
         config
     }
@@ -385,6 +391,7 @@ mod tests {
         assert!(!config.froxel_sun_mask.enabled);
         assert_eq!(config.froxel_sun_mask.resolution, [160, 90, 64]);
         assert_eq!(config.froxel_sun_mask.max_rays_per_frame, 65_536);
+        assert!(!config.debug.allow_unverified_post_205);
         assert!(!config.use_for_gi_secondary);
         assert!(!config.use_for_sun_visibility);
         assert!(!config.use_for_terrain_ao);

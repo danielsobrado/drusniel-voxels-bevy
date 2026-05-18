@@ -2,6 +2,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 
 use super::cache::NaadfCache;
+use super::config::NaadfConfig;
 use super::dirty::NaadfDirtyChunkQueue;
 use super::preview::NaadfPreviewPipelineState;
 use super::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
@@ -82,6 +83,8 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
 
 pub fn record_naadf_bench_counters(
     stats: Res<NaadfStats>,
+    config: Res<NaadfConfig>,
+    cache_state: Res<NaadfCacheState>,
     preview_state: Res<NaadfPreviewPipelineState>,
     radiance_config: Option<Res<RadianceCascadesConfig>>,
     sdf_state: Option<Res<SdfVolumeState>>,
@@ -235,7 +238,8 @@ pub fn record_naadf_bench_counters(
     timing.record_count(
         frame.0,
         "naadf.radiance_backend_available",
-        naadf_gi_shader_backend_available() as u32 as f64,
+        naadf_gi_shader_backend_available(Some(&config), Some(&cache_state), Some(&stats)) as u32
+            as f64,
     );
     timing.record_count(
         frame.0,
