@@ -1,5 +1,5 @@
 #import "shaders/naadf/ray_trace.wgsl" NaadfHit, NaadfRay
-#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world_lod
+#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world, trace_naadf_world_lod
 
 struct NaadfFirstHitParams {
     camera_origin_max_distance: vec4<f32>,
