@@ -9,7 +9,7 @@ use crate::performance::AreaTimingRecorder;
 use crate::rendering::radiance_cascades::{
     NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_SUN_VISIBILITY,
     NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState,
-    radiance_cascade_pass_active,
+    naadf_gi_shader_backend_available, radiance_cascade_pass_active,
 };
 use crate::rendering::ray_tracing::{RayTracingSettings, VoxelRayBackendMode};
 
@@ -232,6 +232,16 @@ pub fn record_naadf_bench_counters(
         .map(|config| config.voxel_backend_query_mask)
         .unwrap_or_default();
 
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_backend_available",
+        naadf_gi_shader_backend_available() as u32 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_query_mask",
+        radiance_query_mask as f64,
+    );
     timing.record_count(
         frame.0,
         "naadf.radiance_sun_visibility_rays_per_pixel",

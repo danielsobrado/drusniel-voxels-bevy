@@ -750,6 +750,15 @@ mod tests {
     }
 
     #[test]
+    fn naadf_bench_counters_publish_radiance_backend_state() {
+        let systems = include_str!("systems.rs");
+
+        assert!(systems.contains("naadf.radiance_backend_available"));
+        assert!(systems.contains("naadf.radiance_query_mask"));
+        assert!(systems.contains("naadf_gi_shader_backend_available()"));
+    }
+
+    #[test]
     fn wgsl_debug_trace_rays_has_ray_count_guard() {
         let debug_trace = include_str!("../../../assets/shaders/naadf/debug_trace_rays.wgsl");
 
