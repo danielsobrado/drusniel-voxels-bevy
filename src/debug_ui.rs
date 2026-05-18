@@ -337,6 +337,14 @@ fn debug_settings_ui(
                         stats.streaming_interest_chunks
                     ));
                     ui.label(format!(
+                        "NAADF residency mips: L0={} L1={} L2={} L3={} L4={}",
+                        stats.streaming_mip0_chunks,
+                        stats.streaming_mip1_chunks,
+                        stats.streaming_mip2_chunks,
+                        stats.streaming_mip3_chunks,
+                        stats.streaming_mip4_chunks
+                    ));
+                    ui.label(format!(
                         "NAADF GPU memory: {} bytes",
                         stats.gpu_memory_bytes
                     ));

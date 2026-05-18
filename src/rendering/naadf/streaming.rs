@@ -1,6 +1,6 @@
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::cache::NaadfCache;
 use super::config::NaadfConfig;
@@ -12,11 +12,13 @@ use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 pub(crate) const MIN_VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;
+pub(crate) const DEFAULT_PRIMARY_CONE_SPREAD: f32 = 1.0 / 720.0;
 
 #[derive(Resource, Debug, Default)]
 pub struct NaadfStreamingState {
     visible_chunks: HashSet<IVec3>,
     retained_chunks: HashSet<IVec3>,
+    finest_resident_mips: HashMap<IVec3, u8>,
     center_chunk: Option<IVec3>,
 }
 
@@ -31,6 +33,10 @@ impl NaadfStreamingState {
 
     pub fn has_visible_chunks(&self) -> bool {
         !self.visible_chunks.is_empty()
+    }
+
+    pub fn finest_resident_mip(&self, chunk_pos: IVec3) -> Option<u8> {
+        self.finest_resident_mips.get(&chunk_pos).copied()
     }
 
     #[cfg(test)]
@@ -66,10 +72,16 @@ pub fn update_visible_region_cache(
     if !config.enabled || !config.build_visible_chunks_only {
         state.visible_chunks.clear();
         state.retained_chunks.clear();
+        state.finest_resident_mips.clear();
         state.center_chunk = None;
         stats.streaming_interest_chunks = 0;
         stats.streaming_interest_missing_gpu_slots = 0;
         stats.streaming_interest_missing_gpu_slots_far_ring = 0;
+        stats.streaming_mip0_chunks = 0;
+        stats.streaming_mip1_chunks = 0;
+        stats.streaming_mip2_chunks = 0;
+        stats.streaming_mip3_chunks = 0;
+        stats.streaming_mip4_chunks = 0;
         return;
     }
 
@@ -77,9 +89,15 @@ pub fn update_visible_region_cache(
         stats.streaming_interest_chunks = 0;
         stats.streaming_interest_missing_gpu_slots = 0;
         stats.streaming_interest_missing_gpu_slots_far_ring = 0;
+        stats.streaming_mip0_chunks = 0;
+        stats.streaming_mip1_chunks = 0;
+        stats.streaming_mip2_chunks = 0;
+        stats.streaming_mip3_chunks = 0;
+        stats.streaming_mip4_chunks = 0;
         return;
     };
     let center_chunk = world_position_to_chunk(camera_transform.translation());
+    let camera_position = camera_transform.translation();
     state.center_chunk = Some(center_chunk);
     let radius = config.chunk_cache.radius_chunks.max(0);
     let hysteresis = config.chunk_cache.hysteresis_chunks.max(0);
@@ -89,8 +107,18 @@ pub fn update_visible_region_cache(
         visible_loaded_region_targets(&world, center_chunk, radius, vertical_radius, max_chunks);
     state.visible_chunks.clear();
     state.visible_chunks.extend(targets.iter().copied());
+    let mut mip_counts = [0u32; 5];
 
     for chunk_pos in &targets {
+        let previous_mip = state.finest_resident_mips.get(chunk_pos).copied();
+        let finest_mip = finest_resident_mip_for_chunk(
+            camera_position,
+            *chunk_pos,
+            DEFAULT_PRIMARY_CONE_SPREAD,
+            previous_mip,
+        );
+        state.finest_resident_mips.insert(*chunk_pos, finest_mip);
+        mip_counts[finest_mip as usize] = mip_counts[finest_mip as usize].saturating_add(1);
         if state.retained_chunks.insert(*chunk_pos) {
             dirty_queue.queue(*chunk_pos);
         }
@@ -112,10 +140,16 @@ pub fn update_visible_region_cache(
         .collect::<Vec<_>>();
     for chunk_pos in evicted {
         state.retained_chunks.remove(&chunk_pos);
+        state.finest_resident_mips.remove(&chunk_pos);
         cache.remove_chunk(chunk_pos);
     }
 
     stats.streaming_interest_chunks = state.visible_chunks.len() as u32;
+    stats.streaming_mip0_chunks = mip_counts[0];
+    stats.streaming_mip1_chunks = mip_counts[1];
+    stats.streaming_mip2_chunks = mip_counts[2];
+    stats.streaming_mip3_chunks = mip_counts[3];
+    stats.streaming_mip4_chunks = mip_counts[4];
 }
 
 pub fn sync_streaming_gpu_slot_stats(
@@ -281,6 +315,58 @@ fn chunk_priority_key(center: IVec3, chunk_pos: IVec3) -> (i64, i32, bool, i32, 
     )
 }
 
+pub fn finest_resident_mip_for_chunk(
+    camera_position: Vec3,
+    chunk_pos: IVec3,
+    cone_spread: f32,
+    previous_mip: Option<u8>,
+) -> u8 {
+    let min_distance = min_distance_to_chunk_aabb(camera_position, chunk_pos);
+    let footprint = (min_distance * cone_spread.max(0.0)).max(1.0);
+    let selected = mip_for_footprint(footprint);
+    apply_mip_hysteresis(selected, footprint, previous_mip)
+}
+
+fn mip_for_footprint(footprint: f32) -> u8 {
+    if footprint <= 1.5 {
+        0
+    } else if footprint <= 3.0 {
+        1
+    } else if footprint <= 6.0 {
+        2
+    } else if footprint <= 12.0 {
+        3
+    } else {
+        4
+    }
+}
+
+fn apply_mip_hysteresis(selected: u8, footprint: f32, previous_mip: Option<u8>) -> u8 {
+    let Some(previous) = previous_mip else {
+        return selected;
+    };
+    if selected > previous {
+        let release_threshold = match previous {
+            0 => 1.8,
+            1 => 3.6,
+            2 => 7.2,
+            3 => 14.4,
+            _ => f32::INFINITY,
+        };
+        if footprint < release_threshold {
+            return previous;
+        }
+    }
+    selected
+}
+
+fn min_distance_to_chunk_aabb(camera_position: Vec3, chunk_pos: IVec3) -> f32 {
+    let chunk_min = (chunk_pos * crate::constants::CHUNK_SIZE as i32).as_vec3();
+    let chunk_max = chunk_min + Vec3::splat(crate::constants::CHUNK_SIZE as f32);
+    let clamped = camera_position.clamp(chunk_min, chunk_max);
+    camera_position.distance(clamped)
+}
+
 pub fn should_evict_chunk(
     center: IVec3,
     chunk_pos: IVec3,
@@ -370,6 +456,40 @@ mod tests {
         );
         assert_eq!(vertical_stream_radius_chunks(12), 12);
         assert_eq!(vertical_stream_radius_chunks(20), 20);
+    }
+
+    #[test]
+    fn footprint_residency_selects_coarser_mips_with_distance() {
+        let camera = Vec3::ZERO;
+
+        assert_eq!(
+            finest_resident_mip_for_chunk(camera, IVec3::ZERO, DEFAULT_PRIMARY_CONE_SPREAD, None),
+            0
+        );
+        assert!(
+            finest_resident_mip_for_chunk(
+                camera,
+                IVec3::new(800, 0, 0),
+                DEFAULT_PRIMARY_CONE_SPREAD,
+                None,
+            ) >= 3
+        );
+    }
+
+    #[test]
+    fn footprint_residency_hysteresis_keeps_previous_finer_mip_near_threshold() {
+        let chunk_pos = IVec3::new(75, 0, 0);
+        let selected_without_history =
+            finest_resident_mip_for_chunk(Vec3::ZERO, chunk_pos, DEFAULT_PRIMARY_CONE_SPREAD, None);
+        let selected_with_history = finest_resident_mip_for_chunk(
+            Vec3::ZERO,
+            chunk_pos,
+            DEFAULT_PRIMARY_CONE_SPREAD,
+            Some(0),
+        );
+
+        assert!(selected_without_history >= selected_with_history);
+        assert_eq!(selected_with_history, 0);
     }
 
     #[test]

@@ -112,6 +112,36 @@ pub fn record_naadf_bench_counters(
         "naadf.streaming_interest_missing_gpu_slots_far_ring",
         stats.streaming_interest_missing_gpu_slots_far_ring as f64,
     );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_mip0_chunks",
+        stats.streaming_mip0_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_mip1_chunks",
+        stats.streaming_mip1_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_mip2_chunks",
+        stats.streaming_mip2_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_mip3_chunks",
+        stats.streaming_mip3_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.streaming_mip4_chunks",
+        stats.streaming_mip4_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.missing_fine_mip_requests_last_frame",
+        stats.missing_fine_mip_requests_last_frame as f64,
+    );
     timing.record_count(frame.0, "naadf.gpu_slots_used", stats.gpu_slots_used as f64);
     timing.record_count(
         frame.0,

@@ -59,6 +59,12 @@ pub struct NaadfStats {
     pub streaming_interest_chunks: u32,
     pub streaming_interest_missing_gpu_slots: u32,
     pub streaming_interest_missing_gpu_slots_far_ring: u32,
+    pub streaming_mip0_chunks: u32,
+    pub streaming_mip1_chunks: u32,
+    pub streaming_mip2_chunks: u32,
+    pub streaming_mip3_chunks: u32,
+    pub streaming_mip4_chunks: u32,
+    pub missing_fine_mip_requests_last_frame: u32,
     pub entity_volumes: u32,
     pub entity_volume_voxels: u32,
 }
