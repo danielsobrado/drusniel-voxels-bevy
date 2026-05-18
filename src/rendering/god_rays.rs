@@ -38,6 +38,8 @@ use crate::environment::Sun;
 use crate::performance::AreaTimingRecorder;
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
 use crate::weather::WeatherRuntime;
+#[cfg(feature = "naadf")]
+use crate::rendering::naadf::froxel::NaadfFroxelSunMaskState;
 
 const GOD_RAYS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a1b2c3d4-e5f6-7890-abcd-ef0123456789");
 const MIN_GOD_RAY_SAMPLES: u32 = 1;
@@ -99,6 +101,8 @@ pub(crate) struct GodRayUniforms {
     threshold: f32,
     rain_factor: f32,
     snow_factor: f32,
+    naadf_froxel_visibility: f32,
+    naadf_froxel_strength: f32,
 }
 
 // ─── Main-world sun projection ───────────────────────────────────────────────
@@ -131,6 +135,7 @@ fn compute_god_ray_frame_data(
     mut commands: Commands,
     config: Res<GodRayConfig>,
     weather: Option<Res<WeatherRuntime>>,
+    #[cfg(feature = "naadf")] naadf_froxel: Option<Res<NaadfFroxelSunMaskState>>,
     frame: Res<FrameCount>,
     mut timing: Option<ResMut<AreaTimingRecorder>>,
     sun_query: Query<&Transform, With<Sun>>,
@@ -148,6 +153,10 @@ fn compute_god_ray_frame_data(
         .map(|t| t.forward().as_vec3())
         .unwrap_or(Vec3::new(-0.3, -1.0, -0.2).normalize());
     let sun_world_dir = -sun_dir;
+    #[cfg(feature = "naadf")]
+    let naadf_froxel_strength = naadf_froxel_god_ray_strength(naadf_froxel.as_deref());
+    #[cfg(not(feature = "naadf"))]
+    let naadf_froxel_strength = naadf_froxel_god_ray_strength();
 
     // Project sun to screen space using the main camera
     let mut sun_screen = Vec4::new(0.5, 0.5, 0.0, 0.0); // default: center, invisible
@@ -188,6 +197,8 @@ fn compute_god_ray_frame_data(
                 .as_deref()
                 .map(|weather| weather.uniforms.snow_factor.clamp(0.0, 1.0))
                 .unwrap_or(0.0),
+            naadf_froxel_visibility: 1.0 - naadf_froxel_strength * 0.15,
+            naadf_froxel_strength,
         },
     });
 
@@ -206,11 +217,29 @@ fn compute_god_ray_frame_data(
             "Weather GodRay Intensity Mult",
             intensity_mult as f64,
         );
+        timing.record_count(
+            frame.0,
+            "NAADF Froxel GodRay Strength",
+            naadf_froxel_strength as f64,
+        );
     }
 }
 
 fn weather_god_ray_intensity_mult(rain: f32, snow: f32) -> f32 {
     (1.0 - rain * 0.55 - snow * 0.1).clamp(0.35, 1.0)
+}
+
+#[cfg(feature = "naadf")]
+fn naadf_froxel_god_ray_strength(state: Option<&NaadfFroxelSunMaskState>) -> f32 {
+    state
+        .filter(|state| state.active)
+        .map(|_| 1.0)
+        .unwrap_or(0.0)
+}
+
+#[cfg(not(feature = "naadf"))]
+fn naadf_froxel_god_ray_strength() -> f32 {
+    0.0
 }
 
 // ─── Extraction ──────────────────────────────────────────────────────────────
@@ -466,5 +495,15 @@ mod tests {
         assert_eq!(clamp_god_ray_samples(0), MIN_GOD_RAY_SAMPLES);
         assert_eq!(clamp_god_ray_samples(32), 32);
         assert_eq!(clamp_god_ray_samples(512), MAX_GOD_RAY_SAMPLES);
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn inactive_froxel_mask_does_not_modulate_god_rays() {
+        assert_eq!(naadf_froxel_god_ray_strength(None), 0.0);
+        assert_eq!(
+            naadf_froxel_god_ray_strength(Some(&NaadfFroxelSunMaskState::default())),
+            0.0
+        );
     }
 }

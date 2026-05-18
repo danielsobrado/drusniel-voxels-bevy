@@ -32,6 +32,8 @@ struct GodRayUniforms {
     threshold: f32,
     rain_factor: f32,
     snow_factor: f32,
+    naadf_froxel_visibility: f32,
+    naadf_froxel_strength: f32,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -69,6 +71,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let snow_factor = clamp(uniforms.snow_factor, 0.0, 1.0);
     let weather_intensity_mult = clamp(1.0 - rain_factor * 0.55 - snow_factor * 0.1, 0.35, 1.0);
     let weather_threshold = max(uniforms.threshold * (1.0 - snow_factor * 0.18), 0.05);
+    let naadf_froxel_visibility = mix(
+        1.0,
+        clamp(uniforms.naadf_froxel_visibility, 0.0, 1.0),
+        clamp(uniforms.naadf_froxel_strength, 0.0, 1.0),
+    );
 
     for (var i = 0; i < sample_count; i++) {
         uv += delta_uv;
@@ -102,7 +109,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let dist_to_sun = length(in.uv - sun_uv);
     let directional_fade = 1.0 - smoothstep(0.0, 1.5, dist_to_sun);
 
-    let god_rays = accumulated * uniforms.intensity * weather_intensity_mult * directional_fade;
+    let god_rays = accumulated *
+        uniforms.intensity *
+        weather_intensity_mult *
+        directional_fade *
+        naadf_froxel_visibility;
 
     // Additive blend onto the scene
     return vec4<f32>(scene.rgb + god_rays, 1.0);

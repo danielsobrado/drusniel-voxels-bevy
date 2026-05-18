@@ -149,6 +149,17 @@ fn god_rays_clamps_dynamic_sample_count_before_division() {
 }
 
 #[test]
+fn god_rays_accept_naadf_froxel_visibility_modulation() {
+    let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
+    let rust = include_str!("../src/rendering/god_rays.rs");
+
+    assert!(god_rays.contains("naadf_froxel_visibility"));
+    assert!(god_rays.contains("naadf_froxel_strength"));
+    assert!(god_rays.contains("naadf_froxel_visibility;"));
+    assert!(rust.contains("NAADF Froxel GodRay Strength"));
+}
+
+#[test]
 fn terrain_materials_participate_in_depth_prepass() {
     let triplanar = include_str!("../src/rendering/triplanar_material.rs");
     let blocky = include_str!("../src/rendering/blocky_material.rs");
