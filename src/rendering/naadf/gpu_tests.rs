@@ -3,6 +3,10 @@ use bevy::prelude::*;
 use crate::rendering::naadf::gpu_buffers::{
     NAADF_BLOCK_RECORD_BYTES, NAADF_MATERIAL_RECORD_BYTES, NAADF_VOXEL_RECORD_BYTES,
 };
+use crate::rendering::naadf::layout::{
+    MIP_LEVEL_COUNT, NaadfMipBoundsRecord, NaadfPayloadRecord, NaadfTraversalRecord,
+    mip_cell_index, mip_level_axis,
+};
 use crate::rendering::voxel_ray_backend::{VoxelRayHit, VoxelRayPurpose};
 
 #[repr(C)]
@@ -33,6 +37,15 @@ pub struct NaadfGpuRayComparison {
     pub distance_delta: f32,
     pub material_matches: bool,
     pub world_voxel_matches: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NaadfMipParityFailure {
+    pub level: u32,
+    pub local: UVec3,
+    pub field: &'static str,
+    pub expected: u32,
+    pub actual: u32,
 }
 
 impl NaadfGpuRayInputRecord {
@@ -132,6 +145,72 @@ pub fn compare_gpu_ray_outputs_to_cpu(
         .collect()
 }
 
+pub fn compare_mip_records_to_cpu(
+    expected_traversal: &[NaadfTraversalRecord],
+    expected_payload: &[NaadfPayloadRecord],
+    expected_bounds: &[NaadfMipBoundsRecord],
+    actual_traversal: &[u32],
+    actual_payload: &[u32],
+    actual_bounds: &[u32],
+) -> Vec<NaadfMipParityFailure> {
+    let mut failures = Vec::new();
+    for level in 0..MIP_LEVEL_COUNT {
+        let axis = mip_level_axis(level);
+        for z in 0..axis {
+            for y in 0..axis {
+                for x in 0..axis {
+                    let local = UVec3::new(x, y, z);
+                    let index = mip_cell_index(level, local);
+                    push_mip_failure(
+                        &mut failures,
+                        level,
+                        local,
+                        "traversal",
+                        expected_traversal[index].0,
+                        actual_traversal[index],
+                    );
+                    push_mip_failure(
+                        &mut failures,
+                        level,
+                        local,
+                        "payload",
+                        expected_payload[index].0,
+                        actual_payload[index],
+                    );
+                    push_mip_failure(
+                        &mut failures,
+                        level,
+                        local,
+                        "bounds",
+                        expected_bounds[index].0,
+                        actual_bounds[index],
+                    );
+                }
+            }
+        }
+    }
+    failures
+}
+
+fn push_mip_failure(
+    failures: &mut Vec<NaadfMipParityFailure>,
+    level: u32,
+    local: UVec3,
+    field: &'static str,
+    expected: u32,
+    actual: u32,
+) {
+    if expected != actual {
+        failures.push(NaadfMipParityFailure {
+            level,
+            local,
+            field,
+            expected,
+            actual,
+        });
+    }
+}
+
 fn compare_one(
     ray_index: usize,
     gpu: NaadfGpuRayOutputRecord,
@@ -162,8 +241,9 @@ fn compare_one(
 mod tests {
     use super::*;
     use crate::rendering::naadf::cpu_builder::{
-        NaadfBuildOptions, build_naadf_chunk, compute_directional_bounds, material_id_for_voxel,
-        propagate_block_skip_in_chunk, propagate_voxel_skip_in_block,
+        NaadfBuildOptions, build_mip_pyramid_from_chunk, build_naadf_chunk,
+        compute_directional_bounds, material_id_for_voxel, propagate_block_skip_in_chunk,
+        propagate_voxel_skip_in_block,
     };
     use crate::rendering::naadf::gpu_buffers::{
         NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
@@ -290,6 +370,44 @@ mod tests {
 
             assert_shader_mirror_matches_cpu_upload(&chunk, seed, options);
         }
+    }
+
+    #[test]
+    fn mip_parity_helper_reports_level_local_and_field() {
+        let chunk = sparse_chunk(IVec3::ZERO);
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+        let pyramid = build_mip_pyramid_from_chunk(&naadf);
+        let mut actual_traversal = pyramid
+            .traversal_records
+            .iter()
+            .map(|record| record.0)
+            .collect::<Vec<_>>();
+        let actual_payload = pyramid
+            .payload_records
+            .iter()
+            .map(|record| record.0)
+            .collect::<Vec<_>>();
+        let actual_bounds = pyramid
+            .bounds_records
+            .iter()
+            .map(|record| record.0)
+            .collect::<Vec<_>>();
+        let changed_index = mip_cell_index(1, UVec3::new(1, 0, 0));
+        actual_traversal[changed_index] ^= 1;
+
+        let failures = compare_mip_records_to_cpu(
+            &pyramid.traversal_records,
+            &pyramid.payload_records,
+            &pyramid.bounds_records,
+            &actual_traversal,
+            &actual_payload,
+            &actual_bounds,
+        );
+
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].level, 1);
+        assert_eq!(failures[0].local, UVec3::new(1, 0, 0));
+        assert_eq!(failures[0].field, "traversal");
     }
 
     struct MirroredGpuRecords {

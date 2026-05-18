@@ -12,6 +12,7 @@ mod naadf_gpu_layout {
         NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
         pack_raw_voxel_record,
     };
+    use voxel_builder::rendering::naadf::gpu_tests::compare_mip_records_to_cpu;
     use voxel_builder::rendering::naadf::layout::{
         BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, MIP_LEVEL_0_OFFSET, NaadfNodeState,
         TRAVERSAL_RECORD_STATE_SHIFT, voxel_index_in_chunk,
@@ -112,35 +113,19 @@ mod naadf_gpu_layout {
                 &actual.mip_payload_records,
             );
             let expected_mips = build_mip_pyramid_from_chunk(&naadf);
-            assert_eq!(
-                expected_mips
-                    .traversal_records
-                    .iter()
-                    .map(|record| record.0)
-                    .collect::<Vec<_>>(),
-                actual.mip_traversal_records,
-                "{}: GPU mip traversal records differ from CPU reference",
-                fixture.name
+            let mip_failures = compare_mip_records_to_cpu(
+                &expected_mips.traversal_records,
+                &expected_mips.payload_records,
+                &expected_mips.bounds_records,
+                &actual.mip_traversal_records,
+                &actual.mip_payload_records,
+                &actual.mip_bounds_records,
             );
-            assert_eq!(
-                expected_mips
-                    .payload_records
-                    .iter()
-                    .map(|record| record.0)
-                    .collect::<Vec<_>>(),
-                actual.mip_payload_records,
-                "{}: GPU mip payload records differ from CPU reference",
-                fixture.name
-            );
-            assert_eq!(
-                expected_mips
-                    .bounds_records
-                    .iter()
-                    .map(|record| record.0)
-                    .collect::<Vec<_>>(),
-                actual.mip_bounds_records,
-                "{}: GPU mip bounds records differ from CPU reference",
-                fixture.name
+            assert!(
+                mip_failures.is_empty(),
+                "{}: GPU mip records differ from CPU reference: {:?}",
+                fixture.name,
+                mip_failures
             );
         }
     }
