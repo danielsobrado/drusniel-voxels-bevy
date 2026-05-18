@@ -718,6 +718,7 @@ mod tests {
         assert!(lighting.contains("fn naadf_sun_visibility"));
         assert!(lighting.contains("trace_naadf_world"));
         assert!(lighting.contains("fn naadf_sun_visibility_world"));
+        assert!(lighting.contains("max_distance,\n        1u"));
         assert!(lighting.contains("fn naadf_terrain_ao_visibility"));
         assert!(lighting.contains("fn naadf_terrain_ao_visibility_world"));
         assert!(lighting.contains("fn naadf_contact_shadow_visibility"));

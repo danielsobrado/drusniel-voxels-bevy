@@ -45,6 +45,7 @@ pub struct NaadfStats {
     pub local_lights_uploaded: u32,
     pub local_lights_culled: u32,
     pub local_light_shadow_rays_last_frame: u64,
+    pub radiance_sun_visibility_rays_per_pixel: u32,
     pub radiance_contact_shadow_rays_per_pixel: u32,
     pub radiance_terrain_ao_rays_per_pixel: u32,
     pub preview_pixels_last_frame: u64,

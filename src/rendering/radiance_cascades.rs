@@ -50,7 +50,7 @@ const RADIANCE_CASCADES_SHADER_HANDLE: Handle<Shader> =
 
 pub(crate) const NAADF_QUERY_GI_SECONDARY: u32 = 1 << 0;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
-const NAADF_QUERY_SUN_VISIBILITY: u32 = 1 << 1;
+pub(crate) const NAADF_QUERY_SUN_VISIBILITY: u32 = 1 << 1;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
 pub(crate) const NAADF_QUERY_TERRAIN_AO: u32 = 1 << 2;
 #[cfg_attr(not(feature = "naadf"), allow(dead_code))]
@@ -1316,6 +1316,8 @@ pub fn record_naadf_gi_counters(
     let gi_rays = estimated_naadf_gi_rays(&config);
     if let Some(stats) = naadf_stats.as_deref_mut() {
         stats.gi_rays_last_frame = gi_rays;
+        stats.radiance_sun_visibility_rays_per_pixel =
+            estimated_naadf_sun_visibility_rays_per_pixel(&config);
         stats.radiance_contact_shadow_rays_per_pixel =
             estimated_naadf_contact_shadow_rays_per_pixel(&config);
         stats.radiance_terrain_ao_rays_per_pixel =
@@ -1330,6 +1332,16 @@ pub fn estimated_naadf_gi_rays(config: &RadianceCascadesConfig) -> u64 {
         return 0;
     }
     config.cascade_count as u64 * config.rays_per_probe as u64
+}
+
+pub fn estimated_naadf_sun_visibility_rays_per_pixel(config: &RadianceCascadesConfig) -> u32 {
+    if config.voxel_backend == VoxelRayBackendMode::Naadf
+        && config.voxel_backend_query_mask & NAADF_QUERY_SUN_VISIBILITY != 0
+    {
+        1
+    } else {
+        0
+    }
 }
 
 pub fn estimated_naadf_contact_shadow_rays_per_pixel(config: &RadianceCascadesConfig) -> u32 {
@@ -1736,6 +1748,23 @@ mod tests {
 
         config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
         assert_eq!(estimated_naadf_gi_rays(&config), 0);
+    }
+
+    #[test]
+    fn estimated_sun_visibility_rays_only_count_enabled_naadf_query() {
+        let mut config = RadianceCascadesConfig {
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            voxel_backend_query_mask: NAADF_QUERY_SUN_VISIBILITY,
+            ..default()
+        };
+
+        assert_eq!(estimated_naadf_sun_visibility_rays_per_pixel(&config), 0);
+
+        config.voxel_backend = VoxelRayBackendMode::Naadf;
+        assert_eq!(estimated_naadf_sun_visibility_rays_per_pixel(&config), 1);
+
+        config.voxel_backend_query_mask = NAADF_QUERY_TERRAIN_AO;
+        assert_eq!(estimated_naadf_sun_visibility_rays_per_pixel(&config), 0);
     }
 
     #[test]

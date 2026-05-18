@@ -7,8 +7,9 @@ use super::preview::NaadfPreviewPipelineState;
 use super::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
 use crate::performance::AreaTimingRecorder;
 use crate::rendering::radiance_cascades::{
-    NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_TERRAIN_AO,
-    RadianceCascadesConfig, SdfVolumeState, radiance_cascade_pass_active,
+    NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_SUN_VISIBILITY,
+    NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState,
+    radiance_cascade_pass_active,
 };
 use crate::rendering::ray_tracing::{RayTracingSettings, VoxelRayBackendMode};
 
@@ -231,6 +232,15 @@ pub fn record_naadf_bench_counters(
         .map(|config| config.voxel_backend_query_mask)
         .unwrap_or_default();
 
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_sun_visibility_rays_per_pixel",
+        if radiance_query_mask & NAADF_QUERY_SUN_VISIBILITY != 0 {
+            1.0
+        } else {
+            0.0
+        },
+    );
     timing.record_count(
         frame.0,
         "naadf.radiance_contact_shadow_rays_per_pixel",
