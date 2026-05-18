@@ -2,8 +2,8 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-18 (NAADF preview local point lights landed — see *Implemented: Local Point Lights*)  
-Visual verification: not run by request
+Last updated: 2026-05-18 (NAADF-200..210 distance LOD foundation landed; preview-only bench verified)  
+Visual verification: preview-only fixed screenshots inspected for `bench-runs/2026-05-18T15-38-40Z`
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
 
@@ -1187,6 +1187,235 @@ Details:
 - Rays that start outside a full chunk now hit at the chunk entry point instead of returning distance zero at the ray origin.
 - Added shader metadata coverage for the chunk-entry helper.
 
+### NAADF-200: GPU Render-Graph Dispatch Online
+
+Updated:
+
+- `src/rendering/naadf/mod.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `src/rendering/naadf/prepare.rs`
+- `src/rendering/naadf/gpu_buffers.rs`
+
+Details:
+
+- Confirmed the GPU render-graph path is online before landing the distance LOD work.
+- The NAADF render graph can run the GPU build queue, preview first-hit dispatch, and preview composite path behind the `naadf` feature/config gates.
+- This prerequisite was already effectively present before the NAADF-201 batch; it was treated as the hard gate for the later tickets.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml`: completed in `bench-runs/2026-05-18T15-38-40Z/summary.json`.
+
+### NAADF-201: Split Traversal / Payload Buffers
+
+Updated:
+
+- `assets/shaders/naadf/common.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- Added separate hot traversal and cold payload record layouts.
+- Locked Rust/WGSL layout constants for traversal records, payload records, bounds records, mip counts, and chunk slots.
+- Kept the split compatible with the existing CPU reference and the render-world GPU buffers that later builders consume.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl`: 23 tests passed after the distance LOD shader metadata updates.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed after the mip parity test fix.
+
+### NAADF-202: GPU Base Chunk Builder
+
+Updated:
+
+- `assets/shaders/naadf/build_blocks.wgsl`
+- `src/rendering/naadf/gpu_buffers.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `tests/naadf_gpu_layout.rs`
+
+Details:
+
+- Extended the GPU base builder so raw voxel uploads seed mip-0 traversal and payload records.
+- Added GPU buffers for the split traversal/payload layout and kept the base-builder dispatch wired through the existing NAADF GPU queue.
+- Added GPU layout coverage for the seeded base records.
+
+Checks:
+
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+### NAADF-203: GPU Mip Pyramid Builder
+
+Updated:
+
+- `assets/shaders/naadf/build_mips.wgsl`
+- `src/rendering/naadf/cpu_builder.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/mod.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `tests/naadf_gpu_layout.rs`
+
+Details:
+
+- Added the CPU reference mip pyramid for `16 -> 8 -> 4 -> 2 -> 1` chunk levels.
+- Added the GPU mip build shader and pipeline step that consumes lower levels and writes higher-level traversal/payload records.
+- Published mip constants through Rust and WGSL so traversal, tests, and builders use the same layout.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::cpu_builder::tests::mip`: 2 tests passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+### NAADF-204: GPU Directional AADF Sweeps
+
+Updated:
+
+- `assets/shaders/naadf/build_mips.wgsl`
+- `assets/shaders/naadf/common.wgsl`
+- `src/rendering/naadf/cpu_builder.rs`
+- `src/rendering/naadf/gpu_buffers.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `tests/naadf_gpu_layout.rs`
+
+Details:
+
+- Added mipped AADF directional bounds records for the derived NAADF cache.
+- Kept CPU builder bounds as the reference for thin-feature and hole cases.
+- Extended GPU mip building so traversal records, payload records, and bounds records stay in lockstep.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::cpu_builder::tests::mip`: 2 tests passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+### NAADF-205: CPU/GPU Parity Harness
+
+Updated:
+
+- `src/rendering/naadf/gpu_tests.rs`
+- `tests/naadf_gpu_layout.rs`
+
+Details:
+
+- Added parity helpers that compare GPU-built mip traversal, payload, and bounds records against the CPU reference.
+- Reports level, local cell, and field names on mismatch so failed parity checks are directly actionable.
+- This closes the foundation gate for proceeding to residency, traversal, LOD, and texture work.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::gpu_tests::tests::mip_parity_helper_reports_level_local_and_field`: 1 test passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+### NAADF-206: Near-Chunk Residency Lookup
+
+Updated:
+
+- `src/debug_ui.rs`
+- `src/rendering/naadf/stats.rs`
+- `src/rendering/naadf/streaming.rs`
+- `src/rendering/naadf/systems.rs`
+
+Details:
+
+- Implemented the v1 dense near-residency table only; hash residency and far summaries remain later work.
+- Added per-chunk finest resident mip tracking, footprint-derived residency planning, and missing-fine-mip request counters.
+- Surfaced residency counters through NAADF stats and the debug UI.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::streaming::tests::footprint_residency`: 2 tests passed.
+
+### NAADF-207: Multi-Chunk World Traversal
+
+Updated:
+
+- `assets/shaders/naadf/world_trace.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- Added world/chunk coordinate helpers for stepping rays across chunk boundaries.
+- Added shader metadata coverage for the world traversal helpers before routing them into skip traversal.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl`: 23 tests passed.
+
+### NAADF-208: AADF Skip Traversal
+
+Updated:
+
+- `assets/shaders/naadf/ray_trace.wgsl`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/pipeline.rs`
+
+Details:
+
+- Added mipped AADF bounds skip helpers to traversal.
+- Kept the shader path bind-compatible with the existing first-hit and GI layouts while the LOD path was phased in.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl`: 23 tests passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+### NAADF-209: Continuous Cone-Footprint LOD
+
+Updated:
+
+- `assets/shaders/naadf/first_hit.wgsl`
+- `assets/shaders/naadf/ray_trace.wgsl`
+- `assets/shaders/naadf/world_trace.wgsl`
+- `src/rendering/naadf/layout.rs`
+
+Details:
+
+- Added cone-footprint LOD selection to NAADF traversal rather than discrete distance tiers.
+- Uses the mip pyramid and residency table to select a conservative resident mip while preserving forced fine descent near primary hits.
+- Exposes missing fine-mip requests for diagnosing residency undersupply.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
+- Preview-only bench completed in `bench-runs/2026-05-18T15-38-40Z/summary.json`.
+
+### NAADF-210: Texture Parity
+
+Updated:
+
+- `assets/shaders/naadf/first_hit.wgsl`
+- `src/rendering/naadf/cpu_builder.rs`
+- `src/rendering/naadf/layout.rs`
+- `src/rendering/naadf/mod.rs`
+- `src/rendering/naadf/pipeline.rs`
+- `bench/scenes/naadf/visual-regression-naadf-preview-only.toml`
+- `src/bench/mod.rs`
+- `assets/config/bench_guard.toml`
+
+Details:
+
+- Added textured first-hit preview sampling through the shared blocky texture array.
+- Uses triplanar weights and `textureSampleLevel`, with the cone footprint feeding texture mip selection.
+- Added a NAADF bench GPU-memory budget toggle and raised the bench guard NAADF GPU-memory cap to 1 GiB for the 8192-slot preview scenes.
+- Preview-only visual output is textured in the fixed screenshots; no blue silhouette/occupancy-only preview remained in the inspected settle and settled images.
+
+Checks:
+
+- `rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_deserialize`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
+- `rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml`: completed in `bench-runs/2026-05-18T15-38-40Z/summary.json`.
+- `rtk cargo run --bin bench_guard -- bench-runs/2026-05-18T15-38-40Z/summary.json`: bench guard output reported `PASS: 187 check(s), 0 warning(s)`.
+
+Bench result:
+
+- Post-change preview-only run: median frame `47.36925 ms`, p99 frame `47.903 ms`.
+- NAADF counters: `preview_first_hit_dispatches_last_frame = 1`, `preview_composite_passes_last_frame = 1`, `preview_pixels_last_frame = 518400`, `gpu_slots_used = 7896`, `gpu_memory_bytes = 880066816`, `missing_fine_mip_requests_last_frame = 0`.
+- Residency counters: `streaming_mip0_chunks = 7584`; `streaming_mip1_chunks` through `streaming_mip4_chunks` remained `0` for this preview-only scene.
+- `summary.json` has `git_dirty = true` because unrelated voxel LOD/meshing files and `docs/rendering/image/` were already dirty/untracked and were not included in the NAADF commits.
+- A clean before/after `summary.json` pair was not captured for this final preview-only run; the recorded bench is the current post-change verification run after the bench memory budget/guard cap update.
+
 ## Verification Completed
 
 The following non-visual checks were run after the implementation passes:
@@ -1217,6 +1446,15 @@ rtk cargo test --features naadf rendering::naadf::prepare::tests
 rtk cargo test --features naadf rendering::naadf::layout::tests
 rtk cargo test --features naadf rendering::radiance_cascades::tests
 rtk cargo test --features naadf rendering::naadf::gpu_tests::tests
+rtk cargo test --lib --features naadf rendering::naadf::cpu_builder::tests::mip
+rtk cargo test --lib --features naadf rendering::naadf::gpu_tests::tests::mip_parity_helper_reports_level_local_and_field
+rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl
+rtk cargo test --lib --features naadf rendering::naadf::streaming::tests::footprint_residency
+rtk cargo test --features naadf --test naadf_gpu_layout
+rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_deserialize
+rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml
+rtk cargo run --bin bench_guard -- bench-runs/2026-05-18T15-38-40Z/summary.json
 ```
 
 Results:
@@ -1289,6 +1527,15 @@ Results:
 - Feature-gated dirty, prepare, layout, radiance, and GPU test-helper tests were rerun after the NAADF-FIX review batch.
 - `rtk cargo test --features naadf rendering::naadf --lib`: 119 tests passed after the loaded-chunk preview coverage fix.
 - `rtk cargo test --features naadf rendering::quality --lib`: 2 tests passed after raising High-quality NAADF warmup budgets.
+- `rendering::naadf::cpu_builder::tests::mip`: 2 tests passed after the mip pyramid work.
+- `rendering::naadf::gpu_tests::tests::mip_parity_helper_reports_level_local_and_field`: 1 test passed after the CPU/GPU parity harness.
+- `rendering::naadf::layout::tests::wgsl`: 23 tests passed after the distance LOD WGSL metadata updates.
+- `rendering::naadf::streaming::tests::footprint_residency`: 2 tests passed after the dense residency table.
+- `naadf_gpu_layout` integration target: 2 tests passed after the GPU builder/mip parity fixes.
+- `bench::tests::naadf_bench_cache_toggles_deserialize`: 1 test passed after the NAADF bench cache toggle.
+- `rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed after the textured first-hit path.
+- `visual-regression-naadf-preview-only.toml`: completed in `bench-runs/2026-05-18T15-38-40Z/summary.json`; median `47.36925 ms`, p99 `47.903 ms`.
+- `bench_guard` on `bench-runs/2026-05-18T15-38-40Z/summary.json`: reported `PASS: 187 check(s), 0 warning(s)`.
 
 ## 2026-05-16 Preview Coverage Follow-Up
 
@@ -1325,31 +1572,28 @@ Known warning:
 
 - Existing warning in `src/main.rs`: unused variable `use_vulkan_on_windows`.
 
-## Historical Verification Not RunNAADF's
+## Historical Verification Gaps
 
-Earlier NAADF batches deferred visual/runtime verification. The latest preview coverage follow-up above has now run the preview and startup-stability benches.
+Earlier NAADF batches deferred some visual/runtime verification. The preview coverage follow-up and the `NAADF-210` preview-only run above now cover the preview path, but the broader runtime/editor matrix is still not fully exercised.
 
 Not run:
 
 - Editor runtime rebuild.
 - Desktop editor restart.
-- Visual regression benches.
 - Baseline runs for `visual-regression-naadf-current.toml`, `visual-regression-naadf-gi.toml`, and `visual-regression-naadf-preview.toml`.
-- Screenshot inspection.
-- Render timing comparisons.
-- `bench_guard`.
-- GPU shader execution.
-- NAADF GI/preview visual checks.
+- Clean before/after `summary.json` comparison for the final distance LOD batch.
+- Startup-stability bench after the final distance LOD texture path.
+- NAADF GI visual checks.
 
 ## Current Behavior
 
 - Current renderer remains default.
 - NAADF is disabled by default in config.
 - With NAADF disabled, dirty queueing/cache rebuild systems no-op.
-- `CurrentSdf` remains the default voxel ray backend.
-- Selecting NAADF only changes runtime state; it does not yet route production GI, AO, shadows, or preview rendering.
-- No NAADF shader is loaded into a render pipeline yet.
-- No visual output should change from these code paths unless a user explicitly toggles backend state, and even then the real render path still falls back to current behavior.
+- `CurrentSdf` remains the default production voxel ray backend.
+- NAADF now has an experimental GPU build plus textured first-hit preview path behind the `naadf` feature/config gates.
+- Production terrain rendering, GI, AO, shadows, fog, and water still use the existing renderer/backend unless explicitly routed by later tickets.
+- Visual output should only change when NAADF preview/config paths are explicitly enabled.
 
 ## Implemented: Local Point Lights (NAADF preview)
 
@@ -1403,12 +1647,12 @@ Not yet done (per the plan's phasing):
 - GI bounce / Path-A radiance-cascade integration of local lights — this
   milestone is **direct primary-hit shading only**.
 
-## Planned: Distance LOD And Texture Parity
+## Distance LOD And Texture Parity Status
 
-NAADF distance LOD and textured first-hit parity are planned in
+NAADF distance LOD and textured first-hit parity are completed in
 `docs/rendering/naadf-distance-lod-plan.md` (the `NAADF-200..210` foundation).
 
-Summary of the planned design:
+Implemented design summary:
 
 - Seam-free terrain LOD — NAADF is ray-marched, so a coarse far region and a
   fine near region compose with no skirt/transition geometry.
@@ -1419,7 +1663,7 @@ Summary of the planned design:
 - Footprint-derived residency so far chunks keep only coarse levels.
 - **Textured first-hit** using the shared terrain atlas (triplanar) for visual
   parity with the legacy renderer — independent of the LOD phases.
-- Hard prerequisite: GPU build/traverse dispatch must come online first.
+- Hard prerequisite satisfied: GPU build/traverse dispatch came online before the build, traversal, LOD, and texture tickets landed.
 
 ## Planned: NAADF Lighting (Path A)
 
@@ -1447,15 +1691,14 @@ Summary:
 
 ## Remaining Work
 
-GPU batch after CPU parity:
+Lighting path:
 
-- Add compute ray test pass.
-- Port real WGSL traversal.
-- Compare GPU hits against CPU hits before any GI integration.
+- Continue with `NAADF-211` sun visibility and `NAADF-212` AO/contact shadow after the `NAADF-205` parity gate.
+- Then wire `NAADF-213` Radiance Cascades backend, followed by `NAADF-214/215` froxel sun visibility and god-ray/fog integration.
+- Supporting lighting work remains in `NAADF-216..218`.
 
-Visual batch, intentionally deferred:
+Deferred research:
 
-- Run NAADF current/GI/preview bench scenes.
-- Inspect screenshots.
-- Compare `bench-runs/<run>/summary.json`.
-- Run `bench_guard` when performance-sensitive integration begins.
+- `NAADF-230` Path-B compositor.
+- `NAADF-240` DDGI/ReSTIR research.
+- `NAADF-250` compression research.
