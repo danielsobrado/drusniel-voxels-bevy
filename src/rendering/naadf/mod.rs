@@ -258,6 +258,7 @@ impl Plugin for NaadfPlugin {
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuConfig>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewPipelineState>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewSettings>()
+                .init_resource::<pipeline::ExtractedNaadfTerrainAtlas>()
                 .init_resource::<local_lights::ExtractedNaadfLocalLights>()
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuUploads>()
                 .init_resource::<gpu_buffers::ExtractedNaadfEntityGpuUploads>()
@@ -274,6 +275,7 @@ impl Plugin for NaadfPlugin {
                     (
                         gpu_buffers::extract_naadf_gpu_config,
                         pipeline::extract_naadf_preview_pipeline_state,
+                        pipeline::extract_naadf_terrain_atlas,
                         local_lights::extract_naadf_local_lights,
                         gpu_buffers::extract_naadf_gpu_uploads,
                         gpu_buffers::extract_naadf_entity_gpu_uploads,

@@ -3,9 +3,11 @@ use bevy::core_pipeline::FullscreenShader;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::MainWorld;
+use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::RenderContext;
+use bevy::render::texture::GpuImage;
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewTarget};
 use bevy::shader::Shader;
 use std::borrow::Cow;
@@ -13,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::atmosphere::{FogQuality, FogQualityTier, FogUniforms};
+use crate::rendering::array_loader::BlockyTextureArray;
 
 use super::config::NaadfDenoiseQuality;
 use super::gpu_buffers::{
@@ -220,6 +223,18 @@ pub fn extract_naadf_preview_pipeline_state(mut commands: Commands, main_world: 
         .map(|frame| frame.0)
         .unwrap_or_default();
     commands.insert_resource(settings);
+}
+
+#[derive(Resource, Clone, Default)]
+pub struct ExtractedNaadfTerrainAtlas {
+    pub albedo: Option<Handle<Image>>,
+}
+
+pub fn extract_naadf_terrain_atlas(mut commands: Commands, main_world: Res<MainWorld>) {
+    let albedo = main_world
+        .get_resource::<BlockyTextureArray>()
+        .map(|array| array.albedo.clone());
+    commands.insert_resource(ExtractedNaadfTerrainAtlas { albedo });
 }
 
 #[derive(Resource)]
@@ -494,6 +509,8 @@ pub fn init_naadf_preview_build_pipelines(
             storage_texture_entry(23, TextureFormat::Rgba16Float),
             storage_buffer_entry(24, false),
             storage_buffer_entry(25, true),
+            texture_array_entry_for_stage(39, ShaderStages::COMPUTE),
+            sampler_entry_for_stage(40, ShaderStages::COMPUTE),
         ],
     );
     let gi_layout = BindGroupLayoutDescriptor::new(
@@ -747,6 +764,28 @@ fn texture_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupL
             view_dimension: TextureViewDimension::D2,
             multisampled: false,
         },
+        count: None,
+    }
+}
+
+fn texture_array_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Float { filterable: true },
+            view_dimension: TextureViewDimension::D2Array,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn sampler_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: BindingType::Sampler(SamplerBindingType::Filtering),
         count: None,
     }
 }
@@ -1157,6 +1196,18 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (20, allocation.chunk_lookup_buffer.as_entire_binding()),
             )),
         );
+        let Some(terrain_atlas_handle) = world
+            .get_resource::<ExtractedNaadfTerrainAtlas>()
+            .and_then(|atlas| atlas.albedo.as_ref())
+        else {
+            publish_preview_node_stage(world, 25);
+            return Ok(());
+        };
+        let gpu_images = world.resource::<RenderAssets<GpuImage>>();
+        let Some(terrain_albedo) = gpu_images.get(terrain_atlas_handle) else {
+            publish_preview_node_stage(world, 26);
+            return Ok(());
+        };
         let first_hit_group = render_device.create_bind_group(
             "naadf_first_hit_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.first_hit_layout),
@@ -1184,6 +1235,8 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (23, BindingResource::TextureView(&preview_motion_view)),
                 (24, allocation.stats_buffer.as_entire_binding()),
                 (25, local_light_allocation.buffer.as_entire_binding()),
+                (39, BindingResource::TextureView(&terrain_albedo.texture_view)),
+                (40, BindingResource::Sampler(&terrain_albedo.sampler)),
             )),
         );
         let gi_group = render_device.create_bind_group(

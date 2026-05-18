@@ -779,6 +779,9 @@ mod tests {
         assert!(first_hit.contains("fn preview_naadf_first_hit_from_hit"));
         assert!(first_hit.contains("fn naadf_preview_shaded_color"));
         assert!(first_hit.contains("fn naadf_preview_material_color"));
+        assert!(first_hit.contains("textureSampleLevel"));
+        assert!(first_hit.contains("naadf_preview_textured_albedo"));
+        assert!(first_hit.contains("naadf_blocky_material_base"));
         assert!(first_hit.contains("fog_color_start"));
         assert!(first_hit.contains("fog_end_strength"));
         assert!(first_hit.contains("fn naadf_apply_preview_fog"));

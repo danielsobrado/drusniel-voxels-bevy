@@ -71,6 +71,8 @@ struct NaadfLocalLightRecord {
 @group(3) @binding(22) var<storage, read> naadf_entity_material_records: array<u32>;
 @group(3) @binding(24) var<storage, read_write> naadf_first_hit_stats: NaadfFirstHitStats;
 @group(3) @binding(25) var<storage, read> naadf_local_light_records: array<NaadfLocalLightRecord>;
+@group(3) @binding(39) var naadf_terrain_albedo_array: texture_2d_array<f32>;
+@group(3) @binding(40) var naadf_terrain_sampler: sampler;
 
 @compute @workgroup_size(8, 8, 1)
 fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -184,7 +186,8 @@ fn naadf_record_first_hit_telemetry(hit: NaadfHit) {
 fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u32>) -> NaadfFirstHitPreview {
     let world_pos = ray.origin + normalize(ray.direction) * hit.distance;
     let normal = naadf_world_surface_normal(hit, config.y, config.z);
-    let albedo = naadf_preview_material_color(hit.material_id);
+    let texture_lod = naadf_texture_lod_for_hit(hit.distance);
+    let albedo = naadf_preview_textured_albedo(hit.material_id, world_pos, normal, texture_lod);
     let base_color = naadf_preview_shaded_color_with_albedo(albedo, normal);
     return NaadfFirstHitPreview(
         hit.hit,
@@ -194,6 +197,62 @@ fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u
         world_pos,
         hit.material_id,
     );
+}
+
+fn naadf_texture_lod_for_hit(distance: f32) -> f32 {
+    let spread = tan(naadf_first_hit_params.camera_forward_fov_y.w * 0.5) / 360.0;
+    return clamp(log2(max(1.0 + distance * spread, 1.0)), 0.0, 8.0);
+}
+
+fn naadf_preview_textured_albedo(
+    material_id: u32,
+    world_pos: vec3<f32>,
+    world_normal: vec3<f32>,
+    texture_lod: f32,
+) -> vec3<f32> {
+    let weights = naadf_triplanar_weights(world_normal);
+    let uv_yz = world_pos.yz / 2.0;
+    let uv_xz = world_pos.xz / 2.0;
+    let uv_xy = world_pos.xy / 2.0;
+    let layer_x = naadf_blocky_array_layer(material_id, vec3<f32>(sign(world_normal.x), 0.0, 0.0));
+    let layer_y = naadf_blocky_array_layer(material_id, vec3<f32>(0.0, sign(world_normal.y), 0.0));
+    let layer_z = naadf_blocky_array_layer(material_id, vec3<f32>(0.0, 0.0, sign(world_normal.z)));
+    return textureSampleLevel(naadf_terrain_albedo_array, naadf_terrain_sampler, uv_yz, layer_x, texture_lod).rgb * weights.x +
+        textureSampleLevel(naadf_terrain_albedo_array, naadf_terrain_sampler, uv_xz, layer_y, texture_lod).rgb * weights.y +
+        textureSampleLevel(naadf_terrain_albedo_array, naadf_terrain_sampler, uv_xy, layer_z, texture_lod).rgb * weights.z;
+}
+
+fn naadf_triplanar_weights(world_normal: vec3<f32>) -> vec3<f32> {
+    let normal_abs = abs(world_normal);
+    let sharp = pow(normal_abs, vec3<f32>(4.0));
+    return sharp / max(sharp.x + sharp.y + sharp.z, 0.001);
+}
+
+fn naadf_blocky_array_layer(material_id: u32, normal: vec3<f32>) -> i32 {
+    let base = naadf_blocky_material_base(material_id);
+    if normal.y > 0.5 {
+        return i32(base);
+    }
+    if normal.y < -0.5 {
+        return i32(base + 2u);
+    }
+    return i32(base + 1u);
+}
+
+fn naadf_blocky_material_base(material_id: u32) -> u32 {
+    if material_id == 1u || material_id == 9u {
+        return 0u;
+    }
+    if material_id == 2u || material_id == 6u || material_id == 8u {
+        return 3u;
+    }
+    if material_id == 3u || material_id == 4u || material_id == 10u || material_id == 11u {
+        return 6u;
+    }
+    if material_id == 5u {
+        return 9u;
+    }
+    return 0u;
 }
 
 fn preview_naadf_first_hit_entities(ray: NaadfRay, entity_count: u32) -> NaadfFirstHitPreview {
