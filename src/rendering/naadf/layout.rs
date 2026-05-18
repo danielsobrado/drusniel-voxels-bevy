@@ -120,6 +120,16 @@ pub const VOXELS_PER_CHUNK_AXIS: u32 = CHUNK_SIZE_U32;
 pub const VOXELS_PER_BLOCK: u32 = 64;
 pub const BLOCKS_PER_CHUNK: u32 = 64;
 pub const VOXELS_PER_CHUNK: u32 = CHUNK_VOLUME as u32;
+pub const MIP_LEVEL_COUNT: u32 = 5;
+pub const MIP_LEVEL_AXES: [u32; MIP_LEVEL_COUNT as usize] = [16, 8, 4, 2, 1];
+pub const MIP_LEVEL_CELL_COUNTS: [u32; MIP_LEVEL_COUNT as usize] = [4096, 512, 64, 8, 1];
+pub const MIP_LEVEL_OFFSETS: [u32; MIP_LEVEL_COUNT as usize] = [0, 4096, 4608, 4672, 4680];
+pub const MIP_CELLS_PER_CHUNK: u32 = 4681;
+
+pub const TRAVERSAL_RECORD_STATE_SHIFT: u32 = 30;
+pub const TRAVERSAL_RECORD_THIN_OR_HOLE_BIT: u32 = 1 << 29;
+pub const TRAVERSAL_RECORD_CHILD_MASK_MASK: u32 = 0xff;
+pub const PAYLOAD_RECORD_MATERIAL_MASK: u32 = 0x0000_ffff;
 
 const NODE_STATE_SHIFT: u32 = 30;
 const NODE_PAYLOAD_MASK: u32 = (1 << NODE_STATE_SHIFT) - 1;
@@ -153,6 +163,68 @@ impl PackedNaadfNode {
     pub fn payload(self) -> u32 {
         self.0 & NODE_PAYLOAD_MASK
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaadfTraversalRecord(pub u32);
+
+impl NaadfTraversalRecord {
+    pub fn new(state: NaadfNodeState, child_mask: u8, thin_or_hole: bool) -> Self {
+        let mut raw = (state as u32) << TRAVERSAL_RECORD_STATE_SHIFT;
+        raw |= child_mask as u32 & TRAVERSAL_RECORD_CHILD_MASK_MASK;
+        if thin_or_hole {
+            raw |= TRAVERSAL_RECORD_THIN_OR_HOLE_BIT;
+        }
+        Self(raw)
+    }
+
+    pub fn state(self) -> NaadfNodeState {
+        match self.0 >> TRAVERSAL_RECORD_STATE_SHIFT {
+            0 => NaadfNodeState::UniformEmpty,
+            1 => NaadfNodeState::UniformFull,
+            2 => NaadfNodeState::Children,
+            _ => NaadfNodeState::Reserved,
+        }
+    }
+
+    pub fn child_mask(self) -> u8 {
+        (self.0 & TRAVERSAL_RECORD_CHILD_MASK_MASK) as u8
+    }
+
+    pub fn thin_or_hole(self) -> bool {
+        self.0 & TRAVERSAL_RECORD_THIN_OR_HOLE_BIT != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaadfPayloadRecord(pub u32);
+
+impl NaadfPayloadRecord {
+    pub fn material(material_id: u16) -> Self {
+        Self(material_id as u32 & PAYLOAD_RECORD_MATERIAL_MASK)
+    }
+
+    pub fn material_id(self) -> u16 {
+        (self.0 & PAYLOAD_RECORD_MATERIAL_MASK) as u16
+    }
+}
+
+pub fn mip_level_axis(level: u32) -> u32 {
+    MIP_LEVEL_AXES[level as usize]
+}
+
+pub fn mip_level_cell_count(level: u32) -> u32 {
+    MIP_LEVEL_CELL_COUNTS[level as usize]
+}
+
+pub fn mip_level_offset(level: u32) -> u32 {
+    MIP_LEVEL_OFFSETS[level as usize]
+}
+
+pub fn mip_cell_index(level: u32, local: UVec3) -> usize {
+    let axis = mip_level_axis(level);
+    debug_assert!(local.x < axis && local.y < axis && local.z < axis);
+    (mip_level_offset(level) + local.x + local.y * axis + local.z * axis * axis) as usize
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +448,27 @@ mod tests {
             wgsl_u32_const(common, "NAADF_CHUNK_BOUND_FIELD_MASK"),
             CHUNK_BOUND_FIELD_MASK
         );
+        assert_eq!(wgsl_u32_const(common, "NAADF_MIP_LEVEL_COUNT"), MIP_LEVEL_COUNT);
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_MIP_CELLS_PER_CHUNK"),
+            MIP_CELLS_PER_CHUNK
+        );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT"),
+            TRAVERSAL_RECORD_THIN_OR_HOLE_BIT
+        );
+    }
+
+    #[test]
+    fn traversal_and_payload_records_keep_hot_and_cold_data_split() {
+        let traversal = NaadfTraversalRecord::new(NaadfNodeState::Children, 0b1010_0101, true);
+        let payload = NaadfPayloadRecord::material(42);
+
+        assert_eq!(traversal.state(), NaadfNodeState::Children);
+        assert_eq!(traversal.child_mask(), 0b1010_0101);
+        assert!(traversal.thin_or_hole());
+        assert_eq!(payload.material_id(), 42);
+        assert_eq!(mip_cell_index(4, UVec3::ZERO), (MIP_CELLS_PER_CHUNK - 1) as usize);
     }
 
     #[test]

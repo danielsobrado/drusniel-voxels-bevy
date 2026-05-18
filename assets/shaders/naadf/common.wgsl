@@ -28,6 +28,22 @@ const NAADF_BLOCK_RECORD_BYTES: u32 = 32u;
 const NAADF_CHUNK_RECORD_BYTES: u32 = 32u;
 const NAADF_PACKED_BLOCK_WORDS: u32 = 8u;
 const NAADF_PACKED_CHUNK_WORDS: u32 = 8u;
+const NAADF_MIP_LEVEL_COUNT: u32 = 5u;
+const NAADF_MIP_LEVEL_0_AXIS: u32 = 16u;
+const NAADF_MIP_LEVEL_1_AXIS: u32 = 8u;
+const NAADF_MIP_LEVEL_2_AXIS: u32 = 4u;
+const NAADF_MIP_LEVEL_3_AXIS: u32 = 2u;
+const NAADF_MIP_LEVEL_4_AXIS: u32 = 1u;
+const NAADF_MIP_LEVEL_0_OFFSET: u32 = 0u;
+const NAADF_MIP_LEVEL_1_OFFSET: u32 = 4096u;
+const NAADF_MIP_LEVEL_2_OFFSET: u32 = 4608u;
+const NAADF_MIP_LEVEL_3_OFFSET: u32 = 4672u;
+const NAADF_MIP_LEVEL_4_OFFSET: u32 = 4680u;
+const NAADF_MIP_CELLS_PER_CHUNK: u32 = 4681u;
+const NAADF_TRAVERSAL_RECORD_STATE_SHIFT: u32 = 30u;
+const NAADF_TRAVERSAL_RECORD_CHILD_MASK_MASK: u32 = 0xffu;
+const NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT: u32 = 0x20000000u;
+const NAADF_PAYLOAD_RECORD_MATERIAL_MASK: u32 = 0x0000ffffu;
 
 fn naadf_node_state(node: u32) -> u32 {
     return node >> NAADF_NODE_STATE_SHIFT;
@@ -43,4 +59,26 @@ fn naadf_make_node(state: u32, payload: u32) -> u32 {
 
 fn naadf_node_is_occupied_uniform(node: u32) -> bool {
     return naadf_node_state(node) == NAADF_NODE_UNIFORM_FULL;
+}
+
+fn naadf_make_traversal_record(state: u32, child_mask: u32, thin_or_hole: bool) -> u32 {
+    return (state << NAADF_TRAVERSAL_RECORD_STATE_SHIFT) |
+        (child_mask & NAADF_TRAVERSAL_RECORD_CHILD_MASK_MASK) |
+        select(0u, NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT, thin_or_hole);
+}
+
+fn naadf_traversal_state(record: u32) -> u32 {
+    return record >> NAADF_TRAVERSAL_RECORD_STATE_SHIFT;
+}
+
+fn naadf_traversal_child_mask(record: u32) -> u32 {
+    return record & NAADF_TRAVERSAL_RECORD_CHILD_MASK_MASK;
+}
+
+fn naadf_traversal_thin_or_hole(record: u32) -> bool {
+    return (record & NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT) != 0u;
+}
+
+fn naadf_payload_material_id(record: u32) -> u32 {
+    return record & NAADF_PAYLOAD_RECORD_MATERIAL_MASK;
 }
