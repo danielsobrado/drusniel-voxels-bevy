@@ -563,6 +563,25 @@ mod tests {
     }
 
     #[test]
+    fn wgsl_world_trace_declares_chunk_lookup_and_boundary_helpers() {
+        let world_trace = include_str!("../../../assets/shaders/naadf/world_trace.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(world_trace, "shaders/naadf/world_trace.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/ray_trace.wgsl"
+            )
+        }));
+        assert!(world_trace.contains("fn trace_naadf_world"));
+        assert!(world_trace.contains("naadf_lookup_chunk_slot"));
+        assert!(world_trace.contains("naadf_world_chunk_for_position"));
+        assert!(world_trace.contains("naadf_world_next_chunk_boundary"));
+    }
+
+    #[test]
     fn wgsl_block_builder_imports_layout_and_uses_raw_voxels() {
         let build_blocks = include_str!("../../../assets/shaders/naadf/build_blocks.wgsl");
         let shader =

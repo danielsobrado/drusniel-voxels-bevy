@@ -21,14 +21,10 @@ fn trace_naadf_world(
         select(-1i, 1i, direction.y >= 0.0),
         select(-1i, 1i, direction.z >= 0.0),
     );
-    var chunk_pos = vec3<i32>(floor(ray.origin / f32(NAADF_VOXELS_PER_CHUNK_AXIS)));
+    var chunk_pos = naadf_world_chunk_for_position(ray.origin);
     let chunk_size = f32(NAADF_VOXELS_PER_CHUNK_AXIS);
     let t_delta = vec3<f32>(chunk_size) / max(abs(direction), vec3<f32>(0.000001));
-    let next_boundary = (vec3<f32>(chunk_pos) + vec3<f32>(
-        select(0.0, 1.0, step.x > 0i),
-        select(0.0, 1.0, step.y > 0i),
-        select(0.0, 1.0, step.z > 0i),
-    )) * chunk_size;
+    let next_boundary = naadf_world_next_chunk_boundary(chunk_pos, step);
     var t_max = abs((next_boundary - ray.origin) / max(abs(direction), vec3<f32>(0.000001)));
     var traveled = 0.0;
 
@@ -65,6 +61,18 @@ fn trace_naadf_world(
     }
 
     return naadf_make_miss(chunk_steps_taken, miss_reason);
+}
+
+fn naadf_world_chunk_for_position(position: vec3<f32>) -> vec3<i32> {
+    return vec3<i32>(floor(position / f32(NAADF_VOXELS_PER_CHUNK_AXIS)));
+}
+
+fn naadf_world_next_chunk_boundary(chunk_pos: vec3<i32>, step: vec3<i32>) -> vec3<f32> {
+    return (vec3<f32>(chunk_pos) + vec3<f32>(
+        select(0.0, 1.0, step.x > 0i),
+        select(0.0, 1.0, step.y > 0i),
+        select(0.0, 1.0, step.z > 0i),
+    )) * f32(NAADF_VOXELS_PER_CHUNK_AXIS);
 }
 
 fn naadf_lookup_chunk_slot(chunk_pos: vec3<i32>, lookup_count: u32) -> u32 {
