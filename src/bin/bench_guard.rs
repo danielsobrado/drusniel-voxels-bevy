@@ -75,6 +75,11 @@ struct NaadfGuardConfig {
     max_uploaded_chunks_per_frame: f64,
     max_stage_invocations_per_frame: f64,
     max_gi_rays_per_frame: f64,
+    max_sun_visibility_rays_per_pixel: f64,
+    max_contact_shadow_rays_per_pixel: f64,
+    max_terrain_ao_rays_per_pixel: f64,
+    max_short_range_rays_per_pixel: f64,
+    max_froxel_sun_rays_per_frame: f64,
     max_cache_rebuild_ms: f64,
     max_gpu_upload_ms: f64,
     max_frame_time_regression_percent: f64,
@@ -164,6 +169,11 @@ impl Default for NaadfGuardConfig {
             max_uploaded_chunks_per_frame: 8.0,
             max_stage_invocations_per_frame: 4.0,
             max_gi_rays_per_frame: 8_388_608.0,
+            max_sun_visibility_rays_per_pixel: 1.0,
+            max_contact_shadow_rays_per_pixel: 1.0,
+            max_terrain_ao_rays_per_pixel: 4.0,
+            max_short_range_rays_per_pixel: 5.0,
+            max_froxel_sun_rays_per_frame: 65_536.0,
             max_cache_rebuild_ms: 5.0,
             max_gpu_upload_ms: 5.0,
             max_frame_time_regression_percent: 10.0,
@@ -191,7 +201,7 @@ impl GuardConfig {
 
 impl NaadfGuardConfig {
     fn metric_checks(&self) -> Vec<GuardCheck> {
-        let mut checks = Vec::with_capacity(self.targets.len() * 15);
+        let mut checks = Vec::with_capacity(self.targets.len() * 20);
         for target in &self.targets {
             checks.push(naadf_area_check(
                 &target.label,
@@ -313,6 +323,49 @@ impl NaadfGuardConfig {
                 self.max_gi_rays_per_frame,
                 "rays",
             ));
+            for (metric_name, area, limit, unit) in [
+                (
+                    "sun_visibility_rays_per_pixel",
+                    "naadf.radiance_sun_visibility_rays_per_pixel",
+                    self.max_sun_visibility_rays_per_pixel,
+                    "rays/pixel",
+                ),
+                (
+                    "contact_shadow_rays_per_pixel",
+                    "naadf.radiance_contact_shadow_rays_per_pixel",
+                    self.max_contact_shadow_rays_per_pixel,
+                    "rays/pixel",
+                ),
+                (
+                    "terrain_ao_rays_per_pixel",
+                    "naadf.radiance_terrain_ao_rays_per_pixel",
+                    self.max_terrain_ao_rays_per_pixel,
+                    "rays/pixel",
+                ),
+                (
+                    "short_range_rays_per_pixel",
+                    "naadf.radiance_short_range_rays_per_pixel",
+                    self.max_short_range_rays_per_pixel,
+                    "rays/pixel",
+                ),
+                (
+                    "froxel_sun_rays_per_frame",
+                    "naadf.froxel_sun_mask_max_rays_per_frame",
+                    self.max_froxel_sun_rays_per_frame,
+                    "rays",
+                ),
+            ] {
+                checks.push(naadf_metric_check(
+                    &target.label,
+                    &target.scene,
+                    &target.checkpoint,
+                    metric_name,
+                    area,
+                    warning_threshold(limit),
+                    limit,
+                    unit,
+                ));
+            }
         }
         checks
     }
@@ -850,6 +903,11 @@ mod tests {
             max_avg_ray_steps = 90
             max_uploaded_chunks_per_frame = 8
             max_frame_time_regression_percent = 10
+            max_sun_visibility_rays_per_pixel = 1
+            max_contact_shadow_rays_per_pixel = 1
+            max_terrain_ao_rays_per_pixel = 4
+            max_short_range_rays_per_pixel = 5
+            max_froxel_sun_rays_per_frame = 65536
             "#,
         )
         .expect("NAADF guard config should parse");
@@ -871,6 +929,18 @@ mod tests {
                 .iter()
                 .any(|check| check.name == "naadf_gi_avg_ray_steps")
         );
+        assert!(checks.iter().any(|check| {
+            check.name == "naadf_gi_sun_visibility_rays_per_pixel"
+                && check.area == "Counter naadf.radiance_sun_visibility_rays_per_pixel"
+        }));
+        assert!(checks.iter().any(|check| {
+            check.name == "naadf_gi_short_range_rays_per_pixel"
+                && check.area == "Counter naadf.radiance_short_range_rays_per_pixel"
+        }));
+        assert!(checks.iter().any(|check| {
+            check.name == "naadf_gi_froxel_sun_rays_per_frame"
+                && check.area == "Counter naadf.froxel_sun_mask_max_rays_per_frame"
+        }));
         assert!(
             checks
                 .iter()
