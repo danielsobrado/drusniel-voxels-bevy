@@ -560,6 +560,8 @@ mod tests {
         assert!(ray_trace.contains("fn naadf_directional_skip_for_step"));
         assert!(ray_trace.contains("fn naadf_mip_bounds_for_step"));
         assert!(ray_trace.contains("naadf_mip_bounds_records"));
+        assert!(ray_trace.contains("fn trace_naadf_lod"));
+        assert!(ray_trace.contains("fn naadf_select_mip_level"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
         assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
     }
@@ -578,6 +580,7 @@ mod tests {
             )
         }));
         assert!(world_trace.contains("fn trace_naadf_world"));
+        assert!(world_trace.contains("fn trace_naadf_world_lod"));
         assert!(world_trace.contains("naadf_lookup_chunk_slot"));
         assert!(world_trace.contains("naadf_world_chunk_for_position"));
         assert!(world_trace.contains("naadf_world_next_chunk_boundary"));
@@ -770,6 +773,8 @@ mod tests {
         assert!(first_hit.contains("fn naadf_first_hit_preview"));
         assert!(first_hit.contains("fn preview_naadf_first_hit_world"));
         assert!(first_hit.contains("trace_naadf_world"));
+        assert!(first_hit.contains("trace_naadf_world_lod"));
+        assert!(first_hit.contains("naadf_lod_threshold_jitter"));
         assert!(first_hit.contains("naadf_first_hit_output"));
         assert!(first_hit.contains("fn preview_naadf_first_hit_from_hit"));
         assert!(first_hit.contains("fn naadf_preview_shaded_color"));

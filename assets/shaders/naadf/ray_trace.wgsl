@@ -1,4 +1,4 @@
-#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_X, NAADF_CHUNK_BOUND_OFFSET_POS_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Z, NAADF_MIP_BOUND_OFFSET_NEG_X, NAADF_MIP_BOUND_OFFSET_NEG_Y, NAADF_MIP_BOUND_OFFSET_NEG_Z, NAADF_MIP_BOUND_OFFSET_POS_X, NAADF_MIP_BOUND_OFFSET_POS_Y, NAADF_MIP_BOUND_OFFSET_POS_Z, NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_0_OFFSET, NAADF_MIP_LEVEL_1_OFFSET, NAADF_MIP_LEVEL_2_OFFSET, NAADF_MIP_LEVEL_3_OFFSET, NAADF_MIP_LEVEL_4_OFFSET, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state, naadf_traversal_state, naadf_traversal_thin_or_hole
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_X, NAADF_CHUNK_BOUND_OFFSET_POS_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Z, NAADF_MIP_BOUND_OFFSET_NEG_X, NAADF_MIP_BOUND_OFFSET_NEG_Y, NAADF_MIP_BOUND_OFFSET_NEG_Z, NAADF_MIP_BOUND_OFFSET_POS_X, NAADF_MIP_BOUND_OFFSET_POS_Y, NAADF_MIP_BOUND_OFFSET_POS_Z, NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_0_OFFSET, NAADF_MIP_LEVEL_1_OFFSET, NAADF_MIP_LEVEL_2_OFFSET, NAADF_MIP_LEVEL_3_OFFSET, NAADF_MIP_LEVEL_4_OFFSET, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state, naadf_payload_material_id, naadf_traversal_state, naadf_traversal_thin_or_hole
 #import "shaders/naadf/layout.wgsl" naadf_block_coord_for_voxel, naadf_block_index_in_chunk, naadf_chunk_world_origin, naadf_local_coord_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read> naadf_voxel_records: array<u32>;
@@ -33,6 +33,7 @@ const NAADF_MISS_REASON_VOXEL_BUDGET: u32 = 2u;
 const NAADF_MISS_REASON_CHUNK_BUDGET: u32 = 3u;
 const NAADF_MISS_REASON_DISTANCE_CLAMP: u32 = 4u;
 const NAADF_MISS_REASON_NO_LOOKUP: u32 = 5u;
+const NAADF_RAY_PURPOSE_PREVIEW_PRIMARY: u32 = 5u;
 
 fn trace_naadf(
     ray: NaadfRay,
@@ -227,6 +228,158 @@ fn trace_naadf_chunk(
     );
 }
 
+fn trace_naadf_chunk_lod(
+    ray: NaadfRay,
+    chunk_pos: vec3<i32>,
+    chunk_index: u32,
+    max_steps: u32,
+    cone_config: vec4<f32>,
+) -> NaadfHit {
+    let chunk_record_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
+    if chunk_record_base + 5u >= arrayLength(&naadf_chunk_records) {
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
+    }
+    if !naadf_chunk_record_valid(chunk_record_base) {
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
+    }
+    return trace_naadf_lod(
+        ray,
+        chunk_pos,
+        naadf_chunk_root_record(chunk_record_base),
+        chunk_index,
+        max_steps,
+        cone_config,
+    );
+}
+
+fn trace_naadf_lod(
+    ray: NaadfRay,
+    chunk_pos: vec3<i32>,
+    chunk_node: u32,
+    chunk_index: u32,
+    max_steps: u32,
+    cone_config: vec4<f32>,
+) -> NaadfHit {
+    if naadf_node_state(chunk_node) == NAADF_NODE_UNIFORM_FULL {
+        return trace_naadf(
+            ray,
+            chunk_pos,
+            chunk_node,
+            chunk_index * NAADF_VOXELS_PER_CHUNK,
+            chunk_index * NAADF_VOXELS_PER_CHUNK,
+            max_steps,
+        );
+    }
+
+    let direction = normalize(ray.direction);
+    let step = naadf_step_direction(direction);
+    let inv_direction_abs = naadf_t_delta(direction);
+    let entry_t = naadf_ray_chunk_entry(ray.origin, direction, chunk_pos);
+    if entry_t < 0.0 || entry_t > ray.max_distance {
+        return naadf_make_miss(0u, NAADF_MISS_REASON_CLEAN_EXIT);
+    }
+
+    var traveled = max(entry_t, 0.0) + 0.0001;
+    var normal = vec3<f32>(0.0);
+    let chunk_origin = naadf_chunk_world_origin(chunk_pos);
+    let chunk_end = chunk_origin + vec3<i32>(i32(NAADF_VOXELS_PER_CHUNK_AXIS));
+    let voxel_base_record = chunk_index * NAADF_VOXELS_PER_CHUNK;
+
+    var steps_taken = 0u;
+    var miss_reason = NAADF_MISS_REASON_VOXEL_BUDGET;
+    for (var steps = 0u; steps < max_steps; steps = steps + 1u) {
+        steps_taken = steps + 1u;
+        if traveled > ray.max_distance {
+            miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
+            break;
+        }
+        let current_position = ray.origin + direction * traveled;
+        let cell_position = current_position + normal * -0.5;
+        let voxel = vec3<i32>(floor(cell_position));
+        if any(voxel < chunk_origin) || any(voxel >= chunk_end) {
+            miss_reason = NAADF_MISS_REASON_CLEAN_EXIT;
+            break;
+        }
+
+        let local = vec3<u32>(voxel - chunk_origin);
+        let selected_level = naadf_select_mip_level(ray, traveled, cone_config);
+        let mip_level = min(selected_level, 4u);
+        let mip_cell_size = 1u << mip_level;
+        let mip_local = local / mip_cell_size;
+        let mip_index = naadf_mip_record_index(chunk_index, mip_level, mip_local);
+        let mip_record = naadf_mip_traversal_records[mip_index];
+        let mip_state = naadf_traversal_state(mip_record);
+        if mip_state == NAADF_NODE_UNIFORM_EMPTY {
+            let mip_bounds = naadf_mip_bounds_for_step(naadf_mip_bounds_records[mip_index], step) *
+                vec3<u32>(mip_cell_size) +
+                naadf_distance_to_mip_cell_edge(local, mip_level, step);
+            let axis = naadf_step_axis_from_bounds(
+                current_position,
+                direction,
+                step,
+                normal,
+                mip_bounds,
+                inv_direction_abs,
+            );
+            normal = naadf_normal_for_step_axis(axis.axis, step);
+            traveled = traveled + max(axis.distance, 0.0001);
+            continue;
+        }
+        if mip_level > 0u && mip_state == NAADF_NODE_UNIFORM_FULL {
+            return naadf_make_hit(
+                ray,
+                current_position,
+                voxel,
+                local,
+                naadf_hit_face_normal(current_position, voxel, direction),
+                naadf_payload_material_id(naadf_mip_payload_records[mip_index]),
+                steps,
+            );
+        }
+        if mip_level > 0u &&
+            ray.purpose != NAADF_RAY_PURPOSE_PREVIEW_PRIMARY &&
+            !naadf_traversal_thin_or_hole(mip_record) {
+            return naadf_make_hit(
+                ray,
+                current_position,
+                voxel,
+                local,
+                naadf_hit_face_normal(current_position, voxel, direction),
+                naadf_payload_material_id(naadf_mip_payload_records[mip_index]),
+                steps,
+            );
+        }
+
+        let local_index = naadf_voxel_index_in_chunk(local);
+        let voxel_record = naadf_voxel_records[voxel_base_record + local_index];
+        if naadf_voxel_record_occupied(voxel_record) {
+            return naadf_make_hit(
+                ray,
+                current_position,
+                voxel,
+                local,
+                naadf_hit_face_normal(current_position, voxel, direction),
+                naadf_material_records[voxel_base_record + local_index],
+                steps,
+            );
+        }
+
+        let bounds_in_dir = naadf_directional_skip_for_step(voxel_record, step);
+        let axis = naadf_step_axis_from_bounds(
+            current_position,
+            direction,
+            step,
+            normal,
+            bounds_in_dir,
+            inv_direction_abs,
+        );
+        normal = naadf_normal_for_step_axis(axis.axis, step);
+        traveled = traveled + max(axis.distance, 0.0001);
+    }
+
+    return naadf_make_miss(steps_taken, miss_reason);
+}
+
 fn naadf_chunk_voxel_occupied_at(chunk_index: u32, local: vec3<u32>) -> bool {
     if any(local >= vec3<u32>(NAADF_VOXELS_PER_CHUNK_AXIS)) {
         return false;
@@ -342,6 +495,59 @@ fn naadf_make_hit(
         normal,
         NAADF_MISS_REASON_NONE,
     );
+}
+
+fn naadf_distance_to_mip_cell_edge(local: vec3<u32>, level: u32, step: vec3<i32>) -> vec3<u32> {
+    let cell_size = 1u << level;
+    let cell_local = local % vec3<u32>(cell_size);
+    let max_local = cell_size - 1u;
+    return vec3<u32>(
+        select(cell_local.x, max_local - cell_local.x, step.x > 0i),
+        select(cell_local.y, max_local - cell_local.y, step.y > 0i),
+        select(cell_local.z, max_local - cell_local.z, step.z > 0i),
+    );
+}
+
+fn naadf_normal_for_step_axis(axis: u32, step: vec3<i32>) -> vec3<f32> {
+    if axis == 0u {
+        return vec3<f32>(f32(-step.x), 0.0, 0.0);
+    }
+    if axis == 1u {
+        return vec3<f32>(0.0, f32(-step.y), 0.0);
+    }
+    return vec3<f32>(0.0, 0.0, f32(-step.z));
+}
+
+fn naadf_select_mip_level(ray: NaadfRay, distance_along_ray: f32, cone_config: vec4<f32>) -> u32 {
+    let base_footprint = max(cone_config.x, 0.0);
+    let cone_spread = max(cone_config.y, 0.0);
+    let jitter = cone_config.z;
+    let purpose_bias = naadf_lod_bias_for_purpose(ray.purpose);
+    let footprint = max(base_footprint + distance_along_ray * cone_spread + jitter, 1.0);
+    let biased_footprint = footprint * exp2(purpose_bias);
+    if biased_footprint <= 1.5 {
+        return 0u;
+    }
+    if biased_footprint <= 3.0 {
+        return 1u;
+    }
+    if biased_footprint <= 6.0 {
+        return 2u;
+    }
+    if biased_footprint <= 12.0 {
+        return 3u;
+    }
+    return 4u;
+}
+
+fn naadf_lod_bias_for_purpose(purpose: u32) -> f32 {
+    if purpose == NAADF_RAY_PURPOSE_PREVIEW_PRIMARY {
+        return -0.75;
+    }
+    if purpose == 0u {
+        return -0.5;
+    }
+    return 0.75;
 }
 
 fn naadf_mip_bounds_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {

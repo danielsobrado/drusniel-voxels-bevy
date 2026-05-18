@@ -1,6 +1,6 @@
 #import "shaders/naadf/common.wgsl" NAADF_VOXELS_PER_CHUNK_AXIS
 #import "shaders/naadf/layout.wgsl" naadf_chunk_world_origin
-#import "shaders/naadf/ray_trace.wgsl" NAADF_MISS_REASON_CHUNK_BUDGET, NAADF_MISS_REASON_DISTANCE_CLAMP, NAADF_MISS_REASON_NO_LOOKUP, NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk
+#import "shaders/naadf/ray_trace.wgsl" NAADF_MISS_REASON_CHUNK_BUDGET, NAADF_MISS_REASON_DISTANCE_CLAMP, NAADF_MISS_REASON_NO_LOOKUP, NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk, trace_naadf_chunk_lod
 
 @group(3) @binding(20) var<storage, read> naadf_chunk_lookup_records: array<vec4<u32>>;
 
@@ -39,6 +39,66 @@ fn trace_naadf_world(
         let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
         if chunk_index != 0xffffffffu && chunk_index < chunk_count {
             let hit = trace_naadf_chunk(ray, chunk_pos, chunk_index, max_steps);
+            if hit.hit != 0u {
+                return hit;
+            }
+        }
+
+        let axis = naadf_chunk_step_axis(t_max);
+        if axis == 0u {
+            chunk_pos.x = chunk_pos.x + step.x;
+            traveled = t_max.x + 0.0001;
+            t_max.x = t_max.x + t_delta.x;
+        } else if axis == 1u {
+            chunk_pos.y = chunk_pos.y + step.y;
+            traveled = t_max.y + 0.0001;
+            t_max.y = t_max.y + t_delta.y;
+        } else {
+            chunk_pos.z = chunk_pos.z + step.z;
+            traveled = t_max.z + 0.0001;
+            t_max.z = t_max.z + t_delta.z;
+        }
+    }
+
+    return naadf_make_miss(chunk_steps_taken, miss_reason);
+}
+
+fn trace_naadf_world_lod(
+    ray: NaadfRay,
+    max_steps: u32,
+    chunk_count: u32,
+    chunk_lookup_count: u32,
+    cone_config: vec4<f32>,
+) -> NaadfHit {
+    let lookup_count = min(chunk_lookup_count, arrayLength(&naadf_chunk_lookup_records));
+    if lookup_count == 0u {
+        return naadf_make_miss(0u, NAADF_MISS_REASON_NO_LOOKUP);
+    }
+
+    let direction = normalize(ray.direction);
+    let step = vec3<i32>(
+        select(-1i, 1i, direction.x >= 0.0),
+        select(-1i, 1i, direction.y >= 0.0),
+        select(-1i, 1i, direction.z >= 0.0),
+    );
+    var chunk_pos = naadf_world_chunk_for_position(ray.origin);
+    let chunk_size = f32(NAADF_VOXELS_PER_CHUNK_AXIS);
+    let t_delta = vec3<f32>(chunk_size) / max(abs(direction), vec3<f32>(0.000001));
+    let next_boundary = naadf_world_next_chunk_boundary(chunk_pos, step);
+    var t_max = abs((next_boundary - ray.origin) / max(abs(direction), vec3<f32>(0.000001)));
+    var traveled = 0.0;
+
+    var chunk_steps_taken = 0u;
+    var miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
+    for (var chunk_step = 0u; chunk_step < max_steps; chunk_step = chunk_step + 1u) {
+        chunk_steps_taken = chunk_step + 1u;
+        if traveled > ray.max_distance {
+            miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
+            break;
+        }
+        let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
+        if chunk_index != 0xffffffffu && chunk_index < chunk_count {
+            let hit = trace_naadf_chunk_lod(ray, chunk_pos, chunk_index, max_steps, cone_config);
             if hit.hit != 0u {
                 return hit;
             }

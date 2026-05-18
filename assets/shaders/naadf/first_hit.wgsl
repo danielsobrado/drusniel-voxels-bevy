@@ -1,5 +1,5 @@
 #import "shaders/naadf/ray_trace.wgsl" NaadfHit, NaadfRay
-#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world
+#import "shaders/naadf/world_trace.wgsl" naadf_world_surface_normal, trace_naadf_world_lod
 
 struct NaadfFirstHitParams {
     camera_origin_max_distance: vec4<f32>,
@@ -91,9 +91,14 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
         naadf_first_hit_params.camera_origin_max_distance.xyz,
         ray_direction,
         naadf_first_hit_params.camera_origin_max_distance.w,
-        0u,
+        5u,
     );
-    let terrain_preview = preview_naadf_first_hit_world(ray, naadf_first_hit_params.config.xyz);
+    let cone_spread = (2.0 * fov_scale) / max(f32(output_size.y), 1.0);
+    let terrain_preview = preview_naadf_first_hit_world(
+        ray,
+        naadf_first_hit_params.config.xyz,
+        vec4<f32>(1.0, cone_spread, naadf_lod_threshold_jitter(id.xy), 0.0),
+    );
     let entity_preview = preview_naadf_first_hit_entities(ray, naadf_first_hit_params.config.w);
     let preview = naadf_nearest_preview(terrain_preview, entity_preview);
 
@@ -135,8 +140,18 @@ fn naadf_first_hit_motion(uv: vec2<f32>, ray: NaadfRay, preview: NaadfFirstHitPr
     return vec4<f32>(uv - previous_uv, 1.0, 0.0);
 }
 
-fn preview_naadf_first_hit_world(ray: NaadfRay, config: vec3<u32>) -> NaadfFirstHitPreview {
-    let hit = trace_naadf_world(ray, config.x, config.y, config.z);
+fn naadf_lod_threshold_jitter(pixel: vec2<u32>) -> f32 {
+    let seed = pixel.x * 1664525u + pixel.y * 1013904223u + naadf_first_hit_params.config.y;
+    let hashed = ((seed >> 8u) ^ seed) & 255u;
+    return (f32(hashed) / 255.0 - 0.5) * 0.35;
+}
+
+fn preview_naadf_first_hit_world(
+    ray: NaadfRay,
+    config: vec3<u32>,
+    cone_config: vec4<f32>,
+) -> NaadfFirstHitPreview {
+    let hit = trace_naadf_world_lod(ray, config.x, config.y, config.z, cone_config);
     naadf_record_first_hit_telemetry(hit);
     if hit.hit == 0u {
         return naadf_first_hit_preview_miss(ray.max_distance);
