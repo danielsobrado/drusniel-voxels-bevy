@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::MainWorld;
 use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use super::cache::NaadfCache;
 use super::config::NaadfConfig;
@@ -69,10 +70,35 @@ impl ExtractedNaadfGpuBuilds {
     }
 }
 
+#[derive(Resource, Clone, Debug, Default)]
+pub struct NaadfGpuBuildDispatchBridge {
+    report: Arc<Mutex<NaadfGpuBuildDispatchReport>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NaadfGpuBuildDispatchReport {
+    pub generation: u64,
+    pub chunk_positions: Vec<IVec3>,
+}
+
+impl NaadfGpuBuildDispatchBridge {
+    pub fn publish(&self, generation: u64, chunk_positions: &[IVec3]) {
+        *self.report.lock().unwrap() = NaadfGpuBuildDispatchReport {
+            generation,
+            chunk_positions: chunk_positions.to_vec(),
+        };
+    }
+
+    pub fn take_report(&self) -> NaadfGpuBuildDispatchReport {
+        std::mem::take(&mut *self.report.lock().unwrap())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NaadfGpuBuildItem {
     pub chunk_pos: IVec3,
     pub age_frames: u32,
+    generation: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -87,12 +113,13 @@ impl NaadfGpuBuildQueue {
         if self.pending_set.contains(&chunk_pos) {
             return false;
         }
+        self.queued_total = self.queued_total.saturating_add(1);
         self.pending.push_back(NaadfGpuBuildItem {
             chunk_pos,
             age_frames: 0,
+            generation: self.queued_total,
         });
         self.pending_set.insert(chunk_pos);
-        self.queued_total = self.queued_total.saturating_add(1);
         true
     }
 
@@ -115,6 +142,29 @@ impl NaadfGpuBuildQueue {
         self.pending.push_back(item);
         self.pending_set.insert(item.chunk_pos);
         true
+    }
+
+    pub fn pending_items(&self) -> impl Iterator<Item = NaadfGpuBuildItem> + '_ {
+        self.pending.iter().copied()
+    }
+
+    pub fn complete_dispatched(&mut self, generation: u64, chunk_positions: &[IVec3]) -> usize {
+        if chunk_positions.is_empty() {
+            return 0;
+        }
+        let completed = chunk_positions.iter().copied().collect::<HashSet<_>>();
+        let before = self.pending.len();
+        self.pending
+            .retain(|item| !completed.contains(&item.chunk_pos) || item.generation > generation);
+        self.pending_set.clear();
+        self.pending_set
+            .extend(self.pending.iter().map(|item| item.chunk_pos));
+        for chunk_pos in &completed {
+            if !self.pending.iter().any(|item| item.chunk_pos == *chunk_pos) {
+                self.pending_set.remove(chunk_pos);
+            }
+        }
+        before.saturating_sub(self.pending.len())
     }
 
     pub fn stats(&self) -> NaadfGpuBuildQueueStats {
@@ -163,6 +213,14 @@ pub fn sync_gpu_build_queue_stats(
     stats.gpu_build_queue_queued_total = queue_stats.queued_total;
 }
 
+pub fn complete_gpu_builds_from_render_dispatch(
+    bridge: Res<NaadfGpuBuildDispatchBridge>,
+    mut build_queue: ResMut<NaadfGpuBuildQueue>,
+) {
+    let report = bridge.take_report();
+    build_queue.complete_dispatched(report.generation, &report.chunk_positions);
+}
+
 pub fn sync_gpu_build_queue_stats_for_config(
     config: &NaadfConfig,
     build_queue: &mut NaadfGpuBuildQueue,
@@ -195,20 +253,14 @@ pub fn extract_naadf_gpu_builds(mut commands: Commands, mut main_world: ResMut<M
             .map(|queue| queue.pending_chunks().collect::<HashSet<_>>())
             .unwrap_or_default();
         let max_builds = config.chunk_cache.max_chunk_updates_per_frame as usize;
-        let attempts = build_queue.stats().pending;
-        for _ in 0..attempts {
+        for item in build_queue.pending_items() {
             if extracted.slots.len() >= max_builds {
                 break;
             }
-            let Some(item) = build_queue.pop_pending() else {
-                break;
-            };
             if pending_uploads.contains(&item.chunk_pos) {
-                build_queue.requeue(item);
                 continue;
             }
             let Some(slot) = table.slot(item.chunk_pos) else {
-                build_queue.requeue(item);
                 continue;
             };
             extracted.slots.push(slot);
@@ -339,5 +391,59 @@ mod tests {
         let stats = queue.stats();
         assert_eq!(stats.pending, 1);
         assert_eq!(stats.queued_total, 1);
+    }
+
+    #[test]
+    fn gpu_build_queue_completes_only_dispatched_chunks() {
+        let mut queue = NaadfGpuBuildQueue::default();
+        queue.queue(IVec3::X);
+        queue.queue(IVec3::Y);
+
+        let completed = queue.complete_dispatched(2, &[IVec3::X]);
+
+        assert_eq!(completed, 1);
+        assert_eq!(queue.stats().pending, 1);
+        assert_eq!(
+            queue
+                .pending_items()
+                .map(|item| item.chunk_pos)
+                .collect::<Vec<_>>(),
+            vec![IVec3::Y]
+        );
+        assert!(!queue.queue(IVec3::Y));
+        assert!(queue.queue(IVec3::X));
+    }
+
+    #[test]
+    fn gpu_build_queue_keeps_newer_dirty_chunk_after_stale_dispatch_report() {
+        let mut queue = NaadfGpuBuildQueue::default();
+        queue.queue(IVec3::X);
+        let report_generation = queue.stats().queued_total;
+        queue.pop_pending();
+        queue.queue(IVec3::X);
+
+        let completed = queue.complete_dispatched(report_generation, &[IVec3::X]);
+
+        assert_eq!(completed, 0);
+        assert_eq!(queue.stats().pending, 1);
+        assert_eq!(
+            queue
+                .pending_items()
+                .map(|item| item.chunk_pos)
+                .collect::<Vec<_>>(),
+            vec![IVec3::X]
+        );
+    }
+
+    #[test]
+    fn gpu_build_dispatch_bridge_reports_once() {
+        let bridge = NaadfGpuBuildDispatchBridge::default();
+
+        bridge.publish(7, &[IVec3::new(1, 2, 3)]);
+
+        let report = bridge.take_report();
+        assert_eq!(report.generation, 7);
+        assert_eq!(report.chunk_positions, vec![IVec3::new(1, 2, 3)]);
+        assert_eq!(bridge.take_report(), NaadfGpuBuildDispatchReport::default());
     }
 }

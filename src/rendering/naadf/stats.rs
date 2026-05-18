@@ -64,6 +64,14 @@ pub struct NaadfStats {
     pub preview_denoise_dispatches_last_frame: u32,
     pub preview_reference_dispatches_last_frame: u32,
     pub preview_node_stage_last_frame: u32,
+    pub path_b_depth_rejects_last_frame: u32,
+    pub path_b_coverage_rejects_last_frame: u32,
+    pub path_b_naadf_accepts_last_frame: u32,
+    pub path_b_current_kept_last_frame: u32,
+    pub path_b_refine_requests_last_frame: u32,
+    pub path_b_stale_or_unresident_last_frame: u32,
+    pub path_b_ownership_changes_last_frame: u32,
+    pub path_b_composite_passes_last_frame: u32,
     pub streaming_interest_chunks: u32,
     pub streaming_interest_missing_gpu_slots: u32,
     pub streaming_interest_missing_gpu_slots_far_ring: u32,
@@ -114,6 +122,14 @@ pub struct NaadfRenderStatsSnapshot {
     pub preview_denoise_dispatches_last_frame: u32,
     pub preview_reference_dispatches_last_frame: u32,
     pub preview_node_stage_last_frame: u32,
+    pub path_b_depth_rejects_last_frame: u32,
+    pub path_b_coverage_rejects_last_frame: u32,
+    pub path_b_naadf_accepts_last_frame: u32,
+    pub path_b_current_kept_last_frame: u32,
+    pub path_b_refine_requests_last_frame: u32,
+    pub path_b_stale_or_unresident_last_frame: u32,
+    pub path_b_ownership_changes_last_frame: u32,
+    pub path_b_composite_passes_last_frame: u32,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -224,6 +240,28 @@ impl NaadfRenderStatsBridge {
 
     pub fn publish_preview_node_stage(&self, stage: u32) {
         self.snapshot.lock().unwrap().preview_node_stage_last_frame = stage;
+    }
+
+    pub fn publish_path_b_passes(
+        &self,
+        depth_rejects: u32,
+        coverage_rejects: u32,
+        naadf_accepts: u32,
+        current_kept: u32,
+        refine_requests: u32,
+        stale_or_unresident: u32,
+        ownership_changes: u32,
+        composite_passes: u32,
+    ) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        snapshot.path_b_depth_rejects_last_frame = depth_rejects;
+        snapshot.path_b_coverage_rejects_last_frame = coverage_rejects;
+        snapshot.path_b_naadf_accepts_last_frame = naadf_accepts;
+        snapshot.path_b_current_kept_last_frame = current_kept;
+        snapshot.path_b_refine_requests_last_frame = refine_requests;
+        snapshot.path_b_stale_or_unresident_last_frame = stale_or_unresident;
+        snapshot.path_b_ownership_changes_last_frame = ownership_changes;
+        snapshot.path_b_composite_passes_last_frame = composite_passes;
     }
 }
 

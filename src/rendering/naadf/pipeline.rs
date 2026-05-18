@@ -1,12 +1,13 @@
 use bevy::asset::uuid_handle;
 use bevy::core_pipeline::FullscreenShader;
+use bevy::core_pipeline::prepass::ViewPrepassTextures;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::MainWorld;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
 use bevy::render::render_resource::*;
-use bevy::render::renderer::RenderContext;
+use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewTarget};
 use bevy::shader::Shader;
@@ -16,6 +17,7 @@ use std::sync::Mutex;
 
 use crate::atmosphere::{FogQuality, FogQualityTier, FogUniforms};
 use crate::rendering::array_loader::BlockyTextureArray;
+use crate::rendering::water_reflection::WaterReflectionMaskTexture;
 
 use super::config::NaadfDenoiseQuality;
 use super::gpu_buffers::{
@@ -23,7 +25,10 @@ use super::gpu_buffers::{
     NaadfGpuBuffers,
 };
 use super::local_lights::{ExtractedNaadfLocalLights, NaadfLocalLightGpuBuffers};
-use super::preview::{NaadfPreviewCompositeMode, NaadfPreviewPipelineState, NaadfPreviewSettings};
+use super::preview::{
+    NaadfPathBCompositorMode, NaadfPreviewCompositeMode, NaadfPreviewPipelineState,
+    NaadfPreviewSettings,
+};
 use super::stats::NaadfRenderStatsBridge;
 
 pub const NAADF_DEBUG_TRACE_RAYS_SHADER_PATH: &str = "shaders/naadf/debug_trace_rays.wgsl";
@@ -126,6 +131,12 @@ pub struct ExtractedNaadfPreviewSettings {
     pub show_miss_sky: bool,
     pub composite_mode: NaadfPreviewCompositeMode,
     pub history_resolution_scale: f32,
+    pub path_b_mode: NaadfPathBCompositorMode,
+    pub path_b_depth_epsilon: f32,
+    pub path_b_enable_temporal: bool,
+    pub path_b_audit_overlay_alpha: f32,
+    pub path_b_counters_enabled: bool,
+    pub path_b_runtime_available: bool,
     pub fog_color_start: Vec4,
     pub fog_end_strength: Vec4,
     pub sun_direction: Vec4,
@@ -178,6 +189,12 @@ impl ExtractedNaadfPreviewSettings {
             show_miss_sky: settings.show_miss_sky,
             composite_mode: settings.composite_mode,
             history_resolution_scale: settings.history_resolution_scale.clamp(0.125, 1.0),
+            path_b_mode: settings.path_b_mode,
+            path_b_depth_epsilon: settings.path_b_depth_epsilon.max(0.0),
+            path_b_enable_temporal: settings.path_b_enable_temporal,
+            path_b_audit_overlay_alpha: settings.path_b_audit_overlay_alpha.clamp(0.0, 1.0),
+            path_b_counters_enabled: settings.path_b_counters_enabled,
+            path_b_runtime_available: settings.path_b_runtime_available,
             fog_color_start: Vec4::new(
                 fog.fog_color.red,
                 fog.fog_color.green,
@@ -240,6 +257,18 @@ pub fn extract_naadf_terrain_atlas(mut commands: Commands, main_world: Res<MainW
     commands.insert_resource(ExtractedNaadfTerrainAtlas { albedo });
 }
 
+#[derive(Resource, Clone, Default)]
+pub struct ExtractedNaadfForegroundCoverageMask {
+    pub water_mask: Option<Handle<Image>>,
+}
+
+pub fn extract_naadf_foreground_coverage_mask(mut commands: Commands, main_world: Res<MainWorld>) {
+    let water_mask = main_world
+        .get_resource::<WaterReflectionMaskTexture>()
+        .map(|mask| mask.image.clone());
+    commands.insert_resource(ExtractedNaadfForegroundCoverageMask { water_mask });
+}
+
 #[derive(Resource)]
 pub struct NaadfPreviewBuildPipelines {
     empty_group_layout: BindGroupLayoutDescriptor,
@@ -268,6 +297,10 @@ pub struct NaadfPreviewBuildPipelines {
     path_trace_pipeline: CachedComputePipelineId,
     composite_hdr_pipeline: CachedRenderPipelineId,
     composite_sdr_pipeline: CachedRenderPipelineId,
+    _dummy_depth_texture: Texture,
+    dummy_depth_view: TextureView,
+    _dummy_coverage_texture: Texture,
+    dummy_coverage_view: TextureView,
 }
 
 #[derive(Resource, Default)]
@@ -450,6 +483,7 @@ pub fn sync_naadf_preview_pass_stats_to_main(
 
 pub fn init_naadf_preview_build_pipelines(
     mut commands: Commands,
+    render_device: Res<RenderDevice>,
     fullscreen_shader: Res<FullscreenShader>,
     pipeline_cache: Res<PipelineCache>,
 ) {
@@ -580,7 +614,14 @@ pub fn init_naadf_preview_build_pipelines(
     );
     let composite_layout = BindGroupLayoutDescriptor::new(
         "naadf_preview_fullscreen_composite_layout",
-        &[texture_entry(0), texture_entry(1), uniform_buffer_entry(2)],
+        &[
+            texture_entry(0),
+            texture_entry(1),
+            uniform_buffer_entry(2),
+            depth_texture_entry(3),
+            texture_entry(4),
+            texture_entry(5),
+        ],
     );
 
     let build_blocks_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
@@ -684,6 +725,17 @@ pub fn init_naadf_preview_build_pipelines(
         "naadf_preview_composite_sdr_pipeline",
         TextureFormat::bevy_default(),
     ));
+    let (dummy_depth_texture, dummy_depth_view) = create_dummy_depth_texture(&render_device);
+    let dummy_coverage_texture = create_preview_texture(
+        &render_device,
+        "naadf_path_b_dummy_foreground_coverage_texture",
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    let dummy_coverage_view = dummy_coverage_texture.create_view(&TextureViewDescriptor::default());
 
     commands.insert_resource(NaadfPreviewBuildPipelines {
         empty_group_layout,
@@ -712,6 +764,10 @@ pub fn init_naadf_preview_build_pipelines(
         path_trace_pipeline,
         composite_hdr_pipeline,
         composite_sdr_pipeline,
+        _dummy_depth_texture: dummy_depth_texture,
+        dummy_depth_view,
+        _dummy_coverage_texture: dummy_coverage_texture,
+        dummy_coverage_view,
     });
 }
 
@@ -756,6 +812,19 @@ fn storage_texture_entry(binding: u32, format: TextureFormat) -> BindGroupLayout
 
 fn texture_entry(binding: u32) -> BindGroupLayoutEntry {
     texture_entry_for_stage(binding, ShaderStages::FRAGMENT)
+}
+
+fn depth_texture_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Depth,
+            view_dimension: TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
 }
 
 fn texture_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
@@ -818,13 +887,21 @@ fn compute_descriptor(
 pub struct NaadfPreviewBuildNode;
 
 impl ViewNode for NaadfPreviewBuildNode {
-    type ViewQuery = (&'static ViewTarget, &'static ExtractedView);
+    type ViewQuery = (
+        &'static ViewTarget,
+        &'static ExtractedView,
+        Option<&'static ViewPrepassTextures>,
+    );
 
     fn run<'w>(
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        (view_target, extracted_view): bevy::ecs::query::QueryItem<'w, '_, Self::ViewQuery>,
+        (view_target, extracted_view, prepass_textures): bevy::ecs::query::QueryItem<
+            'w,
+            '_,
+            Self::ViewQuery,
+        >,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         publish_preview_node_stage(world, 1);
@@ -846,6 +923,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             .copied()
             .unwrap_or_default();
         let denoise_iterations = denoise_iterations(preview_settings);
+        let gi_enabled = preview_settings.bounce_count > 0;
         let Some(allocation) = world
             .get_resource::<NaadfGpuBuffers>()
             .and_then(NaadfGpuBuffers::allocation)
@@ -875,8 +953,9 @@ impl ViewNode for NaadfPreviewBuildNode {
             .get_resource::<super::prepare::ExtractedNaadfGpuBuilds>()
             .cloned()
             .unwrap_or_default();
+        let needs_gpu_build = gpu_builder_enabled && gpu_builds.has_work();
         let telemetry_enabled = gpu_config.debug_readback;
-        let build_blocks_pipeline = if gpu_builder_enabled {
+        let build_blocks_pipeline = if needs_gpu_build {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_blocks_pipeline)
             else {
@@ -887,7 +966,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
-        let build_bounds_pipeline = if gpu_builder_enabled {
+        let build_bounds_pipeline = if needs_gpu_build {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_bounds_pipeline)
             else {
@@ -898,7 +977,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
-        let build_mips_pipeline = if gpu_builder_enabled {
+        let build_mips_pipeline = if needs_gpu_build {
             let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.build_mips_pipeline)
             else {
                 publish_preview_node_stage(world, 12);
@@ -908,7 +987,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
-        let build_chunks_pipeline = if gpu_builder_enabled {
+        let build_chunks_pipeline = if needs_gpu_build {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_chunks_pipeline)
             else {
@@ -919,7 +998,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
-        let build_chunk_bounds_pipeline = if gpu_builder_enabled {
+        let build_chunk_bounds_pipeline = if needs_gpu_build {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_chunk_bounds_pipeline)
             else {
@@ -946,9 +1025,14 @@ impl ViewNode for NaadfPreviewBuildNode {
             publish_preview_node_stage(world, stage);
             return Ok(());
         };
-        let Some(gi_pipeline) = pipeline_cache.get_compute_pipeline(pipelines.gi_pipeline) else {
-            publish_preview_node_stage(world, 15);
-            return Ok(());
+        let gi_pipeline = if gi_enabled {
+            let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.gi_pipeline) else {
+                publish_preview_node_stage(world, 15);
+                return Ok(());
+            };
+            Some(pipeline)
+        } else {
+            None
         };
         let Some(spatial_pipeline) =
             pipeline_cache.get_compute_pipeline(pipelines.spatial_pipeline)
@@ -1089,7 +1173,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         let composite_uniform = create_uniform_buffer(
             &render_device,
             "naadf_preview_composite_params",
-            &composite_params_uniform_with_settings(preview_settings),
+            &composite_params_uniform(extracted_view, preview_settings),
         );
         let spatial_uniform = create_uniform_buffer(
             &render_device,
@@ -1248,31 +1332,36 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (40, BindingResource::Sampler(&terrain_albedo.sampler)),
             )),
         );
-        let gi_group = render_device.create_bind_group(
-            "naadf_gi_trace_bind_group",
-            &pipeline_cache.get_bind_group_layout(&pipelines.gi_layout),
-            &BindGroupEntries::with_indices((
-                (0, allocation.voxel_buffer.as_entire_binding()),
-                (1, allocation.material_buffer.as_entire_binding()),
-                (5, allocation.block_buffer.as_entire_binding()),
-                (6, allocation.mip_traversal_buffer.as_entire_binding()),
-                (7, allocation.mip_payload_buffer.as_entire_binding()),
-                (8, allocation.mip_bounds_buffer.as_entire_binding()),
-                (11, allocation.chunk_buffer.as_entire_binding()),
-                (20, allocation.chunk_lookup_buffer.as_entire_binding()),
-                (28, gi_uniform.as_entire_binding()),
-                (29, BindingResource::TextureView(&preview_view)),
-                (30, BindingResource::TextureView(&preview_depth_view)),
-                (31, BindingResource::TextureView(&preview_normal_view)),
-                (32, BindingResource::TextureView(&gi_view)),
-            )),
-        );
+        let gi_group = if gi_enabled {
+            Some(render_device.create_bind_group(
+                "naadf_gi_trace_bind_group",
+                &pipeline_cache.get_bind_group_layout(&pipelines.gi_layout),
+                &BindGroupEntries::with_indices((
+                    (0, allocation.voxel_buffer.as_entire_binding()),
+                    (1, allocation.material_buffer.as_entire_binding()),
+                    (5, allocation.block_buffer.as_entire_binding()),
+                    (6, allocation.mip_traversal_buffer.as_entire_binding()),
+                    (7, allocation.mip_payload_buffer.as_entire_binding()),
+                    (8, allocation.mip_bounds_buffer.as_entire_binding()),
+                    (11, allocation.chunk_buffer.as_entire_binding()),
+                    (20, allocation.chunk_lookup_buffer.as_entire_binding()),
+                    (28, gi_uniform.as_entire_binding()),
+                    (29, BindingResource::TextureView(&preview_view)),
+                    (30, BindingResource::TextureView(&preview_depth_view)),
+                    (31, BindingResource::TextureView(&preview_normal_view)),
+                    (32, BindingResource::TextureView(&gi_view)),
+                )),
+            ))
+        } else {
+            None
+        };
+        let spatial_source_view = if gi_enabled { &gi_view } else { &preview_view };
         let spatial_group = render_device.create_bind_group(
             "naadf_spatial_resampling_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.spatial_layout),
             &BindGroupEntries::with_indices((
                 (10, spatial_uniform.as_entire_binding()),
-                (12, BindingResource::TextureView(&gi_view)),
+                (12, BindingResource::TextureView(spatial_source_view)),
                 (13, BindingResource::TextureView(&preview_depth_view)),
                 (14, BindingResource::TextureView(&preview_normal_view)),
                 (15, BindingResource::TextureView(&filtered_view)),
@@ -1326,13 +1415,25 @@ impl ViewNode for NaadfPreviewBuildNode {
         };
 
         let post_process = view_target.post_process_write();
+        let scene_depth_view = prepass_textures
+            .and_then(ViewPrepassTextures::depth_view)
+            .unwrap_or(&pipelines.dummy_depth_view);
+        let coverage_view = world
+            .get_resource::<ExtractedNaadfForegroundCoverageMask>()
+            .and_then(|mask| mask.water_mask.as_ref())
+            .and_then(|handle| gpu_images.get(handle))
+            .map(|image| &image.texture_view)
+            .unwrap_or(&pipelines.dummy_coverage_view);
         let composite_group = render_device.create_bind_group(
             "naadf_preview_fullscreen_composite_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.composite_layout),
-            &BindGroupEntries::sequential((
-                post_process.source,
-                composite_source_view,
-                composite_uniform.as_entire_binding(),
+            &BindGroupEntries::with_indices((
+                (0, BindingResource::TextureView(post_process.source)),
+                (1, BindingResource::TextureView(composite_source_view)),
+                (2, composite_uniform.as_entire_binding()),
+                (3, BindingResource::TextureView(scene_depth_view)),
+                (4, BindingResource::TextureView(coverage_view)),
+                (5, BindingResource::TextureView(&preview_depth_view)),
             )),
         );
 
@@ -1352,7 +1453,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         pass.set_bind_group(0, &empty_group, &[]);
         pass.set_bind_group(1, &empty_group, &[]);
         pass.set_bind_group(2, &empty_group, &[]);
-        if gpu_builds.has_work() {
+        if needs_gpu_build {
             if let (
                 Some(build_blocks_pipeline),
                 Some(build_bounds_pipeline),
@@ -1391,6 +1492,11 @@ impl ViewNode for NaadfPreviewBuildNode {
                     1,
                     1,
                 );
+                if let Some(bridge) =
+                    world.get_resource::<super::prepare::NaadfGpuBuildDispatchBridge>()
+                {
+                    bridge.publish(gpu_builds.generation, &gpu_builds.chunk_positions);
+                }
             }
         }
         pass.set_pipeline(first_hit_pipeline);
@@ -1400,13 +1506,15 @@ impl ViewNode for NaadfPreviewBuildNode {
             div_ceil_u64(size.height as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
             1,
         );
-        pass.set_pipeline(gi_pipeline);
-        pass.set_bind_group(3, &gi_group, &[]);
-        pass.dispatch_workgroups(
-            div_ceil_u64(size.width as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
-            div_ceil_u64(size.height as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
-            1,
-        );
+        if let (Some(gi_pipeline), Some(gi_group)) = (gi_pipeline, gi_group.as_ref()) {
+            pass.set_pipeline(gi_pipeline);
+            pass.set_bind_group(3, gi_group, &[]);
+            pass.dispatch_workgroups(
+                div_ceil_u64(size.width as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
+                div_ceil_u64(size.height as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
+                1,
+            );
+        }
         pass.set_pipeline(spatial_pipeline);
         pass.set_bind_group(3, &spatial_group, &[]);
         pass.dispatch_workgroups(
@@ -1486,6 +1594,11 @@ impl ViewNode for NaadfPreviewBuildNode {
                 denoise_iterations,
                 reference_dispatches,
             );
+            let path_b_composite_passes = u32::from(
+                preview_settings.path_b_mode.is_path_b()
+                    && preview_settings.path_b_runtime_available,
+            );
+            bridge.publish_path_b_passes(0, 0, 0, 0, 0, 0, 0, path_b_composite_passes);
         }
         if let Some(pass_stats) = world.get_resource::<NaadfPreviewPassStats>() {
             pass_stats.record(NaadfPreviewPassStatsSnapshot {
@@ -1551,6 +1664,11 @@ struct NaadfFirstHitParamsUniform {
 struct NaadfPreviewCompositeParamsUniform {
     mode_split: Vec4,
     pip_min_max: Vec4,
+    path_b_config: Vec4,
+    clip_from_view_x: Vec4,
+    clip_from_view_y: Vec4,
+    clip_from_view_z: Vec4,
+    clip_from_view_w: Vec4,
 }
 
 #[derive(Clone, Copy, ShaderType)]
@@ -1914,6 +2032,27 @@ fn create_storage_texture(
     })
 }
 
+fn create_dummy_depth_texture(
+    render_device: &bevy::render::renderer::RenderDevice,
+) -> (Texture, TextureView) {
+    let texture = render_device.create_texture(&TextureDescriptor {
+        label: Some("naadf_path_b_dummy_scene_depth_texture"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Depth32Float,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    (texture, view)
+}
+
 #[cfg(test)]
 fn view_matrix_changed(previous: Mat4, current: Mat4) -> bool {
     const CAMERA_HISTORY_EPSILON: f32 = 0.0005;
@@ -1962,13 +2101,18 @@ fn temporal_params_uniform(
     previous_clip_from_world: Mat4,
 ) -> NaadfTemporalAccumulationParamsUniform {
     let camera = camera_basis_params(view);
+    let temporal_enabled = if preview_settings.path_b_mode.is_path_b() {
+        preview_settings.path_b_enable_temporal
+    } else {
+        preview_settings.accumulation_enabled
+    };
     NaadfTemporalAccumulationParamsUniform {
-        blend_factor: if preview_settings.accumulation_enabled {
+        blend_factor: if temporal_enabled {
             preview_settings.temporal_blend_factor.clamp(0.0, 0.99)
         } else {
             0.0
         },
-        reset_history: u32::from(reset_temporal_history || !preview_settings.accumulation_enabled),
+        reset_history: u32::from(reset_temporal_history || !temporal_enabled),
         _pad0: UVec2::ZERO,
         camera_origin_max_distance: camera.origin_max_distance,
         camera_forward_fov_y: camera.forward_fov_y,
@@ -2023,24 +2167,49 @@ fn first_hit_params_uniform(
     }
 }
 
-fn composite_params_uniform(mode: NaadfPreviewCompositeMode) -> NaadfPreviewCompositeParamsUniform {
-    let mode_value = match mode {
-        NaadfPreviewCompositeMode::Fullscreen => 0.0,
-        NaadfPreviewCompositeMode::SplitView => 1.0,
-        NaadfPreviewCompositeMode::PictureInPicture => 2.0,
-    };
-    NaadfPreviewCompositeParamsUniform {
-        mode_split: Vec4::new(mode_value, 0.5, 0.0, 0.0),
-        pip_min_max: Vec4::new(0.68, 0.06, 0.96, 0.34),
-    }
-}
-
-fn composite_params_uniform_with_settings(
+fn composite_params_uniform(
+    view: &ExtractedView,
     settings: ExtractedNaadfPreviewSettings,
 ) -> NaadfPreviewCompositeParamsUniform {
-    let mut params = composite_params_uniform(settings.composite_mode);
-    params.mode_split.z = if settings.show_miss_sky { 1.0 } else { 0.0 };
-    params
+    composite_params_uniform_with_clip_from_view(view.clip_from_view, settings)
+}
+
+fn composite_params_uniform_with_clip_from_view(
+    clip_from_view: Mat4,
+    settings: ExtractedNaadfPreviewSettings,
+) -> NaadfPreviewCompositeParamsUniform {
+    let mode_value = match settings.path_b_mode {
+        NaadfPathBCompositorMode::HybridFarTerrain if settings.path_b_runtime_available => 3.0,
+        NaadfPathBCompositorMode::DepthAudit if settings.path_b_runtime_available => 4.0,
+        NaadfPathBCompositorMode::DebugPreview
+        | NaadfPathBCompositorMode::HybridFarTerrain
+        | NaadfPathBCompositorMode::DepthAudit
+        | NaadfPathBCompositorMode::Off => match settings.composite_mode {
+            NaadfPreviewCompositeMode::Fullscreen => 0.0,
+            NaadfPreviewCompositeMode::SplitView => 1.0,
+            NaadfPreviewCompositeMode::PictureInPicture => 2.0,
+        },
+    };
+    let view_from_clip = clip_from_view.inverse();
+    NaadfPreviewCompositeParamsUniform {
+        mode_split: Vec4::new(
+            mode_value,
+            0.5,
+            if settings.show_miss_sky { 1.0 } else { 0.0 },
+            0.0,
+        ),
+        pip_min_max: Vec4::new(0.68, 0.06, 0.96, 0.34),
+        path_b_config: Vec4::new(
+            settings.path_b_depth_epsilon,
+            settings.path_b_audit_overlay_alpha,
+            u32::from(settings.path_b_counters_enabled) as f32,
+            0.0,
+        ),
+        clip_from_view_x: view_from_clip.x_axis,
+        clip_from_view_y: view_from_clip.y_axis,
+        clip_from_view_z: view_from_clip.z_axis,
+        clip_from_view_w: view_from_clip.w_axis,
+    }
 }
 
 fn create_uniform_buffer<T: ShaderType + encase::internal::WriteInto>(
@@ -2269,7 +2438,7 @@ mod tests {
         let mut settings = ExtractedNaadfPreviewSettings::default();
         settings.show_miss_sky = true;
 
-        let params = composite_params_uniform_with_settings(settings);
+        let params = composite_params_uniform_with_clip_from_view(Mat4::IDENTITY, settings);
 
         assert_eq!(params.mode_split.z, 1.0);
     }

@@ -17,6 +17,8 @@ pub struct NaadfConfig {
     #[serde(default)]
     pub preview: NaadfPreviewConfig,
     #[serde(default)]
+    pub path_b: NaadfPathBConfig,
+    #[serde(default)]
     pub debug: NaadfDebugConfig,
     #[serde(default)]
     pub froxel_sun_mask: NaadfFroxelSunMaskConfig,
@@ -120,6 +122,32 @@ pub enum NaadfPreviewCompositeModeConfig {
     PictureInPicture,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NaadfPathBConfig {
+    #[serde(default)]
+    pub compositor_mode: NaadfPathBCompositorModeConfig,
+    #[serde(default = "default_path_b_depth_epsilon")]
+    pub depth_epsilon: f32,
+    #[serde(default = "default_true")]
+    pub enable_temporal: bool,
+    #[serde(default = "default_path_b_audit_overlay_alpha")]
+    pub audit_overlay_alpha: f32,
+    #[serde(default)]
+    pub counters_enabled: bool,
+    #[serde(default)]
+    pub foundation_200_210_verified: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NaadfPathBCompositorModeConfig {
+    #[default]
+    Off,
+    DebugPreview,
+    HybridFarTerrain,
+    DepthAudit,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NaadfDebugConfig {
     #[serde(default)]
@@ -179,6 +207,7 @@ impl Default for NaadfConfig {
             chunk_cache: NaadfChunkCacheConfig::default(),
             gpu: NaadfGpuConfig::default(),
             preview: NaadfPreviewConfig::default(),
+            path_b: NaadfPathBConfig::default(),
             debug: NaadfDebugConfig::default(),
             froxel_sun_mask: NaadfFroxelSunMaskConfig::default(),
             use_for_gi_secondary: false,
@@ -198,6 +227,19 @@ impl Default for NaadfChunkCacheConfig {
             max_chunk_updates_per_frame: default_max_chunk_updates_per_frame(),
             max_upload_bytes_per_frame: default_max_upload_bytes_per_frame(),
             max_gpu_memory_mb: default_max_gpu_memory_mb(),
+        }
+    }
+}
+
+impl Default for NaadfPathBConfig {
+    fn default() -> Self {
+        Self {
+            compositor_mode: NaadfPathBCompositorModeConfig::Off,
+            depth_epsilon: default_path_b_depth_epsilon(),
+            enable_temporal: true,
+            audit_overlay_alpha: default_path_b_audit_overlay_alpha(),
+            counters_enabled: false,
+            foundation_200_210_verified: false,
         }
     }
 }
@@ -233,6 +275,10 @@ impl NaadfConfig {
             config.debug.allow_unverified_post_205 = true;
         }
         config
+    }
+
+    pub fn path_b_runtime_available(&self) -> bool {
+        self.enabled && self.path_b.foundation_200_210_verified
     }
 }
 
@@ -353,6 +399,14 @@ fn default_preview_history_resolution_scale() -> f32 {
     1.0
 }
 
+fn default_path_b_depth_epsilon() -> f32 {
+    0.25
+}
+
+fn default_path_b_audit_overlay_alpha() -> f32 {
+    0.75
+}
+
 fn default_froxel_sun_mask_resolution() -> [u32; 3] {
     [160, 90, 64]
 }
@@ -388,6 +442,13 @@ mod tests {
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sky_strength, 0.22);
         assert_eq!(config.preview.reference_indirect_strength, 0.18);
+        assert_eq!(
+            config.path_b.compositor_mode,
+            NaadfPathBCompositorModeConfig::Off
+        );
+        assert!(!config.path_b.counters_enabled);
+        assert!(!config.path_b.foundation_200_210_verified);
+        assert!(!config.path_b_runtime_available());
         assert!(!config.froxel_sun_mask.enabled);
         assert_eq!(config.froxel_sun_mask.resolution, [160, 90, 64]);
         assert_eq!(config.froxel_sun_mask.max_rays_per_frame, 65_536);
@@ -413,6 +474,12 @@ mod tests {
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sample_count, 16);
         assert!(!config.preview.show_miss_sky);
+        assert_eq!(
+            config.path_b.compositor_mode,
+            NaadfPathBCompositorModeConfig::Off
+        );
+        assert!(!config.path_b.counters_enabled);
+        assert!(!config.path_b.foundation_200_210_verified);
         assert_eq!(
             config.preview.composite_mode,
             NaadfPreviewCompositeModeConfig::SplitView

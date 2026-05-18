@@ -822,6 +822,9 @@ mod tests {
         assert!(first_hit.contains("fn naadf_preview_miss_sky"));
         assert!(first_hit.contains("sun_direction_pad"));
         assert!(first_hit.contains("fn naadf_preview_sun_direction"));
+        assert!(first_hit.contains("linear_view_depth"));
+        assert!(first_hit.contains("ray_distance"));
+        assert!(!first_hit.contains("preview.distance / max(ray.max_distance"));
         assert!(first_hit.contains("struct NaadfEntityVolumeRecord"));
         assert!(first_hit.contains("naadf_entity_volume_records"));
         assert!(first_hit.contains("naadf_entity_material_records"));

@@ -108,7 +108,13 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
     let fogged_color = naadf_apply_preview_fog(preview.color, preview.distance);
     let color = select(miss_color, fogged_color, preview.hit != 0u);
     let alpha = select(0.0, 1.0, preview.hit != 0u);
-    let depth = select(1.0, clamp(preview.distance / max(ray.max_distance, 0.0001), 0.0, 1.0), preview.hit != 0u);
+    let linear_view_depth = select(
+        ray.max_distance,
+        max(dot(normalize(ray.direction), normalize(naadf_first_hit_params.camera_forward_fov_y.xyz)) * preview.distance, 0.0),
+        preview.hit != 0u,
+    );
+    let ray_distance = select(ray.max_distance, preview.distance, preview.hit != 0u);
+    let diagnostic_reason = select(1.0, 0.0, preview.hit != 0u);
     let normal = select(vec3<f32>(0.5), preview.normal * 0.5 + vec3<f32>(0.5), preview.hit != 0u);
     let motion = naadf_first_hit_motion(uv, ray, preview);
     let coord = vec2<i32>(id.xy);
@@ -117,7 +123,11 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
         coord,
         vec4<f32>(color, alpha),
     );
-    textureStore(naadf_first_hit_depth_output, coord, vec4<f32>(depth, 0.0, 0.0, 1.0));
+    textureStore(
+        naadf_first_hit_depth_output,
+        coord,
+        vec4<f32>(linear_view_depth, ray_distance, diagnostic_reason, alpha),
+    );
     textureStore(naadf_first_hit_normal_output, coord, vec4<f32>(normal, 1.0));
     textureStore(naadf_first_hit_motion_output, coord, motion);
 }

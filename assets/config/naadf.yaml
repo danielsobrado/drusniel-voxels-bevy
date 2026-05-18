@@ -40,6 +40,14 @@ preview:
   composite_mode: split_view
   history_resolution_scale: 1.0
 
+path_b:
+  compositor_mode: off
+  depth_epsilon: 0.25
+  enable_temporal: true
+  audit_overlay_alpha: 0.75
+  counters_enabled: false
+  foundation_200_210_verified: false
+
 debug:
   visualize_chunks: false
   visualize_ray_steps: false

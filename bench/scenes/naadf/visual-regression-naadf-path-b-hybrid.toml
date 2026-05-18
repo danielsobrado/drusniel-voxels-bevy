@@ -1,0 +1,47 @@
+seed = 12345
+duration_warmup_secs = 5.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[render_toggles]
+voxel_ray_backend = "naadf"
+experimental_render_mode = "current"
+disable_reflection_cameras = false
+naadf_force_cpu_builder = true
+naadf_radius_chunks = 20
+naadf_max_chunks = 8192
+naadf_max_gpu_memory_mb = 1024
+naadf_max_chunk_updates_per_frame = 8192
+naadf_max_upload_bytes_per_frame = 67108864
+naadf_history_resolution_scale = 0.5
+naadf_preview_max_ray_steps = 256
+naadf_preview_bounce_count = 0
+naadf_preview_spatial_radius = 0
+naadf_preview_composite_mode = "fullscreen"
+naadf_preview_show_miss_sky = true
+naadf_path_b_compositor_mode = "hybrid_far_terrain"
+naadf_path_b_foundation_200_210_verified = true
+naadf_path_b_depth_epsilon = 0.25
+naadf_path_b_enable_temporal = false
+naadf_path_b_counters_enabled = true
+
+[[checkpoint]]
+name = "naadf-path-b-hybrid"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 1500
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = true, photo_mode = false, cinematic_mode = false }
+screenshot_points = [
+    { name = "path-b-hybrid-settle-120", frame = 120 },
+    { name = "path-b-hybrid-settle-240", frame = 240 },
+    { name = "path-b-hybrid-settle-360", frame = 360 },
+    { name = "path-b-hybrid-settle-540", frame = 540 },
+    { name = "path-b-hybrid-settle-720", frame = 720 },
+    { name = "path-b-hybrid-settle-899", frame = 899 },
+    { name = "path-b-hybrid-settle-1200", frame = 1200 },
+    { name = "path-b-hybrid-settled", frame = 1499 },
+]

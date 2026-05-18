@@ -204,6 +204,16 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub naadf_preview_show_miss_sky: Option<bool>,
     #[serde(default)]
+    pub naadf_path_b_compositor_mode: Option<String>,
+    #[serde(default)]
+    pub naadf_path_b_foundation_200_210_verified: Option<bool>,
+    #[serde(default)]
+    pub naadf_path_b_depth_epsilon: Option<f32>,
+    #[serde(default)]
+    pub naadf_path_b_enable_temporal: Option<bool>,
+    #[serde(default)]
+    pub naadf_path_b_counters_enabled: Option<bool>,
+    #[serde(default)]
     pub naadf_preview_local_lights_enabled: Option<bool>,
     #[serde(default)]
     pub naadf_preview_local_light_limit: Option<u32>,
@@ -1159,12 +1169,17 @@ fn apply_bench_render_toggles(
             .as_deref()
             .and_then(ExperimentalRenderMode::parse)
             == Some(ExperimentalRenderMode::NaadfPreview);
+        let wants_naadf_path_b = toggles
+            .naadf_path_b_compositor_mode
+            .as_deref()
+            .is_some_and(|mode| !matches!(mode.trim().to_ascii_lowercase().as_str(), "off" | ""));
         let wants_naadf_gi = toggles
             .experimental_render_mode
             .as_deref()
             .and_then(ExperimentalRenderMode::parse)
             == Some(ExperimentalRenderMode::CurrentWithNaadfGi);
-        let enabled = wants_naadf_preview || (wants_naadf_backend && wants_naadf_gi);
+        let enabled =
+            wants_naadf_preview || wants_naadf_path_b || (wants_naadf_backend && wants_naadf_gi);
         if config.enabled != enabled {
             config.enabled = enabled;
         }
@@ -1229,6 +1244,44 @@ fn apply_bench_render_toggles(
         if let Some(show_miss_sky) = toggles.naadf_preview_show_miss_sky {
             if config.preview.show_miss_sky != show_miss_sky {
                 config.preview.show_miss_sky = show_miss_sky;
+            }
+        }
+        if let Some(compositor_mode) = toggles.naadf_path_b_compositor_mode.as_deref() {
+            let compositor_mode = match compositor_mode {
+                "debug_preview" => {
+                    crate::rendering::naadf::NaadfPathBCompositorModeConfig::DebugPreview
+                }
+                "hybrid_far_terrain" => {
+                    crate::rendering::naadf::NaadfPathBCompositorModeConfig::HybridFarTerrain
+                }
+                "depth_audit" => {
+                    crate::rendering::naadf::NaadfPathBCompositorModeConfig::DepthAudit
+                }
+                "off" => crate::rendering::naadf::NaadfPathBCompositorModeConfig::Off,
+                _ => config.path_b.compositor_mode,
+            };
+            if config.path_b.compositor_mode != compositor_mode {
+                config.path_b.compositor_mode = compositor_mode;
+            }
+        }
+        if let Some(verified) = toggles.naadf_path_b_foundation_200_210_verified {
+            if config.path_b.foundation_200_210_verified != verified {
+                config.path_b.foundation_200_210_verified = verified;
+            }
+        }
+        if let Some(depth_epsilon) = toggles.naadf_path_b_depth_epsilon {
+            if config.path_b.depth_epsilon != depth_epsilon {
+                config.path_b.depth_epsilon = depth_epsilon;
+            }
+        }
+        if let Some(enable_temporal) = toggles.naadf_path_b_enable_temporal {
+            if config.path_b.enable_temporal != enable_temporal {
+                config.path_b.enable_temporal = enable_temporal;
+            }
+        }
+        if let Some(counters_enabled) = toggles.naadf_path_b_counters_enabled {
+            if config.path_b.counters_enabled != counters_enabled {
+                config.path_b.counters_enabled = counters_enabled;
             }
         }
         if let Some(local_lights_enabled) = toggles.naadf_preview_local_lights_enabled {
@@ -4188,6 +4241,11 @@ naadf_preview_bounce_count = 0
 naadf_preview_spatial_radius = 0
 naadf_preview_composite_mode = "picture_in_picture"
 naadf_preview_show_miss_sky = true
+naadf_path_b_compositor_mode = "depth_audit"
+naadf_path_b_foundation_200_210_verified = true
+naadf_path_b_depth_epsilon = 0.5
+naadf_path_b_enable_temporal = false
+naadf_path_b_counters_enabled = true
 naadf_preview_local_lights_enabled = true
 naadf_preview_local_light_limit = 12
 naadf_preview_local_light_shadows_enabled = true
@@ -4228,6 +4286,14 @@ hold_frames = 30
             Some("picture_in_picture")
         );
         assert_eq!(toggles.naadf_preview_show_miss_sky, Some(true));
+        assert_eq!(
+            toggles.naadf_path_b_compositor_mode.as_deref(),
+            Some("depth_audit")
+        );
+        assert_eq!(toggles.naadf_path_b_foundation_200_210_verified, Some(true));
+        assert_eq!(toggles.naadf_path_b_depth_epsilon, Some(0.5));
+        assert_eq!(toggles.naadf_path_b_enable_temporal, Some(false));
+        assert_eq!(toggles.naadf_path_b_counters_enabled, Some(true));
         assert_eq!(toggles.naadf_preview_local_lights_enabled, Some(true));
         assert_eq!(toggles.naadf_preview_local_light_limit, Some(12));
         assert_eq!(

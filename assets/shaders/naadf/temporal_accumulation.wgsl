@@ -56,7 +56,7 @@ fn naadf_reproject_history_coord(
     alpha: f32,
     motion: vec4<f32>,
 ) -> vec3<i32> {
-    if naadf_temporal_params.reset_history != 0u || alpha <= 0.0 || depth >= 1.0 || motion.z <= 0.0 {
+    if naadf_temporal_params.reset_history != 0u || alpha <= 0.0 || motion.z <= 0.0 {
         return vec3<i32>(coord, 0i);
     }
 

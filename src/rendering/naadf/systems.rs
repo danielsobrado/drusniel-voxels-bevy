@@ -79,6 +79,14 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
     stats.preview_reference_dispatches_last_frame =
         snapshot.preview_reference_dispatches_last_frame;
     stats.preview_node_stage_last_frame = snapshot.preview_node_stage_last_frame;
+    stats.path_b_depth_rejects_last_frame = snapshot.path_b_depth_rejects_last_frame;
+    stats.path_b_coverage_rejects_last_frame = snapshot.path_b_coverage_rejects_last_frame;
+    stats.path_b_naadf_accepts_last_frame = snapshot.path_b_naadf_accepts_last_frame;
+    stats.path_b_current_kept_last_frame = snapshot.path_b_current_kept_last_frame;
+    stats.path_b_refine_requests_last_frame = snapshot.path_b_refine_requests_last_frame;
+    stats.path_b_stale_or_unresident_last_frame = snapshot.path_b_stale_or_unresident_last_frame;
+    stats.path_b_ownership_changes_last_frame = snapshot.path_b_ownership_changes_last_frame;
+    stats.path_b_composite_passes_last_frame = snapshot.path_b_composite_passes_last_frame;
 }
 
 pub fn record_naadf_bench_counters(
@@ -415,6 +423,46 @@ pub fn record_naadf_bench_counters(
         frame.0,
         "naadf.preview_reference_dispatches_last_frame",
         stats.preview_reference_dispatches_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_depth_rejects_last_frame",
+        stats.path_b_depth_rejects_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_coverage_rejects_last_frame",
+        stats.path_b_coverage_rejects_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_naadf_accepts_last_frame",
+        stats.path_b_naadf_accepts_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_current_kept_last_frame",
+        stats.path_b_current_kept_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_refine_requests_last_frame",
+        stats.path_b_refine_requests_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_stale_or_unresident_last_frame",
+        stats.path_b_stale_or_unresident_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_ownership_changes_last_frame",
+        stats.path_b_ownership_changes_last_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.path_b_composite_passes_last_frame",
+        stats.path_b_composite_passes_last_frame as f64,
     );
 }
 

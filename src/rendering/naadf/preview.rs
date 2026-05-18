@@ -1,7 +1,11 @@
+use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::prelude::*;
 use bevy::render::render_graph::RenderLabel;
 
-use super::config::{NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig};
+use super::config::{
+    NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
+    NaadfPreviewCompositeModeConfig,
+};
 use crate::rendering::ray_tracing::{ExperimentalRenderMode, RayTracingSettings};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -30,6 +34,12 @@ pub struct NaadfPreviewSettings {
     pub show_miss_sky: bool,
     pub composite_mode: NaadfPreviewCompositeMode,
     pub history_resolution_scale: f32,
+    pub path_b_mode: NaadfPathBCompositorMode,
+    pub path_b_depth_epsilon: f32,
+    pub path_b_enable_temporal: bool,
+    pub path_b_audit_overlay_alpha: f32,
+    pub path_b_counters_enabled: bool,
+    pub path_b_runtime_available: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,6 +48,28 @@ pub enum NaadfPreviewCompositeMode {
     #[default]
     SplitView,
     PictureInPicture,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NaadfPathBCompositorMode {
+    #[default]
+    Off,
+    DebugPreview,
+    HybridFarTerrain,
+    DepthAudit,
+}
+
+impl NaadfPathBCompositorMode {
+    pub fn is_path_b(self) -> bool {
+        matches!(
+            self,
+            NaadfPathBCompositorMode::HybridFarTerrain | NaadfPathBCompositorMode::DepthAudit
+        )
+    }
+
+    pub fn is_active(self) -> bool {
+        !matches!(self, NaadfPathBCompositorMode::Off)
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -72,6 +104,12 @@ impl Default for NaadfPreviewSettings {
             show_miss_sky: false,
             composite_mode: NaadfPreviewCompositeMode::SplitView,
             history_resolution_scale: 1.0,
+            path_b_mode: NaadfPathBCompositorMode::Off,
+            path_b_depth_epsilon: 0.25,
+            path_b_enable_temporal: true,
+            path_b_audit_overlay_alpha: 0.75,
+            path_b_counters_enabled: false,
+            path_b_runtime_available: false,
         }
     }
 }
@@ -121,9 +159,10 @@ impl NaadfPreviewHistoryState {
 
 pub fn sync_naadf_preview_mode(
     ray_tracing: Res<RayTracingSettings>,
+    config: Res<NaadfConfig>,
     mut state: ResMut<NaadfPreviewPipelineState>,
 ) {
-    apply_preview_mode_state(&ray_tracing, &mut state);
+    apply_preview_mode_state(&ray_tracing, &config, &mut state);
 }
 
 pub fn sync_naadf_preview_settings_from_config(
@@ -173,6 +212,42 @@ fn apply_preview_config(config: &NaadfConfig, settings: &mut NaadfPreviewSetting
         }
     };
     settings.history_resolution_scale = preview.history_resolution_scale.clamp(0.125, 1.0);
+    settings.path_b_mode = match config.path_b.compositor_mode {
+        NaadfPathBCompositorModeConfig::Off => NaadfPathBCompositorMode::Off,
+        NaadfPathBCompositorModeConfig::DebugPreview => NaadfPathBCompositorMode::DebugPreview,
+        NaadfPathBCompositorModeConfig::HybridFarTerrain => {
+            NaadfPathBCompositorMode::HybridFarTerrain
+        }
+        NaadfPathBCompositorModeConfig::DepthAudit => NaadfPathBCompositorMode::DepthAudit,
+    };
+    settings.path_b_depth_epsilon = config.path_b.depth_epsilon.max(0.0);
+    settings.path_b_enable_temporal = config.path_b.enable_temporal;
+    settings.path_b_audit_overlay_alpha = config.path_b.audit_overlay_alpha.clamp(0.0, 1.0);
+    settings.path_b_counters_enabled = config.path_b.counters_enabled;
+    settings.path_b_runtime_available = config.path_b_runtime_available();
+}
+
+pub fn configure_path_b_camera_prepass(
+    mut commands: Commands,
+    config: Res<NaadfConfig>,
+    ray_tracing: Res<RayTracingSettings>,
+    cameras: Query<Entity, (With<Camera3d>, Without<DepthPrepass>)>,
+) {
+    let needs_path_b_prepass = config.path_b_runtime_available()
+        && matches!(
+            config.path_b.compositor_mode,
+            NaadfPathBCompositorModeConfig::HybridFarTerrain
+                | NaadfPathBCompositorModeConfig::DepthAudit
+        );
+    let needs_prepass = ray_tracing.experimental_mode == ExperimentalRenderMode::NaadfPreview
+        || needs_path_b_prepass;
+    if !needs_prepass {
+        return;
+    }
+
+    for entity in cameras.iter() {
+        commands.entity(entity).insert(DepthPrepass);
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +263,7 @@ mod tests {
         };
         let mut state = NaadfPreviewPipelineState::default();
 
-        apply_preview_mode_state(&settings, &mut state);
+        apply_preview_mode_state(&settings, &NaadfConfig::default(), &mut state);
 
         assert!(state.active);
         assert_eq!(state.mode_generation, 1);
@@ -204,10 +279,35 @@ mod tests {
         };
         let mut state = NaadfPreviewPipelineState::default();
 
-        apply_preview_mode_state(&settings, &mut state);
+        apply_preview_mode_state(&settings, &NaadfConfig::default(), &mut state);
 
         assert_eq!(state.history_generation, 1);
         assert_eq!(state.last_backend_switch_generation, 2);
+    }
+
+    #[test]
+    fn path_b_state_requires_foundation_gate() {
+        let ray_tracing = RayTracingSettings::default();
+        let mut state = NaadfPreviewPipelineState::default();
+        let config = NaadfConfig {
+            enabled: true,
+            path_b: super::super::config::NaadfPathBConfig {
+                compositor_mode: NaadfPathBCompositorModeConfig::HybridFarTerrain,
+                foundation_200_210_verified: false,
+                ..default()
+            },
+            ..default()
+        };
+
+        apply_preview_mode_state(&ray_tracing, &config, &mut state);
+
+        assert!(!state.active);
+
+        let mut verified_config = config;
+        verified_config.path_b.foundation_200_210_verified = true;
+        apply_preview_mode_state(&ray_tracing, &verified_config, &mut state);
+
+        assert!(state.active);
     }
 
     #[test]
@@ -221,6 +321,12 @@ mod tests {
         assert!(!NaadfPreviewSettings::default().local_lights_enabled);
         assert_eq!(NaadfPreviewSettings::default().local_light_limit, 16);
         assert!(!NaadfPreviewSettings::default().local_light_shadows_enabled);
+        assert_eq!(
+            NaadfPreviewSettings::default().path_b_mode,
+            NaadfPathBCompositorMode::Off
+        );
+        assert!(!NaadfPreviewSettings::default().path_b_counters_enabled);
+        assert!(!NaadfPreviewSettings::default().path_b_runtime_available);
     }
 
     #[test]
@@ -272,6 +378,15 @@ mod tests {
                 composite_mode: NaadfPreviewCompositeModeConfig::PictureInPicture,
                 history_resolution_scale: 2.0,
             },
+            path_b: super::super::config::NaadfPathBConfig {
+                compositor_mode: NaadfPathBCompositorModeConfig::DepthAudit,
+                depth_epsilon: -1.0,
+                enable_temporal: false,
+                audit_overlay_alpha: 2.0,
+                counters_enabled: true,
+                foundation_200_210_verified: true,
+            },
+            enabled: true,
             ..default()
         };
 
@@ -301,14 +416,24 @@ mod tests {
             NaadfPreviewCompositeMode::PictureInPicture
         );
         assert_eq!(settings.history_resolution_scale, 1.0);
+        assert_eq!(settings.path_b_mode, NaadfPathBCompositorMode::DepthAudit);
+        assert_eq!(settings.path_b_depth_epsilon, 0.0);
+        assert!(!settings.path_b_enable_temporal);
+        assert_eq!(settings.path_b_audit_overlay_alpha, 1.0);
+        assert!(settings.path_b_counters_enabled);
+        assert!(settings.path_b_runtime_available);
     }
 }
 
 pub fn apply_preview_mode_state(
     ray_tracing: &RayTracingSettings,
+    config: &NaadfConfig,
     state: &mut NaadfPreviewPipelineState,
 ) {
-    let active = ray_tracing.experimental_mode == ExperimentalRenderMode::NaadfPreview;
+    let path_b_mode_active = config.path_b_runtime_available()
+        && config.path_b.compositor_mode != NaadfPathBCompositorModeConfig::Off;
+    let active =
+        ray_tracing.experimental_mode == ExperimentalRenderMode::NaadfPreview || path_b_mode_active;
     if state.active != active {
         state.active = active;
         state.mode_generation = state.mode_generation.saturating_add(1);

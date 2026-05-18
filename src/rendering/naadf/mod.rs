@@ -29,7 +29,10 @@ use std::borrow::Cow;
 use crate::rendering::weather_overlay::WeatherOverlayLabel;
 
 pub use cache::{NaadfCache, NaadfCacheBuildReport};
-pub use config::{NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig};
+pub use config::{
+    NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
+    NaadfPreviewCompositeModeConfig,
+};
 pub use cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
 pub use cpu_trace::NaadfCpuRayBackend;
 pub use dirty::NaadfDirtyChunkQueue;
@@ -53,6 +56,7 @@ fn naadf_shader(path: &'static str) -> impl for<'a> Fn(&'static str, Cow<'a, str
 impl Plugin for NaadfPlugin {
     fn build(&self, app: &mut App) {
         let render_stats_bridge = stats::NaadfRenderStatsBridge::default();
+        let gpu_build_dispatch_bridge = prepare::NaadfGpuBuildDispatchBridge::default();
 
         load_internal_asset!(
             app,
@@ -226,6 +230,7 @@ impl Plugin for NaadfPlugin {
             .init_resource::<gpu_buffers::NaadfGpuChunkTable>()
             .init_resource::<gpu_buffers::NaadfGpuUploadQueue>()
             .init_resource::<prepare::NaadfGpuBuildQueue>()
+            .insert_resource(gpu_build_dispatch_bridge.clone())
             .init_resource::<NaadfStats>()
             .init_resource::<streaming::NaadfStreamingState>()
             .insert_resource(render_stats_bridge.clone())
@@ -242,6 +247,7 @@ impl Plugin for NaadfPlugin {
                     cache::rebuild_naadf_cache_from_dirty_queue,
                     gpu_buffers::sync_gpu_chunk_table_from_cache,
                     gpu_buffers::queue_gpu_uploads_from_cache_report,
+                    prepare::complete_gpu_builds_from_render_dispatch,
                     prepare::queue_gpu_builds_from_cache_report,
                     prepare::sync_gpu_build_queue_stats,
                     streaming::sync_streaming_gpu_slot_stats,
@@ -264,6 +270,7 @@ impl Plugin for NaadfPlugin {
                 (
                     preview::sync_naadf_preview_settings_from_config,
                     preview::sync_naadf_preview_mode,
+                    preview::configure_path_b_camera_prepass,
                 )
                     .chain(),
             );
@@ -271,6 +278,7 @@ impl Plugin for NaadfPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(render_stats_bridge)
+                .insert_resource(gpu_build_dispatch_bridge)
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuConfig>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewPipelineState>()
                 .init_resource::<pipeline::ExtractedNaadfPreviewSettings>()
@@ -293,6 +301,7 @@ impl Plugin for NaadfPlugin {
                         gpu_buffers::extract_naadf_gpu_config,
                         pipeline::extract_naadf_preview_pipeline_state,
                         pipeline::extract_naadf_terrain_atlas,
+                        pipeline::extract_naadf_foreground_coverage_mask,
                         local_lights::extract_naadf_local_lights,
                         gpu_buffers::extract_naadf_gpu_uploads,
                         prepare::extract_naadf_gpu_builds,
