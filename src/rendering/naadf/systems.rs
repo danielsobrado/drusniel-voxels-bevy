@@ -331,6 +331,11 @@ pub fn record_naadf_bench_counters(
             "naadf.sdf_volume_skipped_for_naadf",
             sdf_state.sdf_updates_skipped_for_naadf as f64,
         );
+        timing.record_count(
+            frame.0,
+            "naadf.lighting_history_dirty_generation",
+            sdf_state.naadf_dirty_history_generation as f64,
+        );
     }
     timing.record_count(
         frame.0,

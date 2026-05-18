@@ -36,7 +36,9 @@ use crate::atmosphere::FogUniforms;
 #[cfg(feature = "naadf")]
 use crate::rendering::god_rays::GodRaysLabel;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::{NaadfCacheState, NaadfConfig, NaadfGpuChunkTable, NaadfStats};
+use crate::rendering::naadf::{
+    NaadfCacheState, NaadfConfig, NaadfDirtyChunkQueue, NaadfGpuChunkTable, NaadfStats,
+};
 use crate::rendering::ray_tracing::{
     ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
 };
@@ -83,6 +85,8 @@ impl Plugin for RadianceCascadesPlugin {
                 Update,
                 (
                     sync_radiance_cascades_voxel_backend,
+                    #[cfg(feature = "naadf")]
+                    invalidate_naadf_lighting_history_for_dirty_chunks,
                     configure_radiance_cascade_camera_prepass,
                     update_sdf_volume,
                     update_cascade_params,
@@ -235,6 +239,12 @@ pub struct SdfVolumeState {
 
     /// Frames where all GI query classes were NAADF-routed and SDF update work was skipped.
     pub sdf_updates_skipped_for_naadf: u64,
+
+    /// Last GI history reset caused by NAADF dirty chunk edits.
+    pub naadf_dirty_history_generation: u64,
+
+    /// Last observed total of queued NAADF dirty chunks.
+    pub last_naadf_dirty_queued_total: u64,
 }
 
 impl Default for SdfVolumeState {
@@ -249,6 +259,8 @@ impl Default for SdfVolumeState {
             history_reset_generation: 0,
             sdf_update_needed_last_frame: true,
             sdf_updates_skipped_for_naadf: 0,
+            naadf_dirty_history_generation: 0,
+            last_naadf_dirty_queued_total: 0,
         }
     }
 }
@@ -265,6 +277,37 @@ pub fn sync_radiance_cascades_voxel_backend(
         .map(naadf_query_mask_from_config)
         .unwrap_or_default();
     apply_radiance_backend_selection(&ray_tracing, query_mask, &mut config, &mut state);
+}
+
+#[cfg(feature = "naadf")]
+pub fn invalidate_naadf_lighting_history_for_dirty_chunks(
+    queue: Option<Res<NaadfDirtyChunkQueue>>,
+    config: Res<RadianceCascadesConfig>,
+    mut state: ResMut<SdfVolumeState>,
+) {
+    let Some(queue) = queue else {
+        return;
+    };
+    apply_naadf_dirty_history_invalidation(queue.stats().queued_total, &config, &mut state);
+}
+
+#[cfg(feature = "naadf")]
+fn apply_naadf_dirty_history_invalidation(
+    queued_total: u64,
+    config: &RadianceCascadesConfig,
+    state: &mut SdfVolumeState,
+) {
+    if queued_total == state.last_naadf_dirty_queued_total {
+        return;
+    }
+    state.last_naadf_dirty_queued_total = queued_total;
+
+    if config.enabled && config.voxel_backend == VoxelRayBackendMode::Naadf {
+        state.frame_index = 0;
+        state.prev_view_proj = Mat4::IDENTITY;
+        state.naadf_dirty_history_generation =
+            state.naadf_dirty_history_generation.saturating_add(1);
+    }
 }
 
 #[cfg(not(feature = "naadf"))]
@@ -1602,6 +1645,51 @@ mod tests {
 
         assert_eq!(config.voxel_backend, VoxelRayBackendMode::CurrentSdf);
         assert_eq!(config.voxel_backend_query_mask, 0);
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn naadf_dirty_chunks_reset_lighting_history_for_naadf_backend() {
+        let config = RadianceCascadesConfig {
+            voxel_backend: VoxelRayBackendMode::Naadf,
+            ..default()
+        };
+        let mut state = SdfVolumeState {
+            frame_index: 31,
+            prev_view_proj: Mat4::from_scale(Vec3::splat(3.0)),
+            last_naadf_dirty_queued_total: 4,
+            ..default()
+        };
+
+        apply_naadf_dirty_history_invalidation(5, &config, &mut state);
+
+        assert_eq!(state.frame_index, 0);
+        assert_eq!(state.prev_view_proj, Mat4::IDENTITY);
+        assert_eq!(state.naadf_dirty_history_generation, 1);
+        assert_eq!(state.last_naadf_dirty_queued_total, 5);
+    }
+
+    #[cfg(feature = "naadf")]
+    #[test]
+    fn current_sdf_dirty_bookmark_does_not_reset_lighting_history() {
+        let config = RadianceCascadesConfig {
+            voxel_backend: VoxelRayBackendMode::CurrentSdf,
+            ..default()
+        };
+        let previous_view_proj = Mat4::from_scale(Vec3::splat(3.0));
+        let mut state = SdfVolumeState {
+            frame_index: 31,
+            prev_view_proj: previous_view_proj,
+            last_naadf_dirty_queued_total: 4,
+            ..default()
+        };
+
+        apply_naadf_dirty_history_invalidation(5, &config, &mut state);
+
+        assert_eq!(state.frame_index, 31);
+        assert_eq!(state.prev_view_proj, previous_view_proj);
+        assert_eq!(state.naadf_dirty_history_generation, 0);
+        assert_eq!(state.last_naadf_dirty_queued_total, 5);
     }
 
     #[test]
