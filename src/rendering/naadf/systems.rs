@@ -268,6 +268,11 @@ pub fn record_naadf_bench_counters(
             0.0
         },
     );
+    timing.record_count(
+        frame.0,
+        "naadf.radiance_short_range_rays_per_pixel",
+        stats.radiance_short_range_rays_per_pixel as f64,
+    );
     if let Some(radiance_config) = radiance_config.as_deref() {
         timing.record_count(
             frame.0,

@@ -48,6 +48,7 @@ pub struct NaadfStats {
     pub radiance_sun_visibility_rays_per_pixel: u32,
     pub radiance_contact_shadow_rays_per_pixel: u32,
     pub radiance_terrain_ao_rays_per_pixel: u32,
+    pub radiance_short_range_rays_per_pixel: u32,
     pub preview_pixels_last_frame: u64,
     pub preview_first_hit_dispatches_last_frame: u32,
     pub preview_gi_dispatches_last_frame: u32,

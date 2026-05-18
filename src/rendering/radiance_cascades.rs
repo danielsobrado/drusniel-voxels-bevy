@@ -1322,6 +1322,9 @@ pub fn record_naadf_gi_counters(
             estimated_naadf_contact_shadow_rays_per_pixel(&config);
         stats.radiance_terrain_ao_rays_per_pixel =
             estimated_naadf_terrain_ao_rays_per_pixel(&config);
+        stats.radiance_short_range_rays_per_pixel =
+            stats.radiance_contact_shadow_rays_per_pixel
+                .saturating_add(stats.radiance_terrain_ao_rays_per_pixel);
     }
 }
 
@@ -1781,6 +1784,11 @@ mod tests {
         config.voxel_backend = VoxelRayBackendMode::Naadf;
         assert_eq!(estimated_naadf_contact_shadow_rays_per_pixel(&config), 1);
         assert_eq!(estimated_naadf_terrain_ao_rays_per_pixel(&config), 4);
+        assert_eq!(
+            estimated_naadf_contact_shadow_rays_per_pixel(&config)
+                + estimated_naadf_terrain_ao_rays_per_pixel(&config),
+            5
+        );
 
         config.voxel_backend_query_mask = NAADF_QUERY_SUN_VISIBILITY;
         assert_eq!(estimated_naadf_contact_shadow_rays_per_pixel(&config), 0);
