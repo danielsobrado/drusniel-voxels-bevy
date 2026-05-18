@@ -14,8 +14,8 @@ mod naadf_gpu_layout {
     };
     use voxel_builder::rendering::naadf::gpu_tests::compare_mip_records_to_cpu;
     use voxel_builder::rendering::naadf::layout::{
-        BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, MIP_LEVEL_0_OFFSET, NaadfNodeState,
-        TRAVERSAL_RECORD_STATE_SHIFT, voxel_index_in_chunk,
+        BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, NaadfNodeState, TRAVERSAL_RECORD_STATE_SHIFT,
+        voxel_index_in_chunk,
     };
     use voxel_builder::rendering::voxel_ray_backend::VoxelRayPurpose;
     use voxel_builder::voxel::chunk::Chunk;
@@ -334,7 +334,7 @@ mod naadf_gpu_layout {
         gpu: &GpuContext,
         naadf: &voxel_builder::rendering::naadf::layout::NaadfChunk,
         rays: &[SunVisibilityRayInput],
-        label: &str,
+        _label: &str,
     ) -> Vec<u32> {
         let upload = pack_naadf_chunk_upload(naadf, 0);
         let chunk_lookup_record = [
@@ -909,7 +909,7 @@ fn sun_visibility_test(@builtin(global_invocation_id) global_id: vec3<u32>) {
         mip_payload_records: &[u32],
     ) {
         for (index, raw) in raw_voxel_records.iter().copied().enumerate() {
-            let mip_index = MIP_LEVEL_0_OFFSET as usize + index;
+            let mip_index = index;
             let occupied = (raw & 0x8000_0000) != 0;
             let expected_state = if occupied {
                 NaadfNodeState::UniformFull
