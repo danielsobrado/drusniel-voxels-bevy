@@ -36,24 +36,24 @@ Document status (2026-05-17): historical release/reference record; keep for vers
 
 Examples of volumetric fog in this version (toggle with Alt+L; parameters are tunable in the Settings > Fog menu):
 
-![V0.4 Volumetric Fog 1](docs/images/V0.4-rays1.jpg)
-![V0.4 Volumetric Fog 2](docs/images/V0.4-rays2.jpg)
+![V0.4 Volumetric Fog 1](../images/V0.4-rays1.jpg)
+![V0.4 Volumetric Fog 2](../images/V0.4-rays2.jpg)
 
 Debug overlay examples (toggle with F3; sub-toggles are listed in the Debug tab):
 
-![V0.4 Debug Overlay 1](docs/images/v0.4-debug1.jpg)
-![V0.4 Debug Overlay 2](docs/images/v0.4-debug2.jpg)
+![V0.4 Debug Overlay 1](../images/v0.4-debug1.jpg)
+![V0.4 Debug Overlay 2](../images/v0.4-debug2.jpg)
 
 Minimap example (toggle with M):
 
-![V0.4 Minimap](docs/images/v0.4-minimap.jpg)
+![V0.4 Minimap](../images/v0.4-minimap.jpg)
 
 Terraforming tools in action (toggle with T):
 
 * **Terrain Conform**: Props like buildings now automatically flatten the terrain beneath them for seamless integration.
 * **Sculpting**: Improved brush controls for raising, lowering, leveling, and smoothing terrain.
 
-![V0.4 Terraforming](docs/images/V0.4-terraforming1.jpg)
+![V0.4 Terraforming](../images/V0.4-terraforming1.jpg)
 
 New Atlas Texture Mapping UI (Settings > Textures):
 
@@ -61,11 +61,11 @@ New Atlas Texture Mapping UI (Settings > Textures):
 * **3D Preview**: Visualize changes instantly on a rotating 3D block preview.
 * **Visual Picker**: Select atlas tiles directly from a visual grid instead of guessing indices.
 
-![V0.4 Texture Mapping](docs/images/V0.4-textureMapping.jpg)
+![V0.4 Texture Mapping](../images/V0.4-textureMapping.jpg)
 
 Props and vegetation with LOD optimizations:
 
-![V0.4 Props and Vegetation](docs/images/v0.4-props1.jpg)
+![V0.4 Props and Vegetation](../images/v0.4-props1.jpg)
 
 #### Known Issues (v0.4)
 
@@ -75,4 +75,3 @@ Props and vegetation with LOD optimizations:
 * **Culling on close distance**: When digging and there are close distance polygons, culling and visibility has issues.
 * **Shallow water**: Shore foam, edge coloring, and caustics improved in v0.5.
 * **LODS**: Small gaps and errors can be seen far away in the LODs.
-

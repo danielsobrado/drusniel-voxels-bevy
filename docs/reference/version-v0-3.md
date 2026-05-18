@@ -8,5 +8,4 @@ Document status (2026-05-17): historical release/reference record; keep for vers
 * **Material & Mesh Updates**: Ongoing updates to materials and mesh generation.
 * **Smooth Slope Movement**: Enhanced character controller with bilinear terrain height detection and step-up logic for fluid movement over terrain.
 
-![V0.3 Preview](docs/images/V0.3.jpg)
-
+![V0.3 Preview](../images/V0.3.jpg)

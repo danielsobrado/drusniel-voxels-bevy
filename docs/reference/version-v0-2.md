@@ -7,5 +7,4 @@ Document status (2026-05-17): historical release/reference record; keep for vers
 * **Assets**: Integrated new texture assets (PNG files).
 * **Rendering**: Improved visual fidelity with lighting adjustments.
 
-![V0.2 Preview](docs/images/V0.2.jpg)
-
+![V0.2 Preview](../images/V0.2.jpg)

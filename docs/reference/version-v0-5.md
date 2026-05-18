@@ -58,7 +58,6 @@ Document status (2026-05-17): historical release/reference record; keep for vers
 * **New Editor**: Initial Draft of the editor, most functioanlity is Mock
 
   * **Embedded Bevy view with Debug Bridge**
-    ![Editor 1 - Preview](docs/images/editor1.jpg)
+    ![Editor 1 - Preview](../images/editor1.jpg)
   * **Initial Wireframe view**
-    ![Editor 1 - Preview](docs/images/editor2.jpg)
-
+    ![Editor 1 - Preview](../images/editor2.jpg)
