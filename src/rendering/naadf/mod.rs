@@ -106,6 +106,15 @@ impl Plugin for NaadfPlugin {
         );
         load_internal_asset!(
             app,
+            pipeline::NAADF_BUILD_MIPS_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/build_mips.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_BUILD_MIPS_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
             pipeline::NAADF_BUILD_BOUNDS_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),

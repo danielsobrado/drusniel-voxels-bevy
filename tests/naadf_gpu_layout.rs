@@ -5,7 +5,9 @@ mod naadf_gpu_layout {
     use std::sync::mpsc;
     use voxel_builder::constants::CHUNK_VOLUME;
     use voxel_builder::rendering::naadf::NaadfCpuRayBackend;
-    use voxel_builder::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
+    use voxel_builder::rendering::naadf::cpu_builder::{
+        NaadfBuildOptions, build_mip_pyramid_from_chunk, build_naadf_chunk,
+    };
     use voxel_builder::rendering::naadf::gpu_buffers::{
         NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
         pack_raw_voxel_record,
@@ -108,6 +110,27 @@ mod naadf_gpu_layout {
                 &expected.raw_voxel_records,
                 &actual.mip_traversal_records,
                 &actual.mip_payload_records,
+            );
+            let expected_mips = build_mip_pyramid_from_chunk(&naadf);
+            assert_eq!(
+                expected_mips
+                    .traversal_records
+                    .iter()
+                    .map(|record| record.0)
+                    .collect::<Vec<_>>(),
+                actual.mip_traversal_records,
+                "{}: GPU mip traversal records differ from CPU reference",
+                fixture.name
+            );
+            assert_eq!(
+                expected_mips
+                    .payload_records
+                    .iter()
+                    .map(|record| record.0)
+                    .collect::<Vec<_>>(),
+                actual.mip_payload_records,
+                "{}: GPU mip payload records differ from CPU reference",
+                fixture.name
             );
         }
     }
@@ -272,6 +295,7 @@ mod naadf_gpu_layout {
             &mip_traversal_buffer,
             &mip_payload_buffer,
         );
+        run_build_mips(gpu, &mip_traversal_buffer, &mip_payload_buffer);
         run_build_bounds(gpu, &block_buffer);
         run_build_chunks(gpu, &block_buffer, &chunk_buffer);
         run_build_chunk_bounds(gpu, &chunk_buffer, &params_buffer, &lookup_buffer);
@@ -443,6 +467,36 @@ mod naadf_gpu_layout {
             &layout,
             &group,
             64,
+        );
+    }
+
+    fn run_build_mips(
+        gpu: &GpuContext,
+        mip_traversal_buffer: &wgpu::Buffer,
+        mip_payload_buffer: &wgpu::Buffer,
+    ) {
+        let layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("naadf_test_build_mips_layout"),
+                entries: &[storage_entry(6, false), storage_entry(7, false)],
+            });
+        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("naadf_test_build_mips_group"),
+            layout: &layout,
+            entries: &[
+                buffer_entry(6, mip_traversal_buffer),
+                buffer_entry(7, mip_payload_buffer),
+            ],
+        });
+        dispatch_shader(
+            gpu,
+            "build_mips",
+            resolve_shader(include_str!("../assets/shaders/naadf/build_mips.wgsl")),
+            "build_naadf_mips",
+            &layout,
+            &group,
+            1,
         );
     }
 

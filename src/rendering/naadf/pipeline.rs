@@ -31,6 +31,7 @@ pub const NAADF_RAY_TRACE_SHADER_PATH: &str = "shaders/naadf/ray_trace.wgsl";
 pub const NAADF_WORLD_TRACE_SHADER_PATH: &str = "shaders/naadf/world_trace.wgsl";
 pub const NAADF_LIGHTING_QUERIES_SHADER_PATH: &str = "shaders/naadf/lighting_queries.wgsl";
 pub const NAADF_BUILD_BLOCKS_SHADER_PATH: &str = "shaders/naadf/build_blocks.wgsl";
+pub const NAADF_BUILD_MIPS_SHADER_PATH: &str = "shaders/naadf/build_mips.wgsl";
 pub const NAADF_BUILD_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_bounds.wgsl";
 pub const NAADF_BUILD_CHUNKS_SHADER_PATH: &str = "shaders/naadf/build_chunks.wgsl";
 pub const NAADF_BUILD_CHUNK_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_chunk_bounds.wgsl";
@@ -59,6 +60,8 @@ pub const NAADF_LIGHTING_QUERIES_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("010676cf-a5de-4b6a-8ef4-a0eb30867f40");
 pub const NAADF_BUILD_BLOCKS_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("78b08331-0603-4efe-85a9-8e8f5b712f41");
+pub const NAADF_BUILD_MIPS_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("e1d2c726-790f-4f78-9ced-1305583ef45f");
 pub const NAADF_BUILD_BOUNDS_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("2e95a98a-69c1-44b9-a67f-ce44a2969039");
 pub const NAADF_BUILD_CHUNKS_SHADER_HANDLE: Handle<Shader> =
@@ -223,6 +226,7 @@ pub fn extract_naadf_preview_pipeline_state(mut commands: Commands, main_world: 
 pub struct NaadfPreviewBuildPipelines {
     empty_group_layout: BindGroupLayoutDescriptor,
     build_blocks_layout: BindGroupLayoutDescriptor,
+    build_mips_layout: BindGroupLayoutDescriptor,
     build_bounds_layout: BindGroupLayoutDescriptor,
     build_chunks_layout: BindGroupLayoutDescriptor,
     build_chunk_bounds_layout: BindGroupLayoutDescriptor,
@@ -234,6 +238,7 @@ pub struct NaadfPreviewBuildPipelines {
     path_trace_layout: BindGroupLayoutDescriptor,
     composite_layout: BindGroupLayoutDescriptor,
     build_blocks_pipeline: CachedComputePipelineId,
+    build_mips_pipeline: CachedComputePipelineId,
     build_bounds_pipeline: CachedComputePipelineId,
     build_chunks_pipeline: CachedComputePipelineId,
     build_chunk_bounds_pipeline: CachedComputePipelineId,
@@ -446,6 +451,10 @@ pub fn init_naadf_preview_build_pipelines(
         "naadf_build_bounds_layout",
         &[storage_buffer_entry(5, false)],
     );
+    let build_mips_layout = BindGroupLayoutDescriptor::new(
+        "naadf_build_mips_layout",
+        &[storage_buffer_entry(6, false), storage_buffer_entry(7, false)],
+    );
     let build_chunks_layout = BindGroupLayoutDescriptor::new(
         "naadf_build_chunks_layout",
         &[
@@ -558,6 +567,13 @@ pub fn init_naadf_preview_build_pipelines(
         &empty_group_layout,
         &build_bounds_layout,
     ));
+    let build_mips_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
+        "naadf_build_mips_pipeline",
+        NAADF_BUILD_MIPS_SHADER_HANDLE,
+        "build_naadf_mips",
+        &empty_group_layout,
+        &build_mips_layout,
+    ));
     let build_chunks_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
         "naadf_build_chunks_pipeline",
         NAADF_BUILD_CHUNKS_SHADER_HANDLE,
@@ -642,6 +658,7 @@ pub fn init_naadf_preview_build_pipelines(
     commands.insert_resource(NaadfPreviewBuildPipelines {
         empty_group_layout,
         build_blocks_layout,
+        build_mips_layout,
         build_bounds_layout,
         build_chunks_layout,
         build_chunk_bounds_layout,
@@ -653,6 +670,7 @@ pub fn init_naadf_preview_build_pipelines(
         path_trace_layout,
         composite_layout,
         build_blocks_pipeline,
+        build_mips_pipeline,
         build_bounds_pipeline,
         build_chunks_pipeline,
         build_chunk_bounds_pipeline,
@@ -824,11 +842,22 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
+        let build_mips_pipeline = if gpu_builder_enabled {
+            let Some(pipeline) =
+                pipeline_cache.get_compute_pipeline(pipelines.build_mips_pipeline)
+            else {
+                publish_preview_node_stage(world, 12);
+                return Ok(());
+            };
+            Some(pipeline)
+        } else {
+            None
+        };
         let build_chunks_pipeline = if gpu_builder_enabled {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_chunks_pipeline)
             else {
-                publish_preview_node_stage(world, 12);
+                publish_preview_node_stage(world, 13);
                 return Ok(());
             };
             Some(pipeline)
@@ -839,7 +868,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_chunk_bounds_pipeline)
             else {
-                publish_preview_node_stage(world, 13);
+                publish_preview_node_stage(world, 14);
                 return Ok(());
             };
             Some(pipeline)
@@ -1092,6 +1121,14 @@ impl ViewNode for NaadfPreviewBuildNode {
             &pipeline_cache.get_bind_group_layout(&pipelines.build_bounds_layout),
             &BindGroupEntries::with_indices(((5, allocation.block_buffer.as_entire_binding()),)),
         );
+        let build_mips_group = render_device.create_bind_group(
+            "naadf_build_mips_bind_group",
+            &pipeline_cache.get_bind_group_layout(&pipelines.build_mips_layout),
+            &BindGroupEntries::with_indices((
+                (6, allocation.mip_traversal_buffer.as_entire_binding()),
+                (7, allocation.mip_payload_buffer.as_entire_binding()),
+            )),
+        );
         let build_chunks_group = render_device.create_bind_group(
             "naadf_build_chunks_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.build_chunks_layout),
@@ -1239,17 +1276,23 @@ impl ViewNode for NaadfPreviewBuildNode {
         if let (
             Some(build_blocks_pipeline),
             Some(build_bounds_pipeline),
+            Some(build_mips_pipeline),
             Some(build_chunks_pipeline),
             Some(build_chunk_bounds_pipeline),
         ) = (
             build_blocks_pipeline,
             build_bounds_pipeline,
+            build_mips_pipeline,
             build_chunks_pipeline,
             build_chunk_bounds_pipeline,
         ) {
             pass.set_pipeline(build_blocks_pipeline);
             pass.set_bind_group(3, &build_blocks_group, &[]);
             pass.dispatch_workgroups(allocation.plan.block_records as u32, 1, 1);
+
+            pass.set_pipeline(build_mips_pipeline);
+            pass.set_bind_group(3, &build_mips_group, &[]);
+            pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
 
             pass.set_pipeline(build_bounds_pipeline);
             pass.set_bind_group(3, &build_bounds_group, &[]);

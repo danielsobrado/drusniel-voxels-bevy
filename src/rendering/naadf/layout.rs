@@ -573,6 +573,25 @@ mod tests {
     }
 
     #[test]
+    fn wgsl_mip_builder_reduces_base_level_to_root() {
+        let build_mips = include_str!("../../../assets/shaders/naadf/build_mips.wgsl");
+        let shader = bevy_shader::Shader::from_wgsl(build_mips, "shaders/naadf/build_mips.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/common.wgsl"
+            )
+        }));
+        assert!(build_mips.contains("@compute"));
+        assert!(build_mips.contains("fn build_naadf_mips"));
+        assert!(build_mips.contains("naadf_summarize_mip_children"));
+        assert!(build_mips.contains("thin_or_hole"));
+        assert!(build_mips.contains("NAADF_MIP_CELLS_PER_CHUNK"));
+    }
+
+    #[test]
     fn wgsl_chunk_builder_writes_chunk_nodes_from_block_records() {
         let build_chunks = include_str!("../../../assets/shaders/naadf/build_chunks.wgsl");
         let shader =

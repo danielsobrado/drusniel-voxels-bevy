@@ -4,10 +4,11 @@ use crate::constants::CHUNK_VOLUME;
 use crate::rendering::naadf::layout::{
     BLOCKS_PER_CHUNK, BLOCKS_PER_CHUNK_AXIS, BOUND_FIELD_MAX, BOUND_OFFSET_NEG_X,
     BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X, BOUND_OFFSET_POS_Y,
-    BOUND_OFFSET_POS_Z, DirectionalBounds, NaadfBlock, NaadfChunk, NaadfNodeState,
+    BOUND_OFFSET_POS_Z, DirectionalBounds, MIP_CELLS_PER_CHUNK, MIP_LEVEL_COUNT, NaadfBlock,
+    NaadfChunk, NaadfNodeState, NaadfPayloadRecord, NaadfTraversalRecord,
     PackedDirectionalBounds2Bit, PackedNaadfNode, VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS,
-    block_coord_for_voxel, block_index_in_chunk, local_coord_in_block, voxel_index_in_block,
-    voxel_index_in_chunk,
+    block_coord_for_voxel, block_index_in_chunk, local_coord_in_block, mip_cell_index,
+    mip_level_axis, voxel_index_in_block, voxel_index_in_chunk,
 };
 use crate::voxel::chunk::Chunk;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -430,6 +431,128 @@ pub fn occupancy_mask_for_chunk_voxel(local: UVec3) -> (usize, u64) {
     )
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NaadfMipPyramid {
+    pub traversal_records: Vec<NaadfTraversalRecord>,
+    pub payload_records: Vec<NaadfPayloadRecord>,
+}
+
+pub fn build_mip_pyramid_from_chunk(chunk: &NaadfChunk) -> NaadfMipPyramid {
+    let mut pyramid = NaadfMipPyramid {
+        traversal_records: vec![NaadfTraversalRecord::default(); MIP_CELLS_PER_CHUNK as usize],
+        payload_records: vec![NaadfPayloadRecord::default(); MIP_CELLS_PER_CHUNK as usize],
+    };
+
+    for z in 0..16 {
+        for y in 0..16 {
+            for x in 0..16 {
+                let local = UVec3::new(x, y, z);
+                let source_index = voxel_index_in_chunk(local);
+                let occupied = chunk.occupancy[source_index];
+                let mip_index = mip_cell_index(0, local);
+                pyramid.traversal_records[mip_index] = NaadfTraversalRecord::new(
+                    if occupied {
+                        NaadfNodeState::UniformFull
+                    } else {
+                        NaadfNodeState::UniformEmpty
+                    },
+                    u8::from(occupied),
+                    false,
+                );
+                pyramid.payload_records[mip_index] =
+                    NaadfPayloadRecord::material(chunk.material_ids[source_index]);
+            }
+        }
+    }
+
+    for parent_level in 1..MIP_LEVEL_COUNT {
+        build_mip_level(&mut pyramid, parent_level);
+    }
+
+    pyramid
+}
+
+fn build_mip_level(pyramid: &mut NaadfMipPyramid, parent_level: u32) {
+    let child_level = parent_level - 1;
+    let parent_axis = mip_level_axis(parent_level);
+    for z in 0..parent_axis {
+        for y in 0..parent_axis {
+            for x in 0..parent_axis {
+                let local = UVec3::new(x, y, z);
+                let summary = summarize_mip_children(pyramid, child_level, local * 2);
+                let index = mip_cell_index(parent_level, local);
+                pyramid.traversal_records[index] = NaadfTraversalRecord::new(
+                    summary.state,
+                    summary.child_mask,
+                    summary.thin_or_hole,
+                );
+                pyramid.payload_records[index] = NaadfPayloadRecord::material(summary.material_id);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MipSummary {
+    state: NaadfNodeState,
+    child_mask: u8,
+    thin_or_hole: bool,
+    material_id: u16,
+}
+
+fn summarize_mip_children(
+    pyramid: &NaadfMipPyramid,
+    child_level: u32,
+    child_origin: UVec3,
+) -> MipSummary {
+    let mut occupied_count = 0u8;
+    let mut child_mask = 0u8;
+    let mut first_material = 0u16;
+    let mut uniform_material = true;
+    let mut all_full = true;
+    let mut bit = 0u8;
+
+    for z in 0..2 {
+        for y in 0..2 {
+            for x in 0..2 {
+                let child = child_origin + UVec3::new(x, y, z);
+                let child_index = mip_cell_index(child_level, child);
+                let child_record = pyramid.traversal_records[child_index];
+                let child_state = child_record.state();
+                let occupied = child_state != NaadfNodeState::UniformEmpty;
+                if occupied {
+                    occupied_count += 1;
+                    child_mask |= 1 << bit;
+                    let material = pyramid.payload_records[child_index].material_id();
+                    if first_material == 0 {
+                        first_material = material;
+                    } else if material != 0 && material != first_material {
+                        uniform_material = false;
+                    }
+                }
+                all_full = all_full && child_state == NaadfNodeState::UniformFull;
+                bit += 1;
+            }
+        }
+    }
+
+    let state = if occupied_count == 0 {
+        NaadfNodeState::UniformEmpty
+    } else if occupied_count == 8 && all_full && uniform_material {
+        NaadfNodeState::UniformFull
+    } else {
+        NaadfNodeState::Children
+    };
+
+    MipSummary {
+        state,
+        child_mask,
+        thin_or_hole: state == NaadfNodeState::Children
+            && (occupied_count <= 2 || occupied_count >= 6 || !all_full),
+        material_id: first_material,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +586,24 @@ mod tests {
                 neg_z: 0,
                 pos_z: 3,
             }
+        );
+    }
+
+    #[test]
+    fn mip_pyramid_reduces_sparse_chunk_to_thin_mixed_root() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(0, 0, 0), VoxelType::Rock);
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+
+        let pyramid = build_mip_pyramid_from_chunk(&naadf);
+        let root = pyramid.traversal_records[mip_cell_index(4, UVec3::ZERO)];
+
+        assert_eq!(pyramid.traversal_records.len(), MIP_CELLS_PER_CHUNK as usize);
+        assert_eq!(root.state(), NaadfNodeState::Children);
+        assert!(root.thin_or_hole());
+        assert_eq!(
+            pyramid.payload_records[mip_cell_index(4, UVec3::ZERO)].material_id(),
+            VoxelType::Rock as u16
         );
     }
 
