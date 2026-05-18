@@ -277,6 +277,7 @@ impl Plugin for NaadfPlugin {
                 .init_resource::<pipeline::ExtractedNaadfTerrainAtlas>()
                 .init_resource::<local_lights::ExtractedNaadfLocalLights>()
                 .init_resource::<gpu_buffers::ExtractedNaadfGpuUploads>()
+                .init_resource::<prepare::ExtractedNaadfGpuBuilds>()
                 .init_resource::<gpu_buffers::ExtractedNaadfEntityGpuUploads>()
                 .init_resource::<NaadfGpuBuffers>()
                 .init_resource::<local_lights::NaadfLocalLightGpuBuffers>()
@@ -294,6 +295,7 @@ impl Plugin for NaadfPlugin {
                         pipeline::extract_naadf_terrain_atlas,
                         local_lights::extract_naadf_local_lights,
                         gpu_buffers::extract_naadf_gpu_uploads,
+                        prepare::extract_naadf_gpu_builds,
                         gpu_buffers::extract_naadf_entity_gpu_uploads,
                     )
                         .chain(),

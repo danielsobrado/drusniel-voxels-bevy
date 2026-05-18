@@ -217,6 +217,15 @@ impl NaadfConfig {
             config.enabled = true;
             config.debug.force_cpu_builder = true;
         }
+        if env_flag_enabled("DRUSNIEL_NAADF_GPU_BUILDER") {
+            config.enabled = true;
+            config.debug.force_cpu_builder = false;
+            config.debug.force_gpu_builder = true;
+        }
+        if env_flag_enabled("DRUSNIEL_NAADF_DEBUG_READBACK") {
+            config.enabled = true;
+            config.gpu.debug_readback = true;
+        }
         config
     }
 }

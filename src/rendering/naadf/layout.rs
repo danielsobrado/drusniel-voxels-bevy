@@ -569,6 +569,8 @@ mod tests {
         assert!(ray_trace.contains("fn naadf_select_mip_level"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
         assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
+        assert!(ray_trace.contains("fn naadf_ray_box_axis"));
+        assert!(!ray_trace.contains("safe_direction"));
     }
 
     #[test]

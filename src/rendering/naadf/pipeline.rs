@@ -871,6 +871,10 @@ impl ViewNode for NaadfPreviewBuildNode {
             .cloned()
             .unwrap_or_default();
         let gpu_builder_enabled = gpu_config.prefer_gpu_builder;
+        let gpu_builds = world
+            .get_resource::<super::prepare::ExtractedNaadfGpuBuilds>()
+            .cloned()
+            .unwrap_or_default();
         let telemetry_enabled = gpu_config.debug_readback;
         let build_blocks_pipeline = if gpu_builder_enabled {
             let Some(pipeline) =
@@ -1348,44 +1352,46 @@ impl ViewNode for NaadfPreviewBuildNode {
         pass.set_bind_group(0, &empty_group, &[]);
         pass.set_bind_group(1, &empty_group, &[]);
         pass.set_bind_group(2, &empty_group, &[]);
-        if let (
-            Some(build_blocks_pipeline),
-            Some(build_bounds_pipeline),
-            Some(build_mips_pipeline),
-            Some(build_chunks_pipeline),
-            Some(build_chunk_bounds_pipeline),
-        ) = (
-            build_blocks_pipeline,
-            build_bounds_pipeline,
-            build_mips_pipeline,
-            build_chunks_pipeline,
-            build_chunk_bounds_pipeline,
-        ) {
-            pass.set_pipeline(build_blocks_pipeline);
-            pass.set_bind_group(3, &build_blocks_group, &[]);
-            pass.dispatch_workgroups(allocation.plan.block_records as u32, 1, 1);
+        if gpu_builds.has_work() {
+            if let (
+                Some(build_blocks_pipeline),
+                Some(build_bounds_pipeline),
+                Some(build_mips_pipeline),
+                Some(build_chunks_pipeline),
+                Some(build_chunk_bounds_pipeline),
+            ) = (
+                build_blocks_pipeline,
+                build_bounds_pipeline,
+                build_mips_pipeline,
+                build_chunks_pipeline,
+                build_chunk_bounds_pipeline,
+            ) {
+                pass.set_pipeline(build_blocks_pipeline);
+                pass.set_bind_group(3, &build_blocks_group, &[]);
+                pass.dispatch_workgroups(allocation.plan.block_records as u32, 1, 1);
 
-            pass.set_pipeline(build_mips_pipeline);
-            pass.set_bind_group(3, &build_mips_group, &[]);
-            pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.set_pipeline(build_mips_pipeline);
+                pass.set_bind_group(3, &build_mips_group, &[]);
+                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
 
-            pass.set_pipeline(build_bounds_pipeline);
-            pass.set_bind_group(3, &build_bounds_group, &[]);
-            pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.set_pipeline(build_bounds_pipeline);
+                pass.set_bind_group(3, &build_bounds_group, &[]);
+                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
 
-            pass.set_pipeline(build_chunks_pipeline);
-            pass.set_bind_group(3, &build_chunks_group, &[]);
-            pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
-            pass.set_pipeline(build_chunk_bounds_pipeline);
-            pass.set_bind_group(3, &build_chunk_bounds_group, &[]);
-            pass.dispatch_workgroups(
-                div_ceil_u64(
-                    allocation.plan.chunk_records,
-                    NAADF_BUILD_CHUNKS_WORKGROUP_SIZE as u64,
-                ) as u32,
-                1,
-                1,
-            );
+                pass.set_pipeline(build_chunks_pipeline);
+                pass.set_bind_group(3, &build_chunks_group, &[]);
+                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.set_pipeline(build_chunk_bounds_pipeline);
+                pass.set_bind_group(3, &build_chunk_bounds_group, &[]);
+                pass.dispatch_workgroups(
+                    div_ceil_u64(
+                        allocation.plan.chunk_records,
+                        NAADF_BUILD_CHUNKS_WORKGROUP_SIZE as u64,
+                    ) as u32,
+                    1,
+                    1,
+                );
+            }
         }
         pass.set_pipeline(first_hit_pipeline);
         pass.set_bind_group(3, &first_hit_group, &[]);

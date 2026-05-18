@@ -633,20 +633,28 @@ fn naadf_step_axis(t_max: vec3<f32>) -> u32 {
     return 2u;
 }
 
+fn naadf_ray_box_axis(origin: f32, direction: f32, bounds_min: f32, bounds_max: f32) -> vec2<f32> {
+    if abs(direction) < 0.000001 {
+        if origin < bounds_min || origin > bounds_max {
+            return vec2<f32>(1.0, 0.0);
+        }
+        return vec2<f32>(-1000000000.0, 1000000000.0);
+    }
+
+    let inv_direction = 1.0 / direction;
+    let t0 = (bounds_min - origin) * inv_direction;
+    let t1 = (bounds_max - origin) * inv_direction;
+    return vec2<f32>(min(t0, t1), max(t0, t1));
+}
+
 fn naadf_ray_chunk_entry(origin: vec3<f32>, direction: vec3<f32>, chunk_pos: vec3<i32>) -> f32 {
     let bounds_min = vec3<f32>(naadf_chunk_world_origin(chunk_pos));
     let bounds_max = bounds_min + vec3<f32>(f32(NAADF_VOXELS_PER_CHUNK_AXIS));
-    let safe_direction = select(
-        vec3<f32>(0.000001),
-        direction,
-        abs(direction) >= vec3<f32>(0.000001),
-    );
-    let t0 = (bounds_min - origin) / safe_direction;
-    let t1 = (bounds_max - origin) / safe_direction;
-    let near = min(t0, t1);
-    let far = max(t0, t1);
-    let entry = max(max(near.x, near.y), near.z);
-    let exit = min(min(far.x, far.y), far.z);
+    let x_axis = naadf_ray_box_axis(origin.x, direction.x, bounds_min.x, bounds_max.x);
+    let y_axis = naadf_ray_box_axis(origin.y, direction.y, bounds_min.y, bounds_max.y);
+    let z_axis = naadf_ray_box_axis(origin.z, direction.z, bounds_min.z, bounds_max.z);
+    let entry = max(max(x_axis.x, y_axis.x), z_axis.x);
+    let exit = min(min(x_axis.y, y_axis.y), z_axis.y);
     if exit < 0.0 || entry > exit {
         return -1.0;
     }
