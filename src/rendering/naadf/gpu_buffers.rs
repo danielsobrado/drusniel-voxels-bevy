@@ -21,6 +21,8 @@ use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 pub const NAADF_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_MATERIAL_RECORD_BYTES: u64 = 4;
+pub const NAADF_MIP_TRAVERSAL_RECORD_BYTES: u64 = 4;
+pub const NAADF_MIP_PAYLOAD_RECORD_BYTES: u64 = 4;
 pub const NAADF_BLOCK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_LOOKUP_RECORD_BYTES: u64 = 16;
@@ -39,12 +41,16 @@ pub struct NaadfGpuBufferPlan {
     pub voxel_records: u64,
     pub raw_voxel_records: u64,
     pub material_records: u64,
+    pub mip_traversal_records: u64,
+    pub mip_payload_records: u64,
     pub block_records: u64,
     pub chunk_records: u64,
     pub chunk_lookup_records: u64,
     pub voxel_buffer_bytes: u64,
     pub raw_voxel_buffer_bytes: u64,
     pub material_buffer_bytes: u64,
+    pub mip_traversal_buffer_bytes: u64,
+    pub mip_payload_buffer_bytes: u64,
     pub block_buffer_bytes: u64,
     pub chunk_buffer_bytes: u64,
     pub chunk_lookup_buffer_bytes: u64,
@@ -59,12 +65,18 @@ impl NaadfGpuBufferPlan {
         let voxel_records = max_chunks as u64 * crate::constants::CHUNK_VOLUME as u64;
         let raw_voxel_records = voxel_records;
         let material_records = voxel_records;
+        let mip_traversal_records =
+            max_chunks as u64 * super::layout::MIP_CELLS_PER_CHUNK as u64;
+        let mip_payload_records = mip_traversal_records;
         let block_records = max_chunks as u64 * super::layout::BLOCKS_PER_CHUNK as u64;
         let chunk_records = max_chunks as u64;
         let chunk_lookup_records = max_chunks as u64;
         let voxel_buffer_bytes = voxel_records * NAADF_VOXEL_RECORD_BYTES;
         let raw_voxel_buffer_bytes = raw_voxel_records * NAADF_RAW_VOXEL_RECORD_BYTES;
         let material_buffer_bytes = material_records * NAADF_MATERIAL_RECORD_BYTES;
+        let mip_traversal_buffer_bytes =
+            mip_traversal_records * NAADF_MIP_TRAVERSAL_RECORD_BYTES;
+        let mip_payload_buffer_bytes = mip_payload_records * NAADF_MIP_PAYLOAD_RECORD_BYTES;
         let block_buffer_bytes = block_records * NAADF_BLOCK_RECORD_BYTES;
         let chunk_buffer_bytes = chunk_records * NAADF_CHUNK_RECORD_BYTES;
         let chunk_lookup_buffer_bytes = chunk_lookup_records * NAADF_CHUNK_LOOKUP_RECORD_BYTES;
@@ -74,6 +86,8 @@ impl NaadfGpuBufferPlan {
         let estimated_bytes = voxel_buffer_bytes
             + raw_voxel_buffer_bytes
             + material_buffer_bytes
+            + mip_traversal_buffer_bytes
+            + mip_payload_buffer_bytes
             + block_buffer_bytes
             + chunk_buffer_bytes
             + chunk_lookup_buffer_bytes
@@ -85,12 +99,16 @@ impl NaadfGpuBufferPlan {
             voxel_records,
             raw_voxel_records,
             material_records,
+            mip_traversal_records,
+            mip_payload_records,
             block_records,
             chunk_records,
             chunk_lookup_records,
             voxel_buffer_bytes,
             raw_voxel_buffer_bytes,
             material_buffer_bytes,
+            mip_traversal_buffer_bytes,
+            mip_payload_buffer_bytes,
             block_buffer_bytes,
             chunk_buffer_bytes,
             chunk_lookup_buffer_bytes,
@@ -141,6 +159,8 @@ pub struct NaadfGpuBufferAllocation {
     pub voxel_buffer: Buffer,
     pub raw_voxel_buffer: Buffer,
     pub material_buffer: Buffer,
+    pub mip_traversal_buffer: Buffer,
+    pub mip_payload_buffer: Buffer,
     pub block_buffer: Buffer,
     pub chunk_buffer: Buffer,
     pub chunk_lookup_buffer: Buffer,
@@ -884,6 +904,18 @@ fn create_naadf_gpu_allocation(
             plan.material_buffer_bytes,
             storage_usage,
         ),
+        mip_traversal_buffer: create_buffer(
+            render_device,
+            "naadf_mip_traversal_records",
+            plan.mip_traversal_buffer_bytes,
+            storage_usage,
+        ),
+        mip_payload_buffer: create_buffer(
+            render_device,
+            "naadf_mip_payload_records",
+            plan.mip_payload_buffer_bytes,
+            storage_usage,
+        ),
         block_buffer: create_buffer(
             render_device,
             "naadf_block_records",
@@ -1136,7 +1168,7 @@ fn lookup_generation_for_pending_uploads(
 mod tests {
     use super::*;
     use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
-    use crate::rendering::naadf::layout::voxel_index_in_chunk;
+    use crate::rendering::naadf::layout::{MIP_CELLS_PER_CHUNK, voxel_index_in_chunk};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
 
@@ -1260,12 +1292,19 @@ mod tests {
         assert_eq!(plan.voxel_records, 8192);
         assert_eq!(plan.raw_voxel_records, 8192);
         assert_eq!(plan.material_records, 8192);
+        assert_eq!(
+            plan.mip_traversal_records,
+            2 * MIP_CELLS_PER_CHUNK as u64
+        );
+        assert_eq!(plan.mip_payload_records, plan.mip_traversal_records);
         assert_eq!(plan.block_records, 128);
         assert_eq!(plan.chunk_records, 2);
         assert_eq!(plan.chunk_lookup_records, 2);
         assert!(plan.voxel_buffer_bytes > 0);
         assert!(plan.raw_voxel_buffer_bytes > 0);
         assert!(plan.material_buffer_bytes > 0);
+        assert!(plan.mip_traversal_buffer_bytes > 0);
+        assert!(plan.mip_payload_buffer_bytes > 0);
         assert!(plan.block_buffer_bytes > 0);
         assert!(plan.chunk_buffer_bytes > 0);
         assert!(plan.chunk_lookup_buffer_bytes > 0);

@@ -1,10 +1,12 @@
-#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_NODE_CHILDREN, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, naadf_make_node
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_0_OFFSET, NAADF_NODE_CHILDREN, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, naadf_make_node, naadf_make_traversal_record
 #import "shaders/naadf/layout.wgsl" naadf_voxel_index_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read_write> naadf_voxel_records: array<u32>;
 @group(3) @binding(1) var<storage, read_write> naadf_material_records: array<u32>;
 @group(3) @binding(4) var<storage, read> naadf_raw_voxel_records: array<u32>;
 @group(3) @binding(5) var<storage, read_write> naadf_block_records: array<u32>;
+@group(3) @binding(6) var<storage, read_write> naadf_mip_traversal_records: array<u32>;
+@group(3) @binding(7) var<storage, read_write> naadf_mip_payload_records: array<u32>;
 
 var<workgroup> cached_occupied: array<u32, 64>;
 var<workgroup> cached_material: array<u32, 64>;
@@ -46,6 +48,14 @@ fn build_naadf_blocks(
         cached_skip[local_index],
     );
     naadf_material_records[raw_chunk_base + chunk_voxel_index] = cached_material[local_index];
+    let mip_base = chunk_slot * NAADF_MIP_CELLS_PER_CHUNK + NAADF_MIP_LEVEL_0_OFFSET;
+    let mip_record_index = mip_base + chunk_voxel_index;
+    naadf_mip_traversal_records[mip_record_index] = naadf_make_traversal_record(
+        select(NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, cached_occupied[local_index] != 0u),
+        select(0u, 1u, cached_occupied[local_index] != 0u),
+        false,
+    );
+    naadf_mip_payload_records[mip_record_index] = cached_material[local_index];
 
     if local_index == 0u {
         var occupied_count = 0u;

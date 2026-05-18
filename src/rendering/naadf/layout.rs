@@ -543,6 +543,8 @@ mod tests {
         assert!(build_blocks.contains("naadf_voxel_records"));
         assert!(build_blocks.contains("naadf_raw_voxel_records"));
         assert!(build_blocks.contains("naadf_block_records"));
+        assert!(build_blocks.contains("naadf_mip_traversal_records"));
+        assert!(build_blocks.contains("naadf_mip_payload_records"));
         assert!(build_blocks.contains("NAADF_NODE_UNIFORM_FULL"));
         assert!(build_blocks.contains("cached_skip"));
         assert!(build_blocks.contains("naadf_pack_voxel_record"));

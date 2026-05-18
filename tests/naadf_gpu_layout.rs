@@ -10,8 +10,10 @@ mod naadf_gpu_layout {
         NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
         pack_raw_voxel_record,
     };
-    use voxel_builder::rendering::naadf::layout::BLOCKS_PER_CHUNK;
-    use voxel_builder::rendering::naadf::layout::voxel_index_in_chunk;
+    use voxel_builder::rendering::naadf::layout::{
+        BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, MIP_LEVEL_0_OFFSET, NaadfNodeState,
+        TRAVERSAL_RECORD_STATE_SHIFT, voxel_index_in_chunk,
+    };
     use voxel_builder::rendering::voxel_ray_backend::VoxelRayPurpose;
     use voxel_builder::voxel::chunk::Chunk;
     use voxel_builder::voxel::types::{Voxel, VoxelType};
@@ -19,6 +21,7 @@ mod naadf_gpu_layout {
 
     const VOXEL_BYTES: u64 = CHUNK_VOLUME as u64 * 4;
     const BLOCK_BYTES: u64 = BLOCKS_PER_CHUNK as u64 * NAADF_PACKED_BLOCK_WORDS as u64 * 4;
+    const MIP_BYTES: u64 = MIP_CELLS_PER_CHUNK as u64 * 4;
     const CHUNK_BYTES: u64 = NAADF_PACKED_CHUNK_WORDS as u64 * 4;
     const LOOKUP_BYTES: u64 = 16;
     const PARAM_BYTES: u64 = 16;
@@ -100,6 +103,12 @@ mod naadf_gpu_layout {
                 &expected.material_records,
                 &actual.material_records,
             );
+            assert_base_mip_records_match_raw(
+                &fixture.name,
+                &expected.raw_voxel_records,
+                &actual.mip_traversal_records,
+                &actual.mip_payload_records,
+            );
         }
     }
 
@@ -175,6 +184,8 @@ mod naadf_gpu_layout {
         block_records: Vec<[u32; NAADF_PACKED_BLOCK_WORDS]>,
         voxel_records: Vec<u32>,
         material_records: Vec<u32>,
+        mip_traversal_records: Vec<u32>,
+        mip_payload_records: Vec<u32>,
     }
 
     impl SunVisibilityRayInput {
@@ -231,6 +242,9 @@ mod naadf_gpu_layout {
             bytemuck::cast_slice(&raw_voxel_records),
         );
         let block_buffer = storage_buffer(&gpu.device, "naadf_test_blocks", BLOCK_BYTES);
+        let mip_traversal_buffer =
+            storage_buffer(&gpu.device, "naadf_test_mip_traversal", MIP_BYTES);
+        let mip_payload_buffer = storage_buffer(&gpu.device, "naadf_test_mip_payload", MIP_BYTES);
         let chunk_buffer = init_storage_buffer(
             &gpu.device,
             "naadf_test_chunks",
@@ -255,6 +269,8 @@ mod naadf_gpu_layout {
             &material_buffer,
             &raw_buffer,
             &block_buffer,
+            &mip_traversal_buffer,
+            &mip_payload_buffer,
         );
         run_build_bounds(gpu, &block_buffer);
         run_build_chunks(gpu, &block_buffer, &chunk_buffer);
@@ -264,6 +280,8 @@ mod naadf_gpu_layout {
         let block_words = read_words(gpu, &block_buffer, BLOCK_BYTES).await;
         let voxel_records = read_words(gpu, &voxel_buffer, VOXEL_BYTES).await;
         let material_records = read_words(gpu, &material_buffer, VOXEL_BYTES).await;
+        let mip_traversal_records = read_words(gpu, &mip_traversal_buffer, MIP_BYTES).await;
+        let mip_payload_records = read_words(gpu, &mip_payload_buffer, MIP_BYTES).await;
 
         let chunk_record = chunk_words
             .try_into()
@@ -278,6 +296,8 @@ mod naadf_gpu_layout {
             block_records,
             voxel_records,
             material_records,
+            mip_traversal_records,
+            mip_payload_records,
         }
     }
 
@@ -387,6 +407,8 @@ mod naadf_gpu_layout {
         material_buffer: &wgpu::Buffer,
         raw_buffer: &wgpu::Buffer,
         block_buffer: &wgpu::Buffer,
+        mip_traversal_buffer: &wgpu::Buffer,
+        mip_payload_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
@@ -397,6 +419,8 @@ mod naadf_gpu_layout {
                     storage_entry(1, false),
                     storage_entry(4, true),
                     storage_entry(5, false),
+                    storage_entry(6, false),
+                    storage_entry(7, false),
                 ],
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -407,6 +431,8 @@ mod naadf_gpu_layout {
                 buffer_entry(1, material_buffer),
                 buffer_entry(4, raw_buffer),
                 buffer_entry(5, block_buffer),
+                buffer_entry(6, mip_traversal_buffer),
+                buffer_entry(7, mip_payload_buffer),
             ],
         });
         dispatch_shader(
@@ -806,6 +832,40 @@ fn sun_visibility_test(@builtin(global_invocation_id) global_id: vec3<u32>) {
             expected, actual,
             "NAADF GPU record mismatch: fixture={fixture}, chunk_pos={chunk_pos:?}, kind={kind}, expected={expected:?}, actual={actual:?}"
         );
+    }
+
+    fn assert_base_mip_records_match_raw(
+        fixture: &str,
+        raw_voxel_records: &[u32],
+        mip_traversal_records: &[u32],
+        mip_payload_records: &[u32],
+    ) {
+        for (index, raw) in raw_voxel_records.iter().copied().enumerate() {
+            let mip_index = MIP_LEVEL_0_OFFSET as usize + index;
+            let occupied = (raw & 0x8000_0000) != 0;
+            let expected_state = if occupied {
+                NaadfNodeState::UniformFull
+            } else {
+                NaadfNodeState::UniformEmpty
+            } as u32;
+            let actual_state = mip_traversal_records[mip_index] >> TRAVERSAL_RECORD_STATE_SHIFT;
+            let actual_child_mask = mip_traversal_records[mip_index] & 0xff;
+
+            assert_eq!(
+                expected_state, actual_state,
+                "{fixture}: base mip state mismatch at voxel index {index}"
+            );
+            assert_eq!(
+                u32::from(occupied),
+                actual_child_mask,
+                "{fixture}: base mip child mask mismatch at voxel index {index}"
+            );
+            assert_eq!(
+                raw & 0x0000_ffff,
+                mip_payload_records[mip_index],
+                "{fixture}: base mip payload mismatch at voxel index {index}"
+            );
+        }
     }
 
     fn naadf_fixture_files() -> [(&'static str, &'static str); 10] {

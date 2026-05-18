@@ -438,6 +438,8 @@ pub fn init_naadf_preview_build_pipelines(
             storage_buffer_entry(1, false),
             storage_buffer_entry(4, true),
             storage_buffer_entry(5, false),
+            storage_buffer_entry(6, false),
+            storage_buffer_entry(7, false),
         ],
     );
     let build_bounds_layout = BindGroupLayoutDescriptor::new(
@@ -1081,6 +1083,8 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (1, allocation.material_buffer.as_entire_binding()),
                 (4, allocation.raw_voxel_buffer.as_entire_binding()),
                 (5, allocation.block_buffer.as_entire_binding()),
+                (6, allocation.mip_traversal_buffer.as_entire_binding()),
+                (7, allocation.mip_payload_buffer.as_entire_binding()),
             )),
         );
         let build_bounds_group = render_device.create_bind_group(
