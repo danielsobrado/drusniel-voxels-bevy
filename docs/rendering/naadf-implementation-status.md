@@ -1325,7 +1325,7 @@ Known warning:
 
 - Existing warning in `src/main.rs`: unused variable `use_vulkan_on_windows`.
 
-## Historical Verification Not Run
+## Historical Verification Not RunNAADF's
 
 Earlier NAADF batches deferred visual/runtime verification. The latest preview coverage follow-up above has now run the preview and startup-stability benches.
 
