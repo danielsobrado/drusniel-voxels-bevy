@@ -1,9 +1,12 @@
-#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_X, NAADF_CHUNK_BOUND_OFFSET_POS_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Z, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state
+#import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_CHUNK_BOUND_OFFSET_NEG_X, NAADF_CHUNK_BOUND_OFFSET_NEG_Y, NAADF_CHUNK_BOUND_OFFSET_NEG_Z, NAADF_CHUNK_BOUND_OFFSET_POS_X, NAADF_CHUNK_BOUND_OFFSET_POS_Y, NAADF_CHUNK_BOUND_OFFSET_POS_Z, NAADF_MIP_BOUND_OFFSET_NEG_X, NAADF_MIP_BOUND_OFFSET_NEG_Y, NAADF_MIP_BOUND_OFFSET_NEG_Z, NAADF_MIP_BOUND_OFFSET_POS_X, NAADF_MIP_BOUND_OFFSET_POS_Y, NAADF_MIP_BOUND_OFFSET_POS_Z, NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_0_OFFSET, NAADF_MIP_LEVEL_1_OFFSET, NAADF_MIP_LEVEL_2_OFFSET, NAADF_MIP_LEVEL_3_OFFSET, NAADF_MIP_LEVEL_4_OFFSET, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, NAADF_VOXELS_PER_BLOCK_AXIS, NAADF_VOXELS_PER_CHUNK, NAADF_VOXELS_PER_CHUNK_AXIS, naadf_node_payload, naadf_node_state, naadf_traversal_state, naadf_traversal_thin_or_hole
 #import "shaders/naadf/layout.wgsl" naadf_block_coord_for_voxel, naadf_block_index_in_chunk, naadf_chunk_world_origin, naadf_local_coord_in_block, naadf_voxel_index_in_chunk
 
 @group(3) @binding(0) var<storage, read> naadf_voxel_records: array<u32>;
 @group(3) @binding(1) var<storage, read> naadf_material_records: array<u32>;
 @group(3) @binding(5) var<storage, read> naadf_block_records: array<u32>;
+@group(3) @binding(6) var<storage, read> naadf_mip_traversal_records: array<u32>;
+@group(3) @binding(7) var<storage, read> naadf_mip_payload_records: array<u32>;
+@group(3) @binding(8) var<storage, read> naadf_mip_bounds_records: array<u32>;
 @group(3) @binding(11) var<storage, read> naadf_chunk_records: array<u32>;
 
 struct NaadfRay {
@@ -339,6 +342,40 @@ fn naadf_make_hit(
         normal,
         NAADF_MISS_REASON_NONE,
     );
+}
+
+fn naadf_mip_bounds_for_step(record: u32, step: vec3<i32>) -> vec3<u32> {
+    return vec3<u32>(
+        naadf_mip_bounds_field(record, select(NAADF_MIP_BOUND_OFFSET_NEG_X, NAADF_MIP_BOUND_OFFSET_POS_X, step.x > 0i)),
+        naadf_mip_bounds_field(record, select(NAADF_MIP_BOUND_OFFSET_NEG_Y, NAADF_MIP_BOUND_OFFSET_POS_Y, step.y > 0i)),
+        naadf_mip_bounds_field(record, select(NAADF_MIP_BOUND_OFFSET_NEG_Z, NAADF_MIP_BOUND_OFFSET_POS_Z, step.z > 0i)),
+    );
+}
+
+fn naadf_mip_bounds_field(record: u32, offset: u32) -> u32 {
+    return (record >> offset) & 0x1fu;
+}
+
+fn naadf_mip_record_index(chunk_index: u32, level: u32, local: vec3<u32>) -> u32 {
+    let axis = naadf_mip_axis(level);
+    return chunk_index * NAADF_MIP_CELLS_PER_CHUNK + naadf_mip_offset(level) +
+        local.x + local.y * axis + local.z * axis * axis;
+}
+
+fn naadf_mip_axis(level: u32) -> u32 {
+    if level == 0u { return 16u; }
+    if level == 1u { return 8u; }
+    if level == 2u { return 4u; }
+    if level == 3u { return 2u; }
+    return 1u;
+}
+
+fn naadf_mip_offset(level: u32) -> u32 {
+    if level == 0u { return NAADF_MIP_LEVEL_0_OFFSET; }
+    if level == 1u { return NAADF_MIP_LEVEL_1_OFFSET; }
+    if level == 2u { return NAADF_MIP_LEVEL_2_OFFSET; }
+    if level == 3u { return NAADF_MIP_LEVEL_3_OFFSET; }
+    return NAADF_MIP_LEVEL_4_OFFSET;
 }
 
 fn naadf_make_miss(steps: u32, miss_reason: u32) -> NaadfHit {

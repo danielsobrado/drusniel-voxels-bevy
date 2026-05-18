@@ -558,6 +558,8 @@ mod tests {
         assert!(ray_trace.contains("naadf_chunk_records"));
         assert!(ray_trace.contains("fn naadf_chunk_skip_for_step"));
         assert!(ray_trace.contains("fn naadf_directional_skip_for_step"));
+        assert!(ray_trace.contains("fn naadf_mip_bounds_for_step"));
+        assert!(ray_trace.contains("naadf_mip_bounds_records"));
         assert!(ray_trace.contains("fn naadf_step_axis"));
         assert!(ray_trace.contains("fn naadf_ray_chunk_entry"));
     }
