@@ -11,6 +11,7 @@ disable_reflection_cameras = true
 naadf_force_cpu_builder = true
 naadf_radius_chunks = 20
 naadf_max_chunks = 8192
+naadf_max_gpu_memory_mb = 1024
 naadf_max_chunk_updates_per_frame = 8192
 naadf_max_upload_bytes_per_frame = 67108864
 naadf_history_resolution_scale = 0.5

@@ -188,6 +188,8 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub naadf_max_chunks: Option<u32>,
     #[serde(default)]
+    pub naadf_max_gpu_memory_mb: Option<u32>,
+    #[serde(default)]
     pub naadf_max_upload_bytes_per_frame: Option<u32>,
     #[serde(default)]
     pub naadf_history_resolution_scale: Option<f32>,
@@ -1190,6 +1192,11 @@ fn apply_bench_render_toggles(
         if let Some(max_chunks) = toggles.naadf_max_chunks {
             if config.chunk_cache.max_chunks != max_chunks {
                 config.chunk_cache.max_chunks = max_chunks;
+            }
+        }
+        if let Some(max_gpu_memory_mb) = toggles.naadf_max_gpu_memory_mb {
+            if config.chunk_cache.max_gpu_memory_mb != max_gpu_memory_mb {
+                config.chunk_cache.max_gpu_memory_mb = max_gpu_memory_mb;
             }
         }
         if let Some(max_upload_bytes) = toggles.naadf_max_upload_bytes_per_frame {
@@ -4170,6 +4177,7 @@ disable_terrain_meshes = true
 naadf_force_cpu_builder = true
 naadf_radius_chunks = 3
 naadf_max_chunks = 384
+naadf_max_gpu_memory_mb = 768
 naadf_max_chunk_updates_per_frame = 384
 naadf_max_upload_bytes_per_frame = 67108864
 naadf_history_resolution_scale = 0.125
@@ -4206,6 +4214,7 @@ hold_frames = 30
         assert!(toggles.disable_terrain_meshes);
         assert_eq!(toggles.naadf_radius_chunks, Some(3));
         assert_eq!(toggles.naadf_max_chunks, Some(384));
+        assert_eq!(toggles.naadf_max_gpu_memory_mb, Some(768));
         assert_eq!(toggles.naadf_max_chunk_updates_per_frame, Some(384));
         assert_eq!(toggles.naadf_max_upload_bytes_per_frame, Some(67_108_864));
         assert_eq!(toggles.naadf_history_resolution_scale, Some(0.125));
