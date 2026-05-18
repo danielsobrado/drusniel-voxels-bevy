@@ -1406,7 +1406,7 @@ Not yet done (per the plan's phasing):
 ## Planned: Distance LOD And Texture Parity
 
 NAADF distance LOD and textured first-hit parity are planned in
-`docs/rendering/naadf-distance-lod-plan.md` (`NAADF-200` series).
+`docs/rendering/naadf-distance-lod-plan.md` (the `NAADF-200..210` foundation).
 
 Summary of the planned design:
 
@@ -1420,6 +1420,30 @@ Summary of the planned design:
 - **Textured first-hit** using the shared terrain atlas (triplanar) for visual
   parity with the legacy renderer — independent of the LOD phases.
 - Hard prerequisite: GPU build/traverse dispatch must come online first.
+
+## Planned: NAADF Lighting (Path A)
+
+NAADF as a voxel terrain lighting / ray-query backend is planned in
+`docs/rendering/naadf-lighting-plan.md` (`NAADF-200..230`).
+
+Summary:
+
+- **Path A**: NAADF answers visibility / GI / occlusion ray queries; the
+  current renderer keeps drawing the game. **Path B** (an optional NAADF
+  preview / far-terrain renderer) is deferred behind the proven foundation.
+- Phase 1 — NAADF sun visibility + AO/contact shadow (builds on the
+  `NAADF-080/081` query scaffolding).
+- Phase 2 — wire the real NAADF GI pipeline into **Radiance Cascades**
+  (`NAADF-213`), flipping the `naadf_gi_shader_backend_available()` gate left
+  off by `NAADF-FIX-005`. DDGI / ReSTIR / radiance cache stay deferred — the
+  engine already owns Radiance Cascades.
+- Phase 3 — froxel sun-visibility mask → god-ray / fog for off-screen occluders.
+- Explicitly rejected from the source research: a 4.9 GB clipmap, NAADF as the
+  first-target primary renderer, panic-on-VRAM-failure, 10M-ray CI gates, and
+  32-frame TAA as the default.
+- `NAADF-200..210` are the shared foundation, numbered consistently across both
+  `naadf-distance-lod-plan.md` and the lighting plan; the lighting plan owns
+  `NAADF-211..230`.
 
 ## Remaining Work
 

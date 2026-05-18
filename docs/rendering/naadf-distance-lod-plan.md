@@ -47,6 +47,10 @@ resolution, which is heavy in memory, upload bandwidth, and ray steps.
    optional far-future memory optimisation only.
 5. **Residency LOD is a memory decision derived from the same footprint.** Don't
    build/upload fine voxels for a chunk no camera ray will ever sample finely.
+6. **Traversal touches occupancy only.** A marching ray reads occupancy + skip
+   bounds — a small "hot" record. Material / albedo / normal live in a separate
+   "cold" payload record fetched only at a confirmed hit, so empty-space steps
+   never pollute the cache with shading data.
 
 ---
 
@@ -69,16 +73,46 @@ work — it depends on it.
 
 ### A. Per-chunk mip pyramid + inter-chunk coarse grid
 
-- Each `NaadfChunk` gains downsampled levels: `16³ → 8³ → 4³ → 2³ → 1³`
-  occupancy + **dominant material** per node (reuse the `NAADF-FIX-003`
-  dominant-material policy). The existing 4³-block grid is already the 4× level
-  — formalise it as mip 2 and fill in the rest.
-- An **inter-chunk coarse grid**: one occupancy bit (and dominant material) per
-  chunk, and a level above that, so very-distant terrain and sky-scale
-  occlusion are near-free to trace.
-- Built by a **GPU compute downsample pass** (`build_blocks.wgsl` /
-  `build_bounds.wgsl` extended): each level reduces the one below. Upload only
-  the base; the GPU derives the pyramid.
+Each `NaadfChunk` gains an explicit **5-level pyramid**:
+
+| Level | Grid | Cells |
+| --- | --- | --- |
+| L0 — base voxels | 16³ | 4096 |
+| L1 | 8³ | 512 |
+| L2 — the existing 4³ block grid | 4³ | 64 |
+| L3 | 2³ | 8 |
+| L4 — root summary | 1³ | 1 |
+
+That is **4681 cells per chunk** (585 summary cells above the base). NAADF's
+current 4³-block grid *is* L2 — formalise it, add L1/L3/L4. Above the chunk, an
+**inter-chunk coarse grid** (one occupancy bit + dominant material per chunk,
+plus a level above it) makes very-distant terrain and sky-scale occlusion
+near-free to trace.
+
+**Split each cell into a hot traversal record and a cold payload record**, in
+separate buffers:
+
+- *Traversal record* — occupancy state (empty/solid/mixed), child-occupancy
+  mask, directional AADF skip bounds, and a **thin-or-hole flag**. This is all
+  a marching ray touches.
+- *Payload record* — dominant material ID, albedo summary, normal summary.
+  Fetched **only at a confirmed hit**, never during traversal.
+
+Keeping shading attributes out of the traversal hot path avoids cache pollution
+on every empty-space step.
+
+**Build:** a GPU compute downsample pass (`build_blocks.wgsl` /
+`build_bounds.wgsl` extended) — upload only the L0 base; the GPU derives L1–L4
+and the inter-chunk grid, each level reducing the one below and taking the
+**dominant material** (`NAADF-FIX-003` policy). **Whole-chunk rebuild on edit**
+is the baseline — a 16³ chunk is cheap to rebuild fully and easy to benchmark;
+keep a dirty AABB only to prioritise uploads, defer incremental partial
+rebuilds until counters justify them.
+
+**Buffer sizing:** use a fixed resident-slot model (slot → fixed buffer region,
+no dynamic offsets) and keep each storage buffer under the portable wgpu limits
+(128 MiB max storage-buffer *binding*, 256 MiB max buffer, 256-byte offset
+alignment).
 
 ### B. Mipped directional bounds (AADF)
 
@@ -90,16 +124,27 @@ The bounds builder runs per level in the same compute pass.
 
 In the ray-march shader (`ray_trace.wgsl` / `world_trace.wgsl`):
 
-- Carry a **cone**: origin footprint + spread (from camera FOV / pixel size for
-  primary rays; from the GI/AO cone half-angle for secondary rays).
+- Carry a **cone**: origin footprint + spread (camera FOV / pixel size for
+  primary rays; the GI/AO cone half-angle for secondary rays).
 - At each step, compute the footprint radius `r(t)` and select the mip level
   whose node size ≈ `r(t)`. March that level (bigger steps, fewer cells), using
   that level's directional bounds for empty-skip.
+- **Per-purpose bias.** The footprint is shared, but the level it selects is
+  biased by ray purpose: **primary** rays bias *finer* (negative bias) and
+  descend aggressively; **secondary** rays (AO / GI / fog occlusion) tolerate
+  coarser levels (positive bias). One footprint, purpose-specific use.
+- **Thin-or-hole preservation — the critical caveat.** A coarse cell that is
+  merely "mixed" can still contain a narrow cave mouth, slit, arch or overhang
+  that *disappears* if the ray stops at that level. Cells the mip builder flags
+  `thin-or-hole` (from low/high-but-mixed child occupancy, or high normal
+  variance) **force a finer descent regardless of the footprint**. Geometry LOD
+  must be silhouette- and hole-preserving first; only then may the footprint
+  coarsen it.
 - **Inter-level blend:** optionally sample the two bracketing levels and blend
-  by the fractional footprint, to remove residual popping (trilinear-in-LOD).
-- Result: near terrain traced at voxel resolution, far terrain at block /
-  chunk / super-chunk resolution, with **no tier boundary and no seam** — the
-  step size varies continuously.
+  by the fractional footprint, with a small blue-noise jitter at thresholds, so
+  LOD transitions are temporally filterable rather than a visible pop.
+- Result: near terrain at voxel resolution, far terrain at block/chunk
+  resolution, continuous — **no tier boundary and no seam**.
 
 ### D. Footprint-derived residency / streaming
 
@@ -128,9 +173,11 @@ sample the **same textures**:
 - **Triplanar sampling** in `first_hit.wgsl` from world position + hit normal
   (matching `triplanar_terrain.wgsl`); a blocky-mode path matching
   `blocky_terrain.wgsl` as a follow-up.
-- **Texture mip = the cone footprint** from section C. The geometry-LOD
-  footprint *is* the texture-LOD footprint — one value, both selections,
-  anti-aliased terrain at any distance with no extra work.
+- **Texture mip = the cone footprint** from section C. One footprint feeds both
+  selections — but geometry LOD applies the conservative thin-or-hole bias,
+  while texture sampling uses the footprint directly (a slightly finer mip for
+  primary-hit normal maps is fine). Anti-aliased terrain at any distance for
+  no extra footprint work.
 - At coarse geometry LOD the node's dominant material drives the texture; the
   coarse footprint naturally selects a coarse texture mip — consistent.
 
@@ -153,18 +200,32 @@ parallel. Water and props parity stay out of scope for this plan.
 
 ---
 
-## Phased plan (`NAADF-200` series)
+## Phased plan (`NAADF-200..210` — shared foundation)
 
-| Phase | What | Files (primary) |
-| --- | --- | --- |
-| **NAADF-200** | GPU build/traverse **dispatch online** (prerequisite — base level). | `prepare.rs`, `pipeline.rs`, `gpu_buffers.rs`, build/trace shaders |
-| **NAADF-201** | GPU compute **mip pyramid** build (16³→1³ + inter-chunk grid), dominant material per node. | `build_blocks.wgsl`, `layout.rs`, `cpu_builder.rs` (parity ref) |
-| **NAADF-202** | **Mipped directional bounds** per level. | `build_bounds.wgsl`, `layout.rs` |
-| **NAADF-203** | **Cone-footprint LOD** in the ray-march + inter-level blend. | `ray_trace.wgsl`, `world_trace.wgsl`, `gi_trace.wgsl` |
-| **NAADF-204** | **Footprint-derived residency**: build/upload only needed levels. | `streaming.rs`, `cache.rs`, `gpu_buffers.rs` |
-| **NAADF-205** | **Textured first-hit** — shared atlas, triplanar, cone-footprint texture mip (parity). *Independent of 201–204.* | `first_hit.wgsl`, `pipeline.rs`, `preview.rs` |
-| **NAADF-206** | Tuning, `bench_guard` thresholds, NAADF bench runs. | `bench_guard.rs`, `bench_guard.toml`, bench scenes |
-| NAADF-2xx | *(optional, future)* DAG dedup of coarse subtrees; beam pre-pass. | — |
+`NAADF-200..210` is the **canonical foundation roadmap**, shared with
+`naadf-lighting-plan.md` (which owns the lighting-specific `NAADF-211..230`).
+The rows below are that scheme; the distance-LOD and texture-parity detail this
+doc contributes is noted per ticket and in design sections A–E above.
+
+| ID | Title | This doc's detail | Files (primary) |
+| --- | --- | --- | --- |
+| `NAADF-200` | Render-graph GPU dispatch online | Hard prerequisite — currently scaffolded, not dispatched. | `prepare.rs`, `pipeline.rs`, `gpu_buffers.rs` |
+| `NAADF-201` | Split traversal / payload buffers | Hot occupancy + AADF bounds vs cold material / albedo / normal (§A). | `layout.rs`, `gpu_buffers.rs` |
+| `NAADF-202` | GPU base chunk builder | Pass 1 — base payload + occupancy. | `build_blocks.wgsl`, `cpu_builder.rs` (parity ref) |
+| `NAADF-203` | GPU mip pyramid builder | Pass 2 — L0→L4 pyramid (§A) + inter-chunk grid; whole-chunk rebuild baseline. | `build_blocks.wgsl`, `layout.rs` |
+| `NAADF-204` | GPU directional AADF sweeps | Pass 3 — per-level bounds (§B); sets the **thin-or-hole flag**. | `build_bounds.wgsl`, `layout.rs` |
+| `NAADF-205` | CPU/GPU parity harness | Mip / bounds / cone-LOD trace vs the full-res CPU reference. | `gpu_tests.rs`, `naadf_cpu_layout` |
+| `NAADF-206` | Dense near-chunk lookup table | + **footprint-derived residency** (§D) — build/upload only the mip levels a chunk needs. | `streaming.rs`, `cache.rs` |
+| `NAADF-207` | Multi-chunk world traversal | Chunk lookup + boundary crossing. | `world_trace.wgsl` |
+| `NAADF-208` | AADF skip traversal | Empty-run leaps using the mipped directional bounds. | `ray_trace.wgsl`, `world_trace.wgsl` |
+| `NAADF-209` | Continuous cone-footprint LOD | Per-purpose bias, thin-or-hole forced descent, inter-level blend (§C). | `ray_trace.wgsl`, `world_trace.wgsl`, `gi_trace.wgsl` |
+| `NAADF-210` | Texture parity (`textureSampleLevel`) | Shared atlas, triplanar, cone-footprint texture mip (§E). *Independent of 202–209.* | `first_hit.wgsl`, `pipeline.rs`, `preview.rs` |
+
+`NAADF-211..230` (lighting, volumetrics, the optional Path-B compositor) live in
+`naadf-lighting-plan.md`; tuning and `bench_guard` thresholds are tracked there
+as `NAADF-218`. This doc's bench requirement is in *Tests and gates* below.
+Optional future memory/speed work (DAG dedup of coarse subtrees, a coarse beam
+pre-pass) is noted under *Performance levers*.
 
 ---
 
@@ -198,7 +259,15 @@ parallel. Water and props parity stay out of scope for this plan.
 
 ## Out of scope
 
-- Water and prop texturing/rendering parity (separate follow-up).
+- **NAADF-backed lighting** — sun visibility, AO, DDGI / GI, volumetric fog and
+  god rays, and the temporal / SVGF-style denoising stack. These are valuable
+  and a separate, *larger* plan; this doc is **geometry LOD + texture parity
+  only**. The traversal core, mip pyramid, and split records here are the
+  foundation that lighting plan would build on. (Note: NAADF's stated role per
+  `naadf-port-plan.md` is a ray-query / GI cache, not a renderer replacement —
+  a lighting plan must reconcile with the engine's existing Radiance Cascades
+  GI rather than assume a greenfield GI choice.)
+- Water and prop texturing / rendering parity (separate follow-up).
 - Full sparse-voxel-octree / DAG rewrite (brickmap + mips is the chosen
   structure; DAG dedup is an optional future memory phase only).
 - Replacing the production renderer — NAADF stays the experimental preview path

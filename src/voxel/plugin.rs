@@ -4112,7 +4112,9 @@ pub fn apply_visibility_culling_system(
 /// - `Culled`: Far away, not rendered at all
 ///
 /// Uses hysteresis to prevent rapid LOD switching when camera is near thresholds.
-/// Throttled to every 0.25s and skipped when camera hasn't moved significantly.
+/// Throttled to every 0.25s. Stationary scans run only while new chunks arrive
+/// or prior LOD work is still draining, so chunks can converge after loading
+/// without paying a permanent full-world scan cost.
 pub(crate) fn terrain_lod_distance_xz(chunk_pos: IVec3, camera_pos: Vec3) -> f32 {
     let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
     let chunk_center = Vec2::new(
@@ -4134,6 +4136,8 @@ fn update_chunk_lod_system(
     mut timing: ResMut<AreaTimingRecorder>,
     mut last_update: Local<f32>,
     mut last_camera_pos: Local<Option<Vec3>>,
+    mut last_chunk_count: Local<Option<usize>>,
+    mut stationary_lod_scans_remaining: Local<u8>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "LOD Update");
     lod_transitions.repeated_chunks_this_frame = 0;
@@ -4178,25 +4182,30 @@ fn update_chunk_lod_system(
     };
 
     let camera_pos = camera_transform.translation;
-
-    // Skip if camera hasn't moved more than 2 world units since last update
-    if let Some(prev) = *last_camera_pos {
-        if camera_pos.distance_squared(prev) < 4.0 {
-            refresh_lod_change_rate(now, &mut lod_transitions);
-            drop(_timer);
-            record_lod_counters(
-                &mut timing,
-                frame.0,
-                0,
-                lod_transitions.changes_per_second,
-                0,
-            );
-            return;
-        }
+    let chunk_count = world.chunk_entries().count();
+    let camera_moved = last_camera_pos
+        .map(|prev| camera_pos.distance_squared(prev) >= 4.0)
+        .unwrap_or(true);
+    let chunk_count_changed = last_chunk_count
+        .map(|previous| previous != chunk_count)
+        .unwrap_or(true);
+    if !camera_moved && !chunk_count_changed && *stationary_lod_scans_remaining == 0 {
+        *last_update = now;
+        refresh_lod_change_rate(now, &mut lod_transitions);
+        drop(_timer);
+        record_lod_counters(
+            &mut timing,
+            frame.0,
+            0,
+            lod_transitions.changes_per_second,
+            0,
+        );
+        return;
     }
 
     *last_update = now;
     *last_camera_pos = Some(camera_pos);
+    *last_chunk_count = Some(chunk_count);
 
     let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32)> = Vec::new();
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
@@ -4291,6 +4300,7 @@ fn update_chunk_lod_system(
             .then_with(|| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
     });
 
+    let lod_candidate_count = lod_candidates.len();
     let mut lod_changed: Vec<IVec3> = Vec::new();
     for (chunk_pos, _current_lod, target_lod, _distance) in
         lod_candidates.into_iter().take(MAX_LOD_CHANGES_PER_UPDATE)
@@ -4314,6 +4324,11 @@ fn update_chunk_lod_system(
     refresh_lod_change_rate(now, &mut lod_transitions);
 
     let lod_changed_count = lod_changed.len() as u32;
+    if lod_candidate_count > lod_changed.len() || !lod_changed.is_empty() {
+        *stationary_lod_scans_remaining = 1;
+    } else {
+        *stationary_lod_scans_remaining = 0;
+    }
     for chunk_pos in &lod_changed {
         mark_chunk_lod_halo_dirty(&mut world, *chunk_pos);
     }

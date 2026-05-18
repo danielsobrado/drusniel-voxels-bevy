@@ -358,6 +358,24 @@ the wall itself.
   ambiguous-column fallback.
 - Fresh manual capture `20260518-015338` is now considered contaminated by
   startup/load churn and should not be used to judge the snap weld.
+- Fresh manual captures `20260518-025230` / `20260518-025317` repeated the same
+  probe values, but exposed a different convergence bug: many sampled chunks
+  were `mesh_status=Current` while `current_lod` still differed from
+  `computed_target_lod` (for example `Lod0 -> Lod2`). The LOD updater was
+  skipping its scan while the camera was stationary, so chunks loaded after the
+  last movement could remain at stale high detail until the player moved.
+  `update_chunk_lod_system` now runs stationary scans only while chunk count
+  changes or prior LOD candidates are still draining, then idles again.
+- Visual LOD bench run `bench-runs/2026-05-18T03-01-56Z` measured the naive
+  always-scan stationary fix and failed live-LOD guard rows:
+  `Mesh Dirty:p99` 13.060 / 12.565 / 8.796 ms and `forest-look-sweep`
+  frame p99 44.303 ms. This confirmed the convergence fix could not be a
+  permanent 4 Hz full-world scan.
+- Visual LOD bench run `bench-runs/2026-05-18T03-17-52Z` measured the current
+  drain-only stationary scan. It improved `Mesh Dirty:p99` to 10.702 / 11.406 /
+  6.378 ms but still failed ridge/jump mesh-dirty p99 and forest frame p99. The
+  visual bench remains an honest non-signoff; manual probe recapture is still
+  needed to verify the visible mountain seam after LOD convergence.
 - Visual LOD bench run `bench-runs/2026-05-17T17-32-24Z` completed and produced
   screenshots, but every checkpoint hit render-ready timeout. `bench_guard`
   passed live-LOD mesh-dirty p99 rows (0.149-0.204 ms) and failed
