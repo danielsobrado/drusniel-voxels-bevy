@@ -411,6 +411,10 @@ impl Chunk {
         changed
     }
 
+    pub(crate) fn set_initial_lod_level(&mut self, lod_level: LodLevel) {
+        self.lod_level = lod_level;
+    }
+
     /// Converts local 3D coordinates to a linear index.
     ///
     /// Index layout: x + y*16 + z*256 (X-major ordering).

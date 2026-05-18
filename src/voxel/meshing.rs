@@ -34,7 +34,8 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{
-    extract_boundary_edges, generate_skirts, ChunkFace, NeighborLods, SkirtConfig,
+    ChunkFace, NeighborLods, SkirtConfig, compute_boundary_flags, extract_boundary_edges,
+    generate_skirts,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -46,7 +47,7 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
@@ -70,6 +71,39 @@ pub struct TerrainMeshDebug {
     pub missing_boundary_neighbors_at_mesh: u32,
     pub empty_surface_cap_at_mesh: bool,
     pub generated_frame: u32,
+    pub lod_transition_snap_stats: LodTransitionSnapStats,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LodTransitionSnapStats {
+    pub snapped_face_mask: u8,
+    pub fallback_face_mask: u8,
+    pub snapped_vertex_count: u32,
+}
+
+impl LodTransitionSnapStats {
+    #[inline]
+    fn face_mask(face: ChunkFace) -> u8 {
+        1 << face as u8
+    }
+
+    #[inline]
+    fn mark_snapped(&mut self, face: ChunkFace, vertex_count: usize) {
+        self.snapped_face_mask |= Self::face_mask(face);
+        self.snapped_vertex_count = self
+            .snapped_vertex_count
+            .saturating_add(vertex_count as u32);
+    }
+
+    #[inline]
+    fn mark_fallback(&mut self, face: ChunkFace) {
+        self.fallback_face_mask |= Self::face_mask(face);
+    }
+
+    #[inline]
+    pub fn face_snapped(self, face: ChunkFace) -> bool {
+        self.snapped_face_mask & Self::face_mask(face) != 0
+    }
 }
 
 impl ExtractComponent for ChunkMesh {
@@ -310,6 +344,7 @@ pub struct ChunkMeshResult {
     pub solid: MeshData,
     pub water: MeshData,
     pub water_stats: WaterMeshingStats,
+    pub lod_transition_snap_stats: LodTransitionSnapStats,
 }
 
 // =============================================================================
@@ -756,6 +791,7 @@ pub fn generate_chunk_mesh(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
+        lod_transition_snap_stats: LodTransitionSnapStats::default(),
     }
 }
 
@@ -2378,6 +2414,86 @@ fn sample_lod_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> f32 {
     }
 }
 
+fn sample_lod_sdf_at_world_pos_if_loaded(world: &VoxelWorld, world_pos: IVec3) -> Option<f32> {
+    match world.sample_voxel_for_terrain_meshing(world_pos) {
+        VoxelSample::InBounds(voxel) => Some(if voxel.is_solid() { -1.0 } else { 1.0 }),
+        VoxelSample::OutsideAboveWorld
+        | VoxelSample::OutsideBelowWorld
+        | VoxelSample::OutsideHorizontalWorld
+        | VoxelSample::MissingChunkInsideBounds => None,
+    }
+}
+
+#[cfg(test)]
+fn single_solid_to_air_iso_height(samples: impl IntoIterator<Item = (i32, f32)>) -> Option<f32> {
+    let mut samples = samples.into_iter();
+    let (mut prev_y, mut prev_sdf) = samples.next()?;
+    let mut crossing = None;
+    let mut sign_change_count = 0;
+
+    for (y, sdf) in samples {
+        if (prev_sdf > 0.0) != (sdf > 0.0) {
+            sign_change_count += 1;
+            if sign_change_count > 1 || !(prev_sdf < 0.0 && sdf > 0.0) {
+                return None;
+            }
+            let t = prev_sdf / (prev_sdf - sdf);
+            crossing = Some(prev_y as f32 + (y - prev_y) as f32 * t);
+        }
+        prev_y = y;
+        prev_sdf = sdf;
+    }
+
+    crossing
+}
+
+fn coarse_lod_iso_height_for_column(
+    world: &VoxelWorld,
+    world_x: i32,
+    world_z: i32,
+    coarse_lod: LodLevel,
+) -> Option<f32> {
+    let step = coarse_lod.step_size() as i32;
+    if step <= 1 {
+        return None;
+    }
+
+    let bounds = world.bounds();
+    if world_x < bounds.horizontal_min.x
+        || world_x > bounds.horizontal_max.x
+        || world_z < bounds.horizontal_min.y
+        || world_z > bounds.horizontal_max.y
+    {
+        return None;
+    }
+
+    let sample_x = world_x.div_euclid(step) * step;
+    let sample_z = world_z.div_euclid(step) * step;
+    let first_y = bounds.min_world_y.div_euclid(step) * step;
+    let mut prev: Option<(i32, f32)> = None;
+    let mut crossing = None;
+    let mut sign_change_count = 0;
+    let mut y = first_y;
+    while y <= bounds.max_world_y {
+        let sample_pos = IVec3::new(sample_x, y, sample_z);
+        let sdf = sample_lod_sdf_at_world_pos_if_loaded(world, sample_pos)?;
+        if let Some((prev_y, prev_sdf)) = prev {
+            if (prev_sdf > 0.0) != (sdf > 0.0) {
+                sign_change_count += 1;
+                if sign_change_count > 1 || !(prev_sdf < 0.0 && sdf > 0.0) {
+                    return None;
+                }
+                let t = prev_sdf / (prev_sdf - sdf);
+                crossing = Some(prev_y as f32 + (y - prev_y) as f32 * t);
+            }
+        }
+        prev = Some((y, sdf));
+        y += step;
+    }
+
+    crossing
+}
+
 fn smooth_lod_sdf_interior<const N: usize>(
     sdf: &[f32; N],
     padded_size: u32,
@@ -2636,6 +2752,117 @@ fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
     );
     let scaled = chunk_center + (pos - chunk_center) * CHUNK_BOUNDARY_SCALE;
     [scaled.x, scaled.y, scaled.z]
+}
+
+fn snap_column_for_face(chunk_origin: IVec3, local: Vec3, face: ChunkFace) -> Option<IVec2> {
+    match face {
+        ChunkFace::NegX => Some(IVec2::new(
+            chunk_origin.x,
+            chunk_origin.z + local.z.floor() as i32,
+        )),
+        ChunkFace::PosX => Some(IVec2::new(
+            chunk_origin.x + CHUNK_SIZE_I32,
+            chunk_origin.z + local.z.floor() as i32,
+        )),
+        ChunkFace::NegZ => Some(IVec2::new(
+            chunk_origin.x + local.x.floor() as i32,
+            chunk_origin.z,
+        )),
+        ChunkFace::PosZ => Some(IVec2::new(
+            chunk_origin.x + local.x.floor() as i32,
+            chunk_origin.z + CHUNK_SIZE_I32,
+        )),
+        ChunkFace::NegY | ChunkFace::PosY => None,
+    }
+}
+
+fn snap_lod0_boundary_vertices_to_lod1_neighbor(
+    solid_mesh: &mut MeshData,
+    local_positions: &mut [Vec3],
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> LodTransitionSnapStats {
+    let mut stats = LodTransitionSnapStats::default();
+    if my_lod != LodLevel::Lod0 || solid_mesh.positions.len() != local_positions.len() {
+        return stats;
+    }
+
+    let mut face_targets: Vec<(ChunkFace, Vec<(usize, f32)>)> = Vec::new();
+    for face in [
+        ChunkFace::NegX,
+        ChunkFace::PosX,
+        ChunkFace::NegZ,
+        ChunkFace::PosZ,
+    ] {
+        if neighbor_lod_for_face(neighbor_lods, face) != Some(LodLevel::Lod1) {
+            continue;
+        }
+
+        let mut targets = Vec::new();
+        let mut failed = false;
+        for (index, local) in local_positions.iter().copied().enumerate() {
+            if !compute_boundary_flags(local, CHUNK_SIZE as f32).on_face(face) {
+                continue;
+            }
+
+            let Some(column) = snap_column_for_face(chunk_origin, local, face) else {
+                continue;
+            };
+            let Some(world_y) =
+                coarse_lod_iso_height_for_column(world, column.x, column.y, LodLevel::Lod1)
+            else {
+                failed = true;
+                break;
+            };
+            targets.push((index, world_y - chunk_origin.y as f32));
+        }
+
+        if failed {
+            stats.mark_fallback(face);
+            continue;
+        }
+        if targets.is_empty() {
+            continue;
+        }
+        face_targets.push((face, targets));
+    }
+
+    let mut vertex_targets: HashMap<usize, (f32, ChunkFace)> = HashMap::new();
+    for (face, targets) in &face_targets {
+        for (index, local_y) in targets.iter().copied() {
+            if let Some((existing_y, existing_face)) = vertex_targets.get(&index).copied() {
+                if (existing_y - local_y).abs() > VOXEL_SIZE * 0.05 {
+                    stats.mark_fallback(existing_face);
+                    stats.mark_fallback(*face);
+                }
+            } else {
+                vertex_targets.insert(index, (local_y, *face));
+            }
+        }
+    }
+
+    for (face, targets) in face_targets {
+        if stats.fallback_face_mask & LodTransitionSnapStats::face_mask(face) != 0 {
+            continue;
+        }
+
+        for (index, local_y) in targets.iter().copied() {
+            let mut local = local_positions[index];
+            local.y = local_y;
+            local_positions[index] = local;
+            solid_mesh.positions[index] = scale_vertex_from_center(local, chunk_center);
+            if let Some(weights) = solid_mesh.colors.get_mut(index) {
+                *weights = compute_vertex_material_weights(local, chunk, world, chunk_origin);
+            }
+        }
+        stats.mark_snapped(face, targets.len());
+    }
+
+    stats
 }
 
 /// Computes material weights for a vertex based on neighboring voxels.
@@ -3032,8 +3259,19 @@ pub fn generate_chunk_mesh_surface_nets(
         }
     }
 
+    let lod_transition_snap_stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+        &mut solid_mesh,
+        &mut local_positions,
+        chunk,
+        world,
+        chunk_origin,
+        chunk_center,
+        my_lod,
+        &neighbor_lods,
+    );
+
     if !solid_mesh.indices.is_empty() {
-        let boundary_edges = extract_boundary_edges(
+        let mut boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
             &solid_mesh.normals,
@@ -3041,6 +3279,9 @@ pub fn generate_chunk_mesh_surface_nets(
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
         );
+        if lod_transition_snap_stats.snapped_face_mask != 0 {
+            boundary_edges.retain(|edge| !lod_transition_snap_stats.face_snapped(edge.face));
+        }
 
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
@@ -3072,6 +3313,7 @@ pub fn generate_chunk_mesh_surface_nets(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
+        lod_transition_snap_stats,
     }
 }
 
@@ -3253,6 +3495,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
+        lod_transition_snap_stats: LodTransitionSnapStats::default(),
     }
 }
 
@@ -3434,6 +3677,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
+        lod_transition_snap_stats: LodTransitionSnapStats::default(),
     }
 }
 
@@ -3615,6 +3859,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         solid: solid_mesh,
         water: water_mesh,
         water_stats,
+        lod_transition_snap_stats: LodTransitionSnapStats::default(),
     }
 }
 
@@ -4100,6 +4345,212 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn assert_snapped_local_vertices_match_coarse_surface(
+        stats: LodTransitionSnapStats,
+        local_positions: &[Vec3],
+        world: &VoxelWorld,
+        chunk_pos: IVec3,
+        face: ChunkFace,
+    ) {
+        assert!(
+            stats.face_snapped(face),
+            "{face:?} should be snap-welded, stats={:?}",
+            stats
+        );
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_size = CHUNK_SIZE as f32;
+        let mut checked = 0;
+        for local in local_positions.iter().copied() {
+            let on_face = match face {
+                ChunkFace::NegX => local.x.abs() <= 0.02,
+                ChunkFace::PosX => (local.x - chunk_size).abs() <= 0.02,
+                ChunkFace::NegZ => local.z.abs() <= 0.02,
+                ChunkFace::PosZ => (local.z - chunk_size).abs() <= 0.02,
+                ChunkFace::NegY | ChunkFace::PosY => false,
+            };
+            if !on_face {
+                continue;
+            }
+
+            let column = snap_column_for_face(chunk_origin, local, face)
+                .expect("X/Z face should have a snap column");
+            let expected_y =
+                coarse_lod_iso_height_for_column(world, column.x, column.y, LodLevel::Lod1)
+                    .expect("synthetic slope should have a single coarse crossing");
+            let world_y = chunk_origin.y as f32 + local.y;
+            let error = world_y - expected_y;
+            assert!(
+                error.abs() <= 0.02,
+                "snapped {face:?} boundary vertex should sit on coarse iso-surface: local={local:?}, world_y={world_y:.2}, expected_y={expected_y:.2}, error={error:.2}"
+            );
+            assert!(
+                error <= 0.05,
+                "snapped {face:?} boundary vertex should not form a proud flap: local={local:?}, error={error:.2}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "{face:?} should expose boundary vertices");
+    }
+
+    fn mesh_data_for_local_positions(local_positions: &[Vec3], chunk_center: Vec3) -> MeshData {
+        let mut mesh = MeshData::new();
+        for local in local_positions {
+            mesh.positions
+                .push(scale_vertex_from_center(*local, chunk_center));
+            mesh.colors.push([0.0; 4]);
+        }
+        mesh
+    }
+
+    #[test]
+    fn coarse_iso_height_helper_interpolates_single_crossing_column() {
+        let height = single_solid_to_air_iso_height([(0, -1.0), (2, -1.0), (4, 1.0), (6, 1.0)])
+            .expect("single solid-to-air crossing should interpolate");
+
+        assert!((height - 3.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn coarse_iso_height_helper_rejects_no_and_multi_crossing_columns() {
+        assert_eq!(
+            single_solid_to_air_iso_height([(0, -1.0), (2, -1.0), (4, -1.0)]),
+            None
+        );
+        assert_eq!(
+            single_solid_to_air_iso_height([(0, 1.0), (2, -1.0), (4, 1.0)]),
+            None
+        );
+        assert_eq!(
+            single_solid_to_air_iso_height([(0, -1.0), (2, 1.0), (4, -1.0), (6, 1.0)]),
+            None
+        );
+    }
+
+    #[test]
+    fn lod0_lod1_x_boundary_snap_welds_to_coarse_iso_surface() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
+        fill_steep_x_slope(&mut world);
+
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![
+            Vec3::new(CHUNK_SIZE as f32, 2.0, 2.0),
+            Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0),
+            Vec3::new(CHUNK_SIZE as f32, 9.0, 14.0),
+        ];
+        let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+
+        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.fallback_face_mask, 0);
+        assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
+        assert!(
+            solid_mesh.colors.iter().all(|weights| *weights != [0.0; 4]),
+            "snapped vertices should refresh material weights at the new height"
+        );
+        assert_snapped_local_vertices_match_coarse_surface(
+            stats,
+            &local_positions,
+            &world,
+            chunk_pos,
+            ChunkFace::PosX,
+        );
+    }
+
+    #[test]
+    fn lod0_lod1_z_boundary_snap_welds_to_coarse_iso_surface() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![
+            Vec3::new(2.0, 5.0, CHUNK_SIZE as f32),
+            Vec3::new(8.0, 9.0, CHUNK_SIZE as f32),
+            Vec3::new(14.0, 12.0, CHUNK_SIZE as f32),
+        ];
+        let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+
+        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_z: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.fallback_face_mask, 0);
+        assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
+        assert_snapped_local_vertices_match_coarse_surface(
+            stats,
+            &local_positions,
+            &world,
+            chunk_pos,
+            ChunkFace::PosZ,
+        );
+    }
+
+    #[test]
+    fn ambiguous_snap_column_falls_back_without_moving_vertices() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 2, 1));
+        for y in 0..=2 {
+            world.set_voxel(IVec3::new(CHUNK_SIZE_I32, y, 8), VoxelType::Rock);
+        }
+        for y in 8..=10 {
+            world.set_voxel(IVec3::new(CHUNK_SIZE_I32, y, 8), VoxelType::Rock);
+        }
+
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let original_local = Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0);
+        let mut local_positions = vec![original_local];
+        let mut solid_mesh = MeshData::new();
+        solid_mesh
+            .positions
+            .push(scale_vertex_from_center(original_local, chunk_center));
+
+        let stats = snap_lod0_boundary_vertices_to_lod1_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(IVec3::ZERO).unwrap(),
+            &world,
+            IVec3::ZERO,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.snapped_vertex_count, 0);
+        assert!(stats.fallback_face_mask & LodTransitionSnapStats::face_mask(ChunkFace::PosX) != 0);
+        assert_eq!(local_positions[0], original_local);
+        assert_eq!(
+            solid_mesh.positions[0],
+            scale_vertex_from_center(original_local, chunk_center)
+        );
     }
 
     fn vertical_ray_triangle_hit_y(
@@ -4614,6 +5065,7 @@ pub fn generate_chunk_mesh_with_mode(
                         solid: MeshData::new(),
                         water: MeshData::new(),
                         water_stats: WaterMeshingStats::default(),
+                        lod_transition_snap_stats: LodTransitionSnapStats::default(),
                     }
                 }
             }

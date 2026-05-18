@@ -2,7 +2,7 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-14  
+Last updated: 2026-05-18 (NAADF preview local point lights landed — see *Implemented: Local Point Lights*)  
 Visual verification: not run by request
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
@@ -1351,18 +1351,75 @@ Not run:
 - No NAADF shader is loaded into a render pipeline yet.
 - No visual output should change from these code paths unless a user explicitly toggles backend state, and even then the real render path still falls back to current behavior.
 
-## Planned: Local Point Lights And Torches
+## Implemented: Local Point Lights (NAADF preview)
 
-NAADF preview local-light support is documented in
-`docs/rendering/naadf-local-lights-plan.md`.
+NAADF preview local-light support — planned in
+`docs/rendering/naadf-local-lights-plan.md` — is **implemented** (commits
+`dfdb862 Implement NAADF local point lights`, `b09b005 Improve NAADF local
+light demo visibility`). Default-off, behind the `naadf` feature and the
+preview path.
 
-Planned implementation is default-off and phased:
+Added:
 
-- Extract Bevy `PointLight` entities into capped NAADF local-light records.
-- Upload those records to the render app for NAADF preview shaders.
-- Add direct primary-hit point-light shading first.
-- Add a dedicated local-light bench before considering GI bounce integration.
-- Keep Path A radiance-cascade integration out of the first milestone.
+- `src/rendering/naadf/local_lights.rs`
+- `bench/scenes/naadf/visual-regression-naadf-local-lights.toml`
+
+Updated:
+
+- `assets/shaders/naadf/first_hit.wgsl`, `assets/shaders/radiance_cascades.wgsl`
+- `assets/config/naadf.yaml`
+- `src/rendering/naadf/{config.rs,mod.rs,pipeline.rs,preview.rs,stats.rs,systems.rs}`
+- `src/bench/mod.rs`
+
+Details:
+
+- `NaadfLocalLightRecord` — a 48-byte `Pod` GPU record (position + radius,
+  linear colour + preview-scaled intensity, flags). Capacity
+  `NAADF_LOCAL_LIGHT_MAX_RECORDS = 64`. A unit test locks the record size
+  against the WGSL layout.
+- `extract_naadf_local_lights` reads Bevy `PointLight` + `GlobalTransform` from
+  the main world, skips zero-intensity / zero-range lights, sorts candidates by
+  camera distance then intensity, and keeps up to `local_light_limit` (clamped
+  to 64). Reports `visible` / `uploaded` / `culled`.
+- Gated on `NaadfPreviewSettings.local_lights_enabled`; when disabled it inserts
+  an empty extracted-lights resource and does no work.
+- `prepare_naadf_local_light_gpu_buffer` allocates a 64-record storage buffer in
+  the render world; `upload_naadf_local_lights` writes the kept records and
+  publishes counts via `NaadfRenderStatsBridge::publish_local_lights`.
+- `first_hit.wgsl` applies **direct primary-hit** point-light shading from the
+  uploaded records. Per-light shadow casting is flagged
+  (`NAADF_LOCAL_LIGHT_FLAG_CASTS_SHADOW`) from
+  `local_light_shadows_enabled && light.shadows_enabled`.
+- Bevy lumen-scale intensity is preview-scaled and capped
+  (`preview_scaled_intensity`, ≤ 64) into the preview shader's range.
+- Config keys added to `naadf.yaml` / `config.rs`; `NaadfPreviewSettings` carries
+  `local_lights_enabled`, `local_light_limit`, `local_light_shadows_enabled`.
+  `NaadfStats` exposes visible/uploaded/culled local-light counts.
+- Bench scene `visual-regression-naadf-local-lights.toml` plus `bench/mod.rs`
+  toggles exercise the path.
+
+Not yet done (per the plan's phasing):
+
+- GI bounce / Path-A radiance-cascade integration of local lights — this
+  milestone is **direct primary-hit shading only**.
+
+## Planned: Distance LOD And Texture Parity
+
+NAADF distance LOD and textured first-hit parity are planned in
+`docs/rendering/naadf-distance-lod-plan.md` (`NAADF-200` series).
+
+Summary of the planned design:
+
+- Seam-free terrain LOD — NAADF is ray-marched, so a coarse far region and a
+  fine near region compose with no skirt/transition geometry.
+- **Continuous cone-footprint LOD** in traversal (not discrete distance tiers,
+  which pop); the same cone footprint also selects the texture mip.
+- A **GPU-built** per-chunk mip pyramid (`16³→1³`) + inter-chunk coarse grid,
+  with mipped directional skip bounds; CPU build kept only as parity reference.
+- Footprint-derived residency so far chunks keep only coarse levels.
+- **Textured first-hit** using the shared terrain atlas (triplanar) for visual
+  parity with the legacy renderer — independent of the LOD phases.
+- Hard prerequisite: GPU build/traverse dispatch must come online first.
 
 ## Remaining Work
 

@@ -1028,6 +1028,8 @@ fn poll_world_load_task(
     mut pending_generation: ResMut<PendingWorldGeneration>,
     mut tasks: Query<(Entity, &mut WorldLoadTask)>,
     persistence_settings: Res<WorldPersistence>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    lod_settings: Res<LodSettings>,
 ) {
     for (entity, mut task) in tasks.iter_mut() {
         let Some(result) = block_on(poll_once(&mut task.task)) else {
@@ -1060,6 +1062,11 @@ fn poll_world_load_task(
                 }
 
                 *world = loaded_world;
+                let camera_pos = camera_query
+                    .single()
+                    .ok()
+                    .map(|transform| transform.translation);
+                assign_initial_lods_for_loaded_world(&mut world, camera_pos, &lod_settings);
                 gen_state.total_chunks = loaded_chunks as u32;
                 gen_state.chunks_completed = gen_state.total_chunks;
                 gen_state.is_complete = true;
@@ -1730,6 +1737,8 @@ fn poll_chunk_generation_tasks(
     mut gen_state: ResMut<ChunkGenerationState>,
     mut tasks: Query<(Entity, &mut ChunkGenerationTask)>,
     persistence_settings: Res<WorldPersistence>,
+    camera_query: Query<&Transform, With<PlayerCamera>>,
+    lod_settings: Res<LodSettings>,
 ) {
     // Skip until actual generation work has been queued.
     if !should_poll_chunk_generation_tasks(&gen_state) {
@@ -1738,15 +1747,20 @@ fn poll_chunk_generation_tasks(
 
     // Poll all pending tasks
     let mut completed_count = 0u32;
+    let camera_pos = camera_query
+        .single()
+        .ok()
+        .map(|transform| transform.translation);
 
     for (entity, mut task) in tasks.iter_mut() {
         if let Some(result) = block_on(poll_once(&mut task.task)) {
+            let ChunkGenerationResult { mut chunk, stats } = result;
             // Task completed - insert chunk into world
             let chunk_pos = task.chunk_pos;
-            let uniformity = result.chunk.uniformity();
+            let uniformity = chunk.uniformity();
 
             // Log chunks with dungeon content
-            if result.stats.dungeon_wall > 0 || result.stats.dungeon_floor > 0 {
+            if stats.dungeon_wall > 0 || stats.dungeon_floor > 0 {
                 let chunk_world = IVec3::new(
                     chunk_pos.x * CHUNK_SIZE_I32,
                     chunk_pos.y * CHUNK_SIZE_I32,
@@ -1754,15 +1768,17 @@ fn poll_chunk_generation_tasks(
                 );
                 debug!(
                     "Chunk {:?} (world {:?}): {} dungeon walls, {} floors",
-                    chunk_pos, chunk_world, result.stats.dungeon_wall, result.stats.dungeon_floor
+                    chunk_pos, chunk_world, stats.dungeon_wall, stats.dungeon_floor
                 );
             }
 
             // Update stats
-            gen_state.world_stats.add(&result.stats, uniformity);
+            gen_state.world_stats.add(&stats, uniformity);
 
             // Insert chunk into world
-            world.insert_chunk(result.chunk);
+            let initial_lod = initial_lod_for_chunk(&chunk, camera_pos, &lod_settings);
+            chunk.set_initial_lod_level(initial_lod);
+            world.insert_chunk(chunk);
             mark_surface_nets_halo_dirty(&mut world, chunk_pos);
 
             // Despawn the task entity
@@ -1813,7 +1829,16 @@ fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
 }
 
 fn mark_chunk_lod_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
-    mark_chunk_halo_dirty(world, chunk_pos, MeshDirtyReason::NeighborLod);
+    for offset in [
+        IVec3::new(1, 0, 0),
+        IVec3::new(-1, 0, 0),
+        IVec3::new(0, 1, 0),
+        IVec3::new(0, -1, 0),
+        IVec3::new(0, 0, 1),
+        IVec3::new(0, 0, -1),
+    ] {
+        world.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::NeighborLod);
+    }
 }
 
 fn mark_chunk_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3, reason: MeshDirtyReason) {
@@ -1827,6 +1852,52 @@ fn mark_chunk_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3, reason: MeshD
                 let neighbor_pos = chunk_pos + IVec3::new(dx, dy, dz);
                 world.mark_chunk_dirty_with_reason(neighbor_pos, reason);
             }
+        }
+    }
+}
+
+fn initial_lod_for_chunk(
+    chunk: &Chunk,
+    camera_pos: Option<Vec3>,
+    lod_settings: &LodSettings,
+) -> LodLevel {
+    let Some(camera_pos) = camera_pos else {
+        return chunk.lod_level();
+    };
+
+    let distance = terrain_lod_distance_xz(chunk.position(), camera_pos);
+    let target_lod = calculate_target_lod_with_hysteresis(distance, LodLevel::Lod0, lod_settings);
+    water_shore_guarded_lod(
+        target_lod,
+        distance,
+        lod_settings,
+        chunk_contains_liquid(chunk) || chunk_layer_intersects_waterline(chunk.position()),
+    )
+}
+
+fn assign_initial_lods_for_loaded_world(
+    world: &mut VoxelWorld,
+    camera_pos: Option<Vec3>,
+    lod_settings: &LodSettings,
+) {
+    let Some(camera_pos) = camera_pos else {
+        return;
+    };
+
+    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(world);
+    let positions: Vec<IVec3> = world.chunk_positions().collect();
+    for chunk_pos in positions {
+        let distance = terrain_lod_distance_xz(chunk_pos, camera_pos);
+        let target_lod =
+            calculate_target_lod_with_hysteresis(distance, LodLevel::Lod0, lod_settings);
+        let target_lod = water_shore_guarded_lod(
+            target_lod,
+            distance,
+            lod_settings,
+            water_lod_guard_chunks.contains(&chunk_pos),
+        );
+        if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+            chunk.set_initial_lod_level(target_lod);
         }
     }
 }
@@ -2267,6 +2338,7 @@ fn mesh_dirty_chunks_system(
                 missing_boundary_neighbors_at_mesh: missing_boundary_neighbors,
                 empty_surface_cap_at_mesh: empty_surface_neighbor,
                 generated_frame: frame.0,
+                lod_transition_snap_stats: mesh_result.lod_transition_snap_stats,
             };
 
             // Track meshing statistics
@@ -4612,6 +4684,20 @@ mod tests {
     }
 
     #[test]
+    fn initial_lod_assignment_uses_distance_without_lod_dirty_reason() {
+        let mut chunk = Chunk::new(IVec3::new(18, 0, 0));
+        let lod_settings = LodSettings::default();
+        let initial_lod = initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings);
+
+        assert!(initial_lod.is_lower_detail_than(LodLevel::Lod0));
+        chunk.set_initial_lod_level(initial_lod);
+
+        assert_eq!(chunk.lod_level(), initial_lod);
+        assert!(chunk.has_dirty_reason(MeshDirtyReason::Generation));
+        assert!(!chunk.has_dirty_reason(MeshDirtyReason::Lod));
+    }
+
+    #[test]
     fn generated_chunk_marks_full_3d_halo_dirty() {
         let center = IVec3::new(1, 1, 1);
         let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
@@ -4637,7 +4723,7 @@ mod tests {
     }
 
     #[test]
-    fn lod_change_marks_full_3d_halo_dirty() {
+    fn lod_change_marks_face_halo_dirty() {
         let center = IVec3::new(1, 1, 1);
         let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
 
@@ -4654,10 +4740,11 @@ mod tests {
         mark_chunk_lod_halo_dirty(&mut world, center);
 
         let dirty = world.dirty_chunks().collect::<HashSet<_>>();
-        assert_eq!(dirty.len(), 26);
+        assert_eq!(dirty.len(), 6);
         assert!(!dirty.contains(&center));
         assert!(dirty.contains(&(center + IVec3::Y)));
         assert!(dirty.contains(&(center + IVec3::NEG_Y)));
+        assert!(!dirty.contains(&(center + IVec3::new(1, 1, 0))));
         assert!(
             world
                 .get_chunk(center + IVec3::Y)

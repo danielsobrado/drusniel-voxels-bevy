@@ -6,14 +6,14 @@
 //! - Various toggle keys for specific debug information
 
 use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
+use crate::interaction::TargetedProp;
 use crate::interaction::editing::{DeleteMode, DragState, EditMode};
 use crate::interaction::targeting::TargetedBlock;
-use crate::interaction::TargetedProp;
 use crate::network::NetworkSession;
 use crate::performance::{
-    dump_area_timing_csv, start_area_trace, stop_area_trace, AreaTimingCapture, AreaTimingRecorder,
+    AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
 };
-use crate::player::{classify_player_world_validity, Player};
+use crate::player::{Player, classify_player_world_validity};
 use crate::props::billboard::BillboardStats;
 use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::instanced_render::PropBoundsDebugSettings;
@@ -26,7 +26,7 @@ use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
-use crate::voxel::meshing::{get_blocky_material_index, ChunkMesh, Face, MeshSettings};
+use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
 use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,

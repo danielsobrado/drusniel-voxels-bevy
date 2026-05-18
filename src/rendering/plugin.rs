@@ -10,8 +10,8 @@ use crate::rendering::atlas::load_texture_atlas;
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::building_material::{BuildingMaterial, BuildingMesh};
 use crate::rendering::capabilities::{
-    detect_graphics_capabilities, sync_capabilities_to_main, GraphicsCapabilities,
-    GraphicsDetectionSet,
+    GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
+    sync_capabilities_to_main,
 };
 use crate::rendering::cinematic::CinematicPlugin;
 use crate::rendering::god_rays::GodRayPlugin;
@@ -25,13 +25,13 @@ use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
 use crate::rendering::quality::{
-    apply_render_quality_preset, record_render_quality_counters, sync_render_quality_preset,
-    RenderQualityPreset,
+    RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
+    sync_render_quality_preset,
 };
 use crate::rendering::radiance_cascades::RadianceCascadesPlugin;
 use crate::rendering::ray_tracing::{
-    setup_voxel_ray_backend_notice, toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
-    RayTracingSettings, VoxelRayBackendNotice,
+    RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
+    toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
 };
 use crate::rendering::render_timing::install_render_timing;
 use crate::rendering::shadow_budget::ShadowBudgetPlugin;

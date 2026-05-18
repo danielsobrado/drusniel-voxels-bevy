@@ -304,23 +304,72 @@ candidate because it can be either a true hole or a depressed intact surface.
 
 ---
 
-## Next steps (ranked)
+## Decision: fine-boundary snap weld for X/Z Lod0/Lod1 seams
 
-Diagnostics are done — the defect was localised to the X/Z seam. The
-reproducible tests and apron fix are now implemented. The remaining work is
-visual/runtime verification and any follow-up from that result.
+**Current-code note (2026-05-18):** the checked-out meshing code does not have a
+`sample_lod_density_at_world_pos` averaged-density path. `generate_low_lod_sdf`
+currently samples the coarse lattice with `sample_lod_sdf_at_world_pos` and then
+smooths interior SDF values only; boundary samples stay point-sampled for seam
+stability. Any plan assuming the Lod1 mesh uses a 2x2x2 centered density sampler
+is stale for this checkout.
 
-### 1. Verify on the bench
+**Visual verdict (2026-05-17 close-up capture):** the seam artifact is **still
+prominent** — many dark notches/ledges across the mountain's Lod0/Lod1
+transition band. The direct distance→LOD fix correctly produced proper LOD
+rings, which *surfaced the seam defect in more places*, not fewer. Skirts +
+SDF-matching are confirmed a dead end: they convert holes into visible ledges
+and cannot weld two different-resolution Surface Nets boundaries.
 
-Per `CLAUDE.md`, the synthetic test proves the unit; the **mountain** is proven
-by the visual LOD bench (`visual-regression-naadf-live-lod.toml`, before/after
-`summary.json` + screenshots). Do not claim the artifact fixed from the unit
-test alone.
+**Approach implemented for V1:** do not build an in-plane ribbon between the
+Lod0 and Lod1 boundary polylines. Both polylines lie on the same chunk face, so
+that would just recreate a vertical wall. Instead, the Lod0 mesh now performs a
+conservative snap pass before skirt extraction: for known X/Z Lod0->Lod1
+neighbours, every fine boundary vertex on a face must resolve to a single clean
+coarse Lod1 iso-height; if so, its Y is moved to that coarse surface and the
+old X/Z skirt/apron for that face is suppressed. If any boundary vertex on the
+face has no clean crossing or an ambiguous/multi-crossing column, the whole face
+falls back to the existing draped apron/skirt.
 
-### 2. Re-probe manually only if the bench or screenshot still shows a seam
+Rejected for this pass: the separate post-hoc **stitch-entity** design and the
+coplanar boundary-ribbon plan. Both add lifecycle/geometry risk without solving
+the wall itself.
 
-Use schema 7 and read only `mesh_status=Current` rows. The expected result is no
-large `near_face` positive flap and no new solid-before-render cluster.
+### V1 scope and rules
+
+- **X/Z faces only**, Surface Nets only, Lod0->Lod1 only. Y faces, blocky mode,
+  and other LOD pairs keep current behaviour.
+- Snap is **face-level**: all boundary vertices on that face succeed or none
+  are moved.
+- On successful snap, suppress the X/Z apron/vertical skirt for that face.
+  Skirts remain the strict fallback for snap-failed known X/Z LOD seams.
+- The coarse iso-height helper uses the same coarse lattice sampling convention
+  as the low-LOD SDF path, scans the vertical coarse column, and accepts exactly
+  one solid-to-air crossing.
+- Do **not** invent skirts for unknown/missing neighbours (current code already
+  doesn't — keep it).
+- Render-only: no collider changes.
+- Shift+F9 schema 7 now reports `lod_transition_snap` stats on terrain mesh
+  debug data: snapped face mask, fallback face mask, and snapped vertex count.
+
+### Verification status
+
+- Unit coverage added for single-crossing interpolation, no-crossing and
+  multi-crossing rejection, X/Z snap-to-coarse-height, no proud snap, and
+  ambiguous-column fallback.
+- Fresh manual capture `20260518-015338` is now considered contaminated by
+  startup/load churn and should not be used to judge the snap weld.
+- Visual LOD bench run `bench-runs/2026-05-17T17-32-24Z` completed and produced
+  screenshots, but every checkpoint hit render-ready timeout. `bench_guard`
+  passed live-LOD mesh-dirty p99 rows (0.149-0.204 ms) and failed
+  `live_lod_frame_p99` for `forest-look-sweep` (35.268 ms > 25 ms fail
+  threshold). This is not a clean visual/performance sign-off.
+- Discarded experiment note: visual LOD bench run
+  `bench-runs/2026-05-18T02-13-00Z` was captured while testing an edge-local
+  fallback variant that has since been backed out. It is not verification of the
+  current face-level snap implementation.
+- Still required before claiming the mountain fixed: fresh manual Alt+K /
+  Shift+F9 capture from the main play binary, checking `lod_transition_snap`
+  stats and near-face height errors on the actual visible seam.
 
 ---
 

@@ -14,16 +14,16 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
-use crate::player::{classify_player_world_validity, Player};
+use crate::player::{Player, classify_player_world_validity};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{
-    empty_chunk_has_surface_nets_boundary_surface, ChunkMesh, MeshMode, MeshSettings,
-    TerrainMeshDebug, WaterMesh,
+    ChunkMesh, LodTransitionSnapStats, MeshMode, MeshSettings, TerrainMeshDebug, WaterMesh,
+    empty_chunk_has_surface_nets_boundary_surface,
 };
 use crate::voxel::plugin::{
-    calculate_target_lod_with_hysteresis, collect_water_shore_lod_guard_chunks,
-    effective_terrain_mesh_lod_for_chunk, terrain_lod_distance_xz, terrain_lod_hysteresis,
-    water_shore_guarded_lod, LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
+    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
+    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
+    terrain_lod_distance_xz, terrain_lod_hysteresis, water_shore_guarded_lod,
 };
 use crate::voxel::skirt::NeighborLods;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -292,6 +292,7 @@ struct FanGapChunkState {
     mesh_entity_from_world: Option<String>,
     lod_eval: Option<LodEvalProbe>,
     neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
+    lod_transition_snap_at_mesh: Option<LodTransitionSnapStatsProbe>,
     empty_surface_cap_at_mesh: Option<bool>,
     empty_cap: EmptyCapProbe,
 }
@@ -383,6 +384,7 @@ struct ChunkMeshProbe {
     missing_boundary_neighbors_at_mesh: Option<u32>,
     empty_surface_cap_at_mesh: Option<bool>,
     generated_frame: Option<u32>,
+    lod_transition_snap: Option<LodTransitionSnapStatsProbe>,
 }
 
 #[derive(Serialize)]
@@ -393,6 +395,15 @@ struct NeighborLodsProbe {
     pos_y: Option<String>,
     neg_z: Option<String>,
     pos_z: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct LodTransitionSnapStatsProbe {
+    snapped_face_mask: u8,
+    fallback_face_mask: u8,
+    snapped_faces: Vec<String>,
+    fallback_faces: Vec<String>,
+    snapped_vertex_count: u32,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -1975,6 +1986,8 @@ fn fan_gap_chunk_state(
         ),
         neighbor_lods_at_mesh: terrain_debug
             .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
+        lod_transition_snap_at_mesh: terrain_debug
+            .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
         empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
         empty_cap: empty_cap_probe(world, chunk_pos),
     }
@@ -2177,6 +2190,8 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
                 .map(|debug| debug.missing_boundary_neighbors_at_mesh),
             empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
             generated_frame: terrain_debug.map(|debug| debug.generated_frame),
+            lod_transition_snap: terrain_debug
+                .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
         }),
         visibility: visibility.map(|visibility| format!("{visibility:?}")),
         inherited_visibility: inherited_visibility.map(|visibility| visibility.get()),
@@ -2372,6 +2387,30 @@ fn neighbor_lods_probe(neighbor_lods: NeighborLods) -> NeighborLodsProbe {
         neg_z: neighbor_lods.neg_z.map(lod_string),
         pos_z: neighbor_lods.pos_z.map(lod_string),
     }
+}
+
+fn lod_transition_snap_stats_probe(stats: LodTransitionSnapStats) -> LodTransitionSnapStatsProbe {
+    LodTransitionSnapStatsProbe {
+        snapped_face_mask: stats.snapped_face_mask,
+        fallback_face_mask: stats.fallback_face_mask,
+        snapped_faces: face_mask_names(stats.snapped_face_mask),
+        fallback_faces: face_mask_names(stats.fallback_face_mask),
+        snapped_vertex_count: stats.snapped_vertex_count,
+    }
+}
+
+fn face_mask_names(mask: u8) -> Vec<String> {
+    [
+        (0, "neg_x"),
+        (1, "pos_x"),
+        (2, "neg_y"),
+        (3, "pos_y"),
+        (4, "neg_z"),
+        (5, "pos_z"),
+    ]
+    .into_iter()
+    .filter_map(|(bit, name)| ((mask & (1 << bit)) != 0).then_some(name.to_string()))
+    .collect()
 }
 
 fn uniformity_name(uniformity: ChunkUniformity) -> &'static str {
