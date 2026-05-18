@@ -33,6 +33,7 @@ pub const NAADF_LAYOUT_SHADER_PATH: &str = "shaders/naadf/layout.wgsl";
 pub const NAADF_RAY_TRACE_SHADER_PATH: &str = "shaders/naadf/ray_trace.wgsl";
 pub const NAADF_WORLD_TRACE_SHADER_PATH: &str = "shaders/naadf/world_trace.wgsl";
 pub const NAADF_LIGHTING_QUERIES_SHADER_PATH: &str = "shaders/naadf/lighting_queries.wgsl";
+pub const NAADF_FROXEL_SUN_MASK_SHADER_PATH: &str = "shaders/naadf/froxel_sun_mask.wgsl";
 pub const NAADF_BUILD_BLOCKS_SHADER_PATH: &str = "shaders/naadf/build_blocks.wgsl";
 pub const NAADF_BUILD_MIPS_SHADER_PATH: &str = "shaders/naadf/build_mips.wgsl";
 pub const NAADF_BUILD_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_bounds.wgsl";
@@ -61,6 +62,8 @@ pub const NAADF_WORLD_TRACE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("5c129290-de5e-4125-b0be-d128b5e187da");
 pub const NAADF_LIGHTING_QUERIES_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("010676cf-a5de-4b6a-8ef4-a0eb30867f40");
+pub const NAADF_FROXEL_SUN_MASK_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("6726bf56-1334-45d8-a6a9-ad0c3101d1ad");
 pub const NAADF_BUILD_BLOCKS_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("78b08331-0603-4efe-85a9-8e8f5b712f41");
 pub const NAADF_BUILD_MIPS_SHADER_HANDLE: Handle<Shader> =

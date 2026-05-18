@@ -6,6 +6,7 @@ pub mod debug;
 pub mod dirty;
 pub mod entities;
 pub mod extractor;
+pub mod froxel;
 pub mod gpu_buffers;
 pub mod gpu_tests;
 pub mod layout;
@@ -94,6 +95,15 @@ impl Plugin for NaadfPlugin {
                 "/assets/shaders/naadf/lighting_queries.wgsl"
             ),
             naadf_shader(pipeline::NAADF_LIGHTING_QUERIES_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_FROXEL_SUN_MASK_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/froxel_sun_mask.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_FROXEL_SUN_MASK_SHADER_PATH)
         );
         load_internal_asset!(
             app,
@@ -208,6 +218,7 @@ impl Plugin for NaadfPlugin {
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
             .init_resource::<entities::NaadfEntityVolumeRegistry>()
+            .init_resource::<froxel::NaadfFroxelSunMaskState>()
             .init_resource::<gpu_buffers::NaadfGpuChunkTable>()
             .init_resource::<gpu_buffers::NaadfGpuUploadQueue>()
             .init_resource::<prepare::NaadfGpuBuildQueue>()
@@ -231,6 +242,7 @@ impl Plugin for NaadfPlugin {
                     prepare::sync_gpu_build_queue_stats,
                     streaming::sync_streaming_gpu_slot_stats,
                     entities::sync_naadf_entity_volume_registry,
+                    froxel::sync_naadf_froxel_sun_mask_state,
                     systems::sync_naadf_stats_from_dirty_queue,
                     systems::sync_naadf_render_stats_bridge_to_stats,
                     systems::sync_naadf_backend_fallback_policy,

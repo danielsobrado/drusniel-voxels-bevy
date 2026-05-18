@@ -283,6 +283,26 @@ pub fn record_naadf_bench_counters(
         "naadf.radiance_short_range_rays_per_pixel",
         stats.radiance_short_range_rays_per_pixel as f64,
     );
+    timing.record_count(
+        frame.0,
+        "naadf.froxel_sun_mask_active",
+        stats.froxel_sun_mask_active as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.froxel_sun_mask_rays_per_full_update",
+        stats.froxel_sun_mask_rays_per_full_update as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.froxel_sun_mask_max_rays_per_frame",
+        stats.froxel_sun_mask_max_rays_per_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "naadf.froxel_sun_mask_frames_per_full_update",
+        stats.froxel_sun_mask_frames_per_full_update as f64,
+    );
     if let Some(radiance_config) = radiance_config.as_deref() {
         timing.record_count(
             frame.0,

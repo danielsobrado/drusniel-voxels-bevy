@@ -759,6 +759,25 @@ mod tests {
     }
 
     #[test]
+    fn wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel() {
+        let froxel = include_str!("../../../assets/shaders/naadf/froxel_sun_mask.wgsl");
+        let shader =
+            bevy_shader::Shader::from_wgsl(froxel, "shaders/naadf/froxel_sun_mask.wgsl");
+
+        assert!(shader.imports().any(|import| {
+            matches!(
+                import,
+                bevy_shader::ShaderImport::AssetPath(path)
+                    if path == "shaders/naadf/lighting_queries.wgsl"
+            )
+        }));
+        assert!(froxel.contains("fn build_naadf_froxel_sun_mask"));
+        assert!(froxel.contains("let index = id.x + id.y * grid.x + id.z * grid.x * grid.y"));
+        assert!(froxel.contains("naadf_sun_visibility_world("));
+        assert!(froxel.contains("naadf_froxel_sun_mask[index]"));
+    }
+
+    #[test]
     fn wgsl_debug_trace_rays_has_ray_count_guard() {
         let debug_trace = include_str!("../../../assets/shaders/naadf/debug_trace_rays.wgsl");
 

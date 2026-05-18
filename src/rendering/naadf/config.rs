@@ -19,6 +19,8 @@ pub struct NaadfConfig {
     #[serde(default)]
     pub debug: NaadfDebugConfig,
     #[serde(default)]
+    pub froxel_sun_mask: NaadfFroxelSunMaskConfig,
+    #[serde(default)]
     pub use_for_gi_secondary: bool,
     #[serde(default)]
     pub use_for_sun_visibility: bool,
@@ -134,6 +136,39 @@ pub struct NaadfDebugConfig {
     pub force_gpu_builder: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NaadfFroxelSunMaskConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_froxel_sun_mask_resolution")]
+    pub resolution: [u32; 3],
+    #[serde(default = "default_froxel_sun_mask_max_rays_per_frame")]
+    pub max_rays_per_frame: u32,
+    #[serde(default = "default_froxel_sun_mask_max_distance")]
+    pub max_distance: f32,
+}
+
+impl NaadfFroxelSunMaskConfig {
+    pub fn resolution_uvec3(&self) -> UVec3 {
+        UVec3::new(
+            self.resolution[0].max(1),
+            self.resolution[1].max(1),
+            self.resolution[2].max(1),
+        )
+    }
+}
+
+impl Default for NaadfFroxelSunMaskConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            resolution: default_froxel_sun_mask_resolution(),
+            max_rays_per_frame: default_froxel_sun_mask_max_rays_per_frame(),
+            max_distance: default_froxel_sun_mask_max_distance(),
+        }
+    }
+}
+
 impl Default for NaadfConfig {
     fn default() -> Self {
         Self {
@@ -143,6 +178,7 @@ impl Default for NaadfConfig {
             gpu: NaadfGpuConfig::default(),
             preview: NaadfPreviewConfig::default(),
             debug: NaadfDebugConfig::default(),
+            froxel_sun_mask: NaadfFroxelSunMaskConfig::default(),
             use_for_gi_secondary: false,
             use_for_sun_visibility: false,
             use_for_terrain_ao: false,
@@ -302,6 +338,18 @@ fn default_preview_history_resolution_scale() -> f32 {
     1.0
 }
 
+fn default_froxel_sun_mask_resolution() -> [u32; 3] {
+    [160, 90, 64]
+}
+
+fn default_froxel_sun_mask_max_rays_per_frame() -> u32 {
+    65_536
+}
+
+fn default_froxel_sun_mask_max_distance() -> f32 {
+    512.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +373,9 @@ mod tests {
         assert!(!config.preview.reference_path_tracing_enabled);
         assert_eq!(config.preview.reference_sky_strength, 0.22);
         assert_eq!(config.preview.reference_indirect_strength, 0.18);
+        assert!(!config.froxel_sun_mask.enabled);
+        assert_eq!(config.froxel_sun_mask.resolution, [160, 90, 64]);
+        assert_eq!(config.froxel_sun_mask.max_rays_per_frame, 65_536);
         assert!(!config.use_for_gi_secondary);
         assert!(!config.use_for_sun_visibility);
         assert!(!config.use_for_terrain_ao);
@@ -351,6 +402,7 @@ mod tests {
             NaadfPreviewCompositeModeConfig::SplitView
         );
         assert_eq!(config.chunk_cache.max_gpu_memory_mb, 512);
+        assert!(!config.froxel_sun_mask.enabled);
         assert!(!config.use_for_gi_secondary);
         assert!(!config.use_for_sun_visibility);
         assert!(!config.use_for_terrain_ao);
