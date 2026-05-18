@@ -14,12 +14,19 @@ NAADF is a **ray-marched, derived voxel field** (`VoxelWorld` → packed
 `NaadfChunk`: 4³ blocks of 4³ voxels, traversed by DDA with per-block
 directional skip bounds). It is **not a triangle mesh**.
 
-Therefore the entire mesh-LOD-seam problem — skirts, transition cells, vertex
+Therefore the entire **mesh**-LOD-seam class — skirts, transition cells, vertex
 welding, the ledge artifact that consumed the legacy-renderer investigation —
 **does not exist here.** A coarse far region and a fine near region compose
-automatically: the ray simply changes step size at the boundary. LOD on NAADF
-is *seam-free by construction*. That is the reason to do terrain LOD here and
-do it well.
+automatically: the ray simply changes step size at the boundary; there is no
+mesh, so there is nothing to weld.
+
+This is **not** "artifact-free LOD", though. A ray-marcher trades the mesh-seam
+class for its own: mip-transition popping, thin cave mouths vanishing into a
+coarse cell, coarse-cell over-occlusion, material mip mismatch, temporal
+shimmer, and missing-residency holes. The thin-or-hole flag, per-purpose
+conservative bias, hysteresis, and temporal/residency validation in this plan
+exist precisely to manage that class. The win is that those are tunable
+sampling problems, not unfixable geometry cracks.
 
 What NAADF lacks today is LOD at all: every resident chunk is full 16³
 resolution, which is heavy in memory, upload bandwidth, and ray steps.
@@ -66,6 +73,11 @@ so the GPU compute/traverse path NAADF already lists as remaining work must
 actually dispatch first. Until then, only the CPU-side parity reference and the
 residency/streaming logic can be exercised. This plan does not re-scope that
 work — it depends on it.
+
+**First milestone gate.** `NAADF-200..205` (GPU dispatch, base + mip + AADF
+build, CPU/GPU parity harness) is a hard gate: **no `NAADF-206+` ticket — LOD,
+texture parity, residency, or any downstream lighting work — lands until GPU
+build and GPU traversal are proven at parity with the CPU reference.**
 
 ---
 
@@ -140,9 +152,12 @@ In the ray-march shader (`ray_trace.wgsl` / `world_trace.wgsl`):
   variance) **force a finer descent regardless of the footprint**. Geometry LOD
   must be silhouette- and hole-preserving first; only then may the footprint
   coarsen it.
-- **Inter-level blend:** optionally sample the two bracketing levels and blend
-  by the fractional footprint, with a small blue-noise jitter at thresholds, so
-  LOD transitions are temporally filterable rather than a visible pop.
+- **Anti-pop, phased.** v1 ships **mip hysteresis + a small blue-noise jitter
+  at thresholds** only, so LOD transitions are temporally filterable rather than
+  a visible pop. Two-level blending — sampling both bracketing levels and
+  blending by the fractional footprint — is **deferred to a later pass**: it
+  roughly doubles per-step fetches and is only worth it for preview / far
+  terrain if hysteresis + jitter prove insufficient.
 - Result: near terrain at voxel resolution, far terrain at block/chunk
   resolution, continuous — **no tier boundary and no seam**.
 
@@ -157,6 +172,16 @@ In the ray-march shader (`ray_trace.wgsl` / `world_trace.wgsl`):
   larger radius for the same memory.
 - Hysteresis on the level threshold (reuse the existing `hysteresis_chunks`
   pattern) so a chunk doesn't rebuild every time the camera nudges.
+- **Missing-fine-mip safety.** Residency can lag a sudden camera jump or FOV
+  change — a chunk may lack the fine mip a ray now wants. Traversal must
+  **never fabricate a precise hit from coarse data**:
+  - lighting / GI / AO rays → return the coarse conservative answer (fine);
+  - a Path-B preview *primary* ray → return a debug colour / refine-request and
+    raise that chunk's stream priority — never a fake exact hit;
+  - increment a `MissingFineMip` debug counter either way.
+
+  Path A never traces primary rays (the current renderer owns primary
+  visibility), so the primary branch applies only to the deferred Path B.
 
 ### E. Textured first-hit — parity with the legacy renderer
 
@@ -215,7 +240,7 @@ doc contributes is noted per ticket and in design sections A–E above.
 | `NAADF-203` | GPU mip pyramid builder | Pass 2 — L0→L4 pyramid (§A) + inter-chunk grid; whole-chunk rebuild baseline. | `build_blocks.wgsl`, `layout.rs` |
 | `NAADF-204` | GPU directional AADF sweeps | Pass 3 — per-level bounds (§B); sets the **thin-or-hole flag**. | `build_bounds.wgsl`, `layout.rs` |
 | `NAADF-205` | CPU/GPU parity harness | Mip / bounds / cone-LOD trace vs the full-res CPU reference. | `gpu_tests.rs`, `naadf_cpu_layout` |
-| `NAADF-206` | Dense near-chunk lookup table | + **footprint-derived residency** (§D) — build/upload only the mip levels a chunk needs. | `streaming.rs`, `cache.rs` |
+| `NAADF-206` | Near-chunk residency lookup | **v1** dense near-chunk table → **v2** hash fallback → **v3** far summary. + **footprint-derived residency** (§D) with the missing-fine-mip safety rule. | `streaming.rs`, `cache.rs` |
 | `NAADF-207` | Multi-chunk world traversal | Chunk lookup + boundary crossing. | `world_trace.wgsl` |
 | `NAADF-208` | AADF skip traversal | Empty-run leaps using the mipped directional bounds. | `ray_trace.wgsl`, `world_trace.wgsl` |
 | `NAADF-209` | Continuous cone-footprint LOD | Per-purpose bias, thin-or-hole forced descent, inter-level blend (§C). | `ray_trace.wgsl`, `world_trace.wgsl`, `gi_trace.wgsl` |

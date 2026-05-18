@@ -80,6 +80,15 @@ The first real win, and the proof traversal is correct. Builds on the existing
   false). This ticket **wires the real NAADF GI pipeline + bind group** and
   flips that gate — i.e. it replaces the current-SDF lookup *inside* Radiance
   Cascades with NAADF traversal. No new GI algorithm.
+
+  Acceptance — `NAADF-213` lands only when all hold:
+  - the real NAADF GI bind group is bound to the Radiance Cascades pass;
+  - GI probe rays traverse the real NAADF world — no fallback that silently
+    calls the current-SDF path (`NAADF-FIX-005` already removed that);
+  - `naadf_gi_shader_backend_available()` is flipped to `true`.
+
+  Until then `selected` backend may be `Naadf` while `effective` resolves to
+  `CurrentSdf` — that is the deliberate gate (`NAADF-111`), not a contradiction.
 - **DDGI / ReSTIR GI / neural radiance cache are deferred to research.** The
   engine already owns Radiance Cascades; the first integration improves what
   exists, it does not swap the GI algorithm.
@@ -125,7 +134,7 @@ The first real win, and the proof traversal is correct. Builds on the existing
 | `NAADF-203` | GPU mip pyramid builder | Pass 2: 16³→1³ reduction. |
 | `NAADF-204` | GPU directional AADF sweeps | Pass 3: ±X/±Y/±Z skip distances. |
 | `NAADF-205` | CPU/GPU parity harness | Golden chunks + tiered random-ray tests. |
-| `NAADF-206` | Dense near-chunk lookup table | + optional hash fallback for the far field. |
+| `NAADF-206` | Near-chunk residency lookup | v1 dense table → v2 hash → v3 far summary; a missing fine mip → coarse conservative answer for lighting rays, never a fake exact hit. |
 | `NAADF-207` | Multi-chunk world traversal | Chunk lookup, boundary crossing. |
 | `NAADF-208` | AADF skip traversal | Empty-run leaps using the directional bounds. |
 | `NAADF-209` | Continuous cone-footprint LOD | Footprint drives geometry + texture mip. |
