@@ -1,13 +1,17 @@
-#import "shaders/naadf/common.wgsl" NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_COUNT, NAADF_NODE_CHILDREN, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, naadf_make_traversal_record, naadf_payload_material_id, naadf_traversal_state
+#import "shaders/naadf/common.wgsl" NAADF_MIP_CELLS_PER_CHUNK, NAADF_MIP_LEVEL_COUNT, NAADF_NODE_CHILDREN, NAADF_NODE_UNIFORM_EMPTY, NAADF_NODE_UNIFORM_FULL, naadf_make_mip_bounds_record, naadf_make_traversal_record, naadf_payload_material_id, naadf_traversal_state
 
 @group(3) @binding(6) var<storage, read_write> naadf_mip_traversal_records: array<u32>;
 @group(3) @binding(7) var<storage, read_write> naadf_mip_payload_records: array<u32>;
+@group(3) @binding(8) var<storage, read_write> naadf_mip_bounds_records: array<u32>;
 
 @compute @workgroup_size(1, 1, 1)
 fn build_naadf_mips(@builtin(workgroup_id) workgroup_id: vec3<u32>) {
     let chunk_slot = workgroup_id.x;
     for (var parent_level = 1u; parent_level < NAADF_MIP_LEVEL_COUNT; parent_level = parent_level + 1u) {
         naadf_build_mip_level(chunk_slot, parent_level);
+    }
+    for (var level = 0u; level < NAADF_MIP_LEVEL_COUNT; level = level + 1u) {
+        naadf_build_mip_bounds_level(chunk_slot, level);
     }
 }
 
@@ -107,4 +111,48 @@ fn naadf_mip_record_index(chunk_slot: u32, level: u32, local: vec3<u32>) -> u32 
 
 fn naadf_unflatten_mip(index: u32, axis: u32) -> vec3<u32> {
     return vec3<u32>(index % axis, (index / axis) % axis, index / (axis * axis));
+}
+
+fn naadf_build_mip_bounds_level(chunk_slot: u32, level: u32) {
+    let axis = naadf_mip_axis(level);
+    let count = axis * axis * axis;
+    for (var cell_index = 0u; cell_index < count; cell_index = cell_index + 1u) {
+        let local = naadf_unflatten_mip(cell_index, axis);
+        let record_index = naadf_mip_record_index(chunk_slot, level, local);
+        if naadf_traversal_state(naadf_mip_traversal_records[record_index]) != NAADF_NODE_UNIFORM_EMPTY {
+            naadf_mip_bounds_records[record_index] = 0u;
+        } else {
+            naadf_mip_bounds_records[record_index] = naadf_make_mip_bounds_record(
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(-1, 0, 0)),
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(1, 0, 0)),
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(0, -1, 0)),
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(0, 1, 0)),
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(0, 0, -1)),
+                naadf_count_empty_mip_cells(chunk_slot, level, local, vec3<i32>(0, 0, 1)),
+            );
+        }
+    }
+}
+
+fn naadf_count_empty_mip_cells(
+    chunk_slot: u32,
+    level: u32,
+    local: vec3<u32>,
+    step: vec3<i32>,
+) -> u32 {
+    let axis = i32(naadf_mip_axis(level));
+    var cursor = vec3<i32>(local) + step;
+    var count = 0u;
+    for (var i = 0u; i < 31u; i = i + 1u) {
+        if any(cursor < vec3<i32>(0)) || any(cursor >= vec3<i32>(axis)) {
+            break;
+        }
+        let record_index = naadf_mip_record_index(chunk_slot, level, vec3<u32>(cursor));
+        if naadf_traversal_state(naadf_mip_traversal_records[record_index]) != NAADF_NODE_UNIFORM_EMPTY {
+            break;
+        }
+        count = count + 1u;
+        cursor = cursor + step;
+    }
+    return count;
 }

@@ -132,6 +132,16 @@ mod naadf_gpu_layout {
                 "{}: GPU mip payload records differ from CPU reference",
                 fixture.name
             );
+            assert_eq!(
+                expected_mips
+                    .bounds_records
+                    .iter()
+                    .map(|record| record.0)
+                    .collect::<Vec<_>>(),
+                actual.mip_bounds_records,
+                "{}: GPU mip bounds records differ from CPU reference",
+                fixture.name
+            );
         }
     }
 
@@ -209,6 +219,7 @@ mod naadf_gpu_layout {
         material_records: Vec<u32>,
         mip_traversal_records: Vec<u32>,
         mip_payload_records: Vec<u32>,
+        mip_bounds_records: Vec<u32>,
     }
 
     impl SunVisibilityRayInput {
@@ -268,6 +279,7 @@ mod naadf_gpu_layout {
         let mip_traversal_buffer =
             storage_buffer(&gpu.device, "naadf_test_mip_traversal", MIP_BYTES);
         let mip_payload_buffer = storage_buffer(&gpu.device, "naadf_test_mip_payload", MIP_BYTES);
+        let mip_bounds_buffer = storage_buffer(&gpu.device, "naadf_test_mip_bounds", MIP_BYTES);
         let chunk_buffer = init_storage_buffer(
             &gpu.device,
             "naadf_test_chunks",
@@ -294,8 +306,14 @@ mod naadf_gpu_layout {
             &block_buffer,
             &mip_traversal_buffer,
             &mip_payload_buffer,
+            &mip_bounds_buffer,
         );
-        run_build_mips(gpu, &mip_traversal_buffer, &mip_payload_buffer);
+        run_build_mips(
+            gpu,
+            &mip_traversal_buffer,
+            &mip_payload_buffer,
+            &mip_bounds_buffer,
+        );
         run_build_bounds(gpu, &block_buffer);
         run_build_chunks(gpu, &block_buffer, &chunk_buffer);
         run_build_chunk_bounds(gpu, &chunk_buffer, &params_buffer, &lookup_buffer);
@@ -306,6 +324,7 @@ mod naadf_gpu_layout {
         let material_records = read_words(gpu, &material_buffer, VOXEL_BYTES).await;
         let mip_traversal_records = read_words(gpu, &mip_traversal_buffer, MIP_BYTES).await;
         let mip_payload_records = read_words(gpu, &mip_payload_buffer, MIP_BYTES).await;
+        let mip_bounds_records = read_words(gpu, &mip_bounds_buffer, MIP_BYTES).await;
 
         let chunk_record = chunk_words
             .try_into()
@@ -322,6 +341,7 @@ mod naadf_gpu_layout {
             material_records,
             mip_traversal_records,
             mip_payload_records,
+            mip_bounds_records,
         }
     }
 
@@ -433,6 +453,7 @@ mod naadf_gpu_layout {
         block_buffer: &wgpu::Buffer,
         mip_traversal_buffer: &wgpu::Buffer,
         mip_payload_buffer: &wgpu::Buffer,
+        mip_bounds_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
@@ -445,6 +466,7 @@ mod naadf_gpu_layout {
                     storage_entry(5, false),
                     storage_entry(6, false),
                     storage_entry(7, false),
+                    storage_entry(8, false),
                 ],
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -457,6 +479,7 @@ mod naadf_gpu_layout {
                 buffer_entry(5, block_buffer),
                 buffer_entry(6, mip_traversal_buffer),
                 buffer_entry(7, mip_payload_buffer),
+                buffer_entry(8, mip_bounds_buffer),
             ],
         });
         dispatch_shader(
@@ -474,12 +497,17 @@ mod naadf_gpu_layout {
         gpu: &GpuContext,
         mip_traversal_buffer: &wgpu::Buffer,
         mip_payload_buffer: &wgpu::Buffer,
+        mip_bounds_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_mips_layout"),
-                entries: &[storage_entry(6, false), storage_entry(7, false)],
+                entries: &[
+                    storage_entry(6, false),
+                    storage_entry(7, false),
+                    storage_entry(8, false),
+                ],
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_mips_group"),
@@ -487,6 +515,7 @@ mod naadf_gpu_layout {
             entries: &[
                 buffer_entry(6, mip_traversal_buffer),
                 buffer_entry(7, mip_payload_buffer),
+                buffer_entry(8, mip_bounds_buffer),
             ],
         });
         dispatch_shader(

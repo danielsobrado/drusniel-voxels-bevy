@@ -453,7 +453,11 @@ pub fn init_naadf_preview_build_pipelines(
     );
     let build_mips_layout = BindGroupLayoutDescriptor::new(
         "naadf_build_mips_layout",
-        &[storage_buffer_entry(6, false), storage_buffer_entry(7, false)],
+        &[
+            storage_buffer_entry(6, false),
+            storage_buffer_entry(7, false),
+            storage_buffer_entry(8, false),
+        ],
     );
     let build_chunks_layout = BindGroupLayoutDescriptor::new(
         "naadf_build_chunks_layout",
@@ -1127,6 +1131,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             &BindGroupEntries::with_indices((
                 (6, allocation.mip_traversal_buffer.as_entire_binding()),
                 (7, allocation.mip_payload_buffer.as_entire_binding()),
+                (8, allocation.mip_bounds_buffer.as_entire_binding()),
             )),
         );
         let build_chunks_group = render_device.create_bind_group(

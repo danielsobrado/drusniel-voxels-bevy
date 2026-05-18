@@ -44,6 +44,13 @@ const NAADF_TRAVERSAL_RECORD_STATE_SHIFT: u32 = 30u;
 const NAADF_TRAVERSAL_RECORD_CHILD_MASK_MASK: u32 = 0xffu;
 const NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT: u32 = 0x20000000u;
 const NAADF_PAYLOAD_RECORD_MATERIAL_MASK: u32 = 0x0000ffffu;
+const NAADF_MIP_BOUND_OFFSET_NEG_X: u32 = 0u;
+const NAADF_MIP_BOUND_OFFSET_POS_X: u32 = 5u;
+const NAADF_MIP_BOUND_OFFSET_NEG_Y: u32 = 10u;
+const NAADF_MIP_BOUND_OFFSET_POS_Y: u32 = 15u;
+const NAADF_MIP_BOUND_OFFSET_NEG_Z: u32 = 20u;
+const NAADF_MIP_BOUND_OFFSET_POS_Z: u32 = 25u;
+const NAADF_MIP_BOUND_FIELD_MASK: u32 = 0x1fu;
 
 fn naadf_node_state(node: u32) -> u32 {
     return node >> NAADF_NODE_STATE_SHIFT;
@@ -81,4 +88,20 @@ fn naadf_traversal_thin_or_hole(record: u32) -> bool {
 
 fn naadf_payload_material_id(record: u32) -> u32 {
     return record & NAADF_PAYLOAD_RECORD_MATERIAL_MASK;
+}
+
+fn naadf_make_mip_bounds_record(
+    neg_x: u32,
+    pos_x: u32,
+    neg_y: u32,
+    pos_y: u32,
+    neg_z: u32,
+    pos_z: u32,
+) -> u32 {
+    return ((neg_x & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_NEG_X) |
+        ((pos_x & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_POS_X) |
+        ((neg_y & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_NEG_Y) |
+        ((pos_y & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_POS_Y) |
+        ((neg_z & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_NEG_Z) |
+        ((pos_z & NAADF_MIP_BOUND_FIELD_MASK) << NAADF_MIP_BOUND_OFFSET_POS_Z);
 }

@@ -23,6 +23,7 @@ pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_MATERIAL_RECORD_BYTES: u64 = 4;
 pub const NAADF_MIP_TRAVERSAL_RECORD_BYTES: u64 = 4;
 pub const NAADF_MIP_PAYLOAD_RECORD_BYTES: u64 = 4;
+pub const NAADF_MIP_BOUNDS_RECORD_BYTES: u64 = 4;
 pub const NAADF_BLOCK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_RECORD_BYTES: u64 = 32;
 pub const NAADF_CHUNK_LOOKUP_RECORD_BYTES: u64 = 16;
@@ -43,6 +44,7 @@ pub struct NaadfGpuBufferPlan {
     pub material_records: u64,
     pub mip_traversal_records: u64,
     pub mip_payload_records: u64,
+    pub mip_bounds_records: u64,
     pub block_records: u64,
     pub chunk_records: u64,
     pub chunk_lookup_records: u64,
@@ -51,6 +53,7 @@ pub struct NaadfGpuBufferPlan {
     pub material_buffer_bytes: u64,
     pub mip_traversal_buffer_bytes: u64,
     pub mip_payload_buffer_bytes: u64,
+    pub mip_bounds_buffer_bytes: u64,
     pub block_buffer_bytes: u64,
     pub chunk_buffer_bytes: u64,
     pub chunk_lookup_buffer_bytes: u64,
@@ -68,6 +71,7 @@ impl NaadfGpuBufferPlan {
         let mip_traversal_records =
             max_chunks as u64 * super::layout::MIP_CELLS_PER_CHUNK as u64;
         let mip_payload_records = mip_traversal_records;
+        let mip_bounds_records = mip_traversal_records;
         let block_records = max_chunks as u64 * super::layout::BLOCKS_PER_CHUNK as u64;
         let chunk_records = max_chunks as u64;
         let chunk_lookup_records = max_chunks as u64;
@@ -77,6 +81,7 @@ impl NaadfGpuBufferPlan {
         let mip_traversal_buffer_bytes =
             mip_traversal_records * NAADF_MIP_TRAVERSAL_RECORD_BYTES;
         let mip_payload_buffer_bytes = mip_payload_records * NAADF_MIP_PAYLOAD_RECORD_BYTES;
+        let mip_bounds_buffer_bytes = mip_bounds_records * NAADF_MIP_BOUNDS_RECORD_BYTES;
         let block_buffer_bytes = block_records * NAADF_BLOCK_RECORD_BYTES;
         let chunk_buffer_bytes = chunk_records * NAADF_CHUNK_RECORD_BYTES;
         let chunk_lookup_buffer_bytes = chunk_lookup_records * NAADF_CHUNK_LOOKUP_RECORD_BYTES;
@@ -88,6 +93,7 @@ impl NaadfGpuBufferPlan {
             + material_buffer_bytes
             + mip_traversal_buffer_bytes
             + mip_payload_buffer_bytes
+            + mip_bounds_buffer_bytes
             + block_buffer_bytes
             + chunk_buffer_bytes
             + chunk_lookup_buffer_bytes
@@ -101,6 +107,7 @@ impl NaadfGpuBufferPlan {
             material_records,
             mip_traversal_records,
             mip_payload_records,
+            mip_bounds_records,
             block_records,
             chunk_records,
             chunk_lookup_records,
@@ -109,6 +116,7 @@ impl NaadfGpuBufferPlan {
             material_buffer_bytes,
             mip_traversal_buffer_bytes,
             mip_payload_buffer_bytes,
+            mip_bounds_buffer_bytes,
             block_buffer_bytes,
             chunk_buffer_bytes,
             chunk_lookup_buffer_bytes,
@@ -161,6 +169,7 @@ pub struct NaadfGpuBufferAllocation {
     pub material_buffer: Buffer,
     pub mip_traversal_buffer: Buffer,
     pub mip_payload_buffer: Buffer,
+    pub mip_bounds_buffer: Buffer,
     pub block_buffer: Buffer,
     pub chunk_buffer: Buffer,
     pub chunk_lookup_buffer: Buffer,
@@ -916,6 +925,12 @@ fn create_naadf_gpu_allocation(
             plan.mip_payload_buffer_bytes,
             storage_usage,
         ),
+        mip_bounds_buffer: create_buffer(
+            render_device,
+            "naadf_mip_bounds_records",
+            plan.mip_bounds_buffer_bytes,
+            storage_usage,
+        ),
         block_buffer: create_buffer(
             render_device,
             "naadf_block_records",
@@ -1297,6 +1312,7 @@ mod tests {
             2 * MIP_CELLS_PER_CHUNK as u64
         );
         assert_eq!(plan.mip_payload_records, plan.mip_traversal_records);
+        assert_eq!(plan.mip_bounds_records, plan.mip_traversal_records);
         assert_eq!(plan.block_records, 128);
         assert_eq!(plan.chunk_records, 2);
         assert_eq!(plan.chunk_lookup_records, 2);
@@ -1305,6 +1321,7 @@ mod tests {
         assert!(plan.material_buffer_bytes > 0);
         assert!(plan.mip_traversal_buffer_bytes > 0);
         assert!(plan.mip_payload_buffer_bytes > 0);
+        assert!(plan.mip_bounds_buffer_bytes > 0);
         assert!(plan.block_buffer_bytes > 0);
         assert!(plan.chunk_buffer_bytes > 0);
         assert!(plan.chunk_lookup_buffer_bytes > 0);

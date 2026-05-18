@@ -4,11 +4,12 @@ use crate::constants::CHUNK_VOLUME;
 use crate::rendering::naadf::layout::{
     BLOCKS_PER_CHUNK, BLOCKS_PER_CHUNK_AXIS, BOUND_FIELD_MAX, BOUND_OFFSET_NEG_X,
     BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X, BOUND_OFFSET_POS_Y,
-    BOUND_OFFSET_POS_Z, DirectionalBounds, MIP_CELLS_PER_CHUNK, MIP_LEVEL_COUNT, NaadfBlock,
-    NaadfChunk, NaadfNodeState, NaadfPayloadRecord, NaadfTraversalRecord,
-    PackedDirectionalBounds2Bit, PackedNaadfNode, VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS,
-    block_coord_for_voxel, block_index_in_chunk, local_coord_in_block, mip_cell_index,
-    mip_level_axis, voxel_index_in_block, voxel_index_in_chunk,
+    BOUND_OFFSET_POS_Z, DirectionalBounds, MIP_BOUND_OFFSET_POS_X, MIP_CELLS_PER_CHUNK,
+    MIP_LEVEL_COUNT, NaadfBlock, NaadfChunk, NaadfMipBoundsRecord, NaadfNodeState,
+    NaadfPayloadRecord, NaadfTraversalRecord, PackedDirectionalBounds2Bit, PackedNaadfNode,
+    VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS, block_coord_for_voxel, block_index_in_chunk,
+    local_coord_in_block, mip_cell_index, mip_level_axis, voxel_index_in_block,
+    voxel_index_in_chunk,
 };
 use crate::voxel::chunk::Chunk;
 use crate::voxel::types::{Voxel, VoxelType};
@@ -435,12 +436,14 @@ pub fn occupancy_mask_for_chunk_voxel(local: UVec3) -> (usize, u64) {
 pub struct NaadfMipPyramid {
     pub traversal_records: Vec<NaadfTraversalRecord>,
     pub payload_records: Vec<NaadfPayloadRecord>,
+    pub bounds_records: Vec<NaadfMipBoundsRecord>,
 }
 
 pub fn build_mip_pyramid_from_chunk(chunk: &NaadfChunk) -> NaadfMipPyramid {
     let mut pyramid = NaadfMipPyramid {
         traversal_records: vec![NaadfTraversalRecord::default(); MIP_CELLS_PER_CHUNK as usize],
         payload_records: vec![NaadfPayloadRecord::default(); MIP_CELLS_PER_CHUNK as usize],
+        bounds_records: vec![NaadfMipBoundsRecord::default(); MIP_CELLS_PER_CHUNK as usize],
     };
 
     for z in 0..16 {
@@ -467,6 +470,9 @@ pub fn build_mip_pyramid_from_chunk(chunk: &NaadfChunk) -> NaadfMipPyramid {
 
     for parent_level in 1..MIP_LEVEL_COUNT {
         build_mip_level(&mut pyramid, parent_level);
+    }
+    for level in 0..MIP_LEVEL_COUNT {
+        build_mip_bounds_level(&mut pyramid, level);
     }
 
     pyramid
@@ -553,6 +559,55 @@ fn summarize_mip_children(
     }
 }
 
+fn build_mip_bounds_level(pyramid: &mut NaadfMipPyramid, level: u32) {
+    let axis = mip_level_axis(level);
+    for z in 0..axis {
+        for y in 0..axis {
+            for x in 0..axis {
+                let local = UVec3::new(x, y, z);
+                let index = mip_cell_index(level, local);
+                pyramid.bounds_records[index] = if pyramid.traversal_records[index].state()
+                    == NaadfNodeState::UniformEmpty
+                {
+                    NaadfMipBoundsRecord::new(
+                        count_empty_mip_cells(pyramid, level, local, IVec3::NEG_X),
+                        count_empty_mip_cells(pyramid, level, local, IVec3::X),
+                        count_empty_mip_cells(pyramid, level, local, IVec3::NEG_Y),
+                        count_empty_mip_cells(pyramid, level, local, IVec3::Y),
+                        count_empty_mip_cells(pyramid, level, local, IVec3::NEG_Z),
+                        count_empty_mip_cells(pyramid, level, local, IVec3::Z),
+                    )
+                } else {
+                    NaadfMipBoundsRecord::default()
+                };
+            }
+        }
+    }
+}
+
+fn count_empty_mip_cells(
+    pyramid: &NaadfMipPyramid,
+    level: u32,
+    local: UVec3,
+    step: IVec3,
+) -> u8 {
+    let axis = mip_level_axis(level) as i32;
+    let mut cursor = local.as_ivec3() + step;
+    let mut count = 0u8;
+    while count < 31
+        && cursor.cmpge(IVec3::ZERO).all()
+        && cursor.cmplt(IVec3::splat(axis)).all()
+    {
+        let index = mip_cell_index(level, cursor.as_uvec3());
+        if pyramid.traversal_records[index].state() != NaadfNodeState::UniformEmpty {
+            break;
+        }
+        count += 1;
+        cursor += step;
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +660,23 @@ mod tests {
             pyramid.payload_records[mip_cell_index(4, UVec3::ZERO)].material_id(),
             VoxelType::Rock as u16
         );
+        assert_eq!(
+            pyramid.bounds_records[mip_cell_index(4, UVec3::ZERO)].0,
+            0,
+            "mixed root is not an empty-run skip source"
+        );
+    }
+
+    #[test]
+    fn mip_bounds_count_empty_run_until_occupied_cell() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(3, 0, 0), VoxelType::Rock);
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+
+        let pyramid = build_mip_pyramid_from_chunk(&naadf);
+        let origin_empty = pyramid.bounds_records[mip_cell_index(0, UVec3::ZERO)];
+
+        assert_eq!(origin_empty.get_at_offset(MIP_BOUND_OFFSET_POS_X), 2);
     }
 
     fn voxel_skip_at(chunk: &NaadfChunk, x: u32, y: u32, z: u32) -> PackedDirectionalBounds2Bit {

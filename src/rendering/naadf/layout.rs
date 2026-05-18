@@ -130,6 +130,13 @@ pub const TRAVERSAL_RECORD_STATE_SHIFT: u32 = 30;
 pub const TRAVERSAL_RECORD_THIN_OR_HOLE_BIT: u32 = 1 << 29;
 pub const TRAVERSAL_RECORD_CHILD_MASK_MASK: u32 = 0xff;
 pub const PAYLOAD_RECORD_MATERIAL_MASK: u32 = 0x0000_ffff;
+pub const MIP_BOUND_OFFSET_NEG_X: u32 = 0;
+pub const MIP_BOUND_OFFSET_POS_X: u32 = 5;
+pub const MIP_BOUND_OFFSET_NEG_Y: u32 = 10;
+pub const MIP_BOUND_OFFSET_POS_Y: u32 = 15;
+pub const MIP_BOUND_OFFSET_NEG_Z: u32 = 20;
+pub const MIP_BOUND_OFFSET_POS_Z: u32 = 25;
+pub const MIP_BOUND_FIELD_MASK: u32 = 0x1f;
 
 const NODE_STATE_SHIFT: u32 = 30;
 const NODE_PAYLOAD_MASK: u32 = (1 << NODE_STATE_SHIFT) - 1;
@@ -206,6 +213,26 @@ impl NaadfPayloadRecord {
 
     pub fn material_id(self) -> u16 {
         (self.0 & PAYLOAD_RECORD_MATERIAL_MASK) as u16
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaadfMipBoundsRecord(pub u32);
+
+impl NaadfMipBoundsRecord {
+    pub const fn new(neg_x: u8, pos_x: u8, neg_y: u8, pos_y: u8, neg_z: u8, pos_z: u8) -> Self {
+        Self(
+            ((neg_x as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_NEG_X
+                | (((pos_x as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_POS_X)
+                | (((neg_y as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_NEG_Y)
+                | (((pos_y as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_POS_Y)
+                | (((neg_z as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_NEG_Z)
+                | (((pos_z as u32) & MIP_BOUND_FIELD_MASK) << MIP_BOUND_OFFSET_POS_Z),
+        )
+    }
+
+    pub fn get_at_offset(self, offset: u32) -> u8 {
+        ((self.0 >> offset) & MIP_BOUND_FIELD_MASK) as u8
     }
 }
 
@@ -457,6 +484,10 @@ mod tests {
             wgsl_u32_const(common, "NAADF_TRAVERSAL_RECORD_THIN_OR_HOLE_BIT"),
             TRAVERSAL_RECORD_THIN_OR_HOLE_BIT
         );
+        assert_eq!(
+            wgsl_u32_const(common, "NAADF_MIP_BOUND_OFFSET_POS_Z"),
+            MIP_BOUND_OFFSET_POS_Z
+        );
     }
 
     #[test]
@@ -469,6 +500,11 @@ mod tests {
         assert!(traversal.thin_or_hole());
         assert_eq!(payload.material_id(), 42);
         assert_eq!(mip_cell_index(4, UVec3::ZERO), (MIP_CELLS_PER_CHUNK - 1) as usize);
+        assert_eq!(
+            NaadfMipBoundsRecord::new(1, 2, 3, 4, 5, 6)
+                .get_at_offset(MIP_BOUND_OFFSET_POS_Z),
+            6
+        );
     }
 
     #[test]
@@ -587,6 +623,7 @@ mod tests {
         assert!(build_mips.contains("@compute"));
         assert!(build_mips.contains("fn build_naadf_mips"));
         assert!(build_mips.contains("naadf_summarize_mip_children"));
+        assert!(build_mips.contains("naadf_build_mip_bounds_level"));
         assert!(build_mips.contains("thin_or_hole"));
         assert!(build_mips.contains("NAADF_MIP_CELLS_PER_CHUNK"));
     }
