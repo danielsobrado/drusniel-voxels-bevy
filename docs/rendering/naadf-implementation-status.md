@@ -2,8 +2,8 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-18 (NAADF-211..218 lighting path landed; lighting visual A/B bench not rerun in this batch)  
-Visual verification: preview-only fixed screenshots inspected for `bench-runs/2026-05-18T15-38-40Z`; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
+Last updated: 2026-05-18 (NAADF-230 Path-B C1 compositor landed; lighting visual A/B bench not rerun in this batch)  
+Visual verification: preview-only, Path-B hybrid, Path-B DepthAudit, and startup-stability fixed screenshots inspected for the 2026-05-18 bench runs listed below; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
 
@@ -1595,6 +1595,49 @@ Checks:
 - `rtk cargo test --bin bench_guard`: 2 tests passed.
 - A lighting `summary.json` was not regenerated after adding the guard thresholds, so the new checks have not been exercised against a fresh lighting bench in this batch.
 
+### NAADF-230: Path-B Compositor C1
+
+Updated:
+
+- `assets/config/naadf.yaml`
+- `assets/shaders/naadf/first_hit.wgsl`
+- `assets/shaders/naadf/preview_fullscreen_composite.wgsl`
+- `assets/shaders/naadf/temporal_accumulation.wgsl`
+- `bench/scenes/naadf/visual-regression-naadf-path-b-depth-audit.toml`
+- `bench/scenes/naadf/visual-regression-naadf-path-b-hybrid.toml`
+- `docs/rendering/naadf-path-b-compositor-plan.md`
+- `src/bench/mod.rs`
+- `src/rendering/naadf/{config.rs,layout.rs,mod.rs,pipeline.rs,preview.rs,stats.rs,systems.rs}`
+
+Details:
+
+- Added default-off Path-B config and bench toggles for `off`, `hybrid_far_terrain`, and `depth_audit`.
+- Added a hard `foundation_200_210_verified` gate so Path-B output is unavailable unless NAADF is enabled and the foundation is explicitly marked verified for the run.
+- Added depth-prepass setup for Path-B cameras and a compositor bind contract for scene color, scene depth, foreground coverage, and NAADF first-hit depth.
+- First-hit depth now exposes linear view depth in `R`, ray distance in `G`, diagnostic reason in `B`, and hit alpha in `A`; the compositor no longer compares normalized ray distance against raster depth.
+- Hybrid mode keeps current scene color when foreground coverage is present, when raster depth is nearer than NAADF linear depth plus epsilon, or when NAADF misses.
+- DepthAudit mode overlays deterministic diagnostic colors for NAADF accepts, coverage rejects, depth rejects, and misses.
+- Path-B temporal is default-off until ownership-mask history rejection is implemented.
+- Path-B counters are published to bench summaries, but per-pixel accept/reject GPU counter readback is not implemented; only the compositor pass counter currently proves that the mode ran.
+- Path B remains experimental and is not evidence that the legacy mesh LOD seam issue is fixed.
+
+Checks:
+
+- `rtk cargo check --features naadf`: compiler finished successfully; the local `rtk` wrapper returned a non-zero shell status because it forwards Cargo status text on stderr.
+- `rtk cargo test --lib --features naadf rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::preview`: 7 tests passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl`: 24 tests passed.
+- `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
+- `rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_deserialize`: 1 test passed.
+- `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+
+Bench evidence:
+
+- Preview-only foundation run: `bench-runs/2026-05-18T17-58-11Z/summary.json`; median `60.327 ms`, p99 `61.316 ms`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- Path-B hybrid run: `bench-runs/2026-05-18T18-04-51Z/summary.json`; median `49.645 ms`, p99 `46.324 ms`; `ready_wait_secs = 75.023`, `render_ready_secs = 4.901`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The settled screenshot was inspected and showed textured hybrid terrain with current-rendered structures/foreground preserved.
+- Path-B DepthAudit run: `bench-runs/2026-05-18T18-10-37Z/summary.json`; median `35.121 ms`, p99 `38.451 ms`; `ready_wait_secs = 54.343`, `render_ready_secs = 3.241`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The settled screenshot was inspected and showed the expected audit tint and NAADF accepted region.
+- Startup-stability run: `bench-runs/2026-05-18T18-13-07Z/summary.json`; median `34.850 ms`, p99 `68.579 ms`; runtime ready wait was about `53.6 s`, render-ready wait about `3.6 s`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The first staged screenshot at frame `120` / `elapsed_secs = 69.532` was already visually textured rather than the blue silhouette/early occupancy preview.
+
 ## Verification Completed
 
 The following non-visual checks were run after the implementation passes:
@@ -1634,6 +1677,11 @@ rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_de
 rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path
 rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml
 rtk cargo run --bin bench_guard -- bench-runs/2026-05-18T15-38-40Z/summary.json
+rtk cargo test --lib --features naadf rendering::naadf::preview
+rtk cargo test --features naadf --test naadf_gpu_layout
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-hybrid.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-depth-audit.toml
+rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-startup-stability.toml
 ```
 
 Results:
@@ -1715,6 +1763,9 @@ Results:
 - `rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed after the textured first-hit path.
 - `visual-regression-naadf-preview-only.toml`: completed in `bench-runs/2026-05-18T15-38-40Z/summary.json`; median `47.36925 ms`, p99 `47.903 ms`.
 - `bench_guard` on `bench-runs/2026-05-18T15-38-40Z/summary.json`: reported `PASS: 187 check(s), 0 warning(s)`.
+- `visual-regression-naadf-path-b-hybrid.toml`: completed in `bench-runs/2026-05-18T18-04-51Z/summary.json`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- `visual-regression-naadf-path-b-depth-audit.toml`: completed in `bench-runs/2026-05-18T18-10-37Z/summary.json`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- `visual-regression-naadf-startup-stability.toml`: completed in `bench-runs/2026-05-18T18-13-07Z/summary.json`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
 
 ## 2026-05-16 Preview Coverage Follow-Up
 
@@ -1761,7 +1812,7 @@ Not run:
 - Desktop editor restart.
 - Baseline runs for `visual-regression-naadf-current.toml`, `visual-regression-naadf-gi.toml`, and `visual-regression-naadf-preview.toml`.
 - Clean before/after `summary.json` comparison for the final distance LOD batch.
-- Startup-stability bench after the final distance LOD texture path.
+- Clean before/after `summary.json` comparison for the Path-B compositor batch.
 - NAADF GI visual checks.
 
 ## Current Behavior
@@ -1771,6 +1822,7 @@ Not run:
 - With NAADF disabled, dirty queueing/cache rebuild systems no-op.
 - `CurrentSdf` remains the default production voxel ray backend.
 - NAADF now has an experimental GPU build plus textured first-hit preview path behind the `naadf` feature/config gates.
+- NAADF Path-B hybrid/depth-audit compositor modes are implemented as experimental, default-off, foundation-gated paths.
 - Production terrain rendering, GI, AO, shadows, fog, and water still use the existing renderer/backend unless explicitly routed by later tickets.
 - Visual output should only change when NAADF preview/config paths are explicitly enabled.
 
@@ -1857,7 +1909,7 @@ Summary:
 - Phase 3 (`NAADF-214/215`) added the default-off froxel sun-mask scaffold and god-ray/fog hooks.
 - Supporting work (`NAADF-216..218`) added static-proxy policy, dirty-history invalidation, and lighting guard thresholds.
 - Path A remains default-off and is not default-promoted. Earlier Path A GI evidence still showed active NAADF GI slower than the current SDF baseline, so promotion requires new visual/performance evidence.
-- Path B remains deferred.
+- Path B C1 is implemented as a default-off, foundation-gated experimental compositor; temporal ownership-mask integration remains deferred.
 
 ## Remaining Work
 
@@ -1869,6 +1921,6 @@ Release-gate work:
 
 Deferred research:
 
-- `NAADF-230` Path-B compositor.
+- Path-B C2 ownership-mask temporal integration and per-pixel debug counter readback.
 - `NAADF-240` DDGI/ReSTIR research.
 - `NAADF-250` compression research.

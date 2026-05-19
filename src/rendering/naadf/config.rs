@@ -236,7 +236,7 @@ impl Default for NaadfPathBConfig {
         Self {
             compositor_mode: NaadfPathBCompositorModeConfig::Off,
             depth_epsilon: default_path_b_depth_epsilon(),
-            enable_temporal: true,
+            enable_temporal: false,
             audit_overlay_alpha: default_path_b_audit_overlay_alpha(),
             counters_enabled: false,
             foundation_200_210_verified: false,

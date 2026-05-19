@@ -43,7 +43,8 @@ preview:
 path_b:
   compositor_mode: off
   depth_epsilon: 0.25
-  enable_temporal: true
+  # Keep Path-B temporal disabled until ownership-mask history rejection lands.
+  enable_temporal: false
   audit_overlay_alpha: 0.75
   counters_enabled: false
   foundation_200_210_verified: false

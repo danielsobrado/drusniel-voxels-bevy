@@ -106,7 +106,7 @@ impl Default for NaadfPreviewSettings {
             history_resolution_scale: 1.0,
             path_b_mode: NaadfPathBCompositorMode::Off,
             path_b_depth_epsilon: 0.25,
-            path_b_enable_temporal: true,
+            path_b_enable_temporal: false,
             path_b_audit_overlay_alpha: 0.75,
             path_b_counters_enabled: false,
             path_b_runtime_available: false,

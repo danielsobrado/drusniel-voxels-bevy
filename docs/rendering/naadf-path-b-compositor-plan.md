@@ -154,7 +154,8 @@ Config/runtime concepts:
 
 - `path_b_compositor_mode`, default `Off`;
 - `path_b_depth_epsilon`, default small positive linear-depth tolerance;
-- `path_b_enable_temporal`, default uses existing preview temporal setting;
+- `path_b_enable_temporal`, default `false` until the ownership-mask history
+  rejection path is implemented;
 - `path_b_audit_overlay_alpha`, used only by `DepthAudit`;
 - `path_b_counters_enabled`, default `false`, debug/bench only;
 - bench override enabling Path-B counters/readback;
