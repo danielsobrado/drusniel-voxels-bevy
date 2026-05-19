@@ -1,6 +1,6 @@
 #import "shaders/naadf/common.wgsl" NAADF_VOXELS_PER_CHUNK_AXIS
 #import "shaders/naadf/layout.wgsl" naadf_chunk_world_origin
-#import "shaders/naadf/ray_trace.wgsl" NAADF_MISS_REASON_CHUNK_BUDGET, NAADF_MISS_REASON_DISTANCE_CLAMP, NAADF_MISS_REASON_NO_LOOKUP, NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk, trace_naadf_chunk_lod
+#import "shaders/naadf/ray_trace.wgsl" NAADF_MISS_REASON_CHUNK_BUDGET, NAADF_MISS_REASON_CLEAN_EXIT, NAADF_MISS_REASON_DISTANCE_CLAMP, NAADF_MISS_REASON_NO_LOOKUP, NaadfHit, NaadfRay, naadf_chunk_voxel_occupied_at, naadf_make_miss, trace_naadf_chunk, trace_naadf_chunk_lod
 
 @group(3) @binding(20) var<storage, read> naadf_chunk_lookup_records: array<vec4<u32>>;
 
@@ -29,17 +29,28 @@ fn trace_naadf_world(
     var traveled = 0.0;
 
     var chunk_steps_taken = 0u;
+    var total_voxel_steps_taken = 0u;
     var miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
     for (var chunk_step = 0u; chunk_step < max_steps; chunk_step = chunk_step + 1u) {
         chunk_steps_taken = chunk_step + 1u;
+        if total_voxel_steps_taken >= max_steps {
+            miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
+            break;
+        }
         if traveled > ray.max_distance {
             miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
             break;
         }
         let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
         if chunk_index != 0xffffffffu && chunk_index < chunk_count {
-            let hit = trace_naadf_chunk(ray, chunk_pos, chunk_index, max_steps);
+            var hit = trace_naadf_chunk(ray, chunk_pos, chunk_index, max_steps - total_voxel_steps_taken);
+            total_voxel_steps_taken = min(max_steps, total_voxel_steps_taken + hit.steps);
+            hit.steps = total_voxel_steps_taken;
             if hit.hit != 0u {
+                return hit;
+            }
+            if hit.miss_reason != NAADF_MISS_REASON_CLEAN_EXIT &&
+                hit.miss_reason != NAADF_MISS_REASON_NO_LOOKUP {
                 return hit;
             }
         }
@@ -60,7 +71,7 @@ fn trace_naadf_world(
         }
     }
 
-    return naadf_make_miss(chunk_steps_taken, miss_reason);
+    return naadf_make_miss(max(chunk_steps_taken, total_voxel_steps_taken), miss_reason);
 }
 
 fn trace_naadf_world_lod(
@@ -89,17 +100,34 @@ fn trace_naadf_world_lod(
     var traveled = 0.0;
 
     var chunk_steps_taken = 0u;
+    var total_voxel_steps_taken = 0u;
     var miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
     for (var chunk_step = 0u; chunk_step < max_steps; chunk_step = chunk_step + 1u) {
         chunk_steps_taken = chunk_step + 1u;
+        if total_voxel_steps_taken >= max_steps {
+            miss_reason = NAADF_MISS_REASON_CHUNK_BUDGET;
+            break;
+        }
         if traveled > ray.max_distance {
             miss_reason = NAADF_MISS_REASON_DISTANCE_CLAMP;
             break;
         }
         let chunk_index = naadf_lookup_chunk_slot(chunk_pos, lookup_count);
         if chunk_index != 0xffffffffu && chunk_index < chunk_count {
-            let hit = trace_naadf_chunk_lod(ray, chunk_pos, chunk_index, max_steps, cone_config);
+            var hit = trace_naadf_chunk_lod(
+                ray,
+                chunk_pos,
+                chunk_index,
+                max_steps - total_voxel_steps_taken,
+                cone_config,
+            );
+            total_voxel_steps_taken = min(max_steps, total_voxel_steps_taken + hit.steps);
+            hit.steps = total_voxel_steps_taken;
             if hit.hit != 0u {
+                return hit;
+            }
+            if hit.miss_reason != NAADF_MISS_REASON_CLEAN_EXIT &&
+                hit.miss_reason != NAADF_MISS_REASON_NO_LOOKUP {
                 return hit;
             }
         }
@@ -120,7 +148,7 @@ fn trace_naadf_world_lod(
         }
     }
 
-    return naadf_make_miss(chunk_steps_taken, miss_reason);
+    return naadf_make_miss(max(chunk_steps_taken, total_voxel_steps_taken), miss_reason);
 }
 
 fn naadf_world_chunk_for_position(position: vec3<f32>) -> vec3<i32> {

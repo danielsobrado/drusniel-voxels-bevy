@@ -144,6 +144,9 @@ pub struct NaadfPreviewHistoryState {
     pub generation: u64,
 }
 
+#[derive(Component)]
+pub(crate) struct NaadfManagedDepthPrepass;
+
 impl NaadfPreviewHistoryState {
     pub fn ensure_plan(&mut self, plan: NaadfPreviewHistoryPlan) {
         if self.plan != plan {
@@ -227,11 +230,12 @@ fn apply_preview_config(config: &NaadfConfig, settings: &mut NaadfPreviewSetting
     settings.path_b_runtime_available = config.path_b_runtime_available();
 }
 
-pub fn configure_path_b_camera_prepass(
+pub(crate) fn configure_path_b_camera_prepass(
     mut commands: Commands,
     config: Res<NaadfConfig>,
     ray_tracing: Res<RayTracingSettings>,
-    cameras: Query<Entity, (With<Camera3d>, Without<DepthPrepass>)>,
+    cameras_without_prepass: Query<Entity, (With<Camera3d>, Without<DepthPrepass>)>,
+    managed_prepass_cameras: Query<Entity, (With<Camera3d>, With<NaadfManagedDepthPrepass>)>,
 ) {
     let needs_path_b_prepass = config.path_b_runtime_available()
         && matches!(
@@ -241,12 +245,19 @@ pub fn configure_path_b_camera_prepass(
         );
     let needs_prepass = ray_tracing.experimental_mode == ExperimentalRenderMode::NaadfPreview
         || needs_path_b_prepass;
-    if !needs_prepass {
-        return;
-    }
 
-    for entity in cameras.iter() {
-        commands.entity(entity).insert(DepthPrepass);
+    if needs_prepass {
+        for entity in cameras_without_prepass.iter() {
+            commands
+                .entity(entity)
+                .insert((DepthPrepass, NaadfManagedDepthPrepass));
+        }
+    } else {
+        for entity in managed_prepass_cameras.iter() {
+            commands
+                .entity(entity)
+                .remove::<(DepthPrepass, NaadfManagedDepthPrepass)>();
+        }
     }
 }
 

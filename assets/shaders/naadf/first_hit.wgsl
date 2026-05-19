@@ -12,6 +12,8 @@ struct NaadfFirstHitParams {
     fog_color_start: vec4<f32>,
     fog_end_strength: vec4<f32>,
     sun_direction_pad: vec4<f32>,
+    path_b_config: vec4<f32>,
+    view_from_clip: mat4x4<f32>,
     previous_clip_from_world: mat4x4<f32>,
 }
 
@@ -73,6 +75,7 @@ struct NaadfLocalLightRecord {
 @group(3) @binding(25) var<storage, read> naadf_local_light_records: array<NaadfLocalLightRecord>;
 @group(3) @binding(39) var naadf_terrain_albedo_array: texture_2d_array<f32>;
 @group(3) @binding(40) var naadf_terrain_sampler: sampler;
+@group(3) @binding(41) var naadf_first_hit_scene_depth: texture_depth_2d;
 
 @compute @workgroup_size(8, 8, 1)
 fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -89,10 +92,16 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
         naadf_first_hit_params.camera_right_aspect.xyz * (ndc.x * naadf_first_hit_params.camera_right_aspect.w * fov_scale) +
         naadf_first_hit_params.camera_up_pad.xyz * (-ndc.y * fov_scale),
     );
+    let ray_max_distance = naadf_path_b_first_hit_max_distance(
+        uv,
+        vec2<i32>(id.xy),
+        ray_direction,
+        naadf_first_hit_params.camera_origin_max_distance.w,
+    );
     let ray = NaadfRay(
         naadf_first_hit_params.camera_origin_max_distance.xyz,
         ray_direction,
-        naadf_first_hit_params.camera_origin_max_distance.w,
+        ray_max_distance,
         5u,
     );
     let cone_spread = (2.0 * fov_scale) / max(f32(output_size.y), 1.0);
@@ -130,6 +139,34 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
     );
     textureStore(naadf_first_hit_normal_output, coord, vec4<f32>(normal, 1.0));
     textureStore(naadf_first_hit_motion_output, coord, motion);
+}
+
+fn naadf_path_b_first_hit_max_distance(
+    uv: vec2<f32>,
+    coord: vec2<i32>,
+    ray_direction: vec3<f32>,
+    fallback_max_distance: f32,
+) -> f32 {
+    if naadf_first_hit_params.path_b_config.y <= 0.5 || naadf_first_hit_params.path_b_config.z <= 0.5 {
+        return fallback_max_distance;
+    }
+    let depth_size = textureDimensions(naadf_first_hit_scene_depth);
+    let depth_coord = clamp(coord, vec2<i32>(0), vec2<i32>(depth_size) - vec2<i32>(1));
+    let scene_depth = textureLoad(naadf_first_hit_scene_depth, depth_coord, 0);
+    if scene_depth <= 0.001 {
+        return fallback_max_distance;
+    }
+    let ndc = vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), scene_depth, 1.0);
+    let view = naadf_first_hit_params.view_from_clip * ndc;
+    let view_pos = view.xyz / max(view.w, 0.000001);
+    let raster_linear_depth = max(-view_pos.z, 0.0);
+    let view_depth_per_ray_unit = max(
+        dot(normalize(ray_direction), normalize(naadf_first_hit_params.camera_forward_fov_y.xyz)),
+        0.0001,
+    );
+    let depth_epsilon = max(naadf_first_hit_params.path_b_config.x, 0.0);
+    let raster_ray_distance = max((raster_linear_depth - depth_epsilon) / view_depth_per_ray_unit, 0.001);
+    return min(fallback_max_distance, raster_ray_distance);
 }
 
 fn naadf_first_hit_motion(uv: vec2<f32>, ray: NaadfRay, preview: NaadfFirstHitPreview) -> vec4<f32> {

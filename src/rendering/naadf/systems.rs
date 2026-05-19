@@ -8,9 +8,9 @@ use super::preview::NaadfPreviewPipelineState;
 use super::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
 use crate::performance::AreaTimingRecorder;
 use crate::rendering::radiance_cascades::{
-    NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_SUN_VISIBILITY,
-    NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState,
-    naadf_gi_shader_backend_available, radiance_cascade_pass_active,
+    naadf_gi_shader_backend_available, radiance_cascade_pass_active, RadianceCascadesConfig,
+    SdfVolumeState, NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY,
+    NAADF_QUERY_SUN_VISIBILITY, NAADF_QUERY_TERRAIN_AO,
 };
 use crate::rendering::ray_tracing::{RayTracingSettings, VoxelRayBackendMode};
 

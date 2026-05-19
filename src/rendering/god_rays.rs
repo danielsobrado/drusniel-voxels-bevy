@@ -9,26 +9,27 @@
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::{
-    FullscreenShader,
     core_3d::graph::{Core3d, Node3d},
     prepass::ViewPrepassTextures,
+    FullscreenShader,
 };
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
-    ExtractSchedule, RenderApp, RenderStartup,
     render_graph::{
         NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
     },
     render_resource::{
-        BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BufferInitDescriptor,
-        BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
-        Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
-        RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-        ShaderType, TextureFormat, TextureSampleType, binding_types,
+        binding_types, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
+        BindingType, Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages,
+        CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, Operations,
+        PipelineCache, RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+        Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureFormat,
+        TextureSampleType,
     },
     renderer::{RenderContext, RenderDevice},
     view::{ViewTarget, ViewUniformOffset, ViewUniforms},
+    ExtractSchedule, RenderApp, RenderStartup,
 };
 use bevy::shader::Shader;
 
@@ -37,7 +38,7 @@ use crate::camera::controller::PlayerCamera;
 use crate::environment::Sun;
 use crate::performance::AreaTimingRecorder;
 #[cfg(feature = "naadf")]
-use crate::rendering::naadf::froxel::NaadfFroxelSunMaskState;
+use crate::rendering::naadf::froxel::{NaadfFroxelSunMaskGpuState, NaadfFroxelSunMaskState};
 use crate::rendering::water_reflection_compositor::WaterReflectionCompositorLabel;
 use crate::weather::WeatherRuntime;
 
@@ -103,6 +104,32 @@ pub(crate) struct GodRayUniforms {
     snow_factor: f32,
     naadf_froxel_visibility: f32,
     naadf_froxel_strength: f32,
+}
+
+/// Must match `GodRayFroxelParams` in `god_rays.wgsl` and `froxel_sun_mask.wgsl`.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
+pub(crate) struct GodRayFroxelParams {
+    pub(crate) grid: UVec4,
+    pub(crate) camera_origin_max_distance: Vec4,
+    pub(crate) camera_forward_fov_y: Vec4,
+    pub(crate) camera_right_aspect: Vec4,
+    pub(crate) camera_up_pad: Vec4,
+    pub(crate) sun_direction_pad: Vec4,
+    pub(crate) config: UVec4,
+}
+
+impl Default for GodRayFroxelParams {
+    fn default() -> Self {
+        Self {
+            grid: UVec4::new(1, 1, 1, 0),
+            camera_origin_max_distance: Vec4::ZERO,
+            camera_forward_fov_y: Vec4::new(0.0, 0.0, -1.0, std::f32::consts::FRAC_PI_2),
+            camera_right_aspect: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            camera_up_pad: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            sun_direction_pad: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            config: UVec4::ZERO,
+        }
+    }
 }
 
 // ─── Main-world sun projection ───────────────────────────────────────────────
@@ -197,7 +224,7 @@ fn compute_god_ray_frame_data(
                 .as_deref()
                 .map(|weather| weather.uniforms.snow_factor.clamp(0.0, 1.0))
                 .unwrap_or(0.0),
-            naadf_froxel_visibility: 1.0 - naadf_froxel_strength * 0.15,
+            naadf_froxel_visibility: 1.0,
             naadf_froxel_strength,
         },
     });
@@ -244,6 +271,38 @@ fn naadf_froxel_god_ray_strength() -> f32 {
 
 // ─── Extraction ──────────────────────────────────────────────────────────────
 
+#[cfg(test)]
+fn god_ray_froxel_depth_sample_count(depth_slices: u32) -> u32 {
+    (depth_slices / 16).clamp(4, 16)
+}
+
+#[cfg(test)]
+fn sample_god_ray_froxel_column_visibility(
+    mask: &[u32],
+    grid: UVec3,
+    uv: Vec2,
+    active: bool,
+) -> f32 {
+    if !active || grid.x == 0 || grid.y == 0 || grid.z == 0 {
+        return 1.0;
+    }
+    let cell_x = ((uv.x.clamp(0.0, 0.999_999) * grid.x as f32) as u32).min(grid.x - 1);
+    let cell_y = ((uv.y.clamp(0.0, 0.999_999) * grid.y as f32) as u32).min(grid.y - 1);
+    let sample_count = god_ray_froxel_depth_sample_count(grid.z);
+    let mut visibility = 0.0;
+    for sample in 0..sample_count {
+        let slice_f = (sample as f32 + 0.5) / sample_count as f32;
+        let z = ((slice_f * grid.z as f32) as u32).min(grid.z - 1);
+        let index = (cell_x + cell_y * grid.x + z * grid.x * grid.y) as usize;
+        visibility += if mask.get(index).copied().unwrap_or(1) != 0 {
+            1.0
+        } else {
+            0.0
+        };
+    }
+    visibility / sample_count as f32
+}
+
 /// Extracted to the render world each frame.
 #[derive(Resource, Clone)]
 struct ExtractedGodRayData {
@@ -275,6 +334,8 @@ fn extract_god_ray_data(world: &mut World) {
 struct GodRayPipeline {
     layout: BindGroupLayoutDescriptor,
     sampler: Sampler,
+    dummy_froxel_params_buffer: Buffer,
+    dummy_froxel_mask_buffer: Buffer,
     hdr_pipeline_id: CachedRenderPipelineId,
     sdr_pipeline_id: CachedRenderPipelineId,
 }
@@ -300,11 +361,26 @@ fn init_god_ray_pipeline(
                 binding_types::uniform_buffer::<GodRayUniforms>(false),
                 // 4: Bevy View uniform
                 binding_types::uniform_buffer::<bevy::render::view::ViewUniform>(true),
+                // 5: NAADF froxel params; inactive dummy in non-NAADF/default builds
+                binding_types::uniform_buffer::<GodRayFroxelParams>(false),
+                // 6: NAADF froxel mask; read-only in the fragment shader
+                BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
             ),
         ),
     );
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+    let dummy_froxel_params_buffer =
+        create_god_ray_froxel_params_buffer(&render_device, &GodRayFroxelParams::default());
+    let dummy_froxel_mask_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some("god_ray_dummy_naadf_froxel_mask"),
+        contents: bytemuck::cast_slice(&[1u32]),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+    });
 
     let pipeline_descriptor =
         |label: &'static str, format: TextureFormat| RenderPipelineDescriptor {
@@ -335,9 +411,24 @@ fn init_god_ray_pipeline(
     commands.insert_resource(GodRayPipeline {
         layout,
         sampler,
+        dummy_froxel_params_buffer,
+        dummy_froxel_mask_buffer,
         hdr_pipeline_id,
         sdr_pipeline_id,
     });
+}
+
+fn create_god_ray_froxel_params_buffer(
+    render_device: &RenderDevice,
+    params: &GodRayFroxelParams,
+) -> Buffer {
+    let mut uniform_buffer = bevy::render::render_resource::encase::UniformBuffer::new(Vec::new());
+    uniform_buffer.write(params).unwrap();
+    render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some("god_ray_dummy_naadf_froxel_params"),
+        contents: uniform_buffer.as_ref(),
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    })
 }
 
 // ─── Render Graph Node ───────────────────────────────────────────────────────
@@ -408,17 +499,45 @@ impl ViewNode for GodRayNode {
 
         // ── Post-process write (ping-pong) ─────────────────────────────────
         let post_process = view_target.post_process_write();
+        #[cfg(feature = "naadf")]
+        let live_froxel = world
+            .get_resource::<NaadfFroxelSunMaskGpuState>()
+            .filter(|state| state.ready_for_god_rays());
+        #[cfg(feature = "naadf")]
+        let (froxel_params_buffer, froxel_mask_buffer) = live_froxel.map_or(
+            (
+                &pipeline_res.dummy_froxel_params_buffer,
+                &pipeline_res.dummy_froxel_mask_buffer,
+            ),
+            |state| {
+                (
+                    state
+                        .params_buffer()
+                        .unwrap_or(&pipeline_res.dummy_froxel_params_buffer),
+                    state
+                        .mask_buffer()
+                        .unwrap_or(&pipeline_res.dummy_froxel_mask_buffer),
+                )
+            },
+        );
+        #[cfg(not(feature = "naadf"))]
+        let (froxel_params_buffer, froxel_mask_buffer) = (
+            &pipeline_res.dummy_froxel_params_buffer,
+            &pipeline_res.dummy_froxel_mask_buffer,
+        );
 
         // ── Bind group ─────────────────────────────────────────────────────
         let bind_group = render_context.render_device().create_bind_group(
             "god_rays_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
             &BindGroupEntries::sequential((
-                post_process.source,                // 0: scene colour
-                &pipeline_res.sampler,              // 1: sampler
-                depth_view,                         // 2: depth
-                uniform_buffer.as_entire_binding(), // 3: GodRayUniforms
-                view_binding.clone(),               // 4: View uniform
+                post_process.source,                      // 0: scene colour
+                &pipeline_res.sampler,                    // 1: sampler
+                depth_view,                               // 2: depth
+                uniform_buffer.as_entire_binding(),       // 3: GodRayUniforms
+                view_binding.clone(),                     // 4: View uniform
+                froxel_params_buffer.as_entire_binding(), // 5: NAADF froxel params
+                froxel_mask_buffer.as_entire_binding(),   // 6: NAADF froxel mask
             )),
         );
 
@@ -495,6 +614,32 @@ mod tests {
         assert_eq!(clamp_god_ray_samples(0), MIN_GOD_RAY_SAMPLES);
         assert_eq!(clamp_god_ray_samples(32), 32);
         assert_eq!(clamp_god_ray_samples(512), MAX_GOD_RAY_SAMPLES);
+    }
+
+    #[test]
+    fn froxel_column_sampling_varies_by_uv_and_defaults_visible() {
+        let grid = UVec3::new(2, 1, 64);
+        let mut mask = vec![0u32; (grid.x * grid.y * grid.z) as usize];
+        for z in 0..grid.z {
+            mask[(z * grid.x * grid.y) as usize] = 1;
+        }
+
+        assert_eq!(
+            sample_god_ray_froxel_column_visibility(&mask, grid, Vec2::new(0.25, 0.5), true),
+            1.0
+        );
+        assert_eq!(
+            sample_god_ray_froxel_column_visibility(&mask, grid, Vec2::new(0.75, 0.5), true),
+            0.0
+        );
+        assert_eq!(
+            sample_god_ray_froxel_column_visibility(&mask, grid, Vec2::new(0.75, 0.5), false),
+            1.0
+        );
+        assert_eq!(
+            sample_god_ray_froxel_column_visibility(&[1], UVec3::new(1, 1, 1), Vec2::ZERO, true),
+            1.0
+        );
     }
 
     #[cfg(feature = "naadf")]

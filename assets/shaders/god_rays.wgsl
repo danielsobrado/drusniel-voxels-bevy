@@ -36,15 +36,55 @@ struct GodRayUniforms {
     naadf_froxel_strength: f32,
 }
 
+struct GodRayFroxelParams {
+    grid: vec4<u32>,
+    camera_origin_max_distance: vec4<f32>,
+    camera_forward_fov_y: vec4<f32>,
+    camera_right_aspect: vec4<f32>,
+    camera_up_pad: vec4<f32>,
+    sun_direction_pad: vec4<f32>,
+    config: vec4<u32>,
+}
+
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
 @group(0) @binding(2) var depth_texture: texture_depth_2d;
 @group(0) @binding(3) var<uniform> uniforms: GodRayUniforms;
 @group(0) @binding(4) var<uniform> view: View;
+@group(0) @binding(5) var<uniform> naadf_froxel_params: GodRayFroxelParams;
+@group(0) @binding(6) var<storage, read> naadf_froxel_mask: array<u32>;
 
 // Approximate luminance of an HDR color
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+fn naadf_froxel_cell_visibility(x: u32, y: u32, z: u32) -> f32 {
+    let grid = naadf_froxel_params.grid.xyz;
+    let index = x + y * grid.x + z * grid.x * grid.y;
+    return select(0.0, 1.0, naadf_froxel_mask[index] != 0u);
+}
+
+fn naadf_froxel_depth_sample_count(depth_slices: u32) -> u32 {
+    return clamp(depth_slices / 16u, 4u, 16u);
+}
+
+fn naadf_froxel_column_visibility(uv: vec2<f32>) -> f32 {
+    let grid = naadf_froxel_params.grid.xyz;
+    if naadf_froxel_params.grid.w == 0u || any(grid == vec3<u32>(0u)) {
+        return 1.0;
+    }
+
+    let clamped_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.999999));
+    let cell_xy = min(vec2<u32>(clamped_uv * vec2<f32>(grid.xy)), grid.xy - vec2<u32>(1u));
+    let sample_count = naadf_froxel_depth_sample_count(grid.z);
+    var visibility = 0.0;
+    for (var sample = 0u; sample < sample_count; sample++) {
+        let slice_f = (f32(sample) + 0.5) / f32(sample_count);
+        let z = min(u32(slice_f * f32(grid.z)), grid.z - 1u);
+        visibility += naadf_froxel_cell_visibility(cell_xy.x, cell_xy.y, z);
+    }
+    return visibility / f32(sample_count);
 }
 
 @fragment
@@ -71,9 +111,12 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let snow_factor = clamp(uniforms.snow_factor, 0.0, 1.0);
     let weather_intensity_mult = clamp(1.0 - rain_factor * 0.55 - snow_factor * 0.1, 0.35, 1.0);
     let weather_threshold = max(uniforms.threshold * (1.0 - snow_factor * 0.18), 0.05);
+    // V1 samples the output pixel's froxel column as "air along this view ray".
+    // It deliberately does not sample along the radial blur path, and it conflates
+    // near/far occlusion within the column until a depth-localized fog model exists.
     let naadf_froxel_visibility = mix(
         1.0,
-        clamp(uniforms.naadf_froxel_visibility, 0.0, 1.0),
+        naadf_froxel_column_visibility(in.uv),
         clamp(uniforms.naadf_froxel_strength, 0.0, 1.0),
     );
 

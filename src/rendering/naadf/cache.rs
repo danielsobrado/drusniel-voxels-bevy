@@ -7,12 +7,12 @@ use super::cpu_builder::NaadfBuildOptions;
 use super::dirty::NaadfDirtyChunkQueue;
 use super::extractor::{NaadfChunkExtractor, NaadfExtractionError};
 use super::layout::{
-    CHUNK_BOUND_FIELD_MAX, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
-    CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
-    CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
+    NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit, CHUNK_BOUND_FIELD_MAX,
+    CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y, CHUNK_BOUND_OFFSET_NEG_Z,
+    CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y, CHUNK_BOUND_OFFSET_POS_Z,
 };
 use super::stats::{NaadfCacheState, NaadfStats};
-use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::performance::{area_timer, AreaTimingRecorder};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]

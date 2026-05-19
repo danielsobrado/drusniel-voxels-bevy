@@ -1640,7 +1640,7 @@ fn append_control_hints(
 ) {
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[F4] Dump performance CSV");
-    text_content.push_str("\n[Shift+F4] Inspector/settings");
+    text_content.push_str("\n[Shift+F4] Game Tweaks");
     text_content.push_str("\n[F11] Cycle voxel ray backend");
     text_content.push_str("\n[Shift+F11] Toggle enclosure culling");
     text_content.push_str("\n[G] Detailed log");

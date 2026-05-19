@@ -773,7 +773,9 @@ mod tests {
             )
         }));
         assert!(froxel.contains("fn build_naadf_froxel_sun_mask"));
-        assert!(froxel.contains("let index = id.x + id.y * grid.x + id.z * grid.x * grid.y"));
+        assert!(froxel.contains("@compute @workgroup_size(64, 1, 1)"));
+        assert!(froxel.contains("let index = id.x + naadf_froxel_sun_mask_params.config.w"));
+        assert!(froxel.contains("let view_ray = normalize("));
         assert!(froxel.contains("naadf_sun_visibility_world("));
         assert!(froxel.contains("naadf_froxel_sun_mask[index]"));
     }
@@ -825,6 +827,8 @@ mod tests {
         assert!(first_hit.contains("linear_view_depth"));
         assert!(first_hit.contains("ray_distance"));
         assert!(!first_hit.contains("preview.distance / max(ray.max_distance"));
+        assert!(first_hit.contains("naadf_first_hit_scene_depth"));
+        assert!(first_hit.contains("fn naadf_path_b_first_hit_max_distance"));
         assert!(first_hit.contains("struct NaadfEntityVolumeRecord"));
         assert!(first_hit.contains("naadf_entity_volume_records"));
         assert!(first_hit.contains("naadf_entity_material_records"));
@@ -904,6 +908,8 @@ mod tests {
         assert!(composite.contains("textureDimensions(naadf_scene_color)"));
         assert!(composite.contains("preview_coord"));
         assert!(composite.contains("blended_preview"));
+        assert!(composite.contains("divider_width"));
+        assert!(composite.contains("1.0, 0.92, 0.12"));
         assert!(composite.contains("textureLoad"));
     }
 

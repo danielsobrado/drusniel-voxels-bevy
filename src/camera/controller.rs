@@ -1,6 +1,7 @@
 use crate::atmosphere::{AtmosphereConfig, FogConfig, fog_camera_components};
 use crate::camera::config::{CameraConfig, CameraExposureConfig};
 use crate::constants::WORLD_EDGE_GUARD_MARGIN;
+use crate::debug_ui::DebugUiState;
 use crate::editor_diagnostics::{
     EditorDiagnosticsCategory, EditorDiagnosticsState, editor_diagnostics_log,
 };
@@ -23,6 +24,7 @@ use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::MouseMotion;
 use bevy::input::mouse::MouseWheel;
 use bevy::light::ShadowFilteringMethod;
@@ -67,6 +69,28 @@ pub struct PlayerCamera {
 
     // Fly mode settings
     pub fly_speed: f32,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct CameraUiState<'w> {
+    pause_menu: Res<'w, PauseMenuState>,
+    palette: Res<'w, PlacementPaletteState>,
+    map_state: Res<'w, MapState>,
+    inventory_ui: Res<'w, InventoryUiState>,
+    debug_ui: Option<Res<'w, DebugUiState>>,
+}
+
+impl CameraUiState<'_> {
+    fn is_open(&self) -> bool {
+        self.pause_menu.open
+            || self.palette.open
+            || self.map_state.open
+            || self.inventory_ui.open
+            || self
+                .debug_ui
+                .as_deref()
+                .is_some_and(DebugUiState::needs_cursor)
+    }
 }
 
 impl PlayerCamera {
@@ -448,10 +472,7 @@ pub(crate) fn player_camera_system(
     mut mouse_wheel: MessageReader<MouseWheel>,
     time: Res<Time>,
     mut windows: Query<(&mut Window, &mut CursorOptions)>,
-    pause_menu: Res<PauseMenuState>,
-    palette: Res<PlacementPaletteState>,
-    map_state: Res<MapState>,
-    inventory_ui: Res<InventoryUiState>,
+    ui_state: CameraUiState,
     camera_config: Res<CameraConfig>,
     world: Res<VoxelWorld>,
     diagnostics: Option<Res<EditorDiagnosticsState>>,
@@ -482,7 +503,7 @@ pub(crate) fn player_camera_system(
     };
     let dt = time.delta_secs();
 
-    let ui_open = pause_menu.open || palette.open || map_state.open || inventory_ui.open;
+    let ui_open = ui_state.is_open();
 
     if editor_native_viewport {
         editor_viewport_camera_navigation(

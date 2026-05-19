@@ -7,7 +7,7 @@ use super::streaming::{
     vertical_stream_radius_chunks, visible_loaded_region_targets, world_position_to_chunk,
 };
 use crate::camera::controller::PlayerCamera;
-use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::performance::{area_timer, AreaTimingRecorder};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]

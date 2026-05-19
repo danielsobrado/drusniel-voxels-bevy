@@ -1,15 +1,15 @@
 use bevy::asset::uuid_handle;
-use bevy::core_pipeline::FullscreenShader;
 use bevy::core_pipeline::prepass::ViewPrepassTextures;
+use bevy::core_pipeline::FullscreenShader;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
-use bevy::render::MainWorld;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewTarget};
+use bevy::render::MainWorld;
 use bevy::shader::Shader;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -548,6 +548,7 @@ pub fn init_naadf_preview_build_pipelines(
             storage_buffer_entry(25, true),
             texture_array_entry_for_stage(39, ShaderStages::COMPUTE),
             sampler_entry_for_stage(40, ShaderStages::COMPUTE),
+            depth_texture_entry_for_stage(41, ShaderStages::COMPUTE),
         ],
     );
     let gi_layout = BindGroupLayoutDescriptor::new(
@@ -815,9 +816,13 @@ fn texture_entry(binding: u32) -> BindGroupLayoutEntry {
 }
 
 fn depth_texture_entry(binding: u32) -> BindGroupLayoutEntry {
+    depth_texture_entry_for_stage(binding, ShaderStages::FRAGMENT)
+}
+
+fn depth_texture_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
-        visibility: ShaderStages::FRAGMENT,
+        visibility,
         ty: BindingType::Texture {
             sample_type: TextureSampleType::Depth,
             view_dimension: TextureViewDimension::D2,
@@ -1156,6 +1161,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 _pad0: UVec2::ZERO,
             },
         );
+        let scene_depth_view = prepass_textures.and_then(ViewPrepassTextures::depth_view);
         let first_hit_uniform = create_uniform_buffer(
             &render_device,
             "naadf_first_hit_params",
@@ -1168,12 +1174,8 @@ impl ViewNode for NaadfPreviewBuildNode {
                 local_light_count,
                 telemetry_enabled,
                 previous_clip_from_world,
+                scene_depth_view.is_some(),
             ),
-        );
-        let composite_uniform = create_uniform_buffer(
-            &render_device,
-            "naadf_preview_composite_params",
-            &composite_params_uniform(extracted_view, preview_settings),
         );
         let spatial_uniform = create_uniform_buffer(
             &render_device,
@@ -1298,6 +1300,21 @@ impl ViewNode for NaadfPreviewBuildNode {
             publish_preview_node_stage(world, 26);
             return Ok(());
         };
+        let coverage_view = world
+            .get_resource::<ExtractedNaadfForegroundCoverageMask>()
+            .and_then(|mask| mask.water_mask.as_ref())
+            .and_then(|handle| gpu_images.get(handle))
+            .map(|image| &image.texture_view);
+        let composite_uniform = create_uniform_buffer(
+            &render_device,
+            "naadf_preview_composite_params",
+            &composite_params_uniform(
+                extracted_view,
+                preview_settings,
+                scene_depth_view.is_some(),
+                coverage_view.is_some(),
+            ),
+        );
         let first_hit_group = render_device.create_bind_group(
             "naadf_first_hit_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.first_hit_layout),
@@ -1330,6 +1347,12 @@ impl ViewNode for NaadfPreviewBuildNode {
                     BindingResource::TextureView(&terrain_albedo.texture_view),
                 ),
                 (40, BindingResource::Sampler(&terrain_albedo.sampler)),
+                (
+                    41,
+                    BindingResource::TextureView(
+                        scene_depth_view.unwrap_or(&pipelines.dummy_depth_view),
+                    ),
+                ),
             )),
         );
         let gi_group = if gi_enabled {
@@ -1415,15 +1438,8 @@ impl ViewNode for NaadfPreviewBuildNode {
         };
 
         let post_process = view_target.post_process_write();
-        let scene_depth_view = prepass_textures
-            .and_then(ViewPrepassTextures::depth_view)
-            .unwrap_or(&pipelines.dummy_depth_view);
-        let coverage_view = world
-            .get_resource::<ExtractedNaadfForegroundCoverageMask>()
-            .and_then(|mask| mask.water_mask.as_ref())
-            .and_then(|handle| gpu_images.get(handle))
-            .map(|image| &image.texture_view)
-            .unwrap_or(&pipelines.dummy_coverage_view);
+        let scene_depth_view = scene_depth_view.unwrap_or(&pipelines.dummy_depth_view);
+        let coverage_view = coverage_view.unwrap_or(&pipelines.dummy_coverage_view);
         let composite_group = render_device.create_bind_group(
             "naadf_preview_fullscreen_composite_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.composite_layout),
@@ -1657,6 +1673,8 @@ struct NaadfFirstHitParamsUniform {
     fog_color_start: Vec4,
     fog_end_strength: Vec4,
     sun_direction_pad: Vec4,
+    path_b_config: Vec4,
+    view_from_clip: Mat4,
     previous_clip_from_world: Mat4,
 }
 
@@ -2131,8 +2149,12 @@ fn first_hit_params_uniform(
     local_light_records: u32,
     telemetry_enabled: bool,
     previous_clip_from_world: Mat4,
+    scene_depth_available: bool,
 ) -> NaadfFirstHitParamsUniform {
     let camera = camera_basis_params(view);
+    let path_b_depth_clamp_enabled = preview_settings.path_b_runtime_available
+        && preview_settings.path_b_mode.is_path_b()
+        && scene_depth_available;
 
     NaadfFirstHitParamsUniform {
         camera_origin_max_distance: camera.origin_max_distance,
@@ -2163,6 +2185,13 @@ fn first_hit_params_uniform(
         fog_color_start: preview_settings.fog_color_start,
         fog_end_strength: preview_settings.fog_end_strength,
         sun_direction_pad: preview_settings.sun_direction,
+        path_b_config: Vec4::new(
+            preview_settings.path_b_depth_epsilon,
+            u32::from(path_b_depth_clamp_enabled) as f32,
+            u32::from(scene_depth_available) as f32,
+            0.0,
+        ),
+        view_from_clip: view.clip_from_view.inverse(),
         previous_clip_from_world,
     }
 }
@@ -2170,13 +2199,22 @@ fn first_hit_params_uniform(
 fn composite_params_uniform(
     view: &ExtractedView,
     settings: ExtractedNaadfPreviewSettings,
+    scene_depth_available: bool,
+    foreground_coverage_available: bool,
 ) -> NaadfPreviewCompositeParamsUniform {
-    composite_params_uniform_with_clip_from_view(view.clip_from_view, settings)
+    composite_params_uniform_with_clip_from_view(
+        view.clip_from_view,
+        settings,
+        scene_depth_available,
+        foreground_coverage_available,
+    )
 }
 
 fn composite_params_uniform_with_clip_from_view(
     clip_from_view: Mat4,
     settings: ExtractedNaadfPreviewSettings,
+    scene_depth_available: bool,
+    foreground_coverage_available: bool,
 ) -> NaadfPreviewCompositeParamsUniform {
     let mode_value = match settings.path_b_mode {
         NaadfPathBCompositorMode::HybridFarTerrain if settings.path_b_runtime_available => 3.0,
@@ -2202,8 +2240,8 @@ fn composite_params_uniform_with_clip_from_view(
         path_b_config: Vec4::new(
             settings.path_b_depth_epsilon,
             settings.path_b_audit_overlay_alpha,
-            u32::from(settings.path_b_counters_enabled) as f32,
-            0.0,
+            u32::from(scene_depth_available) as f32,
+            u32::from(foreground_coverage_available) as f32,
         ),
         clip_from_view_x: view_from_clip.x_axis,
         clip_from_view_y: view_from_clip.y_axis,
@@ -2438,9 +2476,21 @@ mod tests {
         let mut settings = ExtractedNaadfPreviewSettings::default();
         settings.show_miss_sky = true;
 
-        let params = composite_params_uniform_with_clip_from_view(Mat4::IDENTITY, settings);
+        let params =
+            composite_params_uniform_with_clip_from_view(Mat4::IDENTITY, settings, true, false);
 
         assert_eq!(params.mode_split.z, 1.0);
+    }
+
+    #[test]
+    fn composite_params_mark_real_path_b_inputs() {
+        let settings = ExtractedNaadfPreviewSettings::default();
+
+        let params =
+            composite_params_uniform_with_clip_from_view(Mat4::IDENTITY, settings, true, false);
+
+        assert_eq!(params.path_b_config.z, 1.0);
+        assert_eq!(params.path_b_config.w, 0.0);
     }
 
     #[test]
@@ -2506,11 +2556,9 @@ mod tests {
         assert_eq!(params.sample_count, 2);
         assert_eq!(params.sky_strength, 0.3);
         assert_eq!(params.bounce_strength, 0.12);
-        assert!(
-            params
-                .sun_direction_pad
-                .abs_diff_eq(Vec3::new(0.4, 0.8, 0.3).normalize().extend(0.0), 0.000001)
-        );
+        assert!(params
+            .sun_direction_pad
+            .abs_diff_eq(Vec3::new(0.4, 0.8, 0.3).normalize().extend(0.0), 0.000001));
     }
 
     #[test]

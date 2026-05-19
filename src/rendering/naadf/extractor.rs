@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
+use crate::rendering::naadf::cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
 use crate::rendering::naadf::layout::NaadfChunk;
 use crate::voxel::world::VoxelWorld;
 

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::stats::NaadfStats;
-use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::performance::{area_timer, AreaTimingRecorder};
 use crate::rendering::voxel_ray_backend::VoxelRayHit;
 
 #[derive(Component, Clone, Debug, PartialEq)]

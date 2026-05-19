@@ -233,6 +233,18 @@ fn is_naadf_cache_fallback(reason: &str) -> bool {
     reason.starts_with("NAADF cache ")
 }
 
+#[cfg(feature = "naadf")]
+pub(crate) fn activate_naadf_preview(
+    config: &mut NaadfConfig,
+    settings: &mut RayTracingSettings,
+    composite_mode: NaadfPreviewCompositeModeConfig,
+) {
+    config.enabled = true;
+    config.debug.force_cpu_builder = true;
+    config.preview.composite_mode = composite_mode;
+    settings.experimental_mode = ExperimentalRenderMode::NaadfPreview;
+}
+
 pub(crate) fn toggle_voxel_ray_backend_key(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -287,10 +299,11 @@ pub(crate) fn toggle_voxel_ray_backend_key(
     {
         if let Some(config) = naadf_config.as_deref_mut() {
             if activate_preview {
-                config.enabled = true;
-                config.debug.force_cpu_builder = true;
-                config.preview.composite_mode = NaadfPreviewCompositeModeConfig::Fullscreen;
-                settings.experimental_mode = ExperimentalRenderMode::NaadfPreview;
+                activate_naadf_preview(
+                    config,
+                    &mut settings,
+                    NaadfPreviewCompositeModeConfig::Fullscreen,
+                );
             } else {
                 settings.experimental_mode = ExperimentalRenderMode::Current;
                 config.enabled = false;
@@ -517,6 +530,30 @@ mod tests {
         };
         let text = voxel_ray_backend_notice_text(&settings);
         assert!(text.contains("fullscreen preview active"));
+    }
+
+    #[test]
+    #[cfg(feature = "naadf")]
+    fn activate_naadf_preview_forces_cpu_backed_visible_preview() {
+        let mut config = NaadfConfig::default();
+        let mut settings = RayTracingSettings::default();
+
+        activate_naadf_preview(
+            &mut config,
+            &mut settings,
+            NaadfPreviewCompositeModeConfig::SplitView,
+        );
+
+        assert!(config.enabled);
+        assert!(config.debug.force_cpu_builder);
+        assert_eq!(
+            config.preview.composite_mode,
+            NaadfPreviewCompositeModeConfig::SplitView
+        );
+        assert_eq!(
+            settings.experimental_mode,
+            ExperimentalRenderMode::NaadfPreview
+        );
     }
 
     #[test]

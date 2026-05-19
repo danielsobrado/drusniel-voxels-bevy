@@ -1,9 +1,9 @@
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
-    MainWorld,
     render_resource::{Buffer, BufferDescriptor, BufferUsages},
     renderer::{RenderAdapterInfo, RenderDevice, RenderQueue},
+    MainWorld,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use wgpu::DeviceType;
@@ -11,12 +11,12 @@ use wgpu::DeviceType;
 use super::cache::NaadfCache;
 use super::config::NaadfConfig;
 use super::entities::{NaadfEntityVolumeRecord, NaadfEntityVolumeRegistry};
-use super::layout::{BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk};
+use super::layout::{DirectionalBounds, NaadfBlock, NaadfChunk, BLOCKS_PER_CHUNK};
 use super::prepare::NaadfUploadBudget;
 use super::stats::{NaadfRenderStatsBridge, NaadfStats};
 use super::streaming::NaadfStreamingState;
-use crate::performance::{AreaTimingRecorder, area_timer};
-use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
+use crate::performance::{area_timer, AreaTimingRecorder};
+use crate::rendering::render_timing::{render_timing_guard, RenderTimingSink};
 
 pub const NAADF_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
@@ -1193,8 +1193,8 @@ fn lookup_generation_for_pending_uploads(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
-    use crate::rendering::naadf::layout::{MIP_CELLS_PER_CHUNK, voxel_index_in_chunk};
+    use crate::rendering::naadf::cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
+    use crate::rendering::naadf::layout::{voxel_index_in_chunk, MIP_CELLS_PER_CHUNK};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
 

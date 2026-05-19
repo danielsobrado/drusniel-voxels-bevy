@@ -985,7 +985,8 @@ fn spawn_debug_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 .with_children(|columns| {
                     let debug_core = [
                         ("Toggle Debug Overlay", "F3"),
-                        ("Inspector + Settings Window", "F4"),
+                        ("Game Tweaks Window", "Shift+F4"),
+                        ("World Inspector", "Ctrl+Shift+F4"),
                         ("Mesh Mode (Blocky/Surface)", "F5"),
                         ("Water Visibility (debug)", "F6"),
                         ("Grass Visibility (debug)", "F7"),

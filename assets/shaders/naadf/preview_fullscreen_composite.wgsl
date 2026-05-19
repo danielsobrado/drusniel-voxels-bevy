@@ -71,6 +71,10 @@ fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
         return vec4<f32>(preview_color.rgb, current_color.a);
     }
     if mode < 1.5 {
+        let divider_width = max(0.001, 1.5 / f32(scene_size.x));
+        if abs(uv.x - split_x) <= divider_width {
+            return vec4<f32>(1.0, 0.92, 0.12, current_color.a);
+        }
         return select(current_color, blended_preview, uv.x <= split_x);
     }
 
@@ -91,7 +95,7 @@ fn naadf_hybrid_far_terrain_color(
     if preview_color.a <= 0.0 {
         return current_color;
     }
-    if foreground_coverage > 0.001 {
+    if naadf_foreground_coverage_valid() && foreground_coverage > 0.001 {
         return current_color;
     }
     let raster_linear_depth = naadf_reconstruct_linear_view_depth(uv, scene_depth);
@@ -115,7 +119,7 @@ fn naadf_depth_audit_color(
     var audit = vec3<f32>(0.15, 0.15, 0.18);
     if preview_color.a <= 0.0 {
         audit = vec3<f32>(0.1, 0.2, 0.8);
-    } else if foreground_coverage > 0.001 {
+    } else if naadf_foreground_coverage_valid() && foreground_coverage > 0.001 {
         audit = vec3<f32>(1.0, 0.75, 0.1);
     } else {
         let raster_linear_depth = naadf_reconstruct_linear_view_depth(uv, scene_depth);
@@ -131,7 +135,11 @@ fn naadf_depth_audit_color(
 }
 
 fn naadf_scene_depth_valid(depth: f32) -> bool {
-    return depth > 0.001;
+    return naadf_composite_params.path_b_config.z > 0.5 && depth > 0.001;
+}
+
+fn naadf_foreground_coverage_valid() -> bool {
+    return naadf_composite_params.path_b_config.w > 0.5;
 }
 
 fn naadf_reconstruct_linear_view_depth(uv: vec2<f32>, depth: f32) -> f32 {

@@ -25,6 +25,10 @@ See [controls.md](docs/reference/controls.md) for the full keyboard and mode ref
 
 See [profiling.md](docs/reference/profiling.md) for profiling, benchmarking, and regression guard commands.
 
+## Rendering And NAADF
+
+See [naadf.md](docs/rendering/naadf.md) for the experimental NAADF rendering backend overview, current status, Path-B compositor notes, and test/bench commands.
+
 ## Free Texture Sources Guide
 
 See [free-texture-sources.md](docs/reference/free-texture-sources.md) for texture source links, folder layout, naming, and stylization notes.

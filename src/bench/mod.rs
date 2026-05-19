@@ -226,6 +226,8 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub naadf_use_for_sun_visibility: Option<bool>,
     #[serde(default)]
+    pub naadf_froxel_sun_mask_enabled: Option<bool>,
+    #[serde(default)]
     pub naadf_use_for_terrain_ao: Option<bool>,
     #[serde(default)]
     pub naadf_use_for_contact_shadows: Option<bool>,
@@ -1308,6 +1310,11 @@ fn apply_bench_render_toggles(
         if let Some(use_for_sun_visibility) = toggles.naadf_use_for_sun_visibility {
             if config.use_for_sun_visibility != use_for_sun_visibility {
                 config.use_for_sun_visibility = use_for_sun_visibility;
+            }
+        }
+        if let Some(froxel_sun_mask_enabled) = toggles.naadf_froxel_sun_mask_enabled {
+            if config.froxel_sun_mask.enabled != froxel_sun_mask_enabled {
+                config.froxel_sun_mask.enabled = froxel_sun_mask_enabled;
             }
         }
         if let Some(use_for_terrain_ao) = toggles.naadf_use_for_terrain_ao {
@@ -4252,6 +4259,7 @@ naadf_preview_local_light_shadows_enabled = true
 naadf_spawn_demo_lights = true
 naadf_use_for_gi_secondary = true
 naadf_use_for_sun_visibility = true
+naadf_froxel_sun_mask_enabled = true
 naadf_use_for_terrain_ao = true
 naadf_use_for_contact_shadows = true
 
@@ -4303,6 +4311,7 @@ hold_frames = 30
         assert!(toggles.naadf_spawn_demo_lights);
         assert_eq!(toggles.naadf_use_for_gi_secondary, Some(true));
         assert_eq!(toggles.naadf_use_for_sun_visibility, Some(true));
+        assert_eq!(toggles.naadf_froxel_sun_mask_enabled, Some(true));
         assert_eq!(toggles.naadf_use_for_terrain_ao, Some(true));
         assert_eq!(toggles.naadf_use_for_contact_shadows, Some(true));
     }

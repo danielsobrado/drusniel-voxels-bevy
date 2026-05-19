@@ -1,6 +1,12 @@
-use bevy::asset::LoadState;
+use bevy::app::{App, AppExit, Startup, Update};
+use bevy::asset::{AssetServer, Handle, LoadState};
+use bevy::ecs::message::MessageWriter;
+use bevy::ecs::system::{Commands, Res};
 use bevy::gltf::Gltf;
-use bevy::prelude::*;
+use bevy::log::{error, info};
+use bevy::prelude::{PluginGroup, Resource};
+use bevy::window::{Window, WindowPlugin};
+use bevy::DefaultPlugins;
 
 const SAMPLE_GLTF: &str = "models/vegetation/trees/ultimate_stylized_nature/BirchTree_1.gltf";
 
@@ -37,9 +43,9 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 visible: false,
-                ..default()
+                ..Default::default()
             }),
-            ..default()
+            ..Default::default()
         }))
         .add_systems(Startup, setup)
         .add_systems(Update, poll_load)

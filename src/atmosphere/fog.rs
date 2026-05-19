@@ -3,10 +3,8 @@ use crate::atmosphere::config::{
     FogQualityTier,
 };
 use crate::environment::{AtmosphereSettings, Sun};
-use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::performance::{area_timer, AreaTimingRecorder};
 use crate::rendering::capabilities::GraphicsCapabilities;
-#[cfg(feature = "naadf")]
-use crate::rendering::naadf::froxel::NaadfFroxelSunMaskState;
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
@@ -539,8 +537,6 @@ struct FogUpdateResources<'w> {
     fog_range: ResMut<'w, FogDistanceState>,
     fog_uniforms: ResMut<'w, FogUniforms>,
     ambient: Res<'w, GlobalAmbientLight>,
-    #[cfg(feature = "naadf")]
-    naadf_froxel_sun_mask: Option<Res<'w, NaadfFroxelSunMaskState>>,
     world: Res<'w, VoxelWorld>,
     time: Res<'w, Time>,
     frame: Res<'w, FrameCount>,
@@ -566,11 +562,6 @@ fn update_fog_from_atmosphere(
     let quality: &FogQuality = &resources.quality;
     let lod_settings = &resources.lod_settings;
     let ambient: &GlobalAmbientLight = &resources.ambient;
-    #[cfg(feature = "naadf")]
-    let naadf_froxel_fog_factor =
-        naadf_froxel_fog_light_factor(resources.naadf_froxel_sun_mask.as_deref());
-    #[cfg(not(feature = "naadf"))]
-    let naadf_froxel_fog_factor = naadf_froxel_fog_light_factor();
     let world: &VoxelWorld = &resources.world;
     let time: &Time = &resources.time;
     let atmosphere_sample: &mut AtmosphereSample = &mut resources.atmosphere_sample;
@@ -833,10 +824,7 @@ fn update_fog_from_atmosphere(
         // God rays preset uses 50x multiplier for visible shafts in near-zero density fog
         let base_intensity = 1200.0 * daylight + 100.0 * night;
         let time_modifier = 1.0 + twilight * 1.5;
-        volume.light_intensity = base_intensity
-            * time_modifier
-            * preset_config.light_intensity
-            * naadf_froxel_fog_factor;
+        volume.light_intensity = base_intensity * time_modifier * preset_config.light_intensity;
 
         volume.scattering = smoothing.current_scattering;
         // mie_direction controls forward scattering asymmetry
@@ -1053,20 +1041,6 @@ fn linear_fog_range(config: &FogConfig, scale: f32, min_end: Option<f32>) -> (f3
         start = lerp(start, max_start, near_fade);
     }
     (start, end)
-}
-
-#[cfg(feature = "naadf")]
-fn naadf_froxel_fog_light_factor(state: Option<&NaadfFroxelSunMaskState>) -> f32 {
-    if state.is_some_and(|state| state.active) {
-        0.85
-    } else {
-        1.0
-    }
-}
-
-#[cfg(not(feature = "naadf"))]
-fn naadf_froxel_fog_light_factor() -> f32 {
-    1.0
 }
 
 fn apply_color_modifiers3(color: [f32; 3], mods: &FogColorModifiers) -> [f32; 3] {

@@ -10,7 +10,9 @@ use crate::rendering::naadf::{
 };
 use crate::rendering::ray_tracing::RayTracingSettings;
 #[cfg(feature = "naadf")]
-use crate::rendering::ray_tracing::{ExperimentalRenderMode, VoxelRayBackendMode};
+use crate::rendering::ray_tracing::{
+    ExperimentalRenderMode, VoxelRayBackendMode, activate_naadf_preview,
+};
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
 use crate::vegetation::VegetationConfig;
@@ -27,6 +29,23 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 pub struct DebugUiState {
     pub show_inspector: bool,
     pub show_settings: bool,
+}
+
+impl DebugUiState {
+    pub fn needs_cursor(&self) -> bool {
+        self.show_inspector || self.show_settings
+    }
+
+    fn toggle_shortcut(&mut self, control_held: bool) {
+        if control_held {
+            self.show_inspector = !self.show_inspector;
+        } else {
+            self.show_settings = !self.show_settings;
+            if !self.show_settings {
+                self.show_inspector = false;
+            }
+        }
+    }
 }
 
 /// Controls terrain visual style settings.
@@ -88,9 +107,9 @@ fn should_show_inspector(state: Res<DebugUiState>) -> bool {
 
 fn toggle_debug_ui(mut state: ResMut<DebugUiState>, keys: Res<ButtonInput<KeyCode>>) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if shift_held && keys.just_pressed(KeyCode::F4) {
-        state.show_inspector = !state.show_inspector;
-        state.show_settings = !state.show_settings;
+        state.toggle_shortcut(control_held);
     }
 }
 
@@ -496,7 +515,8 @@ fn debug_settings_ui(
             }
 
             ui.separator();
-            ui.label("Press Shift+F4 to toggle this window and Inspector");
+            ui.label("Press Shift+F4 to toggle this window");
+            ui.label("Press Ctrl+Shift+F4 to toggle the World Inspector");
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
             ui.label("Press Shift+F9 to dump terrain hole probe JSON");
@@ -553,9 +573,11 @@ fn toggle_naadf_split_view_key(
         return;
     }
 
-    config.enabled = true;
-    config.preview.composite_mode = NaadfPreviewCompositeModeConfig::SplitView;
-    settings.experimental_mode = ExperimentalRenderMode::NaadfPreview;
+    activate_naadf_preview(
+        &mut config,
+        &mut settings,
+        NaadfPreviewCompositeModeConfig::SplitView,
+    );
     info!("NAADF split view: ON (Shift+N to toggle)");
 }
 
@@ -706,6 +728,58 @@ impl Default for DebugVisibilityToggles {
             show_water: true,
             show_grass: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_window_claims_cursor() {
+        let state = DebugUiState {
+            show_settings: true,
+            show_inspector: false,
+        };
+
+        assert!(state.needs_cursor());
+    }
+
+    #[test]
+    fn shift_f4_shortcut_toggles_settings_without_world_inspector() {
+        let mut state = DebugUiState::default();
+
+        state.toggle_shortcut(false);
+
+        assert!(state.show_settings);
+        assert!(!state.show_inspector);
+    }
+
+    #[test]
+    fn closing_settings_closes_world_inspector_too() {
+        let mut state = DebugUiState {
+            show_settings: true,
+            show_inspector: true,
+        };
+
+        state.toggle_shortcut(false);
+
+        assert!(!state.show_settings);
+        assert!(!state.show_inspector);
+        assert!(!state.needs_cursor());
+    }
+
+    #[test]
+    fn control_shift_f4_shortcut_toggles_world_inspector() {
+        let mut state = DebugUiState {
+            show_settings: true,
+            show_inspector: false,
+        };
+
+        state.toggle_shortcut(true);
+
+        assert!(state.show_settings);
+        assert!(state.show_inspector);
     }
 }
 

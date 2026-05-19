@@ -8,7 +8,7 @@ use super::dirty::NaadfDirtyChunkQueue;
 use super::gpu_buffers::NaadfGpuChunkTable;
 use super::stats::NaadfStats;
 use crate::camera::controller::PlayerCamera;
-use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::performance::{area_timer, AreaTimingRecorder};
 use crate::voxel::world::VoxelWorld;
 
 pub(crate) const MIN_VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;

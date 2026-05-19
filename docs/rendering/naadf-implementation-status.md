@@ -2,8 +2,8 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-18 (NAADF-230 Path-B C1 compositor landed; lighting visual A/B bench not rerun in this batch)  
-Visual verification: preview-only, Path-B hybrid, Path-B DepthAudit, and startup-stability fixed screenshots inspected for the 2026-05-18 bench runs listed below; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
+Last updated: 2026-05-19 (NAADF-215 real froxel-mask god-ray integration; fog scalar placeholder removed)  
+Visual verification: preview-only, Path-B hybrid, Path-B DepthAudit, startup-stability, and NAADF froxel god-ray fixed screenshots inspected for the 2026-05-18/2026-05-19 bench runs listed below; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
 
@@ -1499,6 +1499,7 @@ Details:
 - Added default-off froxel sun-mask config and state.
 - Added one visibility ray per froxel cell planning, frame budget, and frames-per-full-update counters.
 - Added shader metadata coverage for NAADF ray tracing from the froxel mask shader.
+- Added the real render-graph froxel mask producer pass. The pass owns a reusable `u32` mask buffer, a shared params uniform, dispatches before `GodRaysLabel`, respects `max_rays_per_frame`, and remains gated by NAADF + sun visibility + `allow_unverified_post_205`.
 
 Checks:
 
@@ -1506,29 +1507,45 @@ Checks:
 - `rtk cargo test --lib --features naadf rendering::naadf::froxel::tests::froxel_state_requires_naadf_sun_visibility_toggle`: 1 test passed.
 - `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel`: 1 test passed.
 - `rtk cargo test --lib --features naadf rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off`: 1 test passed.
-- No froxel visual/fog bench was run in this batch.
+- 2026-05-19 review pass: `rtk cargo test --lib --features naadf rendering::naadf::froxel`: 2 tests passed.
+- 2026-05-19 review pass: `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel`: 1 test passed.
 
 ### NAADF-215: God-Ray / Fog Integration
 
 Updated:
 
+- `assets/shaders/naadf/froxel_sun_mask.wgsl`
 - `assets/shaders/god_rays.wgsl`
+- `bench/scenes/naadf/visual-regression-naadf-froxel-god-rays.toml`
+- `src/bench/mod.rs`
 - `src/atmosphere/fog.rs`
 - `src/rendering/god_rays.rs`
+- `src/rendering/naadf/froxel.rs`
+- `src/rendering/naadf/mod.rs`
 - `tests/shader_alpha_tests.rs`
 
 Details:
 
-- Added default-off froxel mask hooks for screen-space god rays and volumetric fog intensity.
-- God rays now carry NAADF froxel visibility/strength uniforms and modulate ray accumulation only when the froxel state is active.
-- Fog reads the froxel mask state behind the `naadf` feature and leaves existing fog behavior unchanged while inactive.
+- Replaced the placeholder global `0.85` dim with real froxel mask sampling in `god_rays.wgsl`.
+- God rays now bind stable froxel params + mask buffers in all builds; non-NAADF/default-off builds bind an all-visible dummy.
+- V1 samples the output pixel's froxel UV column (`sample_count = clamp(grid.z / 16, 4, 16)`) and averages depth slices as an air-visibility approximation. This intentionally conflates near/far occlusion until a depth-localized fog model exists.
+- Fog no longer reads froxel state or applies a fake scalar. Real fog consumption remains deferred.
 
 Checks:
 
 - `rtk cargo test --lib --features naadf rendering::god_rays::tests::inactive_froxel_mask_does_not_modulate_god_rays`: 1 test passed.
 - `rtk cargo test --test shader_alpha_tests god_rays_accept_naadf_froxel_visibility_modulation`: 1 test passed.
-- `rtk cargo test --lib --features naadf atmosphere::fog::naadf`: compiled and ran 0 matching tests.
-- No god-ray/fog visual bench was run in this batch.
+- `rtk cargo test --test shader_alpha_tests naadf_froxel_fog_integration_is_not_a_flat_scalar`: 1 test passed.
+- `rtk cargo test --lib --features naadf rendering::god_rays`: 3 tests passed.
+- `rtk cargo test --lib --features naadf`: 481 tests passed.
+- `rtk cargo check --features naadf`: Cargo finished successfully.
+- `rtk cargo check`: Cargo finished successfully.
+
+Bench / visual:
+
+- Active froxel god-ray run: `bench-runs/2026-05-19T01-36-29Z/summary.json`; median `35.980 ms`, p99 `55.917 ms`; `naadf.froxel_sun_mask_active = 1`, `naadf.froxel_sun_mask_max_rays_per_frame = 65536`, `naadf.froxel_sun_mask_rays_per_full_update = 921600`, `NAADF Froxel GodRay Strength = 1`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- Disabled comparison run: `bench-runs/2026-05-19T01-39-04Z/summary.json`; median `36.174 ms`, p99 `48.463 ms`; `naadf.froxel_sun_mask_active = 0`, `naadf.froxel_sun_mask_max_rays_per_frame = 0`, `NAADF Froxel GodRay Strength = 0`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- Fixed screenshots from both runs were inspected. The active run no longer applies the old flat global dimming; this particular checkpoint does not produce a strong visible shaft A/B, so the non-uniform behavior is primarily covered by shader/unit checks and active counters.
 
 ### NAADF-216: Static-Proxy Voxelization
 
@@ -1621,6 +1638,13 @@ Details:
 - Path-B counters are published to bench summaries, but per-pixel accept/reject GPU counter readback is not implemented; only the compositor pass counter currently proves that the mode ran.
 - Path B remains experimental and is not evidence that the legacy mesh LOD seam issue is fixed.
 
+Review hardening:
+
+- Path-B compositor now passes explicit scene-depth and foreground-coverage availability flags instead of treating dummy fallback textures as real inputs.
+- Path-B first-hit now also binds the raster depth prepass and clamps primary NAADF ray distance to the current raster surface for `HybridFarTerrain`/`DepthAudit` when real depth is available. The compositor still performs the final depth/coverage reject as a safety backstop.
+- NAADF-managed camera depth prepass is reversible and marked with `NaadfManagedDepthPrepass`, so toggling Path-B/preview off does not leave an owned prepass active or remove a pre-existing external prepass.
+- World traversal now shares the voxel-step budget across resident chunks and returns local budget/distance failures instead of continuing to later chunks with a fresh budget.
+
 Checks:
 
 - `rtk cargo check --features naadf`: compiler finished successfully; the local `rtk` wrapper returned a non-zero shell status because it forwards Cargo status text on stderr.
@@ -1630,12 +1654,19 @@ Checks:
 - `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
 - `rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_deserialize`: 1 test passed.
 - `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+- 2026-05-19 review pass: `rtk cargo test --lib --features naadf`: 475 tests passed.
+- 2026-05-19 review pass: `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+- 2026-05-19 depth-clamp pass: `rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl_first_hit_declares_preview_material_path`: 1 test passed.
+- 2026-05-19 depth-clamp pass: `rtk cargo test --features naadf --test naadf_gpu_layout`: 2 tests passed.
+- 2026-05-19 depth-clamp pass: `rtk cargo check --features naadf`: compiler finished successfully; the local `rtk` wrapper returned a non-zero shell status because it forwards Cargo status text on stderr.
 
 Bench evidence:
 
 - Preview-only foundation run: `bench-runs/2026-05-18T17-58-11Z/summary.json`; median `60.327 ms`, p99 `61.316 ms`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
 - Path-B hybrid run: `bench-runs/2026-05-18T18-04-51Z/summary.json`; median `49.645 ms`, p99 `46.324 ms`; `ready_wait_secs = 75.023`, `render_ready_secs = 4.901`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The settled screenshot was inspected and showed textured hybrid terrain with current-rendered structures/foreground preserved.
 - Path-B DepthAudit run: `bench-runs/2026-05-18T18-10-37Z/summary.json`; median `35.121 ms`, p99 `38.451 ms`; `ready_wait_secs = 54.343`, `render_ready_secs = 3.241`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The settled screenshot was inspected and showed the expected audit tint and NAADF accepted region.
+- Path-B DepthAudit review run after compositor/traversal hardening: `bench-runs/2026-05-19T00-54-03Z/summary.json`; median `48.442 ms`, p99 `68.344 ms`; `ready_wait_secs = 66.337`, `render_ready_secs = 3.744`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`.
+- Path-B hybrid run after first-hit raster-depth clamp: `bench-runs/2026-05-19T01-22-09Z/summary.json`; median `36.800 ms`, p99 `75.002 ms`; `ready_wait_secs = 65.508`, `render_ready_secs = 3.923`; direct `target/debug/bench_guard.exe` run reported `PASS: 227 check(s), 0 warning(s)`. The settled screenshot was inspected and showed textured hybrid terrain with foreground/current renderer content preserved. A normal `cargo run --bin bench_guard` attempt could not complete because the local C: drive had only about 120 MB free and Cargo failed writing incremental cache with OS error 112.
 - Startup-stability run: `bench-runs/2026-05-18T18-13-07Z/summary.json`; median `34.850 ms`, p99 `68.579 ms`; runtime ready wait was about `53.6 s`, render-ready wait about `3.6 s`; `bench_guard` reported `PASS: 227 check(s), 0 warning(s)`. The first staged screenshot at frame `120` / `elapsed_secs = 69.532` was already visually textured rather than the blue silhouette/early occupancy preview.
 
 ## Verification Completed

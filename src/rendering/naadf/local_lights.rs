@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::render::{
-    MainWorld,
     render_resource::{Buffer, BufferDescriptor, BufferUsages},
     renderer::{RenderDevice, RenderQueue},
+    MainWorld,
 };
 
 use super::preview::NaadfPreviewSettings;

@@ -26,6 +26,7 @@ use bevy::render::{ExtractSchedule, Render, RenderApp, RenderStartup, RenderSyst
 use bevy::shader::Shader;
 use std::borrow::Cow;
 
+use crate::rendering::god_rays::GodRaysLabel;
 use crate::rendering::weather_overlay::WeatherOverlayLabel;
 
 pub use cache::{NaadfCache, NaadfCacheBuildReport};
@@ -33,7 +34,7 @@ pub use config::{
     NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
     NaadfPreviewCompositeModeConfig,
 };
-pub use cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
+pub use cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
 pub use cpu_trace::NaadfCpuRayBackend;
 pub use dirty::NaadfDirtyChunkQueue;
 pub use entities::{
@@ -43,7 +44,7 @@ pub use entities::{
 pub use extractor::{NaadfChunkExtractor, NaadfExtractionError};
 pub use gpu_buffers::{NaadfGpuBufferPlan, NaadfGpuBuffers, NaadfGpuChunkTable};
 pub use layout::NaadfChunk;
-pub use local_lights::{NAADF_LOCAL_LIGHT_MAX_RECORDS, NaadfLocalLightRecord};
+pub use local_lights::{NaadfLocalLightRecord, NAADF_LOCAL_LIGHT_MAX_RECORDS};
 pub use prepare::{NaadfUploadBudget, NaadfUploadPlan};
 pub use stats::{NaadfCacheState, NaadfStats};
 
@@ -294,11 +295,15 @@ impl Plugin for NaadfPlugin {
                 .init_resource::<pipeline::NaadfPreviewTemporalHistory>()
                 .init_resource::<pipeline::NaadfPreviewScratchTextures>()
                 .init_resource::<pipeline::NaadfPreviewPassStats>()
+                .init_resource::<froxel::ExtractedNaadfFroxelSunMaskState>()
+                .init_resource::<froxel::NaadfFroxelSunMaskGpuState>()
                 .add_systems(RenderStartup, pipeline::init_naadf_preview_build_pipelines)
+                .add_systems(RenderStartup, froxel::init_naadf_froxel_sun_mask_pipeline)
                 .add_systems(
                     ExtractSchedule,
                     (
                         gpu_buffers::extract_naadf_gpu_config,
+                        froxel::extract_naadf_froxel_sun_mask_state,
                         pipeline::extract_naadf_preview_pipeline_state,
                         pipeline::extract_naadf_terrain_atlas,
                         pipeline::extract_naadf_foreground_coverage_mask,
@@ -313,6 +318,8 @@ impl Plugin for NaadfPlugin {
                     Render,
                     (
                         gpu_buffers::prepare_naadf_gpu_buffers,
+                        froxel::prepare_naadf_froxel_sun_mask_gpu
+                            .after(gpu_buffers::prepare_naadf_gpu_buffers),
                         local_lights::prepare_naadf_local_light_gpu_buffer,
                         gpu_buffers::prepare_naadf_entity_gpu_buffers,
                         gpu_buffers::readback_naadf_gpu_stats
@@ -338,6 +345,12 @@ impl Plugin for NaadfPlugin {
                 Core3d,
                 preview::NaadfPreviewNodeLabel,
             );
+            render_app.add_render_graph_node::<ViewNodeRunner<froxel::NaadfFroxelSunMaskNode>>(
+                Core3d,
+                froxel::NaadfFroxelSunMaskLabel,
+            );
+            render_app
+                .add_render_graph_edges(Core3d, (froxel::NaadfFroxelSunMaskLabel, GodRaysLabel));
             render_app.add_render_graph_edges(
                 Core3d,
                 (

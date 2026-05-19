@@ -14,7 +14,8 @@ Keyboard and mode reference for Drusniel Voxels.
 
 * **F3**: Toggle Debug Overlay (FPS, position, chunk stats, targeted block info)
 * **F4**: Dump current performance timing window to `perf-dumps/`
-* **Shift+F4**: Toggle Inspector & Settings Window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
+* **Shift+F4**: Toggle Game Tweaks window (LOD sliders, vegetation tweaks, foliage alpha fade, AO strength)
+* **Ctrl+Shift+F4**: Toggle World Inspector while the Game Tweaks window is open
 * **F5**: Toggle Mesh Mode (Blocky <-> SurfaceNets)
 * **F6**: Toggle Water Visibility (debug builds only)
 * **F7**: Toggle Grass Visibility (debug builds only)
@@ -25,8 +26,8 @@ Keyboard and mode reference for Drusniel Voxels.
 * **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 * **Shift+F10**: Dump water visual probe JSON
 * **F11**: Toggle NAADF fullscreen preview (NAADF builds only)
+* **Shift+N**: Toggle NAADF split view with a yellow center divider (NAADF builds only)
 * **Shift+F11**: Toggle enclosure culling force-disable/automatic
-* **Shift+N**: Toggle NAADF split view (NAADF builds only)
 * **F12**: Toggle Photo Mode (DoF, motion blur)
 * **G**: Print Detailed Block Debug Info to Console
 

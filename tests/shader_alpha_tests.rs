@@ -153,10 +153,24 @@ fn god_rays_accept_naadf_froxel_visibility_modulation() {
     let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
     let rust = include_str!("../src/rendering/god_rays.rs");
 
-    assert!(god_rays.contains("naadf_froxel_visibility"));
+    assert!(god_rays.contains("var<storage, read> naadf_froxel_mask"));
+    assert!(god_rays.contains("fn naadf_froxel_column_visibility"));
+    assert!(god_rays.contains("naadf_froxel_depth_sample_count"));
     assert!(god_rays.contains("naadf_froxel_strength"));
-    assert!(god_rays.contains("naadf_froxel_visibility;"));
+    assert!(god_rays.contains("naadf_froxel_column_visibility(in.uv)"));
     assert!(rust.contains("NAADF Froxel GodRay Strength"));
+}
+
+#[test]
+fn naadf_froxel_fog_integration_is_not_a_flat_scalar() {
+    let fog = include_str!("../src/atmosphere/fog.rs");
+
+    assert_not_contains(
+        fog,
+        "naadf_froxel_fog_light_factor",
+        "src/atmosphere/fog.rs",
+    );
+    assert_not_contains(fog, "* 0.85", "src/atmosphere/fog.rs");
 }
 
 #[test]
