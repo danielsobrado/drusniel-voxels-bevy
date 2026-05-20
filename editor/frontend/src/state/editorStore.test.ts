@@ -13,6 +13,7 @@ import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntim
 import { menuCommandIds } from "../components/editor/EditorMenubar";
 import { toolbarCommandIds } from "../components/editor/MainToolbar";
 import type { ViewportSnapshot } from "../types/world";
+import { buildRuntimeVoxelBrushRequest } from "../features/viewport/voxelBrushRequest";
 
 const collectSourceFiles = (directory: string): readonly string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -42,7 +43,16 @@ describe("editor store actions", () => {
     useEditorStore.getState().setActiveTool("shoreline-brush");
     useEditorStore.getState().setViewportRole("validation");
     useEditorStore.getState().setSelection({ kind: "water", id: "water-lk-03", label: "LK_03" });
-    useEditorStore.getState().updateBrushSettings({ radius: 9, materialBlockId: "sand" });
+    useEditorStore.getState().updateBrushSettings({
+      radius: 9,
+      materialBlockId: "clay",
+      action: "paint",
+      brushShape: "sphere",
+      size: [5, 3, 5],
+      continuous: true,
+      mask: "material",
+      maskBlockId: "rock",
+    });
 
     const state = useEditorStore.getState();
     expect(state.activeMode).toBe("water");
@@ -50,7 +60,38 @@ describe("editor store actions", () => {
     expect(state.viewportRole).toBe("validation");
     expect(state.selection.label).toBe("LK_03");
     expect(state.brushSettings.radius).toBe(9);
-    expect(state.brushSettings.materialBlockId).toBe("sand");
+    expect(state.brushSettings.materialBlockId).toBe("clay");
+    expect(state.brushSettings.action).toBe("paint");
+    expect(state.brushSettings.brushShape).toBe("sphere");
+    expect(state.brushSettings.size).toEqual([5, 3, 5]);
+    expect(state.brushSettings.continuous).toBe(true);
+    expect(state.brushSettings.mask).toBe("material");
+    expect(state.brushSettings.maskBlockId).toBe("rock");
+  });
+
+  it("builds runtime voxel brush requests from editor brush settings", () => {
+    useEditorStore.getState().updateBrushSettings({
+      action: "delete",
+      brushShape: "box",
+      radius: 6,
+      size: [7, 3, 5],
+      materialBlockId: "wood",
+      mask: "material",
+      maskBlockId: "leaves",
+    });
+
+    const request = buildRuntimeVoxelBrushRequest(useEditorStore.getState().brushSettings, [3, 4, 5], "wood");
+
+    expect(request).toEqual({
+      position: [3, 4, 5],
+      action: "delete",
+      shape: "box",
+      block: "wood",
+      radius: 6,
+      size: [7, 3, 5],
+      mask: "material",
+      maskBlock: "leaves",
+    });
   });
 
   it("updates protected areas, water bodies, atlas mapping, dirty state, and agent timeline", () => {

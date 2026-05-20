@@ -1,13 +1,13 @@
-import type { AtlasMapping, BlockType } from "../../types/world";
+import type { AtlasBlockType, AtlasMapping } from "../../types/world";
 
 interface BlockFaceMappingEditorProps {
   readonly disabled?: boolean;
   readonly selectedTileId: string;
-  readonly onAssign: (block: BlockType, face: keyof AtlasMapping) => void;
+  readonly onAssign: (block: AtlasBlockType, face: keyof AtlasMapping) => void;
 }
 
 const blockFaceMap: readonly {
-  readonly block: BlockType;
+  readonly block: AtlasBlockType;
   readonly display: string;
   readonly faces: ReadonlyArray<keyof AtlasMapping>;
 }[] = [

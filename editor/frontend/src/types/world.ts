@@ -1,4 +1,18 @@
-export type BlockType = "grass" | "dirt" | "rock" | "sand";
+export type BlockType =
+  | "grass"
+  | "topSoil"
+  | "dirt"
+  | "subSoil"
+  | "rock"
+  | "sand"
+  | "clay"
+  | "water"
+  | "wood"
+  | "leaves"
+  | "dungeonWall"
+  | "dungeonFloor";
+
+export type AtlasBlockType = "grass" | "dirt" | "rock" | "sand";
 
 export type ChunkMeshMode = "Greedy" | "Mesher" | "LOD" | "Baked";
 
@@ -451,7 +465,54 @@ export interface MaterialAsset {
   readonly name: string;
   readonly kind: MaterialKind;
   readonly sourcePath: string;
+  readonly materialTypeId?: string;
+  readonly colorRgb?: [number, number, number];
+  readonly metallic?: number;
+  readonly smooth?: number;
+  readonly emissive?: number;
+  readonly surfaceTransmission?: number;
+  readonly absorptionLength?: number;
+  readonly scatterLength?: number;
+  readonly indexOfRefraction?: number;
+  readonly phase?: number;
+  readonly strength?: number;
+  readonly defaultVoxel?: ViewportVoxelMaterial;
 }
+
+export interface MaterialTypeAsset {
+  readonly id: string;
+  readonly name: string;
+  readonly materialIds: readonly string[];
+}
+
+export interface MaterialPalette {
+  readonly id: string;
+  readonly name: string;
+  readonly materialIds: readonly string[];
+}
+
+export interface MaterialCatalog {
+  readonly materialTypes: readonly MaterialTypeAsset[];
+  readonly materials: readonly MaterialAsset[];
+  readonly palettes: readonly MaterialPalette[];
+  readonly activeMaterialId: string;
+}
+
+export type MaterialPatch = Partial<
+  Pick<
+    MaterialAsset,
+    | "name"
+    | "colorRgb"
+    | "metallic"
+    | "smooth"
+    | "emissive"
+    | "surfaceTransmission"
+    | "absorptionLength"
+    | "scatterLength"
+    | "indexOfRefraction"
+    | "phase"
+  >
+>;
 
 export interface AtlasMapping {
   readonly top: string;
@@ -459,4 +520,4 @@ export interface AtlasMapping {
   readonly bottom: string;
 }
 
-export type BlockAtlasMap = Record<BlockType, AtlasMapping>;
+export type BlockAtlasMap = Record<AtlasBlockType, AtlasMapping>;

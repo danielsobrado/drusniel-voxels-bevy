@@ -766,7 +766,13 @@ function BrushPreviewLayer({
       ) : (
         <BoxWire
           center={center}
-          size={new THREE.Vector3(brushSettings.radius * 2, brushSettings.brushShape === "cylinder" ? 1.2 : brushSettings.radius * 2, brushSettings.radius * 2)}
+          size={
+            brushSettings.brushShape === "single"
+              ? new THREE.Vector3(1, 1, 1)
+              : brushSettings.brushShape === "box"
+                ? new THREE.Vector3(brushSettings.size[0], brushSettings.size[1], brushSettings.size[2])
+                : new THREE.Vector3(brushSettings.radius * 2, brushSettings.size[1], brushSettings.radius * 2)
+          }
           color={invalid ? "#ef4444" : "#2cb8ff"}
           opacity={0.62}
         />
@@ -942,6 +948,8 @@ export const LiteVoxelViewport = Object.assign(
     const gameCameraCanvasRef = useRef<HTMLCanvasElement>(null);
     const dragRef = useRef<ViewportDragState | null>(null);
     const suppressClickRef = useRef(false);
+    const continuousEditingRef = useRef(false);
+    const lastContinuousEditRef = useRef<string | null>(null);
     const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
     const [cameraSlots, setCameraSlots] = useState<ReadonlyArray<ViewState | null>>([null, null, null]);
@@ -1128,13 +1136,48 @@ export const LiteVoxelViewport = Object.assign(
       [activeMode, gameCameraPlacementArmed, onSelectVoxel, placeGameCamera, queueVoxelEdit],
     );
 
+    const handleHover = useCallback(
+      (voxelSelection: LiteVoxelSelection | null) => {
+        setHoveredVoxel(voxelSelection);
+        if (
+          !voxelSelection ||
+          !continuousEditingRef.current ||
+          !brushSettings.continuous ||
+          (activeMode !== "voxel_paint" && activeMode !== "voxel_sculpt")
+        ) {
+          return;
+        }
+
+        const key = `${voxelSelection.position.join(",")}:${brushSettings.action}:${brushSettings.materialBlockId}`;
+        if (lastContinuousEditRef.current === key) {
+          return;
+        }
+        lastContinuousEditRef.current = key;
+        onSelectVoxel?.(voxelSelection);
+        void queueVoxelEdit(voxelSelection);
+      },
+      [activeMode, brushSettings.action, brushSettings.continuous, brushSettings.materialBlockId, onSelectVoxel, queueVoxelEdit],
+    );
+
     const handlePlace = useCallback(
       (position: readonly [number, number, number]) => {
+        if (activeMode === "voxel_paint" || activeMode === "voxel_sculpt") {
+          const voxelPosition: [number, number, number] = [Math.floor(position[0]), Math.floor(position[1]), Math.floor(position[2])];
+          const selection: LiteVoxelSelection = {
+            position: voxelPosition,
+            chunkId: chunkIdForVoxel(voxelPosition),
+            face: "top",
+          };
+          onSelectVoxel?.(selection);
+          void queueVoxelEdit(selection);
+          return;
+        }
+
         if (propPlacementEnabled && onPlaceProp) {
           onPlaceProp(position);
         }
       },
-      [onPlaceProp, propPlacementEnabled],
+      [activeMode, onPlaceProp, onSelectVoxel, propPlacementEnabled, queueVoxelEdit],
     );
 
     useEffect(() => {
@@ -1225,6 +1268,17 @@ export const LiteVoxelViewport = Object.assign(
               return;
             }
 
+            if (
+              event.button === 0 &&
+              brushSettings.continuous &&
+              (activeMode === "voxel_paint" || activeMode === "voxel_sculpt")
+            ) {
+              continuousEditingRef.current = true;
+              lastContinuousEditRef.current = null;
+              event.preventDefault();
+              return;
+            }
+
             dragRef.current = { kind: "pan", x: event.clientX, y: event.clientY, view };
           }}
           onPointerMove={(event) => {
@@ -1261,14 +1315,20 @@ export const LiteVoxelViewport = Object.assign(
           }}
           onPointerUp={() => {
             dragRef.current = null;
+            continuousEditingRef.current = false;
+            lastContinuousEditRef.current = null;
           }}
           onPointerCancel={() => {
             dragRef.current = null;
-            setHoveredVoxel(null);
+            continuousEditingRef.current = false;
+            lastContinuousEditRef.current = null;
+            handleHover(null);
           }}
           onPointerLeave={() => {
             dragRef.current = null;
-            setHoveredVoxel(null);
+            continuousEditingRef.current = false;
+            lastContinuousEditRef.current = null;
+            handleHover(null);
           }}
           onWheel={(event) => {
             event.preventDefault();
@@ -1396,7 +1456,7 @@ export const LiteVoxelViewport = Object.assign(
             gl={{ antialias: false, powerPreference: "high-performance" }}
             frameloop="demand"
             style={{ width: "100%", height: "100%" }}
-            onPointerMissed={() => setHoveredVoxel(null)}
+            onPointerMissed={() => handleHover(null)}
           >
             <AuthoringScene
               chunks={chunks}
@@ -1417,7 +1477,7 @@ export const LiteVoxelViewport = Object.assign(
               targetedVoxel={targetedVoxel}
               activeMode={activeMode}
               suppressClickRef={suppressClickRef}
-              onHover={setHoveredVoxel}
+              onHover={handleHover}
               onPick={handlePick}
               onPlace={handlePlace}
             />

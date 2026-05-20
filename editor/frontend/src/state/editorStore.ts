@@ -20,7 +20,7 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, LightInstance, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
+import type { AtlasBlockType, AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, LightInstance, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
 import type { EditorCameraState } from "../runtime/runtimeSchemas";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
@@ -256,7 +256,7 @@ interface EditorActions {
   readonly removeLight: (lightId: string) => void;
   readonly removeProtectedArea: (id: string) => void;
   readonly updateProp: (id: string, patch: Partial<Omit<PropInstance, "id">>) => void;
-  readonly updateAtlasMapping: (block: BlockType, patch: Partial<AtlasMapping>) => void;
+  readonly updateAtlasMapping: (block: AtlasBlockType, patch: Partial<AtlasMapping>) => void;
   readonly setSelectedAtlasTile: (tileId: string) => void;
   readonly markAtlasRebuilt: () => void;
   readonly replaceWorldSummary: (summary: WorldSummary) => void;
@@ -294,9 +294,17 @@ const initialSelection: Selection = { kind: "debug_resource", id: "selection-emp
 
 const defaultVoxelBlocks: readonly VoxelBlock[] = [
   { id: "grass", displayName: "Grass", solid: true, defaultMaterialId: "mat-grass-block" },
+  { id: "topSoil", displayName: "Top Soil", solid: true, defaultMaterialId: "mat-grass-block" },
   { id: "dirt", displayName: "Dirt", solid: true, defaultMaterialId: "mat-dirt-block" },
+  { id: "subSoil", displayName: "Sub Soil", solid: true, defaultMaterialId: "mat-dirt-block" },
   { id: "rock", displayName: "Rock", solid: true, defaultMaterialId: "mat-rock-block" },
   { id: "sand", displayName: "Sand", solid: true, defaultMaterialId: "mat-sand-block" },
+  { id: "clay", displayName: "Clay", solid: true, defaultMaterialId: "mat-clay-block" },
+  { id: "water", displayName: "Water", solid: false, defaultMaterialId: "mat-water" },
+  { id: "wood", displayName: "Wood", solid: true, defaultMaterialId: "mat-wood-block" },
+  { id: "leaves", displayName: "Leaves", solid: true, defaultMaterialId: "mat-leaves" },
+  { id: "dungeonWall", displayName: "Dungeon Wall", solid: true, defaultMaterialId: "mat-dungeon-wall" },
+  { id: "dungeonFloor", displayName: "Dungeon Floor", solid: true, defaultMaterialId: "mat-dungeon-floor" },
 ];
 
 const defaultAtlasMapping: BlockAtlasMap = {
@@ -445,9 +453,14 @@ const defaultAgentObservation: AgentObservation = {
   brush: {
     radius: 4,
     strength: 0.75,
-    materialBlockId: "grass",
+    materialBlockId: "topSoil",
     falloff: "smooth",
-    brushShape: "cube",
+    action: "set",
+    brushShape: "box",
+    size: [3, 3, 3],
+    continuous: false,
+    mask: "any",
+    maskBlockId: "topSoil",
     targetFace: "all",
   },
   dirtyChunks: 0,
@@ -489,7 +502,12 @@ export const createInitialEditorState = (): EditorDataState => ({
     strength: 0.75,
     materialBlockId: "grass",
     falloff: "smooth",
-    brushShape: "cube",
+    action: "set",
+    brushShape: "box",
+    size: [3, 3, 3],
+    continuous: false,
+    mask: "any",
+    maskBlockId: "grass",
     targetFace: "all",
   },
   viewportOverlays: {

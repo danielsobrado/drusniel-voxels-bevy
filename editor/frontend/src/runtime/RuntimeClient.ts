@@ -1,6 +1,6 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
-import type { RenderFeatureFlag } from "../types/runtime";
+import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag } from "../types/runtime";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
   EditorCameraInteractionMode,
@@ -8,6 +8,7 @@ import type {
   EditorCameraPose,
   EditorCameraProjection,
   EditorCameraTemplate,
+  LightAtmosphereTemplate,
   RuntimeAtlasMappingState,
   RuntimeAmbientLightMutationResult,
   RuntimeChunkRebuildResult,
@@ -18,8 +19,14 @@ import type {
   RuntimeEditorCameraResult,
   RuntimeFocusCameraResult,
   RuntimeLightDeleteResult,
+  RuntimeLightAtmosphereMutationResult,
   RuntimeLightLoadResult,
   RuntimeLightMutationResult,
+  RuntimeActiveMaterialResult,
+  RuntimeMaterialMutationResult,
+  RuntimeMaterialPaintResult,
+  RuntimeMaterialPickResult,
+  RuntimeMaterialReplaceResult,
   RuntimeProtectedAreaDeleteResult,
   RuntimeProtectedAreaLoadResult,
   RuntimeProtectedAreaMutationResult,
@@ -40,6 +47,8 @@ import type {
   RuntimeWaterVisualProbeResult,
   RuntimeTerrainRecipeState,
   RuntimeTerrainPreviewResult,
+  RuntimeVoxelBrushRequest,
+  RuntimeVoxelBrushResult,
 } from "./runtimeSchemas";
 
 export type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "./runtimeSchemas";
@@ -67,12 +76,22 @@ export interface RuntimeClient {
   readonly setRenderQuality: (preset: RenderQualityPreset) => Promise<RuntimeCommandResult<RuntimeRenderQualityState>>;
   readonly setRenderFeatureFlag: (feature: RenderFeatureFlag, enabled: boolean, value?: number) => Promise<RuntimeCommandResult<RuntimeRenderFeatureFlagResult>>;
   readonly updateAmbientLight: (color: string, brightness: number) => Promise<RuntimeCommandResult<RuntimeAmbientLightMutationResult>>;
+  readonly getLightAtmosphere: () => Promise<RuntimeCommandResult<LightAtmosphereSettings>>;
+  readonly updateLightAtmosphere: (patch: LightAtmospherePatch) => Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>>;
+  readonly importLightAtmosphereTemplate: (template: LightAtmosphereTemplate) => Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>>;
+  readonly exportLightAtmosphereTemplate: () => Promise<RuntimeCommandResult<LightAtmosphereTemplate>>;
   readonly setWaterReflectionDebugMode: (waterBodyId: string, mode: WaterReflectionDebugViewMode) => Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>>;
   readonly updateWaterBody: (waterBodyId: string, patch: Partial<WaterBody>) => Promise<RuntimeCommandResult<RuntimeWaterBodyMutationResult>>;
   readonly runWaterVisualProbe: () => Promise<RuntimeCommandResult<RuntimeWaterVisualProbeResult>>;
   readonly getDefaultTerrainRecipe: () => Promise<RuntimeCommandResult<RuntimeTerrainRecipeState>>;
   readonly previewTerrainRecipe: (request: TerrainPreviewRequest) => Promise<RuntimeCommandResult<RuntimeTerrainPreviewResult>>;
   readonly setVoxel: (position: readonly [number, number, number], block: BlockType) => Promise<RuntimeCommandResult<RuntimeVoxelMutationResult>>;
+  readonly paintVoxelMaterial: (position: readonly [number, number, number], materialId: string) => Promise<RuntimeCommandResult<RuntimeMaterialPaintResult>>;
+  readonly pickVoxelMaterial: (position: readonly [number, number, number]) => Promise<RuntimeCommandResult<RuntimeMaterialPickResult>>;
+  readonly replaceMaterial: (fromMaterialId: string, toMaterialId: string) => Promise<RuntimeCommandResult<RuntimeMaterialReplaceResult>>;
+  readonly updateMaterial: (materialId: string, patch: MaterialPatch) => Promise<RuntimeCommandResult<RuntimeMaterialMutationResult>>;
+  readonly setActiveMaterial: (materialId: string) => Promise<RuntimeCommandResult<RuntimeActiveMaterialResult>>;
+  readonly applyVoxelBrush: (brush: RuntimeVoxelBrushRequest) => Promise<RuntimeCommandResult<RuntimeVoxelBrushResult>>;
   readonly setViewportDebugOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => Promise<RuntimeCommandResult<RuntimeViewportDebugState>>;
   readonly setEditorDiagnostics: (enabled: boolean, categories?: readonly EditorDiagnosticsCategory[]) => Promise<RuntimeCommandResult<RuntimeEditorDiagnosticsState>>;
   readonly setAtlasMapping: (mapping: BlockAtlasMap) => Promise<RuntimeCommandResult<RuntimeAtlasMappingState>>;

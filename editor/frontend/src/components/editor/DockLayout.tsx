@@ -3,9 +3,11 @@ import { DockviewReact, Orientation, type DockviewApi, type DockviewReadyEvent, 
 import { AgentWorkbenchPanel } from "../../features/agent/AgentWorkbenchPanel";
 import { AssetBrowserPanel } from "../../features/assets/AssetBrowserPanel";
 import { ConsolePanel } from "../../features/console/ConsolePanel";
+import { EditToolPanel } from "../../features/edit/EditToolPanel";
 import { InspectorPanel } from "../../features/inspector/InspectorPanel";
 import { ProfilerPanel } from "../../features/profiler/ProfilerPanel";
 import { GraphicsCapabilitiesPanel } from "../../features/profiler/GraphicsCapabilitiesPanel";
+import { LightAtmospherePanel } from "../../features/light-atmosphere/LightAtmospherePanel";
 import { TextureAtlasPanel } from "../../features/materials/TextureAtlasPanel";
 import { WorldOutlinerPanel } from "../../features/outliner/WorldOutlinerPanel";
 import { TerrainRecipePanel } from "../../features/terrain/TerrainRecipePanel";
@@ -24,7 +26,7 @@ const DEFAULT_LAYOUT = {
           type: "branch",
           data: [
             { type: "leaf", data: { views: ["viewport"], activeView: "viewport", id: "center" }, size: 620 },
-            { type: "leaf", data: { views: ["viewport-controls", "terrain-recipe", "assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "viewport-controls", id: "bottom" }, size: 240 },
+            { type: "leaf", data: { views: ["viewport-controls", "edit-tool", "light-atmosphere", "terrain-recipe", "assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "viewport-controls", id: "bottom" }, size: 240 },
           ],
           size: 760,
         },
@@ -42,8 +44,10 @@ const DEFAULT_LAYOUT = {
     inspector: { id: "inspector", contentComponent: "inspector", title: "Inspector" },
     assets: { id: "assets", contentComponent: "assets", title: "Asset Browser" },
     "viewport-controls": { id: "viewport-controls", contentComponent: "viewport-controls", title: "Viewport Controls" },
+    "edit-tool": { id: "edit-tool", contentComponent: "edit-tool", title: "Edit Tool" },
+    "light-atmosphere": { id: "light-atmosphere", contentComponent: "light-atmosphere", title: "Light and Atmosphere" },
     "terrain-recipe": { id: "terrain-recipe", contentComponent: "terrain-recipe", title: "Terrain Recipe" },
-    atlas: { id: "atlas", contentComponent: "atlas", title: "Texture Atlas" },
+    atlas: { id: "atlas", contentComponent: "atlas", title: "Materials" },
     console: { id: "console", contentComponent: "console", title: "Console" },
     profiler: { id: "profiler", contentComponent: "profiler", title: "Profiler" },
     "graphics-capabilities": { id: "graphics-capabilities", contentComponent: "graphics-capabilities", title: "Graphics Capabilities" },
@@ -82,6 +86,8 @@ export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
     () => ({
       viewport: (props: IDockviewPanelProps) => <ViewportPanel onClose={() => props.api.close()} />,
       "viewport-controls": (_props: IDockviewPanelProps) => <ViewportControlsPanel />,
+      "edit-tool": (_props: IDockviewPanelProps) => <EditToolPanel />,
+      "light-atmosphere": (_props: IDockviewPanelProps) => <LightAtmospherePanel />,
       "terrain-recipe": (_props: IDockviewPanelProps) => <TerrainRecipePanel />,
       outliner: (props: IDockviewPanelProps) => <WorldOutlinerPanel onClose={() => props.api.close()} />,
       inspector: (props: IDockviewPanelProps) => <InspectorPanel onClose={() => props.api.close()} />,
@@ -111,6 +117,23 @@ export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
     apiRef.current.fromJSON(DEFAULT_LAYOUT);
     persistLayout(apiRef.current);
   }, [resetRequestId]);
+
+  useEffect(() => {
+    const revealCameraControls = () => {
+      apiRef.current?.getPanel("viewport-controls")?.api.setActive();
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("drusniel:scroll-camera-controls")), 0);
+    };
+    window.addEventListener("drusniel:reveal-camera-controls", revealCameraControls);
+    return () => window.removeEventListener("drusniel:reveal-camera-controls", revealCameraControls);
+  }, []);
+
+  useEffect(() => {
+    const revealLightAtmosphere = () => {
+      apiRef.current?.getPanel("light-atmosphere")?.api.setActive();
+    };
+    window.addEventListener("drusniel:reveal-light-atmosphere", revealLightAtmosphere);
+    return () => window.removeEventListener("drusniel:reveal-light-atmosphere", revealLightAtmosphere);
+  }, []);
 
   return (
     <main className="dock-layout-root" data-testid="dock-layout">

@@ -1,6 +1,6 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag } from "../types/runtime";
+import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
 import type { RuntimeEventHandler } from "./runtimeEvents";
@@ -10,6 +10,7 @@ import type {
   EditorCameraPose,
   EditorCameraProjection,
   EditorCameraTemplate,
+  LightAtmosphereTemplate,
   RuntimeAtlasMappingState,
   RuntimeAmbientLightMutationResult,
   RuntimeChunkRebuildResult,
@@ -20,8 +21,14 @@ import type {
   RuntimeEditorDiagnosticsState,
   RuntimeFocusCameraResult,
   RuntimeLightDeleteResult,
+  RuntimeLightAtmosphereMutationResult,
   RuntimeLightLoadResult,
   RuntimeLightMutationResult,
+  RuntimeActiveMaterialResult,
+  RuntimeMaterialMutationResult,
+  RuntimeMaterialPaintResult,
+  RuntimeMaterialPickResult,
+  RuntimeMaterialReplaceResult,
   RuntimeProtectedAreaDeleteResult,
   RuntimeProtectedAreaLoadResult,
   RuntimeProtectedAreaMutationResult,
@@ -42,6 +49,8 @@ import type {
   RuntimeWaterVisualProbeResult,
   RuntimeTerrainRecipeState,
   RuntimeTerrainPreviewResult,
+  RuntimeVoxelBrushRequest,
+  RuntimeVoxelBrushResult,
 } from "./runtimeSchemas";
 import { runtimeCommandFailure } from "./runtimeSchemas";
 
@@ -235,6 +244,38 @@ export class BrowserRuntimeClient implements RuntimeClient {
     });
   }
 
+  async getLightAtmosphere(): Promise<RuntimeCommandResult<LightAtmosphereSettings>> {
+    return this.execute({
+      type: "runtime.getLightAtmosphere",
+      requestId: makeRequestId("runtime.getLightAtmosphere"),
+      payload: {},
+    });
+  }
+
+  async updateLightAtmosphere(patch: LightAtmospherePatch): Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>> {
+    return this.execute({
+      type: "runtime.updateLightAtmosphere",
+      requestId: makeRequestId("runtime.updateLightAtmosphere"),
+      payload: { patch },
+    });
+  }
+
+  async importLightAtmosphereTemplate(template: LightAtmosphereTemplate): Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>> {
+    return this.execute({
+      type: "runtime.importLightAtmosphereTemplate",
+      requestId: makeRequestId("runtime.importLightAtmosphereTemplate"),
+      payload: { template },
+    });
+  }
+
+  async exportLightAtmosphereTemplate(): Promise<RuntimeCommandResult<LightAtmosphereTemplate>> {
+    return this.execute({
+      type: "runtime.exportLightAtmosphereTemplate",
+      requestId: makeRequestId("runtime.exportLightAtmosphereTemplate"),
+      payload: {},
+    });
+  }
+
   async setWaterReflectionDebugMode(waterBodyId: string, mode: WaterReflectionDebugViewMode): Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>> {
     return this.execute({
       type: "runtime.setWaterReflectionDebugMode",
@@ -280,6 +321,54 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.setVoxel",
       requestId: makeRequestId("runtime.setVoxel"),
       payload: { position, block },
+    });
+  }
+
+  async paintVoxelMaterial(position: readonly [number, number, number], materialId: string): Promise<RuntimeCommandResult<RuntimeMaterialPaintResult>> {
+    return this.execute({
+      type: "runtime.paintVoxelMaterial",
+      requestId: makeRequestId("runtime.paintVoxelMaterial"),
+      payload: { position, materialId },
+    });
+  }
+
+  async pickVoxelMaterial(position: readonly [number, number, number]): Promise<RuntimeCommandResult<RuntimeMaterialPickResult>> {
+    return this.execute({
+      type: "runtime.pickVoxelMaterial",
+      requestId: makeRequestId("runtime.pickVoxelMaterial"),
+      payload: { position },
+    });
+  }
+
+  async replaceMaterial(fromMaterialId: string, toMaterialId: string): Promise<RuntimeCommandResult<RuntimeMaterialReplaceResult>> {
+    return this.execute({
+      type: "runtime.replaceMaterial",
+      requestId: makeRequestId("runtime.replaceMaterial"),
+      payload: { fromMaterialId, toMaterialId },
+    });
+  }
+
+  async updateMaterial(materialId: string, patch: MaterialPatch): Promise<RuntimeCommandResult<RuntimeMaterialMutationResult>> {
+    return this.execute({
+      type: "runtime.updateMaterial",
+      requestId: makeRequestId("runtime.updateMaterial"),
+      payload: { materialId, patch },
+    });
+  }
+
+  async setActiveMaterial(materialId: string): Promise<RuntimeCommandResult<RuntimeActiveMaterialResult>> {
+    return this.execute({
+      type: "runtime.setActiveMaterial",
+      requestId: makeRequestId("runtime.setActiveMaterial"),
+      payload: { materialId },
+    });
+  }
+
+  async applyVoxelBrush(brush: RuntimeVoxelBrushRequest): Promise<RuntimeCommandResult<RuntimeVoxelBrushResult>> {
+    return this.execute({
+      type: "runtime.applyVoxelBrush",
+      requestId: makeRequestId("runtime.applyVoxelBrush"),
+      payload: { brush },
     });
   }
 

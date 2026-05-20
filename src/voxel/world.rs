@@ -1,6 +1,7 @@
 use crate::constants::{BEDROCK_DEPTH, CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WORLD_KILL_Y};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
+use crate::voxel::materials::{MaterialId, MaterialReplaceSummary};
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
@@ -324,6 +325,13 @@ impl VoxelWorld {
         self.sample_voxel_raw(world_pos)
     }
 
+    pub fn get_material_id(&self, world_pos: IVec3) -> Option<MaterialId> {
+        let chunk_pos = Self::world_to_chunk(world_pos);
+        let local_pos = Self::world_to_local(world_pos);
+        self.get_chunk(chunk_pos)
+            .map(|chunk| chunk.get_material_id(local_pos))
+    }
+
     pub fn sample_voxel_raw(&self, world_pos: IVec3) -> Option<VoxelType> {
         let chunk_pos = Self::world_to_chunk(world_pos);
         let local_pos = Self::world_to_local(world_pos);
@@ -402,6 +410,25 @@ impl VoxelWorld {
         self.set_voxel(world_pos, voxel)
     }
 
+    pub fn set_material_id_with_rules(
+        &mut self,
+        world_pos: IVec3,
+        material_id: MaterialId,
+        protected_areas: Option<&ProtectedAreaRegistry>,
+    ) -> VoxelEditResult {
+        if let Some(registry) = protected_areas {
+            if registry.edit_blocked(world_pos, ProtectedEditIntent::Paint) {
+                let result = VoxelEditResult::RejectedProtectedArea;
+                self.edit_stats.record(result);
+                return result;
+            }
+        }
+
+        let result = self.apply_material_edit(world_pos, material_id);
+        self.edit_stats.record(result);
+        result
+    }
+
     pub fn record_edit_result(&mut self, result: VoxelEditResult) {
         self.edit_stats.record(result);
     }
@@ -460,6 +487,81 @@ impl VoxelWorld {
             }
         }
         VoxelEditResult::Applied
+    }
+
+    fn apply_material_edit(
+        &mut self,
+        world_pos: IVec3,
+        material_id: MaterialId,
+    ) -> VoxelEditResult {
+        let sample = self.sample_voxel_for_interaction(world_pos);
+        match sample {
+            VoxelSample::OutsideBelowWorld => return VoxelEditResult::RejectedBelowWorldFloor,
+            VoxelSample::OutsideAboveWorld | VoxelSample::OutsideHorizontalWorld => {
+                return VoxelEditResult::RejectedOutOfBounds;
+            }
+            VoxelSample::MissingChunkInsideBounds => return VoxelEditResult::RejectedMissingChunk,
+            VoxelSample::InBounds(VoxelType::Air) => return VoxelEditResult::NoChange,
+            VoxelSample::InBounds(VoxelType::Bedrock) => {
+                return VoxelEditResult::RejectedUnbreakable;
+            }
+            VoxelSample::InBounds(_) if !self.bounds.is_breakable_y(world_pos.y) => {
+                return VoxelEditResult::RejectedBelowWorldFloor;
+            }
+            VoxelSample::InBounds(_) => {}
+        }
+
+        let chunk_pos = Self::world_to_chunk(world_pos);
+        let local_pos = Self::world_to_local(world_pos);
+        let Some(mut chunk) = self.get_chunk_mut(chunk_pos) else {
+            return VoxelEditResult::RejectedMissingChunk;
+        };
+
+        if chunk.get_material_id(local_pos) == material_id {
+            return VoxelEditResult::NoChange;
+        }
+        chunk.set_material_id(local_pos, material_id);
+        VoxelEditResult::Applied
+    }
+
+    pub fn replace_material_id(
+        &mut self,
+        from: MaterialId,
+        to: MaterialId,
+        protected_areas: Option<&ProtectedAreaRegistry>,
+    ) -> MaterialReplaceSummary {
+        let mut summary = MaterialReplaceSummary::default();
+        let positions = self
+            .chunks
+            .iter()
+            .flat_map(|(chunk_pos, chunk)| {
+                let chunk_origin = Self::chunk_to_world(*chunk_pos);
+                chunk
+                    .iter_materials()
+                    .filter_map(move |(local, voxel, material_id)| {
+                        (voxel != VoxelType::Air && material_id == from)
+                            .then_some(chunk_origin + local.as_ivec3())
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        for position in positions {
+            if let Some(registry) = protected_areas {
+                if registry.edit_blocked(position, ProtectedEditIntent::Paint) {
+                    summary.skipped += 1;
+                    continue;
+                }
+            }
+
+            match self.apply_material_edit(position, to) {
+                VoxelEditResult::Applied => summary.changed += 1,
+                VoxelEditResult::NoChange => summary.no_change += 1,
+                _ => summary.skipped += 1,
+            }
+        }
+
+        summary.dirty_chunks = self.derived_dirty_chunks().collect();
+        summary
     }
 
     // Coordinate conversion

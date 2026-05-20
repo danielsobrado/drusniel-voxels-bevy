@@ -3,7 +3,7 @@ import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
 import type { EditorDiagnosticsCategory, EditorMode, EditorViewportRole, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockType, LightInstance, LightKind, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { AtlasBlockType, BlockType, LightInstance, LightKind, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 
 const unwrapBackend = <T>(result: BackendResult<T>): T => {
   if (!result.ok) {
@@ -560,7 +560,7 @@ const getSelectedTile = (ctx: EditorCommandContext): string => ctx.getState().se
 const createAtlasAssignCommand = (
   id: string,
   title: string,
-  block: BlockType,
+  block: AtlasBlockType,
   face: "top" | "side" | "bottom",
 ): EditorCommand => ({
   id,
@@ -926,7 +926,23 @@ export const editorCommands: readonly EditorCommand[] = [
     run: (ctx) => {
       ctx.getState().setActiveMode("lighting");
       ctx.getState().setActiveTool("camera");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("drusniel:reveal-camera-controls"));
+      }
       ctx.toast.info("Camera controls are available in Viewport Controls.");
+    },
+  },
+  {
+    id: "editor.lightAtmosphere.open",
+    title: "Light and Atmosphere",
+    description: "Open the main light and atmosphere controls.",
+    category: "Tools",
+    keywords: ["tools", "light", "atmosphere", "sun", "fog", "template"],
+    run: (ctx) => {
+      ctx.getState().setActiveMode("lighting");
+      ctx.getState().setActiveTool("light-atmosphere");
+      window.dispatchEvent(new CustomEvent("drusniel:reveal-light-atmosphere"));
+      ctx.toast.info("Light and Atmosphere controls are available.");
     },
   },
   {
@@ -1059,6 +1075,19 @@ export const editorCommands: readonly EditorCommand[] = [
   modeCommand("editor.mode.select", "Select", "select", "V"),
   modeCommand("editor.mode.voxelSculpt", "Voxel Sculpt", "voxel_sculpt", "B"),
   modeCommand("editor.mode.voxelPaint", "Voxel Paint", "voxel_paint", "P"),
+  {
+    id: "editor.editTool.open",
+    title: "Edit Tool",
+    description: "Open the voxel edit tool.",
+    category: "Voxels",
+    shortcut: "E",
+    keywords: ["edit", "voxel", "brush", "sculpt", "paint"],
+    run: (ctx) => {
+      ctx.getState().setActiveMode("voxel_sculpt");
+      ctx.getState().setActiveTool("edit-tool");
+      ctx.toast.info("Edit Tool active.");
+    },
+  },
   modeCommand("editor.mode.area", "Area", "area", "A"),
   modeCommand("editor.mode.props", "Props", "props"),
   modeCommand("editor.mode.water", "Water", "water"),

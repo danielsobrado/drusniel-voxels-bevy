@@ -15,6 +15,7 @@ export const toolbarCommandIds = [
   "editor.view.toggleVoxelGrid",
   "editor.view.toggleChunkBounds",
   "editor.view.toggleWireframe",
+  "editor.editTool.open",
   "editor.lighting.addPointLight",
   "editor.lighting.addSpotLight",
   "editor.lighting.addDirectionalLight",
@@ -86,6 +87,11 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
         </button>
         <button type="button" className="toolbar-button" aria-label="Toggle wireframe" data-command-id="editor.view.toggleWireframe" onClick={() => void runCommand("editor.view.toggleWireframe")}>
           <SquareDashedMousePointer size={14} aria-hidden="true" /> Wireframe
+        </button>
+      </div>
+      <div className="toolbar-group" aria-label="Edit tool">
+        <button type="button" className="toolbar-button" aria-label="Open Edit Tool" data-command-id="editor.editTool.open" onClick={() => void runCommand("editor.editTool.open")}>
+          <Brush size={14} aria-hidden="true" /> Edit Tool
         </button>
       </div>
       <div className="toolbar-group toolbar-modes" aria-label="Editor modes">

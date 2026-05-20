@@ -1,7 +1,7 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
-import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraTemplate } from "./runtimeSchemas";
+import type { LightAtmospherePatch, RenderFeatureFlag } from "../types/runtime";
+import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
+import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraTemplate, LightAtmosphereTemplate, RuntimeVoxelBrushRequest } from "./runtimeSchemas";
 
 export type RuntimeCommandRequestType =
   | "runtime.selectEntity"
@@ -23,12 +23,22 @@ export type RuntimeCommandRequestType =
   | "runtime.setRenderFeatureFlag"
   | "runtime.setShaderFeature"
   | "runtime.updateAmbientLight"
+  | "runtime.getLightAtmosphere"
+  | "runtime.updateLightAtmosphere"
+  | "runtime.importLightAtmosphereTemplate"
+  | "runtime.exportLightAtmosphereTemplate"
   | "runtime.setWaterReflectionDebugMode"
   | "runtime.updateWaterBody"
   | "runtime.runWaterVisualProbe"
   | "runtime.getDefaultTerrainRecipe"
   | "runtime.previewTerrainRecipe"
   | "runtime.setVoxel"
+  | "runtime.paintVoxelMaterial"
+  | "runtime.pickVoxelMaterial"
+  | "runtime.replaceMaterial"
+  | "runtime.updateMaterial"
+  | "runtime.setActiveMaterial"
+  | "runtime.applyVoxelBrush"
   | "runtime.setViewportDebugOverlay"
   | "runtime.setEditorDiagnostics"
   | "runtime.setAtlasMapping"
@@ -80,12 +90,22 @@ export type RuntimeSetShaderFeatureCommand = RuntimeCommandRequestBase<
   { readonly feature: RenderFeatureFlag; readonly enabled: boolean; readonly value?: number }
 >;
 export type RuntimeUpdateAmbientLightCommand = RuntimeCommandRequestBase<"runtime.updateAmbientLight", { readonly color: string; readonly brightness: number }>;
+export type RuntimeGetLightAtmosphereCommand = RuntimeCommandRequestBase<"runtime.getLightAtmosphere", Record<string, never>>;
+export type RuntimeUpdateLightAtmosphereCommand = RuntimeCommandRequestBase<"runtime.updateLightAtmosphere", { readonly patch: LightAtmospherePatch }>;
+export type RuntimeImportLightAtmosphereTemplateCommand = RuntimeCommandRequestBase<"runtime.importLightAtmosphereTemplate", { readonly template: LightAtmosphereTemplate }>;
+export type RuntimeExportLightAtmosphereTemplateCommand = RuntimeCommandRequestBase<"runtime.exportLightAtmosphereTemplate", Record<string, never>>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
 export type RuntimeUpdateWaterBodyCommand = RuntimeCommandRequestBase<"runtime.updateWaterBody", { readonly waterBodyId: string; readonly patch: Partial<WaterBody> }>;
 export type RuntimeRunWaterVisualProbeCommand = RuntimeCommandRequestBase<"runtime.runWaterVisualProbe", Record<string, never>>;
 export type RuntimeGetDefaultTerrainRecipeCommand = RuntimeCommandRequestBase<"runtime.getDefaultTerrainRecipe", Record<string, never>>;
 export type RuntimePreviewTerrainRecipeCommand = RuntimeCommandRequestBase<"runtime.previewTerrainRecipe", { readonly request: TerrainPreviewRequest }>;
 export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel", { readonly position: readonly [number, number, number]; readonly block: BlockType }>;
+export type RuntimePaintVoxelMaterialCommand = RuntimeCommandRequestBase<"runtime.paintVoxelMaterial", { readonly position: readonly [number, number, number]; readonly materialId: string }>;
+export type RuntimePickVoxelMaterialCommand = RuntimeCommandRequestBase<"runtime.pickVoxelMaterial", { readonly position: readonly [number, number, number] }>;
+export type RuntimeReplaceMaterialCommand = RuntimeCommandRequestBase<"runtime.replaceMaterial", { readonly fromMaterialId: string; readonly toMaterialId: string }>;
+export type RuntimeUpdateMaterialCommand = RuntimeCommandRequestBase<"runtime.updateMaterial", { readonly materialId: string; readonly patch: MaterialPatch }>;
+export type RuntimeSetActiveMaterialCommand = RuntimeCommandRequestBase<"runtime.setActiveMaterial", { readonly materialId: string }>;
+export type RuntimeApplyVoxelBrushCommand = RuntimeCommandRequestBase<"runtime.applyVoxelBrush", { readonly brush: RuntimeVoxelBrushRequest }>;
 export type RuntimeSetViewportDebugOverlayCommand = RuntimeCommandRequestBase<"runtime.setViewportDebugOverlay", { readonly overlay: keyof ViewportOverlayState; readonly enabled: boolean }>;
 export type RuntimeSetEditorDiagnosticsCommand = RuntimeCommandRequestBase<"runtime.setEditorDiagnostics", { readonly enabled: boolean; readonly categories?: readonly EditorDiagnosticsCategory[] }>;
 export type RuntimeSetAtlasMappingCommand = RuntimeCommandRequestBase<"runtime.setAtlasMapping", { readonly mapping: BlockAtlasMap }>;
@@ -126,12 +146,22 @@ export type RuntimeCommandRequest =
   | RuntimeSetRenderFeatureFlagCommand
   | RuntimeSetShaderFeatureCommand
   | RuntimeUpdateAmbientLightCommand
+  | RuntimeGetLightAtmosphereCommand
+  | RuntimeUpdateLightAtmosphereCommand
+  | RuntimeImportLightAtmosphereTemplateCommand
+  | RuntimeExportLightAtmosphereTemplateCommand
   | RuntimeSetWaterReflectionDebugModeCommand
   | RuntimeUpdateWaterBodyCommand
   | RuntimeRunWaterVisualProbeCommand
   | RuntimeGetDefaultTerrainRecipeCommand
   | RuntimePreviewTerrainRecipeCommand
   | RuntimeSetVoxelCommand
+  | RuntimePaintVoxelMaterialCommand
+  | RuntimePickVoxelMaterialCommand
+  | RuntimeReplaceMaterialCommand
+  | RuntimeUpdateMaterialCommand
+  | RuntimeSetActiveMaterialCommand
+  | RuntimeApplyVoxelBrushCommand
   | RuntimeSetViewportDebugOverlayCommand
   | RuntimeSetEditorDiagnosticsCommand
   | RuntimeSetAtlasMappingCommand

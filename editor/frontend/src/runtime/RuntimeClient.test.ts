@@ -191,6 +191,53 @@ describe("runtime clients", () => {
     });
   });
 
+  it("browser runtime client sends light atmosphere updates through the bridge", async () => {
+    const requests: unknown[] = [];
+    const client = new BrowserRuntimeClient({
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({
+          settings: {
+            lightEnabled: true,
+            lightPreset: "sun",
+            atmospherePreset: "fog",
+            globalPreset: "default",
+            lightColor: "#fff8f0",
+            lightIlluminance: 100000,
+            lightAzimuthDegrees: 35,
+            lightElevationDegrees: 45,
+            lightDirection: [0.41, 0.71, 0.58],
+            atmosphereAmount: 1.5,
+            atmosphereHalfLength: 120,
+            fogActive: true,
+            godRaysEnabled: false,
+            ambientColor: "#ffffff",
+            ambientBrightness: 1200,
+          },
+          metrics: {
+            lightingAtmosphere: {
+              sunTimeOfDay: "runtime",
+              fogPreset: "Fog",
+              fogActive: true,
+              godRaysEnabled: false,
+              godRayIntensity: 0,
+              ambientColor: "#ffffff",
+              ambientBrightness: 1200,
+            },
+          },
+        });
+      },
+    });
+
+    const result = await client.updateLightAtmosphere({ atmospherePreset: "fog", atmosphereAmount: 1.5 });
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]).toMatchObject({
+      type: "runtime.updateLightAtmosphere",
+      payload: { patch: { atmospherePreset: "fog", atmosphereAmount: 1.5 } },
+    });
+  });
+
   it("browser runtime client sends prop mutation commands through the bridge", async () => {
     const requests: unknown[] = [];
     const client = new BrowserRuntimeClient({

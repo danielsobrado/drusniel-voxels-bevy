@@ -22,6 +22,10 @@ export const buildAffectedVoxelPositions = (
   }
 
   const affected: THREE.Vector3[] = [];
+  if (brushSettings.brushShape === "single") {
+    return [new THREE.Vector3(targetedVoxel[0] + 0.5, targetedVoxel[1] + 0.5, targetedVoxel[2] + 0.5)];
+  }
+
   const previewStep = Math.max(1, Math.round(brushSettings.radius / 3));
 
   for (let x = -previewStep; x <= previewStep; x += previewStep) {

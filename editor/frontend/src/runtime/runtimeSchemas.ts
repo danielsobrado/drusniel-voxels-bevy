@@ -4,6 +4,9 @@ import type {
   BlockAtlasMap,
   ChunkSummary,
   LightInstance,
+  MaterialAsset,
+  MaterialCatalog,
+  MaterialPatch,
   PropInstance,
   PropStats,
   ProtectedArea,
@@ -15,7 +18,7 @@ import type {
   TerrainPreviewResult,
   TerrainRecipe,
 } from "../types/world";
-import type { ConsoleMessage, GraphicsCapabilities, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
+import type { ConsoleMessage, GraphicsCapabilities, LightAtmosphereSettings, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
 
 export type RuntimeConnectionState = "mock" | "connected" | "disconnected" | "stale" | "error";
 
@@ -27,6 +30,7 @@ export interface RuntimeCapabilities {
   readonly canDebugWaterReflections: boolean;
   readonly canRunWaterVisualProbe: boolean;
   readonly canEditAtlasMapping: boolean;
+  readonly canEditMaterials: boolean;
   readonly canEditProtectedAreas: boolean;
   readonly canEditLights: boolean;
   readonly canSaveWorldSnapshot: boolean;
@@ -98,6 +102,11 @@ export interface EditorCameraTemplate {
   readonly cameras: readonly EditorSavedCamera[];
 }
 
+export interface LightAtmosphereTemplate {
+  readonly schema: "drusniel.light-atmosphere-template.v1";
+  readonly settings: LightAtmosphereSettings;
+}
+
 export type RuntimeChunkSummary = ChunkSummary;
 export type RuntimePropStats = PropStats;
 export type RuntimeRenderTimingSample = RenderTimingSample;
@@ -118,6 +127,7 @@ export interface RuntimeSnapshot {
   readonly waterReflection: RuntimeWaterReflectionState;
   readonly waterVisualProbe: RuntimeWaterVisualProbeResult;
   readonly atlasMapping: RuntimeAtlasMappingState;
+  readonly materialCatalog: MaterialCatalog;
   readonly viewportDebug: RuntimeViewportDebugState;
   readonly editorDiagnostics: RuntimeEditorDiagnosticsState;
   readonly editorCamera: EditorCameraState;
@@ -189,7 +199,8 @@ export type RuntimeVoxelEditResult =
   | "rejectedBelowWorldFloor"
   | "rejectedUnbreakable"
   | "rejectedMissingChunk"
-  | "rejectedProtectedArea";
+  | "rejectedProtectedArea"
+  | "skippedMask";
 
 export interface RuntimeVoxelMutationResult {
   readonly position: readonly [number, number, number];
@@ -199,6 +210,75 @@ export interface RuntimeVoxelMutationResult {
   readonly previousVoxel: string | null;
   readonly currentVoxel: string | null;
   readonly editResult: RuntimeVoxelEditResult;
+}
+
+export interface RuntimeMaterialPickResult {
+  readonly position: readonly [number, number, number];
+  readonly voxel: string;
+  readonly material: MaterialAsset;
+}
+
+export interface RuntimeMaterialPaintResult {
+  readonly position: readonly [number, number, number];
+  readonly chunkId: string;
+  readonly material: MaterialAsset;
+  readonly previousMaterialId: string | null;
+  readonly currentMaterialId: string | null;
+  readonly previousVoxel: string | null;
+  readonly editResult: RuntimeVoxelEditResult;
+  readonly dirtyChunkIds: readonly string[];
+}
+
+export interface RuntimeMaterialReplaceResult {
+  readonly fromMaterialId: string;
+  readonly toMaterialId: string;
+  readonly toMaterial: MaterialAsset;
+  readonly changedCount: number;
+  readonly noChangeCount: number;
+  readonly skippedCount: number;
+  readonly dirtyChunkIds: readonly string[];
+}
+
+export interface RuntimeMaterialMutationResult {
+  readonly material: MaterialAsset;
+  readonly catalog: MaterialCatalog;
+}
+
+export interface RuntimeActiveMaterialResult {
+  readonly activeMaterialId: string;
+  readonly material: MaterialAsset;
+  readonly catalog: MaterialCatalog;
+}
+
+export type RuntimeMaterialPatch = MaterialPatch;
+
+export type RuntimeVoxelBrushAction = "set" | "delete" | "paint";
+export type RuntimeVoxelBrushShape = "single" | "box" | "sphere" | "cylinder";
+export type RuntimeVoxelBrushMask = "any" | "empty" | "occupied" | "material";
+
+export interface RuntimeVoxelBrushRequest {
+  readonly position: readonly [number, number, number];
+  readonly action: RuntimeVoxelBrushAction;
+  readonly shape: RuntimeVoxelBrushShape;
+  readonly block: BlockType;
+  readonly radius: number;
+  readonly size: readonly [number, number, number];
+  readonly mask: RuntimeVoxelBrushMask;
+  readonly maskBlock?: BlockType;
+}
+
+export interface RuntimeVoxelBrushResult {
+  readonly origin: readonly [number, number, number];
+  readonly action: RuntimeVoxelBrushAction;
+  readonly shape: RuntimeVoxelBrushShape;
+  readonly block: BlockType;
+  readonly changedCount: number;
+  readonly noChangeCount: number;
+  readonly rejectedCount: number;
+  readonly skippedCount: number;
+  readonly affectedCount: number;
+  readonly dirtyChunkIds: readonly string[];
+  readonly results: readonly RuntimeVoxelMutationResult[];
 }
 
 export interface RuntimeWaterDebugModeResult {
@@ -216,6 +296,11 @@ export interface RuntimeRenderFeatureFlagResult {
 export interface RuntimeAmbientLightMutationResult {
   readonly color: string;
   readonly brightness: number;
+  readonly metrics: Pick<RuntimeMetrics, "lightingAtmosphere">;
+}
+
+export interface RuntimeLightAtmosphereMutationResult {
+  readonly settings: LightAtmosphereSettings;
   readonly metrics: Pick<RuntimeMetrics, "lightingAtmosphere">;
 }
 

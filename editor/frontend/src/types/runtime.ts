@@ -48,12 +48,37 @@ export interface WaterRenderDebugSettings {
 export interface LightingAtmosphereSettings {
   readonly sunTimeOfDay: string;
   readonly fogPreset: string;
+  readonly settings?: LightAtmosphereSettings;
   readonly fogActive: boolean;
   readonly godRaysEnabled: boolean;
   readonly godRayIntensity: number;
   readonly ambientColor: string;
   readonly ambientBrightness: number;
 }
+
+export type LightPreset = "sun" | "moon" | "noneEmissivesOnly";
+export type AtmospherePreset = "void" | "clear" | "hazy" | "fog";
+export type GlobalLightAtmospherePreset = "default" | "neutral";
+
+export interface LightAtmosphereSettings {
+  readonly lightEnabled: boolean;
+  readonly lightPreset: LightPreset;
+  readonly atmospherePreset: AtmospherePreset;
+  readonly globalPreset: GlobalLightAtmospherePreset;
+  readonly lightColor: string;
+  readonly lightIlluminance: number;
+  readonly lightAzimuthDegrees: number;
+  readonly lightElevationDegrees: number;
+  readonly lightDirection: readonly [number, number, number];
+  readonly atmosphereAmount: number;
+  readonly atmosphereHalfLength: number;
+  readonly fogActive: boolean;
+  readonly godRaysEnabled: boolean;
+  readonly ambientColor: string;
+  readonly ambientBrightness: number;
+}
+
+export type LightAtmospherePatch = Partial<LightAtmosphereSettings>;
 
 export interface VolumetricCloudSettings {
   readonly coverage: number;

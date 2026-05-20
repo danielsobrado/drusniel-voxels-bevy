@@ -1,3 +1,5 @@
+import type { BlockType } from "./world";
+
 export const EDITOR_MODES = [
   "select",
   "voxel_sculpt",
@@ -58,9 +60,14 @@ export type Selection =
 export interface BrushSettings {
   readonly radius: number;
   readonly strength: number;
-  readonly materialBlockId: "grass" | "dirt" | "rock" | "sand";
+  readonly materialBlockId: BlockType;
   readonly falloff: "linear" | "smooth" | "constant";
-  readonly brushShape: "cube" | "sphere" | "cylinder";
+  readonly action: "set" | "delete" | "paint";
+  readonly brushShape: "single" | "box" | "sphere" | "cylinder";
+  readonly size: [number, number, number];
+  readonly continuous: boolean;
+  readonly mask: "any" | "empty" | "occupied" | "material";
+  readonly maskBlockId: BlockType;
   readonly targetFace: "top" | "side" | "bottom" | "all";
 }
 

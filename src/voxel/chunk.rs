@@ -1,4 +1,5 @@
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_U32, CHUNK_VOLUME};
+use crate::voxel::materials::MaterialId;
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::types::VoxelType;
 use bevy::prelude::*;
@@ -113,6 +114,8 @@ impl FaceVisibility {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkData {
     pub voxels: Vec<VoxelType>,
+    #[serde(default)]
+    pub material_ids: Vec<MaterialId>,
     pub position: IVec3,
     /// Face visibility mask for occlusion culling (optional for backwards compat).
     #[serde(default)]
@@ -189,6 +192,7 @@ impl LodLevel {
 
 pub struct Chunk {
     voxels: [VoxelType; CHUNK_VOLUME],
+    material_ids: [MaterialId; CHUNK_VOLUME],
     dirty: bool,
     dirty_reasons: u8,
     mesh_entity: Option<Entity>,
@@ -230,6 +234,7 @@ impl Chunk {
     pub fn new(position: IVec3) -> Self {
         Self {
             voxels: [VoxelType::Air; CHUNK_VOLUME],
+            material_ids: [MaterialId::AIR; CHUNK_VOLUME],
             dirty: true,
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
@@ -247,8 +252,10 @@ impl Chunk {
 
     pub fn with_voxels(position: IVec3, voxels: [VoxelType; CHUNK_VOLUME]) -> Self {
         let uniformity = Self::compute_uniformity_for(&voxels);
+        let material_ids = voxels.map(MaterialId::from_voxel);
         Self {
             voxels,
+            material_ids,
             dirty: true,
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
@@ -278,6 +285,17 @@ impl Chunk {
         self.voxels[index]
     }
 
+    #[inline]
+    pub fn get_material_id(&self, local: UVec3) -> MaterialId {
+        debug_assert!(
+            is_valid_local(local),
+            "Chunk::get_material_id called with out-of-bounds coordinates: {:?}",
+            local
+        );
+        let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
+        self.material_ids[index]
+    }
+
     /// Gets the voxel at the given local coordinates, returning None if out of bounds.
     #[inline]
     #[must_use]
@@ -304,6 +322,7 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
+            self.material_ids[index] = MaterialId::from_voxel(voxel);
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
@@ -322,12 +341,30 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
+            self.material_ids[index] = MaterialId::from_voxel(voxel);
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
             // Invalidate face visibility since topology changed
             self.visibility_dirty = true;
         }
+        true
+    }
+
+    #[inline]
+    pub fn set_material_id(&mut self, local: UVec3, material_id: MaterialId) -> bool {
+        debug_assert!(
+            is_valid_local(local),
+            "Chunk::set_material_id called with out-of-bounds coordinates: {:?}",
+            local
+        );
+        let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
+        if self.material_ids[index] == material_id {
+            return false;
+        }
+
+        self.material_ids[index] = material_id;
+        self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
         true
     }
 
@@ -442,6 +479,19 @@ impl Chunk {
         })
     }
 
+    pub fn iter_materials(&self) -> impl Iterator<Item = (UVec3, VoxelType, MaterialId)> + '_ {
+        self.voxels
+            .iter()
+            .zip(self.material_ids.iter())
+            .enumerate()
+            .map(|(i, (&voxel, &material_id))| {
+                let x = i % CHUNK_SIZE;
+                let y = (i / CHUNK_SIZE) % CHUNK_SIZE;
+                let z = i / (CHUNK_SIZE * CHUNK_SIZE);
+                (UVec3::new(x as u32, y as u32, z as u32), voxel, material_id)
+            })
+    }
+
     /// Returns an iterator over all non-air voxels with their local coordinates.
     pub fn iter_solid(&self) -> impl Iterator<Item = (UVec3, VoxelType)> + '_ {
         self.iter().filter(|(_, voxel)| *voxel != VoxelType::Air)
@@ -451,6 +501,7 @@ impl Chunk {
     pub fn to_data(&self) -> ChunkData {
         ChunkData {
             voxels: self.voxels.to_vec(),
+            material_ids: self.material_ids.to_vec(),
             position: self.position,
             face_visibility: self.face_visibility,
         }
@@ -464,10 +515,17 @@ impl Chunk {
                 voxels[i] = v;
             }
         }
+        let mut material_ids = voxels.map(MaterialId::from_voxel);
+        for (i, material_id) in data.material_ids.into_iter().enumerate() {
+            if i < CHUNK_VOLUME {
+                material_ids[i] = material_id;
+            }
+        }
         // If face_visibility is default (0), mark as dirty to recompute
         let visibility_dirty = data.face_visibility.0 == 0;
         Self {
             voxels,
+            material_ids,
             dirty: true, // Mark dirty so mesh gets generated
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,

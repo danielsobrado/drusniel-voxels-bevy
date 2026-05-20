@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { Boxes, Camera, CheckSquare2, Download, Focus, Grid3X3, MousePointer2, Paintbrush, Save, ShieldCheck, SkipBack, SkipForward, TestTube2, TriangleAlert, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
@@ -7,6 +9,7 @@ import { getRuntimeWarnings, getSelectedObject } from "../../state/editorSelecto
 import type { EditorCameraTemplate } from "../../runtime/runtimeSchemas";
 
 export function ViewportControlsPanel() {
+  const cameraSectionRef = useRef<HTMLElement>(null);
   const editorState = useEditorStore();
   const { backendClient, runtimeClient } = useEditorClients();
   const { runCommandById } = useCommandRunner({ backendClient, runtimeClient });
@@ -24,7 +27,7 @@ export function ViewportControlsPanel() {
 
   const toolShelf = [
     { id: "select", label: "Select", command: "editor.mode.select", icon: <MousePointer2 size={14} aria-hidden="true" /> },
-    { id: "sculpt", label: "Sculpt", command: "editor.mode.voxelSculpt", icon: <ShieldCheck size={14} aria-hidden="true" /> },
+    { id: "sculpt", label: "Sculpt", command: "editor.editTool.open", icon: <ShieldCheck size={14} aria-hidden="true" /> },
     { id: "paint", label: "Paint", command: "editor.mode.voxelPaint", icon: <Paintbrush size={14} aria-hidden="true" /> },
     { id: "area", label: "Area", command: "editor.mode.area", icon: <TestTube2 size={14} aria-hidden="true" /> },
     { id: "props", label: "Props", command: "editor.mode.props", icon: <Grid3X3 size={14} aria-hidden="true" /> },
@@ -46,6 +49,14 @@ export function ViewportControlsPanel() {
   ] as const;
   const editorCamera = editorState.editorCamera;
   const activeSavedCamera = editorCamera.savedCameras.find((camera) => camera.id === editorCamera.activeSavedCameraId);
+
+  useEffect(() => {
+    const revealCameraControls = () => {
+      cameraSectionRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    window.addEventListener("drusniel:scroll-camera-controls", revealCameraControls);
+    return () => window.removeEventListener("drusniel:scroll-camera-controls", revealCameraControls);
+  }, []);
 
   const applyEditorCamera = async (operation: Promise<{ readonly ok: true; readonly data: typeof editorCamera } | { readonly ok: false; readonly message: string }>) => {
     const result = await operation;
@@ -85,12 +96,20 @@ export function ViewportControlsPanel() {
         return;
       }
       void file.text().then(async (text) => {
-        const template = JSON.parse(text) as EditorCameraTemplate;
+        let template: EditorCameraTemplate;
+        try {
+          template = JSON.parse(text) as EditorCameraTemplate;
+        } catch {
+          toast.error("Camera template is not valid JSON.");
+          return;
+        }
         const result = await runtimeClient.importEditorCameraTemplate(template);
         if (result.ok) {
           useEditorStore.getState().setEditorCamera(result.data);
+        } else {
+          toast.error(result.message);
         }
-      });
+      }).catch(() => toast.error("Failed to read camera template."));
     };
     input.click();
   };
@@ -185,7 +204,7 @@ export function ViewportControlsPanel() {
           </div>
         </section>
 
-        <section className="viewport-controls-section" data-testid="viewport-camera-controls">
+        <section ref={cameraSectionRef} className="viewport-controls-section" data-testid="viewport-camera-controls">
           <h3>Camera</h3>
           <div className="viewport-controls-toggle-grid">
             <label className="viewport-toggle">

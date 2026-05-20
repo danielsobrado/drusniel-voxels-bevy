@@ -292,6 +292,24 @@ test("voxel paint toolbar is available and updates brush controls", async ({ pag
   await expect(page.getByTestId("viewport-brush-target-face")).toHaveValue("side");
 });
 
+test("edit tool panel configures a voxel brush", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+
+  await page.getByTestId("dock-layout").getByText("Edit Tool", { exact: true }).click();
+  await expect(page.getByTestId("panel-edit-tool")).toBeVisible();
+
+  await page.getByTestId("edit-action-set").click();
+  await page.getByTestId("edit-shape-box").click();
+  await page.getByTestId("edit-material-wood").click();
+  await expect(page.getByTestId("edit-action-set")).toHaveClass(/toolbar-button-active/);
+  await expect(page.getByTestId("edit-shape-box")).toHaveClass(/toolbar-button-active/);
+  await expect(page.getByTestId("edit-material-wood")).toHaveClass(/toolbar-button-active/);
+
+  await page.getByRole("button", { name: "Open Edit Tool" }).click();
+  await expect(page.getByRole("button", { name: "Open Edit Tool" })).toBeVisible();
+});
+
 test("prop mode places a selected prop directly in the viewport", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 

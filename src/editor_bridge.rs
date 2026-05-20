@@ -15,11 +15,13 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::props::{PropConfig, PropDefinition};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{
-    editor_lights_payload, editor_placed_props_payload, handle_runtime_command_json,
-    runtime_snapshot_json, save_editor_lights, save_editor_placed_props,
+    EditorWorldSavePath, editor_lights_payload, editor_placed_props_payload,
+    handle_runtime_command_json, runtime_snapshot_json, save_editor_lights,
+    save_editor_placed_props,
 };
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
+use crate::voxel::materials::MaterialCatalog;
 use crate::voxel::meshing::{
     MeshData, MeshSettings, WaterBodyKind, WaterBodyMaterialMode, generate_chunk_mesh_with_mode,
 };
@@ -568,6 +570,7 @@ fn load_world_data_into_runtime(
     world.insert_resource(WorldBounds::from_size_chunks(
         loaded_world.world_size_chunks(),
     ));
+    world.insert_resource(EditorWorldSavePath(save_path.clone()));
     world.insert_resource(loaded_world);
 
     let loaded = world
@@ -638,7 +641,7 @@ fn frontend_world_summary_from_metadata_and_world(
         "lights": editor_lights_payload(world),
         "props": editor_placed_props_payload(world),
         "propAssets": frontend_prop_assets_payload(world),
-        "materials": [],
+        "materials": frontend_materials_payload(world),
         "viewport": {
             "chunkSize": CHUNK_SIZE_I32,
             "sampleResolution": CHUNK_SIZE,
@@ -661,6 +664,38 @@ fn frontend_prop_assets_payload(world: &World) -> Vec<Value> {
     append_prop_assets(&mut assets, "bush", &config.props.bushes);
     append_prop_assets(&mut assets, "flower", &config.props.flowers);
     assets
+}
+
+fn frontend_materials_payload(world: &World) -> Vec<Value> {
+    let catalog = world
+        .get_resource::<MaterialCatalog>()
+        .cloned()
+        .unwrap_or_default();
+
+    catalog
+        .materials
+        .iter()
+        .map(|material| {
+            json!({
+                "id": format!("mat-{}", material.id.0),
+                "name": material.name,
+                "kind": if material.material_type_id == "water" { "water" } else { "blocky" },
+                "sourcePath": format!("runtime/materials/{}", material.id.0),
+                "materialTypeId": material.material_type_id,
+                "colorRgb": material.color_rgb,
+                "metallic": material.metallic,
+                "smooth": material.smooth,
+                "emissive": material.emissive,
+                "surfaceTransmission": material.surface_transmission,
+                "absorptionLength": material.absorption_length,
+                "scatterLength": material.scatter_length,
+                "indexOfRefraction": material.index_of_refraction,
+                "phase": material.phase,
+                "strength": material.strength,
+                "defaultVoxel": voxel_material_name(material.default_voxel),
+            })
+        })
+        .collect()
 }
 
 fn append_prop_assets(

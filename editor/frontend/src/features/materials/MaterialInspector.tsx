@@ -1,4 +1,4 @@
-import type { BlockType, BlockAtlasMap, MaterialAsset } from "../../types/world";
+import type { AtlasBlockType, BlockAtlasMap, MaterialAsset } from "../../types/world";
 
 interface MaterialInspectorProps {
   readonly atlasMapping: BlockAtlasMap;
@@ -13,7 +13,7 @@ const materialShading: Record<MaterialAsset["kind"], string> = {
   water: "Water shader",
 };
 
-const detectAtlasBlock = (material: MaterialAsset): BlockType | null => {
+const detectAtlasBlock = (material: MaterialAsset): AtlasBlockType | null => {
   const id = material.id.toLowerCase();
   if (id.includes("grass")) {
     return "grass";

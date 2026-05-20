@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, ViewportExposedVoxel, ViewportMeshBuffer, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
+import type { AtlasBlockType, AtlasMapping, BlockAtlasMap, ChunkSummary, ViewportExposedVoxel, ViewportMeshBuffer, WorldSurfaceSample, WorldViewportPreview } from "../../types/world";
 
 export const MATERIAL_COLORS: Record<string, string> = {
   Air: "#171923",
@@ -130,7 +130,7 @@ export const createViewportMeshGeometry = (mesh: ViewportMeshBuffer): THREE.Buff
   return geometry;
 };
 
-export const blockForViewportMaterial = (material: WorldSurfaceSample["material"]): BlockType | null => {
+export const blockForViewportMaterial = (material: WorldSurfaceSample["material"]): AtlasBlockType | null => {
   switch (material) {
     case "TopSoil":
       return "grass";

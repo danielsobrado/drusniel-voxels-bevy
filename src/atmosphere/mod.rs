@@ -11,7 +11,8 @@ mod fog;
 
 pub use atmosphere_integration::{AtmosphereConfig, AtmosphereIntegrationPlugin};
 pub use config::{
-    FogColorModifiers, FogConfig, FogPreset, FogQuality, FogQualityTier, ScreenGodRaysConfig,
+    FogColorModifiers, FogConfig, FogFalloffMode, FogPreset, FogQuality, FogQualityTier,
+    ScreenGodRaysConfig,
 };
 pub use fog::{
     FogCamera, FogPlugin, FogUniforms, GlobalFogVolume, VolumetricFogRuntimeState,

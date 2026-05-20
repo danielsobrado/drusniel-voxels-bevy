@@ -10,6 +10,7 @@ import type { LiteVoxelEditRequest, LiteVoxelEditResponse, LiteVoxelSelection } 
 import type { ViewportModifierKey } from "../../types/editor";
 import type { PropAsset, PropInstance, ProtectedAreaKind, ProtectedAreaShape } from "../../types/world";
 import type { WaterReflectionDebugViewMode } from "../../types/world";
+import { buildRuntimeVoxelBrushRequest } from "./voxelBrushRequest";
 
 const breadcrumbPath = (kind: string, label: string) => {
   if (kind === "chunk") {
@@ -204,18 +205,27 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
 
   const setVoxelInViewer = useCallback(
     async (edit: LiteVoxelEditRequest): Promise<LiteVoxelEditResponse> => {
-      const result = await runtimeClient.setVoxel(edit.position, edit.block);
+      const state = useEditorStore.getState();
+      const brush = state.brushSettings;
+      const result = await runtimeClient.applyVoxelBrush(buildRuntimeVoxelBrushRequest(brush, edit.position, edit.block));
       if (!result.ok) {
         useEditorStore.getState().pushAgentTimelineEvent({
           kind: "warning",
-          message: `Voxel edit rejected at ${edit.position.join(", ")}: ${result.message}`,
+          message: `Voxel brush rejected at ${edit.position.join(", ")}: ${result.message}`,
         });
         return { ok: false, message: result.message };
       }
 
-      const mutation = result.data;
+      const brushResult = result.data;
+      const mutation = brushResult.results.find((candidate) => candidate.editResult === "applied" || candidate.editResult === "noChange") ?? brushResult.results[0];
+      if (!mutation) {
+        return { ok: false, message: "runtime brush returned no voxel results" };
+      }
       const position: [number, number, number] = [mutation.position[0], mutation.position[1], mutation.position[2]];
-      if (mutation.editResult !== "applied" && mutation.editResult !== "noChange") {
+      if (mutation.editResult !== "applied" && mutation.editResult !== "noChange" && brushResult.changedCount === 0) {
+        if (mutation.editResult === "skippedMask") {
+          return { ok: false, message: "no voxels matched the edit mask" };
+        }
         const message = mutation.editResult.replace(/^rejected/, "rejected ");
         useEditorStore.getState().pushAgentTimelineEvent({
           kind: "warning",
@@ -229,9 +239,10 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
         };
       }
 
-      const state = useEditorStore.getState();
-      if (mutation.editResult === "applied") {
-        state.markDirty(mutation.chunkId);
+      if (brushResult.changedCount > 0) {
+        for (const dirtyChunkId of brushResult.dirtyChunkIds) {
+          state.markDirty(dirtyChunkId);
+        }
       }
       state.setSelection({
         kind: "voxel",
@@ -241,7 +252,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
       });
       state.pushAgentTimelineEvent({
         kind: "command",
-        message: `Viewport voxel edit: set ${position.join(", ")} to ${mutation.currentVoxel ?? mutation.voxel}.`,
+        message: `Viewport voxel brush: ${brush.action} ${brushResult.changedCount}/${brushResult.affectedCount} voxel(s) at ${position.join(", ")}.`,
       });
 
       return {
@@ -261,11 +272,11 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
 
   const brushSummary = useMemo(
     () =>
-      `Radius ${editorState.brushSettings.radius}m × Strength ${editorState.brushSettings.strength} × Shape ${editorState.brushSettings.brushShape} × ${editorState.brushSettings.materialBlockId} (${editorState.brushSettings.targetFace})`,
+      `${editorState.brushSettings.action} × Radius ${editorState.brushSettings.radius}m × Shape ${editorState.brushSettings.brushShape} × ${editorState.brushSettings.materialBlockId} (${editorState.brushSettings.targetFace})`,
     [
+      editorState.brushSettings.action,
       editorState.brushSettings.materialBlockId,
       editorState.brushSettings.radius,
-      editorState.brushSettings.strength,
       editorState.brushSettings.brushShape,
       editorState.brushSettings.targetFace,
     ],
@@ -300,7 +311,7 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
 
   const toolShelf = [
     { id: "select", label: "Select", command: "editor.mode.select", icon: <MousePointer2 size={14} aria-hidden="true" />, iconAria: "Select" },
-    { id: "sculpt", label: "Sculpt", command: "editor.mode.voxelSculpt", icon: <ShieldCheck size={14} aria-hidden="true" />, iconAria: "Sculpt" },
+    { id: "sculpt", label: "Sculpt", command: "editor.editTool.open", icon: <ShieldCheck size={14} aria-hidden="true" />, iconAria: "Sculpt" },
     { id: "paint", label: "Paint", command: "editor.mode.voxelPaint", icon: <Paintbrush size={14} aria-hidden="true" />, iconAria: "Paint" },
     { id: "area", label: "Area", command: "editor.mode.area", icon: <TestTube2 size={14} aria-hidden="true" />, iconAria: "Area" },
     { id: "props", label: "Props", command: "editor.mode.props", icon: <Grid3X3 size={14} aria-hidden="true" />, iconAria: "Props" },
@@ -351,8 +362,9 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
     },
   ] as const;
 
-  const brushShapeOptions: readonly { readonly value: "cube" | "sphere" | "cylinder"; readonly label: string }[] = [
-    { value: "cube", label: "Cube" },
+  const brushShapeOptions: readonly { readonly value: "single" | "box" | "sphere" | "cylinder"; readonly label: string }[] = [
+    { value: "single", label: "Single" },
+    { value: "box", label: "Box" },
     { value: "sphere", label: "Sphere" },
     { value: "cylinder", label: "Cylinder" },
   ];

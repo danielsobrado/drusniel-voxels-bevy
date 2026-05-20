@@ -1201,6 +1201,32 @@ body {
   justify-content: center;
 }
 
+.material-swatch-chip {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 3px;
+}
+
+.inspector-field {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--editor-fg-2);
+}
+
+.inspector-field input,
+.atlas-face-block select {
+  min-width: 0;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+  padding: 6px 8px;
+  font: inherit;
+}
+
 .block-preview3d-svg {
   width: 100%;
   min-height: 150px;
@@ -2583,6 +2609,49 @@ button.asset-card {
   position: static;
 }
 
+.edit-tool-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.edit-tool-section {
+  display: grid;
+  gap: 8px;
+}
+
+.edit-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.edit-tool-toggle {
+  align-content: center;
+  grid-template-columns: auto 1fr;
+}
+
+.edit-tool-material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 6px;
+}
+
+.edit-tool-material {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.edit-tool-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--editor-border);
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
 .terrain-recipe-body {
   display: grid;
   grid-template-columns: minmax(320px, 0.95fr) minmax(320px, 1.05fr);
@@ -2710,11 +2779,18 @@ button.asset-card {
   font-size: 12px;
 }
 
+.editor-status-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 34px;
+  padding: 5px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(14, 12, 16, 0.78);
+}
+
 .editor-camera-status {
-  position: fixed;
-  right: 12px;
-  bottom: 10px;
-  z-index: 80;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2745,4 +2821,90 @@ button.asset-card {
 .editor-camera-status button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+.light-atmosphere-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.light-atmosphere-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.42);
+  border-radius: 6px;
+}
+
+.light-atmosphere-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #d9e2ef;
+}
+
+.light-atmosphere-section-title h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.light-atmosphere-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.light-atmosphere-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.light-atmosphere-vector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(90px, 1fr));
+  gap: 10px;
+}
+
+.light-atmosphere-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #9fb0c5;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.light-atmosphere-field input[type="number"],
+.light-atmosphere-field input[type="color"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.light-atmosphere-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.light-atmosphere-readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #b7c5d8;
+  font-size: 0.72rem;
+}
+
+.light-atmosphere-readouts span {
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+@media (max-width: 760px) {
+  .light-atmosphere-vector-grid {
+    grid-template-columns: 1fr;
+  }
 }

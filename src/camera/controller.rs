@@ -135,6 +135,8 @@ pub struct EditorCameraState {
     pub movement_latched: bool,
     #[serde(skip)]
     pub loaded_from_disk: bool,
+    #[serde(skip)]
+    pub loaded_save_path: Option<String>,
 }
 
 impl Default for EditorCameraState {
@@ -150,6 +152,7 @@ impl Default for EditorCameraState {
             active_saved_camera_id: None,
             movement_latched: false,
             loaded_from_disk: false,
+            loaded_save_path: None,
         }
     }
 }

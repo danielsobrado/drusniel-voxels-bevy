@@ -601,11 +601,7 @@ fn update_fog_from_atmosphere(
     // let mie_strength = atmo_settings.mie.x; // Use X component as overall strength
 
     // Calculate sun position from atmosphere settings
-    let phase = atmosphere_phase(atmo_settings);
-    let theta = phase * std::f32::consts::TAU;
-    let altitude = theta.sin(); // 1 at noon, -1 at midnight
-    let azimuth = theta.cos();
-    let sun_dir = Vec3::new(azimuth * 0.45, altitude, 0.35).normalize_or_zero();
+    let (sun_dir, altitude) = atmo_settings.sun_direction_and_altitude();
 
     // Update atmosphere sample
     atmosphere_sample.sun_dir = sun_dir;
@@ -981,17 +977,8 @@ fn twilight_factor(altitude: f32, band: f32) -> f32 {
     (1.0 - centered).powi(2) * (1.0 - altitude.abs().min(1.0))
 }
 
-fn atmosphere_phase(settings: &AtmosphereSettings) -> f32 {
-    if settings.day_length <= f32::EPSILON {
-        0.25
-    } else {
-        (settings.time / settings.day_length).rem_euclid(1.0)
-    }
-}
-
 fn fog_light_factors(settings: &AtmosphereSettings) -> (f32, f32, f32) {
-    let phase = atmosphere_phase(settings);
-    let altitude = (phase * std::f32::consts::TAU).sin();
+    let (_, altitude) = settings.sun_direction_and_altitude();
     let daylight = smoothstep(-0.1, 0.25, altitude);
     let twilight = twilight_factor(altitude, settings.twilight_band.max(0.01));
     let night = (1.0 - daylight).max(0.05);

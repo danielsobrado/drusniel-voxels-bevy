@@ -1,11 +1,11 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
-import { mockAtlasMapping, mockChunks, mockLights, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
+import { mockAtlasMapping, mockChunks, mockLights, mockMaterials, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { EditorDiagnosticsCategory, EditorDiagnosticsState, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { RenderFeatureFlag, RuntimeMetrics } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainGenerationConfig, TerrainPreviewRequest, TerrainPreviewSample, TerrainRecipe, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RuntimeMetrics, RenderFeatureFlag } from "../types/runtime";
+import type { BlockAtlasMap, BlockType, LightInstance, MaterialCatalog, MaterialPatch, PropInstance, ProtectedArea, TerrainGenerationConfig, TerrainPreviewRequest, TerrainPreviewSample, TerrainRecipe, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
-import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraState, EditorCameraTemplate, RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
+import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraState, EditorCameraTemplate, LightAtmosphereTemplate, RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot, RuntimeVoxelBrushRequest } from "./runtimeSchemas";
 import { runtimeCommandSuccess } from "./runtimeSchemas";
 
 const mockCapabilities = {
@@ -16,6 +16,7 @@ const mockCapabilities = {
   canDebugWaterReflections: true,
   canRunWaterVisualProbe: true,
   canEditAtlasMapping: true,
+  canEditMaterials: true,
   canEditProtectedAreas: true,
   canEditLights: true,
   canSaveWorldSnapshot: true,
@@ -55,6 +56,30 @@ const mockTerrainRecipe: TerrainRecipe = {
   config: mockTerrainConfig,
 };
 
+const initialMaterialCatalog: MaterialCatalog = {
+  materialTypes: [
+    { id: "terrain", name: "Terrain", materialIds: ["mat-1", "mat-2", "mat-3", "mat-5", "mat-6"] },
+    { id: "water", name: "Water and Ice", materialIds: ["mat-7"] },
+    { id: "organic", name: "Organic", materialIds: ["mat-8", "mat-9"] },
+    { id: "dungeon", name: "Dungeon", materialIds: ["mat-10", "mat-11"] },
+  ],
+  materials: [
+    { id: "mat-1", name: "Top Soil", kind: "blocky", sourcePath: "runtime/materials/1", materialTypeId: "terrain", colorRgb: [83, 128, 62], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 1, defaultVoxel: "TopSoil" },
+    { id: "mat-2", name: "Sub Soil", kind: "blocky", sourcePath: "runtime/materials/2", materialTypeId: "terrain", colorRgb: [112, 78, 48], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 1, defaultVoxel: "SubSoil" },
+    { id: "mat-3", name: "Rock", kind: "blocky", sourcePath: "runtime/materials/3", materialTypeId: "terrain", colorRgb: [112, 112, 118], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 1.8, defaultVoxel: "Rock" },
+    { id: "mat-5", name: "Sand", kind: "blocky", sourcePath: "runtime/materials/5", materialTypeId: "terrain", colorRgb: [207, 184, 119], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 0.6, defaultVoxel: "Sand" },
+    { id: "mat-6", name: "Clay", kind: "blocky", sourcePath: "runtime/materials/6", materialTypeId: "terrain", colorRgb: [142, 97, 86], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 0.8, defaultVoxel: "Clay" },
+    { id: "mat-7", name: "Water", kind: "water", sourcePath: "runtime/materials/7", materialTypeId: "water", colorRgb: [66, 152, 210], metallic: 0, smooth: 0.85, emissive: 0, surfaceTransmission: 0.72, absorptionLength: 24, scatterLength: 96, indexOfRefraction: 1.33, phase: 0, strength: 0.3, defaultVoxel: "Water" },
+    { id: "mat-8", name: "Wood", kind: "blocky", sourcePath: "runtime/materials/8", materialTypeId: "organic", colorRgb: [121, 82, 45], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 1, defaultVoxel: "Wood" },
+    { id: "mat-9", name: "Leaves", kind: "blocky", sourcePath: "runtime/materials/9", materialTypeId: "organic", colorRgb: [65, 134, 59], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 0.4, defaultVoxel: "Leaves" },
+    { id: "mat-10", name: "Dungeon Wall", kind: "blocky", sourcePath: "runtime/materials/10", materialTypeId: "dungeon", colorRgb: [84, 82, 96], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 2, defaultVoxel: "DungeonWall" },
+    { id: "mat-11", name: "Dungeon Floor", kind: "blocky", sourcePath: "runtime/materials/11", materialTypeId: "dungeon", colorRgb: [91, 87, 78], metallic: 0, smooth: 0.45, emissive: 0, surfaceTransmission: 0, absorptionLength: 0, scatterLength: 0, indexOfRefraction: 1, phase: 0, strength: 1.6, defaultVoxel: "DungeonFloor" },
+    ...mockMaterials.filter((material) => !material.id.startsWith("mat-")),
+  ],
+  palettes: [{ id: "default", name: "Default", materialIds: ["mat-1", "mat-2", "mat-3", "mat-5", "mat-6", "mat-7", "mat-8", "mat-9"] }],
+  activeMaterialId: "mat-1",
+};
+
 const mockPropStats = (props: readonly PropInstance[]) => ({
   totalInstances: props.length,
   visibleInstances: props.filter((prop) => prop.visible).length,
@@ -87,13 +112,27 @@ const boundsOverlap = (left: ProtectedArea["bounds"], right: ProtectedArea["boun
 const blockRuntimeName = (block: BlockType): string => {
   switch (block) {
     case "grass":
+    case "topSoil":
       return "TopSoil";
     case "dirt":
+    case "subSoil":
       return "SubSoil";
     case "rock":
       return "Rock";
     case "sand":
       return "Sand";
+    case "clay":
+      return "Clay";
+    case "water":
+      return "Water";
+    case "wood":
+      return "Wood";
+    case "leaves":
+      return "Leaves";
+    case "dungeonWall":
+      return "DungeonWall";
+    case "dungeonFloor":
+      return "DungeonFloor";
   }
 };
 
@@ -108,10 +147,30 @@ const defaultEditorCameraPose: EditorCameraPose = {
   orthographicScale: 96,
 };
 
+const defaultLightAtmosphereSettings: LightAtmosphereSettings = {
+  lightEnabled: true,
+  lightPreset: "sun",
+  atmospherePreset: "hazy",
+  globalPreset: "default",
+  lightColor: "#fff8f0",
+  lightIlluminance: 100000,
+  lightAzimuthDegrees: 0,
+  lightElevationDegrees: 70,
+  lightDirection: [0, 0.94, 0.34],
+  atmosphereAmount: 1,
+  atmosphereHalfLength: 220,
+  fogActive: true,
+  godRaysEnabled: false,
+  ambientColor: "#5f8fce",
+  ambientBrightness: 1200,
+};
+
 export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
   private runtimeMetrics: RuntimeMetrics = JSON.parse(JSON.stringify(mockRuntimeMetrics)) as RuntimeMetrics;
+  private lightAtmosphereSettings: LightAtmosphereSettings = { ...defaultLightAtmosphereSettings };
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
+  private materialCatalog: MaterialCatalog = JSON.parse(JSON.stringify(initialMaterialCatalog)) as MaterialCatalog;
   private atlasDirty = false;
   private props: PropInstance[] = [...mockProps];
   private lights: LightInstance[] = [...mockLights];
@@ -252,10 +311,16 @@ export class MockRuntimeClient implements RuntimeClient {
   }
 
   async updateAmbientLight(color: string, brightness: number) {
+    this.lightAtmosphereSettings = {
+      ...this.lightAtmosphereSettings,
+      ambientColor: color,
+      ambientBrightness: brightness,
+    };
     this.runtimeMetrics = {
       ...this.runtimeMetrics,
       lightingAtmosphere: {
         ...this.runtimeMetrics.lightingAtmosphere,
+        settings: this.lightAtmosphereSettings,
         ambientColor: color,
         ambientBrightness: brightness,
       },
@@ -266,6 +331,46 @@ export class MockRuntimeClient implements RuntimeClient {
       metrics: {
         lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
       },
+    });
+  }
+
+  async getLightAtmosphere() {
+    return runtimeCommandSuccess(this.lightAtmosphereSettings);
+  }
+
+  async updateLightAtmosphere(patch: LightAtmospherePatch) {
+    this.lightAtmosphereSettings = {
+      ...this.lightAtmosphereSettings,
+      ...patch,
+    };
+    this.runtimeMetrics = {
+      ...this.runtimeMetrics,
+      lightingAtmosphere: {
+        ...this.runtimeMetrics.lightingAtmosphere,
+        settings: this.lightAtmosphereSettings,
+        fogPreset: this.lightAtmosphereSettings.atmospherePreset,
+        fogActive: this.lightAtmosphereSettings.fogActive,
+        godRaysEnabled: this.lightAtmosphereSettings.godRaysEnabled,
+        ambientColor: this.lightAtmosphereSettings.ambientColor,
+        ambientBrightness: this.lightAtmosphereSettings.ambientBrightness,
+      },
+    };
+    return runtimeCommandSuccess({
+      settings: this.lightAtmosphereSettings,
+      metrics: {
+        lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
+      },
+    });
+  }
+
+  async importLightAtmosphereTemplate(template: LightAtmosphereTemplate) {
+    return this.updateLightAtmosphere(template.settings);
+  }
+
+  async exportLightAtmosphereTemplate() {
+    return runtimeCommandSuccess({
+      schema: "drusniel.light-atmosphere-template.v1" as const,
+      settings: this.lightAtmosphereSettings,
     });
   }
 
@@ -518,6 +623,93 @@ export class MockRuntimeClient implements RuntimeClient {
       previousVoxel: "Air",
       currentVoxel: blockRuntimeName(block),
       editResult: "applied" as const,
+    });
+  }
+
+  async paintVoxelMaterial(position: readonly [number, number, number], materialId: string) {
+    const material = this.materialCatalog.materials.find((candidate) => candidate.id === materialId) ?? this.materialCatalog.materials[0];
+    const chunk = position.map((coordinate) => Math.floor(coordinate / 16));
+    this.materialCatalog = { ...this.materialCatalog, activeMaterialId: material.id };
+    return runtimeCommandSuccess({
+      position,
+      chunkId: `chunk-${chunk[0]}-${chunk[1]}-${chunk[2]}`,
+      material,
+      previousMaterialId: "mat-1",
+      currentMaterialId: material.id,
+      previousVoxel: "TopSoil",
+      editResult: "applied" as const,
+      dirtyChunkIds: [`chunk-${chunk[0]}-${chunk[1]}-${chunk[2]}`],
+    });
+  }
+
+  async pickVoxelMaterial(position: readonly [number, number, number]) {
+    const material = this.materialCatalog.materials.find((candidate) => candidate.id === this.materialCatalog.activeMaterialId) ?? this.materialCatalog.materials[0];
+    return runtimeCommandSuccess({
+      position,
+      voxel: material.defaultVoxel ?? "TopSoil",
+      material,
+    });
+  }
+
+  async replaceMaterial(fromMaterialId: string, toMaterialId: string) {
+    const toMaterial = this.materialCatalog.materials.find((material) => material.id === toMaterialId) ?? this.materialCatalog.materials[0];
+    return runtimeCommandSuccess({
+      fromMaterialId,
+      toMaterialId: toMaterial.id,
+      toMaterial,
+      changedCount: 12,
+      noChangeCount: 0,
+      skippedCount: 0,
+      dirtyChunkIds: ["chunk-0-0-0"],
+    });
+  }
+
+  async updateMaterial(materialId: string, patch: MaterialPatch) {
+    let updated = this.materialCatalog.materials.find((material) => material.id === materialId) ?? this.materialCatalog.materials[0];
+    updated = { ...updated, ...patch };
+    this.materialCatalog = {
+      ...this.materialCatalog,
+      materials: this.materialCatalog.materials.map((material) => (material.id === updated.id ? updated : material)),
+    };
+    return runtimeCommandSuccess({
+      material: updated,
+      catalog: this.materialCatalog,
+    });
+  }
+
+  async setActiveMaterial(materialId: string) {
+    const material = this.materialCatalog.materials.find((candidate) => candidate.id === materialId) ?? this.materialCatalog.materials[0];
+    this.materialCatalog = { ...this.materialCatalog, activeMaterialId: material.id };
+    return runtimeCommandSuccess({
+      activeMaterialId: material.id,
+      material,
+      catalog: this.materialCatalog,
+    });
+  }
+
+  async applyVoxelBrush(brush: RuntimeVoxelBrushRequest) {
+    const chunk = brush.position.map((coordinate) => Math.floor(coordinate / 16));
+    const result = {
+      position: brush.position,
+      chunkId: `chunk-${chunk[0]}-${chunk[1]}-${chunk[2]}`,
+      block: brush.block,
+      voxel: blockRuntimeName(brush.block),
+      previousVoxel: brush.action === "set" ? "Air" : blockRuntimeName(brush.block),
+      currentVoxel: brush.action === "delete" ? "Air" : blockRuntimeName(brush.block),
+      editResult: "applied" as const,
+    };
+    return runtimeCommandSuccess({
+      origin: brush.position,
+      action: brush.action,
+      shape: brush.shape,
+      block: brush.block,
+      changedCount: 1,
+      noChangeCount: 0,
+      rejectedCount: 0,
+      skippedCount: 0,
+      affectedCount: 1,
+      dirtyChunkIds: [result.chunkId],
+      results: [result],
     });
   }
 
@@ -781,6 +973,7 @@ export class MockRuntimeClient implements RuntimeClient {
         mapping: this.atlasMapping,
         dirty: this.atlasDirty,
       },
+      materialCatalog: this.materialCatalog,
       viewportDebug: this.viewportDebug,
       editorDiagnostics: this.editorDiagnostics,
       editorCamera: this.editorCamera,

@@ -206,26 +206,28 @@ export function AppShell() {
         {runtimeState}
       </div>
       <DockLayout resetRequestId={layoutResetRequestId} runCommand={runCommandById} />
-      <div className="editor-camera-status" data-testid="editor-camera-status">
-        <span>{editorCamera.interactionMode === "movement" ? "Movement" : "Menu"}</span>
-        <span>{editorCamera.cameraKind === "arcball" ? "Arcball" : "First Person"}</span>
-        <span>{editorCamera.projection === "orthographic" ? "Orthographic" : "Perspective"}</span>
-        <button
-          type="button"
-          aria-label="Previous saved camera"
-          disabled={editorCamera.savedCameras.length === 0}
-          onClick={() => void runCommandById("editor.camera.saved.previous")}
-        >
-          Prev
-        </button>
-        <button
-          type="button"
-          aria-label="Next saved camera"
-          disabled={editorCamera.savedCameras.length === 0}
-          onClick={() => void runCommandById("editor.camera.saved.next")}
-        >
-          Next
-        </button>
+      <div className="editor-status-bar">
+        <div className="editor-camera-status" data-testid="editor-camera-status">
+          <span>{editorCamera.interactionMode === "movement" ? "Movement" : "Menu"}</span>
+          <span>{editorCamera.cameraKind === "arcball" ? "Arcball" : "First Person"}</span>
+          <span>{editorCamera.projection === "orthographic" ? "Orthographic" : "Perspective"}</span>
+          <button
+            type="button"
+            aria-label="Previous saved camera"
+            disabled={editorCamera.savedCameras.length === 0}
+            onClick={() => void runCommandById("editor.camera.saved.previous")}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            aria-label="Next saved camera"
+            disabled={editorCamera.savedCameras.length === 0}
+            onClick={() => void runCommandById("editor.camera.saved.next")}
+          >
+            Next
+          </button>
+        </div>
       </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runCommand={runCommandById} />
       <input

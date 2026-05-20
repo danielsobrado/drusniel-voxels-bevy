@@ -5,7 +5,18 @@ interface VoxelPaletteProps {
   readonly onMaterialChange: (nextMaterial: BrushSettings["materialBlockId"]) => void;
 }
 
-const paletteBlocks = ["grass", "dirt", "rock", "sand"] as const;
+const paletteBlocks: readonly BrushSettings["materialBlockId"][] = [
+  "topSoil",
+  "subSoil",
+  "rock",
+  "sand",
+  "clay",
+  "water",
+  "wood",
+  "leaves",
+  "dungeonWall",
+  "dungeonFloor",
+];
 
 export function VoxelPalette({ selectedMaterial, onMaterialChange }: VoxelPaletteProps) {
   return (

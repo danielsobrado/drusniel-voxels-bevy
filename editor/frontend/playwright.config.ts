@@ -11,7 +11,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `pnpm dev --host 127.0.0.1 --port ${testPort}`,
+    command: `node ./node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${testPort}`,
     url: `http://127.0.0.1:${testPort}`,
     reuseExistingServer: false,
     timeout: 120000,

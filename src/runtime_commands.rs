@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bevy::camera::ScalingMode;
@@ -19,6 +19,9 @@ use crate::camera::controller::{
 use crate::constants::CHUNK_SIZE_I32;
 use crate::editor_diagnostics::{
     EditorDiagnosticsCategory, EditorDiagnosticsState, normalize_editor_diagnostics_categories,
+};
+use crate::environment::{
+    AtmosphereSettings, light_angles_from_direction,
 };
 use crate::interaction::{
     DebugDetailToggles, DebugOverlayState, SelectedBlock, SelectedProp, TargetedBlock,
@@ -53,12 +56,13 @@ use crate::terrain::generation::config::{
     terrain_config_fingerprint,
 };
 use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::materials::{MaterialCatalog, MaterialId, VoxelMaterialDefinition};
 use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::terrain::{Biome, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise};
 use crate::voxel::types::VoxelType;
-use crate::voxel::world::VoxelWorld;
+use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use crate::world_rules::{
     ProtectedArea, ProtectedAreaPatch, ProtectedAreaRegistry, ProtectedEditIntent,
     WORLD_RULES_PATH, validate_protected_area,
@@ -67,8 +71,8 @@ use crate::world_rules::{
 const ATLAS_TILE_COUNT: u32 = 64;
 const EDITOR_PLACED_PROPS_SAVE_PATH: &str = "saves/editor_placed_props.json";
 const EDITOR_LIGHTS_SAVE_PATH: &str = "saves/editor_lights.json";
-const EDITOR_CAMERA_SAVE_PATH: &str = "world_data.cameras.json";
 const EDITOR_CAMERA_TEMPLATE_SCHEMA: &str = "drusniel.camera-template.v1";
+const LIGHT_ATMOSPHERE_TEMPLATE_SCHEMA: &str = "drusniel.light-atmosphere-template.v1";
 const TERRAIN_PREVIEW_MIN_RESOLUTION: u32 = 4;
 const TERRAIN_PREVIEW_MAX_RESOLUTION: u32 = 128;
 const TERRAIN_PREVIEW_MAX_SIZE_VOXELS: u32 = 2048;
@@ -76,6 +80,15 @@ const TERRAIN_PREVIEW_MAX_CELLS: u32 = 16_384;
 const TERRAIN_PREVIEW_MAX_OCTAVES: u32 = 16;
 
 pub struct RuntimeWriteCommandPlugin;
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub struct EditorWorldSavePath(pub String);
+
+impl Default for EditorWorldSavePath {
+    fn default() -> Self {
+        Self(persistence::WORLD_SAVE_PATH.to_string())
+    }
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct EditorPropInstanceId(pub String);
@@ -154,6 +167,95 @@ pub struct EditorLightPatch {
     pub source: Option<EditorLightSource>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LightPreset {
+    Sun,
+    Moon,
+    NoneEmissivesOnly,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AtmospherePreset {
+    Void,
+    Clear,
+    Hazy,
+    Fog,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum GlobalLightAtmospherePreset {
+    Default,
+    Neutral,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightAtmosphereSettingsPayload {
+    pub light_enabled: bool,
+    pub light_preset: LightPreset,
+    pub atmosphere_preset: AtmospherePreset,
+    pub global_preset: GlobalLightAtmospherePreset,
+    pub light_color: String,
+    pub light_illuminance: f32,
+    pub light_azimuth_degrees: f32,
+    pub light_elevation_degrees: f32,
+    pub light_direction: [f32; 3],
+    pub atmosphere_amount: f32,
+    pub atmosphere_half_length: f32,
+    pub fog_active: bool,
+    pub god_rays_enabled: bool,
+    pub ambient_color: String,
+    pub ambient_brightness: f32,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightAtmospherePatch {
+    pub light_enabled: Option<bool>,
+    pub light_preset: Option<LightPreset>,
+    pub atmosphere_preset: Option<AtmospherePreset>,
+    pub global_preset: Option<GlobalLightAtmospherePreset>,
+    pub light_color: Option<String>,
+    pub light_illuminance: Option<f32>,
+    pub light_azimuth_degrees: Option<f32>,
+    pub light_elevation_degrees: Option<f32>,
+    pub light_direction: Option<[f32; 3]>,
+    pub atmosphere_amount: Option<f32>,
+    pub atmosphere_half_length: Option<f32>,
+    pub ambient_color: Option<String>,
+    pub ambient_brightness: Option<f32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightAtmosphereTemplate {
+    pub schema: String,
+    pub settings: LightAtmosphereSettingsPayload,
+}
+
+impl From<LightAtmosphereSettingsPayload> for LightAtmospherePatch {
+    fn from(settings: LightAtmosphereSettingsPayload) -> Self {
+        Self {
+            light_enabled: Some(settings.light_enabled),
+            light_preset: Some(settings.light_preset),
+            atmosphere_preset: Some(settings.atmosphere_preset),
+            global_preset: Some(settings.global_preset),
+            light_color: Some(settings.light_color),
+            light_illuminance: Some(settings.light_illuminance),
+            light_azimuth_degrees: Some(settings.light_azimuth_degrees),
+            light_elevation_degrees: Some(settings.light_elevation_degrees),
+            light_direction: Some(settings.light_direction),
+            atmosphere_amount: Some(settings.atmosphere_amount),
+            atmosphere_half_length: Some(settings.atmosphere_half_length),
+            ambient_color: Some(settings.ambient_color),
+            ambient_brightness: Some(settings.ambient_brightness),
+        }
+    }
+}
+
 impl Plugin for RuntimeWriteCommandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RuntimeCommandQueue>()
@@ -161,8 +263,10 @@ impl Plugin for RuntimeWriteCommandPlugin {
             .init_resource::<RuntimeViewportDebugState>()
             .init_resource::<EditorDiagnosticsState>()
             .init_resource::<EditorCameraState>()
+            .init_resource::<EditorWorldSavePath>()
             .init_resource::<EditorPlacedProps>()
             .init_resource::<EditorPlacedLights>()
+            .init_resource::<MaterialCatalog>()
             .add_systems(
                 Update,
                 (
@@ -312,6 +416,14 @@ pub enum RuntimeWriteCommand {
     },
     #[serde(rename = "runtime.updateAmbientLight")]
     UpdateAmbientLight { color: String, brightness: f32 },
+    #[serde(rename = "runtime.getLightAtmosphere")]
+    GetLightAtmosphere {},
+    #[serde(rename = "runtime.updateLightAtmosphere")]
+    UpdateLightAtmosphere { patch: LightAtmospherePatch },
+    #[serde(rename = "runtime.importLightAtmosphereTemplate")]
+    ImportLightAtmosphereTemplate { template: Value },
+    #[serde(rename = "runtime.exportLightAtmosphereTemplate")]
+    ExportLightAtmosphereTemplate {},
     #[serde(rename = "runtime.setWaterReflectionDebugMode")]
     SetWaterReflectionDebugMode {
         #[serde(rename = "waterBodyId")]
@@ -335,6 +447,34 @@ pub enum RuntimeWriteCommand {
         position: [i32; 3],
         block: FrontendVoxelBlock,
     },
+    #[serde(rename = "runtime.paintVoxelMaterial")]
+    PaintVoxelMaterial {
+        position: [i32; 3],
+        #[serde(rename = "materialId")]
+        material_id: String,
+    },
+    #[serde(rename = "runtime.pickVoxelMaterial")]
+    PickVoxelMaterial { position: [i32; 3] },
+    #[serde(rename = "runtime.replaceMaterial")]
+    ReplaceMaterial {
+        #[serde(rename = "fromMaterialId")]
+        from_material_id: String,
+        #[serde(rename = "toMaterialId")]
+        to_material_id: String,
+    },
+    #[serde(rename = "runtime.updateMaterial")]
+    UpdateMaterial {
+        #[serde(rename = "materialId")]
+        material_id: String,
+        patch: FrontendMaterialPatch,
+    },
+    #[serde(rename = "runtime.setActiveMaterial")]
+    SetActiveMaterial {
+        #[serde(rename = "materialId")]
+        material_id: String,
+    },
+    #[serde(rename = "runtime.applyVoxelBrush")]
+    ApplyVoxelBrush { brush: FrontendVoxelBrush },
     #[serde(rename = "runtime.setViewportDebugOverlay")]
     SetViewportDebugOverlay {
         overlay: FrontendViewportDebugOverlay,
@@ -443,9 +583,72 @@ fn default_naadf_ray_purpose() -> String {
 #[serde(rename_all = "camelCase")]
 pub enum FrontendVoxelBlock {
     Grass,
+    TopSoil,
     Dirt,
+    SubSoil,
     Rock,
     Sand,
+    Clay,
+    Water,
+    Wood,
+    Leaves,
+    DungeonWall,
+    DungeonFloor,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendVoxelBrushAction {
+    Set,
+    Delete,
+    Paint,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendVoxelBrushShape {
+    Single,
+    Box,
+    Sphere,
+    Cylinder,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontendVoxelBrushMask {
+    Any,
+    Empty,
+    Occupied,
+    Material,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendVoxelBrush {
+    pub position: [i32; 3],
+    pub action: FrontendVoxelBrushAction,
+    pub shape: FrontendVoxelBrushShape,
+    pub block: FrontendVoxelBlock,
+    #[serde(default = "default_voxel_brush_radius")]
+    pub radius: u32,
+    #[serde(default = "default_voxel_brush_size")]
+    pub size: [u32; 3],
+    #[serde(default = "default_voxel_brush_mask")]
+    pub mask: FrontendVoxelBrushMask,
+    #[serde(rename = "maskBlock")]
+    pub mask_block: Option<FrontendVoxelBlock>,
+}
+
+fn default_voxel_brush_radius() -> u32 {
+    1
+}
+
+fn default_voxel_brush_size() -> [u32; 3] {
+    [1, 1, 1]
+}
+
+fn default_voxel_brush_mask() -> FrontendVoxelBrushMask {
+    FrontendVoxelBrushMask::Any
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -468,19 +671,33 @@ pub struct TerrainPreviewRequest {
 impl FrontendVoxelBlock {
     fn as_runtime(self) -> VoxelType {
         match self {
-            Self::Grass => VoxelType::TopSoil,
-            Self::Dirt => VoxelType::SubSoil,
+            Self::Grass | Self::TopSoil => VoxelType::TopSoil,
+            Self::Dirt | Self::SubSoil => VoxelType::SubSoil,
             Self::Rock => VoxelType::Rock,
             Self::Sand => VoxelType::Sand,
+            Self::Clay => VoxelType::Clay,
+            Self::Water => VoxelType::Water,
+            Self::Wood => VoxelType::Wood,
+            Self::Leaves => VoxelType::Leaves,
+            Self::DungeonWall => VoxelType::DungeonWall,
+            Self::DungeonFloor => VoxelType::DungeonFloor,
         }
     }
 
     fn as_frontend_str(self) -> &'static str {
         match self {
             Self::Grass => "grass",
+            Self::TopSoil => "topSoil",
             Self::Dirt => "dirt",
+            Self::SubSoil => "subSoil",
             Self::Rock => "rock",
             Self::Sand => "sand",
+            Self::Clay => "clay",
+            Self::Water => "water",
+            Self::Wood => "wood",
+            Self::Leaves => "leaves",
+            Self::DungeonWall => "dungeonWall",
+            Self::DungeonFloor => "dungeonFloor",
         }
     }
 }
@@ -593,6 +810,21 @@ pub struct FrontendWaterBodyPatch {
     pub reflection_strength: Option<f32>,
     pub fresnel_power: Option<f32>,
     pub distortion_strength: Option<f32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendMaterialPatch {
+    pub name: Option<String>,
+    pub color_rgb: Option<[u8; 3]>,
+    pub metallic: Option<f32>,
+    pub smooth: Option<f32>,
+    pub emissive: Option<f32>,
+    pub surface_transmission: Option<f32>,
+    pub absorption_length: Option<f32>,
+    pub scatter_length: Option<f32>,
+    pub index_of_refraction: Option<f32>,
+    pub phase: Option<f32>,
 }
 
 impl FrontendWaterReflectionDebugViewMode {
@@ -818,6 +1050,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
             "canDebugWaterReflections": true,
             "canRunWaterVisualProbe": true,
             "canEditAtlasMapping": true,
+            "canEditMaterials": true,
             "canEditProtectedAreas": true,
             "canEditLights": true,
             "canSaveWorldSnapshot": false,
@@ -840,6 +1073,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
             "mapping": frontend_atlas_mapping_payload(&atlas_mapping),
             "dirty": atlas_mapping.needs_rebuild,
         },
+        "materialCatalog": material_catalog_payload(world),
         "viewportDebug": viewport_debug,
         "editorDiagnostics": editor_diagnostics,
         "editorCamera": editor_camera,
@@ -900,10 +1134,36 @@ fn editor_camera_payload(world: &World) -> Value {
     )
 }
 
+fn editor_world_save_path(world: &World) -> String {
+    world
+        .get_resource::<EditorWorldSavePath>()
+        .map(|path| path.0.clone())
+        .unwrap_or_else(|| persistence::WORLD_SAVE_PATH.to_string())
+}
+
+fn editor_camera_sidecar_path(save_path: &str) -> PathBuf {
+    let mut sidecar_path = PathBuf::from(save_path);
+    sidecar_path.set_extension("cameras.json");
+    sidecar_path
+}
+
+fn editor_camera_save_path(world: &World) -> PathBuf {
+    editor_camera_sidecar_path(&editor_world_save_path(world))
+}
+
+fn editor_camera_save_path_label(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 fn load_saved_editor_cameras(world: &mut World) {
+    let save_path = editor_camera_save_path(world);
+    let save_path_label = editor_camera_save_path_label(&save_path);
     let already_loaded = world
         .get_resource::<EditorCameraState>()
-        .map(|state| state.loaded_from_disk)
+        .map(|state| {
+            state.loaded_from_disk
+                && state.loaded_save_path.as_deref() == Some(save_path_label.as_str())
+        })
         .unwrap_or_default();
     if already_loaded {
         return;
@@ -914,38 +1174,52 @@ fn load_saved_editor_cameras(world: &mut World) {
         .cloned()
         .unwrap_or_default();
     state.loaded_from_disk = true;
+    state.loaded_save_path = Some(save_path_label.clone());
+    state.saved_cameras.clear();
+    state.active_saved_camera_id = None;
 
-    match fs::read_to_string(EDITOR_CAMERA_SAVE_PATH) {
+    match fs::read_to_string(&save_path) {
         Ok(contents) => match serde_json::from_str::<EditorCameraTemplate>(&contents) {
             Ok(template) if template.schema == EDITOR_CAMERA_TEMPLATE_SCHEMA => {
                 state.saved_cameras = template.cameras;
+                state.active_saved_camera_id =
+                    state.saved_cameras.first().map(|saved| saved.id.clone());
             }
             Ok(_) => warn!(
                 "Ignored editor camera file {}; schema did not match {}",
-                EDITOR_CAMERA_SAVE_PATH, EDITOR_CAMERA_TEMPLATE_SCHEMA
+                save_path_label, EDITOR_CAMERA_TEMPLATE_SCHEMA
             ),
             Err(err) => warn!(
                 "Failed to parse editor camera file {}: {}",
-                EDITOR_CAMERA_SAVE_PATH, err
+                save_path_label, err
             ),
         },
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => warn!(
             "Failed to read editor camera file {}: {}",
-            EDITOR_CAMERA_SAVE_PATH, err
+            save_path_label, err
         ),
     }
 
     world.insert_resource(state);
 }
 
-fn save_editor_cameras_to_disk(state: &EditorCameraState) -> Result<(), String> {
+fn save_editor_cameras_to_disk(world: &World) -> Result<(), String> {
+    let state = world
+        .get_resource::<EditorCameraState>()
+        .ok_or_else(|| "EditorCameraState resource is not available.".to_string())?;
     let template = EditorCameraTemplate {
         schema: EDITOR_CAMERA_TEMPLATE_SCHEMA.to_string(),
         cameras: state.saved_cameras.clone(),
     };
     let json = serde_json::to_string_pretty(&template).map_err(|err| err.to_string())?;
-    fs::write(EDITOR_CAMERA_SAVE_PATH, json).map_err(|err| err.to_string())
+    let save_path = editor_camera_save_path(world);
+    if let Some(parent) = save_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+        }
+    }
+    fs::write(save_path, json).map_err(|err| err.to_string())
 }
 
 fn apply_editor_camera_to_runtime(world: &mut World) -> Result<(), String> {
@@ -1398,6 +1672,68 @@ fn validate_editor_light_patch(patch: &EditorLightPatch, errors: &mut Vec<String
     }
 }
 
+fn validate_light_atmosphere_patch(patch: &LightAtmospherePatch, errors: &mut Vec<String>) {
+    if patch
+        .light_color
+        .as_ref()
+        .is_some_and(|color| parse_hex_color(color).is_none())
+    {
+        errors.push("lightColor must be a #RRGGBB color.".to_string());
+    }
+    if patch
+        .ambient_color
+        .as_ref()
+        .is_some_and(|color| parse_hex_color(color).is_none())
+    {
+        errors.push("ambientColor must be a #RRGGBB color.".to_string());
+    }
+    if patch
+        .light_illuminance
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        errors.push("lightIlluminance must be a finite non-negative number.".to_string());
+    }
+    if patch
+        .light_azimuth_degrees
+        .is_some_and(|value| !value.is_finite() || !(-360.0..=360.0).contains(&value))
+    {
+        errors.push("lightAzimuthDegrees must be finite and between -360 and 360.".to_string());
+    }
+    if patch
+        .light_elevation_degrees
+        .is_some_and(|value| !value.is_finite() || !(-90.0..=90.0).contains(&value))
+    {
+        errors.push("lightElevationDegrees must be finite and between -90 and 90.".to_string());
+    }
+    if let Some(direction) = &patch.light_direction {
+        validate_finite_vec3("lightDirection", direction, errors);
+        if direction
+            .iter()
+            .all(|component| component.abs() <= f32::EPSILON)
+        {
+            errors.push("lightDirection must not be the zero vector.".to_string());
+        }
+    }
+    if patch
+        .atmosphere_amount
+        .is_some_and(|value| !value.is_finite() || !(0.0..=8.0).contains(&value))
+    {
+        errors.push("atmosphereAmount must be finite and between 0 and 8.".to_string());
+    }
+    if patch
+        .atmosphere_half_length
+        .is_some_and(|value| !value.is_finite() || !(1.0..=100_000.0).contains(&value))
+    {
+        errors.push("atmosphereHalfLength must be finite and between 1 and 100000.".to_string());
+    }
+    if patch
+        .ambient_brightness
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        errors.push("ambientBrightness must be a finite non-negative number.".to_string());
+    }
+}
+
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -1484,6 +1820,14 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 errors.push("brightness must be a finite non-negative number.".to_string());
             }
         }
+        RuntimeWriteCommand::UpdateLightAtmosphere { patch } => {
+            validate_light_atmosphere_patch(patch, &mut errors);
+        }
+        RuntimeWriteCommand::ImportLightAtmosphereTemplate { template } => {
+            if !template.is_object() {
+                errors.push("template must be an object.".to_string());
+            }
+        }
         RuntimeWriteCommand::UpdateWaterBody {
             water_body_id,
             patch,
@@ -1550,6 +1894,31 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         RuntimeWriteCommand::SetAtlasMapping { mapping }
         | RuntimeWriteCommand::SaveAtlasMapping { mapping } => {
             validate_atlas_mapping(mapping, &mut errors);
+        }
+        RuntimeWriteCommand::PaintVoxelMaterial { material_id, .. }
+        | RuntimeWriteCommand::SetActiveMaterial { material_id }
+        | RuntimeWriteCommand::UpdateMaterial { material_id, .. } => {
+            if parse_material_id(material_id).is_none() {
+                errors.push(format!(
+                    "materialId '{material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                ));
+            }
+        }
+        RuntimeWriteCommand::PickVoxelMaterial { .. } => {}
+        RuntimeWriteCommand::ReplaceMaterial {
+            from_material_id,
+            to_material_id,
+        } => {
+            if parse_material_id(from_material_id).is_none() {
+                errors.push(format!(
+                    "fromMaterialId '{from_material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                ));
+            }
+            if parse_material_id(to_material_id).is_none() {
+                errors.push(format!(
+                    "toMaterialId '{to_material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                ));
+            }
         }
         RuntimeWriteCommand::ScatterProps { props } => {
             if props.is_empty() {
@@ -1624,7 +1993,8 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::AlignEditorCameraToAxes { .. }
         | RuntimeWriteCommand::AddSavedEditorCamera { .. }
         | RuntimeWriteCommand::ExportEditorCameraTemplate {}
-        | RuntimeWriteCommand::SetVoxel { .. }
+        | RuntimeWriteCommand::GetLightAtmosphere {}
+        | RuntimeWriteCommand::ExportLightAtmosphereTemplate {}
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
         | RuntimeWriteCommand::SetEditorDiagnostics { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
@@ -1634,6 +2004,10 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::SaveProtectedAreas {}
         | RuntimeWriteCommand::LoadProtectedAreas {}
         | RuntimeWriteCommand::SaveWorldSnapshot { .. } => {}
+        RuntimeWriteCommand::SetVoxel { .. } => {}
+        RuntimeWriteCommand::ApplyVoxelBrush { brush } => {
+            validate_voxel_brush(brush, &mut errors);
+        }
     }
 
     if errors.is_empty() {
@@ -2172,11 +2546,7 @@ fn execute_runtime_write_command(
                 state.saved_cameras.push(saved.clone());
                 saved
             };
-            match world
-                .get_resource::<EditorCameraState>()
-                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
-                .and_then(save_editor_cameras_to_disk)
-            {
+            match save_editor_cameras_to_disk(world) {
                 Ok(()) => RuntimeCommandResult::success(json!({
                     "camera": saved,
                     "editorCamera": editor_camera_payload(world),
@@ -2222,11 +2592,7 @@ fn execute_runtime_write_command(
                 saved.updated_at = timestamp_string();
                 saved.clone()
             };
-            match world
-                .get_resource::<EditorCameraState>()
-                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
-                .and_then(save_editor_cameras_to_disk)
-            {
+            match save_editor_cameras_to_disk(world) {
                 Ok(()) => RuntimeCommandResult::success(json!({
                     "camera": updated,
                     "editorCamera": editor_camera_payload(world),
@@ -2248,11 +2614,7 @@ fn execute_runtime_write_command(
                 }
                 before != state.saved_cameras.len()
             };
-            match world
-                .get_resource::<EditorCameraState>()
-                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
-                .and_then(save_editor_cameras_to_disk)
-            {
+            match save_editor_cameras_to_disk(world) {
                 Ok(()) => RuntimeCommandResult::success(json!({
                     "cameraId": camera_id,
                     "deleted": deleted,
@@ -2342,11 +2704,7 @@ fn execute_runtime_write_command(
                 state.active_saved_camera_id =
                     state.saved_cameras.first().map(|saved| saved.id.clone());
             }
-            match world
-                .get_resource::<EditorCameraState>()
-                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
-                .and_then(save_editor_cameras_to_disk)
-            {
+            match save_editor_cameras_to_disk(world) {
                 Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
                 Err(message) => {
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
@@ -2397,6 +2755,48 @@ fn execute_runtime_write_command(
                 }
             }
         }
+        RuntimeWriteCommand::GetLightAtmosphere {} => {
+            RuntimeCommandResult::success(light_atmosphere_payload(world))
+        }
+        RuntimeWriteCommand::UpdateLightAtmosphere { patch } => {
+            match update_light_atmosphere(world, patch) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::ImportLightAtmosphereTemplate { template } => {
+            let template = match serde_json::from_value::<LightAtmosphereTemplate>(template) {
+                Ok(template) if template.schema == LIGHT_ATMOSPHERE_TEMPLATE_SCHEMA => template,
+                Ok(_) => {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![format!(
+                            "Light and atmosphere template schema must be {LIGHT_ATMOSPHERE_TEMPLATE_SCHEMA}."
+                        )],
+                    );
+                }
+                Err(err) => {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![err.to_string()],
+                    );
+                }
+            };
+            match update_light_atmosphere(world, LightAtmospherePatch::from(template.settings)) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::ExportLightAtmosphereTemplate {} => {
+            RuntimeCommandResult::success(json!({
+                "schema": LIGHT_ATMOSPHERE_TEMPLATE_SCHEMA,
+                "settings": light_atmosphere_payload(world),
+            }))
+        }
         RuntimeWriteCommand::SetWaterReflectionDebugMode {
             water_body_id,
             mode,
@@ -2435,6 +2835,55 @@ fn execute_runtime_write_command(
                 IVec3::new(position[0], position[1], position[2]),
                 block,
             ) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::PaintVoxelMaterial {
+            position,
+            material_id,
+        } => match paint_runtime_voxel_material(
+            world,
+            IVec3::new(position[0], position[1], position[2]),
+            &material_id,
+        ) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::PickVoxelMaterial { position } => match pick_runtime_voxel_material(
+            world,
+            IVec3::new(position[0], position[1], position[2]),
+        ) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::ReplaceMaterial {
+            from_material_id,
+            to_material_id,
+        } => match replace_runtime_material(world, &from_material_id, &to_material_id) {
+            Ok(data) => RuntimeCommandResult::success(data),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::UpdateMaterial { material_id, patch } => {
+            match update_runtime_material(world, &material_id, patch) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::SetActiveMaterial { material_id } => {
+            match set_active_runtime_material(world, &material_id) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::ApplyVoxelBrush { brush } => {
+            match apply_runtime_voxel_brush(world, &brush) {
                 Ok(data) => RuntimeCommandResult::success(data),
                 Err(message) => {
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
@@ -2713,6 +3162,7 @@ fn execute_runtime_write_command(
 
             let result = persistence::editor_save_default_world(voxel_world);
             if result.saved {
+                world.insert_resource(EditorWorldSavePath(result.save_path.clone()));
                 let (editor_prop_count, editor_prop_save_path) =
                     match save_editor_placed_props(world) {
                         Ok(summary) => summary,
@@ -2923,46 +3373,480 @@ fn voxel_ray_hit_payload(hit: &crate::rendering::voxel_ray_backend::VoxelRayHit)
     })
 }
 
-fn set_runtime_voxel(
+fn validate_voxel_brush(brush: &FrontendVoxelBrush, errors: &mut Vec<String>) {
+    if brush.radius == 0 || brush.radius > 32 {
+        errors.push("brush.radius must be between 1 and 32.".to_string());
+    }
+    if brush
+        .size
+        .iter()
+        .any(|component| *component == 0 || *component > 64)
+    {
+        errors.push("brush.size dimensions must be between 1 and 64.".to_string());
+    }
+    if brush.mask == FrontendVoxelBrushMask::Material && brush.mask_block.is_none() {
+        errors.push("brush.maskBlock is required when mask is material.".to_string());
+    }
+}
+
+fn apply_runtime_voxel_brush(
     world: &mut World,
-    position: IVec3,
-    block: FrontendVoxelBlock,
+    brush: &FrontendVoxelBrush,
 ) -> Result<Value, String> {
-    let voxel = block.as_runtime();
     let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
     let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
         return Err("VoxelWorld resource is not available.".to_string());
     };
 
-    let previous = voxel_world.get_voxel(position);
-    let result = voxel_world.set_voxel_with_rules(
-        position,
-        voxel,
-        ProtectedEditIntent::Paint,
-        registry.as_ref(),
-    );
-    let current = voxel_world.get_voxel(position);
+    let target_voxel = match brush.action {
+        FrontendVoxelBrushAction::Delete => VoxelType::Air,
+        FrontendVoxelBrushAction::Set | FrontendVoxelBrushAction::Paint => brush.block.as_runtime(),
+    };
+    let intent = match brush.action {
+        FrontendVoxelBrushAction::Set => ProtectedEditIntent::Place,
+        FrontendVoxelBrushAction::Paint => ProtectedEditIntent::Paint,
+        FrontendVoxelBrushAction::Delete => ProtectedEditIntent::Mine,
+    };
 
-    if result.rejected() {
+    let positions = expand_voxel_brush_positions(brush);
+    let mut applied = 0u32;
+    let mut no_change = 0u32;
+    let mut rejected = 0u32;
+    let mut skipped = 0u32;
+    let mut dirty_chunk_ids = BTreeSet::new();
+    let mut results = Vec::with_capacity(positions.len().min(256));
+
+    for position in positions {
+        let previous = voxel_world.get_voxel(position);
+        if !voxel_brush_mask_allows(previous, brush)
+            || !voxel_brush_action_allows(previous, brush.action)
+        {
+            skipped += 1;
+            results.push(voxel_brush_result_payload(
+                position,
+                brush.block,
+                previous,
+                previous,
+                "skippedMask",
+            ));
+            continue;
+        }
+
+        let result =
+            voxel_world.set_voxel_with_rules(position, target_voxel, intent, registry.as_ref());
+        let current = voxel_world.get_voxel(position);
+        match result {
+            VoxelEditResult::Applied => {
+                applied += 1;
+                let chunk = VoxelWorld::world_to_chunk(position);
+                dirty_chunk_ids.insert(chunk_id_string(chunk));
+            }
+            VoxelEditResult::NoChange => no_change += 1,
+            _ => rejected += 1,
+        }
+        results.push(voxel_brush_result_payload(
+            position,
+            brush.block,
+            previous,
+            current,
+            voxel_edit_result_to_frontend(result),
+        ));
+    }
+
+    dirty_chunk_ids.extend(voxel_world.derived_dirty_chunks().map(chunk_id_string));
+
+    Ok(json!({
+        "origin": brush.position,
+        "action": voxel_brush_action_to_frontend(brush.action),
+        "shape": voxel_brush_shape_to_frontend(brush.shape),
+        "block": brush.block.as_frontend_str(),
+        "changedCount": applied,
+        "noChangeCount": no_change,
+        "rejectedCount": rejected,
+        "skippedCount": skipped,
+        "affectedCount": results.len(),
+        "dirtyChunkIds": dirty_chunk_ids.into_iter().collect::<Vec<_>>(),
+        "results": results,
+    }))
+}
+
+fn set_runtime_voxel(
+    world: &mut World,
+    position: IVec3,
+    block: FrontendVoxelBlock,
+) -> Result<Value, String> {
+    let brush = FrontendVoxelBrush {
+        position: [position.x, position.y, position.z],
+        action: FrontendVoxelBrushAction::Set,
+        shape: FrontendVoxelBrushShape::Single,
+        block,
+        radius: 1,
+        size: [1, 1, 1],
+        mask: FrontendVoxelBrushMask::Any,
+        mask_block: None,
+    };
+    let data = apply_runtime_voxel_brush(world, &brush)?;
+    let first = data
+        .get("results")
+        .and_then(Value::as_array)
+        .and_then(|results| results.first())
+        .ok_or_else(|| "Voxel edit did not return a result.".to_string())?;
+    if first
+        .get("editResult")
+        .and_then(Value::as_str)
+        .is_some_and(|result| result.starts_with("rejected"))
+    {
         return Err(format!(
             "Voxel edit at ({}, {}, {}) was rejected: {}.",
             position.x,
             position.y,
             position.z,
-            voxel_edit_result_to_frontend(result)
+            first
+                .get("editResult")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
         ));
     }
 
+    Ok(json!({
+        "position": first["position"].clone(),
+        "chunkId": first["chunkId"].clone(),
+        "block": block.as_frontend_str(),
+        "voxel": first["voxel"].clone(),
+        "previousVoxel": first["previousVoxel"].clone(),
+        "currentVoxel": first["currentVoxel"].clone(),
+        "editResult": first["editResult"].clone(),
+    }))
+}
+
+fn paint_runtime_voxel_material(
+    world: &mut World,
+    position: IVec3,
+    material_id: &str,
+) -> Result<Value, String> {
+    let material_id = parse_material_id(material_id)
+        .ok_or_else(|| format!("Unknown material id '{material_id}'."))?;
+    let material = material_from_world(world, material_id)?;
+    let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
+    let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
+        return Err("VoxelWorld resource is not available.".to_string());
+    };
+
+    let previous_material = voxel_world.get_material_id(position);
+    let previous_voxel = voxel_world.get_voxel(position);
+    let result = voxel_world.set_material_id_with_rules(position, material_id, registry.as_ref());
+    let current_material = voxel_world.get_material_id(position);
     let chunk = VoxelWorld::world_to_chunk(position);
+
     Ok(json!({
         "position": [position.x, position.y, position.z],
-        "chunkId": format!("chunk-{}-{}-{}", chunk.x, chunk.y, chunk.z),
+        "chunkId": chunk_id_string(chunk),
+        "material": material_payload(&material),
+        "previousMaterialId": previous_material.map(material_id_string),
+        "currentMaterialId": current_material.map(material_id_string),
+        "previousVoxel": previous_voxel.map(voxel_material_name),
+        "editResult": voxel_edit_result_to_frontend(result),
+        "dirtyChunkIds": voxel_world.derived_dirty_chunks().map(chunk_id_string).collect::<Vec<_>>(),
+    }))
+}
+
+fn pick_runtime_voxel_material(world: &World, position: IVec3) -> Result<Value, String> {
+    let Some(voxel_world) = world.get_resource::<VoxelWorld>() else {
+        return Err("VoxelWorld resource is not available.".to_string());
+    };
+    let voxel = voxel_world.get_voxel(position).ok_or_else(|| {
+        format!(
+            "No voxel exists at ({}, {}, {}).",
+            position.x, position.y, position.z
+        )
+    })?;
+    let material_id = voxel_world
+        .get_material_id(position)
+        .unwrap_or_else(|| MaterialId::from_voxel(voxel));
+    let material = material_from_world(world, material_id)?;
+
+    Ok(json!({
+        "position": [position.x, position.y, position.z],
+        "voxel": voxel_material_name(voxel),
+        "material": material_payload(&material),
+    }))
+}
+
+fn replace_runtime_material(
+    world: &mut World,
+    from_material_id: &str,
+    to_material_id: &str,
+) -> Result<Value, String> {
+    let from = parse_material_id(from_material_id)
+        .ok_or_else(|| format!("Unknown material id '{from_material_id}'."))?;
+    let to = parse_material_id(to_material_id)
+        .ok_or_else(|| format!("Unknown material id '{to_material_id}'."))?;
+    ensure_material_exists(world, from)?;
+    let to_material = material_from_world(world, to)?;
+    let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
+    let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
+        return Err("VoxelWorld resource is not available.".to_string());
+    };
+    let summary = voxel_world.replace_material_id(from, to, registry.as_ref());
+
+    Ok(json!({
+        "fromMaterialId": material_id_string(from),
+        "toMaterialId": material_id_string(to),
+        "toMaterial": material_payload(&to_material),
+        "changedCount": summary.changed,
+        "noChangeCount": summary.no_change,
+        "skippedCount": summary.skipped,
+        "dirtyChunkIds": summary.dirty_chunks.into_iter().map(chunk_id_string).collect::<Vec<_>>(),
+    }))
+}
+
+fn update_runtime_material(
+    world: &mut World,
+    material_id: &str,
+    patch: FrontendMaterialPatch,
+) -> Result<Value, String> {
+    let material_id = parse_material_id(material_id)
+        .ok_or_else(|| format!("Unknown material id '{material_id}'."))?;
+    let material = {
+        let mut catalog = world
+            .get_resource_mut::<MaterialCatalog>()
+            .ok_or_else(|| "MaterialCatalog resource is not available.".to_string())?;
+        let Some(material) = catalog.material_mut(material_id) else {
+            return Err(format!(
+                "Material '{}' does not exist.",
+                material_id_string(material_id)
+            ));
+        };
+        apply_material_patch(material, patch)?;
+        material.clone()
+    };
+
+    if let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() {
+        voxel_world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::TerrainMutation);
+    }
+
+    Ok(json!({
+        "material": material_payload(&material),
+        "catalog": material_catalog_payload(world),
+    }))
+}
+
+fn set_active_runtime_material(world: &mut World, material_id: &str) -> Result<Value, String> {
+    let material_id = parse_material_id(material_id)
+        .ok_or_else(|| format!("Unknown material id '{material_id}'."))?;
+    let mut catalog = world
+        .get_resource_mut::<MaterialCatalog>()
+        .ok_or_else(|| "MaterialCatalog resource is not available.".to_string())?;
+    if !catalog.set_active_material(material_id) {
+        return Err(format!(
+            "Material '{}' does not exist.",
+            material_id_string(material_id)
+        ));
+    }
+    let material = catalog
+        .material(material_id)
+        .cloned()
+        .expect("active material was just validated");
+    drop(catalog);
+
+    Ok(json!({
+        "activeMaterialId": material_id_string(material_id),
+        "material": material_payload(&material),
+        "catalog": material_catalog_payload(world),
+    }))
+}
+
+fn ensure_material_exists(world: &World, id: MaterialId) -> Result<(), String> {
+    let catalog = world
+        .get_resource::<MaterialCatalog>()
+        .cloned()
+        .unwrap_or_default();
+    if catalog.contains_material(id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Material '{}' does not exist.",
+            material_id_string(id)
+        ))
+    }
+}
+
+fn material_from_world(world: &World, id: MaterialId) -> Result<VoxelMaterialDefinition, String> {
+    let catalog = world
+        .get_resource::<MaterialCatalog>()
+        .cloned()
+        .unwrap_or_default();
+    catalog
+        .material(id)
+        .cloned()
+        .ok_or_else(|| format!("Material '{}' does not exist.", material_id_string(id)))
+}
+
+fn apply_material_patch(
+    material: &mut VoxelMaterialDefinition,
+    patch: FrontendMaterialPatch,
+) -> Result<(), String> {
+    if let Some(name) = patch.name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Material name cannot be empty.".to_string());
+        }
+        material.name = trimmed.to_string();
+    }
+    if let Some(color_rgb) = patch.color_rgb {
+        material.color_rgb = color_rgb;
+    }
+    if let Some(value) = patch.metallic {
+        material.metallic = value.clamp(0.0, 1.0);
+    }
+    if let Some(value) = patch.smooth {
+        material.smooth = value.clamp(0.0, 1.0);
+    }
+    if let Some(value) = patch.emissive {
+        material.emissive = value.max(0.0);
+    }
+    if let Some(value) = patch.surface_transmission {
+        material.surface_transmission = value.clamp(0.0, 1.0);
+    }
+    if let Some(value) = patch.absorption_length {
+        material.absorption_length = value.max(0.0);
+    }
+    if let Some(value) = patch.scatter_length {
+        material.scatter_length = value.max(0.0);
+    }
+    if let Some(value) = patch.index_of_refraction {
+        material.index_of_refraction = value.clamp(1.0, 3.0);
+    }
+    if let Some(value) = patch.phase {
+        material.phase = value.clamp(-1.0, 1.0);
+    }
+    Ok(())
+}
+
+fn expand_voxel_brush_positions(brush: &FrontendVoxelBrush) -> Vec<IVec3> {
+    let origin = IVec3::new(brush.position[0], brush.position[1], brush.position[2]);
+    match brush.shape {
+        FrontendVoxelBrushShape::Single => vec![origin],
+        FrontendVoxelBrushShape::Box => {
+            let half = IVec3::new(
+                (brush.size[0].saturating_sub(1) / 2) as i32,
+                (brush.size[1].saturating_sub(1) / 2) as i32,
+                (brush.size[2].saturating_sub(1) / 2) as i32,
+            );
+            let max = IVec3::new(
+                (brush.size[0] / 2) as i32,
+                (brush.size[1] / 2) as i32,
+                (brush.size[2] / 2) as i32,
+            );
+            let mut positions = Vec::new();
+            for y in -half.y..=max.y {
+                for z in -half.z..=max.z {
+                    for x in -half.x..=max.x {
+                        positions.push(origin + IVec3::new(x, y, z));
+                    }
+                }
+            }
+            positions
+        }
+        FrontendVoxelBrushShape::Sphere => {
+            let radius = brush.radius.max(1) as i32;
+            let radius_sq = radius * radius;
+            let mut positions = Vec::new();
+            for y in -radius..=radius {
+                for z in -radius..=radius {
+                    for x in -radius..=radius {
+                        if x * x + y * y + z * z <= radius_sq {
+                            positions.push(origin + IVec3::new(x, y, z));
+                        }
+                    }
+                }
+            }
+            positions
+        }
+        FrontendVoxelBrushShape::Cylinder => {
+            let radius = brush.radius.max(1) as i32;
+            let height = brush.size[1].max(1) as i32;
+            let y_min = -((height - 1) / 2);
+            let y_max = height / 2;
+            let radius_sq = radius * radius;
+            let mut positions = Vec::new();
+            for y in y_min..=y_max {
+                for z in -radius..=radius {
+                    for x in -radius..=radius {
+                        if x * x + z * z <= radius_sq {
+                            positions.push(origin + IVec3::new(x, y, z));
+                        }
+                    }
+                }
+            }
+            positions
+        }
+    }
+}
+
+fn voxel_brush_mask_allows(previous: Option<VoxelType>, brush: &FrontendVoxelBrush) -> bool {
+    match brush.mask {
+        FrontendVoxelBrushMask::Any => true,
+        FrontendVoxelBrushMask::Empty => previous.is_none_or(|voxel| voxel == VoxelType::Air),
+        FrontendVoxelBrushMask::Occupied => previous.is_some_and(|voxel| voxel != VoxelType::Air),
+        FrontendVoxelBrushMask::Material => {
+            let Some(mask_block) = brush.mask_block else {
+                return false;
+            };
+            previous.is_some_and(|voxel| voxel == mask_block.as_runtime())
+        }
+    }
+}
+
+fn voxel_brush_action_allows(
+    previous: Option<VoxelType>,
+    action: FrontendVoxelBrushAction,
+) -> bool {
+    match action {
+        FrontendVoxelBrushAction::Paint => previous.is_some_and(|voxel| voxel != VoxelType::Air),
+        FrontendVoxelBrushAction::Set | FrontendVoxelBrushAction::Delete => true,
+    }
+}
+
+fn voxel_brush_result_payload(
+    position: IVec3,
+    block: FrontendVoxelBlock,
+    previous: Option<VoxelType>,
+    current: Option<VoxelType>,
+    edit_result: &'static str,
+) -> Value {
+    let chunk = VoxelWorld::world_to_chunk(position);
+    let voxel = block.as_runtime();
+    json!({
+        "position": [position.x, position.y, position.z],
+        "chunkId": chunk_id_string(chunk),
         "block": block.as_frontend_str(),
         "voxel": voxel_material_name(voxel),
         "previousVoxel": previous.map(voxel_material_name),
         "currentVoxel": current.map(voxel_material_name),
-        "editResult": voxel_edit_result_to_frontend(result),
-    }))
+        "editResult": edit_result,
+    })
+}
+
+fn chunk_id_string(chunk: IVec3) -> String {
+    format!("chunk-{}-{}-{}", chunk.x, chunk.y, chunk.z)
+}
+
+fn voxel_brush_action_to_frontend(action: FrontendVoxelBrushAction) -> &'static str {
+    match action {
+        FrontendVoxelBrushAction::Set => "set",
+        FrontendVoxelBrushAction::Delete => "delete",
+        FrontendVoxelBrushAction::Paint => "paint",
+    }
+}
+
+fn voxel_brush_shape_to_frontend(shape: FrontendVoxelBrushShape) -> &'static str {
+    match shape {
+        FrontendVoxelBrushShape::Single => "single",
+        FrontendVoxelBrushShape::Box => "box",
+        FrontendVoxelBrushShape::Sphere => "sphere",
+        FrontendVoxelBrushShape::Cylinder => "cylinder",
+    }
 }
 
 fn scatter_runtime_props(world: &mut World, props: Vec<Value>) -> Result<Value, String> {
@@ -3466,6 +4350,29 @@ fn parse_hex_color(color: &str) -> Option<Color> {
     Some(Color::srgb(red, green, blue))
 }
 
+fn parse_hex_rgb(color: &str) -> Option<Vec3> {
+    let trimmed = color.strip_prefix('#')?;
+    if trimmed.len() != 6 {
+        return None;
+    }
+    let red = u8::from_str_radix(&trimmed[0..2], 16).ok()? as f32 / 255.0;
+    let green = u8::from_str_radix(&trimmed[2..4], 16).ok()? as f32 / 255.0;
+    let blue = u8::from_str_radix(&trimmed[4..6], 16).ok()? as f32 / 255.0;
+    Some(Vec3::new(red, green, blue))
+}
+
+fn rgb_to_hex(rgb: Vec3) -> String {
+    let red = (rgb.x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let green = (rgb.y.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let blue = (rgb.z.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{red:02x}{green:02x}{blue:02x}")
+}
+
+fn color_to_hex(color: Color) -> String {
+    let srgb = color.to_srgba();
+    rgb_to_hex(Vec3::new(srgb.red, srgb.green, srgb.blue))
+}
+
 fn update_sun_light(
     world: &mut World,
     light: EditorLightInstance,
@@ -3682,6 +4589,286 @@ fn update_runtime_ambient_light(
             "lightingAtmosphere": render_feature_metrics_payload(world)["lightingAtmosphere"].clone(),
         },
     }))
+}
+
+fn light_atmosphere_payload(world: &World) -> Value {
+    let settings = world
+        .get_resource::<AtmosphereSettings>()
+        .cloned()
+        .unwrap_or_default();
+    let fog = world.get_resource::<FogConfig>();
+    let ambient = world.get_resource::<GlobalAmbientLight>();
+    let direction = settings.manual_light_direction();
+    let atmosphere_preset = if settings.atmosphere_amount <= f32::EPSILON {
+        AtmospherePreset::Void
+    } else {
+        match fog.map(|config| config.current_preset) {
+            Some(FogPreset::Clear) => AtmospherePreset::Clear,
+            Some(FogPreset::Misty) => AtmospherePreset::Fog,
+            Some(FogPreset::Balanced) | Some(FogPreset::GodRays) | None => AtmospherePreset::Hazy,
+        }
+    };
+    let light_preset = if !settings.light_enabled {
+        LightPreset::NoneEmissivesOnly
+    } else if settings.light_illuminance < 10_000.0 {
+        LightPreset::Moon
+    } else {
+        LightPreset::Sun
+    };
+    let global_preset = if atmosphere_preset == AtmospherePreset::Void
+        && settings.light_color == Vec3::ONE
+        && ambient.is_some_and(|ambient| color_to_hex(ambient.color) == "#ffffff")
+    {
+        GlobalLightAtmospherePreset::Neutral
+    } else {
+        GlobalLightAtmospherePreset::Default
+    };
+
+    json!(LightAtmosphereSettingsPayload {
+        light_enabled: settings.light_enabled,
+        light_preset,
+        atmosphere_preset,
+        global_preset,
+        light_color: rgb_to_hex(settings.light_color),
+        light_illuminance: settings.light_illuminance,
+        light_azimuth_degrees: settings.light_azimuth_degrees,
+        light_elevation_degrees: settings.light_elevation_degrees,
+        light_direction: [direction.x, direction.y, direction.z],
+        atmosphere_amount: settings.atmosphere_amount,
+        atmosphere_half_length: settings.atmosphere_half_length,
+        fog_active: fog.is_some_and(|config| config.distance.enabled || config.volumetric.enabled),
+        god_rays_enabled: fog
+            .map(|config| config.screen_god_rays.enabled)
+            .unwrap_or(false),
+        ambient_color: ambient
+            .map(|ambient| color_to_hex(ambient.color))
+            .unwrap_or_else(|| "#ffffff".to_string()),
+        ambient_brightness: ambient.map(|ambient| ambient.brightness).unwrap_or(0.0),
+    })
+}
+
+fn update_light_atmosphere(
+    world: &mut World,
+    patch: LightAtmospherePatch,
+) -> Result<Value, String> {
+    let mut ambient_patch: Option<(String, f32)> = None;
+    let current_ambient = world
+        .get_resource::<GlobalAmbientLight>()
+        .map(|ambient| (color_to_hex(ambient.color), ambient.brightness));
+    {
+        let mut settings = world
+            .get_resource_mut::<AtmosphereSettings>()
+            .ok_or_else(|| "AtmosphereSettings resource is not available.".to_string())?;
+
+        if let Some(global_preset) = patch.global_preset {
+            apply_global_light_atmosphere_preset(&mut settings, global_preset);
+            if global_preset == GlobalLightAtmospherePreset::Neutral {
+                ambient_patch = Some(("#ffffff".to_string(), 2000.0));
+            }
+        }
+        if let Some(light_preset) = patch.light_preset {
+            apply_light_preset(&mut settings, light_preset);
+        }
+        if let Some(atmosphere_preset) = patch.atmosphere_preset {
+            apply_atmosphere_preset(&mut settings, atmosphere_preset);
+        }
+        if let Some(enabled) = patch.light_enabled {
+            settings.light_enabled = enabled;
+        }
+        if let Some(color) = patch.light_color.as_deref() {
+            settings.light_color =
+                parse_hex_rgb(color).ok_or_else(|| "lightColor must be #RRGGBB.".to_string())?;
+        }
+        if let Some(illuminance) = patch.light_illuminance {
+            settings.light_illuminance = illuminance;
+        }
+        if let Some(direction) = patch.light_direction {
+            let direction = Vec3::new(direction[0], direction[1], direction[2]).normalize();
+            let (azimuth, elevation) = light_angles_from_direction(direction);
+            settings.light_azimuth_degrees = azimuth;
+            settings.light_elevation_degrees = elevation;
+        } else {
+            if let Some(azimuth) = patch.light_azimuth_degrees {
+                settings.light_azimuth_degrees = azimuth;
+            }
+            if let Some(elevation) = patch.light_elevation_degrees {
+                settings.light_elevation_degrees = elevation;
+            }
+        }
+        if patch.light_preset.is_some()
+            || patch.light_enabled.is_some()
+            || patch.light_color.is_some()
+            || patch.light_illuminance.is_some()
+            || patch.light_azimuth_degrees.is_some()
+            || patch.light_elevation_degrees.is_some()
+            || patch.light_direction.is_some()
+        {
+            settings.cycle_enabled = false;
+        }
+        if let Some(amount) = patch.atmosphere_amount {
+            settings.atmosphere_amount = amount;
+        }
+        if let Some(half_length) = patch.atmosphere_half_length {
+            settings.atmosphere_half_length = half_length;
+        }
+        if patch.ambient_color.is_some() || patch.ambient_brightness.is_some() {
+            ambient_patch = Some((
+                patch.ambient_color.clone().unwrap_or_else(|| {
+                    current_ambient
+                        .as_ref()
+                        .map(|ambient| ambient.0.clone())
+                        .unwrap_or_else(|| "#ffffff".to_string())
+                }),
+                patch
+                    .ambient_brightness
+                    .unwrap_or_else(|| current_ambient.map(|ambient| ambient.1).unwrap_or(0.0)),
+            ));
+        }
+    }
+
+    sync_light_atmosphere_fog(world);
+    apply_light_atmosphere_to_sun(world);
+    if let Some((ambient_color, ambient_brightness)) = ambient_patch {
+        update_runtime_ambient_light(world, &ambient_color, ambient_brightness)?;
+    }
+
+    Ok(json!({
+        "settings": light_atmosphere_payload(world),
+        "metrics": {
+            "lightingAtmosphere": render_feature_metrics_payload(world)["lightingAtmosphere"].clone(),
+        },
+    }))
+}
+
+fn apply_light_preset(settings: &mut AtmosphereSettings, preset: LightPreset) {
+    match preset {
+        LightPreset::Sun => {
+            settings.light_enabled = true;
+            settings.light_color = Vec3::new(1.0, 0.98, 0.95);
+            settings.light_illuminance = 100_000.0;
+            settings.light_azimuth_degrees = 0.0;
+            settings.light_elevation_degrees = 70.0;
+        }
+        LightPreset::Moon => {
+            settings.light_enabled = true;
+            settings.light_color = Vec3::new(0.73, 0.80, 1.0);
+            settings.light_illuminance = 1200.0;
+            settings.light_azimuth_degrees = 180.0;
+            settings.light_elevation_degrees = 35.0;
+        }
+        LightPreset::NoneEmissivesOnly => {
+            settings.light_enabled = false;
+            settings.light_illuminance = 0.0;
+        }
+    }
+}
+
+fn apply_atmosphere_preset(settings: &mut AtmosphereSettings, preset: AtmospherePreset) {
+    match preset {
+        AtmospherePreset::Void => {
+            settings.atmosphere_amount = 0.0;
+            settings.atmosphere_half_length = 100_000.0;
+            settings.rayleigh = Vec3::ZERO;
+            settings.mie = Vec3::ZERO;
+        }
+        AtmospherePreset::Clear => {
+            settings.atmosphere_amount = 0.25;
+            settings.atmosphere_half_length = 800.0;
+        }
+        AtmospherePreset::Hazy => {
+            settings.atmosphere_amount = 1.0;
+            settings.atmosphere_half_length = 220.0;
+        }
+        AtmospherePreset::Fog => {
+            settings.atmosphere_amount = 1.8;
+            settings.atmosphere_half_length = 80.0;
+        }
+    }
+}
+
+fn apply_global_light_atmosphere_preset(
+    settings: &mut AtmosphereSettings,
+    preset: GlobalLightAtmospherePreset,
+) {
+    match preset {
+        GlobalLightAtmospherePreset::Default => {
+            *settings = AtmosphereSettings::default();
+        }
+        GlobalLightAtmospherePreset::Neutral => {
+            settings.cycle_enabled = false;
+            settings.light_enabled = true;
+            settings.light_color = Vec3::ONE;
+            settings.light_illuminance = 100_000.0;
+            settings.rayleigh = Vec3::ZERO;
+            settings.mie = Vec3::ZERO;
+            settings.atmosphere_amount = 0.0;
+            settings.atmosphere_half_length = 100_000.0;
+        }
+    }
+}
+
+fn sync_light_atmosphere_fog(world: &mut World) {
+    let settings = world
+        .get_resource::<AtmosphereSettings>()
+        .cloned()
+        .unwrap_or_default();
+    let amount = settings.atmosphere_amount.clamp(0.0, 8.0);
+    let half_length = settings.atmosphere_half_length.clamp(1.0, 100_000.0);
+    let extinction = if amount <= f32::EPSILON {
+        0.0
+    } else {
+        std::f32::consts::LN_2 / half_length * amount
+    };
+
+    if let Some(mut fog) = world.get_resource_mut::<FogConfig>() {
+        fog.distance.enabled = amount > f32::EPSILON;
+        fog.distance.start = 0.0;
+        fog.distance.end = if amount <= f32::EPSILON {
+            100_000.0
+        } else {
+            half_length / amount.max(0.05)
+        };
+        fog.distance.falloff = crate::atmosphere::FogFalloffMode::Atmospheric;
+        fog.volumetric.enabled = amount > 0.1 && !matches!(fog.current_preset, FogPreset::Clear);
+        fog.volume.density = extinction;
+        fog.color_modifiers.aerial_strength = amount.clamp(0.0, 2.0);
+        fog.current_preset = if amount <= f32::EPSILON {
+            FogPreset::Clear
+        } else if half_length <= 120.0 || amount >= 1.5 {
+            FogPreset::Misty
+        } else if amount <= 0.35 {
+            FogPreset::Clear
+        } else {
+            FogPreset::Balanced
+        };
+    }
+
+    if let Some(mut settings) = world.get_resource_mut::<AtmosphereSettings>() {
+        settings.fog_density = Vec2::splat((0.0009 * amount.max(0.05)).max(0.0001));
+    }
+}
+
+fn apply_light_atmosphere_to_sun(world: &mut World) {
+    let Some(settings) = world.get_resource::<AtmosphereSettings>().cloned() else {
+        return;
+    };
+    let direction = settings.manual_light_direction();
+    let color = Color::srgb(
+        settings.light_color.x,
+        settings.light_color.y,
+        settings.light_color.z,
+    );
+    let mut query = world
+        .query_filtered::<(&mut Transform, &mut DirectionalLight), With<crate::environment::Sun>>();
+    if let Ok((mut transform, mut light)) = query.single_mut(world) {
+        transform.look_to(-direction, Vec3::Y);
+        light.color = color;
+        light.illuminance = if settings.light_enabled {
+            settings.light_illuminance
+        } else {
+            0.0
+        };
+    }
 }
 
 fn set_photo_mode_enabled(world: &mut World, enabled: bool) {
@@ -4168,6 +5355,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
     let fog = world.get_resource::<FogConfig>();
     let god_rays = world.get_resource::<GodRayConfig>();
     let ambient = world.get_resource::<GlobalAmbientLight>();
+    let light_atmosphere = light_atmosphere_payload(world);
 
     json!({
         "shadowBudget": {
@@ -4193,6 +5381,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
             "fogPreset": fog
                 .map(|config| fog_preset_to_frontend(config.current_preset))
                 .unwrap_or("Runtime"),
+            "settings": light_atmosphere,
             "fogActive": render_feature_enabled(world, FrontendRenderFeatureFlag::Fog),
             "godRaysEnabled": god_rays
                 .map(|config| config.enabled)
@@ -4202,7 +5391,9 @@ fn render_feature_metrics_payload(world: &World) -> Value {
                 .map(|config| config.intensity)
                 .or_else(|| fog.map(|config| config.screen_god_rays.intensity))
                 .unwrap_or(0.0),
-            "ambientColor": "#ffffff",
+            "ambientColor": ambient
+                .map(|ambient| color_to_hex(ambient.color))
+                .unwrap_or_else(|| "#ffffff".to_string()),
             "ambientBrightness": ambient.map(|ambient| ambient.brightness).unwrap_or(0.0),
         },
     })
@@ -4488,6 +5679,81 @@ fn parse_tile_id(tile_id: &str) -> Option<u32> {
     (index < ATLAS_TILE_COUNT).then_some(index)
 }
 
+fn material_catalog_payload(world: &World) -> Value {
+    let catalog = world
+        .get_resource::<MaterialCatalog>()
+        .cloned()
+        .unwrap_or_default();
+
+    json!({
+        "materialTypes": catalog.material_types.iter().map(|material_type| {
+            json!({
+                "id": material_type.id,
+                "name": material_type.name,
+                "materialIds": material_type.material_ids.iter().copied().map(material_id_string).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "materials": catalog.materials.iter().map(material_payload).collect::<Vec<_>>(),
+        "palettes": catalog.palettes.iter().map(|palette| {
+            json!({
+                "id": palette.id,
+                "name": palette.name,
+                "materialIds": palette.material_ids.iter().copied().map(material_id_string).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "activeMaterialId": material_id_string(catalog.active_material_id),
+    })
+}
+
+fn material_payload(material: &VoxelMaterialDefinition) -> Value {
+    json!({
+        "id": material_id_string(material.id),
+        "numericId": material.id.0,
+        "name": material.name,
+        "materialTypeId": material.material_type_id,
+        "colorRgb": material.color_rgb,
+        "metallic": material.metallic,
+        "smooth": material.smooth,
+        "emissive": material.emissive,
+        "surfaceTransmission": material.surface_transmission,
+        "absorptionLength": material.absorption_length,
+        "scatterLength": material.scatter_length,
+        "indexOfRefraction": material.index_of_refraction,
+        "phase": material.phase,
+        "strength": material.strength,
+        "defaultVoxel": voxel_material_name(material.default_voxel),
+    })
+}
+
+fn material_id_string(id: MaterialId) -> String {
+    format!("mat-{}", id.0)
+}
+
+fn parse_material_id(raw: &str) -> Option<MaterialId> {
+    if let Some(value) = raw
+        .strip_prefix("mat-")
+        .and_then(|id| id.parse::<u16>().ok())
+    {
+        return Some(MaterialId(value));
+    }
+
+    match raw {
+        "mat-air" | "mat-air-block" => Some(MaterialId(0)),
+        "mat-grass-block" | "grass" | "topSoil" => Some(MaterialId(1)),
+        "mat-dirt-block" | "dirt" | "subSoil" => Some(MaterialId(2)),
+        "mat-rock-block" | "rock" => Some(MaterialId(3)),
+        "mat-bedrock-block" | "bedrock" => Some(MaterialId(4)),
+        "mat-sand-block" | "sand" => Some(MaterialId(5)),
+        "mat-clay-block" | "clay" => Some(MaterialId(6)),
+        "mat-water-surface" | "water" => Some(MaterialId(7)),
+        "mat-wood-block" | "wood" => Some(MaterialId(8)),
+        "mat-leaves-block" | "leaves" => Some(MaterialId(9)),
+        "mat-dungeon-wall" | "dungeonWall" => Some(MaterialId(10)),
+        "mat-dungeon-floor" | "dungeonFloor" => Some(MaterialId(11)),
+        _ => None,
+    }
+}
+
 fn parse_chunk_id(chunk_id: &str) -> Option<IVec3> {
     let rest = chunk_id.strip_prefix("chunk-")?;
     let parts: Vec<_> = rest.split('-').collect();
@@ -4567,6 +5833,7 @@ mod tests {
     use crate::voxel::chunk::Chunk;
     use crate::voxel::plugin::WaterBodyInfo;
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     fn valid_mapping() -> FrontendAtlasMapping {
         FrontendAtlasMapping {
@@ -4832,6 +6099,22 @@ mod tests {
     }
 
     #[test]
+    fn editor_camera_sidecar_path_stays_beside_world_file() {
+        assert_eq!(
+            editor_camera_sidecar_path("world_data.bin"),
+            PathBuf::from("world_data.cameras.json")
+        );
+        assert_eq!(
+            editor_camera_sidecar_path("saves/custom-world.bin"),
+            PathBuf::from("saves/custom-world.cameras.json")
+        );
+        assert_eq!(
+            editor_camera_sidecar_path("uploaded-world"),
+            PathBuf::from("uploaded-world.cameras.json")
+        );
+    }
+
+    #[test]
     fn decodes_runtime_save_world_snapshot_command() {
         let value = json!({
             "type": "runtime.saveWorldSnapshot",
@@ -4903,6 +6186,182 @@ mod tests {
         assert_eq!(
             world.resource::<VoxelWorld>().get_voxel(position),
             Some(VoxelType::Rock)
+        );
+    }
+
+    #[test]
+    fn apply_voxel_brush_expands_box_and_reports_dirty_chunks() {
+        let mut world = World::new();
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        voxel_world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_resource(voxel_world);
+
+        let position = [4, MIN_BREAKABLE_Y, 4];
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::ApplyVoxelBrush {
+                brush: FrontendVoxelBrush {
+                    position,
+                    action: FrontendVoxelBrushAction::Set,
+                    shape: FrontendVoxelBrushShape::Box,
+                    block: FrontendVoxelBlock::Wood,
+                    radius: 1,
+                    size: [3, 1, 3],
+                    mask: FrontendVoxelBrushMask::Any,
+                    mask_block: None,
+                },
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("brush command should succeed");
+        };
+        assert_eq!(data["changedCount"], json!(9));
+        assert_eq!(data["rejectedCount"], json!(0));
+        assert_eq!(data["dirtyChunkIds"], json!(["chunk-0-0-0"]));
+        assert_eq!(
+            world.resource::<VoxelWorld>().get_voxel(IVec3::new(
+                position[0],
+                position[1],
+                position[2]
+            )),
+            Some(VoxelType::Wood)
+        );
+    }
+
+    #[test]
+    fn apply_voxel_brush_filters_by_mask_material() {
+        let mut world = World::new();
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        voxel_world.insert_chunk(Chunk::new(IVec3::ZERO));
+        let center = IVec3::new(6, MIN_BREAKABLE_Y, 6);
+        voxel_world.set_voxel(center, VoxelType::Sand);
+        voxel_world.set_voxel(center + IVec3::X, VoxelType::Rock);
+        world.insert_resource(voxel_world);
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::ApplyVoxelBrush {
+                brush: FrontendVoxelBrush {
+                    position: [center.x, center.y, center.z],
+                    action: FrontendVoxelBrushAction::Paint,
+                    shape: FrontendVoxelBrushShape::Box,
+                    block: FrontendVoxelBlock::Clay,
+                    radius: 1,
+                    size: [3, 1, 1],
+                    mask: FrontendVoxelBrushMask::Material,
+                    mask_block: Some(FrontendVoxelBlock::Sand),
+                },
+            },
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("brush command should succeed");
+        };
+        assert_eq!(data["changedCount"], json!(1));
+        assert_eq!(data["skippedCount"], json!(2));
+        let voxel_world = world.resource::<VoxelWorld>();
+        assert_eq!(voxel_world.get_voxel(center), Some(VoxelType::Clay));
+        assert_eq!(
+            voxel_world.get_voxel(center + IVec3::X),
+            Some(VoxelType::Rock)
+        );
+    }
+
+    #[test]
+    fn apply_voxel_brush_rejects_bedrock_and_protected_area() {
+        let mut world = World::new();
+        let mut voxel_world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        voxel_world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_resource(voxel_world);
+
+        let protected_position = IVec3::new(8, MIN_BREAKABLE_Y, 8);
+        let mut registry = ProtectedAreaRegistry::default();
+        registry
+            .upsert(ProtectedArea {
+                id: crate::world_rules::ProtectedAreaId("brush-test-area".to_string()),
+                name: "Brush Test Area".to_string(),
+                kind: crate::world_rules::ProtectedAreaKind::NoBuild,
+                shape: crate::world_rules::ProtectedAreaShape::Box,
+                priority: 10,
+                locked: false,
+                color: "#ff0000".to_string(),
+                center: [
+                    protected_position.x as f32 + 0.5,
+                    protected_position.y as f32 + 0.5,
+                    protected_position.z as f32 + 0.5,
+                ],
+                size: [3.0, 3.0, 3.0],
+                bounds: crate::world_rules::ProtectedAreaBounds {
+                    min: [
+                        protected_position.x as f32 - 1.0,
+                        protected_position.y as f32 - 1.0,
+                        protected_position.z as f32 - 1.0,
+                    ],
+                    max: [
+                        protected_position.x as f32 + 2.0,
+                        protected_position.y as f32 + 2.0,
+                        protected_position.z as f32 + 2.0,
+                    ],
+                },
+                rules: crate::world_rules::ProtectedAreaRuleMatrix::ALLOW_ALL,
+                chunks: Vec::new(),
+                schema_version: crate::world_rules::WORLD_RULES_SCHEMA_VERSION,
+                debug_label: None,
+            })
+            .unwrap();
+        world.insert_resource(registry);
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::ApplyVoxelBrush {
+                brush: FrontendVoxelBrush {
+                    position: [
+                        protected_position.x,
+                        protected_position.y,
+                        protected_position.z,
+                    ],
+                    action: FrontendVoxelBrushAction::Set,
+                    shape: FrontendVoxelBrushShape::Single,
+                    block: FrontendVoxelBlock::Rock,
+                    radius: 1,
+                    size: [1, 1, 1],
+                    mask: FrontendVoxelBrushMask::Any,
+                    mask_block: None,
+                },
+            },
+        );
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("protected brush command should return aggregate result");
+        };
+        assert_eq!(data["rejectedCount"], json!(1));
+        assert_eq!(
+            data["results"][0]["editResult"],
+            json!("rejectedProtectedArea")
+        );
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::ApplyVoxelBrush {
+                brush: FrontendVoxelBrush {
+                    position: [2, crate::constants::BEDROCK_DEPTH, 2],
+                    action: FrontendVoxelBrushAction::Delete,
+                    shape: FrontendVoxelBrushShape::Single,
+                    block: FrontendVoxelBlock::Rock,
+                    radius: 1,
+                    size: [1, 1, 1],
+                    mask: FrontendVoxelBrushMask::Any,
+                    mask_block: None,
+                },
+            },
+        );
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("bedrock brush command should return aggregate result");
+        };
+        assert_eq!(data["rejectedCount"], json!(1));
+        assert_eq!(
+            data["results"][0]["editResult"],
+            json!("rejectedUnbreakable")
         );
     }
 

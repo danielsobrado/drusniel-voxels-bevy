@@ -12,7 +12,7 @@ use crate::constants::WATER_LEVEL;
 use crate::rendering::capabilities::GraphicsCapabilities;
 
 /// Settings that drive the sky and sun animation
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct AtmosphereSettings {
     /// Length of a full day/night cycle in seconds
     pub day_length: f32,
@@ -36,6 +36,20 @@ pub struct AtmosphereSettings {
     pub fog_density: Vec2,
     /// Whether the day/night cycle is active
     pub cycle_enabled: bool,
+    /// Whether the main infinitely distant light source contributes direct light.
+    pub light_enabled: bool,
+    /// Manual light azimuth in degrees, used when the day/night cycle is disabled.
+    pub light_azimuth_degrees: f32,
+    /// Manual light elevation in degrees, used when the day/night cycle is disabled.
+    pub light_elevation_degrees: f32,
+    /// Manual light color, used when the day/night cycle is disabled.
+    pub light_color: Vec3,
+    /// Manual light illuminance, used when the day/night cycle is disabled.
+    pub light_illuminance: f32,
+    /// User-facing atmosphere density multiplier.
+    pub atmosphere_amount: f32,
+    /// Distance at which the atmosphere hides half the scene contribution.
+    pub atmosphere_half_length: f32,
 }
 
 impl Default for AtmosphereSettings {
@@ -54,8 +68,58 @@ impl Default for AtmosphereSettings {
             // Much lower density for clearer outdoor views
             fog_density: Vec2::new(0.0001, 0.0010),
             cycle_enabled: false,
+            light_enabled: true,
+            light_azimuth_degrees: 0.0,
+            light_elevation_degrees: 70.0,
+            light_color: Vec3::new(1.0, 0.98, 0.95),
+            light_illuminance: 100_000.0,
+            atmosphere_amount: 1.0,
+            atmosphere_half_length: 220.0,
         }
     }
+}
+
+impl AtmosphereSettings {
+    pub fn manual_light_direction(&self) -> Vec3 {
+        light_direction_from_angles(self.light_azimuth_degrees, self.light_elevation_degrees)
+    }
+
+    pub fn sun_direction_and_altitude(&self) -> (Vec3, f32) {
+        if self.cycle_enabled {
+            let phase = self.time / self.day_length.max(f32::EPSILON);
+            let theta = phase * std::f32::consts::TAU;
+            let altitude = theta.sin();
+            let azimuth = theta.cos();
+            let direction = Vec3::new(azimuth * 0.45, altitude, 0.35).normalize_or_zero();
+            (direction, altitude)
+        } else {
+            let direction = self.manual_light_direction();
+            (direction, direction.y)
+        }
+    }
+}
+
+pub fn light_direction_from_angles(azimuth_degrees: f32, elevation_degrees: f32) -> Vec3 {
+    let azimuth = azimuth_degrees.to_radians();
+    let elevation = elevation_degrees.clamp(-90.0, 90.0).to_radians();
+    let horizontal = elevation.cos();
+    Vec3::new(
+        horizontal * azimuth.sin(),
+        elevation.sin(),
+        horizontal * azimuth.cos(),
+    )
+    .normalize_or_zero()
+}
+
+pub fn light_angles_from_direction(direction: Vec3) -> (f32, f32) {
+    let direction = if direction.length_squared() > f32::EPSILON {
+        direction.normalize()
+    } else {
+        Vec3::Y
+    };
+    let elevation = direction.y.clamp(-1.0, 1.0).asin().to_degrees();
+    let azimuth = direction.x.atan2(direction.z).to_degrees();
+    (azimuth, elevation)
 }
 
 #[derive(Component)]
@@ -199,16 +263,7 @@ struct AtmosphereSample {
 }
 
 fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample> {
-    let (altitude, azimuth) = if settings.cycle_enabled {
-        let phase = settings.time / settings.day_length; // 0..1
-        let theta = phase * std::f32::consts::TAU;
-        (theta.sin(), theta.cos())
-    } else {
-        (1.0, 0.0)
-    };
-
-    // Sun position: overhead at noon, below horizon at night for smooth twilight
-    let sun_dir = Vec3::new(azimuth * 0.45, altitude, 0.35).normalize_or_zero();
+    let (sun_dir, altitude) = settings.sun_direction_and_altitude();
 
     if sun_dir == Vec3::ZERO {
         return None;
@@ -241,11 +296,21 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
 
     let sun_heat = Vec3::new(1.0, 0.78, 0.62).lerp(Vec3::new(1.0, 0.92, 0.84), daylight);
     let moon_heat = Vec3::new(0.8, 0.9, 1.0);
-    let sun_tint = sun_heat.lerp(moon_heat, night_factor * 0.85);
+    let sun_tint = if settings.cycle_enabled {
+        sun_heat.lerp(moon_heat, night_factor * 0.85)
+    } else {
+        settings.light_color
+    };
 
     // Lighting strength based on altitude (tuned to match the older v0.3 look).
-    let sun_strength = lerp(2000.0, 5_000.0, daylight) * (1.0 + horizon_warmth * 0.1);
-    let moon_strength = lerp(100.0, 20.0, daylight) * night_factor;
+    let (sun_strength, moon_strength) = if settings.cycle_enabled {
+        (
+            lerp(2000.0, 5_000.0, daylight) * (1.0 + horizon_warmth * 0.1),
+            lerp(100.0, 20.0, daylight) * night_factor,
+        )
+    } else {
+        (settings.light_illuminance, 0.0)
+    };
     // Ambient light - moderate for balanced shadows
     let ambient_strength = lerp(800.0, 2000.0, daylight) * (1.0 + horizon_warmth * 0.2);
     // Blue-ish ambient tint for cooler fill light (Valheim style)
@@ -256,7 +321,11 @@ fn compute_atmosphere(settings: &AtmosphereSettings) -> Option<AtmosphereSample>
     Some(AtmosphereSample {
         sun_dir,
         sun_color: Color::linear_rgb(sun_tint.x, sun_tint.y, sun_tint.z),
-        sun_illuminance: sun_strength + moon_strength,
+        sun_illuminance: if settings.light_enabled {
+            sun_strength + moon_strength
+        } else {
+            0.0
+        },
         ambient_color: Color::linear_rgb(ambient_tint.x, ambient_tint.y, ambient_tint.z),
         ambient_brightness: ambient_strength,
         sky_color: Color::linear_rgb(sky_color.x, sky_color.y, sky_color.z),
