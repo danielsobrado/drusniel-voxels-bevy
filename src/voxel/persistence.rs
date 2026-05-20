@@ -294,7 +294,7 @@ pub fn read_world_data_from_path(path: impl AsRef<Path>) -> Result<WorldData, Pe
         Ok(data) => Ok(data),
         Err(new_format_error) => {
             let file = File::open(path).map_err(|e| PersistenceError::FileAccess {
-                path: path_string,
+                path: path_string.clone(),
                 source: e,
             })?;
             let reader = BufReader::new(file);
