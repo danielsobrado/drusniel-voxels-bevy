@@ -20,9 +20,7 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::editor_diagnostics::{
     EditorDiagnosticsCategory, EditorDiagnosticsState, normalize_editor_diagnostics_categories,
 };
-use crate::environment::{
-    AtmosphereSettings, light_angles_from_direction,
-};
+use crate::environment::{AtmosphereSettings, light_angles_from_direction};
 use crate::interaction::{
     DebugDetailToggles, DebugOverlayState, SelectedBlock, SelectedProp, TargetedBlock,
 };
