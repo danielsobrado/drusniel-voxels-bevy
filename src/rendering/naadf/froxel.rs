@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::render::MainWorld;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode};
 use bevy::render::render_resource::{
     BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
@@ -7,7 +8,6 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::view::ExtractedView;
-use bevy::render::MainWorld;
 use std::borrow::Cow;
 
 use super::config::NaadfConfig;

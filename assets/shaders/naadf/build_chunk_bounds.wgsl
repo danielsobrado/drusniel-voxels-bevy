@@ -9,10 +9,14 @@ struct NaadfChunkBoundsParams {
 @group(3) @binding(11) var<storage, read_write> naadf_chunk_records: array<u32>;
 @group(3) @binding(12) var<uniform> naadf_chunk_bounds_params: NaadfChunkBoundsParams;
 @group(3) @binding(20) var<storage, read> naadf_chunk_lookup_records: array<vec4<u32>>;
+@group(3) @binding(30) var<storage, read> naadf_build_slots: array<u32>;
 
 @compute @workgroup_size(64)
 fn build_naadf_chunk_bounds(@builtin(global_invocation_id) id: vec3<u32>) {
-    let chunk_index = id.x;
+    if id.x >= arrayLength(&naadf_build_slots) {
+        return;
+    }
+    let chunk_index = naadf_build_slots[id.x];
     let chunk_count = min(
         naadf_chunk_bounds_params.chunk_count,
         arrayLength(&naadf_chunk_records) / NAADF_PACKED_CHUNK_WORDS,

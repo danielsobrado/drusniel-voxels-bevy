@@ -8,9 +8,9 @@ use super::preview::NaadfPreviewPipelineState;
 use super::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
 use crate::performance::AreaTimingRecorder;
 use crate::rendering::radiance_cascades::{
-    naadf_gi_shader_backend_available, radiance_cascade_pass_active, RadianceCascadesConfig,
-    SdfVolumeState, NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY,
-    NAADF_QUERY_SUN_VISIBILITY, NAADF_QUERY_TERRAIN_AO,
+    NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_SUN_VISIBILITY,
+    NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState,
+    naadf_gi_shader_backend_available, radiance_cascade_pass_active,
 };
 use crate::rendering::ray_tracing::{RayTracingSettings, VoxelRayBackendMode};
 
@@ -84,6 +84,7 @@ pub fn sync_naadf_render_stats_bridge_to_stats(
     stats.path_b_naadf_accepts_last_frame = snapshot.path_b_naadf_accepts_last_frame;
     stats.path_b_current_kept_last_frame = snapshot.path_b_current_kept_last_frame;
     stats.path_b_refine_requests_last_frame = snapshot.path_b_refine_requests_last_frame;
+    stats.missing_fine_mip_requests_last_frame = snapshot.path_b_refine_requests_last_frame;
     stats.path_b_stale_or_unresident_last_frame = snapshot.path_b_stale_or_unresident_last_frame;
     stats.path_b_ownership_changes_last_frame = snapshot.path_b_ownership_changes_last_frame;
     stats.path_b_composite_passes_last_frame = snapshot.path_b_composite_passes_last_frame;

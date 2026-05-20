@@ -138,6 +138,73 @@ pub const MIP_BOUND_OFFSET_NEG_Z: u32 = 20;
 pub const MIP_BOUND_OFFSET_POS_Z: u32 = 25;
 pub const MIP_BOUND_FIELD_MASK: u32 = 0x1f;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NaadfBindEntryKind {
+    StorageRead,
+    StorageReadWrite,
+    Uniform,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NaadfBindEntrySpec {
+    pub binding: u32,
+    pub kind: NaadfBindEntryKind,
+}
+
+pub const fn naadf_storage_read(binding: u32) -> NaadfBindEntrySpec {
+    NaadfBindEntrySpec {
+        binding,
+        kind: NaadfBindEntryKind::StorageRead,
+    }
+}
+
+pub const fn naadf_storage_read_write(binding: u32) -> NaadfBindEntrySpec {
+    NaadfBindEntrySpec {
+        binding,
+        kind: NaadfBindEntryKind::StorageReadWrite,
+    }
+}
+
+pub const fn naadf_uniform(binding: u32) -> NaadfBindEntrySpec {
+    NaadfBindEntrySpec {
+        binding,
+        kind: NaadfBindEntryKind::Uniform,
+    }
+}
+
+pub const NAADF_BUILD_BLOCKS_LAYOUT: &[NaadfBindEntrySpec] = &[
+    naadf_storage_read_write(0),
+    naadf_storage_read_write(1),
+    naadf_storage_read(4),
+    naadf_storage_read_write(5),
+    naadf_storage_read_write(6),
+    naadf_storage_read_write(7),
+    naadf_storage_read(30),
+];
+
+pub const NAADF_BUILD_MIPS_LAYOUT: &[NaadfBindEntrySpec] = &[
+    naadf_storage_read_write(6),
+    naadf_storage_read_write(7),
+    naadf_storage_read_write(8),
+    naadf_storage_read(30),
+];
+
+pub const NAADF_BUILD_BOUNDS_LAYOUT: &[NaadfBindEntrySpec] =
+    &[naadf_storage_read_write(5), naadf_storage_read(30)];
+
+pub const NAADF_BUILD_CHUNKS_LAYOUT: &[NaadfBindEntrySpec] = &[
+    naadf_storage_read(5),
+    naadf_storage_read_write(11),
+    naadf_storage_read(30),
+];
+
+pub const NAADF_BUILD_CHUNK_BOUNDS_LAYOUT: &[NaadfBindEntrySpec] = &[
+    naadf_storage_read_write(11),
+    naadf_uniform(12),
+    naadf_storage_read(20),
+    naadf_storage_read(30),
+];
+
 const NODE_STATE_SHIFT: u32 = 30;
 const NODE_PAYLOAD_MASK: u32 = (1 << NODE_STATE_SHIFT) - 1;
 
@@ -609,12 +676,59 @@ mod tests {
         assert!(build_blocks.contains("naadf_voxel_records"));
         assert!(build_blocks.contains("naadf_raw_voxel_records"));
         assert!(build_blocks.contains("naadf_block_records"));
+        assert!(build_blocks.contains("naadf_build_slots"));
         assert!(build_blocks.contains("naadf_mip_traversal_records"));
         assert!(build_blocks.contains("naadf_mip_payload_records"));
         assert!(build_blocks.contains("NAADF_NODE_UNIFORM_FULL"));
         assert!(build_blocks.contains("cached_skip"));
         assert!(build_blocks.contains("naadf_pack_voxel_record"));
         assert!(build_blocks.contains("uniform_material"));
+    }
+
+    #[test]
+    fn gpu_builder_layout_specs_match_shader_bindings() {
+        assert_eq!(
+            NAADF_BUILD_BLOCKS_LAYOUT,
+            &[
+                naadf_storage_read_write(0),
+                naadf_storage_read_write(1),
+                naadf_storage_read(4),
+                naadf_storage_read_write(5),
+                naadf_storage_read_write(6),
+                naadf_storage_read_write(7),
+                naadf_storage_read(30),
+            ]
+        );
+        assert_eq!(
+            NAADF_BUILD_MIPS_LAYOUT,
+            &[
+                naadf_storage_read_write(6),
+                naadf_storage_read_write(7),
+                naadf_storage_read_write(8),
+                naadf_storage_read(30),
+            ]
+        );
+        assert_eq!(
+            NAADF_BUILD_BOUNDS_LAYOUT,
+            &[naadf_storage_read_write(5), naadf_storage_read(30)]
+        );
+        assert_eq!(
+            NAADF_BUILD_CHUNKS_LAYOUT,
+            &[
+                naadf_storage_read(5),
+                naadf_storage_read_write(11),
+                naadf_storage_read(30),
+            ]
+        );
+        assert_eq!(
+            NAADF_BUILD_CHUNK_BOUNDS_LAYOUT,
+            &[
+                naadf_storage_read_write(11),
+                naadf_uniform(12),
+                naadf_storage_read(20),
+                naadf_storage_read(30),
+            ]
+        );
     }
 
     #[test]
@@ -631,6 +745,7 @@ mod tests {
             )
         }));
         assert!(build_bounds.contains("@compute"));
+        assert!(build_bounds.contains("naadf_build_slots"));
         assert!(build_bounds.contains("cached_skip"));
         assert!(build_bounds.contains("cached_next_skip"));
         assert!(build_bounds.contains("naadf_try_extend"));
@@ -652,6 +767,7 @@ mod tests {
         }));
         assert!(build_mips.contains("@compute"));
         assert!(build_mips.contains("fn build_naadf_mips"));
+        assert!(build_mips.contains("naadf_build_slots"));
         assert!(build_mips.contains("naadf_summarize_mip_children"));
         assert!(build_mips.contains("naadf_build_mip_bounds_level"));
         assert!(build_mips.contains("thin_or_hole"));
@@ -674,6 +790,7 @@ mod tests {
         assert!(build_chunks.contains("@compute"));
         assert!(build_chunks.contains("naadf_block_records"));
         assert!(build_chunks.contains("naadf_chunk_records"));
+        assert!(build_chunks.contains("naadf_build_slots"));
         assert!(build_chunks.contains("NAADF_VOXELS_PER_CHUNK"));
         assert!(build_chunks.contains("all_empty"));
         assert!(build_chunks.contains("all_full_same_material"));
@@ -698,6 +815,7 @@ mod tests {
         }));
         assert!(build_chunk_bounds.contains("fn build_naadf_chunk_bounds"));
         assert!(build_chunk_bounds.contains("naadf_lookup_chunk_slot"));
+        assert!(build_chunk_bounds.contains("naadf_build_slots"));
         assert!(build_chunk_bounds.contains("naadf_count_axis_empty_chunks"));
         assert!(build_chunk_bounds.contains("naadf_chunk_lookup_records"));
         assert!(!build_chunk_bounds.contains("naadf_loaded_empty_perpendicular_slab"));
@@ -841,6 +959,21 @@ mod tests {
     }
 
     #[test]
+    fn wgsl_path_b_first_hit_is_terrain_only() {
+        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit_path_b_terrain.wgsl");
+
+        assert!(first_hit.contains("trace_naadf_world_lod"));
+        assert!(first_hit.contains("textureSampleLevel"));
+        assert!(first_hit.contains("naadf_first_hit_depth_output"));
+        assert!(first_hit.contains("diagnostic_reason"));
+        assert!(first_hit.contains("fn naadf_path_b_first_hit_max_distance"));
+        assert!(!first_hit.contains("naadf_entity_volume_records"));
+        assert!(!first_hit.contains("naadf_entity_material_records"));
+        assert!(!first_hit.contains("naadf_first_hit_stats"));
+        assert!(!first_hit.contains("naadf_local_light_records"));
+    }
+
+    #[test]
     fn wgsl_entity_volume_record_matches_rust_pack_order() {
         let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
         let fields = wgsl_struct_fields(first_hit, "NaadfEntityVolumeRecord");
@@ -942,7 +1075,26 @@ mod tests {
         assert!(temporal.contains("naadf_temporal_history_color"));
         assert!(temporal.contains("naadf_temporal_history_moments"));
         assert!(temporal.contains("naadf_temporal_output_moments"));
+        assert!(temporal.contains("naadf_temporal_current_owner"));
+        assert!(temporal.contains("naadf_temporal_history_owner"));
+        assert!(temporal.contains("naadf_temporal_output_owner"));
+        assert!(temporal.contains("history_owner == current_owner"));
         assert!(temporal.contains("textureStore"));
+    }
+
+    #[test]
+    fn wgsl_path_b_ownership_declares_decision_counters() {
+        let ownership = include_str!("../../../assets/shaders/naadf/path_b_ownership.wgsl");
+
+        assert!(ownership.contains("fn naadf_path_b_ownership"));
+        assert!(ownership.contains("path_b_depth_rejects"));
+        assert!(ownership.contains("path_b_coverage_rejects"));
+        assert!(ownership.contains("path_b_naadf_accepts"));
+        assert!(ownership.contains("path_b_refine_requests"));
+        assert!(ownership.contains("path_b_stale_or_unresident"));
+        assert!(ownership.contains("path_b_ownership_changes"));
+        assert!(ownership.contains("textureStore(naadf_path_b_current_owner"));
+        assert!(ownership.contains("naadf_path_b_count_stale_or_unresident"));
     }
 
     #[test]

@@ -5,11 +5,11 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::rendering::naadf::cache::propagate_chunk_skips;
 use crate::rendering::naadf::entities::NaadfEntityVolumeRegistry;
 use crate::rendering::naadf::layout::{
-    block_coord_for_voxel, block_index_in_chunk, chunk_world_origin, NaadfChunk, NaadfNodeState,
     BOUND_OFFSET_NEG_X, BOUND_OFFSET_NEG_Y, BOUND_OFFSET_NEG_Z, BOUND_OFFSET_POS_X,
     BOUND_OFFSET_POS_Y, BOUND_OFFSET_POS_Z, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
     CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
-    CHUNK_BOUND_OFFSET_POS_Z, VOXELS_PER_BLOCK_AXIS,
+    CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, VOXELS_PER_BLOCK_AXIS,
+    block_coord_for_voxel, block_index_in_chunk, chunk_world_origin,
 };
 use crate::rendering::voxel_ray_backend::{
     VoxelRayBackend, VoxelRayBackendStats, VoxelRayHit, VoxelRayPurpose,
@@ -532,12 +532,12 @@ impl NaadfCpuRayBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::naadf::cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
+    use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
     use crate::rendering::naadf::entities::{NaadfEntityVolumeRegistry, NaadfEntityVoxelVolume};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
     use rand::{Rng, RngCore};
 
     #[test]
@@ -560,9 +560,11 @@ mod tests {
         let chunk = Chunk::new(IVec3::ZERO);
         let backend =
             NaadfCpuRayBackend::new([build_naadf_chunk(&chunk, NaadfBuildOptions::default())]);
-        assert!(backend
-            .trace(Vec3::ZERO, Vec3::X, 16.0, VoxelRayPurpose::Debug)
-            .is_none());
+        assert!(
+            backend
+                .trace(Vec3::ZERO, Vec3::X, 16.0, VoxelRayPurpose::Debug)
+                .is_none()
+        );
     }
 
     #[test]

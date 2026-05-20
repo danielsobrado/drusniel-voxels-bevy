@@ -16,6 +16,9 @@ struct NaadfTemporalAccumulationParams {
 @group(3) @binding(16) var naadf_temporal_history_moments: texture_2d<f32>;
 @group(3) @binding(17) var naadf_temporal_output_moments: texture_storage_2d<rg16float, write>;
 @group(3) @binding(18) var naadf_temporal_motion: texture_2d<f32>;
+@group(3) @binding(19) var naadf_temporal_current_owner: texture_2d<u32>;
+@group(3) @binding(20) var naadf_temporal_history_owner: texture_2d<u32>;
+@group(3) @binding(21) var naadf_temporal_output_owner: texture_storage_2d<r32uint, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn naadf_temporal_accumulation(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -30,9 +33,13 @@ fn naadf_temporal_accumulation(@builtin(global_invocation_id) id: vec3<u32>) {
     let motion = textureLoad(naadf_temporal_motion, coord, 0);
     let reprojection = naadf_reproject_history_coord(coord, output_size, depth, current_color.a, motion);
     let history_coord = reprojection.xy;
+    let current_owner = textureLoad(naadf_temporal_current_owner, coord, 0).r;
+    let history_owner = textureLoad(naadf_temporal_history_owner, history_coord, 0).r;
     let history_color = textureLoad(naadf_temporal_history_color, history_coord, 0);
     let history_moments = textureLoad(naadf_temporal_history_moments, history_coord, 0).xy;
-    let motion_valid = reprojection.z != 0i;
+    let motion_valid = reprojection.z != 0i &&
+        current_owner == 1u &&
+        history_owner == current_owner;
     let accumulated_color = naadf_temporal_accumulate(
         current_color,
         history_color,
@@ -47,6 +54,7 @@ fn naadf_temporal_accumulation(@builtin(global_invocation_id) id: vec3<u32>) {
 
     textureStore(naadf_temporal_output, coord, accumulated_color);
     textureStore(naadf_temporal_output_moments, coord, accumulated_moments);
+    textureStore(naadf_temporal_output_owner, coord, vec4<u32>(current_owner, 0u, 0u, 0u));
 }
 
 fn naadf_reproject_history_coord(

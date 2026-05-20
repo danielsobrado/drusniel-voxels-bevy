@@ -9,27 +9,27 @@
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::{
+    FullscreenShader,
     core_3d::graph::{Core3d, Node3d},
     prepass::ViewPrepassTextures,
-    FullscreenShader,
 };
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
+    ExtractSchedule, RenderApp, RenderStartup,
     render_graph::{
         NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
     },
     render_resource::{
-        binding_types, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-        BindingType, Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages,
-        CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, Operations,
-        PipelineCache, RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-        Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureFormat,
-        TextureSampleType,
+        BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BindingType, Buffer,
+        BufferBindingType, BufferInitDescriptor, BufferUsages, CachedRenderPipelineId,
+        ColorTargetState, ColorWrites, FragmentState, Operations, PipelineCache,
+        RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler,
+        SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureFormat,
+        TextureSampleType, binding_types,
     },
     renderer::{RenderContext, RenderDevice},
     view::{ViewTarget, ViewUniformOffset, ViewUniforms},
-    ExtractSchedule, RenderApp, RenderStartup,
 };
 use bevy::shader::Shader;
 

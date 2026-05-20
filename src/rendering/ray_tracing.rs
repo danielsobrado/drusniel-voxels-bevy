@@ -5,8 +5,8 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 #[cfg(feature = "naadf")]
 use crate::rendering::naadf::{NaadfConfig, NaadfPreviewCompositeModeConfig};
 
-const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
-const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
+pub(crate) const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
+pub(crate) const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
 const NAADF_RESTART_HINT: &str = "Restart with scripts/startVoxels.ps1 -Naadf to enable NAADF.";
 
 #[cfg(feature = "naadf")]
@@ -104,7 +104,7 @@ impl Default for VoxelRayBackendNotice {
 pub(crate) struct VoxelRayBackendNoticeText;
 
 impl VoxelRayBackendNotice {
-    fn show_for(&mut self, now_secs: f64, duration_secs: f64) {
+    pub(crate) fn show_for(&mut self, now_secs: f64, duration_secs: f64) {
         self.visible_until_secs = now_secs + duration_secs;
     }
 

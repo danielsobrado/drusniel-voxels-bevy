@@ -1,11 +1,14 @@
 use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::prelude::*;
+use bevy::render::extract_component::ExtractComponent;
 use bevy::render::render_graph::RenderLabel;
 
 use super::config::{
     NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
     NaadfPreviewCompositeModeConfig,
 };
+use super::stats::{NaadfCacheState, NaadfStats};
+use crate::camera::controller::PlayerCamera;
 use crate::rendering::ray_tracing::{ExperimentalRenderMode, RayTracingSettings};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -147,6 +150,9 @@ pub struct NaadfPreviewHistoryState {
 #[derive(Component)]
 pub(crate) struct NaadfManagedDepthPrepass;
 
+#[derive(Component, Clone, Copy, Debug, Default, ExtractComponent)]
+pub struct NaadfMainView;
+
 impl NaadfPreviewHistoryState {
     pub fn ensure_plan(&mut self, plan: NaadfPreviewHistoryPlan) {
         if self.plan != plan {
@@ -163,22 +169,29 @@ impl NaadfPreviewHistoryState {
 pub fn sync_naadf_preview_mode(
     ray_tracing: Res<RayTracingSettings>,
     config: Res<NaadfConfig>,
+    cache_state: Res<NaadfCacheState>,
+    stats: Res<NaadfStats>,
     mut state: ResMut<NaadfPreviewPipelineState>,
 ) {
-    apply_preview_mode_state(&ray_tracing, &config, &mut state);
+    apply_preview_mode_state(
+        &ray_tracing,
+        &config,
+        path_b_runtime_available_for_preview(&config, &cache_state, &stats),
+        &mut state,
+    );
 }
 
 pub fn sync_naadf_preview_settings_from_config(
     config: Res<NaadfConfig>,
+    cache_state: Res<NaadfCacheState>,
+    stats: Res<NaadfStats>,
     mut settings: ResMut<NaadfPreviewSettings>,
     mut pipeline_state: ResMut<NaadfPreviewPipelineState>,
 ) {
-    if !config.is_changed() {
-        return;
-    }
-
     let mut next = *settings;
     apply_preview_config(&config, &mut next);
+    next.path_b_runtime_available =
+        path_b_runtime_available_for_preview(&config, &cache_state, &stats);
 
     if *settings != next {
         *settings = next;
@@ -230,12 +243,27 @@ fn apply_preview_config(config: &NaadfConfig, settings: &mut NaadfPreviewSetting
     settings.path_b_runtime_available = config.path_b_runtime_available();
 }
 
+fn path_b_runtime_available_for_preview(
+    config: &NaadfConfig,
+    cache_state: &NaadfCacheState,
+    stats: &NaadfStats,
+) -> bool {
+    config.path_b_runtime_available()
+        && cache_state.ready
+        && stats.gpu_slots_used > 0
+        && stats.gpu_uploads_pending == 0
+}
+
 pub(crate) fn configure_path_b_camera_prepass(
     mut commands: Commands,
     config: Res<NaadfConfig>,
     ray_tracing: Res<RayTracingSettings>,
-    cameras_without_prepass: Query<Entity, (With<Camera3d>, Without<DepthPrepass>)>,
-    managed_prepass_cameras: Query<Entity, (With<Camera3d>, With<NaadfManagedDepthPrepass>)>,
+    player_cameras: Query<
+        (Entity, Option<&DepthPrepass>, Option<&NaadfMainView>),
+        (With<Camera3d>, With<PlayerCamera>),
+    >,
+    managed_prepass_cameras: Query<Entity, With<NaadfManagedDepthPrepass>>,
+    naadf_main_views: Query<Entity, With<NaadfMainView>>,
 ) {
     let needs_path_b_prepass = config.path_b_runtime_available()
         && matches!(
@@ -247,16 +275,23 @@ pub(crate) fn configure_path_b_camera_prepass(
         || needs_path_b_prepass;
 
     if needs_prepass {
-        for entity in cameras_without_prepass.iter() {
-            commands
-                .entity(entity)
-                .insert((DepthPrepass, NaadfManagedDepthPrepass));
+        for (entity, depth_prepass, main_view) in player_cameras.iter() {
+            let mut entity_commands = commands.entity(entity);
+            if depth_prepass.is_none() {
+                entity_commands.insert((DepthPrepass, NaadfManagedDepthPrepass));
+            }
+            if main_view.is_none() {
+                entity_commands.insert(NaadfMainView);
+            }
         }
     } else {
         for entity in managed_prepass_cameras.iter() {
             commands
                 .entity(entity)
                 .remove::<(DepthPrepass, NaadfManagedDepthPrepass)>();
+        }
+        for entity in naadf_main_views.iter() {
+            commands.entity(entity).remove::<NaadfMainView>();
         }
     }
 }
@@ -274,7 +309,7 @@ mod tests {
         };
         let mut state = NaadfPreviewPipelineState::default();
 
-        apply_preview_mode_state(&settings, &NaadfConfig::default(), &mut state);
+        apply_preview_mode_state(&settings, &NaadfConfig::default(), false, &mut state);
 
         assert!(state.active);
         assert_eq!(state.mode_generation, 1);
@@ -290,7 +325,7 @@ mod tests {
         };
         let mut state = NaadfPreviewPipelineState::default();
 
-        apply_preview_mode_state(&settings, &NaadfConfig::default(), &mut state);
+        apply_preview_mode_state(&settings, &NaadfConfig::default(), false, &mut state);
 
         assert_eq!(state.history_generation, 1);
         assert_eq!(state.last_backend_switch_generation, 2);
@@ -310,15 +345,59 @@ mod tests {
             ..default()
         };
 
-        apply_preview_mode_state(&ray_tracing, &config, &mut state);
+        apply_preview_mode_state(&ray_tracing, &config, false, &mut state);
 
         assert!(!state.active);
 
         let mut verified_config = config;
         verified_config.path_b.foundation_200_210_verified = true;
-        apply_preview_mode_state(&ray_tracing, &verified_config, &mut state);
+        apply_preview_mode_state(&ray_tracing, &verified_config, true, &mut state);
 
         assert!(state.active);
+    }
+
+    #[test]
+    fn path_b_runtime_gate_requires_cache_and_gpu_upload_quiescence() {
+        let config = NaadfConfig {
+            enabled: true,
+            path_b: super::super::config::NaadfPathBConfig {
+                compositor_mode: NaadfPathBCompositorModeConfig::HybridFarTerrain,
+                foundation_200_210_verified: true,
+                ..default()
+            },
+            ..default()
+        };
+        let mut cache_state = NaadfCacheState {
+            ready: true,
+            warming: false,
+            fallback_reason: None,
+        };
+        let mut stats = NaadfStats {
+            gpu_slots_used: 1,
+            gpu_uploads_pending: 0,
+            ..default()
+        };
+
+        assert!(path_b_runtime_available_for_preview(
+            &config,
+            &cache_state,
+            &stats
+        ));
+
+        cache_state.ready = false;
+        assert!(!path_b_runtime_available_for_preview(
+            &config,
+            &cache_state,
+            &stats
+        ));
+
+        cache_state.ready = true;
+        stats.gpu_uploads_pending = 1;
+        assert!(!path_b_runtime_available_for_preview(
+            &config,
+            &cache_state,
+            &stats
+        ));
     }
 
     #[test]
@@ -392,7 +471,7 @@ mod tests {
             path_b: super::super::config::NaadfPathBConfig {
                 compositor_mode: NaadfPathBCompositorModeConfig::DepthAudit,
                 depth_epsilon: -1.0,
-                enable_temporal: false,
+                enable_temporal: true,
                 audit_overlay_alpha: 2.0,
                 counters_enabled: true,
                 foundation_200_210_verified: true,
@@ -429,7 +508,7 @@ mod tests {
         assert_eq!(settings.history_resolution_scale, 1.0);
         assert_eq!(settings.path_b_mode, NaadfPathBCompositorMode::DepthAudit);
         assert_eq!(settings.path_b_depth_epsilon, 0.0);
-        assert!(!settings.path_b_enable_temporal);
+        assert!(settings.path_b_enable_temporal);
         assert_eq!(settings.path_b_audit_overlay_alpha, 1.0);
         assert!(settings.path_b_counters_enabled);
         assert!(settings.path_b_runtime_available);
@@ -439,9 +518,10 @@ mod tests {
 pub fn apply_preview_mode_state(
     ray_tracing: &RayTracingSettings,
     config: &NaadfConfig,
+    path_b_runtime_available: bool,
     state: &mut NaadfPreviewPipelineState,
 ) {
-    let path_b_mode_active = config.path_b_runtime_available()
+    let path_b_mode_active = path_b_runtime_available
         && config.path_b.compositor_mode != NaadfPathBCompositorModeConfig::Off;
     let active =
         ray_tracing.experimental_mode == ExperimentalRenderMode::NaadfPreview || path_b_mode_active;

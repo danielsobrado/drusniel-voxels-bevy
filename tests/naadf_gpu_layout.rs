@@ -14,8 +14,10 @@ mod naadf_gpu_layout {
     };
     use voxel_builder::rendering::naadf::gpu_tests::compare_mip_records_to_cpu;
     use voxel_builder::rendering::naadf::layout::{
-        BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, NaadfNodeState, TRAVERSAL_RECORD_STATE_SHIFT,
-        voxel_index_in_chunk,
+        BLOCKS_PER_CHUNK, MIP_CELLS_PER_CHUNK, NAADF_BUILD_BLOCKS_LAYOUT,
+        NAADF_BUILD_BOUNDS_LAYOUT, NAADF_BUILD_CHUNK_BOUNDS_LAYOUT, NAADF_BUILD_CHUNKS_LAYOUT,
+        NAADF_BUILD_MIPS_LAYOUT, NaadfBindEntryKind, NaadfBindEntrySpec, NaadfNodeState,
+        TRAVERSAL_RECORD_STATE_SHIFT, voxel_index_in_chunk,
     };
     use voxel_builder::rendering::voxel_ray_backend::VoxelRayPurpose;
     use voxel_builder::voxel::chunk::Chunk;
@@ -282,6 +284,11 @@ mod naadf_gpu_layout {
                 contents: bytemuck::cast_slice(&params),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
+        let build_slot_buffer = init_storage_buffer(
+            &gpu.device,
+            "naadf_test_build_slots",
+            bytemuck::cast_slice(&[0u32]),
+        );
 
         run_build_blocks(
             gpu,
@@ -292,16 +299,24 @@ mod naadf_gpu_layout {
             &mip_traversal_buffer,
             &mip_payload_buffer,
             &mip_bounds_buffer,
+            &build_slot_buffer,
         );
         run_build_mips(
             gpu,
             &mip_traversal_buffer,
             &mip_payload_buffer,
             &mip_bounds_buffer,
+            &build_slot_buffer,
         );
-        run_build_bounds(gpu, &block_buffer);
-        run_build_chunks(gpu, &block_buffer, &chunk_buffer);
-        run_build_chunk_bounds(gpu, &chunk_buffer, &params_buffer, &lookup_buffer);
+        run_build_bounds(gpu, &block_buffer, &build_slot_buffer);
+        run_build_chunks(gpu, &block_buffer, &chunk_buffer, &build_slot_buffer);
+        run_build_chunk_bounds(
+            gpu,
+            &chunk_buffer,
+            &params_buffer,
+            &lookup_buffer,
+            &build_slot_buffer,
+        );
 
         let chunk_words = read_words(gpu, &chunk_buffer, CHUNK_BYTES).await;
         let block_words = read_words(gpu, &block_buffer, BLOCK_BYTES).await;
@@ -439,20 +454,13 @@ mod naadf_gpu_layout {
         mip_traversal_buffer: &wgpu::Buffer,
         mip_payload_buffer: &wgpu::Buffer,
         mip_bounds_buffer: &wgpu::Buffer,
+        build_slot_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_blocks_layout"),
-                entries: &[
-                    storage_entry(0, false),
-                    storage_entry(1, false),
-                    storage_entry(4, true),
-                    storage_entry(5, false),
-                    storage_entry(6, false),
-                    storage_entry(7, false),
-                    storage_entry(8, false),
-                ],
+                entries: &layout_entries(NAADF_BUILD_BLOCKS_LAYOUT),
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_blocks_group"),
@@ -465,6 +473,7 @@ mod naadf_gpu_layout {
                 buffer_entry(6, mip_traversal_buffer),
                 buffer_entry(7, mip_payload_buffer),
                 buffer_entry(8, mip_bounds_buffer),
+                buffer_entry(30, build_slot_buffer),
             ],
         });
         dispatch_shader(
@@ -483,16 +492,13 @@ mod naadf_gpu_layout {
         mip_traversal_buffer: &wgpu::Buffer,
         mip_payload_buffer: &wgpu::Buffer,
         mip_bounds_buffer: &wgpu::Buffer,
+        build_slot_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_mips_layout"),
-                entries: &[
-                    storage_entry(6, false),
-                    storage_entry(7, false),
-                    storage_entry(8, false),
-                ],
+                entries: &layout_entries(NAADF_BUILD_MIPS_LAYOUT),
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_mips_group"),
@@ -501,6 +507,7 @@ mod naadf_gpu_layout {
                 buffer_entry(6, mip_traversal_buffer),
                 buffer_entry(7, mip_payload_buffer),
                 buffer_entry(8, mip_bounds_buffer),
+                buffer_entry(30, build_slot_buffer),
             ],
         });
         dispatch_shader(
@@ -514,17 +521,24 @@ mod naadf_gpu_layout {
         );
     }
 
-    fn run_build_bounds(gpu: &GpuContext, block_buffer: &wgpu::Buffer) {
+    fn run_build_bounds(
+        gpu: &GpuContext,
+        block_buffer: &wgpu::Buffer,
+        build_slot_buffer: &wgpu::Buffer,
+    ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_bounds_layout"),
-                entries: &[storage_entry(5, false)],
+                entries: &layout_entries(NAADF_BUILD_BOUNDS_LAYOUT),
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_bounds_group"),
             layout: &layout,
-            entries: &[buffer_entry(5, block_buffer)],
+            entries: &[
+                buffer_entry(5, block_buffer),
+                buffer_entry(30, build_slot_buffer),
+            ],
         });
         dispatch_shader(
             gpu,
@@ -541,12 +555,13 @@ mod naadf_gpu_layout {
         gpu: &GpuContext,
         block_buffer: &wgpu::Buffer,
         chunk_buffer: &wgpu::Buffer,
+        build_slot_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_chunks_layout"),
-                entries: &[storage_entry(5, true), storage_entry(11, false)],
+                entries: &layout_entries(NAADF_BUILD_CHUNKS_LAYOUT),
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_chunks_group"),
@@ -554,6 +569,7 @@ mod naadf_gpu_layout {
             entries: &[
                 buffer_entry(5, block_buffer),
                 buffer_entry(11, chunk_buffer),
+                buffer_entry(30, build_slot_buffer),
             ],
         });
         dispatch_shader(
@@ -572,16 +588,13 @@ mod naadf_gpu_layout {
         chunk_buffer: &wgpu::Buffer,
         params_buffer: &wgpu::Buffer,
         lookup_buffer: &wgpu::Buffer,
+        build_slot_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("naadf_test_build_chunk_bounds_layout"),
-                entries: &[
-                    storage_entry(11, false),
-                    uniform_entry(12),
-                    storage_entry(20, true),
-                ],
+                entries: &layout_entries(NAADF_BUILD_CHUNK_BOUNDS_LAYOUT),
             });
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("naadf_test_build_chunk_bounds_group"),
@@ -590,6 +603,7 @@ mod naadf_gpu_layout {
                 buffer_entry(11, chunk_buffer),
                 buffer_entry(12, params_buffer),
                 buffer_entry(20, lookup_buffer),
+                buffer_entry(30, build_slot_buffer),
             ],
         });
         dispatch_shader(
@@ -761,6 +775,17 @@ mod naadf_gpu_layout {
             },
             count: None,
         }
+    }
+
+    fn layout_entries(specs: &[NaadfBindEntrySpec]) -> Vec<wgpu::BindGroupLayoutEntry> {
+        specs
+            .iter()
+            .map(|spec| match spec.kind {
+                NaadfBindEntryKind::StorageRead => storage_entry(spec.binding, true),
+                NaadfBindEntryKind::StorageReadWrite => storage_entry(spec.binding, false),
+                NaadfBindEntryKind::Uniform => uniform_entry(spec.binding),
+            })
+            .collect()
     }
 
     fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

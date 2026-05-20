@@ -7,6 +7,7 @@
 @group(3) @binding(5) var<storage, read_write> naadf_block_records: array<u32>;
 @group(3) @binding(6) var<storage, read_write> naadf_mip_traversal_records: array<u32>;
 @group(3) @binding(7) var<storage, read_write> naadf_mip_payload_records: array<u32>;
+@group(3) @binding(30) var<storage, read> naadf_build_slots: array<u32>;
 
 var<workgroup> cached_occupied: array<u32, 64>;
 var<workgroup> cached_material: array<u32, 64>;
@@ -18,9 +19,9 @@ fn build_naadf_blocks(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_index) local_index: u32,
 ) {
-    let global_block_index = workgroup_id.x;
-    let chunk_slot = global_block_index / NAADF_BLOCKS_PER_CHUNK;
-    let block_index = global_block_index % NAADF_BLOCKS_PER_CHUNK;
+    let build_index = workgroup_id.x / NAADF_BLOCKS_PER_CHUNK;
+    let chunk_slot = naadf_build_slots[build_index];
+    let block_index = workgroup_id.x % NAADF_BLOCKS_PER_CHUNK;
     let block_coord = vec3<u32>(
         block_index % 4u,
         (block_index / 4u) % 4u,
@@ -108,7 +109,7 @@ fn build_naadf_blocks(
             pos_z = 0u;
         }
 
-        let output_base = global_block_index * NAADF_PACKED_BLOCK_WORDS;
+        let output_base = (chunk_slot * NAADF_BLOCKS_PER_CHUNK + block_index) * NAADF_PACKED_BLOCK_WORDS;
         naadf_block_records[output_base + 0u] = node;
         naadf_block_records[output_base + 1u] = naadf_pack_bounds_xy(neg_x, pos_x, neg_y, pos_y);
         naadf_block_records[output_base + 2u] = occupancy_low;

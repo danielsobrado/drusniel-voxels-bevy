@@ -260,6 +260,17 @@ fn trace_naadf_lod(
     max_steps: u32,
     cone_config: vec4<f32>,
 ) -> NaadfHit {
+    if ray.purpose == NAADF_RAY_PURPOSE_PREVIEW_PRIMARY {
+        return trace_naadf(
+            ray,
+            chunk_pos,
+            chunk_node,
+            chunk_index * NAADF_VOXELS_PER_CHUNK,
+            chunk_index * NAADF_VOXELS_PER_CHUNK,
+            max_steps,
+        );
+    }
+
     if naadf_node_state(chunk_node) == NAADF_NODE_UNIFORM_FULL {
         return trace_naadf(
             ray,

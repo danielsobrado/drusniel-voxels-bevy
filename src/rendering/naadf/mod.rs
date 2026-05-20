@@ -21,6 +21,7 @@ pub mod systems;
 use bevy::asset::load_internal_asset;
 use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
+use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
 use bevy::render::{ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
@@ -34,7 +35,7 @@ pub use config::{
     NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
     NaadfPreviewCompositeModeConfig,
 };
-pub use cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
+pub use cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
 pub use cpu_trace::NaadfCpuRayBackend;
 pub use dirty::NaadfDirtyChunkQueue;
 pub use entities::{
@@ -44,7 +45,7 @@ pub use entities::{
 pub use extractor::{NaadfChunkExtractor, NaadfExtractionError};
 pub use gpu_buffers::{NaadfGpuBufferPlan, NaadfGpuBuffers, NaadfGpuChunkTable};
 pub use layout::NaadfChunk;
-pub use local_lights::{NaadfLocalLightRecord, NAADF_LOCAL_LIGHT_MAX_RECORDS};
+pub use local_lights::{NAADF_LOCAL_LIGHT_MAX_RECORDS, NaadfLocalLightRecord};
 pub use prepare::{NaadfUploadBudget, NaadfUploadPlan};
 pub use stats::{NaadfCacheState, NaadfStats};
 
@@ -169,6 +170,15 @@ impl Plugin for NaadfPlugin {
         );
         load_internal_asset!(
             app,
+            pipeline::NAADF_FIRST_HIT_PATH_B_TERRAIN_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/first_hit_path_b_terrain.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_FIRST_HIT_PATH_B_TERRAIN_SHADER_PATH)
+        );
+        load_internal_asset!(
+            app,
             pipeline::NAADF_GI_TRACE_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -221,8 +231,18 @@ impl Plugin for NaadfPlugin {
             ),
             naadf_shader(pipeline::NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_PATH)
         );
+        load_internal_asset!(
+            app,
+            pipeline::NAADF_PATH_B_OWNERSHIP_SHADER_HANDLE,
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/shaders/naadf/path_b_ownership.wgsl"
+            ),
+            naadf_shader(pipeline::NAADF_PATH_B_OWNERSHIP_SHADER_PATH)
+        );
 
-        app.insert_resource(NaadfConfig::runtime_default())
+        app.add_plugins(ExtractComponentPlugin::<preview::NaadfMainView>::default())
+            .insert_resource(NaadfConfig::runtime_default())
             .init_resource::<NaadfCache>()
             .init_resource::<NaadfDirtyChunkQueue>()
             .init_resource::<entities::NaadfEntityVolumeRegistry>()

@@ -8,7 +8,7 @@ use super::dirty::NaadfDirtyChunkQueue;
 use super::gpu_buffers::NaadfGpuChunkTable;
 use super::stats::NaadfStats;
 use crate::camera::controller::PlayerCamera;
-use crate::performance::{area_timer, AreaTimingRecorder};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 pub(crate) const MIN_VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;
@@ -20,6 +20,17 @@ pub struct NaadfStreamingState {
     retained_chunks: HashSet<IVec3>,
     finest_resident_mips: HashMap<IVec3, u8>,
     center_chunk: Option<IVec3>,
+    target_chunks: Vec<IVec3>,
+    target_signature: Option<NaadfStreamingTargetSignature>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NaadfStreamingTargetSignature {
+    center_chunk: IVec3,
+    radius: i32,
+    vertical_radius: i32,
+    max_chunks: usize,
+    loaded_chunks: usize,
 }
 
 impl NaadfStreamingState {
@@ -73,6 +84,8 @@ pub fn update_visible_region_cache(
         state.visible_chunks.clear();
         state.retained_chunks.clear();
         state.finest_resident_mips.clear();
+        state.target_chunks.clear();
+        state.target_signature = None;
         state.center_chunk = None;
         stats.streaming_interest_chunks = 0;
         stats.streaming_interest_missing_gpu_slots = 0;
@@ -103,13 +116,29 @@ pub fn update_visible_region_cache(
     let hysteresis = config.chunk_cache.hysteresis_chunks.max(0);
     let max_chunks = config.chunk_cache.max_chunks as usize;
     let vertical_radius = vertical_stream_radius_chunks(radius);
-    let targets =
-        visible_loaded_region_targets(&world, center_chunk, radius, vertical_radius, max_chunks);
+    let signature = NaadfStreamingTargetSignature {
+        center_chunk,
+        radius,
+        vertical_radius,
+        max_chunks,
+        loaded_chunks: world.chunk_count(),
+    };
+    if state.target_signature != Some(signature) {
+        state.target_chunks = visible_loaded_region_targets(
+            &world,
+            center_chunk,
+            radius,
+            vertical_radius,
+            max_chunks,
+        );
+        state.target_signature = Some(signature);
+    }
     state.visible_chunks.clear();
-    state.visible_chunks.extend(targets.iter().copied());
+    let target_chunks = state.target_chunks.clone();
+    state.visible_chunks.extend(target_chunks.iter().copied());
     let mut mip_counts = [0u32; 5];
 
-    for chunk_pos in &targets {
+    for chunk_pos in &target_chunks {
         let previous_mip = state.finest_resident_mips.get(chunk_pos).copied();
         let finest_mip = finest_resident_mip_for_chunk(
             camera_position,
@@ -141,7 +170,7 @@ pub fn update_visible_region_cache(
     for chunk_pos in evicted {
         state.retained_chunks.remove(&chunk_pos);
         state.finest_resident_mips.remove(&chunk_pos);
-        cache.remove_chunk(chunk_pos);
+        cache.remove_chunk_deferred(chunk_pos);
     }
 
     stats.streaming_interest_chunks = state.visible_chunks.len() as u32;

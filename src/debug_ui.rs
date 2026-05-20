@@ -8,10 +8,14 @@ use crate::rendering::gtao::gtao_settings_from_config;
 use crate::rendering::naadf::{
     NaadfCacheState, NaadfConfig, NaadfDenoiseQuality, NaadfPreviewCompositeModeConfig, NaadfStats,
 };
-use crate::rendering::ray_tracing::RayTracingSettings;
+#[cfg(not(feature = "naadf"))]
+use crate::rendering::ray_tracing::NAADF_NOT_COMPILED_REASON;
 #[cfg(feature = "naadf")]
 use crate::rendering::ray_tracing::{
     ExperimentalRenderMode, VoxelRayBackendMode, activate_naadf_preview,
+};
+use crate::rendering::ray_tracing::{
+    RayTracingSettings, VOXEL_RAY_NOTICE_SECONDS, VoxelRayBackendNotice,
 };
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
@@ -93,7 +97,6 @@ impl Plugin for DebugUiPlugin {
                 ),
             );
 
-        #[cfg(feature = "naadf")]
         app.add_systems(Update, toggle_naadf_split_view_key);
 
         #[cfg(debug_assertions)]
@@ -531,12 +534,13 @@ fn debug_settings_ui(
     );
 }
 
-#[cfg(feature = "naadf")]
 fn toggle_naadf_split_view_key(
     keys: Res<ButtonInput<KeyCode>>,
-    capabilities: Option<Res<GraphicsCapabilities>>,
-    mut naadf_config: Option<ResMut<NaadfConfig>>,
-    mut ray_tracing: Option<ResMut<RayTracingSettings>>,
+    time: Res<Time>,
+    mut settings: ResMut<RayTracingSettings>,
+    mut notice: ResMut<VoxelRayBackendNotice>,
+    #[cfg(feature = "naadf")] capabilities: Option<Res<GraphicsCapabilities>>,
+    #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
@@ -545,40 +549,53 @@ fn toggle_naadf_split_view_key(
         return;
     }
 
-    let Some(mut config) = naadf_config.take() else {
-        warn!("NAADF split view unchanged: NAADF config resource is unavailable");
-        return;
-    };
-    let Some(mut settings) = ray_tracing.take() else {
-        warn!("NAADF split view unchanged: ray tracing settings resource is unavailable");
-        return;
-    };
-
-    let split_active = settings.experimental_mode == ExperimentalRenderMode::NaadfPreview
-        && config.preview.composite_mode == NaadfPreviewCompositeModeConfig::SplitView;
-    if split_active {
-        settings.experimental_mode = ExperimentalRenderMode::Current;
-        config.preview.composite_mode = NaadfPreviewCompositeModeConfig::Fullscreen;
-        info!("NAADF split view: OFF (Shift+N to toggle)");
+    #[cfg(not(feature = "naadf"))]
+    {
+        settings.fallback_reason = Some(NAADF_NOT_COMPILED_REASON.into());
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+        warn!("NAADF split view unchanged: {}", NAADF_NOT_COMPILED_REASON);
         return;
     }
 
-    settings.set_voxel_backend(VoxelRayBackendMode::Naadf, capabilities.as_deref());
-    if settings.voxel_backend != VoxelRayBackendMode::Naadf {
-        if let Some(reason) = settings.fallback_reason.as_deref() {
-            warn!("NAADF split view unchanged: {reason}");
-        } else {
-            warn!("NAADF split view unchanged: NAADF backend request was rejected");
+    #[cfg(feature = "naadf")]
+    {
+        let Some(mut config) = naadf_config.take() else {
+            settings.fallback_reason = Some("NAADF config resource is unavailable".into());
+            notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+            warn!("NAADF split view unchanged: NAADF config resource is unavailable");
+            return;
+        };
+
+        let split_active = settings.experimental_mode == ExperimentalRenderMode::NaadfPreview
+            && config.preview.composite_mode == NaadfPreviewCompositeModeConfig::SplitView;
+        if split_active {
+            settings.experimental_mode = ExperimentalRenderMode::Current;
+            config.preview.composite_mode = NaadfPreviewCompositeModeConfig::Fullscreen;
+            settings.fallback_reason = None;
+            notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+            info!("NAADF split view: OFF (Shift+N to toggle)");
+            return;
         }
-        return;
-    }
 
-    activate_naadf_preview(
-        &mut config,
-        &mut settings,
-        NaadfPreviewCompositeModeConfig::SplitView,
-    );
-    info!("NAADF split view: ON (Shift+N to toggle)");
+        settings.set_voxel_backend(VoxelRayBackendMode::Naadf, capabilities.as_deref());
+        if settings.voxel_backend != VoxelRayBackendMode::Naadf {
+            notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+            if let Some(reason) = settings.fallback_reason.as_deref() {
+                warn!("NAADF split view unchanged: {reason}");
+            } else {
+                warn!("NAADF split view unchanged: NAADF backend request was rejected");
+            }
+            return;
+        }
+
+        activate_naadf_preview(
+            &mut config,
+            &mut settings,
+            NaadfPreviewCompositeModeConfig::SplitView,
+        );
+        notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
+        info!("NAADF split view: ON (Shift+N to toggle)");
+    }
 }
 
 /// Toggle Sun shadows with F10

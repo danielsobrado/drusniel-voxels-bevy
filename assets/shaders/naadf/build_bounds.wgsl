@@ -1,6 +1,7 @@
 #import "shaders/naadf/common.wgsl" NAADF_BLOCKS_PER_CHUNK, NAADF_NODE_UNIFORM_EMPTY, NAADF_PACKED_BLOCK_WORDS, naadf_node_state
 
 @group(3) @binding(5) var<storage, read_write> naadf_block_records: array<u32>;
+@group(3) @binding(30) var<storage, read> naadf_build_slots: array<u32>;
 
 var<workgroup> cached_skip: array<u32, 64>;
 var<workgroup> cached_next_skip: array<u32, 64>;
@@ -11,7 +12,7 @@ fn build_naadf_bounds(
     @builtin(workgroup_id) group_id: vec3<u32>,
     @builtin(local_invocation_index) local_index: u32,
 ) {
-    let chunk_index = group_id.x;
+    let chunk_index = naadf_build_slots[group_id.x];
     let block_index = chunk_index * NAADF_BLOCKS_PER_CHUNK + local_index;
     let base = block_index * NAADF_PACKED_BLOCK_WORDS;
     let node = naadf_block_records[base + 0u];

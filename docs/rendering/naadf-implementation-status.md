@@ -2,7 +2,7 @@
 
 Status: implementation record with current caveats  
 Branch/worktree: `main`  
-Last updated: 2026-05-19 (NAADF-215 real froxel-mask god-ray integration; fog scalar placeholder removed)  
+Last updated: 2026-05-19 (Path-B hardening: dirty-slot GPU build dispatch, main-camera-only preview node, runtime readiness gate, temporal forced off for Path-B)  
 Visual verification: preview-only, Path-B hybrid, Path-B DepthAudit, startup-stability, and NAADF froxel god-ray fixed screenshots inspected for the 2026-05-18/2026-05-19 bench runs listed below; lighting Path A visual evidence remains the earlier Path A bench set documented under `docs/rendering/naadf-path-a/`
 
 This file records what has been implemented from the NAADF plan so the remaining work can continue Jira-by-Jira without losing track of the completed foundation.
@@ -1644,9 +1644,16 @@ Review hardening:
 - Path-B first-hit now also binds the raster depth prepass and clamps primary NAADF ray distance to the current raster surface for `HybridFarTerrain`/`DepthAudit` when real depth is available. The compositor still performs the final depth/coverage reject as a safety backstop.
 - NAADF-managed camera depth prepass is reversible and marked with `NaadfManagedDepthPrepass`, so toggling Path-B/preview off does not leave an owned prepass active or remove a pre-existing external prepass.
 - World traversal now shares the voxel-step budget across resident chunks and returns local budget/distance failures instead of continuing to later chunks with a fresh budget.
+- GPU builder passes now consume a render-side dirty slot buffer and dispatch only selected dirty slots instead of sweeping `max_chunks`/all block records when one dirty build exists.
+- Path-B/preview render-graph work is restricted to NAADF-marked player-camera views; water reflection, minimap, editor, and other offscreen `Camera3d` views are not marked by the NAADF prepass helper.
+- The Path-B runtime gate now requires the human `foundation_200_210_verified` flag plus cache readiness, at least one GPU slot in use, and zero pending GPU uploads before Path-B compositor settings become runtime-available.
+- `path_b_enable_temporal` is ignored for `HybridFarTerrain` and `DepthAudit` until ownership-mask history rejection exists; Path-B temporal remains forcibly disabled even if the config switch is set.
 
 Checks:
 
+- 2026-05-19 Path-B hardening pass: `rtk cargo check --lib --features naadf -j 1` finished successfully with `CARGO_TARGET_DIR=F:\drusniel-cache\cargo-target\drusniel-voxels-check`.
+- 2026-05-19 Path-B hardening pass: `rtk cargo check --lib -j 1` finished successfully with the same `F:` target directory.
+- 2026-05-19 Path-B hardening pass: `rtk cargo test --lib --features naadf rendering::naadf::preview::tests -j 1` timed out in the local Windows environment after compiling for 15 minutes; no Rust assertion failure was captured. The stuck cargo/rustc processes were stopped.
 - `rtk cargo check --features naadf`: compiler finished successfully; the local `rtk` wrapper returned a non-zero shell status because it forwards Cargo status text on stderr.
 - `rtk cargo test --lib --features naadf rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off`: 1 test passed.
 - `rtk cargo test --lib --features naadf rendering::naadf::preview`: 7 tests passed.

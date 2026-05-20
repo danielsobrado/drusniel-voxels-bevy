@@ -27,53 +27,11 @@ struct NaadfFirstHitPreview {
     diagnostic_reason: f32,
 }
 
-struct NaadfEntityVolumeRecord {
-    world_aabb_min_material_base: vec4<f32>,
-    world_aabb_max_material_count: vec4<f32>,
-    local_from_world_x: vec4<f32>,
-    local_from_world_y: vec4<f32>,
-    local_from_world_z: vec4<f32>,
-    local_from_world_w: vec4<f32>,
-    world_from_local_x: vec4<f32>,
-    world_from_local_y: vec4<f32>,
-    world_from_local_z: vec4<f32>,
-    world_from_local_w: vec4<f32>,
-    previous_world_from_local_x: vec4<f32>,
-    previous_world_from_local_y: vec4<f32>,
-    previous_world_from_local_z: vec4<f32>,
-    previous_world_from_local_w: vec4<f32>,
-    dimensions_occupied: vec4<f32>,
-    voxel_size_local_origin_x: vec4<f32>,
-    local_origin_yz_pad: vec4<f32>,
-}
-
-struct NaadfFirstHitStats {
-    ray_count: atomic<u32>,
-    total_steps: atomic<u32>,
-    max_steps: atomic<u32>,
-    miss_reason_0_hits: atomic<u32>,
-    miss_reason_1_clean_exit: atomic<u32>,
-    miss_reason_2_voxel_budget: atomic<u32>,
-    miss_reason_3_chunk_budget: atomic<u32>,
-    miss_reason_4_distance_clamp: atomic<u32>,
-    miss_reason_5_no_lookup: atomic<u32>,
-}
-
-struct NaadfLocalLightRecord {
-    position_radius: vec4<f32>,
-    color_intensity: vec4<f32>,
-    flags_shadow_pad: vec4<u32>,
-}
-
 @group(3) @binding(16) var<uniform> naadf_first_hit_params: NaadfFirstHitParams;
 @group(3) @binding(17) var naadf_first_hit_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(18) var naadf_first_hit_depth_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(19) var naadf_first_hit_normal_output: texture_storage_2d<rgba16float, write>;
 @group(3) @binding(23) var naadf_first_hit_motion_output: texture_storage_2d<rgba16float, write>;
-@group(3) @binding(21) var<storage, read> naadf_entity_volume_records: array<NaadfEntityVolumeRecord>;
-@group(3) @binding(22) var<storage, read> naadf_entity_material_records: array<u32>;
-@group(3) @binding(24) var<storage, read_write> naadf_first_hit_stats: NaadfFirstHitStats;
-@group(3) @binding(25) var<storage, read> naadf_local_light_records: array<NaadfLocalLightRecord>;
 @group(3) @binding(39) var naadf_terrain_albedo_array: texture_2d_array<f32>;
 @group(3) @binding(40) var naadf_terrain_sampler: sampler;
 @group(3) @binding(41) var naadf_first_hit_scene_depth: texture_depth_2d;
@@ -111,8 +69,7 @@ fn naadf_first_hit_preview(@builtin(global_invocation_id) id: vec3<u32>) {
         naadf_first_hit_params.config.xyz,
         vec4<f32>(1.0, cone_spread, naadf_lod_threshold_jitter(id.xy), 0.0),
     );
-    let entity_preview = preview_naadf_first_hit_entities(ray, naadf_first_hit_params.config.w);
-    let preview = naadf_nearest_preview(terrain_preview, entity_preview);
+    let preview = terrain_preview;
 
     let miss_color = naadf_preview_miss_sky(ray_direction);
     let fogged_color = naadf_apply_preview_fog(preview.color, preview.distance);
@@ -213,25 +170,18 @@ fn preview_naadf_first_hit_world(
 }
 
 fn naadf_record_first_hit_telemetry(hit: NaadfHit) {
-    if naadf_first_hit_params.telemetry_config.x == 0u {
-        return;
-    }
-    atomicAdd(&naadf_first_hit_stats.ray_count, 1u);
-    atomicAdd(&naadf_first_hit_stats.total_steps, hit.steps);
-    atomicMax(&naadf_first_hit_stats.max_steps, hit.steps);
-    if hit.hit != 0u {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_0_hits, 1u);
-    } else if hit.miss_reason == 1u {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_1_clean_exit, 1u);
-    } else if hit.miss_reason == 2u {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_2_voxel_budget, 1u);
-    } else if hit.miss_reason == 3u {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_3_chunk_budget, 1u);
-    } else if hit.miss_reason == 4u {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_4_distance_clamp, 1u);
-    } else {
-        atomicAdd(&naadf_first_hit_stats.miss_reason_5_no_lookup, 1u);
-    }
+}
+
+fn naadf_first_hit_preview_miss(max_distance: f32, diagnostic_reason: f32) -> NaadfFirstHitPreview {
+    return NaadfFirstHitPreview(
+        0u,
+        vec3<f32>(0.0),
+        max_distance,
+        vec3<f32>(0.0),
+        vec3<f32>(0.0),
+        0u,
+        diagnostic_reason,
+    );
 }
 
 fn preview_naadf_first_hit_from_hit(ray: NaadfRay, hit: NaadfHit, config: vec3<u32>) -> NaadfFirstHitPreview {
@@ -317,232 +267,6 @@ fn naadf_blocky_material_base(material_id: u32) -> u32 {
     return 0u;
 }
 
-fn preview_naadf_first_hit_entities(ray: NaadfRay, entity_count: u32) -> NaadfFirstHitPreview {
-    var best = NaadfFirstHitPreview(
-        0u,
-        vec3<f32>(0.0),
-        ray.max_distance,
-        vec3<f32>(0.0),
-        vec3<f32>(0.0),
-        0u,
-        1.0,
-    );
-    let count = min(entity_count, arrayLength(&naadf_entity_volume_records));
-    for (var entity_index = 0u; entity_index < count; entity_index = entity_index + 1u) {
-        let hit = preview_naadf_entity_volume(ray, naadf_entity_volume_records[entity_index]);
-        if hit.hit != 0u && (best.hit == 0u || hit.distance < best.distance) {
-            best = hit;
-        }
-    }
-    return best;
-}
-
-fn preview_naadf_entity_volume(ray: NaadfRay, record: NaadfEntityVolumeRecord) -> NaadfFirstHitPreview {
-    if record.dimensions_occupied.w <= 0.0 {
-        return naadf_first_hit_preview_miss(ray.max_distance, 1.0);
-    }
-
-    let direction = normalize(ray.direction);
-    let local_from_world = mat4x4<f32>(
-        record.local_from_world_x,
-        record.local_from_world_y,
-        record.local_from_world_z,
-        record.local_from_world_w,
-    );
-    let local_origin = (local_from_world * vec4<f32>(ray.origin, 1.0)).xyz;
-    let local_end = (local_from_world * vec4<f32>(ray.origin + direction * ray.max_distance, 1.0)).xyz;
-    let local_direction = local_end - local_origin;
-    let local_volume_origin = vec3<f32>(
-        record.voxel_size_local_origin_x.w,
-        record.local_origin_yz_pad.x,
-        record.local_origin_yz_pad.y,
-    );
-    let voxel_size = max(record.voxel_size_local_origin_x.xyz, vec3<f32>(0.000001));
-    let dimensions = vec3<u32>(record.dimensions_occupied.xyz);
-    let grid_origin = (local_origin - local_volume_origin) / voxel_size;
-    let grid_direction = local_direction / voxel_size;
-    let bounds = naadf_entity_ray_box(grid_origin, grid_direction, vec3<f32>(0.0), vec3<f32>(dimensions));
-    if bounds.x > bounds.y || bounds.y < 0.0 || bounds.x > 1.0 {
-        return naadf_first_hit_preview_miss(ray.max_distance, 1.0);
-    }
-
-    var t = max(bounds.x, 0.0);
-    let step = vec3<i32>(
-        select(-1i, 1i, grid_direction.x >= 0.0),
-        select(-1i, 1i, grid_direction.y >= 0.0),
-        select(-1i, 1i, grid_direction.z >= 0.0),
-    );
-    var voxel = clamp(
-        vec3<i32>(floor(grid_origin + grid_direction * t)),
-        vec3<i32>(0),
-        vec3<i32>(dimensions) - vec3<i32>(1),
-    );
-    let inv_direction = vec3<f32>(
-        naadf_entity_safe_reciprocal(grid_direction.x),
-        naadf_entity_safe_reciprocal(grid_direction.y),
-        naadf_entity_safe_reciprocal(grid_direction.z),
-    );
-    var t_max = naadf_entity_next_grid_boundary_t(grid_origin, voxel, step, inv_direction);
-    let t_delta = abs(inv_direction);
-    var normal = vec3<f32>(0.0);
-    let material_base = u32(record.world_aabb_min_material_base.w + 0.5);
-    let material_count = u32(record.world_aabb_max_material_count.w + 0.5);
-
-    for (var steps = 0u; steps < 4096u; steps = steps + 1u) {
-        if t > bounds.y || t > 1.0 {
-            break;
-        }
-        if any(voxel < vec3<i32>(0)) || any(voxel >= vec3<i32>(dimensions)) {
-            break;
-        }
-        let local_voxel = vec3<u32>(voxel);
-        let material_offset = naadf_entity_voxel_index(local_voxel, dimensions);
-        if material_offset < material_count {
-            let material_index = material_base + material_offset;
-            var material_id = 0u;
-            if material_index < arrayLength(&naadf_entity_material_records) {
-                material_id = naadf_entity_material_records[material_index];
-            }
-            if material_id != 0u {
-                let distance = clamp(t, 0.0, 1.0) * ray.max_distance;
-                let world_normal = naadf_entity_world_normal(record, normal, -normalize(grid_direction));
-                let local_hit = local_origin + local_direction * clamp(t, 0.0, 1.0);
-                let previous_world_position = naadf_entity_previous_world_position(record, local_hit);
-                return NaadfFirstHitPreview(
-                    1u,
-                    naadf_preview_shaded_color(material_id, world_normal) +
-                        naadf_preview_local_light_color(
-                            naadf_preview_material_color(material_id),
-                            ray.origin + normalize(ray.direction) * distance,
-                            world_normal,
-                            naadf_first_hit_params.config.xyz,
-                        ),
-                    distance,
-                    world_normal,
-                    previous_world_position,
-                    material_id,
-                    0.0,
-                );
-            }
-        }
-
-        if t_max.x <= t_max.y && t_max.x <= t_max.z {
-            t = t_max.x;
-            t_max.x = t_max.x + t_delta.x;
-            voxel.x = voxel.x + step.x;
-            normal = vec3<f32>(f32(-step.x), 0.0, 0.0);
-        } else if t_max.y <= t_max.z {
-            t = t_max.y;
-            t_max.y = t_max.y + t_delta.y;
-            voxel.y = voxel.y + step.y;
-            normal = vec3<f32>(0.0, f32(-step.y), 0.0);
-        } else {
-            t = t_max.z;
-            t_max.z = t_max.z + t_delta.z;
-            voxel.z = voxel.z + step.z;
-            normal = vec3<f32>(0.0, 0.0, f32(-step.z));
-        }
-    }
-
-    return naadf_first_hit_preview_miss(ray.max_distance, 1.0);
-}
-
-fn naadf_first_hit_preview_miss(max_distance: f32, diagnostic_reason: f32) -> NaadfFirstHitPreview {
-    return NaadfFirstHitPreview(
-        0u,
-        vec3<f32>(0.0),
-        max_distance,
-        vec3<f32>(0.0),
-        vec3<f32>(0.0),
-        0u,
-        diagnostic_reason,
-    );
-}
-
-fn naadf_nearest_preview(a: NaadfFirstHitPreview, b: NaadfFirstHitPreview) -> NaadfFirstHitPreview {
-    if a.hit == 0u {
-        return b;
-    }
-    if b.hit == 0u {
-        return a;
-    }
-    if b.distance < a.distance {
-        return b;
-    }
-    return a;
-}
-
-fn naadf_entity_ray_box(origin: vec3<f32>, direction: vec3<f32>, min_bounds: vec3<f32>, max_bounds: vec3<f32>) -> vec2<f32> {
-    let x = naadf_entity_ray_box_axis(origin.x, direction.x, min_bounds.x, max_bounds.x);
-    let y = naadf_entity_ray_box_axis(origin.y, direction.y, min_bounds.y, max_bounds.y);
-    let z = naadf_entity_ray_box_axis(origin.z, direction.z, min_bounds.z, max_bounds.z);
-    return vec2<f32>(
-        max(max(x.x, y.x), z.x),
-        min(min(x.y, y.y), z.y),
-    );
-}
-
-fn naadf_entity_ray_box_axis(origin: f32, direction: f32, min_bound: f32, max_bound: f32) -> vec2<f32> {
-    if abs(direction) < 0.000001 {
-        if origin < min_bound || origin > max_bound {
-            return vec2<f32>(1.0, 0.0);
-        }
-        return vec2<f32>(-1000000000.0, 1000000000.0);
-    }
-    let inv_direction = 1.0 / direction;
-    let t0 = (min_bound - origin) * inv_direction;
-    let t1 = (max_bound - origin) * inv_direction;
-    return vec2<f32>(min(t0, t1), max(t0, t1));
-}
-
-fn naadf_entity_safe_reciprocal(value: f32) -> f32 {
-    let safe_value = select(select(-0.000001, 0.000001, value >= 0.0), value, abs(value) >= 0.000001);
-    return 1.0 / safe_value;
-}
-
-fn naadf_entity_next_grid_boundary_t(
-    origin: vec3<f32>,
-    voxel: vec3<i32>,
-    step: vec3<i32>,
-    inv_direction: vec3<f32>,
-) -> vec3<f32> {
-    let next = vec3<f32>(
-        select(f32(voxel.x), f32(voxel.x + 1i), step.x > 0i),
-        select(f32(voxel.y), f32(voxel.y + 1i), step.y > 0i),
-        select(f32(voxel.z), f32(voxel.z + 1i), step.z > 0i),
-    );
-    return (next - origin) * inv_direction;
-}
-
-fn naadf_entity_voxel_index(local: vec3<u32>, dimensions: vec3<u32>) -> u32 {
-    return local.x + local.y * dimensions.x + local.z * dimensions.x * dimensions.y;
-}
-
-fn naadf_entity_world_normal(
-    record: NaadfEntityVolumeRecord,
-    local_normal: vec3<f32>,
-    fallback_local_normal: vec3<f32>,
-) -> vec3<f32> {
-    let world_from_local = mat4x4<f32>(
-        record.world_from_local_x,
-        record.world_from_local_y,
-        record.world_from_local_z,
-        record.world_from_local_w,
-    );
-    let normal = select(local_normal, fallback_local_normal, length(local_normal) <= 0.000001);
-    return normalize((world_from_local * vec4<f32>(normal, 0.0)).xyz);
-}
-
-fn naadf_entity_previous_world_position(record: NaadfEntityVolumeRecord, local_position: vec3<f32>) -> vec3<f32> {
-    let previous_world_from_local = mat4x4<f32>(
-        record.previous_world_from_local_x,
-        record.previous_world_from_local_y,
-        record.previous_world_from_local_z,
-        record.previous_world_from_local_w,
-    );
-    return (previous_world_from_local * vec4<f32>(local_position, 1.0)).xyz;
-}
-
 fn naadf_apply_preview_fog(color: vec3<f32>, distance: f32) -> vec3<f32> {
     let fog_start = naadf_first_hit_params.fog_color_start.w;
     let fog_end = max(naadf_first_hit_params.fog_end_strength.x, fog_start + 0.001);
@@ -585,55 +309,7 @@ fn naadf_preview_local_light_color(
     normal: vec3<f32>,
     trace_config: vec3<u32>,
 ) -> vec3<f32> {
-    let count = min(naadf_first_hit_params.local_light_config.x, arrayLength(&naadf_local_light_records));
-    if count == 0u {
-        return vec3<f32>(0.0);
-    }
-
-    var contribution = vec3<f32>(0.0);
-    let surface_normal = normalize(normal);
-    let shadows_enabled = naadf_first_hit_params.local_light_config.y != 0u;
-    for (var index = 0u; index < count; index = index + 1u) {
-        let light = naadf_local_light_records[index];
-        let light_position = light.position_radius.xyz;
-        let radius = max(light.position_radius.w, 0.001);
-        let to_light = light_position - world_pos;
-        let distance = length(to_light);
-        if distance <= 0.001 || distance >= radius {
-            continue;
-        }
-
-        let light_dir = to_light / distance;
-        let ndotl = max(dot(surface_normal, light_dir), 0.0);
-        if ndotl <= 0.0 {
-            continue;
-        }
-
-        if shadows_enabled && (light.flags_shadow_pad.x & 1u) != 0u {
-            let shadow_origin = world_pos + surface_normal * 0.08;
-            let shadow_ray = NaadfRay(
-                shadow_origin,
-                light_dir,
-                max(distance - 0.12, 0.0),
-                3u,
-            );
-            let shadow_hit = trace_naadf_world(
-                shadow_ray,
-                trace_config.x,
-                trace_config.y,
-                trace_config.z,
-            );
-            if shadow_hit.hit != 0u {
-                continue;
-            }
-        }
-
-        let falloff = clamp(1.0 - distance / radius, 0.0, 1.0);
-        let attenuation = falloff * falloff;
-        contribution = contribution + albedo * light.color_intensity.xyz *
-            light.color_intensity.w * attenuation * ndotl;
-    }
-    return contribution;
+    return vec3<f32>(0.0);
 }
 
 fn naadf_preview_sun_direction() -> vec3<f32> {

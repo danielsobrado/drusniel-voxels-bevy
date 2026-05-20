@@ -1,15 +1,15 @@
 use bevy::asset::uuid_handle;
-use bevy::core_pipeline::prepass::ViewPrepassTextures;
 use bevy::core_pipeline::FullscreenShader;
+use bevy::core_pipeline::prepass::ViewPrepassTextures;
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy::render::MainWorld;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewTarget};
-use bevy::render::MainWorld;
 use bevy::shader::Shader;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ use super::gpu_buffers::{
 };
 use super::local_lights::{ExtractedNaadfLocalLights, NaadfLocalLightGpuBuffers};
 use super::preview::{
-    NaadfPathBCompositorMode, NaadfPreviewCompositeMode, NaadfPreviewPipelineState,
+    NaadfMainView, NaadfPathBCompositorMode, NaadfPreviewCompositeMode, NaadfPreviewPipelineState,
     NaadfPreviewSettings,
 };
 use super::stats::NaadfRenderStatsBridge;
@@ -45,6 +45,8 @@ pub const NAADF_BUILD_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_bounds.wgs
 pub const NAADF_BUILD_CHUNKS_SHADER_PATH: &str = "shaders/naadf/build_chunks.wgsl";
 pub const NAADF_BUILD_CHUNK_BOUNDS_SHADER_PATH: &str = "shaders/naadf/build_chunk_bounds.wgsl";
 pub const NAADF_FIRST_HIT_SHADER_PATH: &str = "shaders/naadf/first_hit.wgsl";
+pub const NAADF_FIRST_HIT_PATH_B_TERRAIN_SHADER_PATH: &str =
+    "shaders/naadf/first_hit_path_b_terrain.wgsl";
 pub const NAADF_GI_TRACE_SHADER_PATH: &str = "shaders/naadf/gi_trace.wgsl";
 pub const NAADF_SPATIAL_RESAMPLING_SHADER_PATH: &str = "shaders/naadf/spatial_resampling.wgsl";
 pub const NAADF_TEMPORAL_ACCUMULATION_SHADER_PATH: &str =
@@ -53,7 +55,9 @@ pub const NAADF_DENOISE_SHADER_PATH: &str = "shaders/naadf/denoise.wgsl";
 pub const NAADF_PATH_TRACE_SHADER_PATH: &str = "shaders/naadf/path_trace.wgsl";
 pub const NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_PATH: &str =
     "shaders/naadf/preview_fullscreen_composite.wgsl";
+pub const NAADF_PATH_B_OWNERSHIP_SHADER_PATH: &str = "shaders/naadf/path_b_ownership.wgsl";
 pub const NAADF_BUILD_BLOCKS_WORKGROUP_SIZE: u32 = 64;
+pub const NAADF_BUILD_BLOCKS_PER_CHUNK: u32 = super::layout::BLOCKS_PER_CHUNK;
 pub const NAADF_BUILD_CHUNKS_WORKGROUP_SIZE: u32 = 64;
 pub const NAADF_PREVIEW_WORKGROUP_SIZE: u32 = 8;
 
@@ -81,6 +85,8 @@ pub const NAADF_BUILD_CHUNK_BOUNDS_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("50ac25a0-9afa-4b24-8689-ad3e57a36b52");
 pub const NAADF_FIRST_HIT_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("cf37e4c0-d2db-48d9-888a-792d1de2c16d");
+pub const NAADF_FIRST_HIT_PATH_B_TERRAIN_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("338cc2fe-4d9a-4d60-bf4e-2ec8a6b95b53");
 pub const NAADF_GI_TRACE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("2c0bb034-951f-4498-aa1b-bd17c248c182");
 pub const NAADF_SPATIAL_RESAMPLING_SHADER_HANDLE: Handle<Shader> =
@@ -93,6 +99,8 @@ pub const NAADF_PATH_TRACE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("6b45e298-4b10-4482-8bf3-57a11a412f01");
 pub const NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("1e1d1db7-2683-408c-9244-045e3e5c310e");
+pub const NAADF_PATH_B_OWNERSHIP_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("bdfbb110-02e9-46c7-9cb2-b4df5bdb447d");
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NaadfGpuRayTestPipelineState {
@@ -278,9 +286,11 @@ pub struct NaadfPreviewBuildPipelines {
     build_chunks_layout: BindGroupLayoutDescriptor,
     build_chunk_bounds_layout: BindGroupLayoutDescriptor,
     first_hit_layout: BindGroupLayoutDescriptor,
+    first_hit_path_b_terrain_layout: BindGroupLayoutDescriptor,
     gi_layout: BindGroupLayoutDescriptor,
     spatial_layout: BindGroupLayoutDescriptor,
     temporal_layout: BindGroupLayoutDescriptor,
+    path_b_ownership_layout: BindGroupLayoutDescriptor,
     denoise_layout: BindGroupLayoutDescriptor,
     path_trace_layout: BindGroupLayoutDescriptor,
     composite_layout: BindGroupLayoutDescriptor,
@@ -290,9 +300,11 @@ pub struct NaadfPreviewBuildPipelines {
     build_chunks_pipeline: CachedComputePipelineId,
     build_chunk_bounds_pipeline: CachedComputePipelineId,
     first_hit_pipeline: CachedComputePipelineId,
+    first_hit_path_b_terrain_pipeline: CachedComputePipelineId,
     gi_pipeline: CachedComputePipelineId,
     spatial_pipeline: CachedComputePipelineId,
     temporal_pipeline: CachedComputePipelineId,
+    path_b_ownership_pipeline: CachedComputePipelineId,
     denoise_pipeline: CachedComputePipelineId,
     path_trace_pipeline: CachedComputePipelineId,
     composite_hdr_pipeline: CachedRenderPipelineId,
@@ -322,6 +334,8 @@ struct NaadfPreviewTemporalHistorySlot {
     write_texture: Texture,
     read_moments_texture: Texture,
     write_moments_texture: Texture,
+    read_owner_texture: Texture,
+    write_owner_texture: Texture,
 }
 
 struct NaadfPreviewScratchTextureSlot {
@@ -330,6 +344,7 @@ struct NaadfPreviewScratchTextureSlot {
     first_hit_depth_texture: Texture,
     first_hit_normal_texture: Texture,
     first_hit_motion_texture: Texture,
+    current_owner_texture: Texture,
     gi_texture: Texture,
     spatial_filtered_texture: Texture,
     denoise_ping_texture: Option<Texture>,
@@ -342,6 +357,7 @@ struct NaadfPreviewScratchViews {
     first_hit_depth: TextureView,
     first_hit_normal: TextureView,
     first_hit_motion: TextureView,
+    current_owner: TextureView,
     gi: TextureView,
     spatial_filtered: TextureView,
     denoise_ping: Option<TextureView>,
@@ -439,6 +455,9 @@ impl NaadfPreviewScratchTextures {
             first_hit_motion: slot
                 .first_hit_motion_texture
                 .create_view(&TextureViewDescriptor::default()),
+            current_owner: slot
+                .current_owner_texture
+                .create_view(&TextureViewDescriptor::default()),
             gi: slot
                 .gi_texture
                 .create_view(&TextureViewDescriptor::default()),
@@ -488,43 +507,23 @@ pub fn init_naadf_preview_build_pipelines(
     pipeline_cache: Res<PipelineCache>,
 ) {
     let empty_group_layout = BindGroupLayoutDescriptor::new("naadf_empty_group_layout", &[]);
-    let build_blocks_layout = BindGroupLayoutDescriptor::new(
-        "naadf_build_blocks_layout",
-        &[
-            storage_buffer_entry(0, false),
-            storage_buffer_entry(1, false),
-            storage_buffer_entry(4, true),
-            storage_buffer_entry(5, false),
-            storage_buffer_entry(6, false),
-            storage_buffer_entry(7, false),
-        ],
-    );
-    let build_bounds_layout = BindGroupLayoutDescriptor::new(
-        "naadf_build_bounds_layout",
-        &[storage_buffer_entry(5, false)],
-    );
-    let build_mips_layout = BindGroupLayoutDescriptor::new(
-        "naadf_build_mips_layout",
-        &[
-            storage_buffer_entry(6, false),
-            storage_buffer_entry(7, false),
-            storage_buffer_entry(8, false),
-        ],
-    );
-    let build_chunks_layout = BindGroupLayoutDescriptor::new(
-        "naadf_build_chunks_layout",
-        &[
-            storage_buffer_entry(5, true),
-            storage_buffer_entry(11, false),
-        ],
-    );
+    let build_blocks_entries = bind_layout_entries(super::layout::NAADF_BUILD_BLOCKS_LAYOUT);
+    let build_blocks_layout =
+        BindGroupLayoutDescriptor::new("naadf_build_blocks_layout", &build_blocks_entries);
+    let build_bounds_entries = bind_layout_entries(super::layout::NAADF_BUILD_BOUNDS_LAYOUT);
+    let build_bounds_layout =
+        BindGroupLayoutDescriptor::new("naadf_build_bounds_layout", &build_bounds_entries);
+    let build_mips_entries = bind_layout_entries(super::layout::NAADF_BUILD_MIPS_LAYOUT);
+    let build_mips_layout =
+        BindGroupLayoutDescriptor::new("naadf_build_mips_layout", &build_mips_entries);
+    let build_chunks_entries = bind_layout_entries(super::layout::NAADF_BUILD_CHUNKS_LAYOUT);
+    let build_chunks_layout =
+        BindGroupLayoutDescriptor::new("naadf_build_chunks_layout", &build_chunks_entries);
+    let build_chunk_bounds_entries =
+        bind_layout_entries(super::layout::NAADF_BUILD_CHUNK_BOUNDS_LAYOUT);
     let build_chunk_bounds_layout = BindGroupLayoutDescriptor::new(
         "naadf_build_chunk_bounds_layout",
-        &[
-            storage_buffer_entry(11, false),
-            uniform_buffer_entry(12),
-            storage_buffer_entry(20, true),
-        ],
+        &build_chunk_bounds_entries,
     );
     let first_hit_layout = BindGroupLayoutDescriptor::new(
         "naadf_first_hit_layout",
@@ -546,6 +545,27 @@ pub fn init_naadf_preview_build_pipelines(
             storage_texture_entry(23, TextureFormat::Rgba16Float),
             storage_buffer_entry(24, false),
             storage_buffer_entry(25, true),
+            texture_array_entry_for_stage(39, ShaderStages::COMPUTE),
+            sampler_entry_for_stage(40, ShaderStages::COMPUTE),
+            depth_texture_entry_for_stage(41, ShaderStages::COMPUTE),
+        ],
+    );
+    let first_hit_path_b_terrain_layout = BindGroupLayoutDescriptor::new(
+        "naadf_first_hit_path_b_terrain_layout",
+        &[
+            storage_buffer_entry(0, true),
+            storage_buffer_entry(1, true),
+            storage_buffer_entry(5, true),
+            storage_buffer_entry(6, true),
+            storage_buffer_entry(7, true),
+            storage_buffer_entry(8, true),
+            storage_buffer_entry(11, true),
+            uniform_buffer_entry(16),
+            storage_texture_entry(17, TextureFormat::Rgba16Float),
+            storage_texture_entry(18, TextureFormat::Rgba16Float),
+            storage_texture_entry(19, TextureFormat::Rgba16Float),
+            storage_buffer_entry(20, true),
+            storage_texture_entry(23, TextureFormat::Rgba16Float),
             texture_array_entry_for_stage(39, ShaderStages::COMPUTE),
             sampler_entry_for_stage(40, ShaderStages::COMPUTE),
             depth_texture_entry_for_stage(41, ShaderStages::COMPUTE),
@@ -590,6 +610,23 @@ pub fn init_naadf_preview_build_pipelines(
             texture_entry_for_stage(16, ShaderStages::COMPUTE),
             storage_texture_entry(17, TextureFormat::Rg16Float),
             texture_entry_for_stage(18, ShaderStages::COMPUTE),
+            uint_texture_entry_for_stage(19, ShaderStages::COMPUTE),
+            uint_texture_entry_for_stage(20, ShaderStages::COMPUTE),
+            storage_texture_entry(21, TextureFormat::R32Uint),
+        ],
+    );
+    let path_b_ownership_layout = BindGroupLayoutDescriptor::new(
+        "naadf_path_b_ownership_layout",
+        &[
+            uniform_buffer_entry(42),
+            depth_texture_entry_for_stage(43, ShaderStages::COMPUTE),
+            texture_entry_for_stage(44, ShaderStages::COMPUTE),
+            texture_entry_for_stage(45, ShaderStages::COMPUTE),
+            texture_entry_for_stage(46, ShaderStages::COMPUTE),
+            storage_texture_entry(47, TextureFormat::R32Uint),
+            uint_texture_entry_for_stage(48, ShaderStages::COMPUTE),
+            texture_entry_for_stage(49, ShaderStages::COMPUTE),
+            storage_buffer_entry_for_stage(50, false, ShaderStages::COMPUTE),
         ],
     );
     let denoise_layout = BindGroupLayoutDescriptor::new(
@@ -667,6 +704,14 @@ pub fn init_naadf_preview_build_pipelines(
         &empty_group_layout,
         &first_hit_layout,
     ));
+    let first_hit_path_b_terrain_pipeline =
+        pipeline_cache.queue_compute_pipeline(compute_descriptor(
+            "naadf_first_hit_path_b_terrain_pipeline",
+            NAADF_FIRST_HIT_PATH_B_TERRAIN_SHADER_HANDLE,
+            "naadf_first_hit_preview",
+            &empty_group_layout,
+            &first_hit_path_b_terrain_layout,
+        ));
     let gi_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
         "naadf_gi_trace_pipeline",
         NAADF_GI_TRACE_SHADER_HANDLE,
@@ -687,6 +732,13 @@ pub fn init_naadf_preview_build_pipelines(
         "naadf_temporal_accumulation",
         &empty_group_layout,
         &temporal_layout,
+    ));
+    let path_b_ownership_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
+        "naadf_path_b_ownership_pipeline",
+        NAADF_PATH_B_OWNERSHIP_SHADER_HANDLE,
+        "naadf_path_b_ownership",
+        &empty_group_layout,
+        &path_b_ownership_layout,
     ));
     let denoise_pipeline = pipeline_cache.queue_compute_pipeline(compute_descriptor(
         "naadf_denoise_pipeline",
@@ -746,9 +798,11 @@ pub fn init_naadf_preview_build_pipelines(
         build_chunks_layout,
         build_chunk_bounds_layout,
         first_hit_layout,
+        first_hit_path_b_terrain_layout,
         gi_layout,
         spatial_layout,
         temporal_layout,
+        path_b_ownership_layout,
         denoise_layout,
         path_trace_layout,
         composite_layout,
@@ -758,9 +812,11 @@ pub fn init_naadf_preview_build_pipelines(
         build_chunks_pipeline,
         build_chunk_bounds_pipeline,
         first_hit_pipeline,
+        first_hit_path_b_terrain_pipeline,
         gi_pipeline,
         spatial_pipeline,
         temporal_pipeline,
+        path_b_ownership_pipeline,
         denoise_pipeline,
         path_trace_pipeline,
         composite_hdr_pipeline,
@@ -773,9 +829,32 @@ pub fn init_naadf_preview_build_pipelines(
 }
 
 fn storage_buffer_entry(binding: u32, read_only: bool) -> BindGroupLayoutEntry {
+    storage_buffer_entry_for_stage(binding, read_only, ShaderStages::COMPUTE)
+}
+
+fn bind_layout_entries(specs: &[super::layout::NaadfBindEntrySpec]) -> Vec<BindGroupLayoutEntry> {
+    specs
+        .iter()
+        .map(|spec| match spec.kind {
+            super::layout::NaadfBindEntryKind::StorageRead => {
+                storage_buffer_entry(spec.binding, true)
+            }
+            super::layout::NaadfBindEntryKind::StorageReadWrite => {
+                storage_buffer_entry(spec.binding, false)
+            }
+            super::layout::NaadfBindEntryKind::Uniform => uniform_buffer_entry(spec.binding),
+        })
+        .collect()
+}
+
+fn storage_buffer_entry_for_stage(
+    binding: u32,
+    read_only: bool,
+    visibility: ShaderStages,
+) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
-        visibility: ShaderStages::COMPUTE,
+        visibility,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only },
             has_dynamic_offset: false,
@@ -845,6 +924,19 @@ fn texture_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupL
     }
 }
 
+fn uint_texture_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Uint,
+            view_dimension: TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
 fn texture_array_entry_for_stage(binding: u32, visibility: ShaderStages) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
@@ -896,13 +988,14 @@ impl ViewNode for NaadfPreviewBuildNode {
         &'static ViewTarget,
         &'static ExtractedView,
         Option<&'static ViewPrepassTextures>,
+        &'static NaadfMainView,
     );
 
     fn run<'w>(
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        (view_target, extracted_view, prepass_textures): bevy::ecs::query::QueryItem<
+        (view_target, extracted_view, prepass_textures, _main_view): bevy::ecs::query::QueryItem<
             'w,
             '_,
             Self::ViewQuery,
@@ -960,6 +1053,12 @@ impl ViewNode for NaadfPreviewBuildNode {
             .unwrap_or_default();
         let needs_gpu_build = gpu_builder_enabled && gpu_builds.has_work();
         let telemetry_enabled = gpu_config.debug_readback;
+        let path_b_counters_readback_enabled = preview_settings.path_b_mode.is_path_b()
+            && preview_settings.path_b_runtime_available
+            && preview_settings.path_b_counters_enabled;
+        let stats_readback_enabled = telemetry_enabled || path_b_counters_readback_enabled;
+        let use_path_b_terrain_first_hit =
+            preview_settings.path_b_mode.is_path_b() && preview_settings.path_b_runtime_available;
         let build_blocks_pipeline = if needs_gpu_build {
             let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.build_blocks_pipeline)
@@ -1014,19 +1113,22 @@ impl ViewNode for NaadfPreviewBuildNode {
         } else {
             None
         };
-        let Some(first_hit_pipeline) =
-            pipeline_cache.get_compute_pipeline(pipelines.first_hit_pipeline)
+        let first_hit_pipeline_id = if use_path_b_terrain_first_hit {
+            pipelines.first_hit_path_b_terrain_pipeline
+        } else {
+            pipelines.first_hit_pipeline
+        };
+        let Some(first_hit_pipeline) = pipeline_cache.get_compute_pipeline(first_hit_pipeline_id)
         else {
-            let stage =
-                match pipeline_cache.get_compute_pipeline_state(pipelines.first_hit_pipeline) {
-                    CachedPipelineState::Queued => 141,
-                    CachedPipelineState::Creating(_) => 142,
-                    CachedPipelineState::Err(err) => {
-                        warn!("NAADF first-hit pipeline failed: {err:?}");
-                        143
-                    }
-                    CachedPipelineState::Ok(_) => 144,
-                };
+            let stage = match pipeline_cache.get_compute_pipeline_state(first_hit_pipeline_id) {
+                CachedPipelineState::Queued => 141,
+                CachedPipelineState::Creating(_) => 142,
+                CachedPipelineState::Err(err) => {
+                    warn!("NAADF first-hit pipeline failed: {err:?}");
+                    143
+                }
+                CachedPipelineState::Ok(_) => 144,
+            };
             publish_preview_node_stage(world, stage);
             return Ok(());
         };
@@ -1049,6 +1151,12 @@ impl ViewNode for NaadfPreviewBuildNode {
             pipeline_cache.get_compute_pipeline(pipelines.temporal_pipeline)
         else {
             publish_preview_node_stage(world, 17);
+            return Ok(());
+        };
+        let Some(path_b_ownership_pipeline) =
+            pipeline_cache.get_compute_pipeline(pipelines.path_b_ownership_pipeline)
+        else {
+            publish_preview_node_stage(world, 171);
             return Ok(());
         };
         let denoise_pipeline = if denoise_iterations > 0 {
@@ -1104,6 +1212,7 @@ impl ViewNode for NaadfPreviewBuildNode {
         let preview_depth_view = scratch_views.first_hit_depth;
         let preview_normal_view = scratch_views.first_hit_normal;
         let preview_motion_view = scratch_views.first_hit_motion;
+        let current_owner_view = scratch_views.current_owner;
         let gi_view = scratch_views.gi;
         let filtered_view = scratch_views.spatial_filtered;
         let denoise_ping = scratch_views.denoise_ping;
@@ -1118,6 +1227,8 @@ impl ViewNode for NaadfPreviewBuildNode {
             temporal_output_view,
             history_moments_view,
             temporal_output_moments_view,
+            history_owner_view,
+            temporal_output_owner_view,
             reset_temporal_history,
             previous_clip_from_world,
         ) = temporal_history.views_for_frame(
@@ -1244,6 +1355,14 @@ impl ViewNode for NaadfPreviewBuildNode {
             &pipeline_cache.get_bind_group_layout(&pipelines.empty_group_layout),
             &[],
         );
+        let fallback_build_slots = [0u32];
+        let build_slots = if needs_gpu_build {
+            gpu_builds.slots.as_slice()
+        } else {
+            &fallback_build_slots
+        };
+        let build_slot_buffer =
+            create_storage_buffer_u32(&render_device, "naadf_build_slot_buffer", build_slots);
 
         let build_blocks_group = render_device.create_bind_group(
             "naadf_build_blocks_bind_group",
@@ -1255,12 +1374,16 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (5, allocation.block_buffer.as_entire_binding()),
                 (6, allocation.mip_traversal_buffer.as_entire_binding()),
                 (7, allocation.mip_payload_buffer.as_entire_binding()),
+                (30, build_slot_buffer.as_entire_binding()),
             )),
         );
         let build_bounds_group = render_device.create_bind_group(
             "naadf_build_bounds_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.build_bounds_layout),
-            &BindGroupEntries::with_indices(((5, allocation.block_buffer.as_entire_binding()),)),
+            &BindGroupEntries::with_indices((
+                (5, allocation.block_buffer.as_entire_binding()),
+                (30, build_slot_buffer.as_entire_binding()),
+            )),
         );
         let build_mips_group = render_device.create_bind_group(
             "naadf_build_mips_bind_group",
@@ -1269,6 +1392,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (6, allocation.mip_traversal_buffer.as_entire_binding()),
                 (7, allocation.mip_payload_buffer.as_entire_binding()),
                 (8, allocation.mip_bounds_buffer.as_entire_binding()),
+                (30, build_slot_buffer.as_entire_binding()),
             )),
         );
         let build_chunks_group = render_device.create_bind_group(
@@ -1277,6 +1401,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             &BindGroupEntries::with_indices((
                 (5, allocation.block_buffer.as_entire_binding()),
                 (11, allocation.chunk_buffer.as_entire_binding()),
+                (30, build_slot_buffer.as_entire_binding()),
             )),
         );
         let build_chunk_bounds_group = render_device.create_bind_group(
@@ -1286,6 +1411,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 (11, allocation.chunk_buffer.as_entire_binding()),
                 (12, build_chunk_bounds_uniform.as_entire_binding()),
                 (20, allocation.chunk_lookup_buffer.as_entire_binding()),
+                (30, build_slot_buffer.as_entire_binding()),
             )),
         );
         let Some(terrain_atlas_handle) = world
@@ -1315,46 +1441,79 @@ impl ViewNode for NaadfPreviewBuildNode {
                 coverage_view.is_some(),
             ),
         );
-        let first_hit_group = render_device.create_bind_group(
-            "naadf_first_hit_bind_group",
-            &pipeline_cache.get_bind_group_layout(&pipelines.first_hit_layout),
-            &BindGroupEntries::with_indices((
-                (0, allocation.voxel_buffer.as_entire_binding()),
-                (1, allocation.material_buffer.as_entire_binding()),
-                (5, allocation.block_buffer.as_entire_binding()),
-                (6, allocation.mip_traversal_buffer.as_entire_binding()),
-                (7, allocation.mip_payload_buffer.as_entire_binding()),
-                (8, allocation.mip_bounds_buffer.as_entire_binding()),
-                (11, allocation.chunk_buffer.as_entire_binding()),
-                (16, first_hit_uniform.as_entire_binding()),
-                (17, BindingResource::TextureView(&preview_view)),
-                (18, BindingResource::TextureView(&preview_depth_view)),
-                (19, BindingResource::TextureView(&preview_normal_view)),
-                (20, allocation.chunk_lookup_buffer.as_entire_binding()),
-                (
-                    21,
-                    entity_allocation.entity_record_buffer.as_entire_binding(),
-                ),
-                (
-                    22,
-                    entity_allocation.entity_material_buffer.as_entire_binding(),
-                ),
-                (23, BindingResource::TextureView(&preview_motion_view)),
-                (24, allocation.stats_buffer.as_entire_binding()),
-                (25, local_light_allocation.buffer.as_entire_binding()),
-                (
-                    39,
-                    BindingResource::TextureView(&terrain_albedo.texture_view),
-                ),
-                (40, BindingResource::Sampler(&terrain_albedo.sampler)),
-                (
-                    41,
-                    BindingResource::TextureView(
-                        scene_depth_view.unwrap_or(&pipelines.dummy_depth_view),
+        let first_hit_group = if use_path_b_terrain_first_hit {
+            render_device.create_bind_group(
+                "naadf_first_hit_path_b_terrain_bind_group",
+                &pipeline_cache.get_bind_group_layout(&pipelines.first_hit_path_b_terrain_layout),
+                &BindGroupEntries::with_indices((
+                    (0, allocation.voxel_buffer.as_entire_binding()),
+                    (1, allocation.material_buffer.as_entire_binding()),
+                    (5, allocation.block_buffer.as_entire_binding()),
+                    (6, allocation.mip_traversal_buffer.as_entire_binding()),
+                    (7, allocation.mip_payload_buffer.as_entire_binding()),
+                    (8, allocation.mip_bounds_buffer.as_entire_binding()),
+                    (11, allocation.chunk_buffer.as_entire_binding()),
+                    (16, first_hit_uniform.as_entire_binding()),
+                    (17, BindingResource::TextureView(&preview_view)),
+                    (18, BindingResource::TextureView(&preview_depth_view)),
+                    (19, BindingResource::TextureView(&preview_normal_view)),
+                    (20, allocation.chunk_lookup_buffer.as_entire_binding()),
+                    (23, BindingResource::TextureView(&preview_motion_view)),
+                    (
+                        39,
+                        BindingResource::TextureView(&terrain_albedo.texture_view),
                     ),
-                ),
-            )),
-        );
+                    (40, BindingResource::Sampler(&terrain_albedo.sampler)),
+                    (
+                        41,
+                        BindingResource::TextureView(
+                            scene_depth_view.unwrap_or(&pipelines.dummy_depth_view),
+                        ),
+                    ),
+                )),
+            )
+        } else {
+            render_device.create_bind_group(
+                "naadf_first_hit_bind_group",
+                &pipeline_cache.get_bind_group_layout(&pipelines.first_hit_layout),
+                &BindGroupEntries::with_indices((
+                    (0, allocation.voxel_buffer.as_entire_binding()),
+                    (1, allocation.material_buffer.as_entire_binding()),
+                    (5, allocation.block_buffer.as_entire_binding()),
+                    (6, allocation.mip_traversal_buffer.as_entire_binding()),
+                    (7, allocation.mip_payload_buffer.as_entire_binding()),
+                    (8, allocation.mip_bounds_buffer.as_entire_binding()),
+                    (11, allocation.chunk_buffer.as_entire_binding()),
+                    (16, first_hit_uniform.as_entire_binding()),
+                    (17, BindingResource::TextureView(&preview_view)),
+                    (18, BindingResource::TextureView(&preview_depth_view)),
+                    (19, BindingResource::TextureView(&preview_normal_view)),
+                    (20, allocation.chunk_lookup_buffer.as_entire_binding()),
+                    (
+                        21,
+                        entity_allocation.entity_record_buffer.as_entire_binding(),
+                    ),
+                    (
+                        22,
+                        entity_allocation.entity_material_buffer.as_entire_binding(),
+                    ),
+                    (23, BindingResource::TextureView(&preview_motion_view)),
+                    (24, allocation.stats_buffer.as_entire_binding()),
+                    (25, local_light_allocation.buffer.as_entire_binding()),
+                    (
+                        39,
+                        BindingResource::TextureView(&terrain_albedo.texture_view),
+                    ),
+                    (40, BindingResource::Sampler(&terrain_albedo.sampler)),
+                    (
+                        41,
+                        BindingResource::TextureView(
+                            scene_depth_view.unwrap_or(&pipelines.dummy_depth_view),
+                        ),
+                    ),
+                )),
+            )
+        };
         let gi_group = if gi_enabled {
             Some(render_device.create_bind_group(
                 "naadf_gi_trace_bind_group",
@@ -1405,6 +1564,37 @@ impl ViewNode for NaadfPreviewBuildNode {
                     BindingResource::TextureView(&temporal_output_moments_view),
                 ),
                 (18, BindingResource::TextureView(&preview_motion_view)),
+                (19, BindingResource::TextureView(&current_owner_view)),
+                (20, BindingResource::TextureView(&history_owner_view)),
+                (
+                    21,
+                    BindingResource::TextureView(&temporal_output_owner_view),
+                ),
+            )),
+        );
+        let path_b_ownership_group = render_device.create_bind_group(
+            "naadf_path_b_ownership_bind_group",
+            &pipeline_cache.get_bind_group_layout(&pipelines.path_b_ownership_layout),
+            &BindGroupEntries::with_indices((
+                (42, composite_uniform.as_entire_binding()),
+                (
+                    43,
+                    BindingResource::TextureView(
+                        scene_depth_view.unwrap_or(&pipelines.dummy_depth_view),
+                    ),
+                ),
+                (
+                    44,
+                    BindingResource::TextureView(
+                        coverage_view.unwrap_or(&pipelines.dummy_coverage_view),
+                    ),
+                ),
+                (45, BindingResource::TextureView(&preview_depth_view)),
+                (46, BindingResource::TextureView(&preview_view)),
+                (47, BindingResource::TextureView(&current_owner_view)),
+                (48, BindingResource::TextureView(&history_owner_view)),
+                (49, BindingResource::TextureView(&preview_motion_view)),
+                (50, allocation.stats_buffer.as_entire_binding()),
             )),
         );
         let path_trace_source_view = if denoise_iterations == 0 {
@@ -1453,7 +1643,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             )),
         );
 
-        if telemetry_enabled {
+        if stats_readback_enabled {
             render_context
                 .command_encoder()
                 .clear_buffer(&allocation.stats_buffer, 0, None);
@@ -1485,24 +1675,28 @@ impl ViewNode for NaadfPreviewBuildNode {
             ) {
                 pass.set_pipeline(build_blocks_pipeline);
                 pass.set_bind_group(3, &build_blocks_group, &[]);
-                pass.dispatch_workgroups(allocation.plan.block_records as u32, 1, 1);
+                pass.dispatch_workgroups(
+                    gpu_builds.slots.len() as u32 * NAADF_BUILD_BLOCKS_PER_CHUNK,
+                    1,
+                    1,
+                );
 
                 pass.set_pipeline(build_mips_pipeline);
                 pass.set_bind_group(3, &build_mips_group, &[]);
-                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.dispatch_workgroups(gpu_builds.slots.len() as u32, 1, 1);
 
                 pass.set_pipeline(build_bounds_pipeline);
                 pass.set_bind_group(3, &build_bounds_group, &[]);
-                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.dispatch_workgroups(gpu_builds.slots.len() as u32, 1, 1);
 
                 pass.set_pipeline(build_chunks_pipeline);
                 pass.set_bind_group(3, &build_chunks_group, &[]);
-                pass.dispatch_workgroups(allocation.plan.max_chunks, 1, 1);
+                pass.dispatch_workgroups(gpu_builds.slots.len() as u32, 1, 1);
                 pass.set_pipeline(build_chunk_bounds_pipeline);
                 pass.set_bind_group(3, &build_chunk_bounds_group, &[]);
                 pass.dispatch_workgroups(
                     div_ceil_u64(
-                        allocation.plan.chunk_records,
+                        gpu_builds.slots.len() as u64,
                         NAADF_BUILD_CHUNKS_WORKGROUP_SIZE as u64,
                     ) as u32,
                     1,
@@ -1533,6 +1727,13 @@ impl ViewNode for NaadfPreviewBuildNode {
         }
         pass.set_pipeline(spatial_pipeline);
         pass.set_bind_group(3, &spatial_group, &[]);
+        pass.dispatch_workgroups(
+            div_ceil_u64(size.width as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
+            div_ceil_u64(size.height as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
+            1,
+        );
+        pass.set_pipeline(path_b_ownership_pipeline);
+        pass.set_bind_group(3, &path_b_ownership_group, &[]);
         pass.dispatch_workgroups(
             div_ceil_u64(size.width as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
             div_ceil_u64(size.height as u64, NAADF_PREVIEW_WORKGROUP_SIZE as u64) as u32,
@@ -1569,7 +1770,7 @@ impl ViewNode for NaadfPreviewBuildNode {
             );
         }
         drop(pass);
-        if telemetry_enabled {
+        if stats_readback_enabled {
             render_context.command_encoder().copy_buffer_to_buffer(
                 &allocation.stats_buffer,
                 0,
@@ -1614,7 +1815,9 @@ impl ViewNode for NaadfPreviewBuildNode {
                 preview_settings.path_b_mode.is_path_b()
                     && preview_settings.path_b_runtime_available,
             );
-            bridge.publish_path_b_passes(0, 0, 0, 0, 0, 0, 0, path_b_composite_passes);
+            if !path_b_counters_readback_enabled {
+                bridge.publish_path_b_passes(0, 0, 0, 0, 0, 0, 0, path_b_composite_passes);
+            }
         }
         if let Some(pass_stats) = world.get_resource::<NaadfPreviewPassStats>() {
             pass_stats.record(NaadfPreviewPassStatsSnapshot {
@@ -1848,6 +2051,8 @@ impl NaadfPreviewTemporalHistory {
         TextureView,
         TextureView,
         TextureView,
+        TextureView,
+        TextureView,
         bool,
         Mat4,
     ) {
@@ -1886,6 +2091,10 @@ impl NaadfPreviewTemporalHistory {
                 .create_view(&TextureViewDescriptor::default()),
             slot.write_moments_texture
                 .create_view(&TextureViewDescriptor::default()),
+            slot.read_owner_texture
+                .create_view(&TextureViewDescriptor::default()),
+            slot.write_owner_texture
+                .create_view(&TextureViewDescriptor::default()),
             reset_history,
             previous_clip_from_world,
         )
@@ -1906,6 +2115,7 @@ impl NaadfPreviewTemporalHistory {
             &mut slot.read_moments_texture,
             &mut slot.write_moments_texture,
         );
+        std::mem::swap(&mut slot.read_owner_texture, &mut slot.write_owner_texture);
         slot.world_from_view = world_from_view;
         slot.clip_from_view = clip_from_view;
     }
@@ -1963,6 +2173,11 @@ fn create_preview_scratch_texture_slot(
             "naadf_preview_first_hit_motion_texture",
             size,
         ),
+        current_owner_texture: create_owner_texture(
+            render_device,
+            "naadf_preview_current_owner_texture",
+            size,
+        ),
         gi_texture: create_preview_texture(render_device, "naadf_preview_gi_texture", size),
         spatial_filtered_texture: create_preview_texture(
             render_device,
@@ -2013,6 +2228,16 @@ fn create_preview_temporal_history_slot(
             "naadf_preview_temporal_moments_write_texture",
             size,
         ),
+        read_owner_texture: create_owner_texture(
+            render_device,
+            "naadf_preview_temporal_owner_read_texture",
+            size,
+        ),
+        write_owner_texture: create_owner_texture(
+            render_device,
+            "naadf_preview_temporal_owner_write_texture",
+            size,
+        ),
     }
 }
 
@@ -2030,6 +2255,14 @@ fn create_moments_texture(
     size: Extent3d,
 ) -> Texture {
     create_storage_texture(render_device, label, size, TextureFormat::Rg16Float)
+}
+
+fn create_owner_texture(
+    render_device: &bevy::render::renderer::RenderDevice,
+    label: &'static str,
+    size: Extent3d,
+) -> Texture {
+    create_storage_texture(render_device, label, size, TextureFormat::R32Uint)
 }
 
 fn create_storage_texture(
@@ -2234,7 +2467,7 @@ fn composite_params_uniform_with_clip_from_view(
             mode_value,
             0.5,
             if settings.show_miss_sky { 1.0 } else { 0.0 },
-            0.0,
+            u32::from(settings.path_b_counters_enabled) as f32,
         ),
         pip_min_max: Vec4::new(0.68, 0.06, 0.96, 0.34),
         path_b_config: Vec4::new(
@@ -2261,6 +2494,18 @@ fn create_uniform_buffer<T: ShaderType + encase::internal::WriteInto>(
         label: Some(label),
         contents: uniform_buffer.as_ref(),
         usage: BufferUsages::UNIFORM,
+    })
+}
+
+fn create_storage_buffer_u32(
+    render_device: &bevy::render::renderer::RenderDevice,
+    label: &'static str,
+    values: &[u32],
+) -> Buffer {
+    render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(values),
+        usage: BufferUsages::STORAGE,
     })
 }
 
@@ -2556,9 +2801,11 @@ mod tests {
         assert_eq!(params.sample_count, 2);
         assert_eq!(params.sky_strength, 0.3);
         assert_eq!(params.bounce_strength, 0.12);
-        assert!(params
-            .sun_direction_pad
-            .abs_diff_eq(Vec3::new(0.4, 0.8, 0.3).normalize().extend(0.0), 0.000001));
+        assert!(
+            params
+                .sun_direction_pad
+                .abs_diff_eq(Vec3::new(0.4, 0.8, 0.3).normalize().extend(0.0), 0.000001)
+        );
     }
 
     #[test]

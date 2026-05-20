@@ -1,9 +1,9 @@
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::{
+    MainWorld,
     render_resource::{Buffer, BufferDescriptor, BufferUsages},
     renderer::{RenderAdapterInfo, RenderDevice, RenderQueue},
-    MainWorld,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use wgpu::DeviceType;
@@ -11,12 +11,12 @@ use wgpu::DeviceType;
 use super::cache::NaadfCache;
 use super::config::NaadfConfig;
 use super::entities::{NaadfEntityVolumeRecord, NaadfEntityVolumeRegistry};
-use super::layout::{DirectionalBounds, NaadfBlock, NaadfChunk, BLOCKS_PER_CHUNK};
+use super::layout::{BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk};
 use super::prepare::NaadfUploadBudget;
 use super::stats::{NaadfRenderStatsBridge, NaadfStats};
 use super::streaming::NaadfStreamingState;
-use crate::performance::{area_timer, AreaTimingRecorder};
-use crate::rendering::render_timing::{render_timing_guard, RenderTimingSink};
+use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
 pub const NAADF_VOXEL_RECORD_BYTES: u64 = 4;
 pub const NAADF_RAW_VOXEL_RECORD_BYTES: u64 = 4;
@@ -726,6 +726,7 @@ pub fn upload_naadf_entity_volumes_to_gpu(
 
 pub fn readback_naadf_gpu_stats(
     buffers: Res<NaadfGpuBuffers>,
+    preview_settings: Option<Res<super::pipeline::ExtractedNaadfPreviewSettings>>,
     render_device: Res<RenderDevice>,
     bridge: Res<NaadfRenderStatsBridge>,
 ) {
@@ -733,7 +734,12 @@ pub fn readback_naadf_gpu_stats(
         bridge.publish_ray_steps(0.0, 0, 0, [0; 6]);
         return;
     };
-    if !allocation.debug_readback {
+    let path_b_counters_enabled = preview_settings.as_deref().is_some_and(|settings| {
+        settings.path_b_mode.is_path_b()
+            && settings.path_b_runtime_available
+            && settings.path_b_counters_enabled
+    });
+    if !allocation.debug_readback && !path_b_counters_enabled {
         bridge.publish_ray_steps(0.0, 0, 0, [0; 6]);
         return;
     }
@@ -1193,8 +1199,8 @@ fn lookup_generation_for_pending_uploads(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::naadf::cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
-    use crate::rendering::naadf::layout::{voxel_index_in_chunk, MIP_CELLS_PER_CHUNK};
+    use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
+    use crate::rendering::naadf::layout::{MIP_CELLS_PER_CHUNK, voxel_index_in_chunk};
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;
 

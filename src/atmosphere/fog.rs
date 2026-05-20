@@ -3,7 +3,7 @@ use crate::atmosphere::config::{
     FogQualityTier,
 };
 use crate::environment::{AtmosphereSettings, Sun};
-use crate::performance::{area_timer, AreaTimingRecorder};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::voxel::plugin::LodSettings;
 use crate::voxel::types::Voxel;

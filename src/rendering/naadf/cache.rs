@@ -7,18 +7,19 @@ use super::cpu_builder::NaadfBuildOptions;
 use super::dirty::NaadfDirtyChunkQueue;
 use super::extractor::{NaadfChunkExtractor, NaadfExtractionError};
 use super::layout::{
-    NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit, CHUNK_BOUND_FIELD_MAX,
-    CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y, CHUNK_BOUND_OFFSET_NEG_Z,
-    CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y, CHUNK_BOUND_OFFSET_POS_Z,
+    CHUNK_BOUND_FIELD_MAX, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
+    CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
+    CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
 };
 use super::stats::{NaadfCacheState, NaadfStats};
-use crate::performance::{area_timer, AreaTimingRecorder};
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]
 pub struct NaadfCache {
     chunks: HashMap<IVec3, NaadfChunk>,
     last_report: NaadfCacheBuildReport,
+    needs_propagation: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,6 +44,7 @@ impl NaadfCache {
     pub fn insert_chunk(&mut self, chunk: NaadfChunk) {
         self.chunks.insert(chunk.position, chunk);
         propagate_chunk_skips(&mut self.chunks);
+        self.needs_propagation = false;
     }
 
     pub fn get(&self, chunk_pos: IVec3) -> Option<&NaadfChunk> {
@@ -57,6 +59,15 @@ impl NaadfCache {
         let removed = self.chunks.remove(&chunk_pos);
         if removed.is_some() {
             propagate_chunk_skips(&mut self.chunks);
+            self.needs_propagation = false;
+        }
+        removed
+    }
+
+    pub fn remove_chunk_deferred(&mut self, chunk_pos: IVec3) -> Option<NaadfChunk> {
+        let removed = self.chunks.remove(&chunk_pos);
+        if removed.is_some() {
+            self.needs_propagation = true;
         }
         removed
     }
@@ -80,6 +91,7 @@ impl NaadfCache {
     pub fn clear(&mut self) {
         self.chunks.clear();
         self.last_report = NaadfCacheBuildReport::default();
+        self.needs_propagation = false;
     }
 }
 
@@ -124,11 +136,13 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
         match extractor.extract_chunk(&world, chunk_pos) {
             Ok(chunk) => {
                 cache.chunks.insert(chunk_pos, chunk);
+                cache.needs_propagation = true;
                 report.rebuilt += 1;
                 report.rebuilt_chunks.push(chunk_pos);
             }
             Err(NaadfExtractionError::MissingChunk(pos)) => {
                 if cache.chunks.remove(&pos).is_some() {
+                    cache.needs_propagation = true;
                     report.removed_missing += 1;
                 }
                 report.missing.push(pos);
@@ -137,11 +151,24 @@ pub fn rebuild_naadf_cache_from_dirty_queue(
         queue.finish(chunk_pos);
     }
 
-    if report.rebuilt > 0 || report.removed_missing > 0 {
+    report.deferred = queue.pending_len() as u32;
+    if cache.needs_propagation && report.deferred == 0 {
         report.propagation = propagate_chunk_skips_with_report(&mut cache.chunks);
+        cache.needs_propagation = false;
+        if report.propagation.updated_bounds > 0 {
+            let mut rebuild_set = report
+                .rebuilt_chunks
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            for chunk_pos in cache.chunks.keys().copied().collect::<Vec<_>>() {
+                if rebuild_set.insert(chunk_pos) {
+                    report.rebuilt_chunks.push(chunk_pos);
+                }
+            }
+        }
     }
 
-    report.deferred = queue.pending_len() as u32;
     let propagation = report.propagation;
     cache.last_report = report;
     stats.loaded_chunks = cache.len() as u32;

@@ -194,6 +194,37 @@ impl NaadfRenderStatsBridge {
             total_steps as f32 / ray_samples as f32
         };
         self.publish_ray_steps(average_steps, max_steps, ray_samples, miss_reason_counts);
+        self.publish_path_b_telemetry_words(words);
+    }
+
+    pub fn publish_path_b_telemetry_words(&self, words: &[u32]) {
+        let depth_rejects = words.get(9).copied().unwrap_or_default();
+        let coverage_rejects = words.get(10).copied().unwrap_or_default();
+        let naadf_accepts = words.get(11).copied().unwrap_or_default();
+        let current_kept = words.get(12).copied().unwrap_or_default();
+        let refine_requests = words.get(13).copied().unwrap_or_default();
+        let stale_or_unresident = words.get(14).copied().unwrap_or_default();
+        let ownership_changes = words.get(15).copied().unwrap_or_default();
+        let composite_passes = u32::from(
+            depth_rejects
+                .saturating_add(coverage_rejects)
+                .saturating_add(naadf_accepts)
+                .saturating_add(current_kept)
+                .saturating_add(refine_requests)
+                .saturating_add(stale_or_unresident)
+                .saturating_add(ownership_changes)
+                > 0,
+        );
+        self.publish_path_b_passes(
+            depth_rejects,
+            coverage_rejects,
+            naadf_accepts,
+            current_kept,
+            refine_requests,
+            stale_or_unresident,
+            ownership_changes,
+            composite_passes,
+        );
     }
 
     pub fn publish_gi_rays(&self, gi_rays: u64) {

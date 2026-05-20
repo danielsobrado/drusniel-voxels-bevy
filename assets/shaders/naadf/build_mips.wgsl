@@ -3,10 +3,11 @@
 @group(3) @binding(6) var<storage, read_write> naadf_mip_traversal_records: array<u32>;
 @group(3) @binding(7) var<storage, read_write> naadf_mip_payload_records: array<u32>;
 @group(3) @binding(8) var<storage, read_write> naadf_mip_bounds_records: array<u32>;
+@group(3) @binding(30) var<storage, read> naadf_build_slots: array<u32>;
 
 @compute @workgroup_size(1, 1, 1)
 fn build_naadf_mips(@builtin(workgroup_id) workgroup_id: vec3<u32>) {
-    let chunk_slot = workgroup_id.x;
+    let chunk_slot = naadf_build_slots[workgroup_id.x];
     for (var parent_level = 1u; parent_level < NAADF_MIP_LEVEL_COUNT; parent_level = parent_level + 1u) {
         naadf_build_mip_level(chunk_slot, parent_level);
     }

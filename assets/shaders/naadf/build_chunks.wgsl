@@ -2,6 +2,7 @@
 
 @group(3) @binding(5) var<storage, read> naadf_block_records: array<u32>;
 @group(3) @binding(11) var<storage, read_write> naadf_chunk_records: array<u32>;
+@group(3) @binding(30) var<storage, read> naadf_build_slots: array<u32>;
 
 @compute @workgroup_size(64, 1, 1)
 fn build_naadf_chunks(
@@ -12,7 +13,7 @@ fn build_naadf_chunks(
         return;
     }
 
-    let chunk_index = workgroup_id.x;
+    let chunk_index = naadf_build_slots[workgroup_id.x];
     let block_base = chunk_index * NAADF_BLOCKS_PER_CHUNK * NAADF_PACKED_BLOCK_WORDS;
     let chunk_base = chunk_index * NAADF_PACKED_CHUNK_WORDS;
     if naadf_chunk_records[chunk_base + 4u] != NAADF_BLOCKS_PER_CHUNK ||

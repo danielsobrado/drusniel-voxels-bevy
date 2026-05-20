@@ -4,8 +4,8 @@ use crate::rendering::naadf::gpu_buffers::{
     NAADF_BLOCK_RECORD_BYTES, NAADF_MATERIAL_RECORD_BYTES, NAADF_VOXEL_RECORD_BYTES,
 };
 use crate::rendering::naadf::layout::{
-    mip_cell_index, mip_level_axis, NaadfMipBoundsRecord, NaadfPayloadRecord, NaadfTraversalRecord,
-    MIP_LEVEL_COUNT,
+    MIP_LEVEL_COUNT, NaadfMipBoundsRecord, NaadfPayloadRecord, NaadfTraversalRecord,
+    mip_cell_index, mip_level_axis,
 };
 use crate::rendering::voxel_ray_backend::{VoxelRayHit, VoxelRayPurpose};
 
@@ -241,18 +241,18 @@ fn compare_one(
 mod tests {
     use super::*;
     use crate::rendering::naadf::cpu_builder::{
-        build_mip_pyramid_from_chunk, build_naadf_chunk, compute_directional_bounds,
-        material_id_for_voxel, propagate_block_skip_in_chunk, propagate_voxel_skip_in_block,
-        NaadfBuildOptions,
+        NaadfBuildOptions, build_mip_pyramid_from_chunk, build_naadf_chunk,
+        compute_directional_bounds, material_id_for_voxel, propagate_block_skip_in_chunk,
+        propagate_voxel_skip_in_block,
     };
     use crate::rendering::naadf::gpu_buffers::{
-        pack_naadf_chunk_upload, pack_raw_voxel_record, pack_voxel_record,
-        NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS,
+        NAADF_PACKED_BLOCK_WORDS, NAADF_PACKED_CHUNK_WORDS, pack_naadf_chunk_upload,
+        pack_raw_voxel_record, pack_voxel_record,
     };
     use crate::rendering::naadf::layout::{
-        block_index_in_chunk, voxel_index_in_block, voxel_index_in_chunk, DirectionalBounds,
-        NaadfBlock, NaadfNodeState, PackedNaadfNode, BLOCKS_PER_CHUNK, VOXELS_PER_BLOCK,
-        VOXELS_PER_BLOCK_AXIS,
+        BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfNodeState, PackedNaadfNode,
+        VOXELS_PER_BLOCK, VOXELS_PER_BLOCK_AXIS, block_index_in_chunk, voxel_index_in_block,
+        voxel_index_in_chunk,
     };
     use crate::voxel::chunk::Chunk;
     use crate::voxel::types::VoxelType;

@@ -221,7 +221,7 @@ fn ray_hits_match(current: Option<&VoxelRayHit>, naadf: Option<&VoxelRayHit>) ->
 mod tests {
     use super::*;
     use crate::rendering::naadf::cache::NaadfCache;
-    use crate::rendering::naadf::cpu_builder::{build_naadf_chunk, NaadfBuildOptions};
+    use crate::rendering::naadf::cpu_builder::{NaadfBuildOptions, build_naadf_chunk};
     use crate::rendering::naadf::gpu_tests::{NaadfGpuRayInputRecord, NaadfGpuRayOutputRecord};
     use crate::rendering::naadf::layout::voxel_index_in_chunk;
     use crate::voxel::chunk::Chunk;
