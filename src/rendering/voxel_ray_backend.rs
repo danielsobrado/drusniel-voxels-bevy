@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::voxel::materials::MaterialId;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 
@@ -221,6 +222,10 @@ fn current_world_hit(
     };
     let chunk = VoxelWorld::world_to_chunk(world_voxel);
     let local = VoxelWorld::world_to_local(world_voxel);
+    let material_id = world
+        .get_material_id(world_voxel)
+        .unwrap_or_else(|| MaterialId::from_voxel(voxel));
+
     Some(VoxelRayHit {
         chunk,
         local,
@@ -228,7 +233,7 @@ fn current_world_hit(
         position: origin + dir * distance,
         normal,
         distance,
-        material_id: voxel as u16,
+        material_id: material_id.0,
         steps,
     })
 }
@@ -275,6 +280,26 @@ mod tests {
         );
 
         assert_eq!(hit.map(|hit| hit.local), Some(UVec3::new(4, 4, 4)));
+    }
+
+    #[test]
+    fn current_backend_reports_assigned_material_id() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        let local = UVec3::new(4, 4, 4);
+        chunk.set(local, VoxelType::Rock);
+        chunk.set_material_id(local, MaterialId(6));
+        world.insert_chunk(chunk);
+
+        let backend = CurrentSdfRayBackend::from_world(&world);
+        let hit = backend.trace(
+            Vec3::new(0.5, 4.5, 4.5),
+            Vec3::X,
+            16.0,
+            VoxelRayPurpose::Debug,
+        );
+
+        assert_eq!(hit.map(|hit| hit.material_id), Some(6));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::rendering::naadf::layout::{
     mip_level_axis, voxel_index_in_block, voxel_index_in_chunk,
 };
 use crate::voxel::chunk::Chunk;
+use crate::voxel::materials::MaterialId;
 use crate::voxel::types::{Voxel, VoxelType};
 
 #[derive(Clone, Copy, Debug)]
@@ -35,8 +36,12 @@ pub fn build_naadf_chunk(chunk: &Chunk, options: NaadfBuildOptions) -> NaadfChun
 
     for (local, voxel) in chunk.iter() {
         let index = voxel_index_in_chunk(local);
-        let material_id = material_id_for_voxel(voxel, options);
-        let occupied = material_id != 0;
+        let occupied = voxel_occupies_naadf(voxel, options);
+        let material_id = if occupied {
+            material_id_for_chunk_voxel(chunk, local, voxel)
+        } else {
+            0
+        };
         occupancy[index] = occupied;
         material_ids[index] = material_id;
         if occupied {
@@ -335,13 +340,22 @@ fn scatter_voxel_skip_into_chunk(
 }
 
 pub fn material_id_for_voxel(voxel: VoxelType, options: NaadfBuildOptions) -> u16 {
-    if voxel == VoxelType::Water && !options.water_is_opaque {
+    if !voxel_occupies_naadf(voxel, options) {
         return 0;
     }
-    if voxel.is_solid() || (voxel == VoxelType::Water && options.water_is_opaque) {
-        voxel as u16
+    MaterialId::from_voxel(voxel).0
+}
+
+fn voxel_occupies_naadf(voxel: VoxelType, options: NaadfBuildOptions) -> bool {
+    voxel.is_solid() || (voxel == VoxelType::Water && options.water_is_opaque)
+}
+
+fn material_id_for_chunk_voxel(chunk: &Chunk, local: UVec3, voxel: VoxelType) -> u16 {
+    let material_id = chunk.get_material_id(local).0;
+    if material_id == MaterialId::AIR.0 {
+        MaterialId::from_voxel(voxel).0
     } else {
-        0
+        material_id
     }
 }
 
@@ -617,6 +631,18 @@ mod tests {
         chunk.set(UVec3::new(1, 1, 1), VoxelType::Water);
         let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
         assert_eq!(naadf.node.state(), NaadfNodeState::UniformEmpty);
+    }
+
+    #[test]
+    fn solid_voxel_uses_assigned_material_id() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        let local = UVec3::new(1, 2, 3);
+        chunk.set(local, VoxelType::Rock);
+        chunk.set_material_id(local, MaterialId(6));
+
+        let naadf = build_naadf_chunk(&chunk, NaadfBuildOptions::default());
+
+        assert_eq!(naadf.material_ids[voxel_index_in_chunk(local)], 6);
     }
 
     #[test]

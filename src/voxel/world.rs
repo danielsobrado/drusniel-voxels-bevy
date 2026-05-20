@@ -554,13 +554,18 @@ impl VoxelWorld {
             }
 
             match self.apply_material_edit(position, to) {
-                VoxelEditResult::Applied => summary.changed += 1,
+                VoxelEditResult::Applied => {
+                    summary.changed += 1;
+                    let chunk_pos = Self::world_to_chunk(position);
+                    if !summary.dirty_chunks.contains(&chunk_pos) {
+                        summary.dirty_chunks.push(chunk_pos);
+                    }
+                }
                 VoxelEditResult::NoChange => summary.no_change += 1,
                 _ => summary.skipped += 1,
             }
         }
 
-        summary.dirty_chunks = self.derived_dirty_chunks().collect();
         summary
     }
 
@@ -675,6 +680,7 @@ impl VoxelWorld {
 mod tests {
     use super::*;
     use crate::voxel::chunk::Chunk;
+    use crate::voxel::materials::MaterialId;
 
     #[test]
     fn below_world_samples_as_boundary_not_air() {
@@ -702,6 +708,82 @@ mod tests {
                 .water_meshing_voxel(),
             VoxelType::Water
         );
+    }
+
+    #[test]
+    fn material_edit_changes_material_without_changing_voxel_type() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        let position = IVec3::new(4, 8, 4);
+
+        assert_eq!(
+            world.set_voxel(position, VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+        assert_eq!(
+            world.set_material_id_with_rules(position, MaterialId(6), None),
+            VoxelEditResult::Applied
+        );
+
+        assert_eq!(world.get_voxel(position), Some(VoxelType::Rock));
+        assert_eq!(world.get_material_id(position), Some(MaterialId(6)));
+    }
+
+    #[test]
+    fn replace_material_updates_matching_voxels_and_marks_chunks_dirty() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        let first = IVec3::new(4, 8, 4);
+        let second = IVec3::new(5, 8, 4);
+
+        assert_eq!(
+            world.set_voxel(first, VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+        assert_eq!(
+            world.set_voxel(second, VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+        assert_eq!(
+            world.set_material_id_with_rules(first, MaterialId(3), None),
+            VoxelEditResult::NoChange
+        );
+        assert_eq!(
+            world.set_material_id_with_rules(second, MaterialId(6), None),
+            VoxelEditResult::Applied
+        );
+
+        let summary = world.replace_material_id(MaterialId(6), MaterialId(5), None);
+
+        assert_eq!(summary.changed, 1);
+        assert_eq!(world.get_material_id(first), Some(MaterialId(3)));
+        assert_eq!(world.get_material_id(second), Some(MaterialId(5)));
+        assert!(summary.dirty_chunks.contains(&IVec3::ZERO));
+    }
+
+    #[test]
+    fn replace_material_reports_only_chunks_changed_by_replace() {
+        let mut world = VoxelWorld::new(IVec3::new(2, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_chunk(Chunk::new(IVec3::X));
+        let position = IVec3::new(4, 8, 4);
+
+        assert_eq!(
+            world.set_voxel(position, VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+        assert_eq!(
+            world.set_material_id_with_rules(position, MaterialId(6), None),
+            VoxelEditResult::Applied
+        );
+        world.get_chunk_mut(IVec3::ZERO).unwrap().clear_dirty();
+        world.get_chunk_mut(IVec3::X).unwrap().clear_dirty();
+        world.mark_chunk_dirty_with_reason(IVec3::X, MeshDirtyReason::Generation);
+
+        let summary = world.replace_material_id(MaterialId(6), MaterialId(5), None);
+
+        assert_eq!(summary.changed, 1);
+        assert_eq!(summary.dirty_chunks, vec![IVec3::ZERO]);
     }
 
     #[test]

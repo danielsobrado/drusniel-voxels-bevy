@@ -33,6 +33,7 @@ use crate::rendering::ao_config::BakedAoConfig;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::materials::MaterialId;
 use crate::voxel::skirt::{
     ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, compute_boundary_flags,
     extract_boundary_edges, generate_skirts_with_apron_only_faces,
@@ -386,6 +387,8 @@ pub struct ChunkMeshResult {
 struct FaceInfo {
     /// The voxel type (for material/texture selection)
     voxel: VoxelType,
+    /// The assigned material for this voxel.
+    material_id: MaterialId,
     /// Whether this face slot is visible and should be meshed
     visible: bool,
 }
@@ -398,6 +401,8 @@ struct GreedyQuad {
     size: (u32, u32),
     /// The voxel type for this quad
     voxel: VoxelType,
+    /// The assigned material for this quad
+    material_id: MaterialId,
     /// The depth (position along the face normal direction)
     depth: u32,
 }
@@ -432,8 +437,10 @@ fn build_face_mask(
 
             // Check if this face is visible
             if is_face_visible(chunk, world, local, face) {
+                let material_id = terrain_meshing_material_in_chunk(chunk, world, local, voxel);
                 mask[u][v] = FaceInfo {
                     voxel,
+                    material_id,
                     visible: true,
                 };
             }
@@ -466,7 +473,8 @@ fn greedy_mesh_slice(
             let mut width = 1;
             while start_u + width < CHUNK_SIZE {
                 let next = mask[start_u + width][start_v];
-                if next.visible && next.voxel == info.voxel {
+                if next.visible && next.voxel == info.voxel && next.material_id == info.material_id
+                {
                     width += 1;
                 } else {
                     break;
@@ -479,7 +487,10 @@ fn greedy_mesh_slice(
                 // Check if the entire row matches
                 for du in 0..width {
                     let next = mask[start_u + du][start_v + height];
-                    if !next.visible || next.voxel != info.voxel {
+                    if !next.visible
+                        || next.voxel != info.voxel
+                        || next.material_id != info.material_id
+                    {
                         break 'height_loop;
                     }
                 }
@@ -498,6 +509,7 @@ fn greedy_mesh_slice(
                 start: (start_u as u32, start_v as u32),
                 size: (width as u32, height as u32),
                 voxel: info.voxel,
+                material_id: info.material_id,
                 depth,
             });
         }
@@ -622,7 +634,8 @@ fn add_greedy_quad(
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
 
-    let material_index = get_blocky_material_index(quad.voxel, face) as f32 / 255.0;
+    let material_index =
+        get_blocky_material_index_for_material(quad.material_id, quad.voxel, face) as f32 / 255.0;
     mesh_data.colors.push([ao[0], ao[0], ao[0], material_index]);
     mesh_data.colors.push([ao[1], ao[1], ao[1], material_index]);
     mesh_data.colors.push([ao[2], ao[2], ao[2], material_index]);
@@ -901,6 +914,32 @@ fn terrain_meshing_voxel_in_chunk(chunk: &Chunk, world: &VoxelWorld, local: UVec
 }
 
 #[inline]
+fn terrain_meshing_material_at(
+    world: &VoxelWorld,
+    world_pos: IVec3,
+    fallback_voxel: VoxelType,
+) -> MaterialId {
+    if world.get_voxel(world_pos) == Some(fallback_voxel) {
+        world
+            .get_material_id(world_pos)
+            .unwrap_or_else(|| MaterialId::from_voxel(fallback_voxel))
+    } else {
+        MaterialId::from_voxel(fallback_voxel)
+    }
+}
+
+#[inline]
+fn terrain_meshing_material_in_chunk(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    local: UVec3,
+    fallback_voxel: VoxelType,
+) -> MaterialId {
+    let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
+    terrain_meshing_material_at(world, world_pos, fallback_voxel)
+}
+
+#[inline]
 fn water_meshing_voxel_in_chunk(chunk: &Chunk, world: &VoxelWorld, local: UVec3) -> VoxelType {
     let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
     water_meshing_voxel_at(world, world_pos)
@@ -1019,6 +1058,7 @@ fn build_water_face_mask(
             if should_render_water_face(chunk, world, local, face, exposure, stats) {
                 mask[u][v] = FaceInfo {
                     voxel,
+                    material_id: MaterialId::from_voxel(voxel),
                     visible: true,
                 };
             }
@@ -1556,7 +1596,16 @@ fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
 ///   Rock:  6=Top, 7=Side, 8=Bottom
 ///   Sand:  9=Top, 10=Side, 11=Bottom
 pub fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
-    let base_index = match voxel {
+    get_blocky_material_index_for_material(MaterialId::from_voxel(voxel), voxel, face)
+}
+
+fn get_blocky_material_index_for_material(
+    material_id: MaterialId,
+    fallback_voxel: VoxelType,
+    face: Face,
+) -> u8 {
+    let material_voxel = material_voxel_for_rendering(material_id).unwrap_or(fallback_voxel);
+    let base_index = match material_voxel {
         VoxelType::TopSoil | VoxelType::Leaves => 0, // Grass
         VoxelType::SubSoil | VoxelType::Clay | VoxelType::Wood => 3, // Dirt
         VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => {
@@ -1573,6 +1622,35 @@ pub fn get_blocky_material_index(voxel: VoxelType, face: Face) -> u8 {
     };
 
     base_index + face_offset
+}
+
+fn material_voxel_for_rendering(material_id: MaterialId) -> Option<VoxelType> {
+    match material_id.0 {
+        0 => Some(VoxelType::Air),
+        1 => Some(VoxelType::TopSoil),
+        2 => Some(VoxelType::SubSoil),
+        3 => Some(VoxelType::Rock),
+        4 => Some(VoxelType::Bedrock),
+        5 => Some(VoxelType::Sand),
+        6 => Some(VoxelType::Clay),
+        7 => Some(VoxelType::Water),
+        8 => Some(VoxelType::Wood),
+        9 => Some(VoxelType::Leaves),
+        10 => Some(VoxelType::DungeonWall),
+        11 => Some(VoxelType::DungeonFloor),
+        _ => None,
+    }
+}
+
+fn material_weight_index(material_id: MaterialId, fallback_voxel: VoxelType) -> usize {
+    match material_voxel_for_rendering(material_id).unwrap_or(fallback_voxel) {
+        VoxelType::TopSoil | VoxelType::Leaves => 0,
+        VoxelType::Rock | VoxelType::Bedrock | VoxelType::DungeonWall | VoxelType::DungeonFloor => {
+            1
+        }
+        VoxelType::Sand => 2,
+        _ => 3,
+    }
 }
 
 /// Legacy per-voxel face generation with AO (replaced by add_greedy_quad).
@@ -1651,7 +1729,9 @@ fn add_face_with_ao(
     mesh_data.normals.push(normal);
     mesh_data.normals.push(normal);
 
-    let material_index = get_blocky_material_index(voxel, face) as f32 / 255.0;
+    let material_id = terrain_meshing_material_in_chunk(chunk, world, local, voxel);
+    let material_index =
+        get_blocky_material_index_for_material(material_id, voxel, face) as f32 / 255.0;
     // Add vertex colors for AO (grayscale) + material index in alpha
     mesh_data.colors.push([ao[0], ao[0], ao[0], material_index]);
     mesh_data.colors.push([ao[1], ao[1], ao[1], material_index]);
@@ -2919,29 +2999,25 @@ fn compute_vertex_material_weights(
                 let ly = base_y + dy;
                 let lz = base_z + dz;
 
-                let voxel = if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
-                    terrain_meshing_voxel_in_chunk(
-                        chunk,
-                        world,
-                        UVec3::new(lx as u32, ly as u32, lz as u32),
-                    )
-                } else {
-                    let wx = chunk_origin.x + lx;
-                    let wy = chunk_origin.y + ly;
-                    let wz = chunk_origin.z + lz;
-                    terrain_meshing_voxel_at(world, IVec3::new(wx, wy, wz))
-                };
+                let (voxel, material_id) =
+                    if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
+                        let local = UVec3::new(lx as u32, ly as u32, lz as u32);
+                        let voxel = terrain_meshing_voxel_in_chunk(chunk, world, local);
+                        (
+                            voxel,
+                            terrain_meshing_material_in_chunk(chunk, world, local, voxel),
+                        )
+                    } else {
+                        let wx = chunk_origin.x + lx;
+                        let wy = chunk_origin.y + ly;
+                        let wz = chunk_origin.z + lz;
+                        let world_pos = IVec3::new(wx, wy, wz);
+                        let voxel = terrain_meshing_voxel_at(world, world_pos);
+                        (voxel, terrain_meshing_material_at(world, world_pos, voxel))
+                    };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
-                    let mat_idx = match voxel {
-                        VoxelType::TopSoil | VoxelType::Leaves => 0,
-                        VoxelType::Rock
-                        | VoxelType::Bedrock
-                        | VoxelType::DungeonWall
-                        | VoxelType::DungeonFloor => 1,
-                        VoxelType::Sand => 2,
-                        _ => 3,
-                    };
+                    let mat_idx = material_weight_index(material_id, voxel);
                     weights[mat_idx] += 1.0;
                     total_weight += 1.0;
                 }
@@ -2987,29 +3063,25 @@ fn compute_vertex_material_weights_lod(
                 let ly = base_y + dy;
                 let lz = base_z + dz;
 
-                let voxel = if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
-                    terrain_meshing_voxel_in_chunk(
-                        chunk,
-                        world,
-                        UVec3::new(lx as u32, ly as u32, lz as u32),
-                    )
-                } else {
-                    let wx = chunk_origin.x + lx;
-                    let wy = chunk_origin.y + ly;
-                    let wz = chunk_origin.z + lz;
-                    terrain_meshing_voxel_at(world, IVec3::new(wx, wy, wz))
-                };
+                let (voxel, material_id) =
+                    if lx >= 0 && lx < 16 && ly >= 0 && ly < 16 && lz >= 0 && lz < 16 {
+                        let local = UVec3::new(lx as u32, ly as u32, lz as u32);
+                        let voxel = terrain_meshing_voxel_in_chunk(chunk, world, local);
+                        (
+                            voxel,
+                            terrain_meshing_material_in_chunk(chunk, world, local, voxel),
+                        )
+                    } else {
+                        let wx = chunk_origin.x + lx;
+                        let wy = chunk_origin.y + ly;
+                        let wz = chunk_origin.z + lz;
+                        let world_pos = IVec3::new(wx, wy, wz);
+                        let voxel = terrain_meshing_voxel_at(world, world_pos);
+                        (voxel, terrain_meshing_material_at(world, world_pos, voxel))
+                    };
 
                 if voxel != VoxelType::Air && voxel != VoxelType::Water {
-                    let mat_idx = match voxel {
-                        VoxelType::TopSoil | VoxelType::Leaves => 0,
-                        VoxelType::Rock
-                        | VoxelType::Bedrock
-                        | VoxelType::DungeonWall
-                        | VoxelType::DungeonFloor => 1,
-                        VoxelType::Sand => 2,
-                        _ => 3,
-                    };
+                    let mat_idx = material_weight_index(material_id, voxel);
                     weights[mat_idx] += 1.0;
                     total_weight += 1.0;
                 }
@@ -4001,6 +4073,37 @@ mod tests {
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
         )
+    }
+
+    #[test]
+    fn blocky_mesh_uses_assigned_voxel_material_for_texture_layer() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        let position = IVec3::new(8, 8, 8);
+        world.set_voxel(position, VoxelType::Rock);
+        world.set_material_id_with_rules(position, MaterialId(5), None);
+
+        let mesh = meshed_chunk(&world, IVec3::ZERO);
+        let sand_layers = [9.0 / 255.0, 10.0 / 255.0, 11.0 / 255.0];
+
+        assert!(mesh.solid.colors.iter().any(|color| {
+            sand_layers
+                .iter()
+                .any(|layer| (color[3] - layer).abs() < f32::EPSILON)
+        }));
+    }
+
+    #[test]
+    fn surface_nets_weights_use_assigned_voxel_material_category() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        let position = IVec3::new(8, 8, 8);
+        world.set_voxel(position, VoxelType::Rock);
+        world.set_material_id_with_rules(position, MaterialId(5), None);
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+
+        let weights =
+            compute_vertex_material_weights(Vec3::new(8.0, 8.0, 8.0), chunk, &world, IVec3::ZERO);
+
+        assert_eq!(weights, [0.0, 0.0, 1.0, 0.0]);
     }
 
     fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
