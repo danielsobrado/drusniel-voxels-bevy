@@ -51,6 +51,7 @@ export type Selection =
   | { readonly kind: "area"; readonly id: string; readonly label: string }
   | { readonly kind: "prop"; readonly id: string; readonly label: string }
   | { readonly kind: "water"; readonly id: string; readonly label: string }
+  | { readonly kind: "light"; readonly id: string; readonly label: string }
   | { readonly kind: "material"; readonly id: string; readonly label: string }
   | { readonly kind: "debug_resource"; readonly id: string; readonly label: string };
 
@@ -104,6 +105,7 @@ export interface DirtyState {
   readonly dirtyChunkIds: readonly string[];
   readonly dirtyAreaIds: readonly string[];
   readonly dirtyWaterBodyIds: readonly string[];
+  readonly dirtyLightIds: readonly string[];
   readonly dirtyPropIds: readonly string[];
   readonly dirtyAtlas: boolean;
   readonly layoutDirty: boolean;
@@ -133,6 +135,7 @@ export interface EditorUndoSnapshot {
   readonly viewportSnapshot: ViewportSnapshot | null;
   readonly protectedAreas: readonly ProtectedArea[];
   readonly waterBodies: readonly WaterBody[];
+  readonly lights: readonly LightInstance[];
   readonly props: readonly PropInstance[];
   readonly propAssets: readonly PropAsset[];
   readonly materials: readonly MaterialAsset[];
@@ -161,6 +164,7 @@ export interface LargeWorldStats {
   readonly propCount: number;
   readonly protectedAreaCount: number;
   readonly waterBodyCount: number;
+  readonly lightCount: number;
   readonly consoleMessageCount: number;
 }
-import type { BlockAtlasMap, ChunkSummary, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "./world";
+import type { BlockAtlasMap, ChunkSummary, LightInstance, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, WaterBody, WorldViewportPreview } from "./world";

@@ -9,6 +9,8 @@ import { getCurrentInspectorKind, getProtectedAreaWarnings, getSelectedObject } 
 import type {
   BillboardMode,
   ChunkSummary,
+  LightInstance,
+  LightKind,
   MaterialAsset,
   PropInstance,
   PropLodState,
@@ -20,6 +22,7 @@ import type {
   VoxelBlock,
 } from "../../types/world";
 import type { Selection } from "../../types/editor";
+import type { RuntimeMetrics } from "../../types/runtime";
 
 const toDisplaySummary = (selectionLabel: string, selectedObject: unknown): string =>
   typeof selectedObject === "object" && selectedObject !== null && "name" in selectedObject ? `${selectionLabel} / ${(selectedObject as { name: string }).name}` : selectionLabel;
@@ -152,6 +155,51 @@ export function InspectorPanel({ onClose }: { readonly onClose?: () => void } = 
           prop={selectedObject as PropInstance}
           materials={materials}
           onUpdate={(patch) => editorState.updateProp((selectedObject as PropInstance).id, patch)}
+        />
+      );
+    }
+
+    if (inspectorKind === "light" && selectedObject && "intensity" in selectedObject) {
+      const light = selectedObject as LightInstance;
+      const updateLight = async (patch: Partial<Omit<LightInstance, "id">>) => {
+        const commandId = "editor.lighting.updateSelected";
+        const nextLight = { ...light, ...patch };
+        editorState.updateLight(light.id, patch);
+        try {
+          const result = await runtimeClient.updateLight(light.id, patch);
+          if (!result.ok) {
+            throw new Error(result.message);
+          }
+          editorState.updateLight(light.id, result.data.light);
+          editorState.pushCommandHistory(commandId, "Update selected light", "success");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown light update failure.";
+          editorState.pushCommandHistory(commandId, "Update selected light", "failure", message);
+          editorState.pushAgentTimelineEvent({ kind: "warning", message: `Light runtime update failed for ${nextLight.name}: ${message}` });
+        }
+      };
+
+      return (
+        <LightInspector
+          light={light}
+          runtimeMetrics={editorState.runtimeMetrics}
+          onApplyPreset={(patch) => void updateLight(patch)}
+          onUpdate={(patch) => void updateLight(patch)}
+          onUpdateAmbient={(color, brightness) => {
+            useEditorStore.setState((state) => ({
+              runtimeMetrics: {
+                ...state.runtimeMetrics,
+                lightingAtmosphere: {
+                  ...state.runtimeMetrics.lightingAtmosphere,
+                  ambientColor: color,
+                  ambientBrightness: brightness,
+                },
+              },
+            }));
+            void runtimeClient.updateAmbientLight(color, brightness);
+          }}
+          onToggleFog={() => void runCommandById("editor.debug.toggleFog")}
+          onToggleGodRays={() => void runCommandById("editor.debug.toggleGodRays")}
         />
       );
     }
@@ -1054,6 +1102,107 @@ function PropInspector({
             })
           }
         />
+      </InspectorSection>
+    </div>
+  );
+}
+
+const lightPresets: readonly { readonly id: string; readonly label: string; readonly patch: Partial<Omit<LightInstance, "id">> }[] = [
+  { id: "warm-torch", label: "Warm Torch", patch: { kind: "point", color: "#ffb36b", intensity: 950, range: 18, radius: 0.45, shadowsEnabled: true, volumetric: false } },
+  { id: "cool-fill", label: "Cool Fill", patch: { kind: "point", color: "#8ecbff", intensity: 450, range: 36, radius: 1.2, shadowsEnabled: false, volumetric: false } },
+  { id: "sun-key", label: "Sun Key", patch: { kind: "directional", color: "#fff4df", intensity: 6500, range: 0, shadowsEnabled: true, volumetric: true } },
+  { id: "moon-fill", label: "Moon Fill", patch: { kind: "directional", color: "#b9ccff", intensity: 1200, range: 0, shadowsEnabled: false, volumetric: false } },
+];
+
+function LightInspector({
+  light,
+  runtimeMetrics,
+  onApplyPreset,
+  onToggleFog,
+  onToggleGodRays,
+  onUpdateAmbient,
+  onUpdate,
+}: {
+  readonly light: LightInstance;
+  readonly runtimeMetrics: RuntimeMetrics;
+  readonly onApplyPreset: (patch: Partial<Omit<LightInstance, "id">>) => void;
+  readonly onToggleFog: () => void;
+  readonly onToggleGodRays: () => void;
+  readonly onUpdateAmbient: (color: string, brightness: number) => void;
+  readonly onUpdate: (patch: Partial<Omit<LightInstance, "id">>) => void;
+}) {
+  const kindOptions: readonly { readonly value: LightKind; readonly label: string }[] = [
+    { value: "directional", label: "Directional" },
+    { value: "point", label: "Point" },
+    { value: "spot", label: "Spot" },
+  ];
+  const editingDisabled = light.locked || light.source === "sun";
+
+  return (
+    <div data-testid="inspector-light">
+      <InspectorHeader title={light.name} badge="light" note={light.source === "sun" ? "Built-in sun is runtime-owned and cannot be deleted." : "Light edits are sent to the active RuntimeClient."} />
+      <InspectorSection title="Light">
+        <TextField label="Name" value={light.name} readOnly={editingDisabled} testId="inspector-light-name" onChange={(name) => onUpdate({ name })} />
+        <EnumSelect label="Type" value={light.kind} options={kindOptions} disabled={editingDisabled} testId="inspector-light-kind" onChange={(kind) => onUpdate({ kind })} />
+        <BooleanToggle label="Enabled" checked={light.enabled} disabled={editingDisabled} testId="inspector-light-enabled" onChange={(enabled) => onUpdate({ enabled })} />
+        <BooleanToggle label="Visible" checked={light.visible} disabled={editingDisabled} testId="inspector-light-visible" onChange={(visible) => onUpdate({ visible })} />
+        <ColorField label="Color" value={light.color} disabled={editingDisabled} testId="inspector-light-color" onChange={(color) => onUpdate({ color })} />
+        <NumericField label={light.kind === "directional" ? "Illuminance" : "Intensity"} value={light.intensity} min={0} step={50} readOnly={editingDisabled} testId="inspector-light-intensity" onChange={(intensity) => onUpdate({ intensity })} />
+      </InspectorSection>
+      <InspectorSection title="Transform">
+        <Vector3Field label="Position" value={light.position} disabled={editingDisabled || light.kind === "directional"} testId="inspector-light-position" onChange={(position) => onUpdate({ position })} />
+        <Vector3Field label="Rotation" value={light.rotation} disabled={editingDisabled} testId="inspector-light-rotation" onChange={(rotation) => onUpdate({ rotation })} />
+      </InspectorSection>
+      <InspectorSection title="Shape and shadows">
+        {light.kind !== "directional" ? (
+          <>
+            <NumericField label="Range" value={light.range} min={0} step={1} readOnly={editingDisabled} testId="inspector-light-range" onChange={(range) => onUpdate({ range })} />
+            <NumericField label="Radius" value={light.radius} min={0} step={0.05} readOnly={editingDisabled} testId="inspector-light-radius" onChange={(radius) => onUpdate({ radius })} />
+          </>
+        ) : null}
+        {light.kind === "spot" ? (
+          <>
+            <NumericField label="Inner cone" value={light.innerConeAngle} min={0} max={179} step={1} readOnly={editingDisabled} testId="inspector-light-inner-cone" onChange={(innerConeAngle) => onUpdate({ innerConeAngle })} />
+            <NumericField label="Outer cone" value={light.outerConeAngle} min={1} max={179} step={1} readOnly={editingDisabled} testId="inspector-light-outer-cone" onChange={(outerConeAngle) => onUpdate({ outerConeAngle })} />
+          </>
+        ) : null}
+        <BooleanToggle label="Shadows" checked={light.shadowsEnabled} disabled={editingDisabled} testId="inspector-light-shadows" onChange={(shadowsEnabled) => onUpdate({ shadowsEnabled })} />
+        <BooleanToggle label="Volumetric" checked={light.volumetric} disabled={editingDisabled} testId="inspector-light-volumetric" onChange={(volumetric) => onUpdate({ volumetric })} />
+      </InspectorSection>
+      <InspectorSection title="Atmosphere">
+        <ReadOnlyMetricRow label="Sun time" value={runtimeMetrics.lightingAtmosphere.sunTimeOfDay || "runtime"} />
+        <ReadOnlyMetricRow label="Fog preset" value={runtimeMetrics.lightingAtmosphere.fogPreset || "runtime"} />
+        <ColorField
+          label="Ambient color"
+          value={runtimeMetrics.lightingAtmosphere.ambientColor}
+          testId="inspector-light-ambient-color"
+          onChange={(ambientColor) => onUpdateAmbient(ambientColor, runtimeMetrics.lightingAtmosphere.ambientBrightness)}
+        />
+        <NumericField
+          label="Ambient brightness"
+          value={runtimeMetrics.lightingAtmosphere.ambientBrightness}
+          min={0}
+          step={50}
+          testId="inspector-light-ambient-brightness"
+          onChange={(ambientBrightness) => onUpdateAmbient(runtimeMetrics.lightingAtmosphere.ambientColor, ambientBrightness)}
+        />
+        <div className="inspector-action-row">
+          <button type="button" className="toolbar-button" data-testid="inspector-light-toggle-fog" onClick={onToggleFog}>
+            {runtimeMetrics.lightingAtmosphere.fogActive ? "Disable fog" : "Enable fog"}
+          </button>
+          <button type="button" className="toolbar-button" data-testid="inspector-light-toggle-god-rays" onClick={onToggleGodRays}>
+            {runtimeMetrics.lightingAtmosphere.godRaysEnabled ? "Disable god rays" : "Enable god rays"}
+          </button>
+        </div>
+      </InspectorSection>
+      <InspectorSection title="Presets">
+        <div className="inspector-rule-presets">
+          {lightPresets.map((preset) => (
+            <button type="button" key={preset.id} className="toolbar-button" disabled={editingDisabled} data-testid={`inspector-light-preset-${preset.id}`} onClick={() => onApplyPreset(preset.patch)}>
+              {preset.label}
+            </button>
+          ))}
+        </div>
       </InspectorSection>
     </div>
   );

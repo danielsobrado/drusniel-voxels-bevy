@@ -27,6 +27,7 @@ const applyRuntimeSnapshot = (snapshot: RuntimeSnapshot): void => {
     waterRuntimeSnapshot: snapshot.waterVisualProbe,
     atlasMapping: snapshot.atlasMapping.mapping,
     viewportOverlays: snapshot.viewportDebug,
+    editorCamera: snapshot.editorCamera,
     dirtyState: {
       ...state.dirtyState,
       dirtyAtlas: snapshot.atlasMapping.dirty,
@@ -54,6 +55,7 @@ export function AppShell() {
   const activeMode = useEditorStore((state) => state.activeMode);
   const activeTool = useEditorStore((state) => state.activeTool);
   const runtimeState = useEditorStore((state) => state.runtimeState);
+  const editorCamera = useEditorStore((state) => state.editorCamera);
   const selection = useEditorStore((state) => state.selection);
   const chunkBoundsEnabled = useEditorStore((state) => state.viewportOverlays.chunkBounds);
   const { backendClient, runtimeClient } = useEditorClients();
@@ -204,6 +206,27 @@ export function AppShell() {
         {runtimeState}
       </div>
       <DockLayout resetRequestId={layoutResetRequestId} runCommand={runCommandById} />
+      <div className="editor-camera-status" data-testid="editor-camera-status">
+        <span>{editorCamera.interactionMode === "movement" ? "Movement" : "Menu"}</span>
+        <span>{editorCamera.cameraKind === "arcball" ? "Arcball" : "First Person"}</span>
+        <span>{editorCamera.projection === "orthographic" ? "Orthographic" : "Perspective"}</span>
+        <button
+          type="button"
+          aria-label="Previous saved camera"
+          disabled={editorCamera.savedCameras.length === 0}
+          onClick={() => void runCommandById("editor.camera.saved.previous")}
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          aria-label="Next saved camera"
+          disabled={editorCamera.savedCameras.length === 0}
+          onClick={() => void runCommandById("editor.camera.saved.next")}
+        >
+          Next
+        </button>
+      </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runCommand={runCommandById} />
       <input
         ref={fileInputRef}

@@ -15,6 +15,7 @@ interface OutlinerFilters {
   chunks: boolean;
   areas: boolean;
   water: boolean;
+  lights: boolean;
   props: boolean;
   materials: boolean;
 }
@@ -35,6 +36,12 @@ const waterKindLabels: Record<string, string> = {
   Unknown: "Unknown",
 };
 
+const lightKindLabels: Record<string, string> = {
+  directional: "Directional Lights",
+  point: "Point Lights",
+  spot: "Spot Lights",
+};
+
 const propTypeLabels: Record<string, string> = {
   tree: "Trees",
   rock: "Rocks",
@@ -49,6 +56,7 @@ const iconByKind: Record<OutlinerNode["kind"], string> = {
   area: "[AR]",
   prop: "[PR]",
   water: "[WT]",
+  light: "[LT]",
   material: "[MT]",
   debug_resource: "[DB]",
 };
@@ -163,6 +171,7 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
     chunks: false,
     areas: false,
     water: false,
+    lights: false,
     props: false,
     materials: false,
   });
@@ -177,7 +186,7 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
     setFilters((previous) => ({ ...previous, [name]: checked }));
   };
 
-  const filterGroups = filters.chunks || filters.areas || filters.water || filters.props || filters.materials;
+  const filterGroups = filters.chunks || filters.areas || filters.water || filters.lights || filters.props || filters.materials;
   const searchText = filters.search.trim().toLowerCase();
   const visibleNodes = useMemo(() => {
     return allNodes.filter((node) => {
@@ -194,6 +203,7 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
           (filters.chunks && node.kind === "chunk") ||
           (filters.areas && node.kind === "area") ||
           (filters.water && node.kind === "water") ||
+          (filters.lights && node.kind === "light") ||
           (filters.props && node.kind === "prop") ||
           (filters.materials && node.kind === "material");
         if (!matchesFilterGroup) {
@@ -208,7 +218,7 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
       const haystack = `${node.label} ${node.detail} ${node.typeBadge}`.toLowerCase();
       return haystack.includes(searchText);
     });
-  }, [allNodes, filterGroups, filters.areas, filters.chunks, filters.dirtyOnly, filters.lockedOnly, filters.materials, filters.props, filters.search, filters.water]);
+  }, [allNodes, filterGroups, filters.areas, filters.chunks, filters.dirtyOnly, filters.lights, filters.lockedOnly, filters.materials, filters.props, filters.search, filters.water]);
 
   const displayNodes = visibleNodes.slice(0, OUTLINER_VISIBLE_NODE_LIMIT);
   const hiddenNodeCount = Math.max(0, visibleNodes.length - displayNodes.length);
@@ -216,6 +226,7 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
   const dirtyChunks = chunks.filter((node) => node.dirty);
   const areas = displayNodes.filter((node) => node.kind === "area");
   const water = displayNodes.filter((node) => node.kind === "water");
+  const lights = displayNodes.filter((node) => node.kind === "light");
   const props = displayNodes.filter((node) => node.kind === "prop");
   const materials = displayNodes.filter((node) => node.kind === "material");
 
@@ -287,6 +298,18 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
     return map;
   }, [editorState.props, props]);
 
+  const lightsByKind = useMemo(() => {
+    const map = new Map<string, OutlinerNode[]>();
+    for (const light of lights) {
+      const source = editorState.lights.find((candidate) => candidate.id === light.id);
+      const label = source ? lightKindLabels[source.kind] : "Lights";
+      const list = map.get(label) ?? [];
+      list.push(light);
+      map.set(label, list);
+    }
+    return map;
+  }, [editorState.lights, lights]);
+
   const renderRows = (items: readonly OutlinerNode[], options: { readonly labelPrefix?: string; readonly testIdScope?: string } = {}) =>
     items
       .filter((node): node is Omit<OutlinerNode, "kind"> & { readonly kind: OutlinerSelectionKind } => node.kind !== "voxel")
@@ -347,6 +370,10 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
           <label>
             <input name="water" type="checkbox" checked={filters.water} onChange={changeFilter} />
             water
+          </label>
+          <label>
+            <input name="lights" type="checkbox" checked={filters.lights} onChange={changeFilter} />
+            lights
           </label>
           <label>
             <input name="props" type="checkbox" checked={filters.props} onChange={changeFilter} />
@@ -414,7 +441,19 @@ export function WorldOutlinerPanel({ onClose }: { readonly onClose?: () => void 
             {materials.length ? renderRows(materials) : <OutlinerPlaceholder label="No materials match current filter." />}
           </OutlinerSection>
           <OutlinerSection title="Lighting">
-            <OutlinerPlaceholder label="No lighting resources found." />
+            {lightsByKind.size ? Array.from(lightsByKind.entries()).map(([label, lightNodes]) => (
+              <OutlinerSection title={label} key={label}>
+                {lightNodes.length ? renderRows(lightNodes) : <OutlinerPlaceholder label={`No ${label.toLowerCase()} match current filter.`} />}
+              </OutlinerSection>
+            )) : <OutlinerPlaceholder label="No lighting resources found." />}
+            <button
+              type="button"
+              className="outliner-placeholder"
+              onClick={() => editorState.pushAgentTimelineEvent({ kind: "command", message: "Use Add Point Light from the command palette or lighting toolbar." })}
+              data-testid="outliner-lighting-add-hint"
+            >
+              Add light from command palette
+            </button>
           </OutlinerSection>
           <OutlinerSection title="Cameras">
             <button

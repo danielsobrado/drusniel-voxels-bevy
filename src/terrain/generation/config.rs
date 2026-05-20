@@ -1,17 +1,17 @@
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
 pub const TERRAIN_GENERATION_VERSION: u64 = 10;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TerrainConfigFile {
     pub terrain: TerrainConfig,
 }
 
-#[derive(Resource, Deserialize, Clone)]
+#[derive(Resource, Debug, Deserialize, Serialize, Clone)]
 pub struct TerrainConfig {
     pub height: HeightConfig,
     pub continent: NoiseLayer,
@@ -28,7 +28,7 @@ pub struct TerrainConfig {
     pub biome_modifiers: HashMap<String, f32>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CaveConfig {
     pub enabled: bool,
 }
@@ -40,7 +40,7 @@ impl Default for CaveConfig {
 }
 
 /// Configuration for river generation
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RiverConfig {
     /// Enable river generation
     pub enabled: bool,
@@ -73,7 +73,7 @@ impl Default for RiverConfig {
 }
 
 /// Configuration for deterministic lake, pond, and aquifer generation.
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WaterBodyGenerationConfig {
     pub enabled: bool,
     pub lakes: BasinConfig,
@@ -110,7 +110,7 @@ impl Default for WaterBodyGenerationConfig {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BasinConfig {
     pub enabled: bool,
     pub spacing: f32,
@@ -122,7 +122,7 @@ pub struct BasinConfig {
     pub shore_power: f32,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AquiferConfig {
     pub enabled: bool,
     pub max_y: i32,
@@ -141,14 +141,14 @@ impl Default for AquiferConfig {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HeightConfig {
     pub min: f32,
     pub max: f32,
     pub sea_level: f32,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NoiseLayer {
     pub scale: f32,
     pub amplitude: f32,
@@ -157,7 +157,7 @@ pub struct NoiseLayer {
     pub lacunarity: f32,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MountainConfig {
     pub scale: f32,
     pub amplitude: f32,

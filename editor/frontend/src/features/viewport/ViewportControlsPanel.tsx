@@ -1,9 +1,10 @@
-import { Boxes, Camera, CheckSquare2, Focus, Grid3X3, MousePointer2, Paintbrush, ShieldCheck, TestTube2, TriangleAlert } from "lucide-react";
+import { Boxes, Camera, CheckSquare2, Download, Focus, Grid3X3, MousePointer2, Paintbrush, Save, ShieldCheck, SkipBack, SkipForward, TestTube2, TriangleAlert, Upload } from "lucide-react";
 import { useEditorClients } from "../../app/providers";
 import { useCommandRunner } from "../../commands/useCommandRunner";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import { getRuntimeWarnings, getSelectedObject } from "../../state/editorSelectors";
+import type { EditorCameraTemplate } from "../../runtime/runtimeSchemas";
 
 export function ViewportControlsPanel() {
   const editorState = useEditorStore();
@@ -29,7 +30,7 @@ export function ViewportControlsPanel() {
     { id: "props", label: "Props", command: "editor.mode.props", icon: <Grid3X3 size={14} aria-hidden="true" /> },
     { id: "water", label: "Water", command: "editor.mode.water", icon: <Focus size={14} aria-hidden="true" /> },
     { id: "measure", label: "Measure", command: "editor.palette.open", icon: <CheckSquare2 size={14} aria-hidden="true" /> },
-    { id: "camera", label: "Camera", command: "editor.mode.lighting", icon: <Camera size={14} aria-hidden="true" /> },
+    { id: "camera", label: "Camera", command: "editor.camera.open", icon: <Camera size={14} aria-hidden="true" /> },
   ];
   const activeToolShelfId =
     activeMode === "voxel_sculpt" ? "sculpt" : activeMode === "voxel_paint" ? "paint" : activeMode === "lighting" ? "camera" : activeMode;
@@ -43,6 +44,56 @@ export function ViewportControlsPanel() {
     { id: "wireframe", label: "Wireframe", command: "editor.view.toggleWireframe", enabled: overlays.wireframe },
     { id: "agentTargets", label: "Agent targets", command: "editor.view.toggleAgentTargets", enabled: overlays.agentTargets },
   ] as const;
+  const editorCamera = editorState.editorCamera;
+  const activeSavedCamera = editorCamera.savedCameras.find((camera) => camera.id === editorCamera.activeSavedCameraId);
+
+  const applyEditorCamera = async (operation: Promise<{ readonly ok: true; readonly data: typeof editorCamera } | { readonly ok: false; readonly message: string }>) => {
+    const result = await operation;
+    if (result.ok) {
+      useEditorStore.getState().setEditorCamera(result.data);
+    }
+  };
+
+  const saveCurrentCamera = async () => {
+    const result = await runtimeClient.addSavedEditorCamera();
+    if (result.ok) {
+      useEditorStore.getState().setEditorCamera(result.data.editorCamera);
+    }
+  };
+
+  const exportCameraTemplate = async () => {
+    const result = await runtimeClient.exportEditorCameraTemplate();
+    if (!result.ok) {
+      return;
+    }
+    const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "drusniel-cameras.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importCameraTemplate = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+      void file.text().then(async (text) => {
+        const template = JSON.parse(text) as EditorCameraTemplate;
+        const result = await runtimeClient.importEditorCameraTemplate(template);
+        if (result.ok) {
+          useEditorStore.getState().setEditorCamera(result.data);
+        }
+      });
+    };
+    input.click();
+  };
 
   return (
     <section className="panel-shell" data-testid="panel-viewport-controls" aria-labelledby="viewport-controls-title">
@@ -131,6 +182,91 @@ export function ViewportControlsPanel() {
                 <span>{toggle.label}</span>
               </label>
             ))}
+          </div>
+        </section>
+
+        <section className="viewport-controls-section" data-testid="viewport-camera-controls">
+          <h3>Camera</h3>
+          <div className="viewport-controls-toggle-grid">
+            <label className="viewport-toggle">
+              <input
+                type="checkbox"
+                checked={editorCamera.interactionMode === "movement"}
+                onChange={(event) => void applyEditorCamera(runtimeClient.setEditorCameraMode({ interactionMode: event.currentTarget.checked ? "movement" : "menu" }))}
+              />
+              <span>{editorCamera.interactionMode === "movement" ? "Movement mode" : "Menu mode"}</span>
+            </label>
+            <label className="viewport-toggle">
+              <input
+                type="checkbox"
+                checked={editorCamera.cameraKind === "arcball"}
+                onChange={(event) => void applyEditorCamera(runtimeClient.setEditorCameraMode({ cameraKind: event.currentTarget.checked ? "arcball" : "firstPerson" }))}
+              />
+              <span>{editorCamera.cameraKind === "arcball" ? "Arcball" : "First Person"}</span>
+            </label>
+            <label className="viewport-toggle">
+              <input
+                type="checkbox"
+                checked={editorCamera.projection === "orthographic"}
+                onChange={(event) =>
+                  void applyEditorCamera(
+                    runtimeClient.setEditorCameraProjection(event.currentTarget.checked ? "orthographic" : "perspective", {
+                      fovDegrees: editorCamera.pose.fovDegrees,
+                      orthographicScale: editorCamera.pose.orthographicScale,
+                    }),
+                  )
+                }
+              />
+              <span>{editorCamera.projection === "orthographic" ? "Orthographic" : "Perspective"}</span>
+            </label>
+          </div>
+          <div className="viewport-controls-tool-grid" role="toolbar" aria-label="Camera presets">
+            <button type="button" className="toolbar-button viewport-tool-button" onClick={() => void applyEditorCamera(runtimeClient.alignEditorCameraToAxes("nearest", true))}>
+              <Camera size={14} aria-hidden="true" />
+              Align
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" onClick={() => void applyEditorCamera(runtimeClient.alignEditorCameraToAxes("isometric", false))}>
+              <Camera size={14} aria-hidden="true" />
+              Isometric
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" onClick={() => void applyEditorCamera(runtimeClient.alignEditorCameraToAxes("dimetric", false))}>
+              <Camera size={14} aria-hidden="true" />
+              Dimetric
+            </button>
+          </div>
+          <div className="viewport-controls-tool-grid" role="toolbar" aria-label="Saved cameras">
+            <button type="button" className="toolbar-button viewport-tool-button" data-testid="camera-save-current" onClick={() => void saveCurrentCamera()}>
+              <Save size={14} aria-hidden="true" />
+              Add
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" disabled={editorCamera.savedCameras.length === 0} onClick={() => void applyEditorCamera(runtimeClient.stepSavedEditorCamera(-1))}>
+              <SkipBack size={14} aria-hidden="true" />
+              Previous
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" disabled={editorCamera.savedCameras.length === 0} onClick={() => void applyEditorCamera(runtimeClient.stepSavedEditorCamera(1))}>
+              <SkipForward size={14} aria-hidden="true" />
+              Next
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" onClick={importCameraTemplate}>
+              <Upload size={14} aria-hidden="true" />
+              Import
+            </button>
+            <button type="button" className="toolbar-button viewport-tool-button" onClick={() => void exportCameraTemplate()}>
+              <Download size={14} aria-hidden="true" />
+              Export
+            </button>
+          </div>
+          <div className="viewport-controls-summary">
+            <article className="viewport-controls-card">
+              <span>Saved</span>
+              <strong>{editorCamera.savedCameras.length}</strong>
+              <small>{activeSavedCamera?.name ?? "No camera selected"}</small>
+            </article>
+            <article className="viewport-controls-card">
+              <span>Pose</span>
+              <strong>{editorCamera.pose.position.map((value) => value.toFixed(1)).join(", ")}</strong>
+              <small>Yaw {(editorCamera.pose.yaw * 180 / Math.PI).toFixed(1)} / Pitch {(editorCamera.pose.pitch * 180 / Math.PI).toFixed(1)}</small>
+            </article>
           </div>
         </section>
       </div>

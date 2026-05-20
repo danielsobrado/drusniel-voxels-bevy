@@ -40,6 +40,18 @@ test("viewport mode switch separates fast authoring from native validation", asy
   await expect(page.getByTestId("world-viewport-canvas")).toBeVisible();
 });
 
+test("camera controls expose native editor camera modes and saved cameras", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("editor-camera-status")).toContainText("Menu");
+  await expect(page.getByTestId("editor-camera-status")).toContainText("First Person");
+  await expect(page.getByTestId("editor-camera-status")).toContainText("Perspective");
+
+  await page.locator('[data-command-id="editor.camera.open"]').click();
+  await expect(page.getByTestId("viewport-camera-controls")).toBeVisible();
+  await page.getByTestId("camera-save-current").click();
+  await expect(page.getByTestId("viewport-camera-controls")).toContainText("Camera 1");
+});
+
 test("authoring viewport overlay toggles affect diagnostic layers", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("viewport-voxel-grid-overlay")).toBeVisible();

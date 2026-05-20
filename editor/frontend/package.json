@@ -13,7 +13,7 @@
     "build:desktop": "tauri build --config src-tauri/tauri.sidecar.conf.json",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:unit": "vitest run src/state/editorStore.test.ts src/runtime/RuntimeClient.test.ts",
+    "test:unit": "vitest run src/state/editorStore.test.ts src/runtime/RuntimeClient.test.ts src/features/terrain/terrainRecipe.test.ts",
     "test:smoke": "playwright test --config playwright.config.ts --grep-invert @visual-review",
     "test:visual-review": "playwright test --config playwright.config.ts tests/editor-visual-review.spec.ts --project chromium"
   },

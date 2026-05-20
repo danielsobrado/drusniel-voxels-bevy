@@ -1,11 +1,11 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
-import { mockAtlasMapping, mockChunks, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
+import { mockAtlasMapping, mockChunks, mockLights, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { EditorDiagnosticsCategory, EditorDiagnosticsState, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag, RuntimeMetrics } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainGenerationConfig, TerrainPreviewRequest, TerrainPreviewSample, TerrainRecipe, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeEventHandler } from "./runtimeEvents";
-import type { RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
+import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraState, EditorCameraTemplate, RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot } from "./runtimeSchemas";
 import { runtimeCommandSuccess } from "./runtimeSchemas";
 
 const mockCapabilities = {
@@ -17,7 +17,42 @@ const mockCapabilities = {
   canRunWaterVisualProbe: true,
   canEditAtlasMapping: true,
   canEditProtectedAreas: true,
+  canEditLights: true,
   canSaveWorldSnapshot: true,
+};
+
+const mockTerrainConfig: TerrainGenerationConfig = {
+  height: { min: 14, max: 118, sea_level: 0 },
+  continent: { scale: 0.001, amplitude: 40, octaves: 2, persistence: 0.5, lacunarity: 2 },
+  mountains: {
+    scale: 0.008,
+    amplitude: 120,
+    octaves: 7,
+    persistence: 0.48,
+    lacunarity: 2.3,
+    ridge_power: 1.8,
+    massif_scale: 0.0035,
+    massif_amplitude: 38,
+    massif_threshold: 0.38,
+    massif_power: 1.65,
+  },
+  hills: { scale: 0.025, amplitude: 25, octaves: 4, persistence: 0.5, lacunarity: 2 },
+  detail: { scale: 0.1, amplitude: 3, octaves: 3, persistence: 0.5, lacunarity: 2 },
+  caves: { enabled: false },
+  rivers: { enabled: true, scale: 0.003, width: 4, depth: 6, octaves: 3, tributary_scale: 0.008, tributary_width: 2 },
+  water_bodies: {
+    enabled: true,
+    lakes: { enabled: true, spacing: 96, density: 0.38, min_radius: 18, max_radius: 42, min_depth: 3, max_depth: 8, shore_power: 1.45 },
+    ponds: { enabled: true, spacing: 48, density: 0.34, min_radius: 7, max_radius: 17, min_depth: 2, max_depth: 5, shore_power: 1.25 },
+    aquifers: { enabled: false, max_y: 10, noise_scale: 0.045, threshold: 0.84 },
+  },
+  biome_modifiers: {},
+};
+
+const mockTerrainRecipe: TerrainRecipe = {
+  version: 1,
+  seed: 0,
+  config: mockTerrainConfig,
 };
 
 const mockPropStats = (props: readonly PropInstance[]) => ({
@@ -62,12 +97,24 @@ const blockRuntimeName = (block: BlockType): string => {
   }
 };
 
+const defaultEditorCameraPose: EditorCameraPose = {
+  position: [96, 80, 96],
+  target: [64, 48, 64],
+  yaw: -Math.PI / 4,
+  pitch: -0.45,
+  roll: 0,
+  radius: 64,
+  fovDegrees: 70,
+  orthographicScale: 96,
+};
+
 export class MockRuntimeClient implements RuntimeClient {
   private renderQualityPreset: RenderQualityPreset = mockRuntimeMetrics.renderQualityPreset;
   private runtimeMetrics: RuntimeMetrics = JSON.parse(JSON.stringify(mockRuntimeMetrics)) as RuntimeMetrics;
   private atlasMapping: BlockAtlasMap = { ...mockAtlasMapping };
   private atlasDirty = false;
   private props: PropInstance[] = [...mockProps];
+  private lights: LightInstance[] = [...mockLights];
   private protectedAreas: ProtectedArea[] = [...mockProtectedAreas];
   private connectionState: RuntimeConnectionState = "mock";
   private viewportDebug: ViewportOverlayState = {
@@ -84,6 +131,15 @@ export class MockRuntimeClient implements RuntimeClient {
   private editorDiagnostics: EditorDiagnosticsState = {
     enabled: false,
     categories: ["nativeViewport", "frontend", "input", "selection", "hover", "highlight", "runtime"],
+  };
+  private editorCamera: EditorCameraState = {
+    interactionMode: "menu",
+    cameraKind: "firstPerson",
+    projection: "perspective",
+    pose: defaultEditorCameraPose,
+    alignToAxes: false,
+    automaticAxis: true,
+    savedCameras: [],
   };
   private readonly handlers = new Set<RuntimeEventHandler>();
 
@@ -195,6 +251,24 @@ export class MockRuntimeClient implements RuntimeClient {
     });
   }
 
+  async updateAmbientLight(color: string, brightness: number) {
+    this.runtimeMetrics = {
+      ...this.runtimeMetrics,
+      lightingAtmosphere: {
+        ...this.runtimeMetrics.lightingAtmosphere,
+        ambientColor: color,
+        ambientBrightness: brightness,
+      },
+    };
+    return runtimeCommandSuccess({
+      color,
+      brightness,
+      metrics: {
+        lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
+      },
+    });
+  }
+
   async getWaterReflectionStatus() {
     return runtimeCommandSuccess(mockWaterRuntimeSnapshot.reflectionStatus);
   }
@@ -205,6 +279,142 @@ export class MockRuntimeClient implements RuntimeClient {
 
   async focusCamera(target: Selection | readonly [number, number, number]) {
     return runtimeCommandSuccess({ target });
+  }
+
+  async setEditorCameraMode(patch: { readonly interactionMode?: EditorCameraInteractionMode; readonly cameraKind?: EditorCameraKind }) {
+    this.editorCamera = { ...this.editorCamera, ...patch };
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async setEditorCameraProjection(projection: EditorCameraProjection, options: { readonly fovDegrees?: number; readonly orthographicScale?: number } = {}) {
+    this.editorCamera = {
+      ...this.editorCamera,
+      projection,
+      pose: {
+        ...this.editorCamera.pose,
+        ...(options.fovDegrees === undefined ? {} : { fovDegrees: options.fovDegrees }),
+        ...(options.orthographicScale === undefined ? {} : { orthographicScale: options.orthographicScale }),
+      },
+    };
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async setEditorCameraPose(pose: EditorCameraPose) {
+    this.editorCamera = { ...this.editorCamera, pose };
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async alignEditorCameraToAxes(axis = "nearest", automatic = false) {
+    const preset =
+      axis === "isometric"
+        ? { yaw: Math.PI / 4, pitch: -(35.264 * Math.PI) / 180 }
+        : axis === "dimetric"
+          ? { yaw: Math.PI / 4, pitch: -Math.PI / 6 }
+          : { yaw: Math.round(this.editorCamera.pose.yaw / (Math.PI / 4)) * (Math.PI / 4), pitch: Math.round(this.editorCamera.pose.pitch / (Math.PI / 12)) * (Math.PI / 12) };
+    this.editorCamera = {
+      ...this.editorCamera,
+      alignToAxes: true,
+      automaticAxis: automatic,
+      pose: { ...this.editorCamera.pose, ...preset },
+    };
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async addSavedEditorCamera(input: { readonly name?: string; readonly description?: string } = {}) {
+    const now = new Date().toISOString();
+    const camera = {
+      id: `camera-${Date.now()}-${this.editorCamera.savedCameras.length + 1}`,
+      name: input.name ?? `Camera ${this.editorCamera.savedCameras.length + 1}`,
+      description: input.description,
+      cameraKind: this.editorCamera.cameraKind,
+      projection: this.editorCamera.projection,
+      pose: this.editorCamera.pose,
+      alignToAxes: this.editorCamera.alignToAxes,
+      automaticAxis: this.editorCamera.automaticAxis,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.editorCamera = {
+      ...this.editorCamera,
+      savedCameras: [...this.editorCamera.savedCameras, camera],
+      activeSavedCameraId: camera.id,
+    };
+    return runtimeCommandSuccess({ camera, editorCamera: this.editorCamera });
+  }
+
+  async updateSavedEditorCamera(cameraId: string, input: { readonly name?: string; readonly description?: string } = {}) {
+    let updated = this.editorCamera.savedCameras.find((camera) => camera.id === cameraId);
+    if (!updated) {
+      const result = await this.addSavedEditorCamera({ name: input.name, description: input.description });
+      return result;
+    }
+    updated = {
+      ...updated,
+      ...input,
+      cameraKind: this.editorCamera.cameraKind,
+      projection: this.editorCamera.projection,
+      pose: this.editorCamera.pose,
+      alignToAxes: this.editorCamera.alignToAxes,
+      automaticAxis: this.editorCamera.automaticAxis,
+      updatedAt: new Date().toISOString(),
+    };
+    this.editorCamera = {
+      ...this.editorCamera,
+      savedCameras: this.editorCamera.savedCameras.map((camera) => (camera.id === cameraId ? updated! : camera)),
+    };
+    return runtimeCommandSuccess({ camera: updated, editorCamera: this.editorCamera });
+  }
+
+  async deleteSavedEditorCamera(cameraId: string) {
+    const deleted = this.editorCamera.savedCameras.some((camera) => camera.id === cameraId);
+    const nextCameras = this.editorCamera.savedCameras.filter((camera) => camera.id !== cameraId);
+    this.editorCamera = {
+      ...this.editorCamera,
+      savedCameras: nextCameras,
+      activeSavedCameraId: this.editorCamera.activeSavedCameraId === cameraId ? undefined : this.editorCamera.activeSavedCameraId,
+    };
+    return runtimeCommandSuccess({ cameraId, deleted, editorCamera: this.editorCamera });
+  }
+
+  async recallSavedEditorCamera(cameraId: string) {
+    const camera = this.editorCamera.savedCameras.find((candidate) => candidate.id === cameraId);
+    if (camera) {
+      this.editorCamera = {
+        ...this.editorCamera,
+        cameraKind: camera.cameraKind,
+        projection: camera.projection,
+        pose: camera.pose,
+        alignToAxes: camera.alignToAxes,
+        automaticAxis: camera.automaticAxis,
+        activeSavedCameraId: camera.id,
+      };
+    }
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async stepSavedEditorCamera(direction: number) {
+    if (this.editorCamera.savedCameras.length === 0) {
+      return runtimeCommandSuccess(this.editorCamera);
+    }
+    const currentIndex = Math.max(0, this.editorCamera.savedCameras.findIndex((camera) => camera.id === this.editorCamera.activeSavedCameraId));
+    const nextIndex = (currentIndex + direction + this.editorCamera.savedCameras.length) % this.editorCamera.savedCameras.length;
+    return this.recallSavedEditorCamera(this.editorCamera.savedCameras[nextIndex].id);
+  }
+
+  async importEditorCameraTemplate(template: EditorCameraTemplate) {
+    this.editorCamera = {
+      ...this.editorCamera,
+      savedCameras: template.cameras,
+      activeSavedCameraId: template.cameras[0]?.id,
+    };
+    return runtimeCommandSuccess(this.editorCamera);
+  }
+
+  async exportEditorCameraTemplate() {
+    return runtimeCommandSuccess({
+      schema: "drusniel.camera-template.v1" as const,
+      cameras: this.editorCamera.savedCameras,
+    });
   }
 
   async setWaterReflectionDebugMode(waterBodyId: string, mode: WaterReflectionDebugViewMode) {
@@ -230,6 +440,71 @@ export class MockRuntimeClient implements RuntimeClient {
       reflectionStatus: { ...mockWaterRuntimeSnapshot.reflectionStatus, lastProbeUpdateMs: 3.1 },
       waterPresence: { ...mockWaterRuntimeSnapshot.waterPresence, nearestWaterDistance: 4.2 },
       capturedAt: new Date().toISOString(),
+    });
+  }
+
+  async getDefaultTerrainRecipe() {
+    return runtimeCommandSuccess({
+      recipe: JSON.parse(JSON.stringify(mockTerrainRecipe)) as TerrainRecipe,
+      fingerprint: "0xmockterrain000000",
+    });
+  }
+
+  async previewTerrainRecipe(request: TerrainPreviewRequest) {
+    const samples: TerrainPreviewSample[] = [];
+    let minHeight = Number.POSITIVE_INFINITY;
+    let maxHeight = Number.NEGATIVE_INFINITY;
+    let sumHeight = 0;
+    let waterCells = 0;
+    let treeCells = 0;
+    const denominator = Math.max(1, request.resolution - 1);
+
+    for (let row = 0; row < request.resolution; row += 1) {
+      for (let col = 0; col < request.resolution; col += 1) {
+        const x = request.origin[0] + Math.round((col / denominator) * request.size[0]);
+        const z = request.origin[1] + Math.round((row / denominator) * request.size[1]);
+        const wave = Math.sin((x + request.recipe.seed) * 0.04) + Math.cos((z - request.recipe.seed) * 0.035);
+        const height = Math.round(32 + wave * 10 + request.recipe.config.hills.amplitude * 0.12);
+        const water = height <= 18;
+        const tree = !water && ((x * 31 + z * 17 + request.recipe.seed) % 19 === 0);
+        const biome: TerrainPreviewSample["biome"] = water ? "Sandy" : height > 48 ? "Rocky" : height < 25 ? "Sandy" : "Grassland";
+        const material: TerrainPreviewSample["material"] = water ? "Water" : biome === "Rocky" ? "Rock" : biome === "Sandy" ? "Sand" : "TopSoil";
+
+        minHeight = Math.min(minHeight, height);
+        maxHeight = Math.max(maxHeight, height);
+        sumHeight += height;
+        waterCells += water ? 1 : 0;
+        treeCells += tree ? 1 : 0;
+        samples.push({
+          x,
+          z,
+          height,
+          biome,
+          material,
+          water,
+          waterKind: water ? "Pond" : "None",
+          waterDepth: water ? 18 - height : 0,
+          surfaceY: 18,
+          tree,
+        });
+      }
+    }
+
+    return runtimeCommandSuccess({
+      recipe: request.recipe,
+      origin: request.origin,
+      size: request.size,
+      resolution: request.resolution,
+      samples,
+      stats: {
+        minHeight,
+        maxHeight,
+        avgHeight: sumHeight / Math.max(1, samples.length),
+        waterCells,
+        treeCells,
+      },
+      fingerprint: "0xmockterrain000000",
+      timingMs: 1.25,
     });
   }
 
@@ -307,6 +582,59 @@ export class MockRuntimeClient implements RuntimeClient {
     return runtimeCommandSuccess({
       removedPropIds,
       propStats: mockPropStats(this.props),
+    });
+  }
+
+  async createLight(light: LightInstance) {
+    this.lights = [...this.lights.filter((candidate) => candidate.id !== light.id), light];
+    return runtimeCommandSuccess({ light });
+  }
+
+  async updateLight(lightId: string, patch: Partial<Omit<LightInstance, "id">>) {
+    const existing = this.lights.find((light) => light.id === lightId);
+    const next: LightInstance = existing
+      ? { ...existing, ...patch }
+      : {
+          id: lightId,
+          name: patch.name ?? lightId,
+          kind: patch.kind ?? "point",
+          enabled: patch.enabled ?? true,
+          visible: patch.visible ?? true,
+          locked: patch.locked ?? false,
+          position: patch.position ?? [0, 16, 0],
+          rotation: patch.rotation ?? [0, 0, 0],
+          color: patch.color ?? "#ffffff",
+          intensity: patch.intensity ?? 800,
+          range: patch.range ?? 24,
+          radius: patch.radius ?? 0,
+          innerConeAngle: patch.innerConeAngle ?? 25,
+          outerConeAngle: patch.outerConeAngle ?? 45,
+          shadowsEnabled: patch.shadowsEnabled ?? true,
+          volumetric: patch.volumetric ?? false,
+          source: patch.source ?? "editor",
+        };
+    this.lights = [...this.lights.filter((light) => light.id !== lightId), next];
+    return runtimeCommandSuccess({ light: next });
+  }
+
+  async deleteLight(lightId: string) {
+    const before = this.lights.length;
+    this.lights = this.lights.filter((light) => light.id !== lightId || light.source === "sun");
+    return runtimeCommandSuccess({ lightId, deleted: this.lights.length !== before });
+  }
+
+  async saveLights() {
+    return runtimeCommandSuccess({
+      worldId: "mock-drusniel-world",
+      savedAt: new Date().toISOString(),
+      snapshotId: "mock-editor-lights",
+    });
+  }
+
+  async loadLights() {
+    return runtimeCommandSuccess({
+      lights: this.lights,
+      lightCount: this.lights.length,
     });
   }
 
@@ -455,7 +783,9 @@ export class MockRuntimeClient implements RuntimeClient {
       },
       viewportDebug: this.viewportDebug,
       editorDiagnostics: this.editorDiagnostics,
+      editorCamera: this.editorCamera,
       propStats: mockPropStats(this.props),
+      lights: this.lights,
       timingSamples: metrics.timingSamples,
       consoleEvents: [],
       capturedAt: new Date().toISOString(),

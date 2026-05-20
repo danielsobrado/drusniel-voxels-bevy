@@ -15,8 +15,8 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::props::{PropConfig, PropDefinition};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::runtime_commands::{
-    editor_placed_props_payload, handle_runtime_command_json, runtime_snapshot_json,
-    save_editor_placed_props,
+    editor_lights_payload, editor_placed_props_payload, handle_runtime_command_json,
+    runtime_snapshot_json, save_editor_lights, save_editor_placed_props,
 };
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
@@ -386,6 +386,19 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
                 );
             }
         };
+        let (editor_light_count, editor_light_save_path) = match save_editor_lights(world) {
+            Ok(summary) => summary,
+            Err(message) => {
+                return BridgeResponse::json(
+                    500,
+                    json!({
+                        "ok": false,
+                        "error": message,
+                        "code": "EDITOR_LIGHT_SAVE_FAILED",
+                    }),
+                );
+            }
+        };
 
         BridgeResponse::json(
             200,
@@ -398,6 +411,11 @@ fn editor_save_default_world_response(world: &World) -> BridgeResponse {
                         "saved": true,
                         "count": editor_prop_count,
                         "savePath": editor_prop_save_path,
+                    },
+                    "editorLights": {
+                        "saved": true,
+                        "count": editor_light_count,
+                        "savePath": editor_light_save_path,
                     },
                 },
             }),
@@ -617,6 +635,7 @@ fn frontend_world_summary_from_metadata_and_world(
             .collect::<Vec<_>>(),
         "protectedAreas": [],
         "waterBodies": frontend_water_bodies_payload(world),
+        "lights": editor_lights_payload(world),
         "props": editor_placed_props_payload(world),
         "propAssets": frontend_prop_assets_payload(world),
         "materials": [],

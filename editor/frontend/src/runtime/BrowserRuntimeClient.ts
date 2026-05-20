@@ -1,16 +1,27 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockAtlasMap, BlockType, PropInstance, ProtectedArea, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockAtlasMap, BlockType, LightInstance, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
+  EditorCameraInteractionMode,
+  EditorCameraKind,
+  EditorCameraPose,
+  EditorCameraProjection,
+  EditorCameraTemplate,
   RuntimeAtlasMappingState,
+  RuntimeAmbientLightMutationResult,
   RuntimeChunkRebuildResult,
   RuntimeCommandResult,
   RuntimeConnectionState,
+  RuntimeDeleteSavedEditorCameraResult,
+  RuntimeEditorCameraResult,
   RuntimeEditorDiagnosticsState,
   RuntimeFocusCameraResult,
+  RuntimeLightDeleteResult,
+  RuntimeLightLoadResult,
+  RuntimeLightMutationResult,
   RuntimeProtectedAreaDeleteResult,
   RuntimeProtectedAreaLoadResult,
   RuntimeProtectedAreaMutationResult,
@@ -21,6 +32,7 @@ import type {
   RuntimeRenderFeatureFlagResult,
   RuntimeRenderQualityState,
   RuntimeSaveSummary,
+  RuntimeSavedEditorCameraResult,
   RuntimeSelectEntityResult,
   RuntimeSnapshot,
   RuntimeVoxelMutationResult,
@@ -28,6 +40,8 @@ import type {
   RuntimeWaterBodyMutationResult,
   RuntimeWaterDebugModeResult,
   RuntimeWaterVisualProbeResult,
+  RuntimeTerrainRecipeState,
+  RuntimeTerrainPreviewResult,
 } from "./runtimeSchemas";
 import { runtimeCommandFailure } from "./runtimeSchemas";
 
@@ -93,6 +107,94 @@ export class BrowserRuntimeClient implements RuntimeClient {
     });
   }
 
+  async setEditorCameraMode(patch: { readonly interactionMode?: EditorCameraInteractionMode; readonly cameraKind?: EditorCameraKind }): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.setEditorCameraMode",
+      requestId: makeRequestId("runtime.setEditorCameraMode"),
+      payload: patch,
+    });
+  }
+
+  async setEditorCameraProjection(projection: EditorCameraProjection, options: { readonly fovDegrees?: number; readonly orthographicScale?: number } = {}): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.setEditorCameraProjection",
+      requestId: makeRequestId("runtime.setEditorCameraProjection"),
+      payload: { projection, ...options },
+    });
+  }
+
+  async setEditorCameraPose(pose: EditorCameraPose): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.setEditorCameraPose",
+      requestId: makeRequestId("runtime.setEditorCameraPose"),
+      payload: { pose },
+    });
+  }
+
+  async alignEditorCameraToAxes(axis?: string, automatic = false): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.alignEditorCameraToAxes",
+      requestId: makeRequestId("runtime.alignEditorCameraToAxes"),
+      payload: axis === undefined ? { automatic } : { axis, automatic },
+    });
+  }
+
+  async addSavedEditorCamera(input: { readonly name?: string; readonly description?: string } = {}): Promise<RuntimeCommandResult<RuntimeSavedEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.addSavedEditorCamera",
+      requestId: makeRequestId("runtime.addSavedEditorCamera"),
+      payload: input,
+    });
+  }
+
+  async updateSavedEditorCamera(cameraId: string, input: { readonly name?: string; readonly description?: string } = {}): Promise<RuntimeCommandResult<RuntimeSavedEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.updateSavedEditorCamera",
+      requestId: makeRequestId("runtime.updateSavedEditorCamera"),
+      payload: { cameraId, ...input },
+    });
+  }
+
+  async deleteSavedEditorCamera(cameraId: string): Promise<RuntimeCommandResult<RuntimeDeleteSavedEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.deleteSavedEditorCamera",
+      requestId: makeRequestId("runtime.deleteSavedEditorCamera"),
+      payload: { cameraId },
+    });
+  }
+
+  async recallSavedEditorCamera(cameraId: string): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.recallSavedEditorCamera",
+      requestId: makeRequestId("runtime.recallSavedEditorCamera"),
+      payload: { cameraId },
+    });
+  }
+
+  async stepSavedEditorCamera(direction: number): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.stepSavedEditorCamera",
+      requestId: makeRequestId("runtime.stepSavedEditorCamera"),
+      payload: { direction },
+    });
+  }
+
+  async importEditorCameraTemplate(template: EditorCameraTemplate): Promise<RuntimeCommandResult<RuntimeEditorCameraResult>> {
+    return this.execute({
+      type: "runtime.importEditorCameraTemplate",
+      requestId: makeRequestId("runtime.importEditorCameraTemplate"),
+      payload: { template },
+    });
+  }
+
+  async exportEditorCameraTemplate(): Promise<RuntimeCommandResult<EditorCameraTemplate>> {
+    return this.execute({
+      type: "runtime.exportEditorCameraTemplate",
+      requestId: makeRequestId("runtime.exportEditorCameraTemplate"),
+      payload: {},
+    });
+  }
+
   async rebuildSelectedChunk(chunkId: string): Promise<RuntimeCommandResult<RuntimeChunkRebuildResult>> {
     return this.execute({
       type: "runtime.rebuildSelectedChunk",
@@ -125,6 +227,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
     });
   }
 
+  async updateAmbientLight(color: string, brightness: number): Promise<RuntimeCommandResult<RuntimeAmbientLightMutationResult>> {
+    return this.execute({
+      type: "runtime.updateAmbientLight",
+      requestId: makeRequestId("runtime.updateAmbientLight"),
+      payload: { color, brightness },
+    });
+  }
+
   async setWaterReflectionDebugMode(waterBodyId: string, mode: WaterReflectionDebugViewMode): Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>> {
     return this.execute({
       type: "runtime.setWaterReflectionDebugMode",
@@ -146,6 +256,22 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.runWaterVisualProbe",
       requestId: makeRequestId("runtime.runWaterVisualProbe"),
       payload: {},
+    });
+  }
+
+  async getDefaultTerrainRecipe(): Promise<RuntimeCommandResult<RuntimeTerrainRecipeState>> {
+    return this.execute({
+      type: "runtime.getDefaultTerrainRecipe",
+      requestId: makeRequestId("runtime.getDefaultTerrainRecipe"),
+      payload: {},
+    });
+  }
+
+  async previewTerrainRecipe(request: TerrainPreviewRequest): Promise<RuntimeCommandResult<RuntimeTerrainPreviewResult>> {
+    return this.execute({
+      type: "runtime.previewTerrainRecipe",
+      requestId: makeRequestId("runtime.previewTerrainRecipe"),
+      payload: { request },
     });
   }
 
@@ -202,6 +328,46 @@ export class BrowserRuntimeClient implements RuntimeClient {
       type: "runtime.removeProps",
       requestId: makeRequestId("runtime.removeProps"),
       payload: filter,
+    });
+  }
+
+  async createLight(light: LightInstance): Promise<RuntimeCommandResult<RuntimeLightMutationResult>> {
+    return this.execute({
+      type: "runtime.createLight",
+      requestId: makeRequestId("runtime.createLight"),
+      payload: { light },
+    });
+  }
+
+  async updateLight(lightId: string, patch: Partial<Omit<LightInstance, "id">>): Promise<RuntimeCommandResult<RuntimeLightMutationResult>> {
+    return this.execute({
+      type: "runtime.updateLight",
+      requestId: makeRequestId("runtime.updateLight"),
+      payload: { lightId, patch },
+    });
+  }
+
+  async deleteLight(lightId: string): Promise<RuntimeCommandResult<RuntimeLightDeleteResult>> {
+    return this.execute({
+      type: "runtime.deleteLight",
+      requestId: makeRequestId("runtime.deleteLight"),
+      payload: { lightId },
+    });
+  }
+
+  async saveLights(): Promise<RuntimeCommandResult<RuntimeSaveSummary>> {
+    return this.execute({
+      type: "runtime.saveLights",
+      requestId: makeRequestId("runtime.saveLights"),
+      payload: {},
+    });
+  }
+
+  async loadLights(): Promise<RuntimeCommandResult<RuntimeLightLoadResult>> {
+    return this.execute({
+      type: "runtime.loadLights",
+      requestId: makeRequestId("runtime.loadLights"),
+      payload: {},
     });
   }
 

@@ -7,7 +7,7 @@ import { editorCommands, getCommand, runCommand } from "../commands/commandRegis
 import type { EditorCommandContext } from "../commands/commandTypes";
 import { MockRuntimeClient } from "../runtime/MockRuntimeClient";
 import { runtimeCommandFailure, runtimeCommandSuccess } from "../runtime/runtimeSchemas";
-import { mockChunks, mockMaterials, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
+import { mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import { createInitialEditorState, useEditorStore } from "./editorStore";
 import { getAgentObservation, getCurrentInspectorKind, getDirtyChunks, getRuntimeWarnings, getSelectedObject, getVisibleOutlinerNodes } from "./editorSelectors";
 import { menuCommandIds } from "../components/editor/EditorMenubar";
@@ -22,6 +22,18 @@ const collectSourceFiles = (directory: string): readonly string[] =>
 
 beforeEach(() => {
   useEditorStore.setState(createInitialEditorState(), false);
+  useEditorStore.getState().replaceWorldSummary({
+    worldId: "mock-world",
+    name: "Mock World",
+    chunks: mockChunks,
+    protectedAreas: mockProtectedAreas,
+    waterBodies: mockWaterBodies,
+    lights: [],
+    props: mockProps,
+    propAssets: mockPropAssets,
+    materials: mockMaterials,
+    updatedAt: "2026-05-20T00:00:00.000Z",
+  });
 });
 
 describe("editor store actions", () => {

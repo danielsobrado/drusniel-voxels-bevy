@@ -1,4 +1,4 @@
-import { Brush, Boxes, Download, Droplets, Grid3X3, History, Lightbulb, MousePointer2, Package, Redo2, Save, Sparkles, SquareDashedMousePointer, TestTube2, Undo2, Upload } from "lucide-react";
+import { Brush, Boxes, Download, Droplets, Grid3X3, History, Lightbulb, MousePointer2, Package, Plus, Redo2, Save, Sparkles, SquareDashedMousePointer, TestTube2, Trash2, Undo2, Upload } from "lucide-react";
 import { useEditorStore } from "../../state/editorStore";
 import type { EditorMode, RenderQualityPreset } from "../../types/editor";
 import { StatusPill } from "./StatusPill";
@@ -15,6 +15,10 @@ export const toolbarCommandIds = [
   "editor.view.toggleVoxelGrid",
   "editor.view.toggleChunkBounds",
   "editor.view.toggleWireframe",
+  "editor.lighting.addPointLight",
+  "editor.lighting.addSpotLight",
+  "editor.lighting.addDirectionalLight",
+  "editor.lighting.deleteSelected",
   ...modeCommandIds,
 ] as const;
 
@@ -91,6 +95,22 @@ export function MainToolbar({ runCommand }: MainToolbarProps) {
           </button>
         ))}
       </div>
+      {activeMode === "lighting" ? (
+        <div className="toolbar-group" aria-label="Lighting controls">
+          <button type="button" className="toolbar-button" aria-label="Add point light" data-command-id="editor.lighting.addPointLight" onClick={() => void runCommand("editor.lighting.addPointLight")}>
+            <Plus size={14} aria-hidden="true" /> Point
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Add spot light" data-command-id="editor.lighting.addSpotLight" onClick={() => void runCommand("editor.lighting.addSpotLight")}>
+            <Plus size={14} aria-hidden="true" /> Spot
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Add directional light" data-command-id="editor.lighting.addDirectionalLight" onClick={() => void runCommand("editor.lighting.addDirectionalLight")}>
+            <Lightbulb size={14} aria-hidden="true" /> Directional
+          </button>
+          <button type="button" className="toolbar-button" aria-label="Delete selected light" data-command-id="editor.lighting.deleteSelected" onClick={() => void runCommand("editor.lighting.deleteSelected")}>
+            <Trash2 size={14} aria-hidden="true" /> Delete
+          </button>
+        </div>
+      ) : null}
       <label className="toolbar-field">
         Brush radius
         <input aria-label="Brush radius" min={1} max={16} type="range" value={brushSettings.radius} onChange={(event) => setBrushRadius(Number(event.target.value))} />

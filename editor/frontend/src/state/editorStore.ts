@@ -20,7 +20,8 @@ import type {
   ViewportOverlayState,
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
-import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
+import type { AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, LightInstance, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
+import type { EditorCameraState } from "../runtime/runtimeSchemas";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
 
@@ -36,6 +37,7 @@ const createOutlinerNodeState = (
   chunks: readonly ChunkSummary[],
   protectedAreas: readonly ProtectedArea[],
   waterBodies: readonly WaterBody[],
+  lights: readonly LightInstance[],
   props: readonly PropInstance[],
   materials: readonly MaterialAsset[],
 ): Record<OutlinerNodeKey, OutlinerNodeState> => {
@@ -43,6 +45,7 @@ const createOutlinerNodeState = (
     ...chunks.map((chunk) => [makeOutlinerNodeKey("chunk", chunk.id), { visible: true, locked: false }] as const),
     ...protectedAreas.map((area) => [makeOutlinerNodeKey("area", area.id), { visible: true, locked: area.locked }] as const),
     ...waterBodies.map((waterBody) => [makeOutlinerNodeKey("water", waterBody.id), { visible: true, locked: false }] as const),
+    ...lights.map((light) => [makeOutlinerNodeKey("light", light.id), { visible: light.visible, locked: light.locked }] as const),
     ...props.map((prop) => [makeOutlinerNodeKey("prop", prop.id), { visible: true, locked: false }] as const),
     ...materials.map((material) => [makeOutlinerNodeKey("material", material.id), { visible: true, locked: false }] as const),
   ];
@@ -60,6 +63,10 @@ const preserveSelectionWhenReplacingSummary = (summary: WorldSummary, currentSel
   }
 
   if (currentSelection.kind === "water" && summary.waterBodies.some((waterBody) => waterBody.id === currentSelection.id)) {
+    return currentSelection;
+  }
+
+  if (currentSelection.kind === "light" && (summary.lights ?? []).some((light) => light.id === currentSelection.id)) {
     return currentSelection;
   }
 
@@ -94,6 +101,7 @@ const captureEditorSnapshot = (state: EditorDataState): EditorUndoSnapshot => ({
   viewportSnapshot: cloneEditorValue(state.viewportSnapshot),
   protectedAreas: cloneEditorValue(state.protectedAreas),
   waterBodies: cloneEditorValue(state.waterBodies),
+  lights: cloneEditorValue(state.lights),
   props: cloneEditorValue(state.props),
   propAssets: cloneEditorValue(state.propAssets),
   materials: cloneEditorValue(state.materials),
@@ -118,10 +126,11 @@ const restoreEditorSnapshot = (state: Draft<EditorDataState>, snapshot: EditorUn
   state.viewportSnapshot = castDraft(cloneEditorValue(snapshot.viewportSnapshot));
   state.protectedAreas = [...cloneEditorValue(snapshot.protectedAreas)];
   state.waterBodies = [...cloneEditorValue(snapshot.waterBodies)];
+  state.lights = [...cloneEditorValue(snapshot.lights)];
   state.props = [...cloneEditorValue(snapshot.props)];
   state.propAssets = [...cloneEditorValue(snapshot.propAssets)];
   state.materials = [...cloneEditorValue(snapshot.materials)];
-  state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.props, state.materials);
+  state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.lights, state.props, state.materials);
   state.atlasMapping = cloneEditorValue(snapshot.atlasMapping);
   state.selectedAtlasTileId = snapshot.selectedAtlasTileId;
   state.selectedPropAssetId = snapshot.selectedPropAssetId;
@@ -190,6 +199,7 @@ export interface EditorDataState {
   readonly propBrushSettings: PropBrushSettings;
   readonly propPlacementSettings: PropPlacementSettings;
   readonly viewportOverlays: ViewportOverlayState;
+  readonly editorCamera: EditorCameraState;
   readonly runtimeState: RuntimeState;
   readonly renderQualityPreset: RenderQualityPreset;
   readonly chunks: ChunkSummary[];
@@ -198,6 +208,7 @@ export interface EditorDataState {
   readonly voxelBlocks: VoxelBlock[];
   readonly protectedAreas: ProtectedArea[];
   readonly waterBodies: WaterBody[];
+  readonly lights: LightInstance[];
   readonly props: PropInstance[];
   readonly propAssets: PropAsset[];
   readonly materials: MaterialAsset[];
@@ -230,6 +241,7 @@ interface EditorActions {
   readonly addProtectedArea: (area: ProtectedArea) => void;
   readonly toggleViewportOverlay: (overlay: keyof ViewportOverlayState) => void;
   readonly setViewportOverlay: (overlay: keyof ViewportOverlayState, enabled: boolean) => void;
+  readonly setEditorCamera: (editorCamera: EditorCameraState) => void;
   readonly setRuntimeState: (state: RuntimeState) => void;
   readonly setRenderQualityPreset: (preset: RenderQualityPreset) => void;
   readonly setOutlinerNodeVisibility: (kind: Selection["kind"], id: string, visible: boolean) => void;
@@ -239,6 +251,9 @@ interface EditorActions {
   readonly updateProtectedArea: (id: string, patch: Partial<Omit<ProtectedArea, "id">>) => void;
   readonly replaceProtectedAreas: (areas: readonly ProtectedArea[]) => void;
   readonly updateWaterBody: (id: string, patch: Partial<Omit<WaterBody, "id">>) => void;
+  readonly addLight: (light: LightInstance) => void;
+  readonly updateLight: (id: string, patch: Partial<Omit<LightInstance, "id">>) => void;
+  readonly removeLight: (lightId: string) => void;
   readonly removeProtectedArea: (id: string) => void;
   readonly updateProp: (id: string, patch: Partial<Omit<PropInstance, "id">>) => void;
   readonly updateAtlasMapping: (block: BlockType, patch: Partial<AtlasMapping>) => void;
@@ -332,6 +347,25 @@ const defaultWaterRuntimeSnapshot: WaterRuntimeSnapshot = {
   },
 };
 
+const defaultEditorCamera: EditorCameraState = {
+  interactionMode: "menu",
+  cameraKind: "firstPerson",
+  projection: "perspective",
+  pose: {
+    position: [96, 80, 96],
+    target: [64, 48, 64],
+    yaw: -Math.PI / 4,
+    pitch: -0.45,
+    roll: 0,
+    radius: 64,
+    fovDegrees: 70,
+    orthographicScale: 96,
+  },
+  alignToAxes: false,
+  automaticAxis: true,
+  savedCameras: [],
+};
+
 const defaultRuntimeMetrics: RuntimeMetrics = {
   fps: 0,
   frameMs: 0,
@@ -371,6 +405,8 @@ const defaultRuntimeMetrics: RuntimeMetrics = {
     fogActive: false,
     godRaysEnabled: false,
     godRayIntensity: 0,
+    ambientColor: "#ffffff",
+    ambientBrightness: 0,
   },
   volumetricClouds: {
     coverage: 0,
@@ -467,6 +503,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     atlasPreview: false,
     wireframe: false,
   },
+  editorCamera: cloneEditorValue(defaultEditorCamera),
   runtimeState: "disconnected",
   renderQualityPreset: "High",
   selectedAtlasTileId: "",
@@ -476,10 +513,11 @@ export const createInitialEditorState = (): EditorDataState => ({
   voxelBlocks: [...defaultVoxelBlocks],
   protectedAreas: [],
   waterBodies: [],
+  lights: [],
   props: [],
   propAssets: [],
   materials: [],
-  outlinerNodeState: createOutlinerNodeState([], [], [], [], []),
+  outlinerNodeState: createOutlinerNodeState([], [], [], [], [], []),
   propBrushSettings: initialPropBrushSettings,
   propPlacementSettings: initialPropPlacementSettings,
   selectedPropAssetId: "",
@@ -494,6 +532,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     dirtyChunkIds: [],
     dirtyAreaIds: [],
     dirtyWaterBodyIds: [],
+    dirtyLightIds: [],
     dirtyPropIds: [],
     dirtyAtlas: false,
     layoutDirty: false,
@@ -508,6 +547,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     propCount: 0,
     protectedAreaCount: 0,
     waterBodyCount: 0,
+    lightCount: 0,
     consoleMessageCount: 0,
   },
   pendingCommandIds: [],
@@ -606,6 +646,10 @@ export const useEditorStore = create<EditorStore>()(
       set((state) => {
         state.viewportOverlays[overlay] = enabled;
       }),
+    setEditorCamera: (editorCamera) =>
+      set((state) => {
+        state.editorCamera = castDraft(cloneEditorValue(editorCamera));
+      }),
     setRuntimeState: (runtimeState) =>
       set((state) => {
         state.runtimeState = runtimeState;
@@ -625,6 +669,16 @@ export const useEditorStore = create<EditorStore>()(
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         state.outlinerNodeState[key] = { ...existing, visible };
+        if (kind === "light") {
+          const lightIndex = state.lights.findIndex((light) => light.id === id);
+          if (lightIndex >= 0) {
+            state.lights[lightIndex] = { ...state.lights[lightIndex], visible };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyLightIds.includes(id)) {
+              state.dirtyState.dirtyLightIds = [...state.dirtyState.dirtyLightIds, id];
+            }
+          }
+        }
         if (kind === "prop") {
           const propIndex = state.props.findIndex((prop) => prop.id === id);
           if (propIndex >= 0) {
@@ -641,6 +695,16 @@ export const useEditorStore = create<EditorStore>()(
         const key = makeOutlinerNodeKey(kind, id);
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         state.outlinerNodeState[key] = { ...existing, locked };
+        if (kind === "light") {
+          const lightIndex = state.lights.findIndex((light) => light.id === id);
+          if (lightIndex >= 0 && state.lights[lightIndex].source !== "sun") {
+            state.lights[lightIndex] = { ...state.lights[lightIndex], locked };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyLightIds.includes(id)) {
+              state.dirtyState.dirtyLightIds = [...state.dirtyState.dirtyLightIds, id];
+            }
+          }
+        }
         if (kind === "area") {
           const areaIndex = state.protectedAreas.findIndex((area) => area.id === id);
           if (areaIndex >= 0) {
@@ -658,6 +722,16 @@ export const useEditorStore = create<EditorStore>()(
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         const visible = !existing.visible;
         state.outlinerNodeState[key] = { ...existing, visible };
+        if (kind === "light") {
+          const lightIndex = state.lights.findIndex((light) => light.id === id);
+          if (lightIndex >= 0) {
+            state.lights[lightIndex] = { ...state.lights[lightIndex], visible };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyLightIds.includes(id)) {
+              state.dirtyState.dirtyLightIds = [...state.dirtyState.dirtyLightIds, id];
+            }
+          }
+        }
         if (kind === "prop") {
           const propIndex = state.props.findIndex((prop) => prop.id === id);
           if (propIndex >= 0) {
@@ -675,6 +749,16 @@ export const useEditorStore = create<EditorStore>()(
         const existing = state.outlinerNodeState[key] ?? { visible: true, locked: false };
         const locked = !existing.locked;
         state.outlinerNodeState[key] = { ...existing, locked };
+        if (kind === "light") {
+          const lightIndex = state.lights.findIndex((light) => light.id === id);
+          if (lightIndex >= 0 && state.lights[lightIndex].source !== "sun") {
+            state.lights[lightIndex] = { ...state.lights[lightIndex], locked };
+            state.dirtyState.hasUnsavedChanges = true;
+            if (!state.dirtyState.dirtyLightIds.includes(id)) {
+              state.dirtyState.dirtyLightIds = [...state.dirtyState.dirtyLightIds, id];
+            }
+          }
+        }
         if (kind === "area") {
           const areaIndex = state.protectedAreas.findIndex((area) => area.id === id);
           if (areaIndex >= 0) {
@@ -712,11 +796,12 @@ export const useEditorStore = create<EditorStore>()(
     replaceProtectedAreas: (areas) =>
       set((state) => {
         state.protectedAreas = [...areas];
-        state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.props, state.materials);
+        state.outlinerNodeState = createOutlinerNodeState(state.chunks, state.protectedAreas, state.waterBodies, state.lights, state.props, state.materials);
         state.dirtyState.dirtyAreaIds = [];
         state.dirtyState.hasUnsavedChanges =
           state.dirtyState.dirtyChunkIds.length > 0 ||
           state.dirtyState.dirtyWaterBodyIds.length > 0 ||
+          state.dirtyState.dirtyLightIds.length > 0 ||
           state.dirtyState.dirtyPropIds.length > 0 ||
           state.dirtyState.dirtyAtlas ||
           state.dirtyState.layoutDirty;
@@ -753,6 +838,46 @@ export const useEditorStore = create<EditorStore>()(
         state.dirtyState.hasUnsavedChanges = true;
         if (!state.dirtyState.dirtyWaterBodyIds.includes(id)) {
           state.dirtyState.dirtyWaterBodyIds = [...state.dirtyState.dirtyWaterBodyIds, id];
+        }
+      }),
+    addLight: (light) =>
+      set((state) => {
+        state.lights = [...state.lights.filter((candidate) => candidate.id !== light.id), light];
+        state.outlinerNodeState[makeOutlinerNodeKey("light", light.id)] = { visible: light.visible, locked: light.locked };
+        state.dirtyState.hasUnsavedChanges = true;
+        state.dirtyState.dirtyLightIds = [...new Set([...state.dirtyState.dirtyLightIds, light.id])];
+      }),
+    updateLight: (id, patch) =>
+      set((state) => {
+        const index = state.lights.findIndex((light) => light.id === id);
+        if (index < 0) {
+          return;
+        }
+
+        if (state.lights[index].locked && patch.locked !== false) {
+          return;
+        }
+
+        const nextLight = { ...state.lights[index], ...patch };
+        state.lights[index] = nextLight;
+        state.outlinerNodeState[makeOutlinerNodeKey("light", id)] = { visible: nextLight.visible, locked: nextLight.locked };
+        state.dirtyState.hasUnsavedChanges = true;
+        if (!state.dirtyState.dirtyLightIds.includes(id)) {
+          state.dirtyState.dirtyLightIds = [...state.dirtyState.dirtyLightIds, id];
+        }
+      }),
+    removeLight: (lightId) =>
+      set((state) => {
+        state.lights = state.lights.filter((light) => light.id !== lightId || light.source === "sun");
+        state.dirtyState.dirtyLightIds = state.dirtyState.dirtyLightIds.filter((id) => id !== lightId);
+        state.dirtyState.hasUnsavedChanges = true;
+        state.outlinerNodeState = Object.fromEntries(Object.entries(state.outlinerNodeState).filter(([key]) => key !== `light:${lightId}`));
+        if (state.selection.kind === "light" && state.selection.id === lightId) {
+          state.selection = state.lights[0]
+            ? { kind: "light", id: state.lights[0].id, label: state.lights[0].name }
+            : state.chunks[0]
+              ? { kind: "chunk", id: state.chunks[0].id, label: state.chunks[0].label }
+              : { kind: "debug_resource", id: "selection-empty", label: "No selection" };
         }
       }),
     updateProp: (id, patch) =>
@@ -792,6 +917,7 @@ export const useEditorStore = create<EditorStore>()(
           state.dirtyState.dirtyChunkIds.length > 0 ||
           state.dirtyState.dirtyAreaIds.length > 0 ||
           state.dirtyState.dirtyWaterBodyIds.length > 0 ||
+          state.dirtyState.dirtyLightIds.length > 0 ||
           state.dirtyState.dirtyPropIds.length > 0 ||
           state.dirtyState.layoutDirty;
       }),
@@ -801,19 +927,21 @@ export const useEditorStore = create<EditorStore>()(
         state.worldViewport = castDraft(summary.viewport ?? null);
         state.protectedAreas = [...summary.protectedAreas];
         state.waterBodies = [...summary.waterBodies];
+        state.lights = [...(summary.lights ?? [])];
         state.props = [...summary.props];
         state.propAssets = [...(summary.propAssets ?? state.propAssets)];
         if (!state.propAssets.some((asset) => asset.id === state.selectedPropAssetId)) {
           state.selectedPropAssetId = state.propAssets[0]?.id ?? "";
         }
         state.materials = [...summary.materials];
-        state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, summary.props, summary.materials);
+        state.outlinerNodeState = createOutlinerNodeState(summary.chunks, summary.protectedAreas, summary.waterBodies, summary.lights ?? [], summary.props, summary.materials);
         state.selection = preserveSelectionWhenReplacingSummary(summary, state.selection);
         state.dirtyState = {
           hasUnsavedChanges: false,
           dirtyChunkIds: summary.chunks.filter((chunk) => chunk.dirty).map((chunk) => chunk.id),
           dirtyAreaIds: [],
           dirtyWaterBodyIds: [],
+          dirtyLightIds: [],
           dirtyPropIds: [],
           dirtyAtlas: false,
           layoutDirty: false,
@@ -824,6 +952,7 @@ export const useEditorStore = create<EditorStore>()(
           propCount: summary.props.length,
           protectedAreaCount: summary.protectedAreas.length,
           waterBodyCount: summary.waterBodies.length,
+          lightCount: (summary.lights ?? []).length,
           consoleMessageCount: state.consoleMessages.length,
         };
       }),
@@ -873,6 +1002,7 @@ export const useEditorStore = create<EditorStore>()(
           dirtyChunkIds: [],
           dirtyAreaIds: [],
           dirtyWaterBodyIds: [],
+          dirtyLightIds: [],
           dirtyPropIds: [],
           dirtyAtlas: false,
           layoutDirty: false,

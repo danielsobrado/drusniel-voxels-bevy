@@ -51,6 +51,8 @@ export interface LightingAtmosphereSettings {
   readonly fogActive: boolean;
   readonly godRaysEnabled: boolean;
   readonly godRayIntensity: number;
+  readonly ambientColor: string;
+  readonly ambientBrightness: number;
 }
 
 export interface VolumetricCloudSettings {

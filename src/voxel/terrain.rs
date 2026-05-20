@@ -302,6 +302,7 @@ impl Biome {
 pub struct TerrainGenerator<N: NoiseGenerator = ValueNoise> {
     noise: N,
     config: TerrainConfig,
+    seed: i32,
 }
 
 const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;
@@ -328,7 +329,29 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
     /// Creates a new terrain generator with custom config.
     pub fn with_config(noise: N, config: TerrainConfig) -> Self {
-        Self { noise, config }
+        Self {
+            noise,
+            config,
+            seed: 0,
+        }
+    }
+
+    /// Creates a new terrain generator with custom config and a deterministic recipe seed.
+    pub fn with_config_and_seed(noise: N, config: TerrainConfig, seed: i32) -> Self {
+        Self {
+            noise,
+            config,
+            seed,
+        }
+    }
+
+    pub fn config(&self) -> &TerrainConfig {
+        &self.config
+    }
+
+    #[inline]
+    fn hash_position(&self, x: i32, z: i32) -> f32 {
+        hash_position_seeded(x, z, self.seed)
     }
 
     /// Configurable fBm noise using NoiseLayer parameters.
@@ -530,11 +553,11 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             for dx in -1..=1 {
                 let cx = cell_x + dx;
                 let cz = cell_z + dz;
-                let offset_x = hash_position(cx.wrapping_mul(43), cz.wrapping_mul(59)) - 0.5;
-                let offset_z = hash_position(cx.wrapping_mul(71), cz.wrapping_mul(37)) - 0.5;
+                let offset_x = self.hash_position(cx.wrapping_mul(43), cz.wrapping_mul(59)) - 0.5;
+                let offset_z = self.hash_position(cx.wrapping_mul(71), cz.wrapping_mul(37)) - 0.5;
                 let height_t =
-                    0.55 + hash_position(cx.wrapping_mul(97), cz.wrapping_mul(83)) * 0.45;
-                let radius_t = hash_position(cx.wrapping_mul(113), cz.wrapping_mul(131));
+                    0.55 + self.hash_position(cx.wrapping_mul(97), cz.wrapping_mul(83)) * 0.45;
+                let radius_t = self.hash_position(cx.wrapping_mul(113), cz.wrapping_mul(131));
                 let center_x = (cx as f32 + 0.5 + offset_x * 0.55) * spacing;
                 let center_z = (cz as f32 + 0.5 + offset_z * 0.55) * spacing;
                 let radius = spacing * (0.42 + radius_t * 0.22);
@@ -698,7 +721,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
         let shoreline_cell = CHUNK_SIZE_I32 * 2;
         let cell_x = world_x.div_euclid(shoreline_cell);
         let cell_z = world_z.div_euclid(shoreline_cell);
-        let headland_noise = hash_position(cell_x.wrapping_add(19), cell_z.wrapping_sub(31));
+        let headland_noise = self.hash_position(cell_x.wrapping_add(19), cell_z.wrapping_sub(31));
         let kind = if cell_x == 0 && cell_z == 0 {
             ShorelineKind::Beach
         } else if headland_noise >= 0.58 || (cell_x + cell_z).rem_euclid(7) == 0 {
@@ -778,7 +801,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             for dx in -1..=1 {
                 let cx = cell_x + dx;
                 let cz = cell_z + dz;
-                let active = hash_position(
+                let active = self.hash_position(
                     cx.wrapping_mul(41).wrapping_add(salt),
                     cz.wrapping_mul(73).wrapping_sub(salt),
                 );
@@ -786,19 +809,19 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
                     continue;
                 }
 
-                let ox = hash_position(
+                let ox = self.hash_position(
                     cx.wrapping_mul(97).wrapping_add(salt * 3),
                     cz.wrapping_mul(37).wrapping_sub(salt * 5),
                 ) - 0.5;
-                let oz = hash_position(
+                let oz = self.hash_position(
                     cx.wrapping_mul(53).wrapping_sub(salt * 7),
                     cz.wrapping_mul(89).wrapping_add(salt * 11),
                 ) - 0.5;
-                let radius_t = hash_position(
+                let radius_t = self.hash_position(
                     cx.wrapping_mul(131).wrapping_add(salt * 13),
                     cz.wrapping_mul(151).wrapping_sub(salt * 17),
                 );
-                let depth_t = hash_position(
+                let depth_t = self.hash_position(
                     cx.wrapping_mul(173).wrapping_sub(salt * 19),
                     cz.wrapping_mul(197).wrapping_add(salt * 23),
                 );
@@ -906,7 +929,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             return false;
         }
 
-        let tree_noise = hash_position(world_x.wrapping_mul(7), world_z.wrapping_mul(13));
+        let tree_noise = self.hash_position(world_x.wrapping_mul(7), world_z.wrapping_mul(13));
         let spawn = tree_noise > TREE_SPAWN_THRESHOLD;
         if spawn && TREE_SPAWN_LOGS.fetch_add(1, Ordering::Relaxed) < 8 {
             debug!(
@@ -919,7 +942,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
     /// Gets the height of a tree at a given location.
     pub fn get_tree_height(&self, world_x: i32, world_z: i32) -> i32 {
-        let h = hash_position(world_x.wrapping_add(1000), world_z.wrapping_add(2000));
+        let h = self.hash_position(world_x.wrapping_add(1000), world_z.wrapping_add(2000));
         TREE_MIN_HEIGHT + (h * TREE_HEIGHT_VARIANCE as f32) as i32
     }
 
@@ -1110,9 +1133,15 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 /// Simple hash function for deterministic pseudo-random values.
 #[inline]
 pub fn hash_position(x: i32, z: i32) -> f32 {
+    hash_position_seeded(x, z, 0)
+}
+
+#[inline]
+pub fn hash_position_seeded(x: i32, z: i32, seed: i32) -> f32 {
     let n = x
         .wrapping_mul(374761393)
-        .wrapping_add(z.wrapping_mul(668265263));
+        .wrapping_add(z.wrapping_mul(668265263))
+        .wrapping_add(seed.wrapping_mul(1376312589));
     let n = (n ^ (n >> 13)).wrapping_mul(1274126177);
     ((n ^ (n >> 16)) as u32 as f32) / u32::MAX as f32
 }

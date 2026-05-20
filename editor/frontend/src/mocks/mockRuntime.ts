@@ -90,6 +90,8 @@ export const mockRuntimeMetrics: RuntimeMetrics = {
     fogActive: true,
     godRaysEnabled: false,
     godRayIntensity: 0.6,
+    ambientColor: "#5f8fce",
+    ambientBrightness: 1200,
   },
   volumetricClouds: {
     coverage: 0.4,

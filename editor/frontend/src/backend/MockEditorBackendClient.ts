@@ -1,5 +1,5 @@
 import type { AtlasMappingDto, BackendResult, EditorBackendClient, VoxelModelExport, VoxelModelFormat, WorldSaveSummary, WorldSummary } from "./EditorBackendClient";
-import { mockAtlasMapping, mockChunks, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
+import { mockAtlasMapping, mockChunks, mockLights, mockMaterials, mockPropAssets, mockProps, mockProtectedAreas, mockWaterBodies } from "../mocks/mockWorld";
 import type { ViewportSnapshot } from "../types/world";
 
 const mockWorldSummary = (): WorldSummary => ({
@@ -8,6 +8,7 @@ const mockWorldSummary = (): WorldSummary => ({
   chunks: mockChunks,
   protectedAreas: mockProtectedAreas,
   waterBodies: mockWaterBodies,
+  lights: mockLights,
   props: mockProps,
   propAssets: mockPropAssets,
   materials: mockMaterials,

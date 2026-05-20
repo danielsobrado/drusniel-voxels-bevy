@@ -1,16 +1,21 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use bevy::camera::ScalingMode;
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
+use bevy::light::VolumetricLight;
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
-use crate::camera::controller::{CameraMode, PlayerCamera};
+use crate::camera::controller::{
+    CameraMode, EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose,
+    EditorCameraProjection, EditorCameraState, EditorSavedCamera, PlayerCamera,
+};
 use crate::constants::CHUNK_SIZE_I32;
 use crate::editor_diagnostics::{
     EditorDiagnosticsCategory, EditorDiagnosticsState, normalize_editor_diagnostics_categories,
@@ -43,10 +48,15 @@ use crate::rendering::water_reflection::{
     WaterPresence, WaterReflectionConfig, WaterReflectionDebugViewMode, WaterReflectionStatus,
 };
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
+use crate::terrain::generation::config::{
+    AquiferConfig, BasinConfig, MountainConfig, NoiseLayer, RiverConfig, TerrainConfig,
+    terrain_config_fingerprint,
+};
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
+use crate::voxel::terrain::{Biome, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{
@@ -56,16 +66,92 @@ use crate::world_rules::{
 
 const ATLAS_TILE_COUNT: u32 = 64;
 const EDITOR_PLACED_PROPS_SAVE_PATH: &str = "saves/editor_placed_props.json";
+const EDITOR_LIGHTS_SAVE_PATH: &str = "saves/editor_lights.json";
+const EDITOR_CAMERA_SAVE_PATH: &str = "world_data.cameras.json";
+const EDITOR_CAMERA_TEMPLATE_SCHEMA: &str = "drusniel.camera-template.v1";
+const TERRAIN_PREVIEW_MIN_RESOLUTION: u32 = 4;
+const TERRAIN_PREVIEW_MAX_RESOLUTION: u32 = 128;
+const TERRAIN_PREVIEW_MAX_SIZE_VOXELS: u32 = 2048;
+const TERRAIN_PREVIEW_MAX_CELLS: u32 = 16_384;
+const TERRAIN_PREVIEW_MAX_OCTAVES: u32 = 16;
 
 pub struct RuntimeWriteCommandPlugin;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct EditorPropInstanceId(pub String);
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct EditorLightInstanceId(pub String);
+
 #[derive(Resource, Default)]
 struct EditorPlacedProps {
     props: Vec<Value>,
     loaded_from_disk: bool,
+}
+
+#[derive(Resource, Default)]
+struct EditorPlacedLights {
+    lights: Vec<EditorLightInstance>,
+    loaded_from_disk: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorLightInstance {
+    pub id: String,
+    pub name: String,
+    pub kind: EditorLightKind,
+    pub enabled: bool,
+    pub visible: bool,
+    pub locked: bool,
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+    pub color: String,
+    pub intensity: f32,
+    pub range: f32,
+    pub radius: f32,
+    pub inner_cone_angle: f32,
+    pub outer_cone_angle: f32,
+    pub shadows_enabled: bool,
+    pub volumetric: bool,
+    pub source: EditorLightSource,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EditorLightKind {
+    Directional,
+    Point,
+    Spot,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EditorLightSource {
+    Editor,
+    Runtime,
+    Sun,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorLightPatch {
+    pub name: Option<String>,
+    pub kind: Option<EditorLightKind>,
+    pub enabled: Option<bool>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub position: Option<[f32; 3]>,
+    pub rotation: Option<[f32; 3]>,
+    pub color: Option<String>,
+    pub intensity: Option<f32>,
+    pub range: Option<f32>,
+    pub radius: Option<f32>,
+    pub inner_cone_angle: Option<f32>,
+    pub outer_cone_angle: Option<f32>,
+    pub shadows_enabled: Option<bool>,
+    pub volumetric: Option<bool>,
+    pub source: Option<EditorLightSource>,
 }
 
 impl Plugin for RuntimeWriteCommandPlugin {
@@ -74,11 +160,14 @@ impl Plugin for RuntimeWriteCommandPlugin {
             .init_resource::<RuntimeCommandResults>()
             .init_resource::<RuntimeViewportDebugState>()
             .init_resource::<EditorDiagnosticsState>()
+            .init_resource::<EditorCameraState>()
             .init_resource::<EditorPlacedProps>()
+            .init_resource::<EditorPlacedLights>()
             .add_systems(
                 Update,
                 (
                     load_saved_editor_placed_props,
+                    load_saved_editor_lights,
                     process_runtime_command_queue,
                 )
                     .chain(),
@@ -156,6 +245,57 @@ pub enum RuntimeWriteCommand {
     SelectEntity { selection: Value },
     #[serde(rename = "runtime.focusCamera")]
     FocusCamera { target: Value },
+    #[serde(rename = "runtime.setEditorCameraMode")]
+    SetEditorCameraMode {
+        #[serde(rename = "interactionMode")]
+        interaction_mode: Option<EditorCameraInteractionMode>,
+        #[serde(rename = "cameraKind")]
+        camera_kind: Option<EditorCameraKind>,
+    },
+    #[serde(rename = "runtime.setEditorCameraProjection")]
+    SetEditorCameraProjection {
+        projection: EditorCameraProjection,
+        #[serde(rename = "fovDegrees")]
+        fov_degrees: Option<f32>,
+        #[serde(rename = "orthographicScale")]
+        orthographic_scale: Option<f32>,
+    },
+    #[serde(rename = "runtime.setEditorCameraPose")]
+    SetEditorCameraPose { pose: EditorCameraPose },
+    #[serde(rename = "runtime.alignEditorCameraToAxes")]
+    AlignEditorCameraToAxes {
+        axis: Option<String>,
+        #[serde(default)]
+        automatic: bool,
+    },
+    #[serde(rename = "runtime.addSavedEditorCamera")]
+    AddSavedEditorCamera {
+        name: Option<String>,
+        description: Option<String>,
+    },
+    #[serde(rename = "runtime.updateSavedEditorCamera")]
+    UpdateSavedEditorCamera {
+        #[serde(rename = "cameraId")]
+        camera_id: String,
+        name: Option<String>,
+        description: Option<String>,
+    },
+    #[serde(rename = "runtime.deleteSavedEditorCamera")]
+    DeleteSavedEditorCamera {
+        #[serde(rename = "cameraId")]
+        camera_id: String,
+    },
+    #[serde(rename = "runtime.recallSavedEditorCamera")]
+    RecallSavedEditorCamera {
+        #[serde(rename = "cameraId")]
+        camera_id: String,
+    },
+    #[serde(rename = "runtime.stepSavedEditorCamera")]
+    StepSavedEditorCamera { direction: i32 },
+    #[serde(rename = "runtime.importEditorCameraTemplate")]
+    ImportEditorCameraTemplate { template: Value },
+    #[serde(rename = "runtime.exportEditorCameraTemplate")]
+    ExportEditorCameraTemplate {},
     #[serde(rename = "runtime.setRenderQuality")]
     SetRenderQuality { preset: FrontendRenderQualityPreset },
     #[serde(rename = "runtime.setRenderFeatureFlag")]
@@ -170,6 +310,8 @@ pub enum RuntimeWriteCommand {
         enabled: bool,
         value: Option<f32>,
     },
+    #[serde(rename = "runtime.updateAmbientLight")]
+    UpdateAmbientLight { color: String, brightness: f32 },
     #[serde(rename = "runtime.setWaterReflectionDebugMode")]
     SetWaterReflectionDebugMode {
         #[serde(rename = "waterBodyId")]
@@ -184,6 +326,10 @@ pub enum RuntimeWriteCommand {
     },
     #[serde(rename = "runtime.runWaterVisualProbe")]
     RunWaterVisualProbe {},
+    #[serde(rename = "runtime.getDefaultTerrainRecipe")]
+    GetDefaultTerrainRecipe {},
+    #[serde(rename = "runtime.previewTerrainRecipe")]
+    PreviewTerrainRecipe { request: TerrainPreviewRequest },
     #[serde(rename = "runtime.setVoxel")]
     SetVoxel {
         position: [i32; 3],
@@ -239,6 +385,23 @@ pub enum RuntimeWriteCommand {
         #[serde(rename = "chunkId")]
         chunk_id: Option<String>,
     },
+    #[serde(rename = "runtime.createLight")]
+    CreateLight { light: EditorLightInstance },
+    #[serde(rename = "runtime.updateLight")]
+    UpdateLight {
+        #[serde(rename = "lightId")]
+        light_id: String,
+        patch: EditorLightPatch,
+    },
+    #[serde(rename = "runtime.deleteLight")]
+    DeleteLight {
+        #[serde(rename = "lightId")]
+        light_id: String,
+    },
+    #[serde(rename = "runtime.saveLights")]
+    SaveLights {},
+    #[serde(rename = "runtime.loadLights")]
+    LoadLights {},
     #[serde(rename = "runtime.createProtectedArea")]
     CreateProtectedArea { area: ProtectedArea },
     #[serde(rename = "runtime.updateProtectedArea")]
@@ -283,6 +446,23 @@ pub enum FrontendVoxelBlock {
     Dirt,
     Rock,
     Sand,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainRecipe {
+    pub version: u32,
+    pub seed: i32,
+    pub config: TerrainConfig,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainPreviewRequest {
+    pub recipe: TerrainRecipe,
+    pub origin: [i32; 2],
+    pub size: [u32; 2],
+    pub resolution: u32,
 }
 
 impl FrontendVoxelBlock {
@@ -609,6 +789,7 @@ pub fn handle_runtime_command_json(world: &mut World, request: Value) -> Runtime
 }
 
 pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
+    load_saved_editor_cameras(world);
     let preset = world
         .get_resource::<RenderQualityPreset>()
         .copied()
@@ -620,6 +801,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
     let water_visual_probe = water_visual_probe_payload(world);
     let viewport_debug = viewport_debug_payload(world);
     let editor_diagnostics = editor_diagnostics_payload(world);
+    let editor_camera = editor_camera_payload(world);
     let protected_area_count = world
         .get_resource::<ProtectedAreaRegistry>()
         .map(|registry| registry.area_count())
@@ -637,6 +819,7 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
             "canRunWaterVisualProbe": true,
             "canEditAtlasMapping": true,
             "canEditProtectedAreas": true,
+            "canEditLights": true,
             "canSaveWorldSnapshot": false,
         },
         "metrics": runtime_metrics_payload(world, preset, &water_visual_probe),
@@ -659,7 +842,9 @@ pub fn runtime_snapshot_json(world: &mut World) -> RuntimeCommandResult<Value> {
         },
         "viewportDebug": viewport_debug,
         "editorDiagnostics": editor_diagnostics,
+        "editorCamera": editor_camera,
         "propStats": runtime_prop_stats_payload(world),
+        "lights": editor_lights_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
             { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
@@ -697,6 +882,220 @@ fn editor_diagnostics_payload(world: &World) -> Value {
             .cloned()
             .unwrap_or_default()
     )
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorCameraTemplate {
+    schema: String,
+    cameras: Vec<EditorSavedCamera>,
+}
+
+fn editor_camera_payload(world: &World) -> Value {
+    json!(
+        world
+            .get_resource::<EditorCameraState>()
+            .cloned()
+            .unwrap_or_default()
+    )
+}
+
+fn load_saved_editor_cameras(world: &mut World) {
+    let already_loaded = world
+        .get_resource::<EditorCameraState>()
+        .map(|state| state.loaded_from_disk)
+        .unwrap_or_default();
+    if already_loaded {
+        return;
+    }
+
+    let mut state = world
+        .get_resource::<EditorCameraState>()
+        .cloned()
+        .unwrap_or_default();
+    state.loaded_from_disk = true;
+
+    match fs::read_to_string(EDITOR_CAMERA_SAVE_PATH) {
+        Ok(contents) => match serde_json::from_str::<EditorCameraTemplate>(&contents) {
+            Ok(template) if template.schema == EDITOR_CAMERA_TEMPLATE_SCHEMA => {
+                state.saved_cameras = template.cameras;
+            }
+            Ok(_) => warn!(
+                "Ignored editor camera file {}; schema did not match {}",
+                EDITOR_CAMERA_SAVE_PATH, EDITOR_CAMERA_TEMPLATE_SCHEMA
+            ),
+            Err(err) => warn!(
+                "Failed to parse editor camera file {}: {}",
+                EDITOR_CAMERA_SAVE_PATH, err
+            ),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => warn!(
+            "Failed to read editor camera file {}: {}",
+            EDITOR_CAMERA_SAVE_PATH, err
+        ),
+    }
+
+    world.insert_resource(state);
+}
+
+fn save_editor_cameras_to_disk(state: &EditorCameraState) -> Result<(), String> {
+    let template = EditorCameraTemplate {
+        schema: EDITOR_CAMERA_TEMPLATE_SCHEMA.to_string(),
+        cameras: state.saved_cameras.clone(),
+    };
+    let json = serde_json::to_string_pretty(&template).map_err(|err| err.to_string())?;
+    fs::write(EDITOR_CAMERA_SAVE_PATH, json).map_err(|err| err.to_string())
+}
+
+fn apply_editor_camera_to_runtime(world: &mut World) -> Result<(), String> {
+    let state = world
+        .get_resource::<EditorCameraState>()
+        .cloned()
+        .unwrap_or_default();
+    let mut query = world
+        .query_filtered::<(&mut Transform, &mut PlayerCamera, &mut Projection), With<PlayerCamera>>(
+        );
+    let Ok((mut transform, mut camera, mut projection)) = query.single_mut(world) else {
+        return Err("PlayerCamera is not available in this runtime.".to_string());
+    };
+
+    *transform = editor_camera_transform(&state);
+    camera.mode = CameraMode::Fly;
+    camera.yaw = state.pose.yaw;
+    camera.pitch = state.pose.pitch;
+    apply_editor_camera_projection(&mut projection, &state);
+    Ok(())
+}
+
+fn editor_camera_transform(state: &EditorCameraState) -> Transform {
+    match state.camera_kind {
+        EditorCameraKind::FirstPerson => Transform {
+            translation: Vec3::from_array(state.pose.position),
+            rotation: Quat::from_euler(
+                EulerRot::YXZ,
+                state.pose.yaw,
+                state.pose.pitch,
+                state.pose.roll,
+            ),
+            ..default()
+        },
+        EditorCameraKind::Arcball => {
+            let target = Vec3::from_array(state.pose.target);
+            let rotation = Quat::from_euler(
+                EulerRot::YXZ,
+                state.pose.yaw,
+                state.pose.pitch,
+                state.pose.roll,
+            );
+            Transform {
+                translation: target - rotation.mul_vec3(Vec3::NEG_Z) * state.pose.radius,
+                rotation,
+                ..default()
+            }
+        }
+    }
+}
+
+fn apply_editor_camera_projection(projection: &mut Projection, state: &EditorCameraState) {
+    match state.projection {
+        EditorCameraProjection::Perspective => {
+            let fov = state.pose.fov_degrees.to_radians().clamp(0.1, 3.0);
+            *projection = Projection::Perspective(PerspectiveProjection {
+                fov,
+                near: 0.02,
+                ..default()
+            });
+        }
+        EditorCameraProjection::Orthographic => {
+            *projection = Projection::from(OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical {
+                    viewport_height: state.pose.orthographic_scale.clamp(1.0, 4096.0),
+                },
+                near: -4096.0,
+                far: 8192.0,
+                ..OrthographicProjection::default_3d()
+            });
+        }
+    }
+}
+
+fn align_editor_camera_pose(state: &mut EditorCameraState, axis: Option<String>, automatic: bool) {
+    state.align_to_axes = true;
+    state.automatic_axis = automatic;
+    let normalized = axis
+        .as_deref()
+        .unwrap_or("nearest")
+        .trim()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "x" | "posx" | "+x" => {
+            state.pose.yaw = std::f32::consts::FRAC_PI_2;
+            state.pose.pitch = 0.0;
+        }
+        "negx" | "-x" => {
+            state.pose.yaw = -std::f32::consts::FRAC_PI_2;
+            state.pose.pitch = 0.0;
+        }
+        "y" | "posy" | "+y" => {
+            state.pose.yaw = 0.0;
+            state.pose.pitch = -std::f32::consts::FRAC_PI_2;
+        }
+        "negy" | "-y" => {
+            state.pose.yaw = 0.0;
+            state.pose.pitch = std::f32::consts::FRAC_PI_2;
+        }
+        "z" | "posz" | "+z" => {
+            state.pose.yaw = std::f32::consts::PI;
+            state.pose.pitch = 0.0;
+        }
+        "negz" | "-z" => {
+            state.pose.yaw = 0.0;
+            state.pose.pitch = 0.0;
+        }
+        "isometric" => {
+            state.pose.yaw = std::f32::consts::FRAC_PI_4;
+            state.pose.pitch = -35.264_f32.to_radians();
+        }
+        "dimetric" => {
+            state.pose.yaw = std::f32::consts::FRAC_PI_4;
+            state.pose.pitch = -30.0_f32.to_radians();
+        }
+        _ => {
+            let yaw_step = std::f32::consts::FRAC_PI_4;
+            state.pose.yaw = (state.pose.yaw / yaw_step).round() * yaw_step;
+            let pitch_step = 15.0_f32.to_radians();
+            state.pose.pitch = (state.pose.pitch / pitch_step).round() * pitch_step;
+        }
+    }
+}
+
+fn current_editor_saved_camera(
+    state: &EditorCameraState,
+    name: Option<String>,
+    description: Option<String>,
+) -> EditorSavedCamera {
+    let now = timestamp_string();
+    let next_index = state.saved_cameras.len() + 1;
+    EditorSavedCamera {
+        id: format!("camera-{}-{}", unix_timestamp_millis(), next_index),
+        name: name.unwrap_or_else(|| format!("Camera {next_index}")),
+        description,
+        camera_kind: state.camera_kind,
+        projection: state.projection,
+        pose: state.pose.clone(),
+        align_to_axes: state.align_to_axes,
+        automatic_axis: state.automatic_axis,
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}
+
+fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
 }
 
 fn runtime_selection_payload(world: &World) -> (Value, Value) {
@@ -779,7 +1178,7 @@ fn validate_selection_payload(selection: &Value, errors: &mut Vec<String>) {
                 errors.push("voxel selection requires position [x, y, z].".to_string());
             }
         }
-        "chunk" | "area" | "prop" | "water" | "material" | "debug_resource" => {
+        "chunk" | "area" | "prop" | "water" | "light" | "material" | "debug_resource" => {
             if selection.get("id").and_then(Value::as_str).is_none() {
                 errors.push(format!("{kind} selection requires id."));
             }
@@ -796,7 +1195,7 @@ fn resolve_focus_target_preview(target: &Value) -> Option<()> {
     let kind = target.get("kind").and_then(Value::as_str)?;
     match kind {
         "voxel" => value_position(target.get("position")).map(|_| ()),
-        "chunk" | "area" => target.get("id").and_then(Value::as_str).map(|_| ()),
+        "chunk" | "area" | "light" => target.get("id").and_then(Value::as_str).map(|_| ()),
         _ => None,
     }
 }
@@ -818,6 +1217,17 @@ fn focus_runtime_camera(world: &mut World, target: &Value) -> Result<Value, Stri
     camera.yaw = yaw;
     camera.pitch = pitch;
     *transform = next_transform;
+    drop(query);
+
+    if let Some(mut editor_camera) = world.get_resource_mut::<EditorCameraState>() {
+        editor_camera.camera_kind = EditorCameraKind::FirstPerson;
+        editor_camera.projection = EditorCameraProjection::Perspective;
+        editor_camera.pose.position = camera_position.to_array();
+        editor_camera.pose.target = target_position.to_array();
+        editor_camera.pose.yaw = yaw;
+        editor_camera.pose.pitch = pitch;
+        editor_camera.pose.radius = camera_position.distance(target_position).max(1.0);
+    }
 
     Ok(json!({
         "target": [target_position.x, target_position.y, target_position.z],
@@ -862,6 +1272,21 @@ fn resolve_focus_target(world: &World, target: &Value) -> Result<Vec3, String> {
                 format!("Protected area '{area_id}' does not exist in the runtime.")
             })?;
             Ok(Vec3::new(area.center[0], area.center[1], area.center[2]))
+        }
+        "light" => {
+            let light_id = target
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Light focus target requires id.".to_string())?;
+            let light = editor_lights_payload(world)
+                .into_iter()
+                .find(|candidate| candidate.id == light_id)
+                .ok_or_else(|| format!("Light '{light_id}' does not exist in the runtime."))?;
+            Ok(Vec3::new(
+                light.position[0],
+                light.position[1],
+                light.position[2],
+            ))
         }
         _ => Err(format!("Focus target kind '{kind}' is not supported.")),
     }
@@ -916,6 +1341,63 @@ fn prop_type_from_value(prop: &Value) -> PropType {
     }
 }
 
+fn validate_editor_light(light: &EditorLightInstance, errors: &mut Vec<String>) {
+    if light.id.trim().is_empty() {
+        errors.push("light.id is required.".to_string());
+    }
+    if light.name.trim().is_empty() {
+        errors.push("light.name is required.".to_string());
+    }
+    validate_finite_vec3("light.position", &light.position, errors);
+    validate_finite_vec3("light.rotation", &light.rotation, errors);
+    if !light.intensity.is_finite() || light.intensity < 0.0 {
+        errors.push("light.intensity must be a finite non-negative number.".to_string());
+    }
+    if !light.range.is_finite() || light.range < 0.0 {
+        errors.push("light.range must be a finite non-negative number.".to_string());
+    }
+    if !light.radius.is_finite() || light.radius < 0.0 {
+        errors.push("light.radius must be a finite non-negative number.".to_string());
+    }
+    if parse_hex_color(&light.color).is_none() {
+        errors.push("light.color must be a #RRGGBB color.".to_string());
+    }
+}
+
+fn validate_editor_light_patch(patch: &EditorLightPatch, errors: &mut Vec<String>) {
+    if let Some(position) = &patch.position {
+        validate_finite_vec3("light.position", position, errors);
+    }
+    if let Some(rotation) = &patch.rotation {
+        validate_finite_vec3("light.rotation", rotation, errors);
+    }
+    if patch
+        .intensity
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        errors.push("light.intensity must be a finite non-negative number.".to_string());
+    }
+    if patch
+        .range
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        errors.push("light.range must be a finite non-negative number.".to_string());
+    }
+    if patch
+        .radius
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        errors.push("light.radius must be a finite non-negative number.".to_string());
+    }
+    if patch
+        .color
+        .as_ref()
+        .is_some_and(|color| parse_hex_color(color).is_none())
+    {
+        errors.push("light.color must be a #RRGGBB color.".to_string());
+    }
+}
+
 pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -931,6 +1413,58 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 );
             }
         }
+        RuntimeWriteCommand::SetEditorCameraProjection {
+            fov_degrees,
+            orthographic_scale,
+            ..
+        } => {
+            if fov_degrees
+                .is_some_and(|value| !value.is_finite() || !(5.0..=170.0).contains(&value))
+            {
+                errors.push("fovDegrees must be finite and between 5 and 170.".to_string());
+            }
+            if orthographic_scale
+                .is_some_and(|value| !value.is_finite() || !(1.0..=4096.0).contains(&value))
+            {
+                errors.push("orthographicScale must be finite and between 1 and 4096.".to_string());
+            }
+        }
+        RuntimeWriteCommand::SetEditorCameraPose { pose } => {
+            validate_finite_vec3("pose.position", &pose.position, &mut errors);
+            validate_finite_vec3("pose.target", &pose.target, &mut errors);
+            for (field, value) in [
+                ("pose.yaw", pose.yaw),
+                ("pose.pitch", pose.pitch),
+                ("pose.roll", pose.roll),
+                ("pose.radius", pose.radius),
+                ("pose.fovDegrees", pose.fov_degrees),
+                ("pose.orthographicScale", pose.orthographic_scale),
+            ] {
+                if !value.is_finite() {
+                    errors.push(format!("{field} must be finite."));
+                }
+            }
+            if pose.radius <= 0.0 {
+                errors.push("pose.radius must be greater than zero.".to_string());
+            }
+        }
+        RuntimeWriteCommand::UpdateSavedEditorCamera { camera_id, .. }
+        | RuntimeWriteCommand::DeleteSavedEditorCamera { camera_id }
+        | RuntimeWriteCommand::RecallSavedEditorCamera { camera_id } => {
+            if camera_id.trim().is_empty() {
+                errors.push("cameraId is required.".to_string());
+            }
+        }
+        RuntimeWriteCommand::StepSavedEditorCamera { direction } => {
+            if *direction == 0 {
+                errors.push("direction must be non-zero.".to_string());
+            }
+        }
+        RuntimeWriteCommand::ImportEditorCameraTemplate { template } => {
+            if !template.is_object() {
+                errors.push("template must be an object.".to_string());
+            }
+        }
         RuntimeWriteCommand::SetWaterReflectionDebugMode { water_body_id, .. } => {
             if water_body_id.trim().is_empty() {
                 errors.push("waterBodyId is required.".to_string());
@@ -940,6 +1474,14 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::SetShaderFeature { value, .. } => {
             if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
                 errors.push("value must be a finite non-negative number.".to_string());
+            }
+        }
+        RuntimeWriteCommand::UpdateAmbientLight { color, brightness } => {
+            if parse_hex_color(color).is_none() {
+                errors.push("color must be a #RRGGBB color.".to_string());
+            }
+            if !brightness.is_finite() || *brightness < 0.0 {
+                errors.push("brightness must be a finite non-negative number.".to_string());
             }
         }
         RuntimeWriteCommand::UpdateWaterBody {
@@ -1039,6 +1581,20 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 }
             }
         }
+        RuntimeWriteCommand::CreateLight { light } => {
+            validate_editor_light(light, &mut errors);
+        }
+        RuntimeWriteCommand::UpdateLight { light_id, patch } => {
+            if light_id.trim().is_empty() {
+                errors.push("lightId is required.".to_string());
+            }
+            validate_editor_light_patch(patch, &mut errors);
+        }
+        RuntimeWriteCommand::DeleteLight { light_id } => {
+            if light_id.trim().is_empty() {
+                errors.push("lightId is required.".to_string());
+            }
+        }
         RuntimeWriteCommand::CreateProtectedArea { area } => {
             if let Err(message) = validate_protected_area(area) {
                 errors.push(message);
@@ -1058,11 +1614,23 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
                 }
             }
         }
+        RuntimeWriteCommand::PreviewTerrainRecipe { request } => {
+            if let Err(request_errors) = validate_terrain_preview_request(request) {
+                errors.extend(request_errors);
+            }
+        }
         RuntimeWriteCommand::SetRenderQuality { .. }
+        | RuntimeWriteCommand::SetEditorCameraMode { .. }
+        | RuntimeWriteCommand::AlignEditorCameraToAxes { .. }
+        | RuntimeWriteCommand::AddSavedEditorCamera { .. }
+        | RuntimeWriteCommand::ExportEditorCameraTemplate {}
         | RuntimeWriteCommand::SetVoxel { .. }
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
         | RuntimeWriteCommand::SetEditorDiagnostics { .. }
         | RuntimeWriteCommand::RunWaterVisualProbe {}
+        | RuntimeWriteCommand::GetDefaultTerrainRecipe {}
+        | RuntimeWriteCommand::SaveLights {}
+        | RuntimeWriteCommand::LoadLights {}
         | RuntimeWriteCommand::SaveProtectedAreas {}
         | RuntimeWriteCommand::LoadProtectedAreas {}
         | RuntimeWriteCommand::SaveWorldSnapshot { .. } => {}
@@ -1078,6 +1646,427 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
 fn validate_finite_vec3(field: &str, value: &[f32; 3], errors: &mut Vec<String>) {
     if value.iter().any(|component| !component.is_finite()) {
         errors.push(format!("{field} must contain only finite numbers."));
+    }
+}
+
+fn validate_terrain_preview_request(request: &TerrainPreviewRequest) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
+
+    if request.recipe.version != 1 {
+        errors.push("recipe.version must be 1.".to_string());
+    }
+    if request.size[0] == 0 || request.size[1] == 0 {
+        errors.push("size dimensions must be greater than zero.".to_string());
+    }
+    if request.size[0] > TERRAIN_PREVIEW_MAX_SIZE_VOXELS
+        || request.size[1] > TERRAIN_PREVIEW_MAX_SIZE_VOXELS
+    {
+        errors.push(format!(
+            "size dimensions must be {} voxels or less.",
+            TERRAIN_PREVIEW_MAX_SIZE_VOXELS
+        ));
+    }
+    if !(TERRAIN_PREVIEW_MIN_RESOLUTION..=TERRAIN_PREVIEW_MAX_RESOLUTION)
+        .contains(&request.resolution)
+    {
+        errors.push(format!(
+            "resolution must be between {} and {}.",
+            TERRAIN_PREVIEW_MIN_RESOLUTION, TERRAIN_PREVIEW_MAX_RESOLUTION
+        ));
+    }
+    if request.resolution.saturating_mul(request.resolution) > TERRAIN_PREVIEW_MAX_CELLS {
+        errors.push(format!(
+            "preview requests must contain {} cells or fewer.",
+            TERRAIN_PREVIEW_MAX_CELLS
+        ));
+    }
+    if !request.recipe.config.height.min.is_finite()
+        || !request.recipe.config.height.max.is_finite()
+        || request.recipe.config.height.min >= request.recipe.config.height.max
+    {
+        errors.push("config.height.min must be lower than config.height.max.".to_string());
+    }
+    validate_terrain_preview_config(&request.recipe.config, &mut errors);
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate_terrain_preview_config(config: &TerrainConfig, errors: &mut Vec<String>) {
+    validate_finite_range(
+        "config.height.min",
+        config.height.min,
+        -1024.0,
+        4096.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.height.max",
+        config.height.max,
+        -1024.0,
+        4096.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.height.sea_level",
+        config.height.sea_level,
+        -1024.0,
+        4096.0,
+        errors,
+    );
+    validate_noise_layer("config.continent", &config.continent, errors);
+    validate_mountain_config(&config.mountains, errors);
+    validate_noise_layer("config.hills", &config.hills, errors);
+    validate_noise_layer("config.detail", &config.detail, errors);
+    validate_river_config(&config.rivers, errors);
+    validate_basin_config(
+        "config.water_bodies.lakes",
+        &config.water_bodies.lakes,
+        errors,
+    );
+    validate_basin_config(
+        "config.water_bodies.ponds",
+        &config.water_bodies.ponds,
+        errors,
+    );
+    validate_aquifer_config(&config.water_bodies.aquifers, errors);
+
+    for (name, modifier) in &config.biome_modifiers {
+        if name.trim().is_empty() {
+            errors.push("config.biome_modifiers keys must not be empty.".to_string());
+        }
+        validate_finite_range(
+            &format!("config.biome_modifiers.{name}"),
+            *modifier,
+            -8.0,
+            8.0,
+            errors,
+        );
+    }
+}
+
+fn validate_noise_layer(field: &str, layer: &NoiseLayer, errors: &mut Vec<String>) {
+    validate_finite_range(
+        &format!("{field}.scale"),
+        layer.scale,
+        0.000001,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.amplitude"),
+        layer.amplitude,
+        0.0,
+        512.0,
+        errors,
+    );
+    validate_octaves(&format!("{field}.octaves"), layer.octaves, errors);
+    validate_finite_range(
+        &format!("{field}.persistence"),
+        layer.persistence,
+        0.0,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.lacunarity"),
+        layer.lacunarity,
+        1.0,
+        8.0,
+        errors,
+    );
+}
+
+fn validate_mountain_config(config: &MountainConfig, errors: &mut Vec<String>) {
+    let layer = NoiseLayer {
+        scale: config.scale,
+        amplitude: config.amplitude,
+        octaves: config.octaves,
+        persistence: config.persistence,
+        lacunarity: config.lacunarity,
+    };
+    validate_noise_layer("config.mountains", &layer, errors);
+    validate_finite_range(
+        "config.mountains.ridge_power",
+        config.ridge_power,
+        0.25,
+        8.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.mountains.massif_scale",
+        config.massif_scale,
+        0.000001,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.mountains.massif_amplitude",
+        config.massif_amplitude,
+        0.0,
+        512.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.mountains.massif_threshold",
+        config.massif_threshold,
+        0.0,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.mountains.massif_power",
+        config.massif_power,
+        0.25,
+        8.0,
+        errors,
+    );
+}
+
+fn validate_river_config(config: &RiverConfig, errors: &mut Vec<String>) {
+    validate_finite_range("config.rivers.scale", config.scale, 0.000001, 1.0, errors);
+    validate_finite_range("config.rivers.width", config.width, 0.0, 128.0, errors);
+    validate_finite_range("config.rivers.depth", config.depth, 0.0, 128.0, errors);
+    validate_octaves("config.rivers.octaves", config.octaves, errors);
+    validate_finite_range(
+        "config.rivers.tributary_scale",
+        config.tributary_scale,
+        0.000001,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.rivers.tributary_width",
+        config.tributary_width,
+        0.0,
+        128.0,
+        errors,
+    );
+}
+
+fn validate_basin_config(field: &str, config: &BasinConfig, errors: &mut Vec<String>) {
+    validate_finite_range(
+        &format!("{field}.spacing"),
+        config.spacing,
+        1.0,
+        2048.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.density"),
+        config.density,
+        0.0,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.min_radius"),
+        config.min_radius,
+        0.0,
+        512.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.max_radius"),
+        config.max_radius,
+        0.0,
+        512.0,
+        errors,
+    );
+    if config.min_radius > config.max_radius {
+        errors.push(format!(
+            "{field}.min_radius must be less than or equal to max_radius."
+        ));
+    }
+    validate_finite_range(
+        &format!("{field}.min_depth"),
+        config.min_depth,
+        0.0,
+        128.0,
+        errors,
+    );
+    validate_finite_range(
+        &format!("{field}.max_depth"),
+        config.max_depth,
+        0.0,
+        128.0,
+        errors,
+    );
+    if config.min_depth > config.max_depth {
+        errors.push(format!(
+            "{field}.min_depth must be less than or equal to max_depth."
+        ));
+    }
+    validate_finite_range(
+        &format!("{field}.shore_power"),
+        config.shore_power,
+        0.25,
+        8.0,
+        errors,
+    );
+}
+
+fn validate_aquifer_config(config: &AquiferConfig, errors: &mut Vec<String>) {
+    if !(-1024..=4096).contains(&config.max_y) {
+        errors
+            .push("config.water_bodies.aquifers.max_y must be between -1024 and 4096.".to_string());
+    }
+    validate_finite_range(
+        "config.water_bodies.aquifers.noise_scale",
+        config.noise_scale,
+        0.000001,
+        1.0,
+        errors,
+    );
+    validate_finite_range(
+        "config.water_bodies.aquifers.threshold",
+        config.threshold,
+        0.0,
+        1.0,
+        errors,
+    );
+}
+
+fn validate_octaves(field: &str, value: u32, errors: &mut Vec<String>) {
+    if value > TERRAIN_PREVIEW_MAX_OCTAVES {
+        errors.push(format!(
+            "{field} must be {} or less.",
+            TERRAIN_PREVIEW_MAX_OCTAVES
+        ));
+    }
+}
+
+fn validate_finite_range(field: &str, value: f32, min: f32, max: f32, errors: &mut Vec<String>) {
+    if !value.is_finite() || value < min || value > max {
+        errors.push(format!(
+            "{field} must be a finite number between {min} and {max}."
+        ));
+    }
+}
+
+fn default_terrain_recipe_payload() -> Value {
+    json!({
+        "recipe": TerrainRecipe {
+            version: 1,
+            seed: 0,
+            config: TerrainConfig::load_or_default(),
+        },
+        "fingerprint": format!("{:#018x}", terrain_config_fingerprint()),
+    })
+}
+
+fn terrain_preview_payload(request: &TerrainPreviewRequest) -> Value {
+    let started = Instant::now();
+    let generator = TerrainGenerator::with_config_and_seed(
+        ValueNoise::new(request.recipe.seed),
+        request.recipe.config.clone(),
+        request.recipe.seed,
+    );
+    let resolution = request.resolution;
+    let denominator = (resolution - 1).max(1) as f32;
+    let mut samples = Vec::with_capacity((resolution * resolution) as usize);
+    let mut min_height = i32::MAX;
+    let mut max_height = i32::MIN;
+    let mut sum_height = 0_i64;
+    let mut water_cells = 0_u32;
+    let mut tree_cells = 0_u32;
+
+    for row in 0..resolution {
+        for col in 0..resolution {
+            let x = request.origin[0]
+                + ((col as f32 / denominator) * request.size[0] as f32).round() as i32;
+            let z = request.origin[1]
+                + ((row as f32 / denominator) * request.size[1] as f32).round() as i32;
+            let (height, water) = generator.get_height_and_water_generation_metadata(x, z);
+            let biome = generator.get_biome(x, z);
+            let material = if water.is_surface_water() {
+                VoxelType::Water
+            } else {
+                generator.get_voxel(x, height, z)
+            };
+            let tree = generator.should_spawn_tree(x, z, height);
+
+            min_height = min_height.min(height);
+            max_height = max_height.max(height);
+            sum_height += height as i64;
+            if water.is_surface_water() {
+                water_cells += 1;
+            }
+            if tree {
+                tree_cells += 1;
+            }
+
+            samples.push(json!({
+                "x": x,
+                "z": z,
+                "height": height,
+                "biome": biome_label(biome),
+                "material": voxel_label(material),
+                "water": water.is_surface_water(),
+                "waterKind": water_kind_label(water.kind),
+                "waterDepth": water.local_depth,
+                "surfaceY": water.surface_y,
+                "tree": tree,
+            }));
+        }
+    }
+
+    let sample_count = samples.len().max(1);
+    json!({
+        "recipe": request.recipe,
+        "origin": request.origin,
+        "size": request.size,
+        "resolution": resolution,
+        "samples": samples,
+        "stats": {
+            "minHeight": min_height,
+            "maxHeight": max_height,
+            "avgHeight": sum_height as f64 / sample_count as f64,
+            "waterCells": water_cells,
+            "treeCells": tree_cells,
+        },
+        "fingerprint": format!("{:#018x}", terrain_config_fingerprint()),
+        "timingMs": started.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+fn biome_label(biome: Biome) -> &'static str {
+    match biome {
+        Biome::Grassland => "Grassland",
+        Biome::Sandy => "Sandy",
+        Biome::Rocky => "Rocky",
+        Biome::Clay => "Clay",
+    }
+}
+
+fn water_kind_label(kind: GeneratedWaterBodyKind) -> &'static str {
+    match kind {
+        GeneratedWaterBodyKind::Ocean => "Ocean",
+        GeneratedWaterBodyKind::LakeBasin => "LakeBasin",
+        GeneratedWaterBodyKind::RiverChannel => "RiverChannel",
+        GeneratedWaterBodyKind::Pond => "Pond",
+        GeneratedWaterBodyKind::CaveWaterAquifer => "CaveWaterAquifer",
+        GeneratedWaterBodyKind::None => "None",
+    }
+}
+
+fn voxel_label(voxel: VoxelType) -> &'static str {
+    match voxel {
+        VoxelType::Air => "Air",
+        VoxelType::TopSoil => "TopSoil",
+        VoxelType::SubSoil => "SubSoil",
+        VoxelType::Rock => "Rock",
+        VoxelType::Bedrock => "Bedrock",
+        VoxelType::Sand => "Sand",
+        VoxelType::Clay => "Clay",
+        VoxelType::Water => "Water",
+        VoxelType::Wood => "Wood",
+        VoxelType::Leaves => "Leaves",
+        VoxelType::DungeonWall => "DungeonWall",
+        VoxelType::DungeonFloor => "DungeonFloor",
     }
 }
 
@@ -1097,6 +2086,283 @@ fn execute_runtime_write_command(
             Ok(data) => RuntimeCommandResult::success(data),
             Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
         },
+        RuntimeWriteCommand::SetEditorCameraMode {
+            interaction_mode,
+            camera_kind,
+        } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                if let Some(interaction_mode) = interaction_mode {
+                    state.interaction_mode = interaction_mode;
+                    state.movement_latched =
+                        interaction_mode == EditorCameraInteractionMode::Movement;
+                }
+                if let Some(camera_kind) = camera_kind {
+                    state.camera_kind = camera_kind;
+                }
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::SetEditorCameraProjection {
+            projection,
+            fov_degrees,
+            orthographic_scale,
+        } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                state.projection = projection;
+                if let Some(fov_degrees) = fov_degrees {
+                    state.pose.fov_degrees = fov_degrees.clamp(5.0, 170.0);
+                }
+                if let Some(orthographic_scale) = orthographic_scale {
+                    state.pose.orthographic_scale = orthographic_scale.clamp(1.0, 4096.0);
+                }
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::SetEditorCameraPose { pose } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                state.pose = pose;
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::AlignEditorCameraToAxes { axis, automatic } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                align_editor_camera_pose(&mut state, axis, automatic);
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::AddSavedEditorCamera { name, description } => {
+            let saved = {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                let saved = current_editor_saved_camera(&state, name, description);
+                state.active_saved_camera_id = Some(saved.id.clone());
+                state.saved_cameras.push(saved.clone());
+                saved
+            };
+            match world
+                .get_resource::<EditorCameraState>()
+                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
+                .and_then(save_editor_cameras_to_disk)
+            {
+                Ok(()) => RuntimeCommandResult::success(json!({
+                    "camera": saved,
+                    "editorCamera": editor_camera_payload(world),
+                })),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::UpdateSavedEditorCamera {
+            camera_id,
+            name,
+            description,
+        } => {
+            let updated = {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                let camera_kind = state.camera_kind;
+                let projection = state.projection;
+                let pose = state.pose.clone();
+                let align_to_axes = state.align_to_axes;
+                let automatic_axis = state.automatic_axis;
+                let Some(saved) = state
+                    .saved_cameras
+                    .iter_mut()
+                    .find(|saved| saved.id == camera_id)
+                else {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![format!("Saved camera '{camera_id}' does not exist.")],
+                    );
+                };
+                if let Some(name) = name {
+                    saved.name = name;
+                }
+                saved.description = description.or_else(|| saved.description.clone());
+                saved.camera_kind = camera_kind;
+                saved.projection = projection;
+                saved.pose = pose;
+                saved.align_to_axes = align_to_axes;
+                saved.automatic_axis = automatic_axis;
+                saved.updated_at = timestamp_string();
+                saved.clone()
+            };
+            match world
+                .get_resource::<EditorCameraState>()
+                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
+                .and_then(save_editor_cameras_to_disk)
+            {
+                Ok(()) => RuntimeCommandResult::success(json!({
+                    "camera": updated,
+                    "editorCamera": editor_camera_payload(world),
+                })),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::DeleteSavedEditorCamera { camera_id } => {
+            let deleted = {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                let before = state.saved_cameras.len();
+                state.saved_cameras.retain(|saved| saved.id != camera_id);
+                if state.active_saved_camera_id.as_deref() == Some(camera_id.as_str()) {
+                    state.active_saved_camera_id = None;
+                }
+                before != state.saved_cameras.len()
+            };
+            match world
+                .get_resource::<EditorCameraState>()
+                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
+                .and_then(save_editor_cameras_to_disk)
+            {
+                Ok(()) => RuntimeCommandResult::success(json!({
+                    "cameraId": camera_id,
+                    "deleted": deleted,
+                    "editorCamera": editor_camera_payload(world),
+                })),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::RecallSavedEditorCamera { camera_id } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                let Some(saved) = state
+                    .saved_cameras
+                    .iter()
+                    .find(|saved| saved.id == camera_id)
+                    .cloned()
+                else {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![format!("Saved camera '{camera_id}' does not exist.")],
+                    );
+                };
+                state.apply_saved_camera(&saved);
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::StepSavedEditorCamera { direction } => {
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                if state.saved_cameras.is_empty() {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec!["No saved cameras exist.".to_string()],
+                    );
+                }
+                let current_index = state
+                    .active_saved_camera_id
+                    .as_ref()
+                    .and_then(|id| state.saved_cameras.iter().position(|saved| &saved.id == id))
+                    .unwrap_or(0);
+                let len = state.saved_cameras.len() as i32;
+                let next_index = (current_index as i32 + direction).rem_euclid(len) as usize;
+                let saved = state.saved_cameras[next_index].clone();
+                state.apply_saved_camera(&saved);
+            }
+            match apply_editor_camera_to_runtime(world) {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::ImportEditorCameraTemplate { template } => {
+            let template = match serde_json::from_value::<EditorCameraTemplate>(template) {
+                Ok(template) if template.schema == EDITOR_CAMERA_TEMPLATE_SCHEMA => template,
+                Ok(_) => {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![format!(
+                            "Camera template schema must be {EDITOR_CAMERA_TEMPLATE_SCHEMA}."
+                        )],
+                    );
+                }
+                Err(err) => {
+                    return RuntimeCommandResult::validation(
+                        "Runtime command validation failed.",
+                        vec![err.to_string()],
+                    );
+                }
+            };
+            {
+                let mut state = world
+                    .get_resource_mut::<EditorCameraState>()
+                    .expect("EditorCameraState should be initialized");
+                state.saved_cameras = template.cameras;
+                state.active_saved_camera_id =
+                    state.saved_cameras.first().map(|saved| saved.id.clone());
+            }
+            match world
+                .get_resource::<EditorCameraState>()
+                .ok_or_else(|| "EditorCameraState resource is not available.".to_string())
+                .and_then(save_editor_cameras_to_disk)
+            {
+                Ok(()) => RuntimeCommandResult::success(editor_camera_payload(world)),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::ExportEditorCameraTemplate {} => {
+            let state = world
+                .get_resource::<EditorCameraState>()
+                .cloned()
+                .unwrap_or_default();
+            RuntimeCommandResult::success(json!({
+                "schema": EDITOR_CAMERA_TEMPLATE_SCHEMA,
+                "cameras": state.saved_cameras,
+            }))
+        }
         RuntimeWriteCommand::SetRenderQuality { preset } => {
             let runtime_preset = preset.as_runtime();
             if let Some(mut quality) = world.get_resource_mut::<RenderQualityPreset>() {
@@ -1123,6 +2389,14 @@ fn execute_runtime_write_command(
             Ok(data) => RuntimeCommandResult::success(data),
             Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
         },
+        RuntimeWriteCommand::UpdateAmbientLight { color, brightness } => {
+            match update_runtime_ambient_light(world, &color, brightness) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
         RuntimeWriteCommand::SetWaterReflectionDebugMode {
             water_body_id,
             mode,
@@ -1148,6 +2422,12 @@ fn execute_runtime_write_command(
         },
         RuntimeWriteCommand::RunWaterVisualProbe {} => {
             RuntimeCommandResult::success(water_visual_probe_payload(world))
+        }
+        RuntimeWriteCommand::GetDefaultTerrainRecipe {} => {
+            RuntimeCommandResult::success(default_terrain_recipe_payload())
+        }
+        RuntimeWriteCommand::PreviewTerrainRecipe { request } => {
+            RuntimeCommandResult::success(terrain_preview_payload(&request))
         }
         RuntimeWriteCommand::SetVoxel { position, block } => {
             match set_runtime_voxel(
@@ -1267,6 +2547,46 @@ fn execute_runtime_write_command(
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
                 }
             }
+        }
+        RuntimeWriteCommand::CreateLight { light } => match upsert_runtime_light(world, light) {
+            Ok(light) => RuntimeCommandResult::success(json!({ "light": light })),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::UpdateLight { light_id, patch } => {
+            match update_runtime_light(world, &light_id, patch) {
+                Ok(light) => RuntimeCommandResult::success(json!({ "light": light })),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::DeleteLight { light_id } => {
+            match delete_runtime_light(world, &light_id) {
+                Ok(deleted) => RuntimeCommandResult::success(
+                    json!({ "lightId": light_id, "deleted": deleted }),
+                ),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::SaveLights {} => match save_editor_lights(world) {
+            Ok((count, path)) => RuntimeCommandResult::success(json!({
+                "worldId": "bevy-runtime",
+                "savedAt": timestamp_string(),
+                "snapshotId": "editor-lights",
+                "editorLightCount": count,
+                "editorLightSavePath": path,
+            })),
+            Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
+        },
+        RuntimeWriteCommand::LoadLights {} => {
+            load_editor_lights_from_disk(world);
+            let lights = editor_lights_payload(world);
+            RuntimeCommandResult::success(json!({
+                "lights": lights,
+                "lightCount": lights.len(),
+            }))
         }
         RuntimeWriteCommand::CreateProtectedArea { area } => {
             let Some(mut registry) = world.get_resource_mut::<ProtectedAreaRegistry>() else {
@@ -1403,6 +2723,15 @@ fn execute_runtime_write_command(
                             );
                         }
                     };
+                let (editor_light_count, editor_light_save_path) = match save_editor_lights(world) {
+                    Ok(summary) => summary,
+                    Err(message) => {
+                        return RuntimeCommandResult::failure(
+                            RuntimeCommandStatus::Failure,
+                            message,
+                        );
+                    }
+                };
                 RuntimeCommandResult::success(json!({
                     "worldId": "bevy-runtime",
                     "savedAt": timestamp_string(),
@@ -1410,6 +2739,8 @@ fn execute_runtime_write_command(
                     "savePath": result.save_path,
                     "editorPropCount": editor_prop_count,
                     "editorPropSavePath": editor_prop_save_path,
+                    "editorLightCount": editor_light_count,
+                    "editorLightSavePath": editor_light_save_path,
                     "reason": reason,
                     "metadata": result.metadata,
                 }))
@@ -1847,6 +3178,337 @@ pub fn editor_placed_props_payload(world: &World) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn load_saved_editor_lights(world: &mut World) {
+    let already_loaded = world
+        .get_resource::<EditorPlacedLights>()
+        .is_some_and(|placed| placed.loaded_from_disk);
+    if already_loaded {
+        return;
+    }
+
+    if !world.contains_resource::<EditorPlacedLights>() {
+        world.insert_resource(EditorPlacedLights::default());
+    }
+    world.resource_mut::<EditorPlacedLights>().loaded_from_disk = true;
+    load_editor_lights_from_disk(world);
+}
+
+fn load_editor_lights_from_disk(world: &mut World) {
+    let path = Path::new(EDITOR_LIGHTS_SAVE_PATH);
+    if !path.exists() {
+        return;
+    }
+
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            warn!(
+                "Failed to open editor light save '{}': {}",
+                path.display(),
+                error
+            );
+            return;
+        }
+    };
+    let lights = match serde_json::from_reader::<_, Vec<EditorLightInstance>>(file) {
+        Ok(lights) => lights,
+        Err(error) => {
+            warn!(
+                "Failed to read editor light save '{}': {}",
+                path.display(),
+                error
+            );
+            return;
+        }
+    };
+
+    for light in lights {
+        if let Err(message) = upsert_runtime_light(world, light) {
+            warn!("Failed to load editor light: {}", message);
+        }
+    }
+}
+
+fn upsert_runtime_light(
+    world: &mut World,
+    mut light: EditorLightInstance,
+) -> Result<EditorLightInstance, String> {
+    if light.source == EditorLightSource::Sun {
+        return update_sun_light(world, light);
+    }
+
+    light.source = EditorLightSource::Editor;
+    despawn_editor_light_entity(world, &light.id);
+
+    let color =
+        parse_hex_color(&light.color).ok_or_else(|| "Light color must be #RRGGBB.".to_string())?;
+    let transform = light_transform(&light);
+    let marker = EditorLightInstanceId(light.id.clone());
+    let visibility = if light.enabled && light.visible {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    let name = Name::new(light.name.clone());
+
+    match light.kind {
+        EditorLightKind::Directional => {
+            let mut entity = world.spawn((
+                DirectionalLight {
+                    color,
+                    illuminance: light.intensity,
+                    shadows_enabled: light.shadows_enabled,
+                    ..default()
+                },
+                transform,
+                visibility,
+                marker,
+                name,
+            ));
+            if light.volumetric {
+                entity.insert(VolumetricLight);
+            }
+        }
+        EditorLightKind::Point => {
+            world.spawn((
+                PointLight {
+                    color,
+                    intensity: light.intensity,
+                    range: light.range.max(0.0),
+                    radius: light.radius.max(0.0),
+                    shadows_enabled: light.shadows_enabled,
+                    ..default()
+                },
+                transform,
+                visibility,
+                marker,
+                name,
+            ));
+        }
+        EditorLightKind::Spot => {
+            world.spawn((
+                SpotLight {
+                    color,
+                    intensity: light.intensity,
+                    range: light.range.max(0.0),
+                    radius: light.radius.max(0.0),
+                    inner_angle: light.inner_cone_angle.to_radians(),
+                    outer_angle: light
+                        .outer_cone_angle
+                        .max(light.inner_cone_angle + 1.0)
+                        .to_radians(),
+                    shadows_enabled: light.shadows_enabled,
+                    ..default()
+                },
+                transform,
+                visibility,
+                marker,
+                name,
+            ));
+        }
+    }
+
+    if !world.contains_resource::<EditorPlacedLights>() {
+        world.insert_resource(EditorPlacedLights::default());
+    }
+    let mut placed = world.resource_mut::<EditorPlacedLights>();
+    placed.lights.retain(|candidate| candidate.id != light.id);
+    placed.lights.push(light.clone());
+    Ok(light)
+}
+
+fn update_runtime_light(
+    world: &mut World,
+    light_id: &str,
+    patch: EditorLightPatch,
+) -> Result<EditorLightInstance, String> {
+    let existing = editor_lights_payload(world)
+        .into_iter()
+        .find(|light| light.id == light_id)
+        .ok_or_else(|| format!("Light '{light_id}' does not exist in the runtime."))?;
+    if existing.locked && patch.locked != Some(false) {
+        return Err(format!("Light '{}' is locked.", existing.name));
+    }
+
+    let mut next = existing;
+    if let Some(name) = patch.name {
+        next.name = name;
+    }
+    if let Some(kind) = patch.kind {
+        next.kind = kind;
+    }
+    if let Some(enabled) = patch.enabled {
+        next.enabled = enabled;
+    }
+    if let Some(visible) = patch.visible {
+        next.visible = visible;
+    }
+    if let Some(locked) = patch.locked {
+        next.locked = locked;
+    }
+    if let Some(position) = patch.position {
+        next.position = position;
+    }
+    if let Some(rotation) = patch.rotation {
+        next.rotation = rotation;
+    }
+    if let Some(color) = patch.color {
+        next.color = color;
+    }
+    if let Some(intensity) = patch.intensity {
+        next.intensity = intensity;
+    }
+    if let Some(range) = patch.range {
+        next.range = range;
+    }
+    if let Some(radius) = patch.radius {
+        next.radius = radius;
+    }
+    if let Some(inner_cone_angle) = patch.inner_cone_angle {
+        next.inner_cone_angle = inner_cone_angle;
+    }
+    if let Some(outer_cone_angle) = patch.outer_cone_angle {
+        next.outer_cone_angle = outer_cone_angle;
+    }
+    if let Some(shadows_enabled) = patch.shadows_enabled {
+        next.shadows_enabled = shadows_enabled;
+    }
+    if let Some(volumetric) = patch.volumetric {
+        next.volumetric = volumetric;
+    }
+
+    upsert_runtime_light(world, next)
+}
+
+fn delete_runtime_light(world: &mut World, light_id: &str) -> Result<bool, String> {
+    if light_id == "sun" {
+        return Err("The built-in sun cannot be deleted.".to_string());
+    }
+    let deleted = despawn_editor_light_entity(world, light_id);
+    if let Some(mut placed) = world.get_resource_mut::<EditorPlacedLights>() {
+        placed.lights.retain(|light| light.id != light_id);
+    }
+    Ok(deleted)
+}
+
+pub fn save_editor_lights(world: &World) -> Result<(usize, &'static str), String> {
+    let lights = world
+        .get_resource::<EditorPlacedLights>()
+        .map(|placed| placed.lights.as_slice())
+        .unwrap_or(&[]);
+    let path = Path::new(EDITOR_LIGHTS_SAVE_PATH);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed to create editor light save directory '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let file = File::create(path).map_err(|error| {
+        format!(
+            "Failed to create editor light save file '{}': {error}",
+            path.display()
+        )
+    })?;
+    serde_json::to_writer_pretty(file, lights).map_err(|error| {
+        format!(
+            "Failed to serialize editor light save file '{}': {error}",
+            path.display()
+        )
+    })?;
+    Ok((lights.len(), EDITOR_LIGHTS_SAVE_PATH))
+}
+
+pub fn editor_lights_payload(world: &World) -> Vec<EditorLightInstance> {
+    let mut lights = vec![default_sun_light_payload()];
+    if let Some(placed) = world.get_resource::<EditorPlacedLights>() {
+        lights.extend(placed.lights.clone());
+    }
+    lights
+}
+
+fn despawn_editor_light_entity(world: &mut World, light_id: &str) -> bool {
+    let mut query = world.query::<(Entity, &EditorLightInstanceId)>();
+    let entities = query
+        .iter(world)
+        .filter_map(|(entity, id)| (id.0 == light_id).then_some(entity))
+        .collect::<Vec<_>>();
+    for entity in &entities {
+        let _ = world.despawn(*entity);
+    }
+    !entities.is_empty()
+}
+
+fn light_transform(light: &EditorLightInstance) -> Transform {
+    let rotation = Quat::from_euler(
+        EulerRot::XYZ,
+        light.rotation[0].to_radians(),
+        light.rotation[1].to_radians(),
+        light.rotation[2].to_radians(),
+    );
+    Transform::from_translation(Vec3::new(
+        light.position[0],
+        light.position[1],
+        light.position[2],
+    ))
+    .with_rotation(rotation)
+}
+
+fn parse_hex_color(color: &str) -> Option<Color> {
+    let trimmed = color.strip_prefix('#')?;
+    if trimmed.len() != 6 {
+        return None;
+    }
+    let red = u8::from_str_radix(&trimmed[0..2], 16).ok()? as f32 / 255.0;
+    let green = u8::from_str_radix(&trimmed[2..4], 16).ok()? as f32 / 255.0;
+    let blue = u8::from_str_radix(&trimmed[4..6], 16).ok()? as f32 / 255.0;
+    Some(Color::srgb(red, green, blue))
+}
+
+fn update_sun_light(
+    world: &mut World,
+    light: EditorLightInstance,
+) -> Result<EditorLightInstance, String> {
+    let color =
+        parse_hex_color(&light.color).ok_or_else(|| "Light color must be #RRGGBB.".to_string())?;
+    let mut query = world
+        .query_filtered::<(&mut Transform, &mut DirectionalLight), With<crate::environment::Sun>>();
+    if let Ok((mut transform, mut directional)) = query.single_mut(world) {
+        *transform = light_transform(&light);
+        directional.color = color;
+        directional.illuminance = light.intensity;
+        directional.shadows_enabled = light.shadows_enabled;
+    }
+    Ok(EditorLightInstance {
+        source: EditorLightSource::Sun,
+        locked: true,
+        ..light
+    })
+}
+
+fn default_sun_light_payload() -> EditorLightInstance {
+    EditorLightInstance {
+        id: "sun".to_string(),
+        name: "Sun".to_string(),
+        kind: EditorLightKind::Directional,
+        enabled: true,
+        visible: true,
+        locked: true,
+        position: [0.0, 0.0, 0.0],
+        rotation: [-45.0, -35.0, 0.0],
+        color: "#fff8f0".to_string(),
+        intensity: 5000.0,
+        range: 0.0,
+        radius: 0.0,
+        inner_cone_angle: 0.0,
+        outer_cone_angle: 0.0,
+        shadows_enabled: true,
+        volumetric: true,
+        source: EditorLightSource::Sun,
+    }
+}
+
 fn runtime_prop_stats_payload(world: &mut World) -> Value {
     let missing_generated_assets = world
         .get_resource::<BillboardStats>()
@@ -1992,6 +3654,33 @@ pub(crate) fn set_render_feature_flag(
         "enabled": render_feature_enabled(world, feature),
         "value": render_feature_value(world, feature),
         "metrics": render_feature_metrics_payload(world),
+    }))
+}
+
+fn update_runtime_ambient_light(
+    world: &mut World,
+    color: &str,
+    brightness: f32,
+) -> Result<Value, String> {
+    let color_value =
+        parse_hex_color(color).ok_or_else(|| "Ambient color must be #RRGGBB.".to_string())?;
+    if let Some(mut ambient) = world.get_resource_mut::<GlobalAmbientLight>() {
+        ambient.color = color_value;
+        ambient.brightness = brightness;
+    } else {
+        world.insert_resource(GlobalAmbientLight {
+            color: color_value,
+            brightness,
+            ..default()
+        });
+    }
+
+    Ok(json!({
+        "color": color,
+        "brightness": brightness,
+        "metrics": {
+            "lightingAtmosphere": render_feature_metrics_payload(world)["lightingAtmosphere"].clone(),
+        },
     }))
 }
 
@@ -2478,6 +4167,7 @@ fn render_feature_metrics_payload(world: &World) -> Value {
     let gtao = ao.and_then(|config| config.gtao.as_ref());
     let fog = world.get_resource::<FogConfig>();
     let god_rays = world.get_resource::<GodRayConfig>();
+    let ambient = world.get_resource::<GlobalAmbientLight>();
 
     json!({
         "shadowBudget": {
@@ -2512,6 +4202,8 @@ fn render_feature_metrics_payload(world: &World) -> Value {
                 .map(|config| config.intensity)
                 .or_else(|| fog.map(|config| config.screen_god_rays.intensity))
                 .unwrap_or(0.0),
+            "ambientColor": "#ffffff",
+            "ambientBrightness": ambient.map(|ambient| ambient.brightness).unwrap_or(0.0),
         },
     })
 }
@@ -3349,5 +5041,121 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    fn terrain_preview_request(seed: i32, resolution: u32) -> TerrainPreviewRequest {
+        TerrainPreviewRequest {
+            recipe: TerrainRecipe {
+                version: 1,
+                seed,
+                config: TerrainConfig::default(),
+            },
+            origin: [0, 0],
+            size: [128, 128],
+            resolution,
+        }
+    }
+
+    #[test]
+    fn terrain_recipe_preview_is_deterministic_for_same_seed() {
+        let request = terrain_preview_request(17, 16);
+        let first = terrain_preview_payload(&request);
+        let second = terrain_preview_payload(&request);
+
+        assert_eq!(first["samples"], second["samples"]);
+        assert_eq!(first["stats"], second["stats"]);
+    }
+
+    #[test]
+    fn terrain_recipe_preview_changes_with_seed() {
+        let first = terrain_preview_payload(&terrain_preview_request(17, 16));
+        let second = terrain_preview_payload(&terrain_preview_request(23, 16));
+
+        assert_ne!(first["samples"], second["samples"]);
+    }
+
+    #[test]
+    fn terrain_recipe_seed_zero_preserves_default_height_samples() {
+        let config = TerrainConfig::default();
+        let default_generator =
+            TerrainGenerator::with_config(ValueNoise::default(), config.clone());
+        let seeded_generator =
+            TerrainGenerator::with_config_and_seed(ValueNoise::new(0), config, 0);
+
+        for (x, z) in [(0, 0), (32, 64), (128, 96), (255, 17)] {
+            assert_eq!(
+                default_generator.get_height(x, z),
+                seeded_generator.get_height(x, z)
+            );
+        }
+    }
+
+    #[test]
+    fn validates_terrain_preview_request_limits() {
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::PreviewTerrainRecipe {
+                request: terrain_preview_request(0, TERRAIN_PREVIEW_MAX_RESOLUTION + 1)
+            })
+            .is_err()
+        );
+
+        assert!(
+            validate_runtime_write_command(&RuntimeWriteCommand::PreviewTerrainRecipe {
+                request: terrain_preview_request(0, 16)
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validates_terrain_preview_recipe_octave_limits() {
+        let mut request = terrain_preview_request(0, 16);
+        request.recipe.config.detail.octaves = TERRAIN_PREVIEW_MAX_OCTAVES + 1;
+
+        let errors =
+            validate_runtime_write_command(&RuntimeWriteCommand::PreviewTerrainRecipe { request })
+                .unwrap_err();
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("config.detail.octaves"))
+        );
+    }
+
+    #[test]
+    fn validates_terrain_preview_recipe_basin_limits() {
+        let mut request = terrain_preview_request(0, 16);
+        request.recipe.config.water_bodies.lakes.density = 2.0;
+        request.recipe.config.water_bodies.ponds.min_radius = 20.0;
+        request.recipe.config.water_bodies.ponds.max_radius = 4.0;
+
+        let errors =
+            validate_runtime_write_command(&RuntimeWriteCommand::PreviewTerrainRecipe { request })
+                .unwrap_err();
+
+        assert!(errors.iter().any(|error| error.contains("lakes.density")));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("ponds.min_radius"))
+        );
+    }
+
+    #[test]
+    fn default_terrain_recipe_command_returns_rust_config() {
+        let mut world = World::new();
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::GetDefaultTerrainRecipe {},
+        );
+
+        let RuntimeCommandResult::Success { data, .. } = result else {
+            panic!("default terrain recipe should succeed");
+        };
+        assert_eq!(data["recipe"]["version"], json!(1));
+        assert_eq!(data["recipe"]["seed"], json!(0));
+        assert!(data["recipe"]["config"]["height"]["min"].is_number());
+        assert!(data["fingerprint"].is_string());
     }
 }

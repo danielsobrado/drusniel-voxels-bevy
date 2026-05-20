@@ -21,7 +21,7 @@ use crate::voxel::world::VoxelWorld;
 use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
-use bevy::camera::Exposure;
+use bevy::camera::{Exposure, ScalingMode};
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::ecs::system::SystemParam;
@@ -36,6 +36,7 @@ use bevy::render::view::{
 };
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_water::ImageReformat;
+use serde::{Deserialize, Serialize};
 
 fn editor_native_viewport_enabled() -> bool {
     std::env::var_os("DRUSNIEL_EDITOR_NATIVE_VIEWPORT").is_some()
@@ -51,6 +52,117 @@ pub(crate) struct EditorViewportInputDebugState {
     last_active: bool,
     last_move_intent: bool,
     seconds_since_report: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EditorCameraInteractionMode {
+    Menu,
+    Movement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EditorCameraKind {
+    FirstPerson,
+    Arcball,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EditorCameraProjection {
+    Perspective,
+    Orthographic,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorCameraPose {
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+    pub radius: f32,
+    pub fov_degrees: f32,
+    pub orthographic_scale: f32,
+}
+
+impl Default for EditorCameraPose {
+    fn default() -> Self {
+        Self {
+            position: [96.0, 80.0, 96.0],
+            target: [64.0, 48.0, 64.0],
+            yaw: -std::f32::consts::FRAC_PI_4,
+            pitch: -0.45,
+            roll: 0.0,
+            radius: 64.0,
+            fov_degrees: 70.0,
+            orthographic_scale: 96.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorSavedCamera {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub camera_kind: EditorCameraKind,
+    pub projection: EditorCameraProjection,
+    pub pose: EditorCameraPose,
+    pub align_to_axes: bool,
+    pub automatic_axis: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorCameraState {
+    pub interaction_mode: EditorCameraInteractionMode,
+    pub camera_kind: EditorCameraKind,
+    pub projection: EditorCameraProjection,
+    pub pose: EditorCameraPose,
+    pub align_to_axes: bool,
+    pub automatic_axis: bool,
+    pub saved_cameras: Vec<EditorSavedCamera>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_saved_camera_id: Option<String>,
+    #[serde(skip)]
+    pub movement_latched: bool,
+    #[serde(skip)]
+    pub loaded_from_disk: bool,
+}
+
+impl Default for EditorCameraState {
+    fn default() -> Self {
+        Self {
+            interaction_mode: EditorCameraInteractionMode::Menu,
+            camera_kind: EditorCameraKind::FirstPerson,
+            projection: EditorCameraProjection::Perspective,
+            pose: EditorCameraPose::default(),
+            align_to_axes: false,
+            automatic_axis: true,
+            saved_cameras: Vec::new(),
+            active_saved_camera_id: None,
+            movement_latched: false,
+            loaded_from_disk: false,
+        }
+    }
+}
+
+impl EditorCameraState {
+    pub fn apply_saved_camera(&mut self, saved: &EditorSavedCamera) {
+        self.camera_kind = saved.camera_kind;
+        self.projection = saved.projection;
+        self.pose = saved.pose.clone();
+        self.align_to_axes = saved.align_to_axes;
+        self.automatic_axis = saved.automatic_axis;
+        self.active_saved_camera_id = Some(saved.id.clone());
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -465,7 +577,7 @@ pub fn apply_taa_capabilities(
 }
 
 pub(crate) fn player_camera_system(
-    mut query: Query<(&mut Transform, &mut PlayerCamera)>,
+    mut query: Query<(&mut Transform, &mut PlayerCamera, &mut Projection)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut mouse_motion: MessageReader<MouseMotion>,
@@ -475,6 +587,7 @@ pub(crate) fn player_camera_system(
     ui_state: CameraUiState,
     camera_config: Res<CameraConfig>,
     world: Res<VoxelWorld>,
+    mut editor_camera: ResMut<EditorCameraState>,
     diagnostics: Option<Res<EditorDiagnosticsState>>,
     mut cursor_captured: Local<bool>,
     mut editor_debug: Local<EditorViewportInputDebugState>,
@@ -509,6 +622,7 @@ pub(crate) fn player_camera_system(
         editor_viewport_camera_navigation(
             &mut query,
             &keys,
+            &mouse_buttons,
             &mut mouse_motion,
             &mut mouse_wheel,
             dt,
@@ -516,6 +630,7 @@ pub(crate) fn player_camera_system(
             window.focused,
             &camera_config,
             &world,
+            &mut editor_camera,
             &mut *editor_debug,
             diagnostics,
         );
@@ -559,7 +674,7 @@ pub(crate) fn player_camera_system(
     cursor_options.visible = false;
     cursor_options.grab_mode = CursorGrabMode::Locked;
 
-    for (mut transform, mut camera) in query.iter_mut() {
+    for (mut transform, mut camera, _) in query.iter_mut() {
         // Toggle between fly and walk mode with Tab
         if keys.just_pressed(KeyCode::Tab) {
             camera.mode = match camera.mode {
@@ -616,8 +731,9 @@ pub(crate) fn player_camera_system(
 }
 
 fn editor_viewport_camera_navigation(
-    query: &mut Query<(&mut Transform, &mut PlayerCamera)>,
+    query: &mut Query<(&mut Transform, &mut PlayerCamera, &mut Projection)>,
     keys: &Res<ButtonInput<KeyCode>>,
+    mouse_buttons: &Res<ButtonInput<MouseButton>>,
     mouse_motion: &mut MessageReader<MouseMotion>,
     mouse_wheel: &mut MessageReader<MouseWheel>,
     dt: f32,
@@ -625,24 +741,50 @@ fn editor_viewport_camera_navigation(
     window_focused: bool,
     camera_config: &CameraConfig,
     world: &VoxelWorld,
+    editor_camera: &mut EditorCameraState,
     debug_state: &mut EditorViewportInputDebugState,
     diagnostics: Option<&EditorDiagnosticsState>,
 ) {
-    let control_down = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let key_w = keys.pressed(KeyCode::KeyW);
     let key_a = keys.pressed(KeyCode::KeyA);
     let key_s = keys.pressed(KeyCode::KeyS);
     let key_d = keys.pressed(KeyCode::KeyD);
+    let key_q = keys.pressed(KeyCode::KeyQ);
+    let key_e = keys.pressed(KeyCode::KeyE);
     let shift_down = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let alt_down = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let right_mouse_down = mouse_buttons.pressed(MouseButton::Right);
+
+    if keys.just_pressed(KeyCode::Tab) {
+        editor_camera.movement_latched = !editor_camera.movement_latched;
+        editor_camera.interaction_mode = if editor_camera.movement_latched {
+            EditorCameraInteractionMode::Movement
+        } else {
+            EditorCameraInteractionMode::Menu
+        };
+    }
+
+    if keys.just_pressed(KeyCode::Escape) {
+        editor_camera.movement_latched = false;
+        editor_camera.interaction_mode = EditorCameraInteractionMode::Menu;
+    }
+
+    let active = window_focused && (editor_camera.movement_latched || right_mouse_down);
+    editor_camera.interaction_mode = if active {
+        EditorCameraInteractionMode::Movement
+    } else {
+        EditorCameraInteractionMode::Menu
+    };
+
     let mut wheel_delta = 0.0f32;
     for event in mouse_wheel.read() {
         wheel_delta += event.y;
     }
 
-    let active = control_down;
-    let move_intent = key_w || key_a || key_s || key_d || wheel_delta.abs() > f32::EPSILON;
+    let move_intent =
+        key_w || key_a || key_s || key_d || key_q || key_e || wheel_delta.abs() > f32::EPSILON;
     let state_changed = !debug_state.reported_initial
-        || debug_state.last_control_down != control_down
+        || debug_state.last_control_down != active
         || debug_state.last_window_focused != window_focused
         || debug_state.last_active != active
         || debug_state.last_move_intent != move_intent;
@@ -657,14 +799,14 @@ fn editor_viewport_camera_navigation(
                 diagnostics,
                 EditorDiagnosticsCategory::Input,
                 format!(
-                    "[editor-viewport-input] inactive focused={} ctrl={} move_intent={} drained_mouse_events={}",
-                    window_focused, control_down, move_intent, drained_motion_events
+                    "[editor-viewport-input] inactive focused={} movement={} move_intent={} drained_mouse_events={}",
+                    window_focused, active, move_intent, drained_motion_events
                 ),
             );
             debug_state.reported_initial = true;
             debug_state.seconds_since_report = 0.0;
         }
-        debug_state.last_control_down = control_down;
+        debug_state.last_control_down = active;
         debug_state.last_window_focused = window_focused;
         debug_state.last_active = active;
         debug_state.last_move_intent = move_intent;
@@ -681,35 +823,13 @@ fn editor_viewport_camera_navigation(
     let mut blocked = false;
     let mut camera_position = Vec3::ZERO;
 
-    for (mut transform, mut camera) in query.iter_mut() {
+    for (mut transform, mut camera, mut projection) in query.iter_mut() {
         camera_count += 1;
+        let mut accumulated_mouse_delta = Vec2::ZERO;
         for event in mouse_motion.read() {
             mouse_delta += event.delta;
+            accumulated_mouse_delta += event.delta;
             mouse_event_count += 1;
-            camera.yaw -= event.delta.x * camera.sensitivity;
-            camera.pitch -= event.delta.y * camera.sensitivity;
-            camera.pitch = camera.pitch.clamp(
-                camera_config.movement.pitch_min,
-                camera_config.movement.pitch_max,
-            );
-        }
-
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, 0.0);
-
-        let forward = transform.forward().as_vec3();
-        let right = transform.right().as_vec3();
-        let mut velocity = Vec3::ZERO;
-        if key_w {
-            velocity += forward;
-        }
-        if key_s {
-            velocity -= forward;
-        }
-        if key_a {
-            velocity -= right;
-        }
-        if key_d {
-            velocity += right;
         }
 
         let speed = if shift_down {
@@ -718,19 +838,127 @@ fn editor_viewport_camera_navigation(
             camera.fly_speed
         };
 
-        let movement =
-            velocity.normalize_or_zero() * speed * dt + forward * wheel_delta * speed * 0.12;
-        if movement.length_squared() > 0.0 {
-            let desired = transform.translation + movement;
-            if !camera_intersects_solid(world, desired) {
-                transform.translation = world
-                    .bounds()
-                    .clamp_horizontal_position(desired, WORLD_EDGE_GUARD_MARGIN);
-                moved = true;
-            } else {
-                blocked = true;
+        match editor_camera.camera_kind {
+            EditorCameraKind::FirstPerson => {
+                camera.yaw -= accumulated_mouse_delta.x * camera.sensitivity;
+                camera.pitch -= accumulated_mouse_delta.y * camera.sensitivity;
+                camera.pitch = camera.pitch.clamp(
+                    camera_config.movement.pitch_min,
+                    camera_config.movement.pitch_max,
+                );
+                editor_camera.pose.yaw = camera.yaw;
+                editor_camera.pose.pitch = camera.pitch;
+                transform.rotation = Quat::from_euler(
+                    EulerRot::YXZ,
+                    camera.yaw,
+                    camera.pitch,
+                    editor_camera.pose.roll,
+                );
+
+                let forward = transform.forward().as_vec3();
+                let right = transform.right().as_vec3();
+                let up = Vec3::Y;
+                let mut velocity = Vec3::ZERO;
+                if key_w {
+                    velocity += forward;
+                }
+                if key_s {
+                    velocity -= forward;
+                }
+                if key_a {
+                    velocity -= right;
+                }
+                if key_d {
+                    velocity += right;
+                }
+                if key_e {
+                    velocity += up;
+                }
+                if key_q {
+                    velocity -= up;
+                }
+
+                let movement = velocity.normalize_or_zero() * speed * dt
+                    + forward * wheel_delta * speed * 0.12;
+                if movement.length_squared() > 0.0 {
+                    let desired = transform.translation + movement;
+                    if !camera_intersects_solid(world, desired) {
+                        transform.translation = world
+                            .bounds()
+                            .clamp_horizontal_position(desired, WORLD_EDGE_GUARD_MARGIN);
+                        moved = true;
+                    } else {
+                        blocked = true;
+                    }
+                }
+                editor_camera.pose.position = transform.translation.to_array();
+                editor_camera.pose.target = (transform.translation
+                    + transform.forward().as_vec3() * editor_camera.pose.radius)
+                    .to_array();
+            }
+            EditorCameraKind::Arcball => {
+                let orbit_sensitivity = camera.sensitivity * 8.0;
+                if alt_down {
+                    let target = Vec3::from_array(editor_camera.pose.target);
+                    let right = transform.right().as_vec3();
+                    let up = Vec3::Y;
+                    let pan_scale = (editor_camera.pose.radius * 0.001).max(0.02);
+                    editor_camera.pose.target = (target
+                        - right * accumulated_mouse_delta.x * pan_scale
+                        + up * accumulated_mouse_delta.y * pan_scale)
+                        .to_array();
+                } else {
+                    editor_camera.pose.yaw -= accumulated_mouse_delta.x * orbit_sensitivity;
+                    editor_camera.pose.pitch = (editor_camera.pose.pitch
+                        - accumulated_mouse_delta.y * orbit_sensitivity)
+                        .clamp(
+                            camera_config.movement.pitch_min,
+                            camera_config.movement.pitch_max,
+                        );
+                }
+
+                let mut radius_delta = 0.0;
+                if key_w {
+                    radius_delta -= speed * dt;
+                }
+                if key_s {
+                    radius_delta += speed * dt;
+                }
+                radius_delta -= wheel_delta * speed * 0.12;
+                editor_camera.pose.radius =
+                    (editor_camera.pose.radius + radius_delta).clamp(2.0, 4096.0);
+
+                if key_a {
+                    editor_camera.pose.roll += dt;
+                }
+                if key_d {
+                    editor_camera.pose.roll -= dt;
+                }
+                if key_q {
+                    editor_camera.pose.target[1] -= speed * dt;
+                }
+                if key_e {
+                    editor_camera.pose.target[1] += speed * dt;
+                }
+
+                let target = Vec3::from_array(editor_camera.pose.target);
+                let rotation = Quat::from_euler(
+                    EulerRot::YXZ,
+                    editor_camera.pose.yaw,
+                    editor_camera.pose.pitch,
+                    editor_camera.pose.roll,
+                );
+                transform.translation =
+                    target - rotation.mul_vec3(Vec3::NEG_Z) * editor_camera.pose.radius;
+                transform.rotation = rotation;
+                camera.yaw = editor_camera.pose.yaw;
+                camera.pitch = editor_camera.pose.pitch;
+                editor_camera.pose.position = transform.translation.to_array();
+                moved = move_intent || accumulated_mouse_delta.length_squared() > 0.0;
             }
         }
+
+        apply_editor_camera_projection(&mut projection, editor_camera);
         camera_position = transform.translation;
     }
 
@@ -742,7 +970,7 @@ fn editor_viewport_camera_navigation(
             format!(
                 "[editor-viewport-input] active focused={} ctrl={} keys=w:{} a:{} s:{} d:{} shift:{} mouse_events={} mouse_delta=({:.1},{:.1}) wheel={:.2} cameras={} moved={} blocked={} pos=({:.2},{:.2},{:.2})",
                 window_focused,
-                control_down,
+                active,
                 key_w,
                 key_a,
                 key_s,
@@ -763,10 +991,40 @@ fn editor_viewport_camera_navigation(
         debug_state.reported_initial = true;
         debug_state.seconds_since_report = 0.0;
     }
-    debug_state.last_control_down = control_down;
+    debug_state.last_control_down = active;
     debug_state.last_window_focused = window_focused;
     debug_state.last_active = active;
     debug_state.last_move_intent = move_intent;
+}
+
+fn apply_editor_camera_projection(projection: &mut Projection, editor_camera: &EditorCameraState) {
+    match editor_camera.projection {
+        EditorCameraProjection::Perspective => {
+            let fov = editor_camera.pose.fov_degrees.to_radians().clamp(0.1, 3.0);
+            match projection {
+                Projection::Perspective(perspective) => {
+                    perspective.fov = fov;
+                    perspective.near = 0.02;
+                }
+                _ => {
+                    *projection = Projection::Perspective(PerspectiveProjection {
+                        fov,
+                        near: 0.02,
+                        ..default()
+                    });
+                }
+            }
+        }
+        EditorCameraProjection::Orthographic => {
+            let viewport_height = editor_camera.pose.orthographic_scale.clamp(1.0, 4096.0);
+            *projection = Projection::from(OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical { viewport_height },
+                near: -4096.0,
+                far: 8192.0,
+                ..OrthographicProjection::default_3d()
+            });
+        }
+    }
 }
 
 pub fn ensure_camera_above_surface_once(

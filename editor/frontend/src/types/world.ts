@@ -39,6 +39,122 @@ export interface WorldSurfaceSample {
   readonly water: boolean;
 }
 
+export interface TerrainHeightConfig {
+  readonly min: number;
+  readonly max: number;
+  readonly sea_level: number;
+}
+
+export interface TerrainNoiseLayer {
+  readonly scale: number;
+  readonly amplitude: number;
+  readonly octaves: number;
+  readonly persistence: number;
+  readonly lacunarity: number;
+}
+
+export interface TerrainMountainConfig extends TerrainNoiseLayer {
+  readonly ridge_power: number;
+  readonly massif_scale: number;
+  readonly massif_amplitude: number;
+  readonly massif_threshold: number;
+  readonly massif_power: number;
+}
+
+export interface TerrainCaveConfig {
+  readonly enabled: boolean;
+}
+
+export interface TerrainRiverConfig {
+  readonly enabled: boolean;
+  readonly scale: number;
+  readonly width: number;
+  readonly depth: number;
+  readonly octaves: number;
+  readonly tributary_scale: number;
+  readonly tributary_width: number;
+}
+
+export interface TerrainBasinConfig {
+  readonly enabled: boolean;
+  readonly spacing: number;
+  readonly density: number;
+  readonly min_radius: number;
+  readonly max_radius: number;
+  readonly min_depth: number;
+  readonly max_depth: number;
+  readonly shore_power: number;
+}
+
+export interface TerrainAquiferConfig {
+  readonly enabled: boolean;
+  readonly max_y: number;
+  readonly noise_scale: number;
+  readonly threshold: number;
+}
+
+export interface TerrainWaterBodiesConfig {
+  readonly enabled: boolean;
+  readonly lakes: TerrainBasinConfig;
+  readonly ponds: TerrainBasinConfig;
+  readonly aquifers: TerrainAquiferConfig;
+}
+
+export interface TerrainGenerationConfig {
+  readonly height: TerrainHeightConfig;
+  readonly continent: TerrainNoiseLayer;
+  readonly mountains: TerrainMountainConfig;
+  readonly hills: TerrainNoiseLayer;
+  readonly detail: TerrainNoiseLayer;
+  readonly caves: TerrainCaveConfig;
+  readonly rivers: TerrainRiverConfig;
+  readonly water_bodies: TerrainWaterBodiesConfig;
+  readonly biome_modifiers: Record<string, number>;
+}
+
+export interface TerrainRecipe {
+  readonly version: 1;
+  readonly seed: number;
+  readonly config: TerrainGenerationConfig;
+}
+
+export interface TerrainPreviewRequest {
+  readonly recipe: TerrainRecipe;
+  readonly origin: readonly [number, number];
+  readonly size: readonly [number, number];
+  readonly resolution: number;
+}
+
+export interface TerrainPreviewSample {
+  readonly x: number;
+  readonly z: number;
+  readonly height: number;
+  readonly biome: "Grassland" | "Sandy" | "Rocky" | "Clay";
+  readonly material: ViewportVoxelMaterial;
+  readonly water: boolean;
+  readonly waterKind: "Ocean" | "LakeBasin" | "RiverChannel" | "Pond" | "CaveWaterAquifer" | "None";
+  readonly waterDepth: number;
+  readonly surfaceY: number;
+  readonly tree: boolean;
+}
+
+export interface TerrainPreviewResult {
+  readonly recipe: TerrainRecipe;
+  readonly origin: readonly [number, number];
+  readonly size: readonly [number, number];
+  readonly resolution: number;
+  readonly samples: readonly TerrainPreviewSample[];
+  readonly stats: {
+    readonly minHeight: number;
+    readonly maxHeight: number;
+    readonly avgHeight: number;
+    readonly waterCells: number;
+    readonly treeCells: number;
+  };
+  readonly fingerprint: string;
+  readonly timingMs: number;
+}
+
 export type ViewportVoxelFace = "posY" | "negY" | "negX" | "posX" | "negZ" | "posZ";
 
 export interface ViewportExposedVoxel {
@@ -303,6 +419,29 @@ export interface PropStats {
   readonly boundsWarnings: number;
   readonly instancedGroups: number;
   readonly shadowCastCount: number;
+}
+
+export type LightKind = "directional" | "point" | "spot";
+export type LightSource = "editor" | "runtime" | "sun";
+
+export interface LightInstance {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: LightKind;
+  readonly enabled: boolean;
+  readonly visible: boolean;
+  readonly locked: boolean;
+  readonly position: [number, number, number];
+  readonly rotation: [number, number, number];
+  readonly color: string;
+  readonly intensity: number;
+  readonly range: number;
+  readonly radius: number;
+  readonly innerConeAngle: number;
+  readonly outerConeAngle: number;
+  readonly shadowsEnabled: boolean;
+  readonly volumetric: boolean;
+  readonly source: LightSource;
 }
 
 export type MaterialKind = "blocky" | "triplanar" | "building" | "props" | "water";

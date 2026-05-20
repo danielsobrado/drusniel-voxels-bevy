@@ -1,6 +1,6 @@
 use crate::camera::config::{CameraConfig, CameraExposureConfig, load_camera_exposure_config};
 use crate::camera::controller::{
-    apply_taa_capabilities, apply_visual_settings, camera_follow_player,
+    EditorCameraState, apply_taa_capabilities, apply_visual_settings, camera_follow_player,
     ensure_camera_above_surface_once, player_camera_system, spawn_camera,
     update_camera_anti_aliasing, update_camera_exposure, update_camera_shadow_filtering,
     update_camera_skybox_from_atmosphere, update_ray_tracing_on_camera,
@@ -22,6 +22,7 @@ impl Plugin for CameraPlugin {
 
         app.insert_resource(exposure_config)
             .init_resource::<CameraConfig>()
+            .init_resource::<EditorCameraState>()
             .add_systems(Startup, spawn_camera.after(GraphicsDetectionSet))
             .add_systems(
                 Update,

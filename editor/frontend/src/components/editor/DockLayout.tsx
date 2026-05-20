@@ -8,10 +8,11 @@ import { ProfilerPanel } from "../../features/profiler/ProfilerPanel";
 import { GraphicsCapabilitiesPanel } from "../../features/profiler/GraphicsCapabilitiesPanel";
 import { TextureAtlasPanel } from "../../features/materials/TextureAtlasPanel";
 import { WorldOutlinerPanel } from "../../features/outliner/WorldOutlinerPanel";
+import { TerrainRecipePanel } from "../../features/terrain/TerrainRecipePanel";
 import { ViewportPanel } from "../../features/viewport/ViewportPanel";
 import { ViewportControlsPanel } from "../../features/viewport/ViewportControlsPanel";
 
-const STORAGE_KEY = "drusniel.editor.dock-layout.v2";
+const STORAGE_KEY = "drusniel.editor.dock-layout.v3";
 
 const DEFAULT_LAYOUT = {
   grid: {
@@ -23,7 +24,7 @@ const DEFAULT_LAYOUT = {
           type: "branch",
           data: [
             { type: "leaf", data: { views: ["viewport"], activeView: "viewport", id: "center" }, size: 620 },
-            { type: "leaf", data: { views: ["viewport-controls", "assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "viewport-controls", id: "bottom" }, size: 240 },
+            { type: "leaf", data: { views: ["viewport-controls", "terrain-recipe", "assets", "atlas", "console", "profiler", "graphics-capabilities", "agent"], activeView: "viewport-controls", id: "bottom" }, size: 240 },
           ],
           size: 760,
         },
@@ -41,6 +42,7 @@ const DEFAULT_LAYOUT = {
     inspector: { id: "inspector", contentComponent: "inspector", title: "Inspector" },
     assets: { id: "assets", contentComponent: "assets", title: "Asset Browser" },
     "viewport-controls": { id: "viewport-controls", contentComponent: "viewport-controls", title: "Viewport Controls" },
+    "terrain-recipe": { id: "terrain-recipe", contentComponent: "terrain-recipe", title: "Terrain Recipe" },
     atlas: { id: "atlas", contentComponent: "atlas", title: "Texture Atlas" },
     console: { id: "console", contentComponent: "console", title: "Console" },
     profiler: { id: "profiler", contentComponent: "profiler", title: "Profiler" },
@@ -80,6 +82,7 @@ export function DockLayout({ resetRequestId, runCommand }: DockLayoutProps) {
     () => ({
       viewport: (props: IDockviewPanelProps) => <ViewportPanel onClose={() => props.api.close()} />,
       "viewport-controls": (_props: IDockviewPanelProps) => <ViewportControlsPanel />,
+      "terrain-recipe": (_props: IDockviewPanelProps) => <TerrainRecipePanel />,
       outliner: (props: IDockviewPanelProps) => <WorldOutlinerPanel onClose={() => props.api.close()} />,
       inspector: (props: IDockviewPanelProps) => <InspectorPanel onClose={() => props.api.close()} />,
       assets: (_props: IDockviewPanelProps) => <AssetBrowserPanel />,

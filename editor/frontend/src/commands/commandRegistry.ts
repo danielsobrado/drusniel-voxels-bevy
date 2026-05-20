@@ -3,7 +3,7 @@ import type { BackendResult } from "../backend/EditorBackendClient";
 import type { RuntimeCommandResult, RuntimeCommandStatus, RuntimeSnapshot } from "../runtime/RuntimeClient";
 import type { EditorDiagnosticsCategory, EditorMode, EditorViewportRole, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { RenderFeatureFlag } from "../types/runtime";
-import type { BlockType, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
+import type { BlockType, LightInstance, LightKind, PropAsset, PropInstance, ProtectedArea, ProtectedAreaKind, ProtectedAreaRuleMatrix, WaterBody, WaterBodyKind, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 
 const unwrapBackend = <T>(result: BackendResult<T>): T => {
   if (!result.ok) {
@@ -682,6 +682,83 @@ const createAreaCommand = (
   },
 });
 
+const makeLightId = (kind: LightKind, nextIndex: number): string =>
+  `light-${kind}-${String(nextIndex).padStart(2, "0")}`;
+
+const lightPositionFromSelection = (state: ReturnType<EditorCommandContext["getState"]>): [number, number, number] => {
+  const selection = state.selection;
+  if (selection.kind === "voxel") {
+    return [selection.position[0] + 0.5, selection.position[1] + 4, selection.position[2] + 0.5];
+  }
+
+  if (selection.kind === "prop") {
+    return state.props.find((prop) => prop.id === selection.id)?.position ?? [64, 32, 64];
+  }
+
+  if (selection.kind === "water") {
+    return state.waterBodies.find((water) => water.id === selection.id)?.center ?? [64, 32, 64];
+  }
+
+  if (selection.kind === "area") {
+    return state.protectedAreas.find((area) => area.id === selection.id)?.center ?? [64, 32, 64];
+  }
+
+  if (selection.kind === "light") {
+    return state.lights.find((light) => light.id === selection.id)?.position ?? [64, 32, 64];
+  }
+
+  return [64, 32, 64];
+};
+
+const createLight = (state: ReturnType<EditorCommandContext["getState"]>, kind: LightKind): LightInstance => {
+  const nextIndex = state.lights.filter((light) => light.source !== "sun").length + 1;
+  const position = lightPositionFromSelection(state);
+  const namePrefix = kind === "directional" ? "Directional Light" : kind === "spot" ? "Spot Light" : "Point Light";
+
+  return {
+    id: makeLightId(kind, nextIndex),
+    name: `${namePrefix} ${nextIndex}`,
+    kind,
+    enabled: true,
+    visible: true,
+    locked: false,
+    position,
+    rotation: kind === "directional" ? [-45, -35, 0] : kind === "spot" ? [-35, 0, 0] : [0, 0, 0],
+    color: kind === "directional" ? "#fff8f0" : "#ffd7a0",
+    intensity: kind === "directional" ? 5000 : kind === "spot" ? 1200 : 900,
+    range: kind === "directional" ? 0 : 24,
+    radius: kind === "directional" ? 0 : 0.35,
+    innerConeAngle: kind === "spot" ? 20 : 0,
+    outerConeAngle: kind === "spot" ? 45 : 0,
+    shadowsEnabled: true,
+    volumetric: kind === "directional",
+    source: "editor",
+  };
+};
+
+const createLightCommand = (kind: LightKind): EditorCommand => {
+  const label = kind === "directional" ? "Directional Light" : kind === "spot" ? "Spot Light" : "Point Light";
+  return {
+    id: `editor.lighting.add${label.replace(/\s+/g, "")}`,
+    title: `Add ${label}`,
+    description: `Create an editable ${kind} light in the runtime scene.`,
+    category: "Lighting",
+    keywords: ["light", "lighting", "add", kind],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const state = ctx.getState();
+      const light = createLight(state, kind);
+      const runtimeLight = unwrapRuntime(await ctx.runtimeClient.createLight(light)).light;
+      state.addLight(runtimeLight);
+      state.setSelection({ kind: "light", id: runtimeLight.id, label: runtimeLight.name });
+      state.setActiveMode("lighting");
+      state.setActiveTool("lighting");
+      state.pushAgentTimelineEvent({ kind: "command", message: `Runtime created ${runtimeLight.name}.` });
+      ctx.toast.success(`${runtimeLight.name} created.`);
+    },
+  };
+};
+
 export const editorCommands: readonly EditorCommand[] = [
   {
     id: "editor.file.openWorld",
@@ -841,6 +918,44 @@ export const editorCommands: readonly EditorCommand[] = [
   viewportRoleCommand("authoring"),
   viewportRoleCommand("validation"),
   {
+    id: "editor.camera.open",
+    title: "Camera controls",
+    description: "Open native editor camera controls in the viewport controls panel.",
+    category: "Tools",
+    keywords: ["tools", "camera", "viewport", "movement"],
+    run: (ctx) => {
+      ctx.getState().setActiveMode("lighting");
+      ctx.getState().setActiveTool("camera");
+      ctx.toast.info("Camera controls are available in Viewport Controls.");
+    },
+  },
+  {
+    id: "editor.camera.saved.previous",
+    title: "Previous saved camera",
+    description: "Recall the previous native editor saved camera.",
+    category: "Camera",
+    keywords: ["camera", "saved", "previous"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const editorCamera = unwrapRuntime(await ctx.runtimeClient.stepSavedEditorCamera(-1));
+      ctx.getState().setEditorCamera(editorCamera);
+      ctx.toast.info("Previous saved camera recalled.");
+    },
+  },
+  {
+    id: "editor.camera.saved.next",
+    title: "Next saved camera",
+    description: "Recall the next native editor saved camera.",
+    category: "Camera",
+    keywords: ["camera", "saved", "next"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const editorCamera = unwrapRuntime(await ctx.runtimeClient.stepSavedEditorCamera(1));
+      ctx.getState().setEditorCamera(editorCamera);
+      ctx.toast.info("Next saved camera recalled.");
+    },
+  },
+  {
     id: "editor.view.toggleVoxelGrid",
     title: "Toggle voxel grid",
     description: "Toggle the runtime voxel grid viewport overlay.",
@@ -949,6 +1064,62 @@ export const editorCommands: readonly EditorCommand[] = [
   modeCommand("editor.mode.water", "Water", "water"),
   modeCommand("editor.mode.material", "Material", "material"),
   modeCommand("editor.mode.lighting", "Lighting", "lighting"),
+  createLightCommand("point"),
+  createLightCommand("spot"),
+  createLightCommand("directional"),
+  {
+    id: "editor.lighting.deleteSelected",
+    title: "Delete selected light",
+    description: "Delete the selected editor-created light from the runtime scene.",
+    category: "Lighting",
+    keywords: ["light", "lighting", "delete", "remove"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const state = ctx.getState();
+      if (state.selection.kind !== "light") {
+        ctx.toast.warning("Select a light before deleting.");
+        return;
+      }
+
+      const selection = state.selection;
+      const light = state.lights.find((candidate) => candidate.id === selection.id);
+      if (!light || light.source === "sun") {
+        ctx.toast.warning("The built-in sun cannot be deleted.");
+        return;
+      }
+
+      const result = unwrapRuntime(await ctx.runtimeClient.deleteLight(light.id));
+      state.removeLight(light.id);
+      ctx.toast.info(`Deleted ${result.deleted ? light.name : "0 lights"}.`);
+      state.pushAgentTimelineEvent({ kind: "command", message: `Runtime deleted light ${light.name}.` });
+    },
+  },
+  {
+    id: "editor.lighting.focusSelected",
+    title: "Focus selected light",
+    description: "Focus the runtime camera on the selected light.",
+    category: "Lighting",
+    keywords: ["light", "lighting", "focus", "camera"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const state = ctx.getState();
+      const selection = state.selection;
+      const light =
+        selection.kind === "light"
+          ? state.lights.find((candidate) => candidate.id === selection.id)
+          : state.lights.find((candidate) => candidate.source !== "sun") ?? state.lights[0];
+      if (!light) {
+        ctx.toast.warning("No light available to focus.");
+        return;
+      }
+
+      state.setSelection({ kind: "light", id: light.id, label: light.name });
+      state.setActiveMode("lighting");
+      state.setActiveTool("lighting");
+      unwrapRuntime(await ctx.runtimeClient.focusCamera(light.position));
+      ctx.toast.info(`Focused ${light.name}.`);
+    },
+  },
   modeCommand("editor.mode.debug", "Debug", "debug"),
   modeCommand("editor.mode.agent", "Agent", "agent"),
   {

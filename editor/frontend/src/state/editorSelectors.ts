@@ -1,6 +1,6 @@
 import type { EditorDataState } from "./editorStore";
 import type { Selection } from "../types/editor";
-import type { ChunkSummary, MaterialAsset, PropInstance, PropStats, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
+import type { ChunkSummary, LightInstance, MaterialAsset, PropInstance, PropStats, ProtectedArea, VoxelBlock, WaterBody } from "../types/world";
 import type { AgentObservation } from "../types/runtime";
 
 export type OutlinerNodeKind = Selection["kind"];
@@ -9,7 +9,7 @@ export type OutlinerNodeKey = `${OutlinerNodeKind}:${string}`;
 
 export const getOutlinerNodeKey = (kind: OutlinerNodeKind, id: string): OutlinerNodeKey => `${kind}:${id}`;
 
-export type SelectedObject = ChunkSummary | ProtectedArea | PropInstance | WaterBody | MaterialAsset | VoxelBlock | { readonly kind: "debug_resource"; readonly id: string; readonly label: string } | undefined;
+export type SelectedObject = ChunkSummary | ProtectedArea | PropInstance | WaterBody | LightInstance | MaterialAsset | VoxelBlock | { readonly kind: "debug_resource"; readonly id: string; readonly label: string } | undefined;
 
 const badgeByKind: Record<Selection["kind"], string> = {
   voxel: "VOX",
@@ -17,6 +17,7 @@ const badgeByKind: Record<Selection["kind"], string> = {
   area: "AREA",
   prop: "PROP",
   water: "WATER",
+  light: "LIGHT",
   material: "MATERIAL",
   debug_resource: "DEBUG",
 };
@@ -66,6 +67,10 @@ export const getSelectedObject = (state: EditorDataState): SelectedObject => {
     return state.waterBodies.find((waterBody) => waterBody.id === selection.id);
   }
 
+  if (selection.kind === "light") {
+    return state.lights.find((light) => light.id === selection.id);
+  }
+
   if (selection.kind === "material") {
     return state.materials.find((material) => material.id === selection.id);
   }
@@ -105,6 +110,15 @@ export const getVisibleOutlinerNodes = (state: EditorDataState): readonly Outlin
         waterBody.name,
         `${waterBody.kind} / reflection ${waterBody.reflectionStatus.enabled ? "on" : "off"}`,
         state.dirtyState.dirtyWaterBodyIds.includes(waterBody.id),
+      ),
+    ),
+    ...state.lights.map((light) =>
+      toNode(
+        "light",
+        light.id,
+        light.name,
+        `${light.kind} / ${light.enabled ? "enabled" : "disabled"}`,
+        state.dirtyState.dirtyLightIds.includes(light.id),
       ),
     ),
     ...state.props.map((prop) => toNode("prop", prop.id, prop.name, `${prop.type} / ${prop.lodState}`, state.dirtyState.dirtyPropIds.includes(prop.id))),

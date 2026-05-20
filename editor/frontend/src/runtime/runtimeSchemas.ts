@@ -3,6 +3,7 @@ import type {
   BlockType,
   BlockAtlasMap,
   ChunkSummary,
+  LightInstance,
   PropInstance,
   PropStats,
   ProtectedArea,
@@ -11,6 +12,8 @@ import type {
   WaterReflectionDebugViewMode,
   WaterReflectionStatus,
   WaterRuntimeSnapshot,
+  TerrainPreviewResult,
+  TerrainRecipe,
 } from "../types/world";
 import type { ConsoleMessage, GraphicsCapabilities, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
 
@@ -25,6 +28,7 @@ export interface RuntimeCapabilities {
   readonly canRunWaterVisualProbe: boolean;
   readonly canEditAtlasMapping: boolean;
   readonly canEditProtectedAreas: boolean;
+  readonly canEditLights: boolean;
   readonly canSaveWorldSnapshot: boolean;
 }
 
@@ -50,6 +54,49 @@ export interface RuntimeAtlasMappingState {
 
 export type RuntimeViewportDebugState = ViewportOverlayState;
 export type RuntimeEditorDiagnosticsState = EditorDiagnosticsState;
+export type EditorCameraInteractionMode = "menu" | "movement";
+export type EditorCameraKind = "firstPerson" | "arcball";
+export type EditorCameraProjection = "perspective" | "orthographic";
+
+export interface EditorCameraPose {
+  readonly position: readonly [number, number, number];
+  readonly target: readonly [number, number, number];
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly roll: number;
+  readonly radius: number;
+  readonly fovDegrees: number;
+  readonly orthographicScale: number;
+}
+
+export interface EditorSavedCamera {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly cameraKind: EditorCameraKind;
+  readonly projection: EditorCameraProjection;
+  readonly pose: EditorCameraPose;
+  readonly alignToAxes: boolean;
+  readonly automaticAxis: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface EditorCameraState {
+  readonly interactionMode: EditorCameraInteractionMode;
+  readonly cameraKind: EditorCameraKind;
+  readonly projection: EditorCameraProjection;
+  readonly pose: EditorCameraPose;
+  readonly alignToAxes: boolean;
+  readonly automaticAxis: boolean;
+  readonly savedCameras: readonly EditorSavedCamera[];
+  readonly activeSavedCameraId?: string;
+}
+
+export interface EditorCameraTemplate {
+  readonly schema: "drusniel.camera-template.v1";
+  readonly cameras: readonly EditorSavedCamera[];
+}
 
 export type RuntimeChunkSummary = ChunkSummary;
 export type RuntimePropStats = PropStats;
@@ -73,7 +120,9 @@ export interface RuntimeSnapshot {
   readonly atlasMapping: RuntimeAtlasMappingState;
   readonly viewportDebug: RuntimeViewportDebugState;
   readonly editorDiagnostics: RuntimeEditorDiagnosticsState;
+  readonly editorCamera: EditorCameraState;
   readonly propStats: RuntimePropStats;
+  readonly lights: readonly LightInstance[];
   readonly timingSamples: readonly RuntimeRenderTimingSample[];
   readonly consoleEvents: readonly RuntimeConsoleEvent[];
   readonly capturedAt: string;
@@ -116,6 +165,19 @@ export interface RuntimeFocusCameraResult {
   readonly target: Selection | readonly [number, number, number];
 }
 
+export type RuntimeEditorCameraResult = EditorCameraState;
+
+export interface RuntimeSavedEditorCameraResult {
+  readonly camera: EditorSavedCamera;
+  readonly editorCamera: EditorCameraState;
+}
+
+export interface RuntimeDeleteSavedEditorCameraResult {
+  readonly cameraId: string;
+  readonly deleted: boolean;
+  readonly editorCamera: EditorCameraState;
+}
+
 export interface RuntimeChunkRebuildResult {
   readonly queuedChunkIds: readonly string[];
 }
@@ -149,6 +211,12 @@ export interface RuntimeRenderFeatureFlagResult {
   readonly enabled: boolean;
   readonly value: boolean | number;
   readonly metrics: Pick<RuntimeMetrics, "shadowBudget" | "ambientOcclusion" | "lightingAtmosphere" | "graphicsCapabilities" | "cinematicPhotoMode">;
+}
+
+export interface RuntimeAmbientLightMutationResult {
+  readonly color: string;
+  readonly brightness: number;
+  readonly metrics: Pick<RuntimeMetrics, "lightingAtmosphere">;
 }
 
 export interface RuntimeWaterBodyMutationResult {
@@ -199,6 +267,20 @@ export interface RuntimeProtectedAreaLoadResult {
   readonly areaCount: number;
 }
 
+export interface RuntimeLightMutationResult {
+  readonly light: LightInstance;
+}
+
+export interface RuntimeLightDeleteResult {
+  readonly lightId: string;
+  readonly deleted: boolean;
+}
+
+export interface RuntimeLightLoadResult {
+  readonly lights: readonly LightInstance[];
+  readonly lightCount: number;
+}
+
 export interface RuntimePropScatterResult {
   readonly props: readonly PropInstance[];
   readonly propStats: PropStats;
@@ -207,4 +289,11 @@ export interface RuntimePropScatterResult {
 export interface RuntimePropRemoveResult {
   readonly removedPropIds: readonly string[];
   readonly propStats: PropStats;
+}
+
+export type RuntimeTerrainPreviewResult = TerrainPreviewResult;
+
+export interface RuntimeTerrainRecipeState {
+  readonly recipe: TerrainRecipe;
+  readonly fingerprint: string;
 }

@@ -1,6 +1,7 @@
 import type {
   BlockAtlasMap,
   ChunkSummary,
+  LightInstance,
   MaterialAsset,
   PropAsset,
   PropInstance,
@@ -310,6 +311,47 @@ export const mockProps: readonly PropInstance[] = Array.from({ length: 40 }, (_,
     placementRules: buildPlacementRules(index, type),
   };
 });
+
+export const mockLights: readonly LightInstance[] = [
+  {
+    id: "sun",
+    name: "Sun",
+    kind: "directional",
+    enabled: true,
+    visible: true,
+    locked: true,
+    position: [0, 80, 0],
+    rotation: [-45, -35, 0],
+    color: "#fff8f0",
+    intensity: 5000,
+    range: 0,
+    radius: 0,
+    innerConeAngle: 0,
+    outerConeAngle: 0,
+    shadowsEnabled: true,
+    volumetric: true,
+    source: "sun",
+  },
+  {
+    id: "light-point-01",
+    name: "Point Light 01",
+    kind: "point",
+    enabled: true,
+    visible: true,
+    locked: false,
+    position: [74, 31, 88],
+    rotation: [0, 0, 0],
+    color: "#ffd6a3",
+    intensity: 900,
+    range: 24,
+    radius: 0.4,
+    innerConeAngle: 25,
+    outerConeAngle: 45,
+    shadowsEnabled: true,
+    volumetric: false,
+    source: "editor",
+  },
+];
 
 export const mockMaterials: readonly MaterialAsset[] = [
   { id: "mat-grass-block", name: "Grass Block", kind: "blocky", sourcePath: "assets/textures/blocks/grass.png" },
