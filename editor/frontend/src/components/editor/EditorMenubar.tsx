@@ -31,7 +31,7 @@ const menuItems = [
   { label: "Props", commandId: "editor.props.scatterOnSelection" },
   { label: "Materials", commandId: "editor.material.openTextureAtlas" },
   { label: "Water", commandId: "editor.water.openReflectionDebug" },
-  { label: "Tools", commandId: "editor.editTool.open" },
+  { label: "Tools", commandId: "editor.camera.open" },
   { label: "Atmosphere", commandId: "editor.lightAtmosphere.open" },
   { label: "Lighting", commandId: "editor.mode.lighting" },
   { label: "Agent", commandId: "editor.agent.observeScreen" },
