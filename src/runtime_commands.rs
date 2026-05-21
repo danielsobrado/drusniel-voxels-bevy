@@ -20,7 +20,9 @@ use crate::constants::CHUNK_SIZE_I32;
 use crate::editor_diagnostics::{
     EditorDiagnosticsCategory, EditorDiagnosticsState, normalize_editor_diagnostics_categories,
 };
-use crate::environment::{AtmosphereSettings, light_angles_from_direction};
+use crate::environment::{
+    AtmosphereSettings, DEFAULT_SUN_ILLUMINANCE, light_angles_from_direction,
+};
 use crate::interaction::{
     DebugDetailToggles, DebugOverlayState, SelectedBlock, SelectedProp, TargetedBlock,
 };
@@ -5049,7 +5051,7 @@ fn apply_light_preset(settings: &mut AtmosphereSettings, preset: LightPreset) {
         LightPreset::Sun => {
             settings.light_enabled = true;
             settings.light_color = Vec3::new(1.0, 0.98, 0.95);
-            settings.light_illuminance = 100_000.0;
+            settings.light_illuminance = DEFAULT_SUN_ILLUMINANCE;
             settings.light_azimuth_degrees = 0.0;
             settings.light_elevation_degrees = 70.0;
         }
@@ -5110,7 +5112,7 @@ fn apply_global_light_atmosphere_preset(
         GlobalLightAtmospherePreset::Neutral => {
             settings.light_enabled = true;
             settings.light_color = Vec3::ONE;
-            settings.light_illuminance = 100_000.0;
+            settings.light_illuminance = DEFAULT_SUN_ILLUMINANCE;
             settings.rayleigh = Vec3::ZERO;
             settings.mie = Vec3::ZERO;
             settings.atmosphere_amount = 0.0;
@@ -6256,6 +6258,28 @@ mod tests {
             world.resource::<LightAtmospherePresetState>().light_preset,
             LightPreset::NoneEmissivesOnly
         );
+    }
+
+    #[test]
+    fn sun_light_preset_uses_shared_editor_illuminance_default() {
+        let mut settings = AtmosphereSettings {
+            light_illuminance: 100_000.0,
+            ..default()
+        };
+
+        apply_light_preset(&mut settings, LightPreset::Sun);
+
+        assert_eq!(settings.light_illuminance, DEFAULT_SUN_ILLUMINANCE);
+    }
+
+    #[test]
+    fn neutral_global_preset_does_not_force_naadf_bright_sun() {
+        let mut settings = AtmosphereSettings::default();
+
+        apply_global_light_atmosphere_preset(&mut settings, GlobalLightAtmospherePreset::Neutral);
+
+        assert_eq!(settings.light_illuminance, DEFAULT_SUN_ILLUMINANCE);
+        assert_eq!(settings.atmosphere_amount, 0.0);
     }
 
     #[test]

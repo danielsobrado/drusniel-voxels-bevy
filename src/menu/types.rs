@@ -594,7 +594,7 @@ pub struct VisualSettings {
     pub highlights_gain: f32,
     /// Sun warmth (0.0 to 1.0, affects sun color)
     pub sun_warmth: f32,
-    /// Sun illuminance (5000 to 50000 lux)
+    /// Sun illuminance (5000 to 100000 lux)
     pub illuminance: f32,
     /// Skybox brightness (1000 to 10000)
     pub skybox_brightness: f32,
@@ -609,7 +609,7 @@ impl Default for VisualSettings {
             gamma: 0.95,
             highlights_gain: 0.9,
             sun_warmth: 0.05,
-            illuminance: 100_000.0,
+            illuminance: crate::environment::DEFAULT_SUN_ILLUMINANCE,
             skybox_brightness: 1000.0,
         }
     }

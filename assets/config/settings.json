@@ -35,7 +35,7 @@
     "gamma": 0.95,
     "highlights_gain": 0.9,
     "sun_warmth": 0.05,
-    "illuminance": 100000.0,
+    "illuminance": 5000.0,
     "skybox_brightness": 1000.0
   },
   "fog": {

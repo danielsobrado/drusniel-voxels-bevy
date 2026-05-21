@@ -11,6 +11,8 @@ use crate::atmosphere::AtmosphereConfig;
 use crate::constants::WATER_LEVEL;
 use crate::rendering::capabilities::GraphicsCapabilities;
 
+pub const DEFAULT_SUN_ILLUMINANCE: f32 = 5_000.0;
+
 /// Settings that drive the sky and sun animation
 #[derive(Resource, Clone)]
 pub struct AtmosphereSettings {
@@ -72,7 +74,7 @@ impl Default for AtmosphereSettings {
             light_azimuth_degrees: 0.0,
             light_elevation_degrees: 70.0,
             light_color: Vec3::new(1.0, 0.98, 0.95),
-            light_illuminance: 100_000.0,
+            light_illuminance: DEFAULT_SUN_ILLUMINANCE,
             atmosphere_amount: 1.0,
             atmosphere_half_length: 220.0,
         }
@@ -184,9 +186,8 @@ fn setup_atmosphere(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.98, 0.95), // Slightly warm white sun
-            // Lux-ish values intended for Bevy's HDR + Exposure pipeline.
-            // Tuned for balanced color rendering
-            illuminance: 100_000.0,
+            // Tuned for the shared terrain PBR and editor viewport exposure.
+            illuminance: DEFAULT_SUN_ILLUMINANCE,
             shadows_enabled: true,
             shadow_depth_bias: 0.04,
             shadow_normal_bias: 1.8,
