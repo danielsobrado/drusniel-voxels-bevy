@@ -21,6 +21,7 @@ import type {
 } from "../types/editor";
 import type { AgentObservation, AgentTimelineEvent, ConsoleMessage, RuntimeMetrics } from "../types/runtime";
 import type { AtlasBlockType, AtlasMapping, BlockAtlasMap, BlockType, ChunkSummary, LightInstance, MaterialAsset, PropAsset, PropInstance, ProtectedArea, ViewportSnapshot, VoxelBlock, WaterBody, WaterReflectionStatus, WaterRuntimeSnapshot, WorldViewportPreview } from "../types/world";
+import { createDefaultEditorCameraState } from "../runtime/defaultEditorCamera";
 import type { EditorCameraState } from "../runtime/runtimeSchemas";
 
 type OutlinerNodeKey = `${Selection["kind"]}:${string}`;
@@ -355,25 +356,6 @@ const defaultWaterRuntimeSnapshot: WaterRuntimeSnapshot = {
   },
 };
 
-const defaultEditorCamera: EditorCameraState = {
-  interactionMode: "menu",
-  cameraKind: "firstPerson",
-  projection: "perspective",
-  pose: {
-    position: [96, 80, 96],
-    target: [64, 48, 64],
-    yaw: -Math.PI / 4,
-    pitch: -0.45,
-    roll: 0,
-    radius: 64,
-    fovDegrees: 70,
-    orthographicScale: 96,
-  },
-  alignToAxes: false,
-  automaticAxis: true,
-  savedCameras: [],
-};
-
 const defaultRuntimeMetrics: RuntimeMetrics = {
   fps: 0,
   frameMs: 0,
@@ -500,14 +482,14 @@ export const createInitialEditorState = (): EditorDataState => ({
   brushSettings: {
     radius: 4,
     strength: 0.75,
-    materialBlockId: "grass",
+    materialBlockId: "topSoil",
     falloff: "smooth",
     action: "set",
     brushShape: "box",
     size: [3, 3, 3],
     continuous: false,
     mask: "any",
-    maskBlockId: "grass",
+    maskBlockId: "topSoil",
     targetFace: "all",
   },
   viewportOverlays: {
@@ -521,7 +503,7 @@ export const createInitialEditorState = (): EditorDataState => ({
     atlasPreview: false,
     wireframe: false,
   },
-  editorCamera: cloneEditorValue(defaultEditorCamera),
+  editorCamera: createDefaultEditorCameraState(),
   runtimeState: "disconnected",
   renderQualityPreset: "High",
   selectedAtlasTileId: "",

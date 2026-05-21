@@ -319,11 +319,7 @@ fn model_voxels_to_world_data(voxels: &[ModelVoxel]) -> Result<WorldData, VoxelM
                     .unwrap_or([VoxelType::Air; CHUNK_VOLUME]);
                 chunks.push(ChunkData {
                     voxels: voxels.to_vec(),
-                    material_ids: voxels
-                        .iter()
-                        .copied()
-                        .map(crate::voxel::materials::MaterialId::from_voxel)
-                        .collect(),
+                    material_overrides: Vec::new(),
                     position,
                     face_visibility: Default::default(),
                 });

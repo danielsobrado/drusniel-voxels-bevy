@@ -4,6 +4,7 @@ use crate::voxel::skirt::ChunkFace;
 use crate::voxel::types::VoxelType;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ============================================================================
 // Face Visibility (for occlusion culling)
@@ -115,11 +116,17 @@ impl FaceVisibility {
 pub struct ChunkData {
     pub voxels: Vec<VoxelType>,
     #[serde(default)]
-    pub material_ids: Vec<MaterialId>,
+    pub material_overrides: Vec<MaterialOverrideData>,
     pub position: IVec3,
     /// Face visibility mask for occlusion culling (optional for backwards compat).
     #[serde(default)]
     pub face_visibility: FaceVisibility,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaterialOverrideData {
+    pub index: u16,
+    pub material_id: MaterialId,
 }
 
 /// Represents the uniformity state of a chunk's voxels.
@@ -192,7 +199,7 @@ impl LodLevel {
 
 pub struct Chunk {
     voxels: [VoxelType; CHUNK_VOLUME],
-    material_ids: [MaterialId; CHUNK_VOLUME],
+    material_overrides: HashMap<u16, MaterialId>,
     dirty: bool,
     dirty_reasons: u8,
     mesh_entity: Option<Entity>,
@@ -234,7 +241,7 @@ impl Chunk {
     pub fn new(position: IVec3) -> Self {
         Self {
             voxels: [VoxelType::Air; CHUNK_VOLUME],
-            material_ids: [MaterialId::AIR; CHUNK_VOLUME],
+            material_overrides: HashMap::new(),
             dirty: true,
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
@@ -252,10 +259,9 @@ impl Chunk {
 
     pub fn with_voxels(position: IVec3, voxels: [VoxelType; CHUNK_VOLUME]) -> Self {
         let uniformity = Self::compute_uniformity_for(&voxels);
-        let material_ids = voxels.map(MaterialId::from_voxel);
         Self {
             voxels,
-            material_ids,
+            material_overrides: HashMap::new(),
             dirty: true,
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
@@ -293,7 +299,10 @@ impl Chunk {
             local
         );
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
-        self.material_ids[index]
+        self.material_overrides
+            .get(&(index as u16))
+            .copied()
+            .unwrap_or_else(|| MaterialId::from_voxel(self.voxels[index]))
     }
 
     /// Gets the voxel at the given local coordinates, returning None if out of bounds.
@@ -322,7 +331,7 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
-            self.material_ids[index] = MaterialId::from_voxel(voxel);
+            self.material_overrides.remove(&(index as u16));
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
@@ -341,7 +350,7 @@ impl Chunk {
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
         if self.voxels[index] != voxel {
             self.voxels[index] = voxel;
-            self.material_ids[index] = MaterialId::from_voxel(voxel);
+            self.material_overrides.remove(&(index as u16));
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
@@ -359,11 +368,29 @@ impl Chunk {
             local
         );
         let index = Self::index(local.x as usize, local.y as usize, local.z as usize);
-        if self.material_ids[index] == material_id {
+        debug_assert!(
+            self.voxels[index] != VoxelType::Air,
+            "Chunk::set_material_id called for an air voxel at {:?}",
+            local
+        );
+        if self.voxels[index] == VoxelType::Air {
+            return false;
+        }
+        let default_material = MaterialId::from_voxel(self.voxels[index]);
+        let current = self
+            .material_overrides
+            .get(&(index as u16))
+            .copied()
+            .unwrap_or(default_material);
+        if current == material_id {
             return false;
         }
 
-        self.material_ids[index] = material_id;
+        if material_id == default_material {
+            self.material_overrides.remove(&(index as u16));
+        } else {
+            self.material_overrides.insert(index as u16, material_id);
+        }
         self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
         true
     }
@@ -480,16 +507,17 @@ impl Chunk {
     }
 
     pub fn iter_materials(&self) -> impl Iterator<Item = (UVec3, VoxelType, MaterialId)> + '_ {
-        self.voxels
-            .iter()
-            .zip(self.material_ids.iter())
-            .enumerate()
-            .map(|(i, (&voxel, &material_id))| {
-                let x = i % CHUNK_SIZE;
-                let y = (i / CHUNK_SIZE) % CHUNK_SIZE;
-                let z = i / (CHUNK_SIZE * CHUNK_SIZE);
-                (UVec3::new(x as u32, y as u32, z as u32), voxel, material_id)
-            })
+        self.voxels.iter().enumerate().map(|(i, &voxel)| {
+            let x = i % CHUNK_SIZE;
+            let y = (i / CHUNK_SIZE) % CHUNK_SIZE;
+            let z = i / (CHUNK_SIZE * CHUNK_SIZE);
+            let material_id = self
+                .material_overrides
+                .get(&(i as u16))
+                .copied()
+                .unwrap_or_else(|| MaterialId::from_voxel(voxel));
+            (UVec3::new(x as u32, y as u32, z as u32), voxel, material_id)
+        })
     }
 
     /// Returns an iterator over all non-air voxels with their local coordinates.
@@ -501,7 +529,7 @@ impl Chunk {
     pub fn to_data(&self) -> ChunkData {
         ChunkData {
             voxels: self.voxels.to_vec(),
-            material_ids: self.material_ids.to_vec(),
+            material_overrides: self.serialized_material_overrides(),
             position: self.position,
             face_visibility: self.face_visibility,
         }
@@ -515,17 +543,26 @@ impl Chunk {
                 voxels[i] = v;
             }
         }
-        let mut material_ids = voxels.map(MaterialId::from_voxel);
-        for (i, material_id) in data.material_ids.into_iter().enumerate() {
-            if i < CHUNK_VOLUME {
-                material_ids[i] = material_id;
+        let mut material_overrides = HashMap::new();
+        for override_data in data.material_overrides {
+            let index = override_data.index as usize;
+            if index >= CHUNK_VOLUME {
+                continue;
+            }
+            let voxel = voxels[index];
+            if voxel == VoxelType::Air {
+                continue;
+            }
+            let default_material = MaterialId::from_voxel(voxel);
+            if override_data.material_id != default_material {
+                material_overrides.insert(override_data.index, override_data.material_id);
             }
         }
         // If face_visibility is default (0), mark as dirty to recompute
         let visibility_dirty = data.face_visibility.0 == 0;
         Self {
             voxels,
-            material_ids,
+            material_overrides,
             dirty: true, // Mark dirty so mesh gets generated
             dirty_reasons: MeshDirtyReason::Generation.bit(),
             mesh_entity: None,
@@ -537,6 +574,49 @@ impl Chunk {
             face_visibility: data.face_visibility,
             visibility_dirty,
         }
+    }
+
+    pub fn data_from_legacy_material_ids(
+        voxels: Vec<VoxelType>,
+        material_ids: Vec<MaterialId>,
+        position: IVec3,
+        face_visibility: FaceVisibility,
+    ) -> ChunkData {
+        let material_overrides = material_ids
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, material_id)| {
+                let voxel = voxels.get(index).copied().unwrap_or(VoxelType::Air);
+                (index < CHUNK_VOLUME
+                    && voxel != VoxelType::Air
+                    && material_id != MaterialId::from_voxel(voxel))
+                .then_some(MaterialOverrideData {
+                    index: index as u16,
+                    material_id,
+                })
+            })
+            .collect();
+
+        ChunkData {
+            voxels,
+            material_overrides,
+            position,
+            face_visibility,
+        }
+    }
+
+    fn serialized_material_overrides(&self) -> Vec<MaterialOverrideData> {
+        let mut entries = self
+            .material_overrides
+            .iter()
+            .filter_map(|(&index, &material_id)| {
+                let voxel = self.voxels[index as usize];
+                (voxel != VoxelType::Air && material_id != MaterialId::from_voxel(voxel))
+                    .then_some(MaterialOverrideData { index, material_id })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.index);
+        entries
     }
 
     // =========================================================================
@@ -648,5 +728,88 @@ impl Chunk {
     #[inline]
     pub fn clear_visibility_dirty(&mut self) {
         self.visibility_dirty = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_materials_do_not_serialize_overrides() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        let local = UVec3::new(1, 2, 3);
+
+        chunk.set(local, VoxelType::Rock);
+        assert_eq!(
+            chunk.get_material_id(local),
+            MaterialId::from_voxel(VoxelType::Rock)
+        );
+
+        let data = chunk.to_data();
+        assert!(data.material_overrides.is_empty());
+    }
+
+    #[test]
+    fn custom_materials_serialize_sparse_overrides() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        let local = UVec3::new(1, 2, 3);
+
+        chunk.set(local, VoxelType::Rock);
+        assert!(chunk.set_material_id(local, MaterialId(6)));
+
+        let data = chunk.to_data();
+        assert_eq!(data.material_overrides.len(), 1);
+        assert_eq!(
+            data.material_overrides[0],
+            MaterialOverrideData {
+                index: Chunk::index(1, 2, 3) as u16,
+                material_id: MaterialId(6),
+            }
+        );
+
+        let restored = Chunk::from_data(data);
+        assert_eq!(restored.get(local), VoxelType::Rock);
+        assert_eq!(restored.get_material_id(local), MaterialId(6));
+    }
+
+    #[test]
+    fn setting_voxel_resets_material_override_to_voxel_default() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        let local = UVec3::new(1, 2, 3);
+
+        chunk.set(local, VoxelType::Rock);
+        assert!(chunk.set_material_id(local, MaterialId(6)));
+        chunk.set(local, VoxelType::Sand);
+
+        assert_eq!(
+            chunk.get_material_id(local),
+            MaterialId::from_voxel(VoxelType::Sand)
+        );
+        assert!(chunk.to_data().material_overrides.is_empty());
+    }
+
+    #[test]
+    fn legacy_material_ids_convert_to_only_non_default_overrides() {
+        let mut voxels = vec![VoxelType::Air; CHUNK_VOLUME];
+        let index = Chunk::index(1, 2, 3);
+        voxels[index] = VoxelType::Rock;
+        let mut material_ids = voxels
+            .iter()
+            .copied()
+            .map(MaterialId::from_voxel)
+            .collect::<Vec<_>>();
+        material_ids[index] = MaterialId(6);
+
+        let data = Chunk::data_from_legacy_material_ids(
+            voxels,
+            material_ids,
+            IVec3::ZERO,
+            FaceVisibility::default(),
+        );
+
+        assert_eq!(data.material_overrides.len(), 1);
+        assert_eq!(data.material_overrides[0].index, index as u16);
+        assert_eq!(data.material_overrides[0].material_id, MaterialId(6));
     }
 }

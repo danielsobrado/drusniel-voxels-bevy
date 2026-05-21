@@ -678,6 +678,7 @@ fn frontend_materials_payload(world: &World) -> Vec<Value> {
         .map(|material| {
             json!({
                 "id": format!("mat-{}", material.id.0),
+                "numericId": material.id.0,
                 "name": material.name,
                 "kind": if material.material_type_id == "water" { "water" } else { "blocky" },
                 "sourcePath": format!("runtime/materials/{}", material.id.0),

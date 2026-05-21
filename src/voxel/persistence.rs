@@ -18,7 +18,8 @@
 //! present in the chunk voxel data.
 
 use crate::constants::{CHUNK_SIZE_I32, CHUNK_VOLUME};
-use crate::voxel::chunk::ChunkData;
+use crate::voxel::chunk::{Chunk, ChunkData};
+use crate::voxel::materials::MaterialId;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
@@ -95,6 +96,23 @@ struct LegacyWorldData {
     pub chunks: Vec<LegacyChunkData>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct LegacyMaterialIdsWorldData {
+    pub world_size_chunks: IVec3,
+    pub terrain_config_fingerprint: u64,
+    pub chunks: Vec<LegacyMaterialIdsChunkData>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct LegacyMaterialIdsChunkData {
+    pub voxels: Vec<VoxelType>,
+    #[serde(default)]
+    pub material_ids: Vec<MaterialId>,
+    pub position: IVec3,
+    #[serde(default)]
+    pub face_visibility: crate::voxel::chunk::FaceVisibility,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct LegacyChunkData {
     pub voxels: Vec<VoxelType>,
@@ -112,15 +130,31 @@ impl From<LegacyWorldData> for WorldData {
                 .chunks
                 .into_iter()
                 .map(|chunk| ChunkData {
-                    material_ids: chunk
-                        .voxels
-                        .iter()
-                        .copied()
-                        .map(crate::voxel::materials::MaterialId::from_voxel)
-                        .collect(),
                     voxels: chunk.voxels,
+                    material_overrides: Vec::new(),
                     position: chunk.position,
                     face_visibility: chunk.face_visibility,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<LegacyMaterialIdsWorldData> for WorldData {
+    fn from(data: LegacyMaterialIdsWorldData) -> Self {
+        Self {
+            world_size_chunks: data.world_size_chunks,
+            terrain_config_fingerprint: data.terrain_config_fingerprint,
+            chunks: data
+                .chunks
+                .into_iter()
+                .map(|chunk| {
+                    Chunk::data_from_legacy_material_ids(
+                        chunk.voxels,
+                        chunk.material_ids,
+                        chunk.position,
+                        chunk.face_visibility,
+                    )
                 })
                 .collect(),
         }
@@ -298,10 +332,18 @@ pub fn read_world_data_from_path(path: impl AsRef<Path>) -> Result<WorldData, Pe
                 source: e,
             })?;
             let reader = BufReader::new(file);
-            match bincode::deserialize_from::<_, LegacyWorldData>(reader) {
-                Ok(data) => Ok(data.into()),
-                Err(_) => Err(PersistenceError::Serialization(new_format_error)),
+            if let Ok(data) = bincode::deserialize_from::<_, LegacyMaterialIdsWorldData>(reader) {
+                return Ok(data.into());
             }
+
+            let file = File::open(path).map_err(|e| PersistenceError::FileAccess {
+                path: path_string.clone(),
+                source: e,
+            })?;
+            let reader = BufReader::new(file);
+            bincode::deserialize_from::<_, LegacyWorldData>(reader)
+                .map(Into::into)
+                .map_err(|_| PersistenceError::Serialization(new_format_error))
         }
     }
 }
@@ -310,9 +352,14 @@ pub fn read_world_data_from_path(path: impl AsRef<Path>) -> Result<WorldData, Pe
 pub fn read_world_data_from_bytes(bytes: &[u8]) -> Result<WorldData, PersistenceError> {
     match bincode::deserialize(bytes) {
         Ok(data) => Ok(data),
-        Err(new_format_error) => bincode::deserialize::<LegacyWorldData>(bytes)
-            .map(Into::into)
-            .map_err(|_| PersistenceError::Serialization(new_format_error)),
+        Err(new_format_error) => {
+            if let Ok(data) = bincode::deserialize::<LegacyMaterialIdsWorldData>(bytes) {
+                return Ok(data.into());
+            }
+            bincode::deserialize::<LegacyWorldData>(bytes)
+                .map(Into::into)
+                .map_err(|_| PersistenceError::Serialization(new_format_error))
+        }
     }
 }
 

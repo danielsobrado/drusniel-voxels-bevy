@@ -472,13 +472,7 @@ pub fn update_camera_skybox_from_atmosphere(
         return;
     }
 
-    let altitude = if atmosphere.cycle_enabled {
-        let phase = atmosphere.time / atmosphere.day_length;
-        let theta = phase * std::f32::consts::TAU;
-        theta.sin()
-    } else {
-        1.0
-    };
+    let (_, altitude) = atmosphere.sun_direction_and_altitude();
 
     let daylight = smoothstep(-0.1, 0.25, altitude);
     let skybox_brightness = lerp(1500.0, 6000.0, daylight);

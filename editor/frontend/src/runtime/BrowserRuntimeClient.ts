@@ -348,6 +348,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
     });
   }
 
+  async getMaterialReplaceJob(jobId: string): Promise<RuntimeCommandResult<RuntimeMaterialReplaceResult>> {
+    return this.execute({
+      type: "runtime.getMaterialReplaceJob",
+      requestId: makeRequestId("runtime.getMaterialReplaceJob"),
+      payload: { jobId },
+    });
+  }
+
   async updateMaterial(materialId: string, patch: MaterialPatch): Promise<RuntimeCommandResult<RuntimeMaterialMutationResult>> {
     return this.execute({
       type: "runtime.updateMaterial",

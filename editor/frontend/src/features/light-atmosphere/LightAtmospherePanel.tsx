@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { CloudFog, Download, Moon, Sparkles, Sun, Upload } from "lucide-react";
 import { useEditorClients } from "../../app/providers";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
@@ -7,6 +8,7 @@ import type { AtmospherePreset, GlobalLightAtmospherePreset, LightAtmospherePatc
 import type { LightAtmosphereTemplate } from "../../runtime/runtimeSchemas";
 
 const defaultSettings: LightAtmosphereSettings = {
+  cycleEnabled: false,
   lightEnabled: true,
   lightPreset: "sun",
   atmospherePreset: "hazy",
@@ -64,11 +66,13 @@ export function LightAtmospherePanel() {
   const runtimeMetrics = useEditorStore((state) => state.runtimeMetrics);
   const [settings, setSettings] = useState<LightAtmosphereSettings>(runtimeMetrics.lightingAtmosphere.settings ?? defaultSettings);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastMutationSeqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const requestSeq = lastMutationSeqRef.current;
     void runtimeClient.getLightAtmosphere().then((result) => {
-      if (result.ok && !cancelled) {
+      if (result.ok && !cancelled && requestSeq === lastMutationSeqRef.current) {
         setSettings(result.data);
       }
     });
@@ -91,9 +95,12 @@ export function LightAtmospherePanel() {
   }, [settings.atmosphereAmount, settings.atmosphereHalfLength]);
 
   const applyPatch = async (patch: LightAtmospherePatch) => {
-    const optimistic = { ...settings, ...patch };
-    setSettings(optimistic);
+    const mutationSeq = lastMutationSeqRef.current + 1;
+    lastMutationSeqRef.current = mutationSeq;
     const result = await runtimeClient.updateLightAtmosphere(patch);
+    if (mutationSeq !== lastMutationSeqRef.current) {
+      return;
+    }
     if (result.ok) {
       setSettings(result.data.settings);
       useEditorStore.setState((state) => ({
@@ -127,19 +134,30 @@ export function LightAtmospherePanel() {
     if (!file) {
       return;
     }
-    void file.text().then(async (text) => {
-      const template = JSON.parse(text) as LightAtmosphereTemplate;
-      const result = await runtimeClient.importLightAtmosphereTemplate(template);
-      if (result.ok) {
-        setSettings(result.data.settings);
-        useEditorStore.setState((state) => ({
-          runtimeMetrics: {
-            ...state.runtimeMetrics,
-            lightingAtmosphere: result.data.metrics.lightingAtmosphere,
-          },
-        }));
+    void (async () => {
+      try {
+        const template = JSON.parse(await file.text()) as LightAtmosphereTemplate;
+        const mutationSeq = lastMutationSeqRef.current + 1;
+        lastMutationSeqRef.current = mutationSeq;
+        const result = await runtimeClient.importLightAtmosphereTemplate(template);
+        if (mutationSeq !== lastMutationSeqRef.current) {
+          return;
+        }
+        if (result.ok) {
+          setSettings(result.data.settings);
+          useEditorStore.setState((state) => ({
+            runtimeMetrics: {
+              ...state.runtimeMetrics,
+              lightingAtmosphere: result.data.metrics.lightingAtmosphere,
+            },
+          }));
+        } else {
+          toast.error(result.message);
+        }
+      } catch (error) {
+        toast.error(error instanceof SyntaxError ? "Template JSON is malformed." : "Template could not be loaded.");
       }
-    });
+    })();
   };
 
   return (

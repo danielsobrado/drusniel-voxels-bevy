@@ -166,13 +166,21 @@ impl Default for MaterialCatalog {
             material_type("dungeon", "Dungeon", &[10, 11]),
         ];
 
+        let default_palette_material_ids = materials
+            .iter()
+            .filter(|material| {
+                material.id != MaterialId::AIR && material.default_voxel != VoxelType::Bedrock
+            })
+            .map(|material| material.id)
+            .collect();
+
         Self {
             material_types,
             materials,
             palettes: vec![MaterialPaletteDefinition {
                 id: "default".to_string(),
                 name: "Default".to_string(),
-                material_ids: (1..=11).map(MaterialId).collect(),
+                material_ids: default_palette_material_ids,
             }],
             active_material_id: MaterialId(1),
         }
@@ -217,6 +225,19 @@ pub struct MaterialReplaceSummary {
     pub no_change: u64,
     pub skipped: u64,
     pub dirty_chunks: Vec<IVec3>,
+}
+
+impl MaterialReplaceSummary {
+    pub fn merge(&mut self, other: Self) {
+        self.changed += other.changed;
+        self.no_change += other.no_change;
+        self.skipped += other.skipped;
+        for chunk_pos in other.dirty_chunks {
+            if !self.dirty_chunks.contains(&chunk_pos) {
+                self.dirty_chunks.push(chunk_pos);
+            }
+        }
+    }
 }
 
 fn material(

@@ -1,4 +1,4 @@
-import type { BlockType } from "./world";
+import type { CanonicalBlockType } from "./world";
 
 export const EDITOR_MODES = [
   "select",
@@ -60,14 +60,14 @@ export type Selection =
 export interface BrushSettings {
   readonly radius: number;
   readonly strength: number;
-  readonly materialBlockId: BlockType;
+  readonly materialBlockId: CanonicalBlockType;
   readonly falloff: "linear" | "smooth" | "constant";
   readonly action: "set" | "delete" | "paint";
   readonly brushShape: "single" | "box" | "sphere" | "cylinder";
   readonly size: [number, number, number];
   readonly continuous: boolean;
   readonly mask: "any" | "empty" | "occupied" | "material";
-  readonly maskBlockId: BlockType;
+  readonly maskBlockId: CanonicalBlockType;
   readonly targetFace: "top" | "side" | "bottom" | "all";
 }
 

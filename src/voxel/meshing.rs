@@ -908,9 +908,8 @@ fn water_meshing_voxel_at(world: &VoxelWorld, world_pos: IVec3) -> VoxelType {
 }
 
 #[inline]
-fn terrain_meshing_voxel_in_chunk(chunk: &Chunk, world: &VoxelWorld, local: UVec3) -> VoxelType {
-    let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
-    terrain_meshing_voxel_at(world, world_pos)
+fn terrain_meshing_voxel_in_chunk(chunk: &Chunk, _world: &VoxelWorld, local: UVec3) -> VoxelType {
+    chunk.get(local)
 }
 
 #[inline]
@@ -931,12 +930,15 @@ fn terrain_meshing_material_at(
 #[inline]
 fn terrain_meshing_material_in_chunk(
     chunk: &Chunk,
-    world: &VoxelWorld,
+    _world: &VoxelWorld,
     local: UVec3,
     fallback_voxel: VoxelType,
 ) -> MaterialId {
-    let world_pos = VoxelWorld::chunk_to_world(chunk.position()) + local.as_ivec3();
-    terrain_meshing_material_at(world, world_pos, fallback_voxel)
+    if chunk.get(local) == fallback_voxel {
+        chunk.get_material_id(local)
+    } else {
+        MaterialId::from_voxel(fallback_voxel)
+    }
 }
 
 #[inline]

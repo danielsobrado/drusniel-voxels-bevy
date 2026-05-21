@@ -2,9 +2,9 @@ import { Box, Circle, Eraser, Paintbrush, Pencil, Square } from "lucide-react";
 import { PanelTitleBar } from "../../components/editor/PanelTitleBar";
 import { useEditorStore } from "../../state/editorStore";
 import type { BrushSettings } from "../../types/editor";
-import type { BlockType } from "../../types/world";
+import type { CanonicalBlockType } from "../../types/world";
 
-const materialOptions: readonly { readonly value: BlockType; readonly label: string; readonly color: string }[] = [
+const materialOptions: readonly { readonly value: CanonicalBlockType; readonly label: string; readonly color: string }[] = [
   { value: "topSoil", label: "Top Soil", color: "#4d8f4e" },
   { value: "subSoil", label: "Sub Soil", color: "#80613c" },
   { value: "rock", label: "Rock", color: "#7f8792" },
@@ -146,7 +146,7 @@ export function EditToolPanel() {
           </label>
           <label className="toolbar-field">
             Mask material
-            <select value={brush.maskBlockId} disabled={brush.mask !== "material"} onChange={(event) => updateBrushSettings({ maskBlockId: event.target.value as BlockType })}>
+            <select value={brush.maskBlockId} disabled={brush.mask !== "material"} onChange={(event) => updateBrushSettings({ maskBlockId: event.target.value as CanonicalBlockType })}>
               {materialOptions.map((material) => (
                 <option key={material.value} value={material.value}>
                   {material.label}

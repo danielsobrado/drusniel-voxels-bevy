@@ -86,7 +86,11 @@ impl AtmosphereSettings {
 
     pub fn sun_direction_and_altitude(&self) -> (Vec3, f32) {
         if self.cycle_enabled {
-            let phase = self.time / self.day_length.max(f32::EPSILON);
+            let phase = if self.day_length <= f32::EPSILON {
+                0.25
+            } else {
+                (self.time / self.day_length).rem_euclid(1.0)
+            };
             let theta = phase * std::f32::consts::TAU;
             let altitude = theta.sin();
             let azimuth = theta.cos();

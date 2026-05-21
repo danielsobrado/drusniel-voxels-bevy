@@ -4,6 +4,7 @@ import type { EditorDiagnosticsCategory, EditorDiagnosticsState, RenderQualityPr
 import type { LightAtmospherePatch, LightAtmosphereSettings, RuntimeMetrics, RenderFeatureFlag } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, LightInstance, MaterialCatalog, MaterialPatch, PropInstance, ProtectedArea, TerrainGenerationConfig, TerrainPreviewRequest, TerrainPreviewSample, TerrainRecipe, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
+import { createDefaultEditorCameraState } from "./defaultEditorCamera";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraState, EditorCameraTemplate, LightAtmosphereTemplate, RuntimeConnectionState, RuntimeProtectedAreaConflict, RuntimeSnapshot, RuntimeVoxelBrushRequest } from "./runtimeSchemas";
 import { runtimeCommandSuccess } from "./runtimeSchemas";
@@ -136,18 +137,8 @@ const blockRuntimeName = (block: BlockType): string => {
   }
 };
 
-const defaultEditorCameraPose: EditorCameraPose = {
-  position: [96, 80, 96],
-  target: [64, 48, 64],
-  yaw: -Math.PI / 4,
-  pitch: -0.45,
-  roll: 0,
-  radius: 64,
-  fovDegrees: 70,
-  orthographicScale: 96,
-};
-
 const defaultLightAtmosphereSettings: LightAtmosphereSettings = {
+  cycleEnabled: false,
   lightEnabled: true,
   lightPreset: "sun",
   atmospherePreset: "hazy",
@@ -191,15 +182,7 @@ export class MockRuntimeClient implements RuntimeClient {
     enabled: false,
     categories: ["nativeViewport", "frontend", "input", "selection", "hover", "highlight", "runtime"],
   };
-  private editorCamera: EditorCameraState = {
-    interactionMode: "menu",
-    cameraKind: "firstPerson",
-    projection: "perspective",
-    pose: defaultEditorCameraPose,
-    alignToAxes: false,
-    automaticAxis: true,
-    savedCameras: [],
-  };
+  private editorCamera: EditorCameraState = createDefaultEditorCameraState();
   private readonly handlers = new Set<RuntimeEventHandler>();
 
   getConnectionState(): RuntimeConnectionState {
@@ -661,6 +644,28 @@ export class MockRuntimeClient implements RuntimeClient {
       noChangeCount: 0,
       skippedCount: 0,
       dirtyChunkIds: ["chunk-0-0-0"],
+      mode: "completed" as const,
+      completed: true,
+      processedChunks: 1,
+      totalChunks: 1,
+    });
+  }
+
+  async getMaterialReplaceJob(jobId: string) {
+    const toMaterial = this.materialCatalog.materials.find((material) => material.id === this.materialCatalog.activeMaterialId) ?? this.materialCatalog.materials[0];
+    return runtimeCommandSuccess({
+      fromMaterialId: "mat-1",
+      toMaterialId: toMaterial.id,
+      toMaterial,
+      changedCount: 12,
+      noChangeCount: 0,
+      skippedCount: 0,
+      dirtyChunkIds: [],
+      mode: "completed" as const,
+      completed: true,
+      processedChunks: 1,
+      totalChunks: 1,
+      jobId,
     });
   }
 
@@ -674,6 +679,7 @@ export class MockRuntimeClient implements RuntimeClient {
     return runtimeCommandSuccess({
       material: updated,
       catalog: this.materialCatalog,
+      dirtyChunkIds: ["chunk-0-0-0"],
     });
   }
 
@@ -709,7 +715,8 @@ export class MockRuntimeClient implements RuntimeClient {
       skippedCount: 0,
       affectedCount: 1,
       dirtyChunkIds: [result.chunkId],
-      results: [result],
+      sampledResult: result,
+      results: brush.includeResults ? [result] : [],
     });
   }
 

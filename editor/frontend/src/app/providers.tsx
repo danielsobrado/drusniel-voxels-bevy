@@ -4,6 +4,7 @@ import { BrowserEditorBackendClient } from "../backend/BrowserEditorBackendClien
 import type { EditorBackendClient } from "../backend/EditorBackendClient";
 import type { RuntimeClient } from "../runtime/RuntimeClient";
 import { BrowserRuntimeClient, hasBrowserRuntimeBridge, type RuntimeBridge } from "../runtime/BrowserRuntimeClient";
+import { createDefaultEditorCameraState } from "../runtime/defaultEditorCamera";
 import type { EditorCameraState } from "../runtime/runtimeSchemas";
 import { runtimeCommandFailure, runtimeCommandSuccess } from "../runtime/runtimeSchemas";
 
@@ -16,24 +17,7 @@ const EditorClientsContext = createContext<EditorClients | null>(null);
 
 const runtimeUnavailableBridge = (): RuntimeBridge => {
   let cameraSequence = 0;
-  let editorCamera: EditorCameraState = {
-    interactionMode: "menu",
-    cameraKind: "firstPerson",
-    projection: "perspective",
-    pose: {
-      position: [96, 80, 96],
-      target: [0, 0, 0],
-      yaw: -Math.PI / 4,
-      pitch: -0.45,
-      roll: 0,
-      radius: 64,
-      fovDegrees: 60,
-      orthographicScale: 32,
-    },
-    alignToAxes: false,
-    automaticAxis: true,
-    savedCameras: [],
-  };
+  let editorCamera: EditorCameraState = createDefaultEditorCameraState();
   const unavailable = async () =>
     ({
       status: "runtime_unavailable" as const,
@@ -68,7 +52,7 @@ const runtimeUnavailableBridge = (): RuntimeBridge => {
       }
       if (request.type === "runtime.stepSavedEditorCamera") {
         if (editorCamera.savedCameras.length === 0) {
-          return runtimeCommandFailure("validation_error", "No saved cameras exist.");
+          return runtimeCommandFailure("failure", "No saved cameras exist.", { code: "NO_SAVED_CAMERAS" });
         }
         const currentIndex = Math.max(0, editorCamera.savedCameras.findIndex((camera) => camera.id === editorCamera.activeSavedCameraId));
         const nextIndex = (currentIndex + request.payload.direction + editorCamera.savedCameras.length) % editorCamera.savedCameras.length;

@@ -8,7 +8,8 @@ import { BlockPreview3D } from "./BlockPreview3D";
 import { AtlasYamlPreview } from "./AtlasYamlPreview";
 import { TextureAtlasGrid } from "./TextureAtlasGrid";
 import { VoxelPalette } from "./VoxelPalette";
-import type { AtlasBlockType, BlockType, MaterialAsset, MaterialCatalog, MaterialPatch } from "../../types/world";
+import type { AtlasBlockType, CanonicalBlockType, MaterialAsset, MaterialCatalog, MaterialPatch } from "../../types/world";
+import type { RuntimeMaterialReplaceResult } from "../../runtime/runtimeSchemas";
 
 const materialFaceCommands: Record<AtlasBlockType, { readonly top: string; readonly side: string; readonly bottom: string }> = {
   grass: {
@@ -40,7 +41,7 @@ const fallbackMaterialCatalog = (materials: readonly MaterialAsset[]): MaterialC
   activeMaterialId: materials[0]?.id ?? "mat-1",
 });
 
-const blockForMaterial = (material: MaterialAsset): BlockType => {
+const blockForMaterial = (material: MaterialAsset): CanonicalBlockType => {
   switch (material.defaultVoxel) {
     case "Rock":
       return "rock";
@@ -59,9 +60,9 @@ const blockForMaterial = (material: MaterialAsset): BlockType => {
     case "DungeonFloor":
       return "dungeonFloor";
     case "SubSoil":
-      return "dirt";
+      return "subSoil";
     default:
-      return "grass";
+      return "topSoil";
   }
 };
 
@@ -233,13 +234,37 @@ export function TextureAtlasPanel() {
     }
   };
 
+  const applyReplaceProgress = (data: RuntimeMaterialReplaceResult) => {
+    data.dirtyChunkIds.forEach((chunkId) => editorState.markDirty(chunkId));
+    const progress = data.totalChunks > 0 ? ` (${data.processedChunks}/${data.totalChunks} chunks)` : "";
+    const prefix = data.completed ? "" : "Queued: ";
+    setReplaceSummary(`${prefix}${data.changedCount} changed, ${data.skippedCount} skipped${progress}`);
+  };
+
+  const pollReplaceJob = async (jobId: string) => {
+    for (;;) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      const result = await runtimeClient.getMaterialReplaceJob(jobId);
+      if (!result.ok) {
+        setReplaceSummary(result.message);
+        return;
+      }
+      applyReplaceProgress(result.data);
+      if (result.data.completed) {
+        return;
+      }
+    }
+  };
+
   const replaceMaterial = async () => {
     const result = await runtimeClient.replaceMaterial(replaceFromId, replaceToId);
     if (!result.ok) {
       return;
     }
-    result.data.dirtyChunkIds.forEach((chunkId) => editorState.markDirty(chunkId));
-    setReplaceSummary(`${result.data.changedCount} changed, ${result.data.skippedCount} skipped`);
+    applyReplaceProgress(result.data);
+    if (!result.data.completed && result.data.jobId) {
+      void pollReplaceJob(result.data.jobId);
+    }
   };
 
   return (

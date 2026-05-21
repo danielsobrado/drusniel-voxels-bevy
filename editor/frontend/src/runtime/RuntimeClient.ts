@@ -89,6 +89,7 @@ export interface RuntimeClient {
   readonly paintVoxelMaterial: (position: readonly [number, number, number], materialId: string) => Promise<RuntimeCommandResult<RuntimeMaterialPaintResult>>;
   readonly pickVoxelMaterial: (position: readonly [number, number, number]) => Promise<RuntimeCommandResult<RuntimeMaterialPickResult>>;
   readonly replaceMaterial: (fromMaterialId: string, toMaterialId: string) => Promise<RuntimeCommandResult<RuntimeMaterialReplaceResult>>;
+  readonly getMaterialReplaceJob: (jobId: string) => Promise<RuntimeCommandResult<RuntimeMaterialReplaceResult>>;
   readonly updateMaterial: (materialId: string, patch: MaterialPatch) => Promise<RuntimeCommandResult<RuntimeMaterialMutationResult>>;
   readonly setActiveMaterial: (materialId: string) => Promise<RuntimeCommandResult<RuntimeActiveMaterialResult>>;
   readonly applyVoxelBrush: (brush: RuntimeVoxelBrushRequest) => Promise<RuntimeCommandResult<RuntimeVoxelBrushResult>>;

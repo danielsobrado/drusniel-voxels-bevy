@@ -754,7 +754,14 @@ function BrushPreviewLayer({
     return null;
   }
 
-  const center = new THREE.Vector3(targetedVoxel[0] + 0.5, targetedVoxel[1] + 0.5, targetedVoxel[2] + 0.5);
+  const evenOffset = (size: number) => (size % 2 === 0 ? 0.5 : 0);
+  const centerOffset =
+    brushSettings.brushShape === "box"
+      ? new THREE.Vector3(evenOffset(brushSettings.size[0]), evenOffset(brushSettings.size[1]), evenOffset(brushSettings.size[2]))
+      : brushSettings.brushShape === "cylinder"
+        ? new THREE.Vector3(0, evenOffset(brushSettings.size[1]), 0)
+        : new THREE.Vector3(0, 0, 0);
+  const center = new THREE.Vector3(targetedVoxel[0] + 0.5, targetedVoxel[1] + 0.5, targetedVoxel[2] + 0.5).add(centerOffset);
   const invalid = targetedVoxel[1] <= 0;
   return (
     <group>
@@ -950,6 +957,9 @@ export const LiteVoxelViewport = Object.assign(
     const suppressClickRef = useRef(false);
     const continuousEditingRef = useRef(false);
     const lastContinuousEditRef = useRef<string | null>(null);
+    const pendingContinuousSelectionRef = useRef<LiteVoxelSelection | null>(null);
+    const continuousEditFrameRef = useRef<number | null>(null);
+    const continuousEditInFlightRef = useRef(false);
     const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
     const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
     const [cameraSlots, setCameraSlots] = useState<ReadonlyArray<ViewState | null>>([null, null, null]);
@@ -1047,6 +1057,46 @@ export const LiteVoxelViewport = Object.assign(
         }, result.ok ? 900 : 2200);
       },
       [brushSettings.materialBlockId, onSetVoxel],
+    );
+
+    const clearContinuousEditQueue = useCallback(() => {
+      pendingContinuousSelectionRef.current = null;
+      if (continuousEditFrameRef.current !== null) {
+        window.cancelAnimationFrame(continuousEditFrameRef.current);
+        continuousEditFrameRef.current = null;
+      }
+    }, []);
+
+    const flushContinuousEdit = useCallback(() => {
+      continuousEditFrameRef.current = null;
+      if (continuousEditInFlightRef.current) {
+        return;
+      }
+
+      const selection = pendingContinuousSelectionRef.current;
+      pendingContinuousSelectionRef.current = null;
+      if (!selection) {
+        return;
+      }
+
+      continuousEditInFlightRef.current = true;
+      onSelectVoxel?.(selection);
+      void queueVoxelEdit(selection).finally(() => {
+        continuousEditInFlightRef.current = false;
+        if (pendingContinuousSelectionRef.current && continuousEditFrameRef.current === null) {
+          continuousEditFrameRef.current = window.requestAnimationFrame(flushContinuousEdit);
+        }
+      });
+    }, [onSelectVoxel, queueVoxelEdit]);
+
+    const scheduleContinuousEdit = useCallback(
+      (voxelSelection: LiteVoxelSelection) => {
+        pendingContinuousSelectionRef.current = voxelSelection;
+        if (!continuousEditInFlightRef.current && continuousEditFrameRef.current === null) {
+          continuousEditFrameRef.current = window.requestAnimationFrame(flushContinuousEdit);
+        }
+      },
+      [flushContinuousEdit],
     );
 
     const fitView = useCallback(() => {
@@ -1153,10 +1203,9 @@ export const LiteVoxelViewport = Object.assign(
           return;
         }
         lastContinuousEditRef.current = key;
-        onSelectVoxel?.(voxelSelection);
-        void queueVoxelEdit(voxelSelection);
+        scheduleContinuousEdit(voxelSelection);
       },
-      [activeMode, brushSettings.action, brushSettings.continuous, brushSettings.materialBlockId, onSelectVoxel, queueVoxelEdit],
+      [activeMode, brushSettings.action, brushSettings.continuous, brushSettings.materialBlockId, scheduleContinuousEdit],
     );
 
     const handlePlace = useCallback(
@@ -1275,6 +1324,9 @@ export const LiteVoxelViewport = Object.assign(
             ) {
               continuousEditingRef.current = true;
               lastContinuousEditRef.current = null;
+              if (hoveredVoxel) {
+                scheduleContinuousEdit(hoveredVoxel);
+              }
               event.preventDefault();
               return;
             }
@@ -1314,6 +1366,7 @@ export const LiteVoxelViewport = Object.assign(
             setView(panView(drag.view, event.clientX - drag.x, event.clientY - drag.y));
           }}
           onPointerUp={() => {
+            flushContinuousEdit();
             dragRef.current = null;
             continuousEditingRef.current = false;
             lastContinuousEditRef.current = null;
@@ -1322,12 +1375,14 @@ export const LiteVoxelViewport = Object.assign(
             dragRef.current = null;
             continuousEditingRef.current = false;
             lastContinuousEditRef.current = null;
+            clearContinuousEditQueue();
             handleHover(null);
           }}
           onPointerLeave={() => {
             dragRef.current = null;
             continuousEditingRef.current = false;
             lastContinuousEditRef.current = null;
+            clearContinuousEditQueue();
             handleHover(null);
           }}
           onWheel={(event) => {

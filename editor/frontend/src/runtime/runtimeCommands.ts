@@ -36,6 +36,7 @@ export type RuntimeCommandRequestType =
   | "runtime.paintVoxelMaterial"
   | "runtime.pickVoxelMaterial"
   | "runtime.replaceMaterial"
+  | "runtime.getMaterialReplaceJob"
   | "runtime.updateMaterial"
   | "runtime.setActiveMaterial"
   | "runtime.applyVoxelBrush"
@@ -103,6 +104,7 @@ export type RuntimeSetVoxelCommand = RuntimeCommandRequestBase<"runtime.setVoxel
 export type RuntimePaintVoxelMaterialCommand = RuntimeCommandRequestBase<"runtime.paintVoxelMaterial", { readonly position: readonly [number, number, number]; readonly materialId: string }>;
 export type RuntimePickVoxelMaterialCommand = RuntimeCommandRequestBase<"runtime.pickVoxelMaterial", { readonly position: readonly [number, number, number] }>;
 export type RuntimeReplaceMaterialCommand = RuntimeCommandRequestBase<"runtime.replaceMaterial", { readonly fromMaterialId: string; readonly toMaterialId: string }>;
+export type RuntimeGetMaterialReplaceJobCommand = RuntimeCommandRequestBase<"runtime.getMaterialReplaceJob", { readonly jobId: string }>;
 export type RuntimeUpdateMaterialCommand = RuntimeCommandRequestBase<"runtime.updateMaterial", { readonly materialId: string; readonly patch: MaterialPatch }>;
 export type RuntimeSetActiveMaterialCommand = RuntimeCommandRequestBase<"runtime.setActiveMaterial", { readonly materialId: string }>;
 export type RuntimeApplyVoxelBrushCommand = RuntimeCommandRequestBase<"runtime.applyVoxelBrush", { readonly brush: RuntimeVoxelBrushRequest }>;
@@ -159,6 +161,7 @@ export type RuntimeCommandRequest =
   | RuntimePaintVoxelMaterialCommand
   | RuntimePickVoxelMaterialCommand
   | RuntimeReplaceMaterialCommand
+  | RuntimeGetMaterialReplaceJobCommand
   | RuntimeUpdateMaterialCommand
   | RuntimeSetActiveMaterialCommand
   | RuntimeApplyVoxelBrushCommand

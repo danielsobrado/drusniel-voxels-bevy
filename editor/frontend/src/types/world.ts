@@ -1,7 +1,5 @@
-export type BlockType =
-  | "grass"
+export type CanonicalBlockType =
   | "topSoil"
-  | "dirt"
   | "subSoil"
   | "rock"
   | "sand"
@@ -11,6 +9,10 @@ export type BlockType =
   | "leaves"
   | "dungeonWall"
   | "dungeonFloor";
+
+export type LegacyBlockTypeAlias = "grass" | "dirt";
+
+export type BlockType = CanonicalBlockType | LegacyBlockTypeAlias;
 
 export type AtlasBlockType = "grass" | "dirt" | "rock" | "sand";
 
@@ -462,6 +464,7 @@ export type MaterialKind = "blocky" | "triplanar" | "building" | "props" | "wate
 
 export interface MaterialAsset {
   readonly id: string;
+  readonly numericId?: number;
   readonly name: string;
   readonly kind: MaterialKind;
   readonly sourcePath: string;

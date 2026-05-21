@@ -61,6 +61,7 @@ export type AtmospherePreset = "void" | "clear" | "hazy" | "fog";
 export type GlobalLightAtmospherePreset = "default" | "neutral";
 
 export interface LightAtmosphereSettings {
+  readonly cycleEnabled: boolean;
   readonly lightEnabled: boolean;
   readonly lightPreset: LightPreset;
   readonly atmospherePreset: AtmospherePreset;

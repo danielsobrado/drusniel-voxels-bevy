@@ -237,11 +237,17 @@ export interface RuntimeMaterialReplaceResult {
   readonly noChangeCount: number;
   readonly skippedCount: number;
   readonly dirtyChunkIds: readonly string[];
+  readonly mode: "queued" | "running" | "completed";
+  readonly completed: boolean;
+  readonly processedChunks: number;
+  readonly totalChunks: number;
+  readonly jobId?: string;
 }
 
 export interface RuntimeMaterialMutationResult {
   readonly material: MaterialAsset;
   readonly catalog: MaterialCatalog;
+  readonly dirtyChunkIds: readonly string[];
 }
 
 export interface RuntimeActiveMaterialResult {
@@ -265,6 +271,7 @@ export interface RuntimeVoxelBrushRequest {
   readonly size: readonly [number, number, number];
   readonly mask: RuntimeVoxelBrushMask;
   readonly maskBlock?: BlockType;
+  readonly includeResults?: boolean;
 }
 
 export interface RuntimeVoxelBrushResult {
@@ -278,6 +285,7 @@ export interface RuntimeVoxelBrushResult {
   readonly skippedCount: number;
   readonly affectedCount: number;
   readonly dirtyChunkIds: readonly string[];
+  readonly sampledResult?: RuntimeVoxelMutationResult;
   readonly results: readonly RuntimeVoxelMutationResult[];
 }
 

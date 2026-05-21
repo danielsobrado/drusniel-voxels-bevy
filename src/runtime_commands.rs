@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -54,7 +54,9 @@ use crate::terrain::generation::config::{
     terrain_config_fingerprint,
 };
 use crate::voxel::chunk::MeshDirtyReason;
-use crate::voxel::materials::{MaterialCatalog, MaterialId, VoxelMaterialDefinition};
+use crate::voxel::materials::{
+    MaterialCatalog, MaterialId, MaterialReplaceSummary, VoxelMaterialDefinition,
+};
 use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
@@ -76,6 +78,8 @@ const TERRAIN_PREVIEW_MAX_RESOLUTION: u32 = 128;
 const TERRAIN_PREVIEW_MAX_SIZE_VOXELS: u32 = 2048;
 const TERRAIN_PREVIEW_MAX_CELLS: u32 = 16_384;
 const TERRAIN_PREVIEW_MAX_OCTAVES: u32 = 16;
+const MATERIAL_REPLACE_SYNC_CHUNK_LIMIT: usize = 256;
+const MATERIAL_REPLACE_CHUNKS_PER_FRAME: usize = 32;
 
 pub struct RuntimeWriteCommandPlugin;
 
@@ -104,6 +108,98 @@ struct EditorPlacedProps {
 struct EditorPlacedLights {
     lights: Vec<EditorLightInstance>,
     loaded_from_disk: bool,
+}
+
+#[derive(Resource, Default)]
+struct RuntimeMaterialReplaceJobs {
+    next_id: u64,
+    active: VecDeque<RuntimeMaterialReplaceJob>,
+    completed: HashMap<String, RuntimeMaterialReplaceJobSnapshot>,
+}
+
+struct RuntimeMaterialReplaceJob {
+    job_id: String,
+    from: MaterialId,
+    to: MaterialId,
+    to_material: Value,
+    chunk_positions: Vec<IVec3>,
+    next_chunk_index: usize,
+    summary: MaterialReplaceSummary,
+    dirty_chunks_since_poll: Vec<IVec3>,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeMaterialReplaceJobSnapshot {
+    job_id: String,
+    from: MaterialId,
+    to: MaterialId,
+    to_material: Value,
+    changed: u64,
+    no_change: u64,
+    skipped: u64,
+    processed_chunks: usize,
+    total_chunks: usize,
+    completed: bool,
+    dirty_chunks: Vec<IVec3>,
+}
+
+impl RuntimeMaterialReplaceJobs {
+    fn push(
+        &mut self,
+        from: MaterialId,
+        to: MaterialId,
+        to_material: Value,
+        chunk_positions: Vec<IVec3>,
+    ) -> RuntimeMaterialReplaceJobSnapshot {
+        self.next_id += 1;
+        let job_id = format!("material-replace-{}", self.next_id);
+        let snapshot = RuntimeMaterialReplaceJobSnapshot {
+            job_id: job_id.clone(),
+            from,
+            to,
+            to_material: to_material.clone(),
+            changed: 0,
+            no_change: 0,
+            skipped: 0,
+            processed_chunks: 0,
+            total_chunks: chunk_positions.len(),
+            completed: false,
+            dirty_chunks: Vec::new(),
+        };
+        self.active.push_back(RuntimeMaterialReplaceJob {
+            job_id,
+            from,
+            to,
+            to_material,
+            chunk_positions,
+            next_chunk_index: 0,
+            summary: MaterialReplaceSummary::default(),
+            dirty_chunks_since_poll: Vec::new(),
+        });
+        snapshot
+    }
+
+    fn snapshot_for(&mut self, job_id: &str) -> Option<RuntimeMaterialReplaceJobSnapshot> {
+        if let Some(job) = self.active.iter_mut().find(|job| job.job_id == job_id) {
+            let dirty_chunks = job.dirty_chunks_since_poll.clone();
+            job.dirty_chunks_since_poll.clear();
+            return Some(RuntimeMaterialReplaceJobSnapshot {
+                job_id: job.job_id.clone(),
+                from: job.from,
+                to: job.to,
+                to_material: job.to_material.clone(),
+                changed: job.summary.changed,
+                no_change: job.summary.no_change,
+                skipped: job.summary.skipped,
+                processed_chunks: job.next_chunk_index,
+                total_chunks: job.chunk_positions.len(),
+                completed: false,
+                dirty_chunks,
+            });
+        }
+
+        self.completed.get(job_id).cloned()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -189,9 +285,28 @@ pub enum GlobalLightAtmospherePreset {
     Neutral,
 }
 
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LightAtmospherePresetState {
+    pub light_preset: LightPreset,
+    pub atmosphere_preset: AtmospherePreset,
+    pub global_preset: GlobalLightAtmospherePreset,
+}
+
+impl Default for LightAtmospherePresetState {
+    fn default() -> Self {
+        Self {
+            light_preset: LightPreset::Sun,
+            atmosphere_preset: AtmospherePreset::Hazy,
+            global_preset: GlobalLightAtmospherePreset::Default,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LightAtmosphereSettingsPayload {
+    #[serde(default)]
+    pub cycle_enabled: bool,
     pub light_enabled: bool,
     pub light_preset: LightPreset,
     pub atmosphere_preset: AtmospherePreset,
@@ -212,6 +327,7 @@ pub struct LightAtmosphereSettingsPayload {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LightAtmospherePatch {
+    pub cycle_enabled: Option<bool>,
     pub light_enabled: Option<bool>,
     pub light_preset: Option<LightPreset>,
     pub atmosphere_preset: Option<AtmospherePreset>,
@@ -237,6 +353,7 @@ pub struct LightAtmosphereTemplate {
 impl From<LightAtmosphereSettingsPayload> for LightAtmospherePatch {
     fn from(settings: LightAtmosphereSettingsPayload) -> Self {
         Self {
+            cycle_enabled: Some(settings.cycle_enabled),
             light_enabled: Some(settings.light_enabled),
             light_preset: Some(settings.light_preset),
             atmosphere_preset: Some(settings.atmosphere_preset),
@@ -264,12 +381,15 @@ impl Plugin for RuntimeWriteCommandPlugin {
             .init_resource::<EditorWorldSavePath>()
             .init_resource::<EditorPlacedProps>()
             .init_resource::<EditorPlacedLights>()
+            .init_resource::<RuntimeMaterialReplaceJobs>()
             .init_resource::<MaterialCatalog>()
+            .init_resource::<LightAtmospherePresetState>()
             .add_systems(
                 Update,
                 (
                     load_saved_editor_placed_props,
                     load_saved_editor_lights,
+                    process_runtime_material_replace_jobs,
                     process_runtime_command_queue,
                 )
                     .chain(),
@@ -460,6 +580,11 @@ pub enum RuntimeWriteCommand {
         #[serde(rename = "toMaterialId")]
         to_material_id: String,
     },
+    #[serde(rename = "runtime.getMaterialReplaceJob")]
+    GetMaterialReplaceJob {
+        #[serde(rename = "jobId")]
+        job_id: String,
+    },
     #[serde(rename = "runtime.updateMaterial")]
     UpdateMaterial {
         #[serde(rename = "materialId")]
@@ -635,6 +760,8 @@ pub struct FrontendVoxelBrush {
     pub mask: FrontendVoxelBrushMask,
     #[serde(rename = "maskBlock")]
     pub mask_block: Option<FrontendVoxelBlock>,
+    #[serde(default, rename = "includeResults")]
+    pub include_results: bool,
 }
 
 fn default_voxel_brush_radius() -> u32 {
@@ -936,6 +1063,81 @@ fn process_runtime_command_queue(world: &mut World) {
             .completed
             .push_back(RuntimeCommandResponse { request_id, result });
     }
+}
+
+fn process_runtime_material_replace_jobs(world: &mut World) {
+    let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
+
+    world.resource_scope(|world, mut jobs: Mut<RuntimeMaterialReplaceJobs>| {
+        let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
+            return;
+        };
+
+        let mut completed_jobs = Vec::new();
+        for job in jobs.active.iter_mut() {
+            let remaining = job
+                .chunk_positions
+                .len()
+                .saturating_sub(job.next_chunk_index);
+            let chunk_budget = remaining.min(MATERIAL_REPLACE_CHUNKS_PER_FRAME);
+
+            for _ in 0..chunk_budget {
+                let chunk_pos = job.chunk_positions[job.next_chunk_index];
+                job.next_chunk_index += 1;
+                let chunk_summary = voxel_world.replace_material_id_in_chunk(
+                    chunk_pos,
+                    job.from,
+                    job.to,
+                    registry.as_ref(),
+                );
+                for dirty_chunk in &chunk_summary.dirty_chunks {
+                    if !job.dirty_chunks_since_poll.contains(dirty_chunk) {
+                        job.dirty_chunks_since_poll.push(*dirty_chunk);
+                    }
+                }
+                job.summary.merge(chunk_summary);
+            }
+
+            if job.next_chunk_index >= job.chunk_positions.len() {
+                completed_jobs.push(job.job_id.clone());
+            }
+        }
+
+        for job_id in completed_jobs {
+            if let Some(index) = jobs.active.iter().position(|job| job.job_id == job_id) {
+                let job = jobs
+                    .active
+                    .remove(index)
+                    .expect("active job index was found");
+                let mut dirty_chunks = job
+                    .dirty_chunks_since_poll
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                for chunk_pos in job.summary.dirty_chunks.iter().copied() {
+                    if !dirty_chunks.contains(&chunk_pos) {
+                        dirty_chunks.push(chunk_pos);
+                    }
+                }
+                jobs.completed.insert(
+                    job.job_id.clone(),
+                    RuntimeMaterialReplaceJobSnapshot {
+                        job_id: job.job_id,
+                        from: job.from,
+                        to: job.to,
+                        to_material: job.to_material,
+                        changed: job.summary.changed,
+                        no_change: job.summary.no_change,
+                        skipped: job.summary.skipped,
+                        processed_chunks: job.chunk_positions.len(),
+                        total_chunks: job.chunk_positions.len(),
+                        completed: true,
+                        dirty_chunks,
+                    },
+                );
+            }
+        }
+    });
 }
 
 fn load_saved_editor_placed_props(world: &mut World) {
@@ -1898,7 +2100,7 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::UpdateMaterial { material_id, .. } => {
             if parse_material_id(material_id).is_none() {
                 errors.push(format!(
-                    "materialId '{material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                    "materialId '{material_id}' must look like mat-N or one of: grass/topSoil, dirt/subSoil, rock, bedrock, sand, clay, water, wood, leaves, dungeonWall, dungeonFloor."
                 ));
             }
         }
@@ -1909,13 +2111,18 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         } => {
             if parse_material_id(from_material_id).is_none() {
                 errors.push(format!(
-                    "fromMaterialId '{from_material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                    "fromMaterialId '{from_material_id}' must look like mat-N or one of: grass/topSoil, dirt/subSoil, rock, bedrock, sand, clay, water, wood, leaves, dungeonWall, dungeonFloor."
                 ));
             }
             if parse_material_id(to_material_id).is_none() {
                 errors.push(format!(
-                    "toMaterialId '{to_material_id}' must look like mat-0, mat-1, or a known legacy material id."
+                    "toMaterialId '{to_material_id}' must look like mat-N or one of: grass/topSoil, dirt/subSoil, rock, bedrock, sand, clay, water, wood, leaves, dungeonWall, dungeonFloor."
                 ));
+            }
+        }
+        RuntimeWriteCommand::GetMaterialReplaceJob { job_id } => {
+            if job_id.trim().is_empty() {
+                errors.push("jobId is required.".to_string());
             }
         }
         RuntimeWriteCommand::ScatterProps { props } => {
@@ -2864,6 +3071,14 @@ fn execute_runtime_write_command(
             Ok(data) => RuntimeCommandResult::success(data),
             Err(message) => RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message),
         },
+        RuntimeWriteCommand::GetMaterialReplaceJob { job_id } => {
+            match poll_runtime_material_replace_job(world, &job_id) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
         RuntimeWriteCommand::UpdateMaterial { material_id, patch } => {
             match update_runtime_material(world, &material_id, patch) {
                 Ok(data) => RuntimeCommandResult::success(data),
@@ -3412,7 +3627,13 @@ fn apply_runtime_voxel_brush(
     let mut rejected = 0u32;
     let mut skipped = 0u32;
     let mut dirty_chunk_ids = BTreeSet::new();
-    let mut results = Vec::with_capacity(positions.len().min(256));
+    let affected_count = positions.len();
+    let mut results = if brush.include_results {
+        Vec::with_capacity(positions.len())
+    } else {
+        Vec::new()
+    };
+    let mut sampled_result: Option<Value> = None;
 
     for position in positions {
         let previous = voxel_world.get_voxel(position);
@@ -3420,13 +3641,19 @@ fn apply_runtime_voxel_brush(
             || !voxel_brush_action_allows(previous, brush.action)
         {
             skipped += 1;
-            results.push(voxel_brush_result_payload(
+            let payload = voxel_brush_result_payload(
                 position,
                 brush.block,
                 previous,
                 previous,
                 "skippedMask",
-            ));
+            );
+            if sampled_result.is_none() {
+                sampled_result = Some(payload.clone());
+            }
+            if brush.include_results {
+                results.push(payload);
+            }
             continue;
         }
 
@@ -3442,13 +3669,21 @@ fn apply_runtime_voxel_brush(
             VoxelEditResult::NoChange => no_change += 1,
             _ => rejected += 1,
         }
-        results.push(voxel_brush_result_payload(
+        let payload = voxel_brush_result_payload(
             position,
             brush.block,
             previous,
             current,
             voxel_edit_result_to_frontend(result),
-        ));
+        );
+        if sampled_result.is_none()
+            || matches!(result, VoxelEditResult::Applied | VoxelEditResult::NoChange)
+        {
+            sampled_result = Some(payload.clone());
+        }
+        if brush.include_results {
+            results.push(payload);
+        }
     }
 
     dirty_chunk_ids.extend(voxel_world.derived_dirty_chunks().map(chunk_id_string));
@@ -3462,8 +3697,9 @@ fn apply_runtime_voxel_brush(
         "noChangeCount": no_change,
         "rejectedCount": rejected,
         "skippedCount": skipped,
-        "affectedCount": results.len(),
+        "affectedCount": affected_count,
         "dirtyChunkIds": dirty_chunk_ids.into_iter().collect::<Vec<_>>(),
+        "sampledResult": sampled_result,
         "results": results,
     }))
 }
@@ -3482,12 +3718,11 @@ fn set_runtime_voxel(
         size: [1, 1, 1],
         mask: FrontendVoxelBrushMask::Any,
         mask_block: None,
+        include_results: false,
     };
     let data = apply_runtime_voxel_brush(world, &brush)?;
     let first = data
-        .get("results")
-        .and_then(Value::as_array)
-        .and_then(|results| results.first())
+        .get("sampledResult")
         .ok_or_else(|| "Voxel edit did not return a result.".to_string())?;
     if first
         .get("editResult")
@@ -3581,21 +3816,78 @@ fn replace_runtime_material(
         .ok_or_else(|| format!("Unknown material id '{to_material_id}'."))?;
     ensure_material_exists(world, from)?;
     let to_material = material_from_world(world, to)?;
+    let to_material_payload = material_payload(&to_material);
     let registry = world.get_resource::<ProtectedAreaRegistry>().cloned();
     let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() else {
         return Err("VoxelWorld resource is not available.".to_string());
     };
-    let summary = voxel_world.replace_material_id(from, to, registry.as_ref());
+    let chunk_positions = voxel_world.chunk_positions().collect::<Vec<_>>();
+    if chunk_positions.len() > MATERIAL_REPLACE_SYNC_CHUNK_LIMIT {
+        drop(voxel_world);
+        if !world.contains_resource::<RuntimeMaterialReplaceJobs>() {
+            world.insert_resource(RuntimeMaterialReplaceJobs::default());
+        }
+        let snapshot = world.resource_mut::<RuntimeMaterialReplaceJobs>().push(
+            from,
+            to,
+            to_material_payload,
+            chunk_positions,
+        );
+        return Ok(material_replace_job_payload(&snapshot, "queued"));
+    }
 
-    Ok(json!({
-        "fromMaterialId": material_id_string(from),
-        "toMaterialId": material_id_string(to),
-        "toMaterial": material_payload(&to_material),
-        "changedCount": summary.changed,
-        "noChangeCount": summary.no_change,
-        "skippedCount": summary.skipped,
-        "dirtyChunkIds": summary.dirty_chunks.into_iter().map(chunk_id_string).collect::<Vec<_>>(),
-    }))
+    let summary = voxel_world.replace_material_id(from, to, registry.as_ref());
+    let snapshot = RuntimeMaterialReplaceJobSnapshot {
+        job_id: String::new(),
+        from,
+        to,
+        to_material: to_material_payload,
+        changed: summary.changed,
+        no_change: summary.no_change,
+        skipped: summary.skipped,
+        processed_chunks: chunk_positions.len(),
+        total_chunks: chunk_positions.len(),
+        completed: true,
+        dirty_chunks: summary.dirty_chunks,
+    };
+
+    Ok(material_replace_job_payload(&snapshot, "completed"))
+}
+
+fn poll_runtime_material_replace_job(world: &mut World, job_id: &str) -> Result<Value, String> {
+    if !world.contains_resource::<RuntimeMaterialReplaceJobs>() {
+        return Err(format!("Material replace job '{job_id}' was not found."));
+    }
+    let snapshot = world
+        .resource_mut::<RuntimeMaterialReplaceJobs>()
+        .snapshot_for(job_id)
+        .ok_or_else(|| format!("Material replace job '{job_id}' was not found."))?;
+    let mode = if snapshot.completed {
+        "completed"
+    } else {
+        "running"
+    };
+    Ok(material_replace_job_payload(&snapshot, mode))
+}
+
+fn material_replace_job_payload(snapshot: &RuntimeMaterialReplaceJobSnapshot, mode: &str) -> Value {
+    let mut payload = json!({
+        "fromMaterialId": material_id_string(snapshot.from),
+        "toMaterialId": material_id_string(snapshot.to),
+        "toMaterial": snapshot.to_material.clone(),
+        "changedCount": snapshot.changed,
+        "noChangeCount": snapshot.no_change,
+        "skippedCount": snapshot.skipped,
+        "dirtyChunkIds": snapshot.dirty_chunks.iter().copied().map(chunk_id_string).collect::<Vec<_>>(),
+        "mode": mode,
+        "completed": snapshot.completed,
+        "processedChunks": snapshot.processed_chunks,
+        "totalChunks": snapshot.total_chunks,
+    });
+    if !snapshot.job_id.is_empty() {
+        payload["jobId"] = json!(snapshot.job_id);
+    }
+    payload
 }
 
 fn update_runtime_material(
@@ -3619,13 +3911,23 @@ fn update_runtime_material(
         material.clone()
     };
 
-    if let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() {
-        voxel_world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::TerrainMutation);
-    }
+    let dirty_chunk_ids = if let Some(mut voxel_world) = world.get_resource_mut::<VoxelWorld>() {
+        voxel_world
+            .mark_chunks_containing_material_dirty_with_reason(
+                material_id,
+                MeshDirtyReason::TerrainMutation,
+            )
+            .into_iter()
+            .map(chunk_id_string)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
 
     Ok(json!({
         "material": material_payload(&material),
         "catalog": material_catalog_payload(world),
+        "dirtyChunkIds": dirty_chunk_ids,
     }))
 }
 
@@ -4596,37 +4898,18 @@ fn light_atmosphere_payload(world: &World) -> Value {
         .unwrap_or_default();
     let fog = world.get_resource::<FogConfig>();
     let ambient = world.get_resource::<GlobalAmbientLight>();
+    let presets = world
+        .get_resource::<LightAtmospherePresetState>()
+        .copied()
+        .unwrap_or_default();
     let direction = settings.manual_light_direction();
-    let atmosphere_preset = if settings.atmosphere_amount <= f32::EPSILON {
-        AtmospherePreset::Void
-    } else {
-        match fog.map(|config| config.current_preset) {
-            Some(FogPreset::Clear) => AtmospherePreset::Clear,
-            Some(FogPreset::Misty) => AtmospherePreset::Fog,
-            Some(FogPreset::Balanced) | Some(FogPreset::GodRays) | None => AtmospherePreset::Hazy,
-        }
-    };
-    let light_preset = if !settings.light_enabled {
-        LightPreset::NoneEmissivesOnly
-    } else if settings.light_illuminance < 10_000.0 {
-        LightPreset::Moon
-    } else {
-        LightPreset::Sun
-    };
-    let global_preset = if atmosphere_preset == AtmospherePreset::Void
-        && settings.light_color == Vec3::ONE
-        && ambient.is_some_and(|ambient| color_to_hex(ambient.color) == "#ffffff")
-    {
-        GlobalLightAtmospherePreset::Neutral
-    } else {
-        GlobalLightAtmospherePreset::Default
-    };
 
     json!(LightAtmosphereSettingsPayload {
+        cycle_enabled: settings.cycle_enabled,
         light_enabled: settings.light_enabled,
-        light_preset,
-        atmosphere_preset,
-        global_preset,
+        light_preset: presets.light_preset,
+        atmosphere_preset: presets.atmosphere_preset,
+        global_preset: presets.global_preset,
         light_color: rgb_to_hex(settings.light_color),
         light_illuminance: settings.light_illuminance,
         light_azimuth_degrees: settings.light_azimuth_degrees,
@@ -4660,15 +4943,15 @@ fn update_light_atmosphere(
 
         if let Some(global_preset) = patch.global_preset {
             apply_global_light_atmosphere_preset(&mut settings, global_preset);
-            if global_preset == GlobalLightAtmospherePreset::Neutral {
+            if matches!(
+                global_preset,
+                GlobalLightAtmospherePreset::Default | GlobalLightAtmospherePreset::Neutral
+            ) {
                 ambient_patch = Some(("#ffffff".to_string(), 2000.0));
             }
         }
-        if let Some(light_preset) = patch.light_preset {
-            apply_light_preset(&mut settings, light_preset);
-        }
-        if let Some(atmosphere_preset) = patch.atmosphere_preset {
-            apply_atmosphere_preset(&mut settings, atmosphere_preset);
+        if let Some(cycle_enabled) = patch.cycle_enabled {
+            settings.cycle_enabled = cycle_enabled;
         }
         if let Some(enabled) = patch.light_enabled {
             settings.light_enabled = enabled;
@@ -4693,15 +4976,17 @@ fn update_light_atmosphere(
                 settings.light_elevation_degrees = elevation;
             }
         }
-        if patch.light_preset.is_some()
-            || patch.light_enabled.is_some()
-            || patch.light_color.is_some()
-            || patch.light_illuminance.is_some()
-            || patch.light_azimuth_degrees.is_some()
-            || patch.light_elevation_degrees.is_some()
-            || patch.light_direction.is_some()
-        {
-            settings.cycle_enabled = false;
+        if patch.cycle_enabled.is_none() {
+            if patch.light_preset.is_some()
+                || patch.light_enabled.is_some()
+                || patch.light_color.is_some()
+                || patch.light_illuminance.is_some()
+                || patch.light_azimuth_degrees.is_some()
+                || patch.light_elevation_degrees.is_some()
+                || patch.light_direction.is_some()
+            {
+                settings.cycle_enabled = false;
+            }
         }
         if let Some(amount) = patch.atmosphere_amount {
             settings.atmosphere_amount = amount;
@@ -4721,6 +5006,27 @@ fn update_light_atmosphere(
                     .ambient_brightness
                     .unwrap_or_else(|| current_ambient.map(|ambient| ambient.1).unwrap_or(0.0)),
             ));
+        }
+        if let Some(light_preset) = patch.light_preset {
+            apply_light_preset(&mut settings, light_preset);
+        }
+        if let Some(atmosphere_preset) = patch.atmosphere_preset {
+            apply_atmosphere_preset(&mut settings, atmosphere_preset);
+        }
+    }
+
+    {
+        let mut presets = world
+            .get_resource_mut::<LightAtmospherePresetState>()
+            .ok_or_else(|| "LightAtmospherePresetState resource is not available.".to_string())?;
+        if let Some(global_preset) = patch.global_preset {
+            presets.global_preset = global_preset;
+        }
+        if let Some(light_preset) = patch.light_preset {
+            presets.light_preset = light_preset;
+        }
+        if let Some(atmosphere_preset) = patch.atmosphere_preset {
+            presets.atmosphere_preset = atmosphere_preset;
         }
     }
 
@@ -4790,10 +5096,18 @@ fn apply_global_light_atmosphere_preset(
 ) {
     match preset {
         GlobalLightAtmospherePreset::Default => {
-            *settings = AtmosphereSettings::default();
+            let defaults = AtmosphereSettings::default();
+            settings.light_enabled = defaults.light_enabled;
+            settings.light_color = defaults.light_color;
+            settings.light_illuminance = defaults.light_illuminance;
+            settings.light_azimuth_degrees = defaults.light_azimuth_degrees;
+            settings.light_elevation_degrees = defaults.light_elevation_degrees;
+            settings.rayleigh = defaults.rayleigh;
+            settings.mie = defaults.mie;
+            settings.atmosphere_amount = defaults.atmosphere_amount;
+            settings.atmosphere_half_length = defaults.atmosphere_half_length;
         }
         GlobalLightAtmospherePreset::Neutral => {
-            settings.cycle_enabled = false;
             settings.light_enabled = true;
             settings.light_color = Vec3::ONE;
             settings.light_illuminance = 100_000.0;
@@ -5708,6 +6022,8 @@ fn material_payload(material: &VoxelMaterialDefinition) -> Value {
         "id": material_id_string(material.id),
         "numericId": material.id.0,
         "name": material.name,
+        "kind": if material.material_type_id == "water" { "water" } else { "blocky" },
+        "sourcePath": format!("runtime/materials/{}", material.id.0),
         "materialTypeId": material.material_type_id,
         "colorRgb": material.color_rgb,
         "metallic": material.metallic,
@@ -5913,6 +6229,65 @@ mod tests {
                 value: Some(value)
             } if (value - 0.35).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn light_preset_wins_over_conflicting_explicit_fields() {
+        let mut world = World::new();
+        world.insert_resource(AtmosphereSettings::default());
+        world.insert_resource(LightAtmospherePresetState::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::UpdateLightAtmosphere {
+                patch: LightAtmospherePatch {
+                    light_preset: Some(LightPreset::NoneEmissivesOnly),
+                    light_illuminance: Some(5000.0),
+                    ..default()
+                },
+            },
+        );
+
+        assert!(matches!(result, RuntimeCommandResult::Success { .. }));
+        let settings = world.resource::<AtmosphereSettings>();
+        assert!(!settings.light_enabled);
+        assert_eq!(settings.light_illuminance, 0.0);
+        assert_eq!(
+            world.resource::<LightAtmospherePresetState>().light_preset,
+            LightPreset::NoneEmissivesOnly
+        );
+    }
+
+    #[test]
+    fn global_default_preserves_cycle_timing_fields() {
+        let mut world = World::new();
+        world.insert_resource(AtmosphereSettings {
+            cycle_enabled: true,
+            day_length: 42.0,
+            time: 17.0,
+            time_scale: 3.0,
+            twilight_band: 0.22,
+            ..default()
+        });
+        world.insert_resource(LightAtmospherePresetState::default());
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::UpdateLightAtmosphere {
+                patch: LightAtmospherePatch {
+                    global_preset: Some(GlobalLightAtmospherePreset::Default),
+                    ..default()
+                },
+            },
+        );
+
+        assert!(matches!(result, RuntimeCommandResult::Success { .. }));
+        let settings = world.resource::<AtmosphereSettings>();
+        assert!(settings.cycle_enabled);
+        assert_eq!(settings.day_length, 42.0);
+        assert_eq!(settings.time, 17.0);
+        assert_eq!(settings.time_scale, 3.0);
+        assert_eq!(settings.twilight_band, 0.22);
     }
 
     #[test]
@@ -6207,6 +6582,7 @@ mod tests {
                     size: [3, 1, 3],
                     mask: FrontendVoxelBrushMask::Any,
                     mask_block: None,
+                    include_results: false,
                 },
             },
         );
@@ -6216,6 +6592,8 @@ mod tests {
         };
         assert_eq!(data["changedCount"], json!(9));
         assert_eq!(data["rejectedCount"], json!(0));
+        assert_eq!(data["results"], json!([]));
+        assert_eq!(data["sampledResult"]["editResult"], json!("applied"));
         assert_eq!(data["dirtyChunkIds"], json!(["chunk-0-0-0"]));
         assert_eq!(
             world.resource::<VoxelWorld>().get_voxel(IVec3::new(
@@ -6249,6 +6627,7 @@ mod tests {
                     size: [3, 1, 1],
                     mask: FrontendVoxelBrushMask::Material,
                     mask_block: Some(FrontendVoxelBlock::Sand),
+                    include_results: false,
                 },
             },
         );
@@ -6258,6 +6637,8 @@ mod tests {
         };
         assert_eq!(data["changedCount"], json!(1));
         assert_eq!(data["skippedCount"], json!(2));
+        assert_eq!(data["results"], json!([]));
+        assert_eq!(data["sampledResult"]["editResult"], json!("applied"));
         let voxel_world = world.resource::<VoxelWorld>();
         assert_eq!(voxel_world.get_voxel(center), Some(VoxelType::Clay));
         assert_eq!(
@@ -6326,6 +6707,7 @@ mod tests {
                     size: [1, 1, 1],
                     mask: FrontendVoxelBrushMask::Any,
                     mask_block: None,
+                    include_results: true,
                 },
             },
         );
@@ -6350,6 +6732,7 @@ mod tests {
                     size: [1, 1, 1],
                     mask: FrontendVoxelBrushMask::Any,
                     mask_block: None,
+                    include_results: true,
                 },
             },
         );

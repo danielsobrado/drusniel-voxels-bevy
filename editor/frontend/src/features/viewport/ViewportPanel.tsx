@@ -217,7 +217,10 @@ export function ViewportPanel({ onClose }: { readonly onClose?: () => void } = {
       }
 
       const brushResult = result.data;
-      const mutation = brushResult.results.find((candidate) => candidate.editResult === "applied" || candidate.editResult === "noChange") ?? brushResult.results[0];
+      const mutation =
+        brushResult.sampledResult ??
+        brushResult.results.find((candidate) => candidate.editResult === "applied" || candidate.editResult === "noChange") ??
+        brushResult.results[0];
       if (!mutation) {
         return { ok: false, message: "runtime brush returned no voxel results" };
       }

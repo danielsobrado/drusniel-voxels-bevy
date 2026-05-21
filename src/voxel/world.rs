@@ -320,6 +320,29 @@ impl VoxelWorld {
         }
     }
 
+    pub fn mark_chunks_containing_material_dirty_with_reason(
+        &mut self,
+        material_id: MaterialId,
+        reason: MeshDirtyReason,
+    ) -> Vec<IVec3> {
+        let positions = self
+            .chunks
+            .iter()
+            .filter_map(|(chunk_pos, chunk)| {
+                chunk
+                    .iter_materials()
+                    .any(|(_, voxel, id)| voxel != VoxelType::Air && id == material_id)
+                    .then_some(*chunk_pos)
+            })
+            .collect::<Vec<_>>();
+
+        for chunk_pos in &positions {
+            self.mark_chunk_dirty_with_reason(*chunk_pos, reason);
+        }
+
+        positions
+    }
+
     // Voxel access (world coordinates)
     pub fn get_voxel(&self, world_pos: IVec3) -> Option<VoxelType> {
         self.sample_voxel_raw(world_pos)
@@ -531,21 +554,42 @@ impl VoxelWorld {
         protected_areas: Option<&ProtectedAreaRegistry>,
     ) -> MaterialReplaceSummary {
         let mut summary = MaterialReplaceSummary::default();
-        let positions = self
-            .chunks
-            .iter()
-            .flat_map(|(chunk_pos, chunk)| {
-                let chunk_origin = Self::chunk_to_world(*chunk_pos);
-                chunk
-                    .iter_materials()
-                    .filter_map(move |(local, voxel, material_id)| {
-                        (voxel != VoxelType::Air && material_id == from)
-                            .then_some(chunk_origin + local.as_ivec3())
-                    })
+        let chunk_positions = self.chunks.keys().copied().collect::<Vec<_>>();
+
+        for chunk_pos in chunk_positions {
+            summary.merge(self.replace_material_id_in_chunk(chunk_pos, from, to, protected_areas));
+        }
+
+        summary
+    }
+
+    pub fn replace_material_id_in_chunk(
+        &mut self,
+        chunk_pos: IVec3,
+        from: MaterialId,
+        to: MaterialId,
+        protected_areas: Option<&ProtectedAreaRegistry>,
+    ) -> MaterialReplaceSummary {
+        let mut summary = MaterialReplaceSummary::default();
+        let bounds = self.bounds;
+        let chunk_origin = Self::chunk_to_world(chunk_pos);
+        let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+            return summary;
+        };
+        let locals = chunk
+            .iter_materials()
+            .filter_map(|(local, voxel, material_id)| {
+                (voxel != VoxelType::Air && voxel != VoxelType::Bedrock && material_id == from)
+                    .then_some(local)
             })
             .collect::<Vec<_>>();
 
-        for position in positions {
+        for local in locals {
+            let position = chunk_origin + local.as_ivec3();
+            if !bounds.is_breakable_y(position.y) {
+                summary.skipped += 1;
+                continue;
+            }
             if let Some(registry) = protected_areas {
                 if registry.edit_blocked(position, ProtectedEditIntent::Paint) {
                     summary.skipped += 1;
@@ -553,17 +597,19 @@ impl VoxelWorld {
                 }
             }
 
-            match self.apply_material_edit(position, to) {
-                VoxelEditResult::Applied => {
-                    summary.changed += 1;
-                    let chunk_pos = Self::world_to_chunk(position);
-                    if !summary.dirty_chunks.contains(&chunk_pos) {
-                        summary.dirty_chunks.push(chunk_pos);
-                    }
+            if chunk.set_material_id(local, to) {
+                summary.changed += 1;
+                if !summary.dirty_chunks.contains(&chunk_pos) {
+                    summary.dirty_chunks.push(chunk_pos);
                 }
-                VoxelEditResult::NoChange => summary.no_change += 1,
-                _ => summary.skipped += 1,
+            } else {
+                summary.no_change += 1;
             }
+        }
+
+        if !summary.dirty_chunks.is_empty() {
+            self.dirty_chunks.insert(chunk_pos);
+            self.derived_dirty_chunks.insert(chunk_pos);
         }
 
         summary
