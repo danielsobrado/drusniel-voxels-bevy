@@ -1,0 +1,42 @@
+seed = 12345
+duration_warmup_secs = 5.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+skip_props = true
+
+[render_toggles]
+voxel_ray_backend = "naadf"
+experimental_render_mode = "naadf_preview"
+disable_instanced_props = true
+disable_terrain_meshes = true
+disable_water_meshes = true
+disable_buildings = true
+disable_shadows = true
+disable_reflection_cameras = true
+naadf_force_cpu_builder = true
+naadf_radius_chunks = 20
+naadf_max_chunks = 8192
+naadf_max_gpu_memory_mb = 1024
+naadf_max_chunk_updates_per_frame = 8192
+naadf_max_upload_bytes_per_frame = 67108864
+naadf_history_resolution_scale = 0.5
+naadf_preview_max_ray_steps = 256
+naadf_preview_bounce_count = 1
+naadf_preview_spatial_radius = 0
+naadf_preview_composite_mode = "fullscreen"
+naadf_preview_show_miss_sky = true
+
+[[checkpoint]]
+name = "naadf-preview-artifact-close"
+position = [190.0, 62.0, 330.0]
+look_at = [145.0, 22.0, 292.0]
+time_of_day = 0.3
+hold_frames = 360
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = false, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = false, shadow_budget = false, ray_tracing = true, photo_mode = false, cinematic_mode = false }
+screenshot_points = [
+    { name = "artifact-close-settle-120", frame = 120 },
+    { name = "artifact-close-settled", frame = 359 },
+]
