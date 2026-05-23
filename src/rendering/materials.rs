@@ -11,6 +11,7 @@ use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
+    TerrainIsoBandUniforms,
 };
 use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig, WaterShaderToggles};
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
@@ -617,6 +618,7 @@ fn water_ripple_lines_disabled() -> bool {
 pub fn setup_triplanar_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<TriplanarMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
     asset_server: Res<AssetServer>,
     frame: Res<FrameCount>,
@@ -648,6 +650,8 @@ pub fn setup_triplanar_material(
             sand_normal: None,
             dirt_albedo: None,
             dirt_normal: None,
+            iso_band_volume: None,
+            iso_band_params: TerrainIsoBandUniforms::default(),
         }
     } else {
         TriplanarMaterial {
@@ -673,6 +677,8 @@ pub fn setup_triplanar_material(
             // Dirt textures (for SubSoil, sides)
             dirt_albedo: Some(asset_server.load("pbr/dirt/albedo.png")),
             dirt_normal: Some(asset_server.load("pbr/dirt/normal.png")),
+            iso_band_volume: None,
+            iso_band_params: TerrainIsoBandUniforms::default(),
         }
     };
 
@@ -684,22 +690,55 @@ pub fn setup_triplanar_material(
     single_projection_far_material.quality = TerrainMaterialQuality::SingleProjectionFar;
     let mut atlas_only_debug_material = base_material.clone();
     atlas_only_debug_material.quality = TerrainMaterialQuality::AtlasOnlyDebug;
-    let mut wireframe_debug_material = base_material;
+    let mut wireframe_debug_material = base_material.clone();
     wireframe_debug_material.quality = TerrainMaterialQuality::WireframeDebug;
+    let mut normals_debug_material = base_material.clone();
+    normals_debug_material.quality = TerrainMaterialQuality::NormalsDebug;
+    let mut wireframe_normals_debug_material = base_material.clone();
+    wireframe_normals_debug_material.quality = TerrainMaterialQuality::WireframeNormalsDebug;
+
+    let iso_band_image = crate::voxel::terrain_iso_band::create_iso_band_volume_image();
+    let iso_band_texture = images.add(iso_band_image);
+    let attach_iso_band = |material: &mut TriplanarMaterial| {
+        material.iso_band_volume = Some(iso_band_texture.clone());
+        material.iso_band_params = TerrainIsoBandUniforms::default();
+    };
+    attach_iso_band(&mut full_material);
+    attach_iso_band(&mut cheap_material);
+    attach_iso_band(&mut single_projection_far_material);
+    attach_iso_band(&mut atlas_only_debug_material);
+    attach_iso_band(&mut wireframe_debug_material);
+    attach_iso_band(&mut normals_debug_material);
+    attach_iso_band(&mut wireframe_normals_debug_material);
 
     let material_handle = materials.add(full_material);
     let cheap_handle = materials.add(cheap_material);
     let single_projection_far_handle = materials.add(single_projection_far_material);
     let atlas_only_debug_handle = materials.add(atlas_only_debug_material);
     let wireframe_debug_handle = materials.add(wireframe_debug_material);
+    let normals_debug_handle = materials.add(normals_debug_material);
+    let wireframe_normals_debug_handle = materials.add(wireframe_normals_debug_material);
 
     commands.insert_resource(TriplanarMaterialHandle {
-        handle: material_handle,
-        cheap_handle,
-        single_projection_far_handle,
-        atlas_only_debug_handle,
-        wireframe_debug_handle,
+        handle: material_handle.clone(),
+        cheap_handle: cheap_handle.clone(),
+        single_projection_far_handle: single_projection_far_handle.clone(),
+        atlas_only_debug_handle: atlas_only_debug_handle.clone(),
+        wireframe_debug_handle: wireframe_debug_handle.clone(),
+        normals_debug_handle: normals_debug_handle.clone(),
+        wireframe_normals_debug_handle: wireframe_normals_debug_handle.clone(),
     });
+    commands.insert_resource(crate::voxel::terrain_debug::TerrainDebugMaterialHandles::from_base(
+        &material_handle,
+        &wireframe_debug_handle,
+        &normals_debug_handle,
+        &wireframe_normals_debug_handle,
+        &iso_band_texture,
+        &mut materials,
+    ));
+    commands.insert_resource(crate::voxel::terrain_iso_band::TerrainIsoBandVolume::new(
+        iso_band_texture,
+    ));
 }
 
 /// Ensure all triplanar textures use Repeat address mode for seamless tiling with proper mipmaps
@@ -1199,6 +1238,8 @@ pub fn sync_weather_to_materials(
             (&handles.single_projection_far_handle, 0.0),
             (&handles.atlas_only_debug_handle, 0.0),
             (&handles.wireframe_debug_handle, 0.0),
+            (&handles.normals_debug_handle, 0.0),
+            (&handles.wireframe_normals_debug_handle, 0.0),
         ] {
             if let Some(material) = triplanar_materials.get_mut(handle) {
                 material.uniforms.rain_factor = uniforms.rain_factor;

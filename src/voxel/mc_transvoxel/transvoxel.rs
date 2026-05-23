@@ -1,0 +1,396 @@
+//! Transvoxel transition-cell extraction for 2:1 LOD boundaries (all six faces).
+//!
+//! Transition cells replace the outermost regular-MC cell row on faces where the
+//! neighbor LOD index is exactly `my_lod_index + 1` (coarser neighbor).
+
+use crate::voxel::chunk::Chunk;
+use crate::voxel::meshing::MeshData;
+use crate::voxel::skirt::ChunkFace;
+use crate::voxel::world::VoxelWorld;
+use bevy::prelude::*;
+
+use super::face_mask::TransvoxelFaceMask;
+use super::mc::{push_mc_triangle, SdfGrid};
+use super::stats::McTransvoxelStats;
+use super::tables::{
+    TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA, TRANSITION_VERTEX_DATA,
+};
+
+#[derive(Copy, Clone)]
+struct TransitionVertexData(u16);
+
+impl TransitionVertexData {
+    fn grid_a(self) -> usize {
+        ((self.0 & 0x0F) as usize).min(12)
+    }
+    fn grid_b(self) -> usize {
+        (((self.0 & 0xF0) >> 4) as usize).min(12)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct HighResDelta {
+    u: isize,
+    v: isize,
+}
+
+const HIGH_RES_FACE_GRID: [HighResDelta; 9] = [
+    HighResDelta { u: 0, v: 0 },
+    HighResDelta { u: 1, v: 0 },
+    HighResDelta { u: 2, v: 0 },
+    HighResDelta { u: 0, v: 1 },
+    HighResDelta { u: 1, v: 1 },
+    HighResDelta { u: 2, v: 1 },
+    HighResDelta { u: 0, v: 2 },
+    HighResDelta { u: 1, v: 2 },
+    HighResDelta { u: 2, v: 2 },
+];
+
+const HIGH_RES_CASE_BITS: [usize; 9] = [0x01, 0x02, 0x04, 0x80, 0x100, 0x08, 0x40, 0x20, 0x10];
+
+/// Grid-point layout for one transition cell (Lengyel 13-point layout).
+#[derive(Clone, Copy)]
+enum GridPoint {
+    HighRes(HighResDelta),
+    LowRes(usize, usize),
+}
+
+const TRANSITION_GRID_POINTS: [GridPoint; 13] = [
+    GridPoint::HighRes(HighResDelta { u: 0, v: 0 }),
+    GridPoint::HighRes(HighResDelta { u: 1, v: 0 }),
+    GridPoint::HighRes(HighResDelta { u: 2, v: 0 }),
+    GridPoint::HighRes(HighResDelta { u: 0, v: 1 }),
+    GridPoint::HighRes(HighResDelta { u: 1, v: 1 }),
+    GridPoint::HighRes(HighResDelta { u: 2, v: 1 }),
+    GridPoint::HighRes(HighResDelta { u: 0, v: 2 }),
+    GridPoint::HighRes(HighResDelta { u: 1, v: 2 }),
+    GridPoint::HighRes(HighResDelta { u: 2, v: 2 }),
+    GridPoint::LowRes(0, 0),
+    GridPoint::LowRes(1, 0),
+    GridPoint::LowRes(0, 1),
+    GridPoint::LowRes(1, 1),
+];
+
+struct FaceFrame {
+    /// Regular-grid axis aligned with face normal (into chunk).
+    w_axis: u8,
+    w_sign: i32,
+    /// Tangential axes.
+    u_axis: u8,
+    v_axis: u8,
+}
+
+impl FaceFrame {
+    fn for_face(face: ChunkFace) -> Self {
+        match face {
+            ChunkFace::NegX => Self {
+                w_axis: 0,
+                w_sign: 1,
+                u_axis: 2,
+                v_axis: 1,
+            },
+            ChunkFace::PosX => Self {
+                w_axis: 0,
+                w_sign: -1,
+                u_axis: 2,
+                v_axis: 1,
+            },
+            ChunkFace::NegY => Self {
+                w_axis: 1,
+                w_sign: 1,
+                u_axis: 0,
+                v_axis: 2,
+            },
+            ChunkFace::PosY => Self {
+                w_axis: 1,
+                w_sign: -1,
+                u_axis: 0,
+                v_axis: 2,
+            },
+            ChunkFace::NegZ => Self {
+                w_axis: 2,
+                w_sign: 1,
+                u_axis: 0,
+                v_axis: 1,
+            },
+            ChunkFace::PosZ => Self {
+                w_axis: 2,
+                w_sign: -1,
+                u_axis: 0,
+                v_axis: 1,
+            },
+        }
+    }
+
+    fn grid_coords(
+        &self,
+        subdivisions: usize,
+        cell_u: usize,
+        cell_v: usize,
+        point: GridPoint,
+    ) -> [usize; 3] {
+        // The transition cell fills the chunk's outermost boundary cell row —
+        // exactly the row that `skip_regular_on_face` skips in the regular MC
+        // pass. Its high-res plane lies at the boundary; its low-res plane lies
+        // one cell INTO the chunk, so the cell spans [low_w, high_w] in padded
+        // indices and matches the skipped regular cell in local W.
+        //
+        // The padded grid (18^3 at LOD0) is indexed [0..=17] with padding rings
+        // at 0 and 17 and chunk voxels at [1..=16]. For Neg* faces (w_sign > 0)
+        // the boundary lives at padded index 1; for Pos* faces (w_sign < 0) it
+        // lives at padded index `subdivisions`.
+        let (high_w, low_w) = if self.w_sign > 0 {
+            (1usize, 2usize)
+        } else {
+            (subdivisions, subdivisions.saturating_sub(1))
+        };
+        let mut coords = [0usize; 3];
+        match point {
+            GridPoint::HighRes(delta) => {
+                // 3x3 high-res sub-grid within the cell.
+                coords[self.w_axis as usize] = high_w;
+                coords[self.u_axis as usize] = cell_u * 2 + delta.u as usize;
+                coords[self.v_axis as usize] = cell_v * 2 + delta.v as usize;
+            }
+            GridPoint::LowRes(fu, fv) => {
+                // 4 low-res corners coincide with the 4 corners of the same 3x3
+                // sub-grid in world space, so they share U/V positions with the
+                // high-res corners (0,0), (2,0), (0,2), (2,2). The * 2 multiplier
+                // was missing in the prior version, putting low-res corners at
+                // wrong world positions inside earlier cells.
+                coords[self.w_axis as usize] = low_w;
+                coords[self.u_axis as usize] = cell_u * 2 + fu * 2;
+                coords[self.v_axis as usize] = cell_v * 2 + fv * 2;
+            }
+        }
+        coords
+    }
+}
+
+pub fn append_transition_meshes(
+    sdf: &SdfGrid,
+    mesh: &mut MeshData,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+    subdivisions: usize,
+    _step: i32,
+    transition_mask: TransvoxelFaceMask,
+    stats: &mut McTransvoxelStats,
+) {
+    for (face_index, face) in ChunkFace::ALL.iter().enumerate() {
+        if !transition_mask.get(*face) {
+            continue;
+        }
+        let frame = FaceFrame::for_face(*face);
+        let mut face_tris = 0u32;
+        let transition_cells = subdivisions / 2;
+        for cell_v in 0..transition_cells {
+            for cell_u in 0..transition_cells {
+                face_tris += extract_transition_cell(
+                    sdf,
+                    mesh,
+                    chunk,
+                    world,
+                    chunk_origin,
+                    chunk_center,
+                    subdivisions,
+                    &frame,
+                    cell_u,
+                    cell_v,
+                );
+            }
+        }
+        stats.record_transition_face(face_index, face_tris);
+    }
+}
+
+fn extract_transition_cell(
+    sdf: &SdfGrid,
+    mesh: &mut MeshData,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+    subdivisions: usize,
+    frame: &FaceFrame,
+    cell_u: usize,
+    cell_v: usize,
+) -> u32 {
+    let mut case = 0usize;
+    for (i, delta) in HIGH_RES_FACE_GRID.iter().enumerate() {
+        let coords = frame.grid_coords(
+            subdivisions,
+            cell_u,
+            cell_v,
+            GridPoint::HighRes(*delta),
+        );
+        if sdf.get(coords[0], coords[1], coords[2]) < 0.0 {
+            case |= HIGH_RES_CASE_BITS[i];
+        }
+    }
+    let solid_corners = case.count_ones();
+    if solid_corners <= 1 || solid_corners >= 8 {
+        return 0;
+    }
+    if case == 0 || case == 0x1FF {
+        return 0;
+    }
+
+    let raw_class = TRANSITION_CELL_CLASS[case];
+    let class = raw_class & 0x7F;
+    let invert = (raw_class & 0x80) != 0;
+    let tri_data = TRANSITION_CELL_DATA[class as usize];
+    let tri_count = tri_data.get_triangle_count() as usize;
+    let vert_data = TRANSITION_VERTEX_DATA[case];
+    let mut cell_vertices: [Option<Vec3>; 12] = [None; 12];
+
+    for vi in 0..tri_data.get_vertex_count() as usize {
+        let vd = TransitionVertexData(vert_data[vi]);
+        let ga = TRANSITION_GRID_POINTS[vd.grid_a()];
+        let gb = TRANSITION_GRID_POINTS[vd.grid_b()];
+        let a = frame.grid_coords(subdivisions, cell_u, cell_v, ga);
+        let b = frame.grid_coords(subdivisions, cell_u, cell_v, gb);
+        cell_vertices[vi] = Some(sdf.interpolate_edge(a, b));
+    }
+
+    let mut emitted = 0u32;
+    for t in 0..tri_count {
+        let i0 = tri_data.vertex_index[t * 3] as usize;
+        let i1 = tri_data.vertex_index[t * 3 + 1] as usize;
+        let i2 = tri_data.vertex_index[t * 3 + 2] as usize;
+        let Some(mut p0) = cell_vertices[i0] else { continue };
+        let Some(mut p1) = cell_vertices[i1] else { continue };
+        let Some(mut p2) = cell_vertices[i2] else { continue };
+        if invert {
+            std::mem::swap(&mut p1, &mut p2);
+        }
+        push_mc_triangle(
+            mesh,
+            chunk,
+            world,
+            chunk_origin,
+            chunk_center,
+            p0,
+            p1,
+            p2,
+        );
+        emitted += 1;
+    }
+    emitted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SUBDIVISIONS: usize = 16; // LOD0 chunk subdivisions; padded grid is 18.
+
+    /// PosY HighRes plane sits at padded index `subdivisions`, LowRes one cell
+    /// into the chunk at `subdivisions - 1`. Together they span the boundary
+    /// cell row that `skip_regular_on_face` skips in regular MC, with no gap.
+    #[test]
+    fn pos_y_transition_fills_skipped_boundary_row() {
+        let frame = FaceFrame::for_face(ChunkFace::PosY);
+
+        let hi = frame.grid_coords(
+            SUBDIVISIONS,
+            0,
+            0,
+            GridPoint::HighRes(HighResDelta { u: 0, v: 0 }),
+        );
+        let lo = frame.grid_coords(SUBDIVISIONS, 0, 0, GridPoint::LowRes(0, 0));
+
+        // W = y axis, plane at the boundary (16) for HighRes and one cell in
+        // (15) for LowRes. Together they span padded y [15, 16].
+        assert_eq!(hi[1], SUBDIVISIONS, "PosY HighRes plane is the boundary");
+        assert_eq!(lo[1], SUBDIVISIONS - 1, "PosY LowRes is one cell into the chunk");
+        assert_eq!(hi[1] - lo[1], 1, "transition cell is exactly one W cell thick");
+    }
+
+    /// NegY mirrors PosY: HighRes at padded index 1 (boundary), LowRes at 2.
+    /// Before the fix this branch put HighRes at `subdivisions - 1 = 15`,
+    /// which placed NegY transitions on the *opposite* end of the chunk.
+    #[test]
+    fn neg_y_transition_fills_skipped_boundary_row() {
+        let frame = FaceFrame::for_face(ChunkFace::NegY);
+
+        let hi = frame.grid_coords(
+            SUBDIVISIONS,
+            0,
+            0,
+            GridPoint::HighRes(HighResDelta { u: 0, v: 0 }),
+        );
+        let lo = frame.grid_coords(SUBDIVISIONS, 0, 0, GridPoint::LowRes(0, 0));
+
+        assert_eq!(hi[1], 1, "NegY HighRes plane is the boundary at padded y=1");
+        assert_eq!(lo[1], 2, "NegY LowRes is one cell into the chunk at padded y=2");
+        assert_eq!(lo[1] - hi[1], 1, "transition cell is exactly one W cell thick");
+    }
+
+    /// Each transition cell covers a 2x2 high-res sub-cell area. The four
+    /// LowRes corners must coincide in world position with HighRes corners
+    /// (0,0), (2,0), (0,2), (2,2) of the same cell. The pre-fix code wrote
+    /// `cell_u + fu` (no * 2), which mapped LowRes corners to wrong positions
+    /// inside earlier cells.
+    #[test]
+    fn low_res_corners_coincide_with_high_res_corners() {
+        let frame = FaceFrame::for_face(ChunkFace::PosY);
+        let cell_u = 3;
+        let cell_v = 5;
+
+        let pairs = [
+            ((0u8, 0u8), (HighResDelta { u: 0, v: 0 })),
+            ((1, 0), (HighResDelta { u: 2, v: 0 })),
+            ((0, 1), (HighResDelta { u: 0, v: 2 })),
+            ((1, 1), (HighResDelta { u: 2, v: 2 })),
+        ];
+        for ((fu, fv), hr_delta) in pairs {
+            let lo = frame.grid_coords(
+                SUBDIVISIONS,
+                cell_u,
+                cell_v,
+                GridPoint::LowRes(fu as usize, fv as usize),
+            );
+            let hi = frame.grid_coords(
+                SUBDIVISIONS,
+                cell_u,
+                cell_v,
+                GridPoint::HighRes(hr_delta),
+            );
+            // u_axis = 0, v_axis = 2 for PosY: LowRes and HighRes corner must
+            // share U and V (only W differs).
+            assert_eq!(lo[0], hi[0], "U mismatch for LowRes({fu},{fv})");
+            assert_eq!(lo[2], hi[2], "V mismatch for LowRes({fu},{fv})");
+        }
+    }
+
+    /// All face frames must keep grid coordinates within the padded grid
+    /// [0..=subdivisions+1] for every transition cell index they'll be called
+    /// with (cell_u, cell_v in [0..subdivisions/2)). Catches off-by-one bugs
+    /// that would re-introduce the original OOB panic.
+    #[test]
+    fn grid_coords_stay_within_padded_bounds_for_all_faces() {
+        let transition_cells = SUBDIVISIONS / 2;
+        let padded = SUBDIVISIONS + 2; // 18 for LOD0
+
+        for face in ChunkFace::ALL.iter().copied() {
+            let frame = FaceFrame::for_face(face);
+            for cell_v in 0..transition_cells {
+                for cell_u in 0..transition_cells {
+                    for grid_point in TRANSITION_GRID_POINTS.iter().copied() {
+                        let c = frame.grid_coords(SUBDIVISIONS, cell_u, cell_v, grid_point);
+                        for (axis, value) in c.iter().enumerate() {
+                            assert!(
+                                *value < padded,
+                                "face {face:?} cell ({cell_u},{cell_v}) axis {axis} \
+                                 produced grid index {value} >= padded {padded}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

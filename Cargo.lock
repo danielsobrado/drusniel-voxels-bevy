@@ -6090,6 +6090,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "transvoxel-data"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31c8adc977f8b18a6894d2dea6c300b73cdd1f653b3adaf0c32749ed5a633a34"
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6297,6 +6303,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "toml",
+ "transvoxel-data",
  "wgpu",
 ]
 

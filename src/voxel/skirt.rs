@@ -348,8 +348,14 @@ fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx:
     }
 }
 
-fn push_quad_barycentrics(barycentric_uvs: &mut Vec<[f32; 2]>) {
-    barycentric_uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, 1.0]]);
+fn push_quad_barycentrics(barycentric_uvs: &mut Vec<[f32; 2]>, section: u8) {
+    use crate::voxel::meshing::encode_barycentric_uv;
+    barycentric_uvs.extend_from_slice(&[
+        encode_barycentric_uv([1.0, 0.0], section),
+        encode_barycentric_uv([0.0, 1.0], section),
+        encode_barycentric_uv([0.0, 0.0], section),
+        encode_barycentric_uv([0.0, 1.0], section),
+    ]);
 }
 
 /// Generate skirt geometry and append to existing mesh data.
@@ -501,7 +507,10 @@ pub fn generate_skirts_with_apron_only_faces(
             uvs.push([1.0, 0.0]);
             material_weights.push(edge.v1_weights);
 
-            push_quad_barycentrics(barycentric_uvs);
+            push_quad_barycentrics(
+                barycentric_uvs,
+                crate::voxel::meshing::TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT,
+            );
             push_boundary_quad_indices(indices, edge.face, base_idx);
             stats.transition_apron_index_count += 6;
             (apron0, apron1)
@@ -541,7 +550,10 @@ pub fn generate_skirts_with_apron_only_faces(
         uvs.push([1.0, 0.0]);
         material_weights.push(edge.v1_weights);
 
-        push_quad_barycentrics(barycentric_uvs);
+        push_quad_barycentrics(
+            barycentric_uvs,
+            crate::voxel::meshing::TERRAIN_MESH_SECTION_VERTICAL_SKIRT,
+        );
         push_boundary_quad_indices(indices, edge.face, vertical_idx);
         stats.vertical_skirt_index_count += 6;
     }
@@ -1064,5 +1076,53 @@ mod tests {
             max_y <= 16.0 + VOXEL_SIZE * 3.0 + 1e-4,
             "apron must stay bounded, got {max_y}"
         );
+    }
+
+    #[test]
+    fn skirt_barycentrics_tag_apron_and_vertical_sections() {
+        use crate::voxel::meshing::{
+            TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT, TERRAIN_MESH_SECTION_VERTICAL_SKIRT,
+            barycentric_section,
+        };
+
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            neg_x: None,
+            pos_x: Some(LodLevel::Lod1),
+            neg_y: None,
+            pos_y: None,
+            neg_z: None,
+            pos_z: None,
+        };
+
+        let stats = generate_skirts(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+        );
+
+        assert!(stats.transition_apron_index_count > 0);
+        assert!(stats.vertical_skirt_index_count > 0);
+        assert!(barycentric_uvs.iter().any(|uv| {
+            barycentric_section(*uv) == TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT
+        }));
+        assert!(barycentric_uvs.iter().any(|uv| {
+            barycentric_section(*uv) == TERRAIN_MESH_SECTION_VERTICAL_SKIRT
+        }));
     }
 }

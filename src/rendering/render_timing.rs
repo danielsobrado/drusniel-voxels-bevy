@@ -432,7 +432,7 @@ fn visible_terrain_pressure_inventory(
         stats.terrain_vertices += chunk_mesh.vertex_count as u64;
         stats.terrain_triangles += chunk_mesh.triangle_count as u64;
         match chunk_mesh.mesh_mode {
-            MeshMode::SurfaceNets => stats.triplanar_meshes += 1,
+            MeshMode::SurfaceNets | MeshMode::McTransvoxel => stats.triplanar_meshes += 1,
             MeshMode::Blocky => stats.blocky_meshes += 1,
         }
         match chunk_mesh.material_quality {
@@ -442,7 +442,9 @@ fn visible_terrain_pressure_inventory(
                 stats.single_projection_far_meshes += 1;
             }
             TerrainMaterialQuality::AtlasOnlyDebug => stats.atlas_only_debug_meshes += 1,
-            TerrainMaterialQuality::WireframeDebug => stats.wireframe_debug_meshes += 1,
+            TerrainMaterialQuality::WireframeDebug
+            | TerrainMaterialQuality::NormalsDebug
+            | TerrainMaterialQuality::WireframeNormalsDebug => stats.wireframe_debug_meshes += 1,
         }
     }
 

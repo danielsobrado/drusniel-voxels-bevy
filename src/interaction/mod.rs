@@ -1035,6 +1035,10 @@ impl Plugin for InteractionPlugin {
             .init_resource::<palette::GhostPreviewState>()
             .init_resource::<radial_menu::RadialMenuState>()
             .add_systems(Startup, debug::setup_debug_overlay)
+            .add_systems(
+                Startup,
+                crate::voxel::terrain_debug::setup_terrain_debug_indicator,
+            )
             .add_systems(Startup, palette::load_bookmarks)
             .add_systems(Startup, palette::setup_ghost_materials)
             .add_systems(
@@ -1098,6 +1102,11 @@ impl Plugin for InteractionPlugin {
                     debug::toggle_debug_details.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_mesh_mode.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_terrain_lod.run_if(|state: Res<PauseMenuState>| !state.open),
+                    crate::voxel::terrain_debug::toggle_terrain_debug_view
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
+                    crate::voxel::terrain_debug::capture_terrain_debug_frame
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
+                    crate::voxel::terrain_debug::update_terrain_debug_indicator,
                     debug::draw_chunk_borders.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),

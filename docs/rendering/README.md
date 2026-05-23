@@ -16,6 +16,10 @@ Document status (2026-05-17): current index/reference.
 - [NAADF debugging notes](naadf-debugging.md)
 - [NAADF benchmarks](naadf-benchmarks.md)
 
+## LOD seam experiments
+
+- [MC + Transvoxel spike plan](../lod/mc-transvoxel-plan.md) — off-by-default Marching Cubes + transition-cell seam closure spike (`mc_transvoxel` Cargo feature).
+
 ### Path A: NAADF GI backend migration
 
 - [Path A overview and phases](naadf-path-a/README.md)

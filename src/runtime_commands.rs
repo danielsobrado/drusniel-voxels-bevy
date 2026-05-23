@@ -55,11 +55,11 @@ use crate::terrain::generation::config::{
     AquiferConfig, BasinConfig, MountainConfig, NoiseLayer, RiverConfig, TerrainConfig,
     terrain_config_fingerprint,
 };
-use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::materials::{
     MaterialCatalog, MaterialId, MaterialReplaceSummary, VoxelMaterialDefinition,
 };
-use crate::voxel::meshing::{ChunkMesh, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::meshing::{ChunkMesh, TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::terrain::{Biome, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise};
@@ -5415,6 +5415,8 @@ fn set_baked_ao_strength(world: &mut World, strength: f32) {
                 handles.single_projection_far_handle.clone(),
                 handles.atlas_only_debug_handle.clone(),
                 handles.wireframe_debug_handle.clone(),
+                handles.normals_debug_handle.clone(),
+                handles.wireframe_normals_debug_handle.clone(),
             ]
         })
         .unwrap_or_default();
@@ -5517,41 +5519,77 @@ fn set_viewport_debug_overlay(
 }
 
 fn set_terrain_wireframe_debug_material(world: &mut World, enabled: bool) {
-    let Some((wireframe_handle, restore_handles)) = world
-        .get_resource::<TriplanarMaterialHandle>()
-        .map(|handles| {
-            (
-                handles.wireframe_debug_handle.clone(),
-                (!enabled).then(|| {
-                    (
-                        handles.handle.clone(),
-                        handles.cheap_handle.clone(),
-                        handles.single_projection_far_handle.clone(),
-                        handles.atlas_only_debug_handle.clone(),
-                    )
-                }),
-            )
-        })
+    let Some(debug_handles) = world
+        .get_resource::<crate::voxel::terrain_debug::TerrainDebugMaterialHandles>()
+        .cloned()
     else {
         return;
     };
+    let restore_handles = (!enabled)
+        .then(|| {
+            world.get_resource::<TriplanarMaterialHandle>().map(|handles| {
+                (
+                    handles.handle.clone(),
+                    handles.cheap_handle.clone(),
+                    handles.single_projection_far_handle.clone(),
+                    handles.atlas_only_debug_handle.clone(),
+                    handles.wireframe_debug_handle.clone(),
+                    handles.normals_debug_handle.clone(),
+                    handles.wireframe_normals_debug_handle.clone(),
+                )
+            })
+        })
+        .flatten();
+    let wireframe_fallback = world
+        .get_resource::<TriplanarMaterialHandle>()
+        .map(|handles| handles.wireframe_debug_handle.clone());
 
-    let mut query = world.query::<(&mut MeshMaterial3d<TriplanarMaterial>, &ChunkMesh)>();
-    for (mut material, chunk_mesh) in query.iter_mut(world) {
+    let mut query = world.query::<(
+        &mut MeshMaterial3d<TriplanarMaterial>,
+        &ChunkMesh,
+        Option<&TerrainMeshDebug>,
+    )>();
+    for (mut material, chunk_mesh, mesh_debug) in query.iter_mut(world) {
         **material = if enabled {
-            wireframe_handle.clone()
-        } else if let Some((full, cheap, single_projection_far, atlas_only_debug)) =
-            restore_handles.as_ref()
+            let lod = mesh_debug
+                .map(|debug| debug.logical_lod_at_mesh)
+                .unwrap_or(LodLevel::Lod0);
+            debug_handles
+                .handle_for(
+                    crate::voxel::terrain_debug::TerrainDebugMaterialMode::Wireframe,
+                    lod,
+                )
+                .or(wireframe_fallback.clone())
+                .unwrap()
+        } else if let Some((
+            full,
+            cheap,
+            single_projection_far,
+            atlas_only_debug,
+            wireframe_debug,
+            normals_debug,
+            wireframe_normals_debug,
+        )) = restore_handles.as_ref()
         {
             match chunk_mesh.material_quality {
                 TerrainMaterialQuality::FullTriplanar => full.clone(),
                 TerrainMaterialQuality::CheapTriplanar => cheap.clone(),
                 TerrainMaterialQuality::SingleProjectionFar => single_projection_far.clone(),
                 TerrainMaterialQuality::AtlasOnlyDebug => atlas_only_debug.clone(),
-                TerrainMaterialQuality::WireframeDebug => full.clone(),
+                TerrainMaterialQuality::WireframeDebug => wireframe_debug.clone(),
+                TerrainMaterialQuality::NormalsDebug => normals_debug.clone(),
+                TerrainMaterialQuality::WireframeNormalsDebug => {
+                    wireframe_normals_debug.clone()
+                }
             }
         } else {
-            wireframe_handle.clone()
+            debug_handles
+                .handle_for(
+                    crate::voxel::terrain_debug::TerrainDebugMaterialMode::Wireframe,
+                    LodLevel::Lod0,
+                )
+                .or(wireframe_fallback.clone())
+                .unwrap()
         };
     }
 }

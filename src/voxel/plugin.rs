@@ -101,6 +101,10 @@ use crate::voxel::meshing::{
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_with_mode,
     lod_delta_gt_one_face_mask,
 };
+use crate::voxel::mc_transvoxel::{
+    log_transition_stats_if_due, McTransvoxelLodDeltaPolicy, McTransvoxelRuntimeStats,
+    McTransvoxelSettings,
+};
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
@@ -642,6 +646,9 @@ impl Plugin for VoxelPlugin {
             ..default()
         })
         .insert_resource(LodSettings::default())
+        .insert_resource(crate::voxel::terrain_debug::TerrainDebugView::default())
+        .insert_resource(McTransvoxelSettings::load_or_default())
+        .insert_resource(McTransvoxelRuntimeStats::default())
         .insert_resource(TerrainLodControl::default())
         .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(SkirtConfig::default())
@@ -726,6 +733,8 @@ impl Plugin for VoxelPlugin {
                 update_water_material_lod.after(update_water_body_registry),
                 draw_water_body_debug_overlay.after(update_water_body_registry),
                 update_terrain_material_lod.after(update_chunk_lod_system),
+                crate::voxel::terrain_iso_band::update_terrain_iso_band_volume
+                    .after(update_terrain_material_lod),
                 record_voxel_edit_counters,
                 update_world_startup_background_cover,
                 update_world_startup_overlay.after(mesh_dirty_chunks_system),
@@ -1904,13 +1913,88 @@ fn assign_initial_lods_for_loaded_world(
 }
 
 fn should_defer_surface_nets_mesh(target_mode: MeshMode, missing_boundary_neighbors: u32) -> bool {
-    matches!(target_mode, MeshMode::SurfaceNets) && missing_boundary_neighbors > 0
+    matches!(
+        target_mode,
+        MeshMode::SurfaceNets | MeshMode::McTransvoxel
+    ) && missing_boundary_neighbors > 0
 }
 
 fn visual_surface_nets_lod(lod_level: LodLevel) -> LodLevel {
     match lod_level {
         LodLevel::Lod3 => LodLevel::Lod2,
         other => other,
+    }
+}
+
+fn resolve_terrain_mesh_mode(
+    base_mode: MeshMode,
+    chunk_pos: IVec3,
+    logical_lod: LodLevel,
+    mc_settings: &McTransvoxelSettings,
+    camera_pos: Option<Vec3>,
+) -> MeshMode {
+    if base_mode != MeshMode::SurfaceNets || !mc_settings.enabled {
+        return base_mode;
+    }
+    let camera_chunk = camera_pos.map(|pos| {
+        VoxelWorld::world_to_chunk(IVec3::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        ))
+    });
+    if mc_settings.should_mesh_chunk(chunk_pos, camera_chunk, logical_lod) {
+        MeshMode::McTransvoxel
+    } else {
+        base_mode
+    }
+}
+
+fn lod_level_from_index(index: u8) -> LodLevel {
+    match index {
+        0 => LodLevel::Lod0,
+        1 => LodLevel::Lod1,
+        2 => LodLevel::Lod2,
+        _ => LodLevel::Lod3,
+    }
+}
+
+fn enforce_lod_delta_max_one(desired: &mut HashMap<IVec3, LodLevel>) {
+    const FACE_OFFSETS: [IVec3; 6] = [
+        IVec3::new(1, 0, 0),
+        IVec3::new(-1, 0, 0),
+        IVec3::new(0, 1, 0),
+        IVec3::new(0, -1, 0),
+        IVec3::new(0, 0, 1),
+        IVec3::new(0, 0, -1),
+    ];
+    for _ in 0..6 {
+        let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
+        for (chunk_pos, &lod) in desired.iter() {
+            let Some(my_idx) = lod.lod_index() else {
+                continue;
+            };
+            for offset in FACE_OFFSETS {
+                let Some(&neighbor_lod) = desired.get(&(*chunk_pos + offset)) else {
+                    continue;
+                };
+                let Some(neighbor_idx) = neighbor_lod.lod_index() else {
+                    continue;
+                };
+                if my_idx.abs_diff(neighbor_idx) <= 1 {
+                    continue;
+                }
+                let mid = ((my_idx as u16 + neighbor_idx as u16) / 2) as u8;
+                updates.push((*chunk_pos, lod_level_from_index(mid)));
+                break;
+            }
+        }
+        if updates.is_empty() {
+            break;
+        }
+        for (pos, lod) in updates {
+            desired.insert(pos, lod);
+        }
     }
 }
 
@@ -1933,8 +2017,10 @@ fn mesh_lod_level_for_surface_nets_cap(
     empty_surface_neighbor: bool,
     lod_level: LodLevel,
 ) -> LodLevel {
-    let mesh_lod_level = if matches!(target_mode, MeshMode::SurfaceNets)
-        && uniformity == ChunkUniformity::Empty
+    let mesh_lod_level = if matches!(
+        target_mode,
+        MeshMode::SurfaceNets | MeshMode::McTransvoxel
+    ) && uniformity == ChunkUniformity::Empty
         && empty_surface_neighbor
     {
         LodLevel::Lod0
@@ -1942,7 +2028,10 @@ fn mesh_lod_level_for_surface_nets_cap(
         lod_level
     };
 
-    if matches!(target_mode, MeshMode::SurfaceNets) {
+    if matches!(
+        target_mode,
+        MeshMode::SurfaceNets | MeshMode::McTransvoxel
+    ) {
         visual_surface_nets_lod(mesh_lod_level)
     } else {
         mesh_lod_level
@@ -2073,6 +2162,12 @@ struct MeshDirtyTimingParams<'w> {
     gen_state: Res<'w, ChunkGenerationState>,
 }
 
+#[derive(SystemParam)]
+struct McSpikeMeshParams<'w> {
+    settings: Res<'w, McTransvoxelSettings>,
+    stats: ResMut<'w, McTransvoxelRuntimeStats>,
+}
+
 fn mesh_dirty_chunks_system(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
@@ -2083,6 +2178,7 @@ fn mesh_dirty_chunks_system(
     bench_toggles: Option<Res<BenchRenderToggles>>,
     mesh_settings: Res<MeshSettings>,
     lod_settings: Res<LodSettings>,
+    mut mc_spike: McSpikeMeshParams,
     skirt_config: Res<SkirtConfig>,
     ao_config: Res<AmbientOcclusionConfig>,
     mut chunk_stats: ResMut<RuntimeChunkStats>,
@@ -2096,6 +2192,7 @@ fn mesh_dirty_chunks_system(
     let mesh_dirty_total_start = timing.enabled.then(Instant::now);
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
+    mc_spike.stats.chunks_meshed_this_frame = 0;
 
     // Wait for blocky material to be loaded before processing chunks.
     let blocky_material = if let Some(mat) = blocky_material {
@@ -2182,8 +2279,15 @@ fn mesh_dirty_chunks_system(
         }
 
         let (target_mode, lod_level, uniformity) = if let Some(chunk) = world.get_chunk(chunk_pos) {
-            let target_mode =
+            let base_mode =
                 target_terrain_mesh_mode_for_lod(chunk.lod_level(), &mesh_settings, &lod_settings);
+            let target_mode = resolve_terrain_mesh_mode(
+                base_mode,
+                chunk_pos,
+                chunk.lod_level(),
+                &mc_spike.settings,
+                camera_pos,
+            );
 
             (target_mode, chunk.lod_level(), chunk.uniformity())
         } else {
@@ -2212,7 +2316,7 @@ fn mesh_dirty_chunks_system(
         }
 
         let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
-            && matches!(target_mode, MeshMode::SurfaceNets)
+            && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
             && empty_chunk_has_surface_nets_boundary_surface(&world, chunk_pos);
         let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
             target_mode,
@@ -2308,6 +2412,50 @@ fn mesh_dirty_chunks_system(
         chunk_stats.water_exposure_outside_world_rejected +=
             mesh_result.water_stats.exposure_outside_world_rejected as u64;
 
+        if let Some(mc_stats) = mesh_result.mc_transvoxel_stats {
+            mc_spike.stats.chunks_meshed_this_frame += 1;
+            mc_spike.stats.aggregated.regular_chunks_meshed = mc_spike
+                .stats
+                .aggregated
+                .regular_chunks_meshed
+                .saturating_add(mc_stats.regular_chunks_meshed);
+            for (dst, src) in mc_spike
+                .stats
+                .aggregated
+                .transition_faces_meshed
+                .iter_mut()
+                .zip(mc_stats.transition_faces_meshed)
+            {
+                *dst = dst.saturating_add(src);
+            }
+            mc_spike.stats.aggregated.transition_triangles_total = mc_spike
+                .stats
+                .aggregated
+                .transition_triangles_total
+                .saturating_add(mc_stats.transition_triangles_total);
+            mc_spike.stats.aggregated.skipped_lod_delta_gt_one = mc_spike
+                .stats
+                .aggregated
+                .skipped_lod_delta_gt_one
+                .saturating_add(mc_stats.skipped_lod_delta_gt_one);
+            mc_spike.stats.aggregated.skipped_missing_neighbor = mc_spike
+                .stats
+                .aggregated
+                .skipped_missing_neighbor
+                .saturating_add(mc_stats.skipped_missing_neighbor);
+            mc_spike.stats.aggregated.mesh_generation_ms_total += mc_stats.mesh_generation_ms_total;
+            mc_spike.stats.aggregated.triangle_count_regular = mc_spike
+                .stats
+                .aggregated
+                .triangle_count_regular
+                .saturating_add(mc_stats.triangle_count_regular);
+            mc_spike.stats.aggregated.triangle_count_transition = mc_spike
+                .stats
+                .aggregated
+                .triangle_count_transition
+                .saturating_add(mc_stats.triangle_count_transition);
+        }
+
         let water_depth_detail = if mesh_result.water.is_empty() {
             WaterChunkDepthDetail::default()
         } else {
@@ -2342,6 +2490,7 @@ fn mesh_dirty_chunks_system(
                 generated_frame: frame.0,
                 lod_transition_snap_stats: mesh_result.lod_transition_snap_stats,
                 mesh_section_stats: mesh_result.mesh_section_stats,
+                mc_transvoxel_stats: mesh_result.mc_transvoxel_stats,
             };
 
             // Track meshing statistics
@@ -2377,7 +2526,7 @@ fn mesh_dirty_chunks_system(
                                     >>();
                             }
                         }
-                        MeshMode::SurfaceNets => {
+                        MeshMode::SurfaceNets | MeshMode::McTransvoxel => {
                             commands
                                 .entity(entity)
                                 .insert((
@@ -2423,7 +2572,7 @@ fn mesh_dirty_chunks_system(
                                 ))
                                 .id()
                         }
-                        MeshMode::SurfaceNets => commands
+                        MeshMode::SurfaceNets | MeshMode::McTransvoxel => commands
                             .spawn((
                                 Mesh3d(mesh_handle),
                                 MeshMaterial3d(triplanar_handle),
@@ -2572,6 +2721,7 @@ fn mesh_dirty_chunks_system(
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
     chunk_stats.dirty_chunks_queued = dirty_chunks_queued as u32;
     chunk_stats.surface_nets_chunks_deferred_for_halo = surface_nets_chunks_deferred_for_halo;
+    log_transition_stats_if_due(&mc_spike.settings, &mc_spike.stats, frame.0);
 
     // Keep the O(N) debug/stat snapshot off hot dirty-mesh frames while the
     // terrain queue is backed up. Per-frame mesh counters above stay current.
@@ -2835,7 +2985,9 @@ fn terrain_material_quality_for_distance(
         TerrainMaterialQuality::CheapTriplanar
         | TerrainMaterialQuality::SingleProjectionFar
         | TerrainMaterialQuality::AtlasOnlyDebug
-        | TerrainMaterialQuality::WireframeDebug => current,
+        | TerrainMaterialQuality::WireframeDebug
+        | TerrainMaterialQuality::NormalsDebug
+        | TerrainMaterialQuality::WireframeNormalsDebug => current,
         _ => current,
     }
 }
@@ -2844,6 +2996,8 @@ fn update_terrain_material_lod(
     time: Res<Time>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     triplanar_material: Res<TriplanarMaterialHandle>,
+    terrain_debug_handles: Option<Res<crate::voxel::terrain_debug::TerrainDebugMaterialHandles>>,
+    terrain_debug: Res<crate::voxel::terrain_debug::TerrainDebugView>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     quality_preset: Res<RenderQualityPreset>,
     runtime_debug: Option<Res<crate::runtime_commands::RuntimeViewportDebugState>>,
@@ -2852,6 +3006,7 @@ fn update_terrain_material_lod(
             &Transform,
             &mut ChunkMesh,
             &mut MeshMaterial3d<TriplanarMaterial>,
+            Option<&TerrainMeshDebug>,
         ),
         Without<WaterMesh>,
     >,
@@ -2868,15 +3023,28 @@ fn update_terrain_material_lod(
     };
     let camera_pos = camera_transform.translation;
     let bench_toggles = bench_toggles.as_deref();
-    let wireframe_debug_enabled = runtime_debug.is_some_and(|debug| debug.wireframe);
+    let forced_quality = bench_toggles.and_then(|toggles| toggles.terrain_material_quality.forced_quality());
+    let editor_wireframe = runtime_debug.is_some_and(|debug| debug.wireframe);
+    let debug_mode = crate::voxel::terrain_debug::terrain_debug_material_mode(
+        &terrain_debug,
+        editor_wireframe,
+        forced_quality,
+    );
 
-    for (transform, mut chunk_mesh, mut material) in &mut terrain_meshes {
+    for (transform, mut chunk_mesh, mut material, mesh_debug) in &mut terrain_meshes {
         if chunk_mesh.mesh_mode != MeshMode::SurfaceNets {
             continue;
         }
-        if wireframe_debug_enabled {
-            **material =
-                triplanar_material.handle_for_quality(TerrainMaterialQuality::WireframeDebug);
+        if debug_mode != crate::voxel::terrain_debug::TerrainDebugMaterialMode::None {
+            let Some(handles) = terrain_debug_handles.as_ref() else {
+                continue;
+            };
+            let lod = mesh_debug
+                .map(|debug| debug.logical_lod_at_mesh)
+                .unwrap_or(LodLevel::Lod0);
+            if let Some(handle) = handles.handle_for(debug_mode, lod) {
+                **material = handle;
+            }
             continue;
         }
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
@@ -4132,6 +4300,7 @@ fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
+    mc_spike: McSpikeMeshParams,
     lod_control: Res<TerrainLodControl>,
     mut lod_transitions: ResMut<TerrainLodTransitionState>,
     time: Res<Time>,
@@ -4277,6 +4446,12 @@ fn update_chunk_lod_system(
         for (pos, lod) in updates {
             desired.insert(pos, lod);
         }
+    }
+
+    if mc_spike.settings.enabled
+        && mc_spike.settings.lod_delta_policy == McTransvoxelLodDeltaPolicy::MaxOne
+    {
+        enforce_lod_delta_max_one(&mut desired);
     }
 
     // Pass 3 — turn coherent desired LODs into change candidates.

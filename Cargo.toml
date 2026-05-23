@@ -13,6 +13,8 @@ legacy_prop_spawn = []
 # A/B benches, and preview work.
 naadf = []
 naadf_debug = ["naadf"]
+# Off-by-default MC + Transvoxel LOD seam spike (see docs/lod/mc-transvoxel-plan.md).
+mc_transvoxel = ["dep:transvoxel-data"]
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
@@ -69,6 +71,7 @@ pollster = "0.4.0"
 wgpu = { version = "27.0.1", default-features = false, features = ["dx12", "vulkan"] }
 rand = "0.8"
 sysinfo = "0.37"
+transvoxel-data = { version = "0.2.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"

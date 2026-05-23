@@ -16,6 +16,7 @@ use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
 use crate::player::{Player, classify_player_world_validity};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
+use crate::voxel::mc_transvoxel::McTransvoxelStats;
 use crate::voxel::meshing::{
     ChunkMesh, LodTransitionSnapStats, MeshMode, MeshSettings, TerrainMeshDebug,
     TerrainMeshSectionStats, WaterMesh, empty_chunk_has_surface_nets_boundary_surface,
@@ -307,6 +308,7 @@ struct FanGapChunkState {
     lod_eval: Option<LodEvalProbe>,
     neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
     lod_transition_snap_at_mesh: Option<LodTransitionSnapStatsProbe>,
+    mc_transvoxel_at_mesh: Option<McTransvoxelStatsProbe>,
     mesh_sections_at_mesh: Option<TerrainMeshSectionStatsProbe>,
     empty_surface_cap_at_mesh: Option<bool>,
     empty_cap: EmptyCapProbe,
@@ -401,6 +403,7 @@ struct ChunkMeshProbe {
     empty_surface_cap_at_mesh: Option<bool>,
     generated_frame: Option<u32>,
     lod_transition_snap: Option<LodTransitionSnapStatsProbe>,
+    mc_transvoxel: Option<McTransvoxelStatsProbe>,
     mesh_sections: Option<TerrainMeshSectionStatsProbe>,
 }
 
@@ -431,6 +434,18 @@ struct LodTransitionSnapStatsProbe {
     snapped_vertex_count: u32,
     skipped_vertex_count: u32,
     conflicting_vertex_count: u32,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct McTransvoxelStatsProbe {
+    regular_chunks_meshed: u32,
+    transition_faces_meshed: [u32; 6],
+    transition_triangles_total: u32,
+    skipped_lod_delta_gt_one: u32,
+    skipped_missing_neighbor: u32,
+    mesh_generation_ms_total: f32,
+    triangle_count_regular: u32,
+    triangle_count_transition: u32,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -2180,6 +2195,8 @@ fn fan_gap_chunk_state(
             .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
         lod_transition_snap_at_mesh: terrain_debug
             .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
+        mc_transvoxel_at_mesh: terrain_debug
+            .and_then(|debug| debug.mc_transvoxel_stats.map(mc_transvoxel_stats_probe)),
         mesh_sections_at_mesh: terrain_debug
             .map(|debug| mesh_section_stats_probe(debug.mesh_section_stats)),
         empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
@@ -2388,6 +2405,8 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
             generated_frame: terrain_debug.map(|debug| debug.generated_frame),
             lod_transition_snap: terrain_debug
                 .map(|debug| lod_transition_snap_stats_probe(debug.lod_transition_snap_stats)),
+            mc_transvoxel: terrain_debug
+                .and_then(|debug| debug.mc_transvoxel_stats.map(mc_transvoxel_stats_probe)),
             mesh_sections: terrain_debug
                 .map(|debug| mesh_section_stats_probe(debug.mesh_section_stats)),
         }),
@@ -2596,6 +2615,19 @@ fn lod_transition_snap_stats_probe(stats: LodTransitionSnapStats) -> LodTransiti
         snapped_vertex_count: stats.snapped_vertex_count,
         skipped_vertex_count: stats.skipped_vertex_count,
         conflicting_vertex_count: stats.conflicting_vertex_count,
+    }
+}
+
+fn mc_transvoxel_stats_probe(stats: McTransvoxelStats) -> McTransvoxelStatsProbe {
+    McTransvoxelStatsProbe {
+        regular_chunks_meshed: stats.regular_chunks_meshed,
+        transition_faces_meshed: stats.transition_faces_meshed,
+        transition_triangles_total: stats.transition_triangles_total,
+        skipped_lod_delta_gt_one: stats.skipped_lod_delta_gt_one,
+        skipped_missing_neighbor: stats.skipped_missing_neighbor,
+        mesh_generation_ms_total: stats.mesh_generation_ms_total,
+        triangle_count_regular: stats.triangle_count_regular,
+        triangle_count_transition: stats.triangle_count_transition,
     }
 }
 

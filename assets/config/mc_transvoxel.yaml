@@ -1,0 +1,11 @@
+mc_transvoxel:
+  enabled: true
+  mode: replace_surface_nets
+  max_chunks_per_frame: 2
+  lod_delta_policy: max_one
+  use_secondary_positions: false
+  generate_colliders: false
+  material_mode: single_triplanar
+  debug_draw_transition_faces: false
+  debug_log_transition_stats: false
+  sandbox_radius_chunks: 2

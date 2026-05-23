@@ -2,6 +2,7 @@ seed = 12345
 duration_warmup_secs = 1.0
 median_runs = 1
 chunk_load_radius = 7
+skip_props = true
 freeze_terrain_lod_after_ready = true
 world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 

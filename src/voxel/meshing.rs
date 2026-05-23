@@ -35,7 +35,7 @@ use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
 use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, compute_boundary_flags,
+    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats,
     extract_boundary_edges, generate_skirts_with_apron_only_faces,
 };
 use crate::voxel::types::{Voxel, VoxelType};
@@ -53,6 +53,31 @@ use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
+
+/// UV1.y section scale for wireframe mesh-section colouring (`TERRAIN_DEBUG_WIREFRAME`).
+pub const TERRAIN_BARYCENTRIC_SECTION_SCALE: f32 = 4.0;
+
+/// Main Surface Nets mesh triangles.
+pub const TERRAIN_MESH_SECTION_MAIN: u8 = 0;
+/// Horizontal transition apron / seal geometry from [`crate::voxel::skirt`].
+pub const TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT: u8 = 1;
+/// Vertical drop curtain geometry from [`crate::voxel::skirt`].
+pub const TERRAIN_MESH_SECTION_VERTICAL_SKIRT: u8 = 2;
+/// Reserved for future MC+Transvoxel transition aprons.
+pub const TERRAIN_MESH_SECTION_TRANSITION_APRON: u8 = 3;
+
+/// Encode barycentric UV1 with a mesh-generation section tag in the spare Y channel.
+pub fn encode_barycentric_uv(bary: [f32; 2], section: u8) -> [f32; 2] {
+    [
+        bary[0],
+        bary[1] + section as f32 * TERRAIN_BARYCENTRIC_SECTION_SCALE,
+    ]
+}
+
+/// Decode the mesh-generation section tag written by [`encode_barycentric_uv`].
+pub fn barycentric_section(uv: [f32; 2]) -> u8 {
+    (uv[1] / TERRAIN_BARYCENTRIC_SECTION_SCALE).floor() as u8
+}
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ChunkMesh {
@@ -75,6 +100,7 @@ pub struct TerrainMeshDebug {
     pub generated_frame: u32,
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
+    pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -322,9 +348,16 @@ impl MeshData {
         mesh
     }
 
-    fn push_triangle_barycentrics(&mut self) {
-        self.barycentric_uvs
-            .extend_from_slice(&[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]);
+    pub(crate) fn push_triangle_barycentrics(&mut self) {
+        self.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_MAIN);
+    }
+
+    pub(crate) fn push_triangle_barycentrics_with_section(&mut self, section: u8) {
+        self.barycentric_uvs.extend_from_slice(&[
+            encode_barycentric_uv([1.0, 0.0], section),
+            encode_barycentric_uv([0.0, 1.0], section),
+            encode_barycentric_uv([0.0, 0.0], section),
+        ]);
     }
 }
 
@@ -378,6 +411,7 @@ pub struct ChunkMeshResult {
     pub water_stats: WaterMeshingStats,
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
+    pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
 }
 
 // =============================================================================
@@ -838,6 +872,7 @@ pub fn generate_chunk_mesh(
         water_stats,
         lod_transition_snap_stats: LodTransitionSnapStats::default(),
         mesh_section_stats: TerrainMeshSectionStats::default(),
+        mc_transvoxel_stats: None,
     }
 }
 
@@ -2505,7 +2540,7 @@ fn coarse_aligned_lod_sample_base(
     coarse_aligned_lod_sample_base_with_stride(chunk_origin, px, py, pz, 1, step)
 }
 
-fn coarse_aligned_lod_sample_base_with_stride(
+pub(crate) fn coarse_aligned_lod_sample_base_with_stride(
     chunk_origin: IVec3,
     px: u32,
     py: u32,
@@ -2615,7 +2650,7 @@ fn coarse_lod_iso_height_for_column(
     crossing
 }
 
-fn sdf_gradient_normal_at_local(
+pub(crate) fn sdf_gradient_normal_at_local(
     world: &VoxelWorld,
     chunk_origin: IVec3,
     local_pos: Vec3,
@@ -2771,7 +2806,19 @@ fn smoothed_sdf_from_block(block: &[f32], px: u32, py: u32, pz: u32) -> f32 {
     if raw < 0.0 { -1.0 } else { smoothed }
 }
 
-fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> f32 {
+/// Mesher SDF at a world position (matches Surface Nets / iso-band debug sampling).
+pub fn mesher_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: Vec3) -> f32 {
+    smoothed_terrain_sdf_at_world_pos(
+        world,
+        IVec3::new(
+            world_pos.x.floor() as i32,
+            world_pos.y.floor() as i32,
+            world_pos.z.floor() as i32,
+        ),
+    )
+}
+
+pub(crate) fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> f32 {
     const W: [f32; 3] = [1.0, 2.0, 1.0];
     if terrain_occupancy_sdf_at_world(world, world_pos) < 0.0 {
         return -1.0;
@@ -3013,7 +3060,7 @@ fn get_normalized_normal(normals: &[[f32; 3]], index: usize) -> [f32; 3] {
 
 /// Scales a vertex position outward from chunk center to close seams.
 #[inline]
-fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
+pub(crate) fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
     let pos = Vec3::new(
         local.x * VOXEL_SIZE,
         local.y * VOXEL_SIZE,
@@ -3092,6 +3139,26 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
         return stats;
     }
 
+    // A vertex qualifies as "on a chunk face" for snapping if it lies inside the
+    // outermost cell row of that face. The old `compute_boundary_flags` /
+    // EPSILON=0.01 check required the vertex to be effectively on the boundary
+    // plane, which the previous binary SDF satisfied (vertices snapped to lattice
+    // points) but the fractional smoothed SDF does not — vertices now sit inside
+    // their cells. Using `step_size` voxels of tolerance captures the boundary-
+    // cell band for any LOD without depending on lattice quantisation.
+    let chunk_size = CHUNK_SIZE as f32;
+    let face_tolerance = my_lod.step_size() as f32;
+    let in_boundary_cell = |local: Vec3, face: ChunkFace| -> bool {
+        match face {
+            ChunkFace::NegX => local.x <= face_tolerance,
+            ChunkFace::PosX => local.x >= chunk_size - face_tolerance,
+            ChunkFace::NegY => local.y <= face_tolerance,
+            ChunkFace::PosY => local.y >= chunk_size - face_tolerance,
+            ChunkFace::NegZ => local.z <= face_tolerance,
+            ChunkFace::PosZ => local.z >= chunk_size - face_tolerance,
+        }
+    };
+
     let mut face_targets: Vec<(ChunkFace, Vec<(usize, Vec3)>)> = Vec::new();
     for face in [
         ChunkFace::NegX,
@@ -3110,7 +3177,7 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
 
         let mut targets = Vec::new();
         for (index, local) in local_positions.iter().copied().enumerate() {
-            if !compute_boundary_flags(local, CHUNK_SIZE as f32).on_face(face) {
+            if !in_boundary_cell(local, face) {
                 continue;
             }
 
@@ -3191,7 +3258,7 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
 }
 
 /// Computes material weights for a vertex based on neighboring voxels.
-fn compute_vertex_material_weights(
+pub(crate) fn compute_vertex_material_weights(
     local_pos: Vec3,
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -3315,7 +3382,8 @@ fn compute_vertex_material_weights_lod(
 
 /// Generates water mesh using blocky faces for clean edges.
 /// Uses exact voxel boundaries to prevent interpolation artifacts.
-fn generate_water_mesh(
+/// Generate water mesh for a chunk (shared by Surface Nets and MC paths).
+pub fn generate_water_mesh(
     chunk: &Chunk,
     world: &VoxelWorld,
     _chunk_center: Vec3,
@@ -3640,6 +3708,7 @@ pub fn generate_chunk_mesh_surface_nets(
         water_stats,
         lod_transition_snap_stats,
         mesh_section_stats,
+        mc_transvoxel_stats: None,
     }
 }
 
@@ -3839,6 +3908,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         water_stats,
         lod_transition_snap_stats,
         mesh_section_stats,
+        mc_transvoxel_stats: None,
     }
 }
 
@@ -4038,6 +4108,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         water_stats,
         lod_transition_snap_stats,
         mesh_section_stats,
+        mc_transvoxel_stats: None,
     }
 }
 
@@ -4237,6 +4308,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         water_stats,
         lod_transition_snap_stats,
         mesh_section_stats,
+        mc_transvoxel_stats: None,
     }
 }
 
@@ -5465,6 +5537,19 @@ mod tests {
             "terrain should not render a downward face into the world floor boundary"
         );
     }
+
+    #[test]
+    fn barycentric_uv_section_tags_round_trip() {
+        let mut mesh = MeshData::new();
+        mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_MAIN);
+        mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_VERTICAL_SKIRT);
+
+        assert_eq!(barycentric_section(mesh.barycentric_uvs[0]), TERRAIN_MESH_SECTION_MAIN);
+        assert_eq!(
+            barycentric_section(mesh.barycentric_uvs[3]),
+            TERRAIN_MESH_SECTION_VERTICAL_SKIRT
+        );
+    }
 }
 
 /// Mesh generation mode
@@ -5475,6 +5560,8 @@ pub enum MeshMode {
     Blocky,
     /// Smooth meshing using Surface Nets algorithm
     SurfaceNets,
+    /// MC + Transvoxel spike (requires `mc_transvoxel` feature + config enabled)
+    McTransvoxel,
 }
 
 impl MeshMode {
@@ -5483,6 +5570,7 @@ impl MeshMode {
         *self = match self {
             MeshMode::Blocky => MeshMode::SurfaceNets,
             MeshMode::SurfaceNets => MeshMode::Blocky,
+            MeshMode::McTransvoxel => MeshMode::SurfaceNets,
         };
     }
 }
@@ -5518,6 +5606,14 @@ pub fn generate_chunk_mesh_with_mode(
 ) -> ChunkMeshResult {
     match mode {
         MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config, water_exposure_mode),
+        MeshMode::McTransvoxel => generate_chunk_mesh_mc_transvoxel(
+            chunk,
+            world,
+            my_lod,
+            neighbor_lods,
+            ao_config,
+            water_exposure_mode,
+        ),
         MeshMode::SurfaceNets => {
             // Select LOD-appropriate mesh generation
             match my_lod {
@@ -5581,9 +5677,148 @@ pub fn generate_chunk_mesh_with_mode(
                         water_stats: WaterMeshingStats::default(),
                         lod_transition_snap_stats: LodTransitionSnapStats::default(),
                         mesh_section_stats: TerrainMeshSectionStats::default(),
+                        mc_transvoxel_stats: None,
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn generate_chunk_mesh_mc_transvoxel(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    _ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
+) -> ChunkMeshResult {
+    use crate::voxel::mc_transvoxel::{generate_mc_chunk_mesh, McMeshInput, McTransvoxelSettings};
+
+    let settings = McTransvoxelSettings::load_or_default();
+    if !settings.enabled {
+        return generate_chunk_mesh_with_mode(
+            chunk,
+            world,
+            MeshMode::SurfaceNets,
+            my_lod,
+            neighbor_lods,
+            &SkirtConfig::default(),
+            _ao_config,
+            water_exposure_mode,
+        );
+    }
+
+    let output = generate_mc_chunk_mesh(McMeshInput {
+        world,
+        chunk,
+        chunk_pos: chunk.position(),
+        lod: my_lod,
+        neighbor_lods,
+        settings: &settings,
+        water_exposure_mode,
+    });
+    output.result
+}
+
+#[cfg(not(feature = "mc_transvoxel"))]
+fn generate_chunk_mesh_mc_transvoxel(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
+) -> ChunkMeshResult {
+    generate_chunk_mesh_with_mode(
+        chunk,
+        world,
+        MeshMode::SurfaceNets,
+        my_lod,
+        neighbor_lods,
+        &SkirtConfig::default(),
+        ao_config,
+        water_exposure_mode,
+    )
+}
+
+/// Shared SDF sampling helpers for the MC + Transvoxel spike.
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
+pub(crate) mod mc_support {
+    use super::{
+        coarse_aligned_lod_sample_base_with_stride, compute_vertex_material_weights,
+        scale_vertex_from_center, sdf_gradient_normal_at_local, smoothed_terrain_sdf_at_world_pos,
+    };
+    use crate::voxel::world::VoxelWorld;
+    use bevy::prelude::{IVec3, Vec3};
+
+    pub fn build_mc_sdf_values(
+        chunk: &crate::voxel::chunk::Chunk,
+        world: &VoxelWorld,
+        my_lod: crate::voxel::chunk::LodLevel,
+        neighbor_lods: &crate::voxel::skirt::NeighborLods,
+    ) -> (usize, Vec<f32>, i32) {
+        use crate::voxel::chunk::LodLevel;
+        let step = my_lod.step_size() as i32;
+        match my_lod {
+            LodLevel::Lod0 => {
+                let sdf = super::generate_sdf(
+                    chunk,
+                    world,
+                    my_lod,
+                    neighbor_lods,
+                    super::SMOOTH_TERRAIN_SDF_LOD0,
+                );
+                (super::LOD0_PADDED_SIZE as usize, sdf.to_vec(), step)
+            }
+            LodLevel::Lod1 => {
+                let sdf = super::generate_sdf_lod1(chunk, world, neighbor_lods);
+                (super::LOD1_PADDED_SIZE as usize, sdf.to_vec(), step)
+            }
+            LodLevel::Lod2 => {
+                let sdf = super::generate_sdf_lod2(chunk, world, neighbor_lods);
+                (super::LOD2_PADDED_SIZE as usize, sdf.to_vec(), step)
+            }
+            LodLevel::Lod3 => {
+                let sdf = super::generate_sdf_lod3(chunk, world, neighbor_lods);
+                (super::LOD3_PADDED_SIZE as usize, sdf.to_vec(), step)
+            }
+            LodLevel::Culled => (0, Vec::new(), step),
+        }
+    }
+
+    pub fn sample_smoothed_sdf_at_padded(
+        world: &VoxelWorld,
+        chunk_origin: IVec3,
+        px: u32,
+        py: u32,
+        pz: u32,
+        step: i32,
+    ) -> f32 {
+        let base_world_pos =
+            coarse_aligned_lod_sample_base_with_stride(chunk_origin, px, py, pz, 1, step);
+        smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
+    }
+
+    pub fn vertex_material_weights(
+        local_pos: Vec3,
+        chunk: &crate::voxel::chunk::Chunk,
+        world: &VoxelWorld,
+        chunk_origin: IVec3,
+    ) -> [f32; 4] {
+        compute_vertex_material_weights(local_pos, chunk, world, chunk_origin)
+    }
+
+    pub fn scale_vertex(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
+        scale_vertex_from_center(local, chunk_center)
+    }
+
+    pub fn gradient_normal(
+        world: &VoxelWorld,
+        chunk_origin: IVec3,
+        local_pos: Vec3,
+    ) -> [f32; 3] {
+        sdf_gradient_normal_at_local(world, chunk_origin, local_pos)
     }
 }

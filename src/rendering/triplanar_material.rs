@@ -36,6 +36,28 @@ pub struct TriplanarUniforms {
     pub weather_flags: u32,
 }
 
+/// High byte of `weather_flags` stores chunk LOD (0–3) for debug wireframe tinting.
+pub const TRIPLANAR_DEBUG_LOD_FLAG_SHIFT: u32 = 24;
+pub const TRIPLANAR_DEBUG_LOD_FLAG_MASK: u32 = 0xFF << TRIPLANAR_DEBUG_LOD_FLAG_SHIFT;
+
+pub fn triplanar_weather_flags_with_debug_lod(flags: u32, lod_index: u8) -> u32 {
+    (flags & !TRIPLANAR_DEBUG_LOD_FLAG_MASK)
+        | ((lod_index as u32 & 0xFF) << TRIPLANAR_DEBUG_LOD_FLAG_SHIFT)
+}
+
+/// Volume bounds for the terrain iso-band debug overlay. `epsilon <= 0` disables the overlay.
+#[derive(Clone, Copy, ShaderType, Debug, Default)]
+pub struct TerrainIsoBandUniforms {
+    pub world_min: Vec3,
+    pub _pad0: f32,
+    pub inv_extent: Vec3,
+    pub epsilon: f32,
+    pub mismatch_threshold: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
+    pub _pad3: f32,
+}
+
 impl Default for TriplanarUniforms {
     fn default() -> Self {
         Self {
@@ -94,6 +116,14 @@ pub struct TriplanarMaterial {
     pub dirt_albedo: Option<Handle<Image>>,
     #[texture(9)]
     pub dirt_normal: Option<Handle<Image>>,
+
+    /// Mesher SDF brick for iso-band debug (`epsilon <= 0` disables sampling in shader).
+    #[texture(10)]
+    #[sampler(11)]
+    pub iso_band_volume: Option<Handle<Image>>,
+
+    #[uniform(12)]
+    pub iso_band_params: TerrainIsoBandUniforms,
 }
 
 #[repr(u8)]
@@ -105,6 +135,8 @@ pub enum TerrainMaterialQuality {
     SingleProjectionFar,
     AtlasOnlyDebug,
     WireframeDebug,
+    NormalsDebug,
+    WireframeNormalsDebug,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -133,6 +165,8 @@ impl Default for TriplanarMaterial {
             sand_normal: None,
             dirt_albedo: None,
             dirt_normal: None,
+            iso_band_volume: None,
+            iso_band_params: TerrainIsoBandUniforms::default(),
         }
     }
 }
@@ -183,6 +217,13 @@ impl Material for TriplanarMaterial {
                 TerrainMaterialQuality::WireframeDebug => {
                     fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
                 }
+                TerrainMaterialQuality::NormalsDebug => {
+                    fragment.shader_defs.push("TERRAIN_DEBUG_NORMALS".into());
+                }
+                TerrainMaterialQuality::WireframeNormalsDebug => {
+                    fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
+                    fragment.shader_defs.push("TERRAIN_DEBUG_NORMALS".into());
+                }
             }
         }
         Ok(())
@@ -197,6 +238,8 @@ pub struct TriplanarMaterialHandle {
     pub single_projection_far_handle: Handle<TriplanarMaterial>,
     pub atlas_only_debug_handle: Handle<TriplanarMaterial>,
     pub wireframe_debug_handle: Handle<TriplanarMaterial>,
+    pub normals_debug_handle: Handle<TriplanarMaterial>,
+    pub wireframe_normals_debug_handle: Handle<TriplanarMaterial>,
 }
 
 impl TriplanarMaterialHandle {
@@ -209,6 +252,10 @@ impl TriplanarMaterialHandle {
             }
             TerrainMaterialQuality::AtlasOnlyDebug => self.atlas_only_debug_handle.clone(),
             TerrainMaterialQuality::WireframeDebug => self.wireframe_debug_handle.clone(),
+            TerrainMaterialQuality::NormalsDebug => self.normals_debug_handle.clone(),
+            TerrainMaterialQuality::WireframeNormalsDebug => {
+                self.wireframe_normals_debug_handle.clone()
+            }
         }
     }
 }

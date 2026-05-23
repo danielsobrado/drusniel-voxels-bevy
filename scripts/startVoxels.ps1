@@ -1,5 +1,6 @@
 param(
     [switch]$Naadf,
+    [switch]$Mc,
     [switch]$NoStopExisting,
     [switch]$KeepLock
 )
@@ -72,12 +73,23 @@ if (-not $KeepLock -and (Test-Path -LiteralPath $LockPath)) {
 
 Set-Location -LiteralPath $RepoRoot
 $cargoArgs = @("cargo", "run", "--release")
+$features = @()
 if ($Naadf) {
     $env:DRUSNIEL_NAADF = "1"
-    $cargoArgs += @("--features", "naadf")
-    Write-Host "Starting user runtime from $RepoRoot with NAADF feature enabled"
+    $features += "naadf"
 } else {
     Remove-Item Env:\DRUSNIEL_NAADF -ErrorAction SilentlyContinue
+}
+if ($Mc) {
+    # Compiles in src/voxel/mc_transvoxel/* and lets mc_transvoxel.yaml's
+    # `enabled: true` actually take effect. Without this, the stub module
+    # silently bypasses MC even when the config says otherwise.
+    $features += "mc_transvoxel"
+}
+if ($features.Count -gt 0) {
+    $cargoArgs += @("--features", ($features -join ","))
+    Write-Host "Starting user runtime from $RepoRoot with features: $($features -join ', ')"
+} else {
     Write-Host "Starting user runtime from $RepoRoot"
 }
 

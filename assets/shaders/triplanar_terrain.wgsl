@@ -49,6 +49,11 @@ const DEBUG_ALBEDO_COLOR: vec4<f32> = vec4<f32>(0.0, 1.0, 0.0, 1.0);
 const WEATHER_DEBUG_PUDDLE: u32 = 1u << 8u;
 const WEATHER_DEBUG_WETNESS: u32 = 1u << 9u;
 const WEATHER_DEBUG_SNOW: u32 = 1u << 10u;
+const TRIPLANAR_DEBUG_LOD_FLAG_SHIFT: u32 = 24u;
+
+fn triplanar_debug_lod_level() -> u32 {
+    return (uniforms.weather_flags >> TRIPLANAR_DEBUG_LOD_FLAG_SHIFT) & 0xffu;
+}
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
 
@@ -235,12 +240,113 @@ fn terrain_snow_mask(normal: vec3<f32>) -> f32 {
     return weather_common::safe_saturate(snow * uniforms.snow_tint_strength * upness);
 }
 
+const TERRAIN_BARYCENTRIC_SECTION_SCALE: f32 = 4.0;
+
+fn terrain_debug_section_color(section: u32) -> vec3<f32> {
+    switch section {
+        case 0u: { return vec3<f32>(1.0, 1.0, 1.0); }
+        case 1u: { return vec3<f32>(0.0, 1.0, 1.0); }
+        case 2u: { return vec3<f32>(1.0, 0.0, 1.0); }
+        case 3u: { return vec3<f32>(1.0, 1.0, 0.0); }
+        default: { return vec3<f32>(1.0, 1.0, 1.0); }
+    }
+}
+
+fn terrain_debug_lod_tint(lod: u32) -> vec3<f32> {
+    switch lod {
+        case 0u: { return vec3<f32>(1.0, 1.0, 1.0); }
+        case 1u: { return vec3<f32>(0.75, 0.88, 1.0); }
+        case 2u: { return vec3<f32>(0.65, 1.0, 0.65); }
+        case 3u: { return vec3<f32>(1.0, 0.72, 0.35); }
+        default: { return vec3<f32>(1.0, 1.0, 1.0); }
+    }
+}
+
+fn apply_terrain_debug_wireframe(base_color: vec4<f32>, uv_b: vec2<f32>) -> vec4<f32> {
+    let section = u32(floor(uv_b.y / TERRAIN_BARYCENTRIC_SECTION_SCALE));
+    let bary_v = uv_b.y - f32(section) * TERRAIN_BARYCENTRIC_SECTION_SCALE;
+    let bary = vec3<f32>(uv_b.x, bary_v, 1.0 - uv_b.x - bary_v);
+    let edge = min(bary.x, min(bary.y, bary.z));
+    let line = 1.0 - smoothstep(0.01, 0.03, edge);
+    let lod = min(triplanar_debug_lod_level(), 3u);
+    let wire_color = terrain_debug_section_color(section) * terrain_debug_lod_tint(lod);
+    return vec4<f32>(mix(base_color.rgb, wire_color, line * 0.85), base_color.a);
+}
+
+struct TerrainIsoBandUniforms {
+    world_min: vec3<f32>,
+    _pad0: f32,
+    inv_extent: vec3<f32>,
+    epsilon: f32,
+    mismatch_threshold: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var iso_band_volume: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var iso_band_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var<uniform> iso_band: TerrainIsoBandUniforms;
+
+fn sample_mesher_sdf(world_pos: vec3<f32>) -> f32 {
+    let uvw = (world_pos - iso_band.world_min) * iso_band.inv_extent;
+    if (any(uvw < vec3<f32>(0.0)) || any(uvw > vec3<f32>(1.0))) {
+        return 1.0;
+    }
+    return textureSampleLevel(iso_band_volume, iso_band_sampler, uvw, 0.0).r;
+}
+
+fn apply_terrain_iso_band_overlay(
+    base_color: vec4<f32>,
+    world_pos: vec3<f32>,
+    world_normal: vec3<f32>,
+) -> vec4<f32> {
+    if (iso_band.epsilon <= 0.0) {
+        return base_color;
+    }
+
+    let sdf_here = sample_mesher_sdf(world_pos);
+    let band = 1.0 - smoothstep(iso_band.epsilon, iso_band.epsilon * 2.5, abs(sdf_here));
+    var out = base_color;
+    if (band > 0.001) {
+        let band_color = vec3<f32>(1.0, 0.15, 0.85);
+        out = vec4<f32>(mix(out.rgb, band_color, band * 0.85), out.a);
+    }
+
+    if (abs(sdf_here) > iso_band.mismatch_threshold) {
+        let mismatch = smoothstep(
+            iso_band.mismatch_threshold,
+            iso_band.mismatch_threshold * 2.0,
+            abs(sdf_here),
+        );
+        out = vec4<f32>(mix(out.rgb, vec3<f32>(1.0, 0.85, 0.0), mismatch * 0.75), out.a);
+    }
+
+    // Where the iso surface along the normal diverges from the mesh point, tint blue.
+    let sdf_along_normal = sample_mesher_sdf(world_pos + world_normal * iso_band.epsilon * 2.0);
+    if (sdf_here * sdf_along_normal < 0.0) {
+        let crossing = 1.0 - smoothstep(iso_band.epsilon, iso_band.epsilon * 3.0, abs(sdf_here));
+        out = vec4<f32>(mix(out.rgb, vec3<f32>(0.2, 0.75, 1.0), crossing * 0.45), out.a);
+    }
+
+    return out;
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
     var pbr_input = pbr_fragment::pbr_input_from_vertex_output(in, is_front, true);
     let world_pos = pbr_input.world_position.xyz;
     let world_normal = normalize(pbr_input.world_normal);
     let view_dir = pbr_input.V;
+
+#ifdef TERRAIN_DEBUG_NORMALS
+    var debug_color = vec4<f32>(world_normal * 0.5 + 0.5, 1.0);
+#ifdef TERRAIN_DEBUG_WIREFRAME
+    debug_color = apply_terrain_debug_wireframe(debug_color, in.uv_b);
+#endif
+    debug_color = apply_terrain_iso_band_overlay(debug_color, world_pos, world_normal);
+    return vec4<f32>(debug_color.rgb, 1.0);
+#endif
     
     // Use vertex colors as material weights
     let mat_weights = in.color; 
@@ -453,11 +559,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
 
 #ifdef TERRAIN_DEBUG_WIREFRAME
-    let bary = vec3<f32>(in.uv_b.x, in.uv_b.y, 1.0 - in.uv_b.x - in.uv_b.y);
-    let edge = min(bary.x, min(bary.y, bary.z));
-    let line = 1.0 - smoothstep(0.01, 0.03, edge);
-    color = vec4<f32>(mix(color.rgb, vec3<f32>(1.0), line * 0.8), color.a);
+    color = apply_terrain_debug_wireframe(color, in.uv_b);
 #endif
+
+    color = apply_terrain_iso_band_overlay(color, world_pos, world_normal);
 
     return vec4<f32>(color.rgb, 1.0);
 }
