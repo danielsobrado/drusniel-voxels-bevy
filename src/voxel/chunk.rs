@@ -195,6 +195,16 @@ impl LodLevel {
             LodLevel::Culled => 0,
         }
     }
+
+    pub fn lod_index(&self) -> Option<u8> {
+        match self {
+            LodLevel::Lod0 => Some(0),
+            LodLevel::Lod1 => Some(1),
+            LodLevel::Lod2 => Some(2),
+            LodLevel::Lod3 => Some(3),
+            LodLevel::Culled => None,
+        }
+    }
 }
 
 pub struct Chunk {

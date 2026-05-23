@@ -396,6 +396,7 @@ struct ChunkMeshProbe {
     effective_lod_at_mesh: Option<String>,
     target_mode_at_mesh: Option<String>,
     neighbor_lods_at_mesh: Option<NeighborLodsProbe>,
+    lod_delta_gt_one_faces_at_mesh: Option<Vec<String>>,
     missing_boundary_neighbors_at_mesh: Option<u32>,
     empty_surface_cap_at_mesh: Option<bool>,
     generated_frame: Option<u32>,
@@ -428,6 +429,8 @@ struct LodTransitionSnapStatsProbe {
     snapped_faces: Vec<String>,
     fallback_faces: Vec<String>,
     snapped_vertex_count: u32,
+    skipped_vertex_count: u32,
+    conflicting_vertex_count: u32,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -2377,6 +2380,8 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
                 .map(|debug| mesh_mode_string(debug.target_mode_at_mesh)),
             neighbor_lods_at_mesh: terrain_debug
                 .map(|debug| neighbor_lods_probe(debug.neighbor_lods_at_mesh)),
+            lod_delta_gt_one_faces_at_mesh: terrain_debug
+                .map(|debug| face_mask_names(debug.lod_delta_gt_one_face_mask)),
             missing_boundary_neighbors_at_mesh: terrain_debug
                 .map(|debug| debug.missing_boundary_neighbors_at_mesh),
             empty_surface_cap_at_mesh: terrain_debug.map(|debug| debug.empty_surface_cap_at_mesh),
@@ -2589,6 +2594,8 @@ fn lod_transition_snap_stats_probe(stats: LodTransitionSnapStats) -> LodTransiti
         snapped_faces: face_mask_names(stats.snapped_face_mask),
         fallback_faces: face_mask_names(stats.fallback_face_mask),
         snapped_vertex_count: stats.snapped_vertex_count,
+        skipped_vertex_count: stats.skipped_vertex_count,
+        conflicting_vertex_count: stats.conflicting_vertex_count,
     }
 }
 

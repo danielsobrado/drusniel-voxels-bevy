@@ -99,6 +99,7 @@ use crate::voxel::meshing::{
     ChunkMesh, MeshMode, MeshSettings, TerrainMeshDebug, WaterBodyId, WaterBodyKind,
     WaterBodyMaterialMode, WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_with_mode,
+    lod_delta_gt_one_face_mask,
 };
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
@@ -2335,6 +2336,7 @@ fn mesh_dirty_chunks_system(
                 effective_lod_at_mesh: mesh_lod_level,
                 target_mode_at_mesh: target_mode,
                 neighbor_lods_at_mesh: neighbor_lods,
+                lod_delta_gt_one_face_mask: lod_delta_gt_one_face_mask(lod_level, &neighbor_lods),
                 missing_boundary_neighbors_at_mesh: missing_boundary_neighbors,
                 empty_surface_cap_at_mesh: empty_surface_neighbor,
                 generated_frame: frame.0,

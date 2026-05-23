@@ -1,0 +1,31 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "lod-y-overhang-fixed-sun"
+position = [288.0, 78.0, 304.0]
+look_at = [258.0, 54.0, 274.0]
+time_of_day = 0.38
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "fixed", frame = 120 },
+]
+
+[[checkpoint]]
+name = "lod-y-overhang-rotating-sun"
+position = [288.0, 78.0, 304.0]
+look_at = [258.0, 54.0, 274.0]
+time_of_day = 0.68
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "sun-angle-a", frame = 60 },
+    { name = "sun-angle-b", frame = 150 },
+]

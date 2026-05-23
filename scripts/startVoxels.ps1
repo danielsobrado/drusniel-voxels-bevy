@@ -4,9 +4,14 @@ param(
     [switch]$KeepLock
 )
 
-$ErrorActionPreference = "Stop"
+# Keep this Continue, not Stop: cargo writes its `Finished ...` status to
+# stderr, and PowerShell 5.1 wraps native-command stderr as a NativeCommandError
+# under hosts that capture stderr (VS Code terminal, redirected runs, etc.).
+# With Stop, that wrapping aborts the script before rtk even launches the game.
+$ErrorActionPreference = "Continue"
 
-$RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Script lives in scripts/, so walk one level up to reach the repo root.
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LockPath = Join-Path ([System.IO.Path]::GetTempPath()) "drusniel-voxels\runtime.lock"
 
 function Stop-NamedProcess {

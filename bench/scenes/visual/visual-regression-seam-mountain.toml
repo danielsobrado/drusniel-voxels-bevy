@@ -1,0 +1,31 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "lod-xz-ridge-fixed-sun"
+position = [255.0, 92.0, 219.0]
+look_at = [288.0, 62.0, 254.0]
+time_of_day = 0.42
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "fixed", frame = 120 },
+]
+
+[[checkpoint]]
+name = "lod-xz-ridge-rotating-sun"
+position = [255.0, 92.0, 219.0]
+look_at = [288.0, 62.0, 254.0]
+time_of_day = 0.72
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "sun-angle-a", frame = 60 },
+    { name = "sun-angle-b", frame = 150 },
+]
