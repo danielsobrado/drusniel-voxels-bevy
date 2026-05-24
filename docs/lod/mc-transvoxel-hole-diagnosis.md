@@ -601,3 +601,73 @@ Next concrete step:
 - If the human-visible dark patches are still not covered by this fixed fan,
   move the repro target/fan onto one of those dark screenshot regions and rerun
   the same schema-10 classification.
+
+### Case-3 replay classification correction
+
+Follow-up on 2026-05-24:
+
+- Added a minimal regular-MC case-3 table sanity test:
+  `regular_case3_table_uses_expected_lengyel_edges`.
+- The table/corner-order for the replay target is correct:
+
+```text
+case_index = 3
+class_index = 3
+expected triangle count = 2
+edge vertices = [0-2, 0-4, 1-5, 1-3]
+triangulation = [0, 1, 2], [0, 2, 3]
+```
+
+This means the previous replay target was not a proven regular-MC
+table/corner-order failure. It was a trilinear mesher-iso vs triangulated-MC
+surface residual at a visually lit screenshot pixel.
+
+Probe fix:
+
+- `vertex_position_or_table_decode_error` is now gated behind visual evidence.
+- If the mesher-iso point projects to a lit/non-dark screenshot pixel, the gap
+  remains `raw_occupancy_vs_mesher_iso_false_positive` even when the exact
+  mesher-iso owning cell's emitted triangles miss the ray by a small residual.
+- If the same case is visually dark/missing, it still remains a
+  `vertex_position_or_table_decode_error` suspect.
+
+Verification:
+
+```powershell
+rtk cargo test --lib --features mc_transvoxel lit_mesher_iso_visual_overrides_case3_triangle_miss_classification -j 1
+rtk cargo test --lib --features mc_transvoxel dark_mesher_iso_keeps_case3_triangle_miss_as_vertex_decode_suspect -j 1
+rtk cargo test --lib --features mc_transvoxel regular_case3_table_uses_expected_lengyel_edges -j 1
+rtk cargo test --lib --features mc_transvoxel forensics -j 1
+```
+
+Refreshed normal MC fixed-camera repro:
+
+```powershell
+rtk cargo run --release --features mc_transvoxel -- --bench bench/scenes/visual/mc-transvoxel-static-hole-probe.toml
+```
+
+Artifacts:
+
+- `debug/terrain-hole-probe-mctx-static-mountain-hole-20260524-104838.json`
+
+Normalized result:
+
+```text
+camera_ray_fan.rays_total = 81
+camera_ray_fan.rays_with_gap = 33
+camera_ray_fan.gap_classification counts:
+  raw_occupancy_vs_mesher_iso_false_positive = 33
+mesher_iso visual pixel classifications:
+  lit_or_non_dark = 33
+source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
+```
+
+Updated conclusion:
+
+- The current fixed-camera fan is not landing on a visually dark/missing mesh
+  defect. It is mostly measuring raw voxel occupancy earlier than the smoothed
+  MC surface, and the screenshot confirms the sampled pixels are lit.
+- Do not fix MC extraction from this fan anymore.
+- The next useful repro must retarget the probe onto a pixel that is visibly
+  black/dark in the screenshot, then rerun schema 10. Only that visually dark
+  ray should drive a mesh/table/transition fix.

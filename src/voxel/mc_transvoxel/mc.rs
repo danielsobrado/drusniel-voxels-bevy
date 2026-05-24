@@ -679,6 +679,26 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn regular_case3_table_uses_expected_lengyel_edges() {
+        let class = REGULAR_CELL_CLASS[3];
+        let tri_data = REGULAR_CELL_DATA[class as usize];
+        let vert_data = REGULAR_VERTEX_DATA[3];
+        let edges: Vec<[usize; 2]> = (0..tri_data.get_vertex_count() as usize)
+            .map(|i| {
+                let vd = RegularVertexData(vert_data[i]);
+                let mut edge = [vd.corner_a(), vd.corner_b()];
+                edge.sort_unstable();
+                edge
+            })
+            .collect();
+
+        assert_eq!(class, 3);
+        assert_eq!(tri_data.get_triangle_count(), 2);
+        assert_eq!(edges, vec![[0, 2], [0, 4], [1, 5], [1, 3]]);
+        assert_eq!(&tri_data.vertex_index[..6], &[0, 1, 2, 0, 2, 3]);
+    }
+
     /// MC mesh at Lod1 must tag its per-triangle barycentric UV1 with LOD
     /// index 1 so the wireframe-debug shader can colour the chunk light-blue.
     /// Without this tag every MC chunk renders as LOD0 (white) regardless of

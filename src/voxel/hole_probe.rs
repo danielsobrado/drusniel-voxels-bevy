@@ -3426,6 +3426,12 @@ fn classify_camera_gap(
         }
     }
 
+    if first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75)
+        && visual_samples_confirm_non_dark(visual_samples)
+    {
+        return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
+    }
+
     if let Some(cell) = mc_cell {
         let actual_regular = cell.actual_regular_triangle_count.unwrap_or(0);
         let expected_transition: u32 = cell
@@ -3462,11 +3468,6 @@ fn classify_camera_gap(
             && cell.emitted_regular_triangles_ray_hit_count == 0
         {
             return GapClassification::VertexPositionOrTableDecodeError;
-        }
-        if first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75)
-            && visual_samples_confirm_non_dark(visual_samples)
-        {
-            return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
         }
     }
 
@@ -4753,6 +4754,132 @@ mod tests {
         };
 
         assert!(mc_source_matches_cell_probe(&source, &cell));
+    }
+
+    fn classification_test_hit(distance: f32) -> CameraRayHit {
+        CameraRayHit {
+            distance,
+            point: Vec3::new(0.0, 0.0, distance).into(),
+            front_face: true,
+            geometric_normal: Vec3::Y.into(),
+            normal_dot_ray: 0.0,
+            vertex_normal: Some(Vec3::Y.into()),
+            material_weights: Some([1.0, 0.0, 0.0, 0.0]),
+            chunk_position: Some(IVec3::ZERO.into()),
+            entity: "test".to_string(),
+            mesh_section: MeshTriangleSectionProbe::Unknown,
+            triangle_start_index: 0,
+            vertices: None,
+            source: None,
+        }
+    }
+
+    fn classification_test_cell() -> McCellOracleProbe {
+        McCellOracleProbe {
+            chunk_position: IVec3::new(11, 1, 8).into(),
+            effective_lod_at_mesh: "Lod0".to_string(),
+            neighbor_lods_at_mesh: NeighborLodsProbe {
+                neg_x: Some("Lod0".to_string()),
+                pos_x: Some("Lod0".to_string()),
+                neg_y: Some("Lod0".to_string()),
+                pos_y: Some("Lod0".to_string()),
+                neg_z: Some("Lod0".to_string()),
+                pos_z: Some("Lod0".to_string()),
+            },
+            cell: UVec3::new(15, 4, 5).into(),
+            case_index: 3,
+            class_index: 3,
+            expected_regular_triangle_count: 2,
+            actual_regular_triangle_count: Some(2),
+            boundary_faces: vec!["pos_x".to_string()],
+            skipped_regular_faces: Vec::new(),
+            transition_owner_faces: Vec::new(),
+            transition_cells: Vec::new(),
+            emitted_regular_triangles: Vec::new(),
+            emitted_regular_triangles_ray_hit_count: 0,
+            nearest_emitted_regular_triangle_ray_hit_distance: None,
+            closest_emitted_regular_triangle_ray_distance: Some(0.13819484),
+            source_chunk_skipped_lod_delta_gt_one: Some(0),
+        }
+    }
+
+    fn visual_samples_with_mesher_iso(
+        classification: VisualPixelClassification,
+    ) -> CameraRayVisualSamples {
+        CameraRayVisualSamples {
+            mesher_iso: Some(VisualPointProbe {
+                world_point: Vec3::new(190.2826, 19.445261, 132.31314).into(),
+                screen_position: Some(Vec2Dump {
+                    x: 845.9431,
+                    y: 769.8731,
+                }),
+                screenshot_path: Some("synthetic.png".to_string()),
+                pixel: Some(RgbaProbe {
+                    r: 52,
+                    g: 69,
+                    b: 14,
+                    a: 255,
+                    luminance: pixel_luminance(52, 69, 14),
+                }),
+                classification,
+                note: "test visual sample".to_string(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn lit_mesher_iso_visual_overrides_case3_triangle_miss_classification() {
+        let gap = SeeThroughGap {
+            voxel_surface_distance: 95.5,
+            first_front_render_hit_distance: Some(102.165565),
+            gap_length: 6.6655655,
+            note: "test".to_string(),
+        };
+        let hit = classification_test_hit(102.165565);
+        let cell = classification_test_cell();
+        let visual_samples =
+            visual_samples_with_mesher_iso(VisualPixelClassification::LitOrNonDark);
+
+        assert_eq!(
+            classify_camera_gap(
+                &Some(gap),
+                &Some(hit.clone()),
+                &Some(hit),
+                &None,
+                Some(98.228195),
+                Some(&cell),
+                &visual_samples,
+            ),
+            GapClassification::RawOccupancyVsMesherIsoFalsePositive
+        );
+    }
+
+    #[test]
+    fn dark_mesher_iso_keeps_case3_triangle_miss_as_vertex_decode_suspect() {
+        let gap = SeeThroughGap {
+            voxel_surface_distance: 95.5,
+            first_front_render_hit_distance: Some(102.165565),
+            gap_length: 6.6655655,
+            note: "test".to_string(),
+        };
+        let hit = classification_test_hit(102.165565);
+        let cell = classification_test_cell();
+        let visual_samples =
+            visual_samples_with_mesher_iso(VisualPixelClassification::DarkOrMissing);
+
+        assert_eq!(
+            classify_camera_gap(
+                &Some(gap),
+                &Some(hit.clone()),
+                &Some(hit),
+                &None,
+                Some(98.228195),
+                Some(&cell),
+                &visual_samples,
+            ),
+            GapClassification::VertexPositionOrTableDecodeError
+        );
     }
 
     #[cfg(feature = "mc_transvoxel")]
