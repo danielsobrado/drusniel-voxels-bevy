@@ -256,7 +256,7 @@ fn terrain_debug_section_color(section: u32) -> vec3<f32> {
 fn terrain_debug_lod_wire_color(lod: u32) -> vec3<f32> {
     switch lod {
         case 0u: { return vec3<f32>(1.00, 1.00, 1.00); }
-        case 1u: { return vec3<f32>(0.35, 0.65, 1.00); }
+        case 1u: { return vec3<f32>(0.05, 0.20, 0.85); }
         case 2u: { return vec3<f32>(0.20, 0.95, 0.30); }
         case 3u: { return vec3<f32>(1.00, 0.50, 0.08); }
         default: { return vec3<f32>(1.00, 1.00, 1.00); }

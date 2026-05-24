@@ -133,7 +133,7 @@ Wireframe colour key — section × LOD tint:
 | Section colour | Meaning | | LOD tint | LOD |
 |---|---|---|---|---|
 | White | Main Surface Nets mesh | | White (none) | LOD0 |
-| Cyan | Horizontal skirt / transition apron | | Light blue | LOD1 |
+| Cyan | Horizontal skirt / transition apron | | Dark blue | LOD1 |
 | Magenta | Vertical skirt | | Green | LOD2 |
 | Yellow | Transvoxel transition apron (MC+Transvoxel) | | Orange | LOD3 / Culled |
 

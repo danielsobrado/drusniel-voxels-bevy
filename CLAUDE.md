@@ -64,7 +64,7 @@ LOD tint:
 | Tint | LOD |
 |---|---|
 | White (no tint) | LOD0 |
-| Light blue | LOD1 |
+| Dark blue | LOD1 |
 | Green | LOD2 |
 | Orange | LOD3 / Culled |
 

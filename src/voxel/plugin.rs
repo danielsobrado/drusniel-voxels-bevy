@@ -4398,7 +4398,6 @@ fn update_chunk_lod_system(
     *last_camera_pos = Some(camera_pos);
     *last_chunk_count = Some(chunk_count);
 
-    let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32)> = Vec::new();
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
     let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
@@ -4476,6 +4475,8 @@ fn update_chunk_lod_system(
     };
 
     // Pass 3 — turn coherent desired LODs into change candidates.
+    // 5th tuple element flags max_one-forced changes for prioritized handling.
+    let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32, bool)> = Vec::new();
     for (chunk_pos, &target_lod) in &desired {
         let Some(&(current_lod, distance)) = chunk_state.get(chunk_pos) else {
             continue;
@@ -4500,22 +4501,37 @@ fn update_chunk_lod_system(
         if !is_upgrade && !cooldown_elapsed && !is_max_one_forced {
             continue;
         }
-        lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
+        lod_candidates.push((*chunk_pos, current_lod, target_lod, distance, is_max_one_forced));
     }
 
     lod_candidates.sort_by(|a, b| {
-        let a_upgrade = a.2.is_higher_detail_than(a.1);
-        let b_upgrade = b.2.is_higher_detail_than(b.1);
-        b_upgrade
-            .cmp(&a_upgrade)
+        // Forced max_one changes first (constraint-mandated; can't bake them in
+        // later). Then upgrades (visual responsiveness during motion). Then by
+        // closeness so what's near the camera updates ahead of far chunks.
+        b.4.cmp(&a.4)
+            .then_with(|| {
+                let a_upgrade = a.2.is_higher_detail_than(a.1);
+                let b_upgrade = b.2.is_higher_detail_than(b.1);
+                b_upgrade.cmp(&a_upgrade)
+            })
             .then_with(|| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
     });
 
     let lod_candidate_count = lod_candidates.len();
     let mut lod_changed: Vec<IVec3> = Vec::new();
-    for (chunk_pos, _current_lod, target_lod, _distance) in
-        lod_candidates.into_iter().take(MAX_LOD_CHANGES_PER_UPDATE)
-    {
+    let mut voluntary_count = 0usize;
+    for (chunk_pos, _current_lod, target_lod, _distance, is_forced) in lod_candidates {
+        // Voluntary changes throttled by MAX_LOD_CHANGES_PER_UPDATE to keep mesh
+        // load smooth. Forced max_one changes are not optional — capping them
+        // leaves chunks with delta>1 neighbours that the MC apron can't bridge,
+        // recreating the horizontal band of holes that drifts as the camera
+        // moves. Commit ALL forced changes regardless of cap.
+        if !is_forced {
+            if voluntary_count >= MAX_LOD_CHANGES_PER_UPDATE {
+                continue;
+            }
+            voluntary_count += 1;
+        }
         let Some(mut chunk) = world.get_chunk_mut(chunk_pos) else {
             continue;
         };

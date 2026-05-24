@@ -2727,6 +2727,13 @@ fn smooth_lod_sdf_interior<const N: usize>(
     let neighbor_weight = 1.0 - current_weight;
     let mut smoothed = *sdf;
     let last_interior = padded_size - 3;
+    // Sign-preserving clamp — see also `smoothed_terrain_sdf_at_world_pos` and
+    // `smoothed_sdf_from_block`. A 50/50 mix of an air cell (`+0.5`) with a
+    // mostly-solid neighbour average (`-0.58`) crosses zero (`-0.04`). MC's
+    // case index uses `< 0.0` per corner, so a sign flip in this smoothing
+    // step changes the MC case and produces static holes in the resulting
+    // mesh. Surface Nets is robust to it; MC is not.
+    const SIGN_GUARD: f32 = 1.0e-3;
 
     for z in 2..=last_interior {
         for y in 2..=last_interior {
@@ -2747,7 +2754,14 @@ fn smooth_lod_sdf_interior<const N: usize>(
                     .any(|&neighbor| (neighbor > 0.0) != (current > 0.0))
                 {
                     let neighbor_avg = neighbors.iter().sum::<f32>() / neighbors.len() as f32;
-                    smoothed[idx] = current * current_weight + neighbor_avg * neighbor_weight;
+                    let mixed = current * current_weight + neighbor_avg * neighbor_weight;
+                    smoothed[idx] = if current > 0.0 {
+                        mixed.max(SIGN_GUARD)
+                    } else if current < 0.0 {
+                        mixed.min(-SIGN_GUARD)
+                    } else {
+                        mixed
+                    };
                 }
             }
         }
@@ -4679,6 +4693,68 @@ mod tests {
         assert!(
             saw_air_with_solid_neighbours,
             "test fixture failed to exercise the air-adjacent-to-solid case via the block path"
+        );
+    }
+
+    /// `smooth_lod_sdf_interior` averages each near-surface cell with its 6
+    /// neighbours. Without a sign-preservation clamp, an air cell (+0.5) with
+    /// 4-5 mostly-solid neighbours (avg ~-0.58) at 50/50 weight produces ~-0.04
+    /// — a sign flip. MC's case index uses `< 0.0` per corner, so a sign flip
+    /// here selects the wrong MC case and drops triangles, producing static
+    /// holes in LOD1+ meshes. This test reproduces that fixture and asserts
+    /// the clamp keeps every air cell strictly positive after smoothing.
+    #[test]
+    fn smooth_lod_sdf_interior_preserves_sign_at_iso_surface() {
+        // A 10x10x10 grid (LOD1 padded size) where one corner of the interior
+        // is solid (a 3x3x3 block at padded (4..7, 4..7, 4..7)). The air cells
+        // along its faces have 4 of 6 neighbours solid — exactly the pre-clamp
+        // sign-flip case.
+        const N: usize = 10;
+        let linearize = |c: [u32; 3]| c[0] + c[1] * N as u32 + c[2] * N as u32 * N as u32;
+        let mut sdf = [1.0f32; N * N * N];
+        for z in 4..=6 {
+            for y in 4..=6 {
+                for x in 4..=6 {
+                    sdf[linearize([x, y, z]) as usize] = -1.0;
+                }
+            }
+        }
+
+        let smoothed = smooth_lod_sdf_interior(&sdf, N as u32, linearize, 0.5);
+
+        // Every air cell (original +1.0) must remain strictly positive.
+        // Every solid cell (original -1.0) must remain strictly negative.
+        let mut saw_smoothed_air_with_solid_neighbours = false;
+        for z in 2..(N as u32 - 2) {
+            for y in 2..(N as u32 - 2) {
+                for x in 2..(N as u32 - 2) {
+                    let idx = linearize([x, y, z]) as usize;
+                    let raw = sdf[idx];
+                    let post = smoothed[idx];
+                    if raw > 0.0 {
+                        assert!(
+                            post > 0.0,
+                            "air cell at ({x},{y},{z}) flipped sign: raw={raw} smoothed={post}"
+                        );
+                    } else {
+                        assert!(
+                            post < 0.0,
+                            "solid cell at ({x},{y},{z}) flipped sign: raw={raw} smoothed={post}"
+                        );
+                    }
+                    // Air cells face-adjacent to the cube are the exact
+                    // sign-flip configuration; mark we exercised them.
+                    if raw > 0.0
+                        && ((x == 3 || x == 7) && (4..=6).contains(&y) && (4..=6).contains(&z))
+                    {
+                        saw_smoothed_air_with_solid_neighbours = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_smoothed_air_with_solid_neighbours,
+            "test fixture failed to exercise an air cell with mostly-solid neighbours"
         );
     }
 
