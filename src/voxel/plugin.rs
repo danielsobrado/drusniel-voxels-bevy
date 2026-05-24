@@ -85,6 +85,7 @@ use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::loading_flames::{LoadingFlamesMaterial, LoadingFlamesUniform};
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::{
@@ -120,6 +121,7 @@ use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
 use crate::voxel::world::{VoxelSample, VoxelWorld, WorldBounds};
 use bevy::camera::visibility::RenderLayers;
+use bevy_ui_render::prelude::MaterialNode;
 use bevy_water::water::material::StandardWaterMaterial;
 
 fn env_flag(name: &str) -> bool {
@@ -588,6 +590,9 @@ struct WorldStartupOverlay;
 
 #[derive(Component)]
 struct WorldStartupBackgroundImage;
+
+#[derive(Component)]
+struct WorldStartupFlamesMaterial;
 
 #[derive(Component)]
 struct WorldStartupTitleText;
@@ -1200,9 +1205,13 @@ fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
 fn spawn_world_startup_overlay(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut flame_materials: ResMut<Assets<LoadingFlamesMaterial>>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
 ) {
     let background_image = asset_server.load("images/DrunsielShyntara.png");
+    let flame_material = flame_materials.add(LoadingFlamesMaterial {
+        uniform: LoadingFlamesUniform::default(),
+    });
     loading_flames.active = true;
 
     commands
@@ -1236,11 +1245,24 @@ fn spawn_world_startup_overlay(
                 },
                 ImageNode::new(background_image).with_mode(NodeImageMode::Stretch),
                 WorldStartupBackgroundImage,
-            ));
+                ));
 
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
+              root.spawn((
+                  MaterialNode(flame_material),
+                  Node {
+                      position_type: PositionType::Absolute,
+                      left: Val::Px(0.0),
+                      right: Val::Px(0.0),
+                      top: Val::Px(0.0),
+                      bottom: Val::Px(0.0),
+                      ..default()
+                  },
+                  WorldStartupFlamesMaterial,
+              ));
+
+              root.spawn((
+                  Node {
+                      position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
                     right: Val::Px(0.0),
                     top: Val::Px(0.0),
@@ -1365,7 +1387,10 @@ fn update_world_startup_overlay(
     setup_state: Res<WorldStartupSetupState>,
     mut overlay_state: ResMut<WorldStartupOverlayState>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     root_query: Query<Entity, With<WorldStartupOverlay>>,
+    flame_query: Query<&MaterialNode<LoadingFlamesMaterial>, With<WorldStartupFlamesMaterial>>,
+    mut flame_materials: ResMut<Assets<LoadingFlamesMaterial>>,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<WorldStartupTitleText>>,
         Query<&mut Text, With<WorldStartupDetailText>>,
@@ -1378,6 +1403,24 @@ fn update_world_startup_overlay(
         return;
     };
     loading_flames.active = true;
+
+    let (resolution, mouse) = windows
+        .single()
+        .ok()
+        .map(|window| {
+            (
+                Vec2::new(window.width().max(1.0), window.height().max(1.0)),
+                window.cursor_position().unwrap_or(Vec2::ZERO),
+            )
+        })
+        .unwrap_or((Vec2::new(1280.0, 720.0), Vec2::ZERO));
+    for material_node in flame_query.iter() {
+        if let Some(material) = flame_materials.get_mut(&material_node.0) {
+            material.uniform.time = time.elapsed_secs();
+            material.uniform.resolution = resolution;
+            material.uniform.mouse = mouse;
+        }
+    }
 
     let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, setup_state.started);
     if snapshot.complete {

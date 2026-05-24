@@ -1,10 +1,10 @@
 // Procedural loading flame overlay.
 //
 // Converted from the user-provided Ashima simplex-noise GLSL fire effect.
-// This pass runs as a fullscreen post-process and overlays animated flame color
-// over the existing loading screen background.
+// This shader is rendered as a Bevy UI material so it appears above the loading
+// background and disappears with the loading overlay.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
+#import bevy_ui::ui_vertex_output::UiVertexOutput
 
 struct LoadingFlamesUniform {
     time: f32,
@@ -13,9 +13,7 @@ struct LoadingFlamesUniform {
     mouse: vec2<f32>,
 };
 
-@group(0) @binding(0) var scene_texture: texture_2d<f32>;
-@group(0) @binding(1) var scene_sampler: sampler;
-@group(0) @binding(2) var<uniform> loading_flames: LoadingFlamesUniform;
+@group(1) @binding(0) var<uniform> loading_flames: LoadingFlamesUniform;
 
 fn mod289(x: vec3<f32>) -> vec3<f32> {
     return x - floor(x * (1.0 / 289.0)) * 289.0;
@@ -137,9 +135,8 @@ fn noise_stack_uv(pos: vec3<f32>, octaves: i32, falloff: f32, _diff: f32) -> vec
 }
 
 @fragment
-fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let scene = textureSample(scene_texture, scene_sampler, in.uv);
-    let resolution = loading_flames.resolution;
+fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
+    let resolution = max(loading_flames.resolution, vec2<f32>(1.0));
     let mouse = loading_flames.mouse;
     let time = loading_flames.time;
 
@@ -205,6 +202,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
 
     let flame_source = max(fire, sparks) + smoke;
-    let final_color = mix(scene.rgb, max(scene.rgb, flame_source), 0.82);
-    return vec4<f32>(final_color, 1.0);
+    let alpha = clamp(max(max(flame_source.r, flame_source.g), flame_source.b) * 0.72, 0.0, 0.86);
+    return vec4<f32>(flame_source, alpha);
 }
