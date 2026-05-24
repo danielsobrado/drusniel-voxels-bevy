@@ -1241,6 +1241,8 @@ fn spawn_world_startup_overlay(
                     right: Val::Px(0.0),
                     top: Val::Px(0.0),
                     bottom: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
                     ..default()
                 },
                 ImageNode::new(background_image).with_mode(NodeImageMode::Stretch),

@@ -201,8 +201,12 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
         sparks = spark_life * sparks_gray * vec3<f32>(1.0, 0.3, 0.0);
     }
 
-    let flame_source = max(fire, sparks) + smoke;
+    let vertical_heat = pow(clamp(1.0 - in.uv.y, 0.0, 1.0), 1.7);
+    let veil_noise = noise_stack(vec3<f32>(in.uv * vec2<f32>(5.0, 2.2), time * 0.65), 3, 0.45);
+    let fallback_fire = vec3<f32>(1.25, 0.34, 0.02) * vertical_heat * (0.45 + 0.75 * veil_noise);
+
+    let flame_source = max(fire, sparks) + smoke + fallback_fire;
     let flame_luma = max(max(flame_source.r, flame_source.g), flame_source.b);
-    let alpha = clamp(0.18 + flame_luma * 1.25, 0.0, 0.96);
-    return vec4<f32>(flame_source * vec3<f32>(1.8, 1.35, 1.1), alpha);
+    let alpha = clamp(0.22 + flame_luma * 1.35, 0.0, 0.96);
+    return vec4<f32>(flame_source * vec3<f32>(1.9, 1.35, 1.05), alpha);
 }
