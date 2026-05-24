@@ -2714,6 +2714,17 @@ pub fn lod_delta_gt_one_face_mask(my_lod: LodLevel, neighbor_lods: &NeighborLods
     mask
 }
 
+const SDF_SIGN_GUARD: f32 = 1.0e-3;
+
+#[inline]
+fn preserve_sdf_sign(raw: f32, candidate: f32) -> f32 {
+    if raw < 0.0 {
+        candidate.min(-SDF_SIGN_GUARD)
+    } else {
+        candidate.max(SDF_SIGN_GUARD)
+    }
+}
+
 fn smooth_lod_sdf_interior<const N: usize>(
     sdf: &[f32; N],
     padded_size: u32,
@@ -2733,8 +2744,6 @@ fn smooth_lod_sdf_interior<const N: usize>(
     // case index uses `< 0.0` per corner, so a sign flip in this smoothing
     // step changes the MC case and produces static holes in the resulting
     // mesh. Surface Nets is robust to it; MC is not.
-    const SIGN_GUARD: f32 = 1.0e-3;
-
     for z in 2..=last_interior {
         for y in 2..=last_interior {
             for x in 2..=last_interior {
@@ -2751,17 +2760,11 @@ fn smooth_lod_sdf_interior<const N: usize>(
 
                 if neighbors
                     .iter()
-                    .any(|&neighbor| (neighbor > 0.0) != (current > 0.0))
+                    .any(|&neighbor| (neighbor < 0.0) != (current < 0.0))
                 {
                     let neighbor_avg = neighbors.iter().sum::<f32>() / neighbors.len() as f32;
                     let mixed = current * current_weight + neighbor_avg * neighbor_weight;
-                    smoothed[idx] = if current > 0.0 {
-                        mixed.max(SIGN_GUARD)
-                    } else if current < 0.0 {
-                        mixed.min(-SIGN_GUARD)
-                    } else {
-                        mixed
-                    };
+                    smoothed[idx] = preserve_sdf_sign(current, mixed);
                 }
             }
         }
@@ -4693,6 +4696,93 @@ mod tests {
         assert!(
             saw_air_with_solid_neighbours,
             "test fixture failed to exercise the air-adjacent-to-solid case via the block path"
+        );
+    }
+
+    /// Minimal air-to-solid sign-flip fixture (per peer-review feedback):
+    /// one air cell at +0.1 surrounded by six face-neighbour solids at -1.0.
+    /// Pre-clamp mix: 0.1*0.5 + (-1.0)*0.5 = -0.45, which flips the sign.
+    #[test]
+    fn smooth_lod_sdf_interior_preserves_air_sign_near_solids() {
+        const N: usize = 5;
+        let linearize =
+            |p: [u32; 3]| -> u32 { p[0] + p[1] * N as u32 + p[2] * N as u32 * N as u32 };
+
+        let mut sdf = [1.0f32; N * N * N];
+        let center = linearize([2, 2, 2]) as usize;
+
+        sdf[center] = 0.1;
+        for p in [
+            [1, 2, 2],
+            [3, 2, 2],
+            [2, 1, 2],
+            [2, 3, 2],
+            [2, 2, 1],
+            [2, 2, 3],
+        ] {
+            sdf[linearize(p) as usize] = -1.0;
+        }
+
+        let smoothed = smooth_lod_sdf_interior(&sdf, N as u32, linearize, 0.5);
+
+        assert!(
+            smoothed[center] > 0.0,
+            "LOD smoothing flipped an air sample negative (raw=0.1, smoothed={})",
+            smoothed[center]
+        );
+    }
+
+    /// Minimal solid-to-air sign-flip fixture (per peer-review feedback): one
+    /// solid cell at -1.0 surrounded by six +1.0 air face-neighbours. Pre-clamp
+    /// mix: -1.0*0.5 + 1.0*0.5 = 0.0. MC treats 0.0 as non-solid because the
+    /// case test is `< 0.0`, so without the clamp this still corrupts MC.
+    #[test]
+    fn smooth_lod_sdf_interior_preserves_solid_sign_near_air() {
+        const N: usize = 5;
+        let linearize =
+            |p: [u32; 3]| -> u32 { p[0] + p[1] * N as u32 + p[2] * N as u32 * N as u32 };
+
+        let mut sdf = [1.0f32; N * N * N];
+        let center = linearize([2, 2, 2]) as usize;
+
+        sdf[center] = -1.0;
+
+        let smoothed = smooth_lod_sdf_interior(&sdf, N as u32, linearize, 0.5);
+
+        assert!(
+            smoothed[center] < 0.0,
+            "LOD smoothing flipped a solid sample non-negative (raw=-1.0, smoothed={})",
+            smoothed[center]
+        );
+    }
+
+    #[test]
+    fn smooth_lod_sdf_interior_treats_zero_as_air_for_mc_case_sign() {
+        const N: usize = 5;
+        let linearize =
+            |p: [u32; 3]| -> u32 { p[0] + p[1] * N as u32 + p[2] * N as u32 * N as u32 };
+
+        let mut sdf = [1.0f32; N * N * N];
+        let center = linearize([2, 2, 2]) as usize;
+
+        sdf[center] = 0.0;
+        for p in [
+            [1, 2, 2],
+            [3, 2, 2],
+            [2, 1, 2],
+            [2, 3, 2],
+            [2, 2, 1],
+            [2, 2, 3],
+        ] {
+            sdf[linearize(p) as usize] = -1.0;
+        }
+
+        let smoothed = smooth_lod_sdf_interior(&sdf, N as u32, linearize, 0.5);
+
+        assert!(
+            smoothed[center] > 0.0,
+            "LOD smoothing must preserve MC's non-solid classification for zero samples (smoothed={})",
+            smoothed[center]
         );
     }
 

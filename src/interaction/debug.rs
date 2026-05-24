@@ -26,6 +26,7 @@ use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
+use crate::voxel::mc_transvoxel::McTransvoxelRuntimeStats;
 use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
 use crate::voxel::plugin::{
@@ -82,6 +83,7 @@ pub struct DebugOverlayParams<'w> {
     pub reflection_mask_stats: Option<Res<'w, WaterReflectionMaskStats>>,
     pub water_visual_debug: Option<Res<'w, WaterVisualDebugState>>,
     pub water_bodies: Option<Res<'w, WaterBodyRegistry>>,
+    pub mc_spike_stats: Res<'w, McTransvoxelRuntimeStats>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
@@ -850,7 +852,7 @@ pub fn update_debug_overlay(
     }
 
     if debug.toggles.show_chunk_stats {
-        append_chunk_stats_debug(&mut text_content, &chunk_stats);
+        append_chunk_stats_debug(&mut text_content, &chunk_stats, &debug.mc_spike_stats);
     }
 
     if debug.toggles.show_performance {
@@ -1124,7 +1126,11 @@ fn is_grass_like_prop(prop_id: &str) -> bool {
 }
 
 /// Append chunk statistics debug info to text content.
-fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats) {
+fn append_chunk_stats_debug(
+    text_content: &mut String,
+    stats: &RuntimeChunkStats,
+    mc_stats: &McTransvoxelRuntimeStats,
+) {
     text_content.push_str("\n[Chunk Statistics]\n");
 
     // Uniformity breakdown
@@ -1187,6 +1193,11 @@ fn append_chunk_stats_debug(text_content: &mut String, stats: &RuntimeChunkStats
             hi_avg, lo_avg, reduction
         ));
     }
+
+    text_content.push_str(&format!(
+        "MC+TVX: meshed/frame={} lod_delta_gt_one_skips={}\n",
+        mc_stats.chunks_meshed_this_frame, mc_stats.aggregated.skipped_lod_delta_gt_one,
+    ));
 
     // Per-frame stats
     if stats.chunks_meshed_this_frame > 0 || stats.chunks_skipped_this_frame > 0 {

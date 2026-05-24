@@ -26,6 +26,7 @@ use crate::rendering::ray_tracing::{
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
+use crate::voxel::hole_probe::{TerrainHoleProbeRequest, TerrainHoleProbeRequests};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::plugin::{RuntimeChunkStats, TerrainLodControl, WorldConfig};
@@ -332,6 +333,7 @@ struct BenchState {
     gameplay_dig_applied: u32,
     gameplay_dig_rejected_crust: u32,
     gameplay_dig_failed: bool,
+    hole_probe_requested: bool,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
@@ -498,6 +500,7 @@ struct BenchCheckpoint {
     motion: Option<BenchMotion>,
     gameplay: Option<BenchGameplay>,
     inventory_ui: Option<BenchInventoryUi>,
+    hole_probe: Option<BenchHoleProbe>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -540,6 +543,17 @@ struct ScreenshotPoint {
     frame: u32,
     #[serde(default)]
     inventory_category: Option<InventoryCategory>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchHoleProbe {
+    #[serde(default)]
+    frame: u32,
+    target_voxel: [i32; 3],
+    player_position: Option<[f32; 3]>,
+    camera_position: Option<[f32; 3]>,
+    camera_direction: Option<[f32; 3]>,
+    label: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1006,6 +1020,7 @@ impl Plugin for BenchPlugin {
                 gameplay_dig_applied: 0,
                 gameplay_dig_rejected_crust: 0,
                 gameplay_dig_failed: false,
+                hole_probe_requested: false,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
@@ -2321,6 +2336,7 @@ fn run_bench_state_machine(
             state.gameplay_dig_applied = 0;
             state.gameplay_dig_rejected_crust = 0;
             state.gameplay_dig_failed = false;
+            state.hole_probe_requested = false;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
@@ -2828,6 +2844,18 @@ fn run_bench_state_machine(
                 {
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
                 }
+                if let Some(request) = checkpoint_hole_probe_request(
+                    checkpoint,
+                    state.hold_elapsed_frames,
+                    state.run_index,
+                    &mut state.hole_probe_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainHoleProbeRequests>()
+                            .push(request);
+                    });
+                }
                 apply_inventory_ui_screenshot_category(
                     checkpoint,
                     state.hold_elapsed_frames,
@@ -2924,6 +2952,41 @@ fn apply_inventory_ui_screenshot_category(
 
     control.open = true;
     control.category = category;
+}
+
+fn checkpoint_hole_probe_request(
+    checkpoint: &BenchCheckpoint,
+    hold_elapsed_frames: u32,
+    run_index: u32,
+    requested: &mut bool,
+) -> Option<TerrainHoleProbeRequest> {
+    let Some(probe) = checkpoint.hole_probe.as_ref() else {
+        return None;
+    };
+    if *requested || hold_elapsed_frames < probe.frame {
+        return None;
+    }
+
+    let label = probe
+        .label
+        .clone()
+        .unwrap_or_else(|| format!("{}-run{run_index}", checkpoint.name));
+    *requested = true;
+    Some(TerrainHoleProbeRequest {
+        trigger: format!(
+            "bench:{}:run{}:frame{}",
+            checkpoint.name, run_index, hold_elapsed_frames
+        ),
+        output_label: Some(label),
+        target_voxel_position: IVec3::new(
+            probe.target_voxel[0],
+            probe.target_voxel[1],
+            probe.target_voxel[2],
+        ),
+        player_world_position: probe.player_position.map(vec3),
+        camera_world_position: probe.camera_position.map(vec3),
+        camera_direction: probe.camera_direction.map(vec3),
+    })
 }
 
 fn save_bench_world_cache_if_ready(scene: &BenchScene, world: &VoxelWorld) {
@@ -4221,6 +4284,35 @@ hold_frames = 30
         assert!(scene.startup_trace.capture_csv);
         assert_eq!(scene.startup_trace.max_phase_frames, 12_000);
         assert_eq!(scene.checkpoints.len(), 1);
+    }
+
+    #[test]
+    fn hole_probe_checkpoint_config_deserializes() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 6
+
+[[checkpoint]]
+name = "mctx-static"
+position = [285.84256, 38.747417, 144.33394]
+look_at = [188.1263, 36.347652, 123.22059]
+time_of_day = 0.42
+hold_frames = 90
+hole_probe = { frame = 30, label = "mctx-static-mountain-hole", target_voxel = [108, 34, 106], player_position = [285.84256, 37.047417, 144.33394], camera_position = [285.84256, 38.747417, 144.33394], camera_direction = [-0.97716266, -0.02399765, -0.21113348] }
+"#,
+        )
+        .expect("hole-probe bench scene should deserialize");
+
+        let probe = scene.checkpoints[0]
+            .hole_probe
+            .as_ref()
+            .expect("checkpoint should have a hole probe");
+        assert_eq!(probe.frame, 30);
+        assert_eq!(probe.target_voxel, [108, 34, 106]);
+        assert_eq!(probe.label.as_deref(), Some("mctx-static-mountain-hole"));
     }
 
     #[test]

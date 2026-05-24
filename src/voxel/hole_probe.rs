@@ -36,7 +36,29 @@ const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 8;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, dump_terrain_hole_probe);
+        app.init_resource::<TerrainHoleProbeRequests>()
+            .add_systems(Update, dump_terrain_hole_probe);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerrainHoleProbeRequest {
+    pub trigger: String,
+    pub output_label: Option<String>,
+    pub target_voxel_position: IVec3,
+    pub player_world_position: Option<Vec3>,
+    pub camera_world_position: Option<Vec3>,
+    pub camera_direction: Option<Vec3>,
+}
+
+#[derive(Resource, Default)]
+pub struct TerrainHoleProbeRequests {
+    pending: Vec<TerrainHoleProbeRequest>,
+}
+
+impl TerrainHoleProbeRequests {
+    pub fn push(&mut self, request: TerrainHoleProbeRequest) {
+        self.pending.push(request);
     }
 }
 
@@ -498,6 +520,7 @@ type TerrainEntityQuery<'w, 's> = Query<
 #[allow(clippy::too_many_arguments)]
 fn dump_terrain_hole_probe(
     keys: Res<ButtonInput<KeyCode>>,
+    mut requests: ResMut<TerrainHoleProbeRequests>,
     world: Res<VoxelWorld>,
     targeted: Res<TargetedBlock>,
     player_query: Query<&GlobalTransform, With<Player>>,
@@ -511,15 +534,26 @@ fn dump_terrain_hole_probe(
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if !shift_held || !keys.just_pressed(KeyCode::F9) {
+    let keyboard_requested = shift_held && keys.just_pressed(KeyCode::F9);
+    let scripted_request = (!keyboard_requested)
+        .then(|| requests.pending.pop())
+        .flatten();
+    if !keyboard_requested && scripted_request.is_none() {
         return;
     }
+    let request = scripted_request.as_ref();
 
-    let Some(mut spatial_query) = spatial_query else {
+    let mut spatial_query = spatial_query;
+    if let Some(spatial_query) = spatial_query.as_mut() {
+        spatial_query.update_pipeline();
+    } else if keyboard_requested {
         warn!("Terrain hole probe skipped: physics SpatialQuery resource is not available");
         return;
-    };
-    spatial_query.update_pipeline();
+    } else {
+        warn!(
+            "Terrain hole probe continuing without physics SpatialQuery; down-ray hits will be absent"
+        );
+    }
 
     let player_pos = player_query
         .single()
@@ -530,37 +564,69 @@ fn dump_terrain_hole_probe(
                 .map(|transform| transform.translation())
         })
         .unwrap_or(Vec3::ZERO);
+    let player_pos = request
+        .and_then(|request| request.player_world_position)
+        .unwrap_or(player_pos);
     let camera_transform = camera_query.single().ok();
-    let camera_pos = camera_transform.map(|transform| transform.translation());
-    let camera_dir = camera_transform.map(|transform| transform.forward().as_vec3());
-    let camera_right = camera_transform.map(|transform| transform.right().as_vec3());
-    let camera_up = camera_transform.map(|transform| transform.up().as_vec3());
-    let target_pos = targeted.position.unwrap_or_else(|| {
-        IVec3::new(
-            player_pos.x.floor() as i32,
-            (player_pos.y - 1.0).floor() as i32,
-            player_pos.z.floor() as i32,
-        )
-    });
+    let camera_pos = request
+        .and_then(|request| request.camera_world_position)
+        .or_else(|| camera_transform.map(|transform| transform.translation()));
+    let camera_dir = request
+        .and_then(|request| request.camera_direction)
+        .map(Vec3::normalize_or_zero)
+        .or_else(|| camera_transform.map(|transform| transform.forward().as_vec3()));
+    let (scripted_right, scripted_up) = camera_dir
+        .filter(|_| request.is_some())
+        .map(camera_basis_from_forward)
+        .unwrap_or((Vec3::ZERO, Vec3::ZERO));
+    let camera_right = if request.is_some() {
+        Some(scripted_right)
+    } else {
+        camera_transform.map(|transform| transform.right().as_vec3())
+    };
+    let camera_up = if request.is_some() {
+        Some(scripted_up)
+    } else {
+        camera_transform.map(|transform| transform.up().as_vec3())
+    };
+    let target_pos = request
+        .map(|request| request.target_voxel_position)
+        .or(targeted.position)
+        .unwrap_or_else(|| {
+            IVec3::new(
+                player_pos.x.floor() as i32,
+                (player_pos.y - 1.0).floor() as i32,
+                player_pos.z.floor() as i32,
+            )
+        });
     let target_chunk = VoxelWorld::world_to_chunk(target_pos);
     let target_local = VoxelWorld::world_to_local(target_pos);
     let target_voxel = world.sample_voxel_for_collision(target_pos).voxel();
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
 
     let columns = sample_columns(&world, target_pos, 2);
-    let physics = PhysicsProbe {
-        player_down_ray: cast_down_ray(
-            &spatial_query,
-            &terrain_entities,
-            player_pos + Vec3::Y * 4.0,
-            160.0,
-        ),
-        target_down_ray: cast_down_ray(
-            &spatial_query,
-            &terrain_entities,
-            target_pos.as_vec3() + Vec3::new(0.5, 8.0, 0.5),
-            160.0,
-        ),
+    let player_down_ray_origin = player_pos + Vec3::Y * 4.0;
+    let target_down_ray_origin = target_pos.as_vec3() + Vec3::new(0.5, 8.0, 0.5);
+    let physics = if let Some(spatial_query) = spatial_query.as_ref() {
+        PhysicsProbe {
+            player_down_ray: cast_down_ray(
+                spatial_query,
+                &terrain_entities,
+                player_down_ray_origin,
+                160.0,
+            ),
+            target_down_ray: cast_down_ray(
+                spatial_query,
+                &terrain_entities,
+                target_down_ray_origin,
+                160.0,
+            ),
+        }
+    } else {
+        PhysicsProbe {
+            player_down_ray: missing_down_ray_probe(player_down_ray_origin, 160.0),
+            target_down_ray: missing_down_ray_probe(target_down_ray_origin, 160.0),
+        }
     };
     let expected_surface_y = expected_surface_y(&columns);
     let render_mesh_ray_hits = sample_render_mesh_rays(
@@ -708,10 +774,13 @@ fn dump_terrain_hole_probe(
     );
 
     let timestamp = timestamp_utc_compact();
+    let trigger = request
+        .map(|request| request.trigger.clone())
+        .unwrap_or_else(|| "Shift+F9".to_string());
     let dump = TerrainHoleProbeDump {
         schema_version: TERRAIN_HOLE_PROBE_SCHEMA_VERSION,
         timestamp_utc: timestamp.clone(),
-        trigger: "Shift+F9".to_string(),
+        trigger,
         player_world_position: player_pos.into(),
         camera_world_position: camera_pos.map(Into::into),
         target_voxel_position: target_pos.into(),
@@ -747,10 +816,26 @@ fn dump_terrain_hole_probe(
         chunks,
     };
 
-    match write_probe_dump(&dump, &timestamp) {
+    let output_label = request.and_then(|request| request.output_label.as_deref());
+    match write_probe_dump(&dump, &timestamp, output_label) {
         Ok(path) => info!("Terrain hole probe written to {}", path.display()),
         Err(err) => error!("Failed to write terrain hole probe: {err}"),
     }
+}
+
+fn camera_basis_from_forward(forward: Vec3) -> (Vec3, Vec3) {
+    let forward = forward.normalize_or_zero();
+    if forward == Vec3::ZERO {
+        return (Vec3::X, Vec3::Y);
+    }
+    let reference_up = if forward.y.abs() > 0.98 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let right = forward.cross(reference_up).normalize_or_zero();
+    let up = right.cross(forward).normalize_or_zero();
+    (right, up)
 }
 
 fn sample_columns(world: &VoxelWorld, target_pos: IVec3, radius: i32) -> Vec<ColumnProbe> {
@@ -928,6 +1013,15 @@ fn cast_down_ray(
         direction: Vec3::NEG_Y.into(),
         max_distance,
         hit,
+    }
+}
+
+fn missing_down_ray_probe(origin: Vec3, max_distance: f32) -> RayProbe {
+    RayProbe {
+        origin: origin.into(),
+        direction: Vec3::NEG_Y.into(),
+        max_distance,
+        hit: None,
     }
 }
 
@@ -2555,13 +2649,39 @@ fn classify_probe(
     classification
 }
 
-fn write_probe_dump(dump: &TerrainHoleProbeDump, timestamp: &str) -> std::io::Result<PathBuf> {
+fn write_probe_dump(
+    dump: &TerrainHoleProbeDump,
+    timestamp: &str,
+    output_label: Option<&str>,
+) -> std::io::Result<PathBuf> {
     let dir = PathBuf::from("debug");
     fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("terrain-hole-probe-{timestamp}.json"));
+    let path = match output_label
+        .map(sanitize_probe_label)
+        .filter(|label| !label.is_empty())
+    {
+        Some(label) => dir.join(format!("terrain-hole-probe-{label}-{timestamp}.json")),
+        None => dir.join(format!("terrain-hole-probe-{timestamp}.json")),
+    };
     let json = serde_json::to_string_pretty(dump)?;
     fs::write(&path, json)?;
     Ok(path)
+}
+
+fn sanitize_probe_label(label: &str) -> String {
+    label
+        .chars()
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                Some(ch)
+            } else if ch.is_ascii_whitespace() {
+                Some('-')
+            } else {
+                None
+            }
+        })
+        .take(64)
+        .collect()
 }
 
 fn dirty_reason_names(flags: u8) -> Vec<String> {
@@ -2770,5 +2890,26 @@ mod tests {
             LodMeshStatus::DebugUnavailable
         );
         assert_eq!(lod_mesh_status(None, true), LodMeshStatus::DebugUnavailable);
+    }
+
+    #[test]
+    fn scripted_camera_basis_is_orthonormal() {
+        let forward = Vec3::new(-0.97716266, -0.02399765, -0.21113348);
+
+        let (right, up) = camera_basis_from_forward(forward);
+
+        assert!((right.length() - 1.0).abs() < 1.0e-5);
+        assert!((up.length() - 1.0).abs() < 1.0e-5);
+        assert!(right.dot(forward).abs() < 1.0e-5);
+        assert!(up.dot(forward).abs() < 1.0e-5);
+        assert!(right.dot(up).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn probe_output_label_is_filename_safe() {
+        assert_eq!(
+            sanitize_probe_label("mctx static/mountain hole!"),
+            "mctx-staticmountain-hole"
+        );
     }
 }

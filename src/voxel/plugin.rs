@@ -687,6 +687,7 @@ impl Plugin for VoxelPlugin {
                 .chain(),
         )
         .add_systems(Startup, spawn_world_startup_overlay)
+        .add_systems(Startup, log_mc_spike_build_tag)
         .add_systems(
             Update,
             start_voxel_world_after_overlay_frame.before(poll_world_load_task),
@@ -1160,6 +1161,25 @@ fn spawn_queued_chunk_generation_tasks(
             generation_queue.remaining()
         );
     }
+}
+
+/// Tag bumped with each MC+Transvoxel hole-fix series. Logged at startup so
+/// the user can verify their binary contains the latest source changes
+/// without guessing from visuals. Bump when landing a fix that should affect
+/// the visible mesh.
+const MC_SPIKE_BUILD_TAG: &str =
+    "mc-spike-2026-05-24-sdf-sign-guard-and-lod-refine-coarser";
+
+fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
+    #[cfg(feature = "mc_transvoxel")]
+    let mode = format!("{:?}", mc_settings.mode);
+    #[cfg(not(feature = "mc_transvoxel"))]
+    let mode = "feature-disabled".to_string();
+
+    info!(
+        "MC+Transvoxel spike build tag: {}; enabled={} mode={} lod_delta_policy={:?}",
+        MC_SPIKE_BUILD_TAG, mc_settings.enabled, mode, mc_settings.lod_delta_policy,
+    );
 }
 
 fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -1960,12 +1980,12 @@ fn lod_level_from_index(index: u8) -> LodLevel {
 }
 
 /// Enforce that no two face-adjacent chunks have LOD indices differing by
-/// more than 1, by pulling violators toward the midpoint LOD. Returns the
-/// set of chunks whose `desired` LOD was modified by this pass; pass-3 uses
-/// it to bypass the LOD-change cooldown for these coherence-mandated
-/// changes (otherwise downgrades sit blocked for 30 frames during camera
-/// motion, leaving transient LOD deltas of 2+ that MC+Transvoxel cannot
-/// bridge — they show up as a horizontal band of holes along the seam).
+/// more than 1 by refining the coarser side of violating boundaries. Returns
+/// the set of chunks whose `desired` LOD was modified by this pass; pass-3
+/// uses it to bypass the LOD-change cooldown for these coherence-mandated
+/// changes (otherwise forced refinements sit blocked for 30 frames during
+/// camera motion, leaving transient LOD deltas of 2+ that MC+Transvoxel
+/// cannot bridge).
 fn enforce_lod_delta_max_one(
     desired: &mut HashMap<IVec3, LodLevel>,
 ) -> HashSet<IVec3> {
@@ -1979,7 +1999,7 @@ fn enforce_lod_delta_max_one(
     ];
     let mut forced: HashSet<IVec3> = HashSet::new();
     for _ in 0..6 {
-        let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
+        let mut updates: HashMap<IVec3, LodLevel> = HashMap::new();
         for (chunk_pos, &lod) in desired.iter() {
             let Some(my_idx) = lod.lod_index() else {
                 continue;
@@ -1991,12 +2011,18 @@ fn enforce_lod_delta_max_one(
                 let Some(neighbor_idx) = neighbor_lod.lod_index() else {
                     continue;
                 };
-                if my_idx.abs_diff(neighbor_idx) <= 1 {
+                if my_idx <= neighbor_idx + 1 {
                     continue;
                 }
-                let mid = ((my_idx as u16 + neighbor_idx as u16) / 2) as u8;
-                updates.push((*chunk_pos, lod_level_from_index(mid)));
-                break;
+                let target = lod_level_from_index(neighbor_idx + 1);
+                updates
+                    .entry(*chunk_pos)
+                    .and_modify(|existing| {
+                        if target.is_higher_detail_than(*existing) {
+                            *existing = target;
+                        }
+                    })
+                    .or_insert(target);
             }
         }
         if updates.is_empty() {
@@ -4491,9 +4517,9 @@ fn update_chunk_lod_system(
             .unwrap_or(true);
         // Cooldown only throttles downgrades; upgrades to higher detail must
         // not be punished or stale LOD states can persist during movement.
-        // Coherence-forced downgrades (from `enforce_lod_delta_max_one`) also
-        // bypass cooldown — without this, max-one bumps sit blocked for 30
-        // frames while the user walks, leaving Lod0↔Lod2 deltas the
+        // Coherence-forced refinements (from `enforce_lod_delta_max_one`) also
+        // bypass cooldown; without this, max-one bumps sit blocked for 30
+        // frames while the user walks, leaving Lod0-Lod2 deltas the
         // MC+Transvoxel apron cannot bridge (visible as a horizontal band
         // of holes along the LOD seam that drifts as the camera moves).
         let is_upgrade = target_lod.is_higher_detail_than(current_lod);
@@ -4707,10 +4733,37 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
 mod tests {
     use super::*;
 
+    fn assert_face_lod_deltas_le_one(desired: &HashMap<IVec3, LodLevel>) {
+        const FACE_OFFSETS: [IVec3; 3] = [
+            IVec3::new(1, 0, 0),
+            IVec3::new(0, 1, 0),
+            IVec3::new(0, 0, 1),
+        ];
+
+        for (pos, lod) in desired {
+            let Some(lod_idx) = lod.lod_index() else {
+                continue;
+            };
+            for offset in FACE_OFFSETS {
+                let Some(neighbor) = desired.get(&(*pos + offset)) else {
+                    continue;
+                };
+                let Some(neighbor_idx) = neighbor.lod_index() else {
+                    continue;
+                };
+                assert!(
+                    lod_idx.abs_diff(neighbor_idx) <= 1,
+                    "expected face-adjacent delta <= 1 for {pos:?} and {:?}, got {lod_idx} vs {neighbor_idx}",
+                    *pos + offset
+                );
+            }
+        }
+    }
+
     /// `enforce_lod_delta_max_one` must (a) clamp deltas to 1 and (b) return
     /// the chunks it touched so pass-3 can bypass the LOD-change cooldown for
-    /// those coherence-forced downgrades. Without (b), the bumps sit blocked
-    /// for 30 frames while the user walks, leaving the LOD0↔LOD2 deltas the
+    /// those coherence-forced refinements. Without (b), the bumps sit blocked
+    /// for 30 frames while the user walks, leaving the LOD0-LOD2 deltas the
     /// MC+Transvoxel apron can't bridge.
     #[test]
     fn enforce_lod_delta_max_one_returns_modified_chunks() {
@@ -4720,13 +4773,8 @@ mod tests {
 
         let forced = enforce_lod_delta_max_one(&mut desired);
 
-        // After enforcement, deltas should all be <= 1.
-        let a = desired[&IVec3::ZERO].lod_index().unwrap();
-        let b = desired[&IVec3::new(1, 0, 0)].lod_index().unwrap();
-        assert!(a.abs_diff(b) <= 1, "expected delta <= 1, got {a} vs {b}");
+        assert_face_lod_deltas_le_one(&desired);
 
-        // At least one chunk must have been modified (mid(0,2)=Lod1 on whichever
-        // side the iteration touched first).
         assert!(
             !forced.is_empty(),
             "enforce_lod_delta_max_one must report which chunks it modified"
@@ -4744,6 +4792,53 @@ mod tests {
                 "chunk reported as forced ({pos:?}) but its LOD is unchanged"
             );
         }
+    }
+
+    #[test]
+    fn enforce_lod_delta_max_one_refines_coarser_side_only() {
+        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
+        let fine = IVec3::ZERO;
+        let coarse = IVec3::new(1, 0, 0);
+        desired.insert(fine, LodLevel::Lod0);
+        desired.insert(coarse, LodLevel::Lod2);
+
+        let forced = enforce_lod_delta_max_one(&mut desired);
+
+        assert_eq!(
+            desired[&fine],
+            LodLevel::Lod0,
+            "max-one enforcement must not coarsen the high-detail side"
+        );
+        assert_eq!(
+            desired[&coarse],
+            LodLevel::Lod1,
+            "coarser neighbor should refine to the only bridgeable LOD"
+        );
+        assert_eq!(
+            forced,
+            HashSet::from([coarse]),
+            "only the refined coarse chunk should bypass the cooldown"
+        );
+        assert_face_lod_deltas_le_one(&desired);
+    }
+
+    #[test]
+    fn enforce_lod_delta_max_one_propagates_refinements_across_chain() {
+        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
+        let lod0 = IVec3::ZERO;
+        let lod3_a = IVec3::new(1, 0, 0);
+        let lod3_b = IVec3::new(2, 0, 0);
+        desired.insert(lod0, LodLevel::Lod0);
+        desired.insert(lod3_a, LodLevel::Lod3);
+        desired.insert(lod3_b, LodLevel::Lod3);
+
+        let forced = enforce_lod_delta_max_one(&mut desired);
+
+        assert_eq!(desired[&lod0], LodLevel::Lod0);
+        assert_eq!(desired[&lod3_a], LodLevel::Lod1);
+        assert_eq!(desired[&lod3_b], LodLevel::Lod2);
+        assert_eq!(forced, HashSet::from([lod3_a, lod3_b]));
+        assert_face_lod_deltas_le_one(&desired);
     }
 
     #[test]
