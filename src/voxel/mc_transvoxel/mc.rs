@@ -401,4 +401,88 @@ mod tests {
             out.stats.triangle_count_regular
         );
     }
+
+    /// LOD0↔LOD1 transition apron must emit triangles for cells with
+    /// single-corner cases. A previous filter in `extract_transition_cell`
+    /// (`solid_corners <= 1 || >= 8`) dropped those, leaving irregular dark
+    /// holes along the LOD-transition boundary on any sloped terrain.
+    /// Fixture: a sloped wedge inside the chunk with the PosY face flagged
+    /// as having a coarser neighbour, so the transvoxel apron runs along it.
+    #[test]
+    fn sloped_chunk_with_coarser_pos_y_neighbor_emits_transition_triangles() {
+        use crate::voxel::chunk::LodLevel;
+
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        // For the PosY transition apron to fire, the iso must cross the +Y
+        // boundary cell row (world voxels at y = 14..15 for a 16-voxel chunk).
+        // A sawtooth surface alternating between heights 14 and 15 along X
+        // creates a sweep of 9-corner transition cases that includes the
+        // single-corner cases the previous filter dropped.
+        for x in 0..CHUNK_SIZE_I32 {
+            let height = 14 + (x % 2); // alternates 14, 15 along +X
+            for z in 0..CHUNK_SIZE_I32 {
+                for y in 0..=height {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let neighbor_lods = NeighborLods {
+            pos_y: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods,
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+        });
+        assert!(
+            out.stats.triangle_count_transition > 0,
+            "expected transition triangles along the PosY 2:1 LOD boundary \
+             but got 0 — the single-corner transition-cell filter has \
+             likely been re-introduced in extract_transition_cell"
+        );
+    }
+
+    /// MC mesh at Lod1 must tag its per-triangle barycentric UV1 with LOD
+    /// index 1 so the wireframe-debug shader can colour the chunk light-blue.
+    /// Without this tag every MC chunk renders as LOD0 (white) regardless of
+    /// its real LOD, and Alt+F7 can't distinguish LOD0 from LOD1 chunks.
+    #[test]
+    fn mc_mesh_carries_lod_tagged_barycentric_uvs() {
+        use crate::voxel::chunk::LodLevel;
+        use crate::voxel::meshing::barycentric_lod_index;
+
+        let world = sphere_world();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod1,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+        });
+        let mesh = &out.result.solid;
+        assert!(!mesh.is_empty(), "Lod1 sphere should still produce a mesh");
+        // Every vertex must carry the Lod1 tag.
+        for uv in &mesh.barycentric_uvs {
+            assert_eq!(
+                barycentric_lod_index(*uv),
+                1,
+                "MC Lod1 mesh has a vertex tagged as LOD {} instead of 1; \
+                 mesh.wireframe_lod_index init missing in generate_mc_chunk_mesh",
+                barycentric_lod_index(*uv)
+            );
+        }
+    }
 }

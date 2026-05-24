@@ -1959,7 +1959,16 @@ fn lod_level_from_index(index: u8) -> LodLevel {
     }
 }
 
-fn enforce_lod_delta_max_one(desired: &mut HashMap<IVec3, LodLevel>) {
+/// Enforce that no two face-adjacent chunks have LOD indices differing by
+/// more than 1, by pulling violators toward the midpoint LOD. Returns the
+/// set of chunks whose `desired` LOD was modified by this pass; pass-3 uses
+/// it to bypass the LOD-change cooldown for these coherence-mandated
+/// changes (otherwise downgrades sit blocked for 30 frames during camera
+/// motion, leaving transient LOD deltas of 2+ that MC+Transvoxel cannot
+/// bridge — they show up as a horizontal band of holes along the seam).
+fn enforce_lod_delta_max_one(
+    desired: &mut HashMap<IVec3, LodLevel>,
+) -> HashSet<IVec3> {
     const FACE_OFFSETS: [IVec3; 6] = [
         IVec3::new(1, 0, 0),
         IVec3::new(-1, 0, 0),
@@ -1968,6 +1977,7 @@ fn enforce_lod_delta_max_one(desired: &mut HashMap<IVec3, LodLevel>) {
         IVec3::new(0, 0, 1),
         IVec3::new(0, 0, -1),
     ];
+    let mut forced: HashSet<IVec3> = HashSet::new();
     for _ in 0..6 {
         let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
         for (chunk_pos, &lod) in desired.iter() {
@@ -1994,8 +2004,10 @@ fn enforce_lod_delta_max_one(desired: &mut HashMap<IVec3, LodLevel>) {
         }
         for (pos, lod) in updates {
             desired.insert(pos, lod);
+            forced.insert(pos);
         }
     }
+    forced
 }
 
 pub(crate) fn target_terrain_mesh_mode_for_lod(
@@ -4455,11 +4467,13 @@ fn update_chunk_lod_system(
         }
     }
 
-    if mc_spike.settings.enabled
+    let forced_by_max_one = if mc_spike.settings.enabled
         && mc_spike.settings.lod_delta_policy == McTransvoxelLodDeltaPolicy::MaxOne
     {
-        enforce_lod_delta_max_one(&mut desired);
-    }
+        enforce_lod_delta_max_one(&mut desired)
+    } else {
+        HashSet::new()
+    };
 
     // Pass 3 — turn coherent desired LODs into change candidates.
     for (chunk_pos, &target_lod) in &desired {
@@ -4476,8 +4490,14 @@ fn update_chunk_lod_system(
             .unwrap_or(true);
         // Cooldown only throttles downgrades; upgrades to higher detail must
         // not be punished or stale LOD states can persist during movement.
+        // Coherence-forced downgrades (from `enforce_lod_delta_max_one`) also
+        // bypass cooldown — without this, max-one bumps sit blocked for 30
+        // frames while the user walks, leaving Lod0↔Lod2 deltas the
+        // MC+Transvoxel apron cannot bridge (visible as a horizontal band
+        // of holes along the LOD seam that drifts as the camera moves).
         let is_upgrade = target_lod.is_higher_detail_than(current_lod);
-        if !is_upgrade && !cooldown_elapsed {
+        let is_max_one_forced = forced_by_max_one.contains(chunk_pos);
+        if !is_upgrade && !cooldown_elapsed && !is_max_one_forced {
             continue;
         }
         lod_candidates.push((*chunk_pos, current_lod, target_lod, distance));
@@ -4670,6 +4690,59 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `enforce_lod_delta_max_one` must (a) clamp deltas to 1 and (b) return
+    /// the chunks it touched so pass-3 can bypass the LOD-change cooldown for
+    /// those coherence-forced downgrades. Without (b), the bumps sit blocked
+    /// for 30 frames while the user walks, leaving the LOD0↔LOD2 deltas the
+    /// MC+Transvoxel apron can't bridge.
+    #[test]
+    fn enforce_lod_delta_max_one_returns_modified_chunks() {
+        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
+        desired.insert(IVec3::ZERO, LodLevel::Lod0);
+        desired.insert(IVec3::new(1, 0, 0), LodLevel::Lod2);
+
+        let forced = enforce_lod_delta_max_one(&mut desired);
+
+        // After enforcement, deltas should all be <= 1.
+        let a = desired[&IVec3::ZERO].lod_index().unwrap();
+        let b = desired[&IVec3::new(1, 0, 0)].lod_index().unwrap();
+        assert!(a.abs_diff(b) <= 1, "expected delta <= 1, got {a} vs {b}");
+
+        // At least one chunk must have been modified (mid(0,2)=Lod1 on whichever
+        // side the iteration touched first).
+        assert!(
+            !forced.is_empty(),
+            "enforce_lod_delta_max_one must report which chunks it modified"
+        );
+        // The modified chunk's desired LOD must differ from its starting LOD.
+        let initial: HashMap<IVec3, LodLevel> = [
+            (IVec3::ZERO, LodLevel::Lod0),
+            (IVec3::new(1, 0, 0), LodLevel::Lod2),
+        ]
+        .into_iter()
+        .collect();
+        for pos in &forced {
+            assert_ne!(
+                desired[pos], initial[pos],
+                "chunk reported as forced ({pos:?}) but its LOD is unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn enforce_lod_delta_max_one_no_modifications_returns_empty_set() {
+        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
+        desired.insert(IVec3::ZERO, LodLevel::Lod0);
+        desired.insert(IVec3::new(1, 0, 0), LodLevel::Lod1);
+
+        let forced = enforce_lod_delta_max_one(&mut desired);
+
+        assert!(
+            forced.is_empty(),
+            "delta=1 fixture must not trigger any modifications"
+        );
+    }
 
     #[test]
     fn terrain_lod_hysteresis_caps_at_eight_voxels() {

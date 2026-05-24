@@ -230,10 +230,14 @@ fn extract_transition_cell(
             case |= HIGH_RES_CASE_BITS[i];
         }
     }
-    let solid_corners = case.count_ones();
-    if solid_corners <= 1 || solid_corners >= 8 {
-        return 0;
-    }
+    // Only 0 and 0x1FF (all 9 corners) emit no transition triangles. A prior
+    // `solid_corners <= 1 || >= 8` filter was added as a defence against
+    // unclamped-smoothed-SDF shatter, mirroring the same bug in
+    // `extract_regular_mc`. It dropped every transition cell where the iso
+    // clipped one corner — precisely the topology that occurs along the
+    // LOD0↔LOD1 apron on any sloped surface — producing irregular dark holes
+    // at the LOD transition. The SDF sign-guard now keeps air corners > 0,
+    // so the defensive filter has no purpose and must be removed.
     if case == 0 || case == 0x1FF {
         return 0;
     }
