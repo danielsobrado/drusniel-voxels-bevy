@@ -62,11 +62,11 @@ fn extract_loading_flames(world: &mut World) {
                 return None;
             }
 
-            let time = main_world.get_resource::<Time>()?.elapsed_secs();
-            let window = main_world
-                .query_filtered::<&Window, With<PrimaryWindow>>()
-                .iter(main_world)
-                .next()?;
+        let time = main_world.get_resource::<Time>()?.elapsed_secs();
+        let window = main_world
+            .query_filtered::<&Window, With<PrimaryWindow>>()
+            .iter(&*main_world)
+            .next()?;
             let width = window.width();
             let height = window.height();
             if width <= 0.0 || height <= 0.0 {
