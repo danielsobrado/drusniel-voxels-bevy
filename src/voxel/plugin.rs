@@ -12,8 +12,11 @@ use std::time::Instant;
 
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::SystemParam;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::window::PrimaryWindow;
@@ -523,6 +526,12 @@ struct WorldStartupOverlayState {
     ready_seconds: f32,
 }
 
+#[derive(Resource, Debug)]
+struct WorldStartupFlameTexture {
+    handle: Handle<Image>,
+    last_frame: u32,
+}
+
 #[derive(Resource, Default, Debug)]
 pub(crate) struct WorldStartupLoadingFlames {
     pub active: bool,
@@ -593,6 +602,9 @@ struct WorldStartupBackgroundImage;
 
 #[derive(Component)]
 struct WorldStartupFlamesMaterial;
+
+#[derive(Component)]
+struct WorldStartupFlamesImage;
 
 #[derive(Component)]
 struct WorldStartupTitleText;
@@ -1189,6 +1201,8 @@ fn spawn_queued_chunk_generation_tasks(
 /// without guessing from visuals. Bump when landing a fix that should affect
 /// the visible mesh.
 const MC_SPIKE_BUILD_TAG: &str = "mc-spike-2026-05-24-sdf-sign-guard-and-lod-refine-coarser";
+const WORLD_STARTUP_FLAME_TEXTURE_WIDTH: u32 = 384;
+const WORLD_STARTUP_FLAME_TEXTURE_HEIGHT: u32 = 216;
 
 fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     #[cfg(feature = "mc_transvoxel")]
@@ -1202,15 +1216,101 @@ fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     );
 }
 
+fn create_world_startup_flame_image(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: WORLD_STARTUP_FLAME_TEXTURE_WIDTH,
+            height: WORLD_STARTUP_FLAME_TEXTURE_HEIGHT,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &build_world_startup_flame_pixels(
+            WORLD_STARTUP_FLAME_TEXTURE_WIDTH,
+            WORLD_STARTUP_FLAME_TEXTURE_HEIGHT,
+            0.0,
+        ),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        address_mode_w: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+
+    images.add(image)
+}
+
+fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u8> {
+    let mut pixels = vec![0; (width * height * 4) as usize];
+    let width_f = width.max(1) as f32;
+    let height_f = height.max(1) as f32;
+
+    for y in 0..height {
+        let v = y as f32 / height_f;
+        let heat = (1.0 - v).clamp(0.0, 1.0).powf(1.45);
+        for x in 0..width {
+            let u = x as f32 / width_f;
+            let center_fuel = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.35);
+            let n1 = flame_hash_noise(u * 7.0, v * 4.0 - time * 0.9);
+            let n2 = flame_hash_noise(u * 18.0 + time * 0.3, v * 11.0 - time * 2.1);
+            let lick = ((n1 * 0.62 + n2 * 0.38) * center_fuel + heat * 0.85).clamp(0.0, 1.0);
+            let intensity = (heat * lick * 1.7).clamp(0.0, 1.0);
+            let smoke = ((1.0 - heat) * n2 * center_fuel * 0.18).clamp(0.0, 1.0);
+            let alpha = ((intensity * 0.78 + smoke * 0.35) * 255.0).clamp(0.0, 235.0) as u8;
+            let idx = ((y * width + x) * 4) as usize;
+
+            pixels[idx] = ((intensity * 255.0) + smoke * 45.0).clamp(0.0, 255.0) as u8;
+            pixels[idx + 1] = ((intensity.powf(1.55) * 105.0) + smoke * 35.0).clamp(0.0, 255.0) as u8;
+            pixels[idx + 2] = ((intensity.powf(3.0) * 18.0) + smoke * 42.0).clamp(0.0, 255.0) as u8;
+            pixels[idx + 3] = alpha;
+        }
+    }
+
+    pixels
+}
+
+fn flame_hash_noise(x: f32, y: f32) -> f32 {
+    let coarse_x = x.floor();
+    let coarse_y = y.floor();
+    let frac_x = x - coarse_x;
+    let frac_y = y - coarse_y;
+    let smooth_x = frac_x * frac_x * (3.0 - 2.0 * frac_x);
+    let smooth_y = frac_y * frac_y * (3.0 - 2.0 * frac_y);
+
+    let a = flame_hash(coarse_x, coarse_y);
+    let b = flame_hash(coarse_x + 1.0, coarse_y);
+    let c = flame_hash(coarse_x, coarse_y + 1.0);
+    let d = flame_hash(coarse_x + 1.0, coarse_y + 1.0);
+    let x1 = a + (b - a) * smooth_x;
+    let x2 = c + (d - c) * smooth_x;
+    x1 + (x2 - x1) * smooth_y
+}
+
+fn flame_hash(x: f32, y: f32) -> f32 {
+    ((x * 127.1 + y * 311.7).sin() * 43758.547).fract().abs()
+}
+
 fn spawn_world_startup_overlay(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
     mut flame_materials: ResMut<Assets<LoadingFlamesMaterial>>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
 ) {
     let background_image = asset_server.load("images/DrunsielShyntara.png");
+    let flame_image = create_world_startup_flame_image(&mut images);
     let flame_material = flame_materials.add(LoadingFlamesMaterial {
         uniform: LoadingFlamesUniform::default(),
+    });
+    commands.insert_resource(WorldStartupFlameTexture {
+        handle: flame_image.clone(),
+        last_frame: u32::MAX,
     });
     loading_flames.active = true;
 
@@ -1261,6 +1361,22 @@ fn spawn_world_startup_overlay(
                 },
                 BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.58)),
                 ZIndex(-1),
+            ));
+
+            root.spawn((
+                ImageNode::new(flame_image).with_mode(NodeImageMode::Stretch),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                ZIndex(0),
+                WorldStartupFlamesImage,
             ));
 
             root.spawn((
@@ -1390,11 +1506,14 @@ fn world_startup_background_cover_size(
 fn update_world_startup_overlay(
     mut commands: Commands,
     time: Res<Time>,
+    frame: Res<FrameCount>,
     gen_state: Res<ChunkGenerationState>,
     chunk_stats: Res<RuntimeChunkStats>,
     setup_state: Res<WorldStartupSetupState>,
     mut overlay_state: ResMut<WorldStartupOverlayState>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
+    flame_texture: Option<ResMut<WorldStartupFlameTexture>>,
+    mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     root_query: Query<Entity, With<WorldStartupOverlay>>,
     flame_query: Query<&MaterialNode<LoadingFlamesMaterial>, With<WorldStartupFlamesMaterial>>,
@@ -1411,6 +1530,19 @@ fn update_world_startup_overlay(
         return;
     };
     loading_flames.active = true;
+
+    if let Some(mut flame_texture) = flame_texture {
+        if flame_texture.last_frame != frame.0 {
+            if let Some(image) = images.get_mut(&flame_texture.handle) {
+                image.data = Some(build_world_startup_flame_pixels(
+                    WORLD_STARTUP_FLAME_TEXTURE_WIDTH,
+                    WORLD_STARTUP_FLAME_TEXTURE_HEIGHT,
+                    time.elapsed_secs(),
+                ));
+            }
+            flame_texture.last_frame = frame.0;
+        }
+    }
 
     let (resolution, mouse) = windows
         .single()
