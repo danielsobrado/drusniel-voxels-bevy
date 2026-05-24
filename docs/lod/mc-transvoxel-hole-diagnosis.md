@@ -489,3 +489,115 @@ source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
 This is comparable to the normal-LOD run: the dominant bucket remains
 raw-occupancy-vs-mesher-iso, with a smaller but persistent set of
 vertex-position/table-decode suspects.
+
+### Screenshot-backed mesh oracle pass
+
+Implemented on 2026-05-24 after visual checks still showed the same mountain
+defects. This pass keeps scheduler and SDF behavior frozen and sharpens the
+probe so a raw voxel gap is not accepted as a visual hole unless the checkpoint
+screenshot also supports it.
+
+Additional probe evidence:
+
+- `schema_version = 10`
+- multi-chunk `first_mesher_iso_distance` and `first_mesher_iso_point`
+- raw-surface MC cell, mesher-iso MC cell, first render-hit source cell, and
+  explicit cell agreement flags
+- emitted regular and transition triangle vertices for suspicious oracle cells
+- ray-hit distance and closest ray-to-triangle miss distance for emitted
+  triangles
+- first render-hit triangle vertices, source cell, normal data, material
+  weights, and distance from mesher iso
+- projected screenshot pixels at raw surface, mesher iso, and first render hit
+- visual pixel classification: `lit_or_non_dark`, `dark_or_black`, or
+  `sky_or_background`
+
+Bench plumbing change:
+
+- Hole probes that need screenshot pixels are deferred until the matching
+  checkpoint PNG exists. The request still comes from the configured
+  `hole_probe.frame`, but the actual dump can occur during the screenshot
+  phase so `visual_samples` are populated instead of `screenshot_unavailable`.
+
+Focused verification passed:
+
+```powershell
+rtk cargo test --lib --features mc_transvoxel forensics -j 1
+rtk cargo test --lib --features mc_transvoxel mesher_iso_oracle_matches_flat_plane_sdf -j 1
+rtk cargo test --lib --features mc_transvoxel regular_mc_flat_plane_has_no_ray_gaps -j 1
+rtk cargo test --lib --features mc_transvoxel regular_mc_diagonal_plane_has_no_ray_gaps -j 1
+rtk cargo test --lib --features mc_transvoxel screenshot_pixel_sampler_reads_synthetic_fixture -j 1
+rtk cargo test --lib --features mc_transvoxel ray_to_emitted_triangle_residual_reports_hit_and_miss -j 1
+rtk cargo test --lib --features mc_transvoxel render_hit_source_cell_matches_expected_mc_cell -j 1
+rtk cargo test --lib --features mc_transvoxel mesher_iso_crossing_interpolates_across_chunk_sample_boundary -j 1
+rtk cargo test --lib --features mc_transvoxel oracle_cell_selection_uses_mesher_iso_point -j 1
+```
+
+Isolation matrix result:
+
+| Scene | Probe dump | Fan gaps | Classification counts | Mesher-iso visual pixels | Source chunk `skipped_lod_delta_gt_one` |
+| --- | --- | ---: | --- | --- | --- |
+| Normal MC+Transvoxel | `debug/terrain-hole-probe-mctx-static-mountain-hole-20260524-091824.json` | `33 / 81` | `raw_occupancy_vs_mesher_iso_false_positive = 32`, `vertex_position_or_table_decode_error = 1` | `lit_or_non_dark = 33` | `0` |
+| Surface Nets baseline | `debug/terrain-hole-probe-mctx-static-mountain-hole-surface-nets-20260524-092056.json` | `35 / 81` | `unknown = 35` | MC oracle not applicable | n/a |
+| MC all LOD0 | `debug/terrain-hole-probe-mctx-static-mountain-hole-all-lod0-20260524-092224.json` | `32 / 81` | `raw_occupancy_vs_mesher_iso_false_positive = 31`, `vertex_position_or_table_decode_error = 1` | `lit_or_non_dark = 32` | `0` |
+| MC normal LODs, transitions disabled, boundary rows kept | `debug/terrain-hole-probe-mctx-static-mountain-hole-no-transitions-20260524-093554.json` | `33 / 81` | `raw_occupancy_vs_mesher_iso_false_positive = 20`, `missing_mesh_entity_or_render_layer = 12`, `vertex_position_or_table_decode_error = 1` | `lit_or_non_dark = 21`, `sky_or_background = 12` | `0` |
+| MC all LOD1, transitions disabled, boundary rows kept | `debug/terrain-hole-probe-mctx-static-mountain-hole-all-lod1-no-transitions-20260524-092605.json` | `27 / 81` | `raw_occupancy_vs_mesher_iso_false_positive = 27` | `lit_or_non_dark = 27` | `0` |
+| MC all LOD1 | `debug/terrain-hole-probe-mctx-static-mountain-hole-all-lod1-20260524-092734.json` | `27 / 81` | `raw_occupancy_vs_mesher_iso_false_positive = 27` | `lit_or_non_dark = 27` | `0` |
+
+The release bench commands still returned nonzero because the run output
+contains the known missing prop/billboard asset errors, but each run produced
+the summary, screenshot, timing CSVs, and labelled probe dump used above.
+
+Interpretation:
+
+- The fixed-camera fan now classifies all normal MC gaps as non-unknown.
+- Every classified MC source chunk still reports `skipped_lod_delta_gt_one = 0`,
+  so this repro still does not justify scheduler work.
+- The dominant raw probe gap is not a visual hole for this exact fan: the
+  screenshot pixel at the mesher iso is lit/non-dark in the normal, all-LOD0,
+  all-LOD1, and all-LOD1-no-transition runs.
+- Surface Nets still reports raw solid-before-render candidates, but the MC
+  source-cell oracle cannot classify those meshes. This reinforces that raw
+  occupancy distance alone is not the visual truth.
+- Disabling transitions while keeping boundary rows creates 12
+  `missing_mesh_entity_or_render_layer` classifications with sky/background
+  pixels. Treat that as transition-mode evidence, not as the current normal MC
+  root cause.
+- The persistent high-value suspect is a regular MC cell where the mesher-iso
+  owning cell emits the expected triangle count, but the emitted triangles do
+  not intersect the ray.
+
+Current regular MC replay target:
+
+```text
+fan grid = [2, 8]
+raw voxel surface distance = 95.5
+mesher iso distance = 98.228195
+first any/front render hit distance = 102.165565
+mesher-iso owning chunk = (11, 1, 8), Lod0
+mesher-iso owning cell = (15, 4, 5)
+case_index = 3
+class_index = 3
+expected_regular_triangle_count = 2
+actual_regular_triangle_count = 2
+emitted_regular_triangles_ray_hit_count = 0
+closest_emitted_regular_triangle_ray_distance = 0.13819484
+first render-hit source chunk = (11, 1, 8)
+first render-hit source cell = (11, 3, 4)
+first render-hit case/class = 51 / 3
+cell_agreement.raw_vs_mesher_iso = false
+cell_agreement.mesher_iso_vs_first_render_source = false
+cell_agreement.raw_vs_first_render_source = false
+```
+
+Next concrete step:
+
+- Build a minimal replay fixture for chunk `(11, 1, 8)`, cell `(15, 4, 5)`,
+  using the dumped SDF/case/ray data.
+- Compare that case-3 emitted geometry against a reference MC edge/corner-order
+  oracle.
+- Do not change scheduler or SDF code unless a new probe shows a nonzero
+  `skipped_lod_delta_gt_one` on the source chunk for a visually confirmed gap.
+- If the human-visible dark patches are still not covered by this fixed fan,
+  move the repro target/fan onto one of those dark screenshot regions and rerun
+  the same schema-10 classification.

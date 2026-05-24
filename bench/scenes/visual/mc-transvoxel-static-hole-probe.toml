@@ -18,7 +18,7 @@ hold_frames = 90
 screenshot = true
 fog_tier = "off"
 render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
-hole_probe = { frame = 30, label = "mctx-static-mountain-hole", target_voxel = [108, 34, 106], player_position = [285.84256, 37.047417, 144.33394], camera_position = [285.84256, 38.747417, 144.33394], camera_direction = [-0.97716266, -0.02399765, -0.21113348] }
+hole_probe = { frame = 45, label = "mctx-static-mountain-hole", target_voxel = [108, 34, 106], player_position = [285.84256, 37.047417, 144.33394], camera_position = [285.84256, 38.747417, 144.33394], camera_direction = [-0.97716266, -0.02399765, -0.21113348] }
 screenshot_points = [
     { name = "probe", frame = 30 },
     { name = "end", frame = 89 },

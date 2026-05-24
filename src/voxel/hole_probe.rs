@@ -1,11 +1,12 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use avian3d::prelude::{Collider, RigidBody, SpatialQuery, SpatialQueryFilter};
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_mesh::{Indices, VertexAttributeValues};
 use serde::Serialize;
 
@@ -33,7 +34,7 @@ use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldB
 
 pub struct TerrainHoleProbePlugin;
 
-const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 9;
+const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 10;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
@@ -50,6 +51,7 @@ pub struct TerrainHoleProbeRequest {
     pub player_world_position: Option<Vec3>,
     pub camera_world_position: Option<Vec3>,
     pub camera_direction: Option<Vec3>,
+    pub screenshot_path: Option<PathBuf>,
 }
 
 #[derive(Resource, Default)]
@@ -256,7 +258,15 @@ struct CameraRayProbe {
     /// First trilinear iso crossing from the exact MC SDF grid for the source chunk.
     first_mesher_iso_distance: Option<f32>,
     first_mesher_iso_point: Option<Vec3Dump>,
+    /// Difference between the nearest render hit and mesher iso distance.
+    first_any_distance_from_mesher_iso: Option<f32>,
+    first_front_distance_from_mesher_iso: Option<f32>,
     mc_cell: Option<McCellOracleProbe>,
+    raw_surface_mc_cell: Option<McCellOracleProbe>,
+    mesher_iso_mc_cell: Option<McCellOracleProbe>,
+    first_render_hit_source: Option<McTriangleSourceProbe>,
+    cell_agreement: Option<McCellAgreementProbe>,
+    visual_samples: CameraRayVisualSamples,
     gap_classification: GapClassification,
     /// All render-mesh hits along the ray, sorted by distance (capped).
     render_hits: Vec<CameraRayHit>,
@@ -278,6 +288,7 @@ struct CameraRayHit {
     entity: String,
     mesh_section: MeshTriangleSectionProbe,
     triangle_start_index: u32,
+    vertices: Option<[Vec3Dump; 3]>,
     source: Option<McTriangleSourceProbe>,
 }
 
@@ -330,6 +341,10 @@ struct McCellOracleProbe {
     skipped_regular_faces: Vec<String>,
     transition_owner_faces: Vec<String>,
     transition_cells: Vec<McTransitionCellOracleProbe>,
+    emitted_regular_triangles: Vec<McEmittedTriangleProbe>,
+    emitted_regular_triangles_ray_hit_count: u32,
+    nearest_emitted_regular_triangle_ray_hit_distance: Option<f32>,
+    closest_emitted_regular_triangle_ray_distance: Option<f32>,
     source_chunk_skipped_lod_delta_gt_one: Option<u32>,
 }
 
@@ -343,6 +358,65 @@ struct McTransitionCellOracleProbe {
     expected_triangle_count: u8,
     actual_triangle_count: Option<u32>,
     invert: bool,
+    emitted_triangles: Vec<McEmittedTriangleProbe>,
+    emitted_triangles_ray_hit_count: u32,
+    nearest_emitted_triangle_ray_hit_distance: Option<f32>,
+    closest_emitted_triangle_ray_distance: Option<f32>,
+}
+
+#[derive(Serialize, Clone)]
+struct McEmittedTriangleProbe {
+    triangle_start_index: u32,
+    vertices: [Vec3Dump; 3],
+    ray_hit_distance: Option<f32>,
+    front_face: Option<bool>,
+    closest_ray_distance: f32,
+}
+
+#[derive(Serialize, Clone)]
+struct McCellAgreementProbe {
+    raw_surface_cell_matches_mesher_iso_cell: Option<bool>,
+    mesher_iso_cell_matches_first_render_hit_source: Option<bool>,
+    raw_surface_cell_matches_first_render_hit_source: Option<bool>,
+    note: String,
+}
+
+#[derive(Serialize, Clone, Default)]
+struct CameraRayVisualSamples {
+    raw_surface: Option<VisualPointProbe>,
+    mesher_iso: Option<VisualPointProbe>,
+    first_any_render_hit: Option<VisualPointProbe>,
+    first_front_render_hit: Option<VisualPointProbe>,
+}
+
+#[derive(Serialize, Clone)]
+struct VisualPointProbe {
+    world_point: Vec3Dump,
+    screen_position: Option<Vec2Dump>,
+    screenshot_path: Option<String>,
+    pixel: Option<RgbaProbe>,
+    classification: VisualPixelClassification,
+    note: String,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum VisualPixelClassification {
+    LitOrNonDark,
+    DarkOrMissing,
+    SkyOrBackground,
+    Offscreen,
+    ScreenshotUnavailable,
+    ProjectionUnavailable,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct RgbaProbe {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+    luminance: f32,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -387,8 +461,15 @@ struct FanGap {
     first_backface_render_hit_distance: Option<f32>,
     first_mesher_iso_distance: Option<f32>,
     first_mesher_iso_point: Option<Vec3Dump>,
+    first_any_distance_from_mesher_iso: Option<f32>,
+    first_front_distance_from_mesher_iso: Option<f32>,
     gap_classification: GapClassification,
     mc_cell: Option<McCellOracleProbe>,
+    raw_surface_mc_cell: Option<McCellOracleProbe>,
+    mesher_iso_mc_cell: Option<McCellOracleProbe>,
+    first_render_hit_source: Option<McTriangleSourceProbe>,
+    cell_agreement: Option<McCellAgreementProbe>,
+    visual_samples: CameraRayVisualSamples,
     gap_length: f32,
     surface_point: Vec3Dump,
     surface_chunk: IVec3Dump,
@@ -562,6 +643,12 @@ struct Vec3Dump {
     z: f32,
 }
 
+#[derive(Serialize, Clone, Copy)]
+struct Vec2Dump {
+    x: f32,
+    y: f32,
+}
+
 #[derive(Serialize, Clone, Copy, PartialEq, Eq)]
 struct IVec3Dump {
     x: i32,
@@ -575,7 +662,7 @@ struct IVec2Dump {
     y: i32,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
 struct UVec3Dump {
     x: u32,
     y: u32,
@@ -603,6 +690,24 @@ type TerrainEntityQuery<'w, 's> = Query<
     ),
 >;
 
+struct VisualProbeContext<'a> {
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    camera_right: Vec3,
+    camera_up: Vec3,
+    projection: &'a Projection,
+    window_size: Option<Vec2>,
+    image: Option<&'a ProbeImage>,
+    screenshot_path: Option<&'a PathBuf>,
+}
+
+struct ProbeImage {
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dump_terrain_hole_probe(
     keys: Res<ButtonInput<KeyCode>>,
@@ -610,7 +715,8 @@ fn dump_terrain_hole_probe(
     world: Res<VoxelWorld>,
     targeted: Res<TargetedBlock>,
     player_query: Query<&GlobalTransform, With<Player>>,
-    camera_query: Query<&GlobalTransform, (With<PlayerCamera>, Without<Player>)>,
+    camera_query: Query<(&GlobalTransform, &Projection), (With<PlayerCamera>, Without<Player>)>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
     terrain_entities: TerrainEntityQuery,
     meshes: Res<Assets<Mesh>>,
     spatial_query: Option<SpatialQuery>,
@@ -647,7 +753,7 @@ fn dump_terrain_hole_probe(
         .or_else(|_| {
             camera_query
                 .single()
-                .map(|transform| transform.translation())
+                .map(|(transform, _)| transform.translation())
         })
         .unwrap_or(Vec3::ZERO);
     let player_pos = request
@@ -656,11 +762,11 @@ fn dump_terrain_hole_probe(
     let camera_transform = camera_query.single().ok();
     let camera_pos = request
         .and_then(|request| request.camera_world_position)
-        .or_else(|| camera_transform.map(|transform| transform.translation()));
+        .or_else(|| camera_transform.map(|(transform, _)| transform.translation()));
     let camera_dir = request
         .and_then(|request| request.camera_direction)
         .map(Vec3::normalize_or_zero)
-        .or_else(|| camera_transform.map(|transform| transform.forward().as_vec3()));
+        .or_else(|| camera_transform.map(|(transform, _)| transform.forward().as_vec3()));
     let (scripted_right, scripted_up) = camera_dir
         .filter(|_| request.is_some())
         .map(camera_basis_from_forward)
@@ -668,13 +774,46 @@ fn dump_terrain_hole_probe(
     let camera_right = if request.is_some() {
         Some(scripted_right)
     } else {
-        camera_transform.map(|transform| transform.right().as_vec3())
+        camera_transform.map(|(transform, _)| transform.right().as_vec3())
     };
     let camera_up = if request.is_some() {
         Some(scripted_up)
     } else {
-        camera_transform.map(|transform| transform.up().as_vec3())
+        camera_transform.map(|(transform, _)| transform.up().as_vec3())
     };
+    let visual_image_path = request.and_then(|request| request.screenshot_path.clone());
+    let visual_image = visual_image_path
+        .as_deref()
+        .and_then(load_probe_image)
+        .inspect(|image| {
+            debug!(
+                "Terrain hole probe loaded screenshot {} ({}x{}) for visual samples",
+                image.path.display(),
+                image.width,
+                image.height
+            );
+        });
+    let window_size = window_query
+        .single()
+        .ok()
+        .map(|window| Vec2::new(window.resolution.width(), window.resolution.height()));
+    let visual_context = camera_pos
+        .zip(camera_dir)
+        .zip(camera_right)
+        .zip(camera_up)
+        .and_then(|(((pos, forward), right), up)| {
+            let projection = camera_transform.map(|(_, projection)| projection)?;
+            Some(VisualProbeContext {
+                camera_pos: pos,
+                camera_forward: forward.normalize_or_zero(),
+                camera_right: right.normalize_or_zero(),
+                camera_up: up.normalize_or_zero(),
+                projection,
+                window_size,
+                image: visual_image.as_ref(),
+                screenshot_path: visual_image_path.as_ref(),
+            })
+        });
     let target_pos = request
         .map(|request| request.target_voxel_position)
         .or(targeted.position)
@@ -746,6 +885,7 @@ fn dump_terrain_hole_probe(
             camera_pos,
             camera_dir,
             512.0,
+            visual_context.as_ref(),
         )),
         _ => None,
     };
@@ -773,6 +913,7 @@ fn dump_terrain_hole_probe(
             &mesh_settings,
             &lod_settings,
             &water_lod_guard_chunks,
+            visual_context.as_ref(),
         )),
         _ => None,
     };
@@ -1345,6 +1486,7 @@ fn append_camera_height_fan_samples(
                 camera_pos,
                 ray_direction,
                 MAX_DISTANCE,
+                None,
             );
             let render_hit = ray_probe.first_front_render_hit.as_ref();
             let render_hit_point = render_hit.map(|hit| vec3_from_dump(hit.point));
@@ -2004,6 +2146,7 @@ fn sample_camera_ray(
     camera_pos: Vec3,
     camera_dir: Vec3,
     max_distance: f32,
+    visual_context: Option<&VisualProbeContext>,
 ) -> CameraRayProbe {
     let dir = camera_dir.normalize_or_zero();
     let mut render_hits: Vec<CameraRayHit> = Vec::new();
@@ -2094,10 +2237,12 @@ fn sample_camera_ray(
         mc_forensics_for_gap(
             world,
             terrain_entities,
+            meshes,
             camera_pos,
             dir,
             max_distance,
             surface_point,
+            first_any_render_hit.as_ref(),
         )
     });
     let first_mesher_iso_distance = mc_forensics
@@ -2106,7 +2251,29 @@ fn sample_camera_ray(
     let first_mesher_iso_point = mc_forensics
         .as_ref()
         .and_then(|forensics| forensics.first_mesher_iso_point);
-    let mc_cell = mc_forensics.and_then(|forensics| forensics.mc_cell);
+    let first_any_distance_from_mesher_iso = first_any_render_hit
+        .as_ref()
+        .zip(first_mesher_iso_distance)
+        .map(|(hit, iso)| hit.distance - iso);
+    let first_front_distance_from_mesher_iso = first_front_render_hit
+        .as_ref()
+        .zip(first_mesher_iso_distance)
+        .map(|(hit, iso)| hit.distance - iso);
+    let raw_surface_mc_cell = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.raw_surface_mc_cell.clone());
+    let mesher_iso_mc_cell = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.mesher_iso_mc_cell.clone());
+    let first_render_hit_source = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.first_render_hit_source.clone());
+    let cell_agreement = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.cell_agreement.clone());
+    let mc_cell = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.mc_cell.clone());
 
     let see_through_gap = match (first_voxel_solid_distance, &first_front_render_hit) {
         (Some(voxel_distance), Some(render_hit)) if render_hit.distance > voxel_distance + 1.0 => {
@@ -2129,6 +2296,13 @@ fn sample_camera_ray(
         }),
         _ => None,
     };
+    let visual_samples = visual_samples_for_camera_ray(
+        visual_context,
+        first_voxel_solid_point,
+        first_mesher_iso_point,
+        first_any_render_hit.as_ref(),
+        first_front_render_hit.as_ref(),
+    );
     let gap_classification = classify_camera_gap(
         &see_through_gap,
         &first_any_render_hit,
@@ -2136,6 +2310,7 @@ fn sample_camera_ray(
         &first_backface_render_hit,
         first_mesher_iso_distance,
         mc_cell.as_ref(),
+        &visual_samples,
     );
 
     render_hits.truncate(32);
@@ -2151,7 +2326,14 @@ fn sample_camera_ray(
         first_backface_render_hit,
         first_mesher_iso_distance,
         first_mesher_iso_point: first_mesher_iso_point.map(Into::into),
+        first_any_distance_from_mesher_iso,
+        first_front_distance_from_mesher_iso,
         mc_cell,
+        raw_surface_mc_cell,
+        mesher_iso_mc_cell,
+        first_render_hit_source,
+        cell_agreement,
+        visual_samples,
         gap_classification,
         render_hits,
         see_through_gap,
@@ -2197,6 +2379,7 @@ fn collect_camera_ray_mesh_hits(
                             p2,
                         ),
                         triangle_start_index: triangle_start_index as u32,
+                        vertices: Some([p0.into(), p1.into(), p2.into()]),
                         source: mc_triangle_sources
                             .and_then(|sources| {
                                 sources.source_for_triangle_start(triangle_start_index)
@@ -2344,29 +2527,122 @@ struct McGapForensics {
     first_mesher_iso_distance: Option<f32>,
     first_mesher_iso_point: Option<Vec3>,
     mc_cell: Option<McCellOracleProbe>,
+    raw_surface_mc_cell: Option<McCellOracleProbe>,
+    mesher_iso_mc_cell: Option<McCellOracleProbe>,
+    first_render_hit_source: Option<McTriangleSourceProbe>,
+    cell_agreement: Option<McCellAgreementProbe>,
 }
 
 #[cfg(feature = "mc_transvoxel")]
 fn mc_forensics_for_gap(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
     ray_origin: Vec3,
     ray_dir: Vec3,
     max_distance: f32,
     surface_point: Vec3,
+    first_render_hit: Option<&CameraRayHit>,
 ) -> Option<McGapForensics> {
-    use crate::voxel::mc_transvoxel::compute_transvoxel_face_mask;
-    use crate::voxel::mc_transvoxel::tables::{
-        REGULAR_CELL_CLASS, REGULAR_CELL_DATA, TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA,
-    };
-    use crate::voxel::meshing::mc_support::build_mc_sdf_values;
-
     let surface_voxel = IVec3::new(
         surface_point.x.floor() as i32,
         surface_point.y.floor() as i32,
         surface_point.z.floor() as i32,
     );
-    let chunk_pos = VoxelWorld::world_to_chunk(surface_voxel);
+    let raw_chunk_pos = VoxelWorld::world_to_chunk(surface_voxel);
+    let raw_surface_mc_cell = mc_cell_oracle_for_point(
+        world,
+        terrain_entities,
+        meshes,
+        ray_origin,
+        ray_dir,
+        raw_chunk_pos,
+        surface_point,
+    );
+    let first_mesher_iso =
+        first_mesher_iso_multi_chunk(world, terrain_entities, ray_origin, ray_dir, max_distance);
+    let first_mesher_iso_distance = first_mesher_iso.as_ref().map(|hit| hit.distance);
+    let first_mesher_iso_point = first_mesher_iso.as_ref().map(|hit| hit.point);
+    let mesher_iso_mc_cell = first_mesher_iso.as_ref().and_then(|hit| {
+        mc_cell_oracle_for_point(
+            world,
+            terrain_entities,
+            meshes,
+            ray_origin,
+            ray_dir,
+            hit.chunk_position,
+            hit.point,
+        )
+    });
+    let first_render_hit_source = first_render_hit.and_then(|hit| hit.source.clone());
+    let mc_cell = mesher_iso_mc_cell
+        .clone()
+        .or_else(|| raw_surface_mc_cell.clone());
+    let cell_agreement = Some(mc_cell_agreement(
+        raw_surface_mc_cell.as_ref(),
+        mesher_iso_mc_cell.as_ref(),
+        first_render_hit_source.as_ref(),
+    ));
+
+    Some(McGapForensics {
+        first_mesher_iso_distance,
+        first_mesher_iso_point,
+        mc_cell,
+        raw_surface_mc_cell,
+        mesher_iso_mc_cell,
+        first_render_hit_source,
+        cell_agreement,
+    })
+}
+
+#[cfg(not(feature = "mc_transvoxel"))]
+fn mc_forensics_for_gap(
+    _world: &VoxelWorld,
+    _terrain_entities: &TerrainEntityQuery,
+    _meshes: &Assets<Mesh>,
+    _ray_origin: Vec3,
+    _ray_dir: Vec3,
+    _max_distance: f32,
+    _surface_point: Vec3,
+    _first_render_hit: Option<&CameraRayHit>,
+) -> Option<McGapForensics> {
+    None
+}
+
+#[cfg(feature = "mc_transvoxel")]
+struct McSdfGridProbe {
+    chunk_position: IVec3,
+    lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    padded: usize,
+    values: Vec<f32>,
+    step: i32,
+    source_chunk_skipped_lod_delta_gt_one: Option<u32>,
+}
+
+#[cfg(feature = "mc_transvoxel")]
+#[derive(Clone, Copy)]
+struct McSdfRaySample {
+    distance: f32,
+    value: f32,
+    chunk_position: IVec3,
+}
+
+#[cfg(feature = "mc_transvoxel")]
+struct MesherIsoHit {
+    distance: f32,
+    point: Vec3,
+    chunk_position: IVec3,
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn build_mc_sdf_grid_probe(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    chunk_pos: IVec3,
+) -> Option<McSdfGridProbe> {
+    use crate::voxel::meshing::mc_support::build_mc_sdf_values;
+
     let chunk = world.get_chunk(chunk_pos)?;
     let mesh_entity = chunk.mesh_entity()?;
     let Ok((
@@ -2375,6 +2651,149 @@ fn mc_forensics_for_gap(
         _transform,
         _chunk_mesh,
         terrain_debug,
+        _mc_triangle_sources,
+        _water_mesh,
+        _visibility,
+        _inherited_visibility,
+        _view_visibility,
+        _needs_collider,
+        _chunk_collider,
+        _collider,
+        _rigid_body,
+    )) = terrain_entities.get(mesh_entity)
+    else {
+        return None;
+    };
+    let debug = terrain_debug?;
+    if debug.target_mode_at_mesh != MeshMode::McTransvoxel {
+        return None;
+    }
+
+    let lod = debug.effective_lod_at_mesh;
+    let neighbor_lods = debug.neighbor_lods_at_mesh;
+    let (padded, values, step) = build_mc_sdf_values(chunk, world, lod, &neighbor_lods);
+    if padded < 2 || values.is_empty() || step <= 0 {
+        return None;
+    }
+
+    Some(McSdfGridProbe {
+        chunk_position: chunk_pos,
+        lod,
+        neighbor_lods,
+        padded,
+        values,
+        step,
+        source_chunk_skipped_lod_delta_gt_one: debug
+            .mc_transvoxel_stats
+            .map(|stats| stats.skipped_lod_delta_gt_one),
+    })
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn mc_sdf_sample_multi_chunk(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    cache: &mut HashMap<IVec3, Option<McSdfGridProbe>>,
+    point: Vec3,
+    distance: f32,
+) -> Option<McSdfRaySample> {
+    let voxel = IVec3::new(
+        point.x.floor() as i32,
+        point.y.floor() as i32,
+        point.z.floor() as i32,
+    );
+    let chunk_pos = VoxelWorld::world_to_chunk(voxel);
+    if !cache.contains_key(&chunk_pos) {
+        let grid = build_mc_sdf_grid_probe(world, terrain_entities, chunk_pos);
+        cache.insert(chunk_pos, grid);
+    }
+    let grid = cache.get(&chunk_pos)?.as_ref()?;
+    let chunk_origin = VoxelWorld::chunk_to_world(grid.chunk_position).as_vec3();
+    let value = sample_mc_sdf_trilinear(point, chunk_origin, grid.padded, &grid.values, grid.step)?;
+    Some(McSdfRaySample {
+        distance,
+        value,
+        chunk_position: grid.chunk_position,
+    })
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn first_mesher_iso_multi_chunk(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    origin: Vec3,
+    dir: Vec3,
+    max_distance: f32,
+) -> Option<MesherIsoHit> {
+    let mut cache: HashMap<IVec3, Option<McSdfGridProbe>> = HashMap::new();
+    let mut previous: Option<McSdfRaySample> = None;
+    let mut distance = 0.0_f32;
+    while distance <= max_distance {
+        let point = origin + dir * distance;
+        if let Some(sample) =
+            mc_sdf_sample_multi_chunk(world, terrain_entities, &mut cache, point, distance)
+        {
+            if sample.value.abs() <= f32::EPSILON {
+                return Some(MesherIsoHit {
+                    distance,
+                    point,
+                    chunk_position: sample.chunk_position,
+                });
+            }
+            if let Some(previous_sample) = previous {
+                if let Some((iso_distance, iso_point)) = mesher_iso_crossing_between_samples(
+                    origin,
+                    dir,
+                    previous_sample.distance,
+                    previous_sample.value,
+                    sample.distance,
+                    sample.value,
+                ) {
+                    let iso_voxel = IVec3::new(
+                        iso_point.x.floor() as i32,
+                        iso_point.y.floor() as i32,
+                        iso_point.z.floor() as i32,
+                    );
+                    return Some(MesherIsoHit {
+                        distance: iso_distance,
+                        point: iso_point,
+                        chunk_position: VoxelWorld::world_to_chunk(iso_voxel),
+                    });
+                }
+            }
+            previous = Some(sample);
+        } else {
+            previous = None;
+        }
+        distance += 0.25;
+    }
+    None
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn mc_cell_oracle_for_point(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    ray_origin: Vec3,
+    ray_dir: Vec3,
+    chunk_pos: IVec3,
+    point: Vec3,
+) -> Option<McCellOracleProbe> {
+    use crate::voxel::mc_transvoxel::compute_transvoxel_face_mask;
+    use crate::voxel::mc_transvoxel::tables::{
+        REGULAR_CELL_CLASS, REGULAR_CELL_DATA, TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA,
+    };
+
+    let grid = build_mc_sdf_grid_probe(world, terrain_entities, chunk_pos)?;
+    let chunk = world.get_chunk(chunk_pos)?;
+    let mesh_entity = chunk.mesh_entity()?;
+    let Ok((
+        _entity,
+        mesh3d,
+        transform,
+        _chunk_mesh,
+        _terrain_debug,
         mc_triangle_sources,
         _water_mesh,
         _visibility,
@@ -2386,79 +2805,40 @@ fn mc_forensics_for_gap(
         _rigid_body,
     )) = terrain_entities.get(mesh_entity)
     else {
-        return Some(McGapForensics {
-            first_mesher_iso_distance: None,
-            first_mesher_iso_point: None,
-            mc_cell: None,
-        });
+        return None;
     };
-    let Some(debug) = terrain_debug else {
-        return Some(McGapForensics {
-            first_mesher_iso_distance: None,
-            first_mesher_iso_point: None,
-            mc_cell: None,
-        });
-    };
-    if debug.target_mode_at_mesh != MeshMode::McTransvoxel {
-        return Some(McGapForensics {
-            first_mesher_iso_distance: None,
-            first_mesher_iso_point: None,
-            mc_cell: None,
-        });
-    }
-
-    let lod = debug.effective_lod_at_mesh;
-    let neighbor_lods = debug.neighbor_lods_at_mesh;
-    let (padded, values, step) = build_mc_sdf_values(chunk, world, lod, &neighbor_lods);
-    if padded < 2 || values.is_empty() || step <= 0 {
-        return Some(McGapForensics {
-            first_mesher_iso_distance: None,
-            first_mesher_iso_point: None,
-            mc_cell: None,
-        });
-    }
-
+    let mesh = mesh3d.and_then(|mesh3d| meshes.get(&mesh3d.0));
+    let translation = transform
+        .map(|transform| transform.translation)
+        .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
     let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
-    let (first_mesher_iso_distance, first_mesher_iso_point) = first_mesher_iso_in_sdf_grid(
-        ray_origin,
-        ray_dir,
-        max_distance,
-        chunk_origin,
-        padded,
-        &values,
-        step,
-    )
-    .map(|(distance, point)| (Some(distance), Some(point)))
-    .unwrap_or((None, None));
-
-    let subdivisions = (CHUNK_SIZE_I32 / step) as usize;
-    let cell = mc_cell_for_point(surface_point, chunk_origin, subdivisions, step);
-    let case_index = regular_case_index(&values, padded, cell);
+    let subdivisions = (CHUNK_SIZE_I32 / grid.step) as usize;
+    let cell = mc_cell_for_point(point, chunk_origin, subdivisions, grid.step);
+    let cell_uvec = UVec3::new(cell[0] as u32, cell[1] as u32, cell[2] as u32);
+    let case_index = regular_case_index(&grid.values, grid.padded, cell);
     let class_index = REGULAR_CELL_CLASS[case_index as usize];
     let expected_regular_triangle_count = if case_index == 0 || case_index == 255 {
         0
     } else {
         REGULAR_CELL_DATA[class_index as usize].get_triangle_count()
     };
-    let cell_uvec = UVec3::new(cell[0] as u32, cell[1] as u32, cell[2] as u32);
     let actual_regular_triangle_count = mc_triangle_sources.map(|sources| {
         sources
             .sources
             .iter()
-            .filter(|source| {
-                matches!(
-                    source,
-                    McTriangleSource::Regular {
-                        chunk_pos: source_chunk,
-                        cell: source_cell,
-                        ..
-                    } if *source_chunk == chunk_pos && *source_cell == cell_uvec
-                )
-            })
+            .filter(|source| source_matches_regular_cell(source, chunk_pos, cell_uvec))
             .count() as u32
     });
+    let emitted_regular_triangles = collect_emitted_triangle_evidence(
+        mesh,
+        translation,
+        mc_triangle_sources,
+        ray_origin,
+        ray_dir,
+        |source| source_matches_regular_cell(source, chunk_pos, cell_uvec),
+    );
 
-    let (transition_mask, _) = compute_transvoxel_face_mask(lod, &neighbor_lods);
+    let (transition_mask, _) = compute_transvoxel_face_mask(grid.lod, &grid.neighbor_lods);
     let boundary_faces = boundary_faces_for_cell(cell, subdivisions);
     let transition_owner_faces: Vec<ChunkFace> = boundary_faces
         .iter()
@@ -2469,8 +2849,14 @@ fn mc_forensics_for_gap(
         .iter()
         .map(|face| {
             let (cell_u, cell_v) = transition_cell_for_regular_cell(*face, cell, subdivisions);
-            let transition_case =
-                transition_case_index(&values, padded, subdivisions, *face, cell_u, cell_v);
+            let transition_case = transition_case_index(
+                &grid.values,
+                grid.padded,
+                subdivisions,
+                *face,
+                cell_u,
+                cell_v,
+            );
             let raw_class = TRANSITION_CELL_CLASS[transition_case as usize];
             let class = raw_class & 0x7F;
             let expected_triangle_count = if transition_case == 0 || transition_case == 0x1FF {
@@ -2483,22 +2869,32 @@ fn mc_forensics_for_gap(
                     .sources
                     .iter()
                     .filter(|source| {
-                        matches!(
+                        source_matches_transition_cell(
                             source,
-                            McTriangleSource::Transition {
-                                chunk_pos: source_chunk,
-                                face: source_face,
-                                cell_u: source_u,
-                                cell_v: source_v,
-                                ..
-                            } if *source_chunk == chunk_pos
-                                && *source_face == *face
-                                && *source_u == cell_u as u16
-                                && *source_v == cell_v as u16
+                            chunk_pos,
+                            *face,
+                            cell_u as u16,
+                            cell_v as u16,
                         )
                     })
                     .count() as u32
             });
+            let emitted_triangles = collect_emitted_triangle_evidence(
+                mesh,
+                translation,
+                mc_triangle_sources,
+                ray_origin,
+                ray_dir,
+                |source| {
+                    source_matches_transition_cell(
+                        source,
+                        chunk_pos,
+                        *face,
+                        cell_u as u16,
+                        cell_v as u16,
+                    )
+                },
+            );
             McTransitionCellOracleProbe {
                 face: chunk_face_name(*face).to_string(),
                 cell_u: cell_u as u16,
@@ -2508,14 +2904,25 @@ fn mc_forensics_for_gap(
                 expected_triangle_count,
                 actual_triangle_count,
                 invert: (raw_class & 0x80) != 0,
+                emitted_triangles_ray_hit_count: emitted_triangles
+                    .iter()
+                    .filter(|triangle| triangle.ray_hit_distance.is_some())
+                    .count() as u32,
+                nearest_emitted_triangle_ray_hit_distance: nearest_triangle_hit_distance(
+                    &emitted_triangles,
+                ),
+                closest_emitted_triangle_ray_distance: closest_triangle_ray_distance(
+                    &emitted_triangles,
+                ),
+                emitted_triangles,
             }
         })
         .collect();
 
-    let mc_cell = McCellOracleProbe {
+    Some(McCellOracleProbe {
         chunk_position: chunk_pos.into(),
-        effective_lod_at_mesh: lod_string(lod),
-        neighbor_lods_at_mesh: neighbor_lods_probe(neighbor_lods),
+        effective_lod_at_mesh: lod_string(grid.lod),
+        neighbor_lods_at_mesh: neighbor_lods_probe(grid.neighbor_lods),
         cell: cell_uvec.into(),
         case_index: case_index as u16,
         class_index,
@@ -2534,28 +2941,440 @@ fn mc_forensics_for_gap(
             .map(|face| chunk_face_name(*face).to_string())
             .collect(),
         transition_cells,
-        source_chunk_skipped_lod_delta_gt_one: debug
-            .mc_transvoxel_stats
-            .map(|stats| stats.skipped_lod_delta_gt_one),
-    };
-
-    Some(McGapForensics {
-        first_mesher_iso_distance,
-        first_mesher_iso_point,
-        mc_cell: Some(mc_cell),
+        emitted_regular_triangles_ray_hit_count: emitted_regular_triangles
+            .iter()
+            .filter(|triangle| triangle.ray_hit_distance.is_some())
+            .count() as u32,
+        nearest_emitted_regular_triangle_ray_hit_distance: nearest_triangle_hit_distance(
+            &emitted_regular_triangles,
+        ),
+        closest_emitted_regular_triangle_ray_distance: closest_triangle_ray_distance(
+            &emitted_regular_triangles,
+        ),
+        emitted_regular_triangles,
+        source_chunk_skipped_lod_delta_gt_one: grid.source_chunk_skipped_lod_delta_gt_one,
     })
 }
 
-#[cfg(not(feature = "mc_transvoxel"))]
-fn mc_forensics_for_gap(
-    _world: &VoxelWorld,
-    _terrain_entities: &TerrainEntityQuery,
-    _ray_origin: Vec3,
-    _ray_dir: Vec3,
-    _max_distance: f32,
-    _surface_point: Vec3,
-) -> Option<McGapForensics> {
-    None
+#[cfg(feature = "mc_transvoxel")]
+fn source_matches_regular_cell(source: &McTriangleSource, chunk_pos: IVec3, cell: UVec3) -> bool {
+    matches!(
+        source,
+        McTriangleSource::Regular {
+            chunk_pos: source_chunk,
+            cell: source_cell,
+            ..
+        } if *source_chunk == chunk_pos && *source_cell == cell
+    )
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn source_matches_transition_cell(
+    source: &McTriangleSource,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+    cell_u: u16,
+    cell_v: u16,
+) -> bool {
+    matches!(
+        source,
+        McTriangleSource::Transition {
+            chunk_pos: source_chunk,
+            face: source_face,
+            cell_u: source_u,
+            cell_v: source_v,
+            ..
+        } if *source_chunk == chunk_pos
+            && *source_face == face
+            && *source_u == cell_u
+            && *source_v == cell_v
+    )
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn collect_emitted_triangle_evidence(
+    mesh: Option<&Mesh>,
+    translation: Vec3,
+    sources: Option<&McTriangleSources>,
+    ray_origin: Vec3,
+    ray_dir: Vec3,
+    matches_source: impl Fn(&McTriangleSource) -> bool,
+) -> Vec<McEmittedTriangleProbe> {
+    let (Some(mesh), Some(sources)) = (mesh, sources) else {
+        return Vec::new();
+    };
+    sources
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(triangle_index, source)| {
+            if !matches_source(source) {
+                return None;
+            }
+            let triangle_start = triangle_index * 3;
+            let vertices = mesh_triangle_vertices(mesh, translation, triangle_start)?;
+            Some(emitted_triangle_probe(
+                triangle_start,
+                ray_origin,
+                ray_dir,
+                vertices,
+            ))
+        })
+        .collect()
+}
+
+fn mesh_triangle_vertices(
+    mesh: &Mesh,
+    translation: Vec3,
+    triangle_start: usize,
+) -> Option<[Vec3; 3]> {
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return None;
+    };
+    let indices = mesh_indices(mesh)?;
+    Some([
+        Vec3::from_array(*positions.get(indices.get(triangle_start))?) + translation,
+        Vec3::from_array(*positions.get(indices.get(triangle_start + 1))?) + translation,
+        Vec3::from_array(*positions.get(indices.get(triangle_start + 2))?) + translation,
+    ])
+}
+
+fn emitted_triangle_probe(
+    triangle_start: usize,
+    ray_origin: Vec3,
+    ray_dir: Vec3,
+    vertices: [Vec3; 3],
+) -> McEmittedTriangleProbe {
+    let hit = ray_triangle_hit(ray_origin, ray_dir, vertices[0], vertices[1], vertices[2]);
+    McEmittedTriangleProbe {
+        triangle_start_index: triangle_start as u32,
+        vertices: [vertices[0].into(), vertices[1].into(), vertices[2].into()],
+        ray_hit_distance: hit.map(|(distance, _)| distance),
+        front_face: hit.map(|(_, front_face)| front_face),
+        closest_ray_distance: closest_sampled_triangle_ray_distance(ray_origin, ray_dir, vertices),
+    }
+}
+
+fn nearest_triangle_hit_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
+    triangles
+        .iter()
+        .filter_map(|triangle| triangle.ray_hit_distance)
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+fn closest_triangle_ray_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
+    triangles
+        .iter()
+        .map(|triangle| triangle.closest_ray_distance)
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+fn closest_sampled_triangle_ray_distance(origin: Vec3, dir: Vec3, vertices: [Vec3; 3]) -> f32 {
+    let points = [
+        vertices[0],
+        vertices[1],
+        vertices[2],
+        (vertices[0] + vertices[1]) * 0.5,
+        (vertices[1] + vertices[2]) * 0.5,
+        (vertices[2] + vertices[0]) * 0.5,
+        (vertices[0] + vertices[1] + vertices[2]) / 3.0,
+    ];
+    points
+        .iter()
+        .map(|point| point_to_ray_distance(*point, origin, dir))
+        .fold(f32::INFINITY, f32::min)
+}
+
+fn point_to_ray_distance(point: Vec3, origin: Vec3, dir: Vec3) -> f32 {
+    let dir = dir.normalize_or_zero();
+    if dir == Vec3::ZERO {
+        return f32::INFINITY;
+    }
+    let to_point = point - origin;
+    let along = to_point.dot(dir).max(0.0);
+    (to_point - dir * along).length()
+}
+
+fn mc_cell_agreement(
+    raw_cell: Option<&McCellOracleProbe>,
+    iso_cell: Option<&McCellOracleProbe>,
+    render_source: Option<&McTriangleSourceProbe>,
+) -> McCellAgreementProbe {
+    let raw_matches_iso = raw_cell
+        .zip(iso_cell)
+        .map(|(raw, iso)| mc_cells_same(raw, iso));
+    let iso_matches_render = iso_cell.map(|cell| {
+        render_source
+            .map(|source| mc_source_matches_cell_probe(source, cell))
+            .unwrap_or(false)
+    });
+    let raw_matches_render = raw_cell.map(|cell| {
+        render_source
+            .map(|source| mc_source_matches_cell_probe(source, cell))
+            .unwrap_or(false)
+    });
+    let note = if raw_matches_iso == Some(true) && iso_matches_render == Some(true) {
+        "raw surface, mesher iso, and first render hit resolve to the same MC cell".to_string()
+    } else {
+        "cell ownership differs or one ownership source is unavailable".to_string()
+    };
+    McCellAgreementProbe {
+        raw_surface_cell_matches_mesher_iso_cell: raw_matches_iso,
+        mesher_iso_cell_matches_first_render_hit_source: iso_matches_render,
+        raw_surface_cell_matches_first_render_hit_source: raw_matches_render,
+        note,
+    }
+}
+
+fn mc_cells_same(a: &McCellOracleProbe, b: &McCellOracleProbe) -> bool {
+    a.chunk_position == b.chunk_position && a.cell == b.cell
+}
+
+fn mc_source_matches_cell_probe(source: &McTriangleSourceProbe, cell: &McCellOracleProbe) -> bool {
+    match source {
+        McTriangleSourceProbe::Regular {
+            chunk_position,
+            cell: source_cell,
+            ..
+        } => *chunk_position == cell.chunk_position && *source_cell == cell.cell,
+        McTriangleSourceProbe::Transition {
+            chunk_position,
+            face,
+            cell_u,
+            cell_v,
+            ..
+        } => {
+            *chunk_position == cell.chunk_position
+                && cell.transition_cells.iter().any(|transition| {
+                    transition.face == *face
+                        && transition.cell_u == *cell_u
+                        && transition.cell_v == *cell_v
+                })
+        }
+    }
+}
+
+fn load_probe_image(path: &Path) -> Option<ProbeImage> {
+    let image = image::ImageReader::open(path)
+        .ok()?
+        .decode()
+        .ok()?
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    Some(ProbeImage {
+        path: path.to_path_buf(),
+        width,
+        height,
+        pixels: image.into_raw(),
+    })
+}
+
+fn visual_samples_for_camera_ray(
+    context: Option<&VisualProbeContext>,
+    raw_surface_point: Option<Vec3>,
+    mesher_iso_point: Option<Vec3>,
+    first_any: Option<&CameraRayHit>,
+    first_front: Option<&CameraRayHit>,
+) -> CameraRayVisualSamples {
+    CameraRayVisualSamples {
+        raw_surface: raw_surface_point.map(|point| visual_point_probe(context, point)),
+        mesher_iso: mesher_iso_point.map(|point| visual_point_probe(context, point)),
+        first_any_render_hit: first_any
+            .map(|hit| visual_point_probe(context, vec3_from_dump(hit.point))),
+        first_front_render_hit: first_front
+            .map(|hit| visual_point_probe(context, vec3_from_dump(hit.point))),
+    }
+}
+
+fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> VisualPointProbe {
+    let Some(context) = context else {
+        return VisualPointProbe {
+            world_point: point.into(),
+            screen_position: None,
+            screenshot_path: None,
+            pixel: None,
+            classification: VisualPixelClassification::ProjectionUnavailable,
+            note: "camera projection context was unavailable".to_string(),
+        };
+    };
+    let screenshot_path = context
+        .screenshot_path
+        .map(|path| path.display().to_string());
+    let Some((screen_position, target_size)) = project_world_point_to_screen(context, point) else {
+        return VisualPointProbe {
+            world_point: point.into(),
+            screen_position: None,
+            screenshot_path,
+            pixel: None,
+            classification: VisualPixelClassification::ProjectionUnavailable,
+            note: "point could not be projected with the active camera projection".to_string(),
+        };
+    };
+    let screen_dump = Vec2Dump {
+        x: screen_position.x,
+        y: screen_position.y,
+    };
+    if screen_position.x < 0.0
+        || screen_position.y < 0.0
+        || screen_position.x >= target_size.x
+        || screen_position.y >= target_size.y
+    {
+        return VisualPointProbe {
+            world_point: point.into(),
+            screen_position: Some(screen_dump),
+            screenshot_path,
+            pixel: None,
+            classification: VisualPixelClassification::Offscreen,
+            note: "projected point is outside the screenshot".to_string(),
+        };
+    }
+    let Some(image) = context.image else {
+        return VisualPointProbe {
+            world_point: point.into(),
+            screen_position: Some(screen_dump),
+            screenshot_path,
+            pixel: None,
+            classification: VisualPixelClassification::ScreenshotUnavailable,
+            note: "screenshot was not available when the probe ran".to_string(),
+        };
+    };
+    let pixel = sample_probe_image(image, screen_position);
+    let classification = pixel
+        .map(classify_visual_pixel)
+        .unwrap_or(VisualPixelClassification::Offscreen);
+    VisualPointProbe {
+        world_point: point.into(),
+        screen_position: Some(screen_dump),
+        screenshot_path,
+        pixel,
+        classification,
+        note: "sampled screenshot pixel at the projected probe point".to_string(),
+    }
+}
+
+fn project_world_point_to_screen(
+    context: &VisualProbeContext,
+    point: Vec3,
+) -> Option<(Vec2, Vec2)> {
+    let target_size = context
+        .image
+        .map(|image| Vec2::new(image.width as f32, image.height as f32))
+        .or(context.window_size)?;
+    if target_size.x <= 0.0 || target_size.y <= 0.0 {
+        return None;
+    }
+    match context.projection {
+        Projection::Perspective(perspective) => {
+            let to_point = point - context.camera_pos;
+            let depth = to_point.dot(context.camera_forward);
+            if depth <= 1.0e-4 {
+                return None;
+            }
+            let aspect = target_size.x / target_size.y;
+            let half_height = depth * (perspective.fov * 0.5).tan();
+            let half_width = half_height * aspect;
+            if half_height <= f32::EPSILON || half_width <= f32::EPSILON {
+                return None;
+            }
+            let ndc_x = to_point.dot(context.camera_right) / half_width;
+            let ndc_y = to_point.dot(context.camera_up) / half_height;
+            Some((
+                Vec2::new(
+                    (ndc_x + 1.0) * 0.5 * target_size.x,
+                    (1.0 - ndc_y) * 0.5 * target_size.y,
+                ),
+                target_size,
+            ))
+        }
+        Projection::Orthographic(orthographic) => {
+            let area = orthographic.area;
+            let to_point = point - context.camera_pos;
+            let x = to_point.dot(context.camera_right);
+            let y = to_point.dot(context.camera_up);
+            let ndc_x = ((x - area.min.x) / (area.max.x - area.min.x)) * 2.0 - 1.0;
+            let ndc_y = ((y - area.min.y) / (area.max.y - area.min.y)) * 2.0 - 1.0;
+            Some((
+                Vec2::new(
+                    (ndc_x + 1.0) * 0.5 * target_size.x,
+                    (1.0 - ndc_y) * 0.5 * target_size.y,
+                ),
+                target_size,
+            ))
+        }
+        Projection::Custom(_) => None,
+    }
+}
+
+fn sample_probe_image(image: &ProbeImage, screen_position: Vec2) -> Option<RgbaProbe> {
+    let x = screen_position.x.floor() as i32;
+    let y = screen_position.y.floor() as i32;
+    if x < 0 || y < 0 || x >= image.width as i32 || y >= image.height as i32 {
+        return None;
+    }
+    let index = ((y as u32 * image.width + x as u32) * 4) as usize;
+    let r = *image.pixels.get(index)?;
+    let g = *image.pixels.get(index + 1)?;
+    let b = *image.pixels.get(index + 2)?;
+    let a = *image.pixels.get(index + 3)?;
+    Some(RgbaProbe {
+        r,
+        g,
+        b,
+        a,
+        luminance: pixel_luminance(r, g, b),
+    })
+}
+
+fn pixel_luminance(r: u8, g: u8, b: u8) -> f32 {
+    (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
+}
+
+fn classify_visual_pixel(pixel: RgbaProbe) -> VisualPixelClassification {
+    if pixel.a < 8 || pixel.luminance < 0.08 {
+        VisualPixelClassification::DarkOrMissing
+    } else if pixel.b > pixel.r.saturating_add(24)
+        && pixel.b > pixel.g.saturating_add(8)
+        && pixel.luminance > 0.35
+    {
+        VisualPixelClassification::SkyOrBackground
+    } else {
+        VisualPixelClassification::LitOrNonDark
+    }
+}
+
+fn visual_samples_have_dark_geometry(samples: &CameraRayVisualSamples) -> bool {
+    [
+        samples.mesher_iso.as_ref(),
+        samples.first_any_render_hit.as_ref(),
+        samples.first_front_render_hit.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|sample| sample.classification == VisualPixelClassification::DarkOrMissing)
+}
+
+fn visual_samples_confirm_non_dark(samples: &CameraRayVisualSamples) -> bool {
+    [
+        samples.mesher_iso.as_ref(),
+        samples.first_any_render_hit.as_ref(),
+        samples.first_front_render_hit.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|sample| sample.classification == VisualPixelClassification::LitOrNonDark)
+}
+
+fn visual_samples_show_background(samples: &CameraRayVisualSamples) -> bool {
+    [
+        samples.mesher_iso.as_ref(),
+        samples.first_any_render_hit.as_ref(),
+        samples.first_front_render_hit.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|sample| sample.classification == VisualPixelClassification::SkyOrBackground)
 }
 
 fn classify_camera_gap(
@@ -2565,6 +3384,7 @@ fn classify_camera_gap(
     first_backface: &Option<CameraRayHit>,
     first_mesher_iso_distance: Option<f32>,
     mc_cell: Option<&McCellOracleProbe>,
+    visual_samples: &CameraRayVisualSamples,
 ) -> GapClassification {
     let Some(gap) = gap else {
         return GapClassification::Unknown;
@@ -2586,10 +3406,19 @@ fn classify_camera_gap(
         let near_raw = hit.distance <= raw_distance + 1.0;
         let near_iso =
             first_mesher_iso_distance.is_some_and(|iso| (hit.distance - iso).abs() <= 1.0);
-        if (near_raw || near_iso) && hit_has_shading_or_normal_anomaly(hit) {
+        if (near_raw || near_iso)
+            && (hit_has_shading_or_normal_anomaly(hit)
+                || visual_samples_have_dark_geometry(visual_samples))
+        {
             return GapClassification::GeometryPresentButShadingOrNormalDarkening;
         }
-        if near_iso && first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75) {
+        if (near_raw || near_iso) && visual_samples_show_background(visual_samples) {
+            return GapClassification::MissingMeshEntityOrRenderLayer;
+        }
+        if near_iso
+            && first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75)
+            && visual_samples_confirm_non_dark(visual_samples)
+        {
             return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
         }
         if front_late && !hit.front_face {
@@ -2630,10 +3459,13 @@ fn classify_camera_gap(
             && first_any
                 .as_ref()
                 .map_or(true, |hit| hit.distance > raw_distance + 1.0)
+            && cell.emitted_regular_triangles_ray_hit_count == 0
         {
             return GapClassification::VertexPositionOrTableDecodeError;
         }
-        if first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75) {
+        if first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75)
+            && visual_samples_confirm_non_dark(visual_samples)
+        {
             return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
         }
     }
@@ -2659,6 +3491,25 @@ fn hit_has_shading_or_normal_anomaly(hit: &CameraRayHit) -> bool {
 }
 
 #[cfg(feature = "mc_transvoxel")]
+fn mesher_iso_crossing_between_samples(
+    origin: Vec3,
+    dir: Vec3,
+    previous_distance: f32,
+    previous_value: f32,
+    distance: f32,
+    value: f32,
+) -> Option<(f32, Vec3)> {
+    if previous_value.signum() != value.signum() {
+        let t = previous_value / (previous_value - value);
+        let iso_distance = previous_distance + (distance - previous_distance) * t.clamp(0.0, 1.0);
+        Some((iso_distance, origin + dir * iso_distance))
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+#[cfg_attr(not(test), allow(dead_code))]
 fn first_mesher_iso_in_sdf_grid(
     origin: Vec3,
     dir: Vec3,
@@ -2677,11 +3528,15 @@ fn first_mesher_iso_in_sdf_grid(
                 return Some((distance, point));
             }
             if let Some((previous_distance, previous_value)) = previous {
-                if previous_value.signum() != value.signum() {
-                    let t = previous_value / (previous_value - value);
-                    let iso_distance =
-                        previous_distance + (distance - previous_distance) * t.clamp(0.0, 1.0);
-                    return Some((iso_distance, origin + dir * iso_distance));
+                if let Some(crossing) = mesher_iso_crossing_between_samples(
+                    origin,
+                    dir,
+                    previous_distance,
+                    previous_value,
+                    distance,
+                    value,
+                ) {
+                    return Some(crossing);
                 }
             }
             previous = Some((distance, value));
@@ -2944,6 +3799,7 @@ fn sample_camera_ray_fan(
     mesh_settings: &MeshSettings,
     lod_settings: &LodSettings,
     water_lod_guard_chunks: &HashSet<IVec3>,
+    visual_context: Option<&VisualProbeContext>,
 ) -> CameraRayFan {
     const HALF_ANGLE_DEGREES: f32 = 10.0;
     const GRID_SIZE: u32 = 9;
@@ -2971,6 +3827,7 @@ fn sample_camera_ray_fan(
                 camera_pos,
                 dir,
                 max_distance,
+                visual_context,
             );
             if let Some(gap) = &probe.see_through_gap {
                 let surface_point = camera_pos + dir * gap.voxel_surface_distance;
@@ -3001,8 +3858,16 @@ fn sample_camera_ray_fan(
                         .map(|hit| hit.distance),
                     first_mesher_iso_distance: probe.first_mesher_iso_distance,
                     first_mesher_iso_point: probe.first_mesher_iso_point,
+                    first_any_distance_from_mesher_iso: probe.first_any_distance_from_mesher_iso,
+                    first_front_distance_from_mesher_iso: probe
+                        .first_front_distance_from_mesher_iso,
                     gap_classification: probe.gap_classification,
                     mc_cell: probe.mc_cell,
+                    raw_surface_mc_cell: probe.raw_surface_mc_cell,
+                    mesher_iso_mc_cell: probe.mesher_iso_mc_cell,
+                    first_render_hit_source: probe.first_render_hit_source,
+                    cell_agreement: probe.cell_agreement,
+                    visual_samples: probe.visual_samples,
                     gap_length: gap.gap_length,
                     surface_point: surface_point.into(),
                     surface_chunk: surface_chunk.into(),
@@ -3770,6 +4635,7 @@ mod tests {
             entity: "Entity(0)".to_string(),
             mesh_section: MeshTriangleSectionProbe::MainSurface,
             triangle_start_index: 0,
+            vertices: None,
             source: None,
         };
 
@@ -3780,10 +4646,113 @@ mod tests {
                 &None,
                 &Some(backface),
                 None,
-                None
+                None,
+                &CameraRayVisualSamples::default()
             ),
             GapClassification::BackfaceOrWinding
         );
+    }
+
+    #[test]
+    fn screenshot_pixel_classifier_detects_dark_and_lit_pixels() {
+        assert_eq!(
+            classify_visual_pixel(RgbaProbe {
+                r: 2,
+                g: 2,
+                b: 2,
+                a: 255,
+                luminance: pixel_luminance(2, 2, 2),
+            }),
+            VisualPixelClassification::DarkOrMissing
+        );
+        assert_eq!(
+            classify_visual_pixel(RgbaProbe {
+                r: 180,
+                g: 160,
+                b: 120,
+                a: 255,
+                luminance: pixel_luminance(180, 160, 120),
+            }),
+            VisualPixelClassification::LitOrNonDark
+        );
+    }
+
+    #[test]
+    fn screenshot_pixel_sampler_reads_synthetic_fixture() {
+        let image = ProbeImage {
+            path: PathBuf::from("synthetic.png"),
+            width: 2,
+            height: 1,
+            pixels: vec![0, 0, 0, 255, 200, 180, 120, 255],
+        };
+
+        let dark = sample_probe_image(&image, Vec2::new(0.0, 0.0)).unwrap();
+        let lit = sample_probe_image(&image, Vec2::new(1.0, 0.0)).unwrap();
+
+        assert_eq!(
+            classify_visual_pixel(dark),
+            VisualPixelClassification::DarkOrMissing
+        );
+        assert_eq!(
+            classify_visual_pixel(lit),
+            VisualPixelClassification::LitOrNonDark
+        );
+    }
+
+    #[test]
+    fn ray_to_emitted_triangle_residual_reports_hit_and_miss() {
+        let vertices = [
+            Vec3::new(0.0, 0.0, 5.0),
+            Vec3::new(1.0, 0.0, 5.0),
+            Vec3::new(0.0, 1.0, 5.0),
+        ];
+
+        let hit = emitted_triangle_probe(0, Vec3::new(0.25, 0.25, 0.0), Vec3::Z, vertices);
+        let miss = emitted_triangle_probe(0, Vec3::new(3.0, 3.0, 0.0), Vec3::Z, vertices);
+
+        assert!((hit.ray_hit_distance.unwrap() - 5.0).abs() < 1.0e-5);
+        assert!(hit.closest_ray_distance < 0.75);
+        assert!(miss.ray_hit_distance.is_none());
+        assert!(miss.closest_ray_distance > 2.0);
+    }
+
+    #[test]
+    fn render_hit_source_cell_matches_expected_mc_cell() {
+        let cell = McCellOracleProbe {
+            chunk_position: IVec3::new(1, 2, 3).into(),
+            effective_lod_at_mesh: "Lod1".to_string(),
+            neighbor_lods_at_mesh: NeighborLodsProbe {
+                neg_x: None,
+                pos_x: None,
+                neg_y: None,
+                pos_y: None,
+                neg_z: None,
+                pos_z: None,
+            },
+            cell: UVec3::new(4, 5, 6).into(),
+            case_index: 23,
+            class_index: 3,
+            expected_regular_triangle_count: 2,
+            actual_regular_triangle_count: Some(2),
+            boundary_faces: Vec::new(),
+            skipped_regular_faces: Vec::new(),
+            transition_owner_faces: Vec::new(),
+            transition_cells: Vec::new(),
+            emitted_regular_triangles: Vec::new(),
+            emitted_regular_triangles_ray_hit_count: 0,
+            nearest_emitted_regular_triangle_ray_hit_distance: None,
+            closest_emitted_regular_triangle_ray_distance: None,
+            source_chunk_skipped_lod_delta_gt_one: Some(0),
+        };
+        let source = McTriangleSourceProbe::Regular {
+            chunk_position: IVec3::new(1, 2, 3).into(),
+            lod: "Lod1".to_string(),
+            cell: UVec3::new(4, 5, 6).into(),
+            case_index: 23,
+            class_index: 3,
+        };
+
+        assert!(mc_source_matches_cell_probe(&source, &cell));
     }
 
     #[cfg(feature = "mc_transvoxel")]
@@ -3812,5 +4781,24 @@ mod tests {
 
         assert!((distance - 1.5).abs() < 1.0e-5);
         assert!((point.z - 1.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn mesher_iso_crossing_interpolates_across_chunk_sample_boundary() {
+        let (distance, point) =
+            mesher_iso_crossing_between_samples(Vec3::ZERO, Vec3::X, 15.5, -1.0, 16.5, 1.0)
+                .expect("opposite signs should produce an iso crossing");
+
+        assert!((distance - 16.0).abs() < 1.0e-5);
+        assert!((point.x - 16.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn oracle_cell_selection_uses_mesher_iso_point() {
+        let cell = mc_cell_for_point(Vec3::new(14.9, 4.1, 7.0), Vec3::ZERO, 16, 1);
+
+        assert_eq!(cell, [15, 5, 8]);
     }
 }

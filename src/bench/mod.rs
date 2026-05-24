@@ -2898,6 +2898,7 @@ fn run_bench_state_machine(
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
                 }
                 if let Some(request) = checkpoint_hole_probe_request(
+                    &config,
                     checkpoint,
                     state.hold_elapsed_frames,
                     state.run_index,
@@ -2927,6 +2928,24 @@ fn run_bench_state_machine(
             let waited_long_enough = wait_elapsed >= SCREENSHOT_WAIT_MIN_SECS;
             let wait_timed_out = wait_elapsed >= SCREENSHOT_WAIT_MAX_SECS;
             let screenshots_ready = screenshots_exist(&config, &state.current_screenshots);
+            if screenshots_ready && !state.hole_probe_requested {
+                let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                if let Some(request) = checkpoint_hole_probe_request(
+                    &config,
+                    checkpoint,
+                    checkpoint.hold_frames,
+                    state.run_index,
+                    &mut state.hole_probe_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainHoleProbeRequests>()
+                            .push(request);
+                    });
+                    state.screenshot_wait_left = state.screenshot_wait_left.max(1);
+                    return;
+                }
+            }
             if state.screenshot_wait_left == 0
                 && waited_long_enough
                 && (screenshots_ready || wait_timed_out)
@@ -3008,6 +3027,7 @@ fn apply_inventory_ui_screenshot_category(
 }
 
 fn checkpoint_hole_probe_request(
+    config: &BenchConfig,
     checkpoint: &BenchCheckpoint,
     hold_elapsed_frames: u32,
     run_index: u32,
@@ -3024,6 +3044,30 @@ fn checkpoint_hole_probe_request(
         .label
         .clone()
         .unwrap_or_else(|| format!("{}-run{run_index}", checkpoint.name));
+    let screenshot_path = checkpoint
+        .screenshot_points
+        .iter()
+        .filter(|point| point.frame <= probe.frame)
+        .find(|point| point.name == "probe")
+        .or_else(|| {
+            checkpoint
+                .screenshot_points
+                .iter()
+                .filter(|point| point.frame <= probe.frame)
+                .max_by_key(|point| point.frame)
+        })
+        .map(|point| {
+            config.output_dir.join(run_file_name(
+                &config.scene_path,
+                checkpoint,
+                Some(&point.name),
+                run_index,
+                "png",
+            ))
+        });
+    if screenshot_path.as_ref().is_some_and(|path| !path.exists()) {
+        return None;
+    }
     *requested = true;
     Some(TerrainHoleProbeRequest {
         trigger: format!(
@@ -3039,6 +3083,7 @@ fn checkpoint_hole_probe_request(
         player_world_position: probe.player_position.map(vec3),
         camera_world_position: probe.camera_position.map(vec3),
         camera_direction: probe.camera_direction.map(vec3),
+        screenshot_path,
     })
 }
 
