@@ -5,7 +5,7 @@ use crate::voxel::meshing::{
     ChunkMeshResult, McTransitionForensicsMode, McTriangleSource, McTriangleSources, MeshData,
     MeshForensicsOptions, TerrainMeshSectionStats, WaterAirExposureMode, generate_water_mesh,
 };
-use crate::voxel::skirt::NeighborLods;
+use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 use std::time::Instant;
@@ -15,7 +15,9 @@ use super::face_mask::{TransvoxelFaceMask, compute_transvoxel_face_mask};
 use super::normals::sdf_gradient_normal_at_world;
 use super::stats::McTransvoxelStats;
 use super::tables::{CUBE_CORNERS, REGULAR_CELL_CLASS, REGULAR_CELL_DATA, REGULAR_VERTEX_DATA};
-use super::transvoxel::append_transition_meshes;
+use super::transvoxel::{append_transition_meshes, transition_triangle_count_for_regular_cell};
+#[cfg(test)]
+use super::transvoxel::transition_case_for_regular_cell;
 
 pub struct McMeshInput<'a> {
     pub world: &'a VoxelWorld,
@@ -190,6 +192,55 @@ impl RegularVertexData {
     }
 }
 
+fn transition_replaces_regular_cell(
+    sdf: &SdfGrid,
+    subdivisions: usize,
+    transition_mask: TransvoxelFaceMask,
+    regular_cell: [usize; 3],
+) -> bool {
+    let (faces, count) =
+        transition_faces_for_regular_cell(transition_mask, subdivisions, regular_cell);
+    faces[..count].iter().flatten().any(|face| {
+        transition_triangle_count_for_regular_cell(sdf, subdivisions, *face, regular_cell) > 0
+    })
+}
+
+fn transition_faces_for_regular_cell(
+    transition_mask: TransvoxelFaceMask,
+    subdivisions: usize,
+    regular_cell: [usize; 3],
+) -> ([Option<ChunkFace>; 6], usize) {
+    let [cx, cy, cz] = regular_cell;
+    let max_cell = subdivisions.saturating_sub(1);
+    let mut faces = [None; 6];
+    let mut count = 0usize;
+    let mut add = |face: ChunkFace| {
+        faces[count] = Some(face);
+        count += 1;
+    };
+
+    if transition_mask.pos_x && cx >= max_cell {
+        add(ChunkFace::PosX);
+    }
+    if transition_mask.neg_x && cx == 0 {
+        add(ChunkFace::NegX);
+    }
+    if transition_mask.pos_y && cy >= max_cell {
+        add(ChunkFace::PosY);
+    }
+    if transition_mask.neg_y && cy == 0 {
+        add(ChunkFace::NegY);
+    }
+    if transition_mask.pos_z && cz >= max_cell {
+        add(ChunkFace::PosZ);
+    }
+    if transition_mask.neg_z && cz == 0 {
+        add(ChunkFace::NegZ);
+    }
+
+    (faces, count)
+}
+
 fn extract_regular_mc(
     sdf: &SdfGrid,
     mesh: &mut MeshData,
@@ -204,39 +255,22 @@ fn extract_regular_mc(
     triangle_sources: &mut Option<Vec<McTriangleSource>>,
     stats: &mut McTransvoxelStats,
 ) {
-    let skip_regular_on_face = |cx: usize, cy: usize, cz: usize| -> bool {
-        if transition_mask.pos_x && cx >= subdivisions.saturating_sub(1) {
-            return true;
-        }
-        if transition_mask.neg_x && cx == 0 {
-            return true;
-        }
-        if transition_mask.pos_y && cy >= subdivisions.saturating_sub(1) {
-            return true;
-        }
-        if transition_mask.neg_y && cy == 0 {
-            return true;
-        }
-        if transition_mask.pos_z && cz >= subdivisions.saturating_sub(1) {
-            return true;
-        }
-        if transition_mask.neg_z && cz == 0 {
-            return true;
-        }
-        false
-    };
-
+    let grid_base = 1usize;
+    // The current transition extraction is not yet watertight enough to
+    // destructively replace regular boundary rows. Live probes on 2026-05-24
+    // showed non-empty transition cells whose triangles missed the expected
+    // near ray by ~0.3-0.5 voxel after the matching regular cell had been
+    // skipped. Keep the regular surface and let transition triangles act as a
+    // seam apron until the transition table/frame path is proven watertight.
+    let replace_regular_boundary_rows = false;
     for cz in 0..subdivisions {
         for cy in 0..subdivisions {
             for cx in 0..subdivisions {
-                if skip_regular_on_face(cx, cy, cz) {
-                    continue;
-                }
                 let mut case = 0usize;
                 for (i, corner) in CUBE_CORNERS.iter().enumerate() {
-                    let gx = cx + corner[0] as usize;
-                    let gy = cy + corner[1] as usize;
-                    let gz = cz + corner[2] as usize;
+                    let gx = cx + grid_base + corner[0] as usize;
+                    let gy = cy + grid_base + corner[1] as usize;
+                    let gz = cz + grid_base + corner[2] as usize;
                     if sdf.get(gx, gy, gz) < 0.0 {
                         case |= 1 << i;
                     }
@@ -253,6 +287,16 @@ fn extract_regular_mc(
                 if case == 0 || case == 255 {
                     continue;
                 }
+                if replace_regular_boundary_rows
+                    && transition_replaces_regular_cell(
+                        sdf,
+                        subdivisions,
+                        transition_mask,
+                        [cx, cy, cz],
+                    )
+                {
+                    continue;
+                }
                 let class = REGULAR_CELL_CLASS[case];
                 let tri_data = REGULAR_CELL_DATA[class as usize];
                 let tri_count = tri_data.get_triangle_count() as usize;
@@ -265,14 +309,14 @@ fn extract_regular_mc(
                     let ca = CUBE_CORNERS[corner_a];
                     let cb = CUBE_CORNERS[corner_b];
                     let a = [
-                        cx + ca[0] as usize,
-                        cy + ca[1] as usize,
-                        cz + ca[2] as usize,
+                        cx + grid_base + ca[0] as usize,
+                        cy + grid_base + ca[1] as usize,
+                        cz + grid_base + ca[2] as usize,
                     ];
                     let b = [
-                        cx + cb[0] as usize,
-                        cy + cb[1] as usize,
-                        cz + cb[2] as usize,
+                        cx + grid_base + cb[0] as usize,
+                        cy + grid_base + cb[1] as usize,
+                        cz + grid_base + cb[2] as usize,
                     ];
                     cell_vertices[vi] = Some(sdf.interpolate_edge(a, b));
                 }
@@ -415,6 +459,61 @@ mod tests {
         world
     }
 
+    fn world_with_heightfield_allow_top(height: impl Fn(i32, i32) -> i32) -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        for z in 0..CHUNK_SIZE_I32 {
+            for x in 0..CHUNK_SIZE_I32 {
+                let column_height = height(x, z).clamp(0, CHUNK_SIZE_I32 - 1);
+                for y in 0..=column_height {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+        world
+    }
+
+    fn pos_y_transition_fixture_world() -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        for x in 0..CHUNK_SIZE_I32 {
+            let height = 14 + (x % 2);
+            for z in 0..CHUNK_SIZE_I32 {
+                for y in 0..=height {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+        world
+    }
+
+    fn world_with_solid_pos_z_neighbor() -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 2));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.insert_chunk(Chunk::new(IVec3::new(0, 0, 1)));
+        for z in 0..CHUNK_SIZE_I32 {
+            for y in 4..CHUNK_SIZE_I32 {
+                for x in 0..CHUNK_SIZE_I32 {
+                    world.set_voxel(IVec3::new(x, y, CHUNK_SIZE_I32 + z), VoxelType::Rock);
+                }
+            }
+        }
+        world
+    }
+
+    fn synthetic_pos_z_case_12_sdf() -> SdfGrid {
+        let padded = 18usize;
+        let mut values = vec![1.0f32; padded * padded * padded];
+        let index = |x: usize, y: usize, z: usize| x + y * padded + z * padded * padded;
+        values[index(11, 7, 16)] = -1.0;
+        values[index(11, 8, 16)] = -1.0;
+        SdfGrid {
+            values,
+            padded,
+            step: 1,
+        }
+    }
+
     #[test]
     fn sphere_fixture_has_triangles_and_valid_attributes() {
         let world = sphere_world();
@@ -498,6 +597,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn regular_lod1_mesh_covers_positive_boundary_cell() {
+        let world = world_with_heightfield_allow_top(|_, _| CHUNK_SIZE_I32 - 1);
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod1,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
+        });
+        let mesh = &out.result.solid;
+        let ray_origin = Vec3::new(8.0, 20.0, 8.0);
+        let hit = first_mesh_ray_hit(mesh, ray_origin, Vec3::NEG_Y)
+            .expect("Lod1 top surface should be meshed in the positive boundary cell");
+        let hit_y = ray_origin.y - hit.0;
+
+        assert!(
+            hit_y > 14.0,
+            "Lod1 top hit should come from the positive boundary cell [14,16], got y={hit_y}"
+        );
     }
 
     /// A single solid voxel surrounded by air produces eight MC cells each
@@ -586,21 +712,12 @@ mod tests {
     fn sloped_chunk_with_coarser_pos_y_neighbor_emits_transition_triangles() {
         use crate::voxel::chunk::LodLevel;
 
-        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
-        world.insert_chunk(Chunk::new(IVec3::ZERO));
         // For the PosY transition apron to fire, the iso must cross the +Y
         // boundary cell row (world voxels at y = 14..15 for a 16-voxel chunk).
         // A sawtooth surface alternating between heights 14 and 15 along X
         // creates a sweep of 9-corner transition cases that includes the
         // single-corner cases the previous filter dropped.
-        for x in 0..CHUNK_SIZE_I32 {
-            let height = 14 + (x % 2); // alternates 14, 15 along +X
-            for z in 0..CHUNK_SIZE_I32 {
-                for y in 0..=height {
-                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
-                }
-            }
-        }
+        let world = pos_y_transition_fixture_world();
 
         let chunk = world.get_chunk(IVec3::ZERO).unwrap();
         let settings = McTransvoxelSettings::default();
@@ -627,20 +744,187 @@ mod tests {
     }
 
     #[test]
-    fn forensics_sources_track_transition_triangles() {
-        use crate::voxel::chunk::LodLevel;
+    fn transition_apron_keeps_regular_boundary_rows() {
+        let world = pos_y_transition_fixture_world();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods {
+                pos_y: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        assert!(
+            sources.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Transition {
+                        face: ChunkFace::PosY,
+                        ..
+                    }
+                )
+            }),
+            "fixture should emit PosY transition apron triangles"
+        );
+        assert!(
+            sources.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Regular {
+                        cell,
+                        case_index,
+                        ..
+                    } if cell.y == 15 && *case_index != 0 && *case_index != 255
+                )
+            }),
+            "regular boundary rows must remain under transition aprons until transition replacement is watertight"
+        );
+    }
+
+    #[test]
+    fn empty_transition_owner_keeps_regular_boundary_row() {
+        let world = world_with_solid_pos_z_neighbor();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let neighbor_lods = NeighborLods {
+            pos_z: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+        let sdf = SdfGrid::new(chunk, &world, LodLevel::Lod0, &neighbor_lods, IVec3::ZERO);
+        assert_eq!(
+            transition_triangle_count_for_regular_cell(&sdf, 16, ChunkFace::PosZ, [8, 8, 15]),
+            0,
+            "target PosZ transition cell should be empty while the regular boundary cell is non-empty"
+        );
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods,
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        assert!(
+            !sources.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Transition {
+                        face: ChunkFace::PosZ,
+                        cell_u: 4,
+                        cell_v: 4,
+                        ..
+                    }
+                )
+            }),
+            "target PosZ transition cell should not emit replacement triangles"
+        );
+        assert!(
+            sources.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Regular {
+                        cell,
+                        case_index,
+                        ..
+                    } if *cell == UVec3::new(8, 8, 15)
+                        && *case_index != 0
+                        && *case_index != 255
+                )
+            }),
+            "non-empty PosZ regular boundary cells must remain when the owning transition cells are empty"
+        );
+        let hit = first_mesh_ray_hit(&out.result.solid, Vec3::new(8.5, 8.5, 14.0), Vec3::Z);
+        assert!(
+            hit.is_some(),
+            "ray through the PosZ boundary row should hit the retained regular MC surface"
+        );
+    }
+
+    #[test]
+    fn pos_z_transition_case_uses_reversed_u_mapping() {
+        let sdf = synthetic_pos_z_case_12_sdf();
+        assert_eq!(
+            transition_case_for_regular_cell(&sdf, 16, ChunkFace::PosZ, [10, 7, 15]),
+            12,
+            "PosZ regular cell x=10 must map through HighZ's reversed U axis"
+        );
+        assert_eq!(
+            transition_triangle_count_for_regular_cell(&sdf, 16, ChunkFace::PosZ, [10, 7, 15]),
+            3
+        );
 
         let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
         world.insert_chunk(Chunk::new(IVec3::ZERO));
-        for x in 0..CHUNK_SIZE_I32 {
-            let height = 14 + (x % 2);
-            for z in 0..CHUNK_SIZE_I32 {
-                for y in 0..=height {
-                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
-                }
-            }
-        }
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let mut mesh = MeshData::with_capacity(16, 16);
+        let mut sources = Some(Vec::new());
+        let mut stats = McTransvoxelStats::default();
+        append_transition_meshes(
+            &sdf,
+            &mut mesh,
+            chunk,
+            &world,
+            IVec3::ZERO,
+            Vec3::splat(8.0),
+            16,
+            1,
+            TransvoxelFaceMask {
+                pos_z: true,
+                ..Default::default()
+            },
+            LodLevel::Lod0,
+            &mut sources,
+            &mut stats,
+        );
+        let sources = sources.expect("forensics source collection should remain available");
+        assert!(
+            sources.iter().any(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Transition {
+                        face: ChunkFace::PosZ,
+                        cell_u: 2,
+                        cell_v: 3,
+                        case_index: 12,
+                        ..
+                    }
+                )
+            }),
+            "PosZ transition case 12 should be emitted at reversed-U cell (2, 3)"
+        );
+    }
 
+    #[test]
+    fn forensics_sources_track_transition_triangles() {
+        use crate::voxel::chunk::LodLevel;
+
+        let world = pos_y_transition_fixture_world();
         let chunk = world.get_chunk(IVec3::ZERO).unwrap();
         let settings = McTransvoxelSettings::default();
         let neighbor_lods = NeighborLods {
@@ -677,6 +961,80 @@ mod tests {
                 }
             )
         }));
+    }
+
+    #[test]
+    fn transition_triangle_winding_matches_vertex_normals() {
+        use crate::voxel::chunk::LodLevel;
+        use crate::voxel::skirt::ChunkFace;
+
+        let world = pos_y_transition_fixture_world();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods {
+                pos_y: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+        let mesh = &out.result.solid;
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        let mut checked = 0usize;
+        let mut worst_dot = 1.0f32;
+
+        for (triangle_index, source) in sources.sources.iter().enumerate() {
+            if !matches!(
+                source,
+                McTriangleSource::Transition {
+                    face: ChunkFace::PosY,
+                    ..
+                }
+            ) {
+                continue;
+            }
+            let indices = &mesh.indices[triangle_index * 3..triangle_index * 3 + 3];
+            let p0 = Vec3::from_array(mesh.positions[indices[0] as usize]);
+            let p1 = Vec3::from_array(mesh.positions[indices[1] as usize]);
+            let p2 = Vec3::from_array(mesh.positions[indices[2] as usize]);
+            let n0 = Vec3::from_array(mesh.normals[indices[0] as usize]);
+            let n1 = Vec3::from_array(mesh.normals[indices[1] as usize]);
+            let n2 = Vec3::from_array(mesh.normals[indices[2] as usize]);
+            let geometric = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+            let vertex = (n0 + n1 + n2).normalize_or_zero();
+            if geometric == Vec3::ZERO || vertex == Vec3::ZERO {
+                continue;
+            }
+            let dot = geometric.dot(vertex);
+            worst_dot = worst_dot.min(dot);
+            checked += 1;
+            assert!(
+                dot > 0.0,
+                "transition triangle {triangle_index} has geometric normal opposite vertex normal: dot={dot}, source={source:?}"
+            );
+        }
+
+        assert!(
+            checked > 0,
+            "fixture did not emit PosY transition triangles"
+        );
+        assert!(
+            worst_dot > 0.0,
+            "all checked PosY transition triangles should align, worst dot={worst_dot}"
+        );
     }
 
     #[test]

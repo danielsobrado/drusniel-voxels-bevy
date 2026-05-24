@@ -2847,7 +2847,7 @@ fn mc_cell_oracle_for_point(
         .copied()
         .filter(|face| transition_mask.get(*face))
         .collect();
-    let transition_cells = transition_owner_faces
+    let transition_cells: Vec<McTransitionCellOracleProbe> = transition_owner_faces
         .iter()
         .map(|face| {
             let (cell_u, cell_v) = transition_cell_for_regular_cell(*face, cell, subdivisions);
@@ -2920,6 +2920,11 @@ fn mc_cell_oracle_for_point(
             }
         })
         .collect();
+    // MC+Transvoxel currently keeps regular boundary rows under transition
+    // aprons. Transition faces are still reported as owners, but they no longer
+    // destructively skip regular cells until the transition replacement path is
+    // proven watertight in the live seam repros.
+    let skipped_regular_faces: Vec<ChunkFace> = Vec::new();
 
     Some(McCellOracleProbe {
         chunk_position: chunk_pos.into(),
@@ -2934,7 +2939,7 @@ fn mc_cell_oracle_for_point(
             .iter()
             .map(|face| chunk_face_name(*face).to_string())
             .collect(),
-        skipped_regular_faces: transition_owner_faces
+        skipped_regular_faces: skipped_regular_faces
             .iter()
             .map(|face| chunk_face_name(*face).to_string())
             .collect(),
@@ -3616,20 +3621,21 @@ fn mc_cell_for_point(
     let local = point - chunk_origin;
     let max_cell = subdivisions.saturating_sub(1) as i32;
     [
-        ((local.x / step as f32).floor() as i32 + 1).clamp(0, max_cell) as usize,
-        ((local.y / step as f32).floor() as i32 + 1).clamp(0, max_cell) as usize,
-        ((local.z / step as f32).floor() as i32 + 1).clamp(0, max_cell) as usize,
+        ((local.x / step as f32).floor() as i32).clamp(0, max_cell) as usize,
+        ((local.y / step as f32).floor() as i32).clamp(0, max_cell) as usize,
+        ((local.z / step as f32).floor() as i32).clamp(0, max_cell) as usize,
     ]
 }
 
 #[cfg(feature = "mc_transvoxel")]
 fn regular_case_index(values: &[f32], padded: usize, cell: [usize; 3]) -> usize {
     use crate::voxel::mc_transvoxel::tables::CUBE_CORNERS;
+    let grid_base = 1usize;
     let mut case = 0usize;
     for (index, corner) in CUBE_CORNERS.iter().enumerate() {
-        let x = cell[0] + corner[0] as usize;
-        let y = cell[1] + corner[1] as usize;
-        let z = cell[2] + corner[2] as usize;
+        let x = cell[0] + grid_base + corner[0] as usize;
+        let y = cell[1] + grid_base + corner[1] as usize;
+        let z = cell[2] + grid_base + corner[2] as usize;
         if values[x + y * padded + z * padded * padded] < 0.0 {
             case |= 1 << index;
         }
@@ -3669,10 +3675,17 @@ fn transition_cell_for_regular_cell(
     subdivisions: usize,
 ) -> (usize, usize) {
     let frame = ProbeFaceFrame::for_face(face);
-    let cells = (subdivisions / 2).saturating_sub(1);
     (
-        (cell[frame.u_axis as usize] / 2).min(cells),
-        (cell[frame.v_axis as usize] / 2).min(cells),
+        ProbeFaceFrame::transition_cell_for_regular_axis(
+            subdivisions,
+            cell[frame.u_axis as usize],
+            frame.u_sign,
+        ),
+        ProbeFaceFrame::transition_cell_for_regular_axis(
+            subdivisions,
+            cell[frame.v_axis as usize],
+            frame.v_sign,
+        ),
     )
 }
 
@@ -3725,7 +3738,9 @@ struct ProbeFaceFrame {
     w_axis: u8,
     w_sign: i32,
     u_axis: u8,
+    u_sign: i32,
     v_axis: u8,
+    v_sign: i32,
 }
 
 #[cfg(feature = "mc_transvoxel")]
@@ -3736,38 +3751,83 @@ impl ProbeFaceFrame {
                 w_axis: 0,
                 w_sign: 1,
                 u_axis: 2,
+                u_sign: -1,
                 v_axis: 1,
+                v_sign: 1,
             },
             ChunkFace::PosX => Self {
                 w_axis: 0,
                 w_sign: -1,
                 u_axis: 2,
+                u_sign: 1,
                 v_axis: 1,
+                v_sign: 1,
             },
             ChunkFace::NegY => Self {
                 w_axis: 1,
                 w_sign: 1,
                 u_axis: 0,
+                u_sign: 1,
                 v_axis: 2,
+                v_sign: -1,
             },
             ChunkFace::PosY => Self {
                 w_axis: 1,
                 w_sign: -1,
                 u_axis: 0,
+                u_sign: 1,
                 v_axis: 2,
+                v_sign: 1,
             },
             ChunkFace::NegZ => Self {
                 w_axis: 2,
                 w_sign: 1,
                 u_axis: 0,
+                u_sign: 1,
                 v_axis: 1,
+                v_sign: 1,
             },
             ChunkFace::PosZ => Self {
                 w_axis: 2,
                 w_sign: -1,
                 u_axis: 0,
+                u_sign: -1,
                 v_axis: 1,
+                v_sign: 1,
             },
+        }
+    }
+
+    fn tangent_grid_coord(
+        subdivisions: usize,
+        cell: usize,
+        delta: usize,
+        sign: i32,
+    ) -> usize {
+        if sign >= 0 {
+            1 + cell * 2 + delta
+        } else {
+            subdivisions + 1 - (cell * 2 + delta)
+        }
+    }
+
+    fn transition_cell_for_regular_axis(
+        subdivisions: usize,
+        regular_axis_cell: usize,
+        sign: i32,
+    ) -> usize {
+        let transition_cells = subdivisions / 2;
+        if transition_cells == 0 {
+            return 0;
+        }
+        if sign >= 0 {
+            (regular_axis_cell / 2).min(transition_cells - 1)
+        } else {
+            (subdivisions
+                .saturating_sub(1)
+                .saturating_sub(regular_axis_cell)
+                / 2)
+                .min(transition_cells - 1)
         }
     }
 
@@ -3779,14 +3839,24 @@ impl ProbeFaceFrame {
         delta: ProbeHighResDelta,
     ) -> [usize; 3] {
         let high_w = if self.w_sign > 0 {
-            1usize
+            2usize
         } else {
             subdivisions
         };
         let mut coords = [0usize; 3];
         coords[self.w_axis as usize] = high_w;
-        coords[self.u_axis as usize] = cell_u * 2 + delta.u as usize;
-        coords[self.v_axis as usize] = cell_v * 2 + delta.v as usize;
+        coords[self.u_axis as usize] = Self::tangent_grid_coord(
+            subdivisions,
+            cell_u,
+            delta.u as usize,
+            self.u_sign,
+        );
+        coords[self.v_axis as usize] = Self::tangent_grid_coord(
+            subdivisions,
+            cell_v,
+            delta.v as usize,
+            self.v_sign,
+        );
         coords
     }
 }
@@ -5029,6 +5099,15 @@ mod tests {
     fn oracle_cell_selection_uses_mesher_iso_point() {
         let cell = mc_cell_for_point(Vec3::new(14.9, 4.1, 7.0), Vec3::ZERO, 16, 1);
 
-        assert_eq!(cell, [15, 5, 8]);
+        assert_eq!(cell, [14, 4, 7]);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn oracle_cell_selection_keeps_lod1_positive_boundary_band() {
+        let chunk_origin = Vec3::new(96.0, 32.0, 96.0);
+        let cell = mc_cell_for_point(Vec3::new(96.60327, 46.26485, 96.79657), chunk_origin, 8, 2);
+
+        assert_eq!(cell, [0, 7, 0]);
     }
 }

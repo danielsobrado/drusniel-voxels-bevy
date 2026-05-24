@@ -737,3 +737,479 @@ Next live repro requirement:
 - The next dump should have non-null `actual_regular_triangle_count` and
   `first_render_hit_source` for MC chunks. That is the first dump that can
   legitimately classify missing regular/transition geometry in live mode.
+
+### Live source-map repro: padded MC cell offset
+
+User-provided live runtime dump on 2026-05-24 after restarting with
+`.\scripts\startVoxels.ps1 -Mc`:
+
+- `debug/terrain-hole-probe-20260524-125502.json`
+
+Logged summary:
+
+```text
+camera_ray.gap_classification = vertex_position_or_table_decode_error
+camera_ray.first_voxel_solid_distance = 227.0
+camera_ray.first_mesher_iso_distance = 227.21916
+camera_ray.first_any_render_hit.distance = 267.51733
+camera_ray.first_front_render_hit = null
+camera_ray.first_backface_render_hit.distance = 267.51733
+camera_ray.first_mesher_iso_point = (96.60327, 46.26485, 96.79657)
+camera_ray.mc_cell.chunk_position = (6, 2, 6)
+camera_ray.mc_cell.effective_lod_at_mesh = Lod1
+camera_ray.mc_cell.cell = (1, 7, 1)
+camera_ray.mc_cell.case_index = 23
+camera_ray.mc_cell.expected_regular_triangle_count = 4
+camera_ray.mc_cell.actual_regular_triangle_count = 4
+camera_ray.mc_cell.emitted_regular_triangles_ray_hit_count = 0
+camera_ray.mc_cell.closest_emitted_regular_triangle_ray_distance = 0.3571166
+camera_ray.mc_cell.source_chunk_skipped_lod_delta_gt_one = 0
+camera_ray.first_render_hit_source = regular chunk (4, 3, 4), Lod2, cell (2, 1, 2)
+camera_ray_fan.rays_with_gap = 23 / 81
+camera_ray_fan.gap_classification counts = unknown:17, vertex_position_or_table_decode_error:6
+source_chunk_skipped_lod_delta_gt_one values across classified gaps = [0]
+```
+
+Important finding:
+
+- The mesher-iso point sits in the positive Y band of a Lod1 chunk:
+  chunk `(6, 2, 6)` starts at world `(96, 32, 96)`, so `y = 46.26485`
+  is local `14.26485`. Lod1 step is 2, so this belongs to regular cell
+  `y = 7`, spanning local `[14, 16]`.
+- `extract_regular_mc` was reading regular cells from padded SDF indices
+  `cell + corner`, while `SdfGrid::local_position` maps padded index `i`
+  to `(i - 1) * step`. That means the regular extractor meshed
+  `[-step, chunk_size - step]` instead of `[0, chunk_size]`.
+- At Lod1, the old extractor's top regular cell spanned local `[12, 14]`.
+  The live iso point at local `14.26485` was inside the unmeshed positive
+  boundary band, explaining the near-surface miss without involving the
+  scheduler (`skipped_lod_delta_gt_one = 0`).
+
+Fix:
+
+- Regular MC now samples SDF corners from padded index `cell + 1 + corner`
+  while keeping public/source-map cell coordinates in `0..subdivisions`.
+- The hole-probe MC cell oracle now maps points to the same source cell
+  coordinates and computes regular case indices with the same `+1` padded
+  offset.
+- Transvoxel face frames now use the same padded convention: the 9 high-res
+  case samples sit on the inner side of the skipped boundary row and the
+  4 low-res samples sit on the outer boundary side.
+- The failed throwaway case-complement hypothesis test was removed; it did
+  not explain the live ray.
+
+Regression coverage:
+
+```powershell
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_lod1_mesh_covers_positive_boundary_cell -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_mc_ -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel oracle_cell_selection -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_fills_skipped_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel grid_coords_stay_within_padded_bounds_for_all_faces -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel forensics -- --nocapture
+rtk cargo check -j 1 --lib --features mc_transvoxel
+rtk cargo build -j 1 --release --features mc_transvoxel
+```
+
+Status:
+
+- All focused tests above passed.
+- The first release build attempt exceeded the tool timeout but completed in
+  the background; the immediate rerun finished as a no-op in under one second.
+- Visual confirmation is still pending. Restart with `.\scripts\startVoxels.ps1 -Mc`,
+  aim at the same dark mountain patch, and run Shift+F9. Expected improvement:
+  the center ray should no longer report a near mesher-iso miss in the
+  Lod1 positive-boundary band.
+
+### Live seam repro after padded-cell fix: transition winding
+
+User-provided live runtime dump on 2026-05-24 after the padded MC cell offset
+fix:
+
+- `debug/terrain-hole-probe-20260524-141321.json`
+
+User observation:
+
+- The mid-LOD/interior mountain hole appears fixed.
+- Visible seams remain along LOD transition bands.
+
+Logged summary:
+
+```text
+camera_ray.gap_classification = backface_or_winding
+camera_ray.first_voxel_solid_distance = 189.25
+camera_ray.first_mesher_iso_distance = 189.58493
+camera_ray.first_any_render_hit.distance = 189.3657
+camera_ray.first_front_render_hit.distance = 271.79724
+camera_ray.first_backface_render_hit.distance = 189.3657
+camera_ray.first_mesher_iso_point = (117.66649, 31.610695, 106.77595)
+camera_ray.mc_cell.chunk_position = (7, 1, 6)
+camera_ray.mc_cell.effective_lod_at_mesh = Lod0
+camera_ray.mc_cell.neighbor_lods_at_mesh.neg_y = Lod1
+camera_ray.mc_cell.neighbor_lods_at_mesh.pos_y = Lod1
+camera_ray.mc_cell.cell = (5, 15, 10)
+camera_ray.mc_cell.case_index = 51
+camera_ray.mc_cell.expected_regular_triangle_count = 2
+camera_ray.mc_cell.actual_regular_triangle_count = 0
+camera_ray.mc_cell.skipped_regular_faces = [pos_y]
+camera_ray.mc_cell.transition_owner_faces = [pos_y]
+camera_ray.mc_cell.transition_cells[0].case_index = 495
+camera_ray.mc_cell.transition_cells[0].class_index = 1
+camera_ray.mc_cell.transition_cells[0].expected_triangle_count = 2
+camera_ray.mc_cell.transition_cells[0].actual_triangle_count = 2
+camera_ray.mc_cell.transition_cells[0].invert = true
+camera_ray.mc_cell.transition_cells[0].emitted_triangles_ray_hit_count = 1
+camera_ray.mc_cell.source_chunk_skipped_lod_delta_gt_one = 0
+camera_ray.first_render_hit_source = transition chunk (7, 1, 6), Lod0, face pos_y, cell_u=2, cell_v=5, case=495, class=1, invert=true
+camera_ray.cell_agreement = raw surface, mesher iso, and first render hit resolve to the same MC cell
+camera_ray_fan.rays_with_gap = 25 / 81
+camera_ray_fan.gap_classification counts = unknown:23, vertex_position_or_table_decode_error:1, backface_or_winding:1
+source_chunk_skipped_lod_delta_gt_one values across classified gaps = [0]
+```
+
+Important finding:
+
+- This is no longer missing geometry at the center ray. The first actual
+  render hit is at the expected surface distance, and it comes from the same
+  transition cell the oracle expects.
+- The hit is back-facing:
+
+```text
+first_any_render_hit.front_face = false
+first_any_render_hit.geometric_normal = (-0.42379394, -0.80049825, -0.42379394)
+first_any_render_hit.vertex_normal = (0.34503898, 0.87947774, 0.32782155)
+material_weights = [0.0, 0.0, 0.0, 1.0]
+```
+
+- Geometric normal and vertex/SDF normal point in opposite hemispheres. Because
+  the terrain material is double-sided, this is not GPU culling, but the shader
+  receives `front_facing = false` and Bevy's PBR input can flip the normal for
+  double-sided lighting. This matches a dark seam rather than an absent triangle.
+
+Fix:
+
+- Added `transition_triangle_winding_matches_vertex_normals`, using the existing
+  PosY sawtooth transition fixture.
+- The regression failed before the fix:
+
+```text
+transition triangle 930 has geometric normal opposite vertex normal:
+dot = -0.8433683
+source = Transition { face: PosY, case_index: 483, class_index: 4, invert: true }
+```
+
+- Corrected transition triangle winding by reversing the table invert handling:
+  swap transition triangle vertices when `invert == false`, not when
+  `invert == true`.
+
+Verification:
+
+```powershell
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_triangle_winding_matches_vertex_normals -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel forensics -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_fills_skipped_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_lod1_mesh_covers_positive_boundary_cell -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel oracle_cell_selection -- --nocapture
+rtk cargo check -j 1 --lib --features mc_transvoxel
+rtk cargo build -j 1 --release --features mc_transvoxel
+```
+
+Status:
+
+- All focused tests above passed.
+- Release MC binary rebuilt. As before, the first release build command exceeded
+  the tool timeout but finished in the background; the immediate rerun reported
+  the release profile finished successfully.
+- Next live retest: restart with `.\scripts\startVoxels.ps1 -Mc`, aim at the
+  same seam, and run Shift+F9. Expected center-ray change: first hit at the seam
+  should become front-facing or no longer classify as `backface_or_winding`.
+
+### Live seam repro after winding fix: empty transition owner
+
+User-provided live runtime dump on 2026-05-24 after the transition winding fix:
+
+- `debug/terrain-hole-probe-20260524-144537.json`
+
+User observation:
+
+- The mid-LOD/interior mountain issue appears improved.
+- Dark holes are still visible on the seam between LOD bands.
+
+Logged summary:
+
+```text
+camera_ray.gap_classification = missing_transition_geometry_or_face_frame
+camera_ray.first_voxel_solid_distance = 192.75
+camera_ray.first_mesher_iso_distance = 193.09703
+camera_ray.first_any_render_hit = None
+camera_ray.first_front_render_hit = None
+camera_ray.first_backface_render_hit = None
+camera_ray.mc_cell.chunk_position = (8, 3, 19)
+camera_ray.mc_cell.effective_lod_at_mesh = Lod0
+camera_ray.mc_cell.neighbor_lods_at_mesh.pos_z = Lod1
+camera_ray.mc_cell.cell = (2, 3, 15)
+camera_ray.mc_cell.case_index = 240
+camera_ray.mc_cell.expected_regular_triangle_count = 2
+camera_ray.mc_cell.actual_regular_triangle_count = 0
+camera_ray.mc_cell.boundary_faces = [pos_z]
+camera_ray.mc_cell.skipped_regular_faces = [pos_z]
+camera_ray.mc_cell.transition_owner_faces = [pos_z]
+camera_ray.mc_cell.transition_cells[0].face = pos_z
+camera_ray.mc_cell.transition_cells[0].cell_u = 1
+camera_ray.mc_cell.transition_cells[0].cell_v = 1
+camera_ray.mc_cell.transition_cells[0].case_index = 0
+camera_ray.mc_cell.transition_cells[0].expected_triangle_count = 0
+camera_ray.mc_cell.transition_cells[0].actual_triangle_count = 0
+camera_ray.mc_cell.source_chunk_skipped_lod_delta_gt_one = 0
+camera_ray_fan.rays_with_gap = 14 / 81
+camera_ray_fan.gap_classification counts =
+  unknown:9
+  vertex_position_or_table_decode_error:2
+  missing_transition_geometry_or_face_frame:2
+  backface_or_winding:1
+source_chunk_skipped_lod_delta_gt_one values across classified gaps = [0]
+```
+
+Important finding:
+
+- This is a real boundary-row replacement failure, not scheduler churn:
+  `skipped_lod_delta_gt_one = 0`.
+- The regular MC boundary cell was non-empty (`case=240`, expected 2 triangles),
+  but it was skipped because `pos_z` was marked as a transition owner.
+- The mapped transition cell for that same row was empty (`case=0`, expected
+  and actual 0 triangles), so the transition pass removed the regular surface
+  without providing replacement geometry.
+
+Fix:
+
+- Regular MC boundary-row skipping is now conditional on the mapped transition
+  cell actually producing replacement triangles.
+- `transition_triangle_count_for_regular_cell` reuses the same transition case
+  calculation as transition extraction.
+- If the transition owner exists but the mapped transition case is empty, the
+  regular boundary cell is kept.
+- The hole probe now reports `skipped_regular_faces` using the same conditional
+  rule, while still reporting `transition_owner_faces` separately. This keeps
+  future dumps from saying a row was skipped when the mesh generator now keeps it.
+
+Regression:
+
+- Added `empty_transition_owner_keeps_regular_boundary_row`.
+- Fixture: current chunk air, `pos_z` neighbor solid/coarser. The target PosZ
+  transition cell is empty, while the regular PosZ boundary cell is non-empty.
+- Expected behavior: no transition source for the mapped transition cell,
+  a regular source for cell `(8, 8, 15)`, and a ray hit through the retained
+  regular boundary row.
+
+Verification:
+
+```powershell
+rtk cargo test -j 1 --lib --features mc_transvoxel empty_transition_owner_keeps_regular_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_triangle_winding_matches_vertex_normals -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_fills_skipped_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_lod1_mesh_covers_positive_boundary_cell -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel forensics -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel oracle_cell_selection -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_mc_flat_plane_has_no_ray_gaps -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_mc_diagonal_plane_has_no_ray_gaps -- --nocapture
+rtk cargo check -j 1 --lib --features mc_transvoxel
+rtk cargo build -j 1 --release --features mc_transvoxel
+```
+
+Status:
+
+- All focused tests above passed.
+- Release MC binary rebuilt successfully.
+- Next live retest: restart with `.\scripts\startVoxels.ps1 -Mc`, aim at the
+  same seam, and run Shift+F9. Expected center-ray change for this failure class:
+  if the oracle regular cell is non-empty and the mapped transition cell is
+  empty, the regular cell should now be present and `skipped_regular_faces`
+  should be empty while `transition_owner_faces` may still include the face.
+
+### Live seam repro after empty-owner fix: PosZ face-frame orientation
+
+User-provided live runtime dump on 2026-05-24 after the empty transition owner
+fallback:
+
+- `debug/terrain-hole-probe-20260524-152756.json`
+
+User observation:
+
+- Seam holes are still visible, but likely fewer.
+
+Logged summary:
+
+```text
+camera_ray.gap_classification = missing_transition_geometry_or_face_frame
+camera_ray.first_voxel_solid_distance = 179.75
+camera_ray.first_mesher_iso_distance = 179.52902
+camera_ray.first_any_render_hit.distance = 274.4428
+camera_ray.mc_cell.chunk_position = (21, 2, 21)
+camera_ray.mc_cell.effective_lod_at_mesh = Lod0
+camera_ray.mc_cell.neighbor_lods_at_mesh.pos_z = Lod1
+camera_ray.mc_cell.cell = (10, 7, 15)
+camera_ray.mc_cell.case_index = 48
+camera_ray.mc_cell.expected_regular_triangle_count = 2
+camera_ray.mc_cell.actual_regular_triangle_count = 0
+camera_ray.mc_cell.boundary_faces = [pos_z]
+camera_ray.mc_cell.skipped_regular_faces = [pos_z]
+camera_ray.mc_cell.transition_owner_faces = [pos_z]
+camera_ray.mc_cell.transition_cells[0].face = pos_z
+camera_ray.mc_cell.transition_cells[0].cell_u = 5
+camera_ray.mc_cell.transition_cells[0].cell_v = 3
+camera_ray.mc_cell.transition_cells[0].case_index = 12
+camera_ray.mc_cell.transition_cells[0].expected_triangle_count = 3
+camera_ray.mc_cell.transition_cells[0].actual_triangle_count = 3
+camera_ray.mc_cell.transition_cells[0].emitted_triangles_ray_hit_count = 0
+camera_ray.mc_cell.transition_cells[0].closest_emitted_triangle_ray_distance = 0.84287953
+camera_ray.mc_cell.source_chunk_skipped_lod_delta_gt_one = 0
+camera_ray_fan.rays_with_gap = 18 / 81
+camera_ray_fan.gap_classification counts =
+  unknown:16
+  vertex_position_or_table_decode_error:1
+  missing_transition_geometry_or_face_frame:1
+  backface_or_winding:1
+source_chunk_skipped_lod_delta_gt_one values across classified gaps = [0]
+```
+
+Important finding:
+
+- The mapped PosZ transition cell was not empty, but it was mapped with the
+  wrong tangent orientation. The reference `transvoxel` crate's rotations define
+  `HighZ`/PosZ U as `-X`; this implementation used `+X`.
+- The same audit found two other tangent sign mismatches against the reference
+  rotations: `NegX` U should run toward `-Z`, and `NegY` V should run toward
+  `-Z`.
+
+Fix:
+
+- `FaceFrame` now carries `u_sign` and `v_sign`.
+- `PosZ` uses reversed U, `NegX` uses reversed U, and `NegY` uses reversed V.
+- Transition cell lookup from a regular boundary cell now respects reversed
+  tangent axes, so the probe and mesher agree on the mapped transition cell.
+
+Regression:
+
+- Added `face_frames_match_transvoxel_tangent_orientation`.
+- Added `transition_cell_mapping_respects_reversed_tangent_axes`.
+- Added `pos_z_transition_case_uses_reversed_u_mapping`, using a synthetic PosZ
+  `case=12` SDF fixture matching the live dump's case class.
+
+Verification:
+
+```powershell
+rtk cargo test -j 1 --lib --features mc_transvoxel pos_z_transition_case_uses_reversed_u_mapping -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel face_frames_match_transvoxel_tangent_orientation -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_cell_mapping_respects_reversed_tangent_axes -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel empty_transition_owner_keeps_regular_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_triangle_winding_matches_vertex_normals -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_fills_skipped_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel forensics -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel oracle_cell_selection -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_mc_flat_plane_has_no_ray_gaps -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_mc_diagonal_plane_has_no_ray_gaps -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel regular_lod1_mesh_covers_positive_boundary_cell -- --nocapture
+rtk cargo check -j 1 --lib --features mc_transvoxel
+rtk cargo build -j 1 --release --features mc_transvoxel
+```
+
+Status:
+
+- All focused tests above passed.
+- Release MC binary rebuilt successfully.
+
+### Live seam repro after face-frame fix: transition replacement not watertight
+
+User-provided live runtime dump on 2026-05-24 after the PosZ/NegX/NegY tangent
+orientation fix:
+
+- `debug/terrain-hole-probe-20260524-154713.json`
+
+User observation:
+
+- There are fewer seam holes, but visible holes remain.
+
+Logged summary:
+
+```text
+camera_ray.gap_classification = unknown
+camera_ray.see_through_gap = None
+camera_ray.first_any_render_hit.distance = 211.64474
+camera_ray.first_any_render_hit.front_face = true
+camera_ray.first_any_render_hit.source = regular chunk (10, 2, 20), Lod1, cell (7, 1, 3), case=247
+camera_ray_fan.rays_with_gap = 15 / 81
+camera_ray_fan.gap_classification counts =
+  unknown:12
+  missing_transition_geometry_or_face_frame:2
+  vertex_position_or_table_decode_error:1
+source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
+```
+
+The 12 `unknown` fan rays now have front-facing render hits close to the mesher
+iso and are likely raw-occupancy-vs-mesher displacement rather than true holes.
+The remaining classified seam misses are both `pos_z` transition replacements:
+
+```text
+gap (3, 1):
+  chunk = (10, 4, 22), Lod1, pos_z neighbor Lod2
+  regular cell = (3, 2, 7), case=85, expected regular tris=2, actual regular tris=0
+  transition cell = pos_z u=2 v=1, case=270, expected/actual transition tris=4/4
+  emitted transition triangles ray hits = 0
+  closest transition triangle ray distance = 0.33981854
+
+gap (5, 4):
+  chunk = (10, 2, 19), Lod0, pos_z neighbor Lod1
+  regular cell = (9, 3, 15), case=115, expected regular tris=3, actual regular tris=0
+  transition cell = pos_z u=3 v=1, case=399, expected/actual transition tris=3/3
+  emitted transition triangles ray hits = 0
+  closest transition triangle ray distance = 0.4521598
+```
+
+Important finding:
+
+- This is no longer an empty transition owner or wrong PosZ tangent mapping.
+- The transition cell emits triangles, but the emitted triangles still miss the
+  ray near the mesher iso after the regular boundary cell has been deleted.
+- The remaining seam holes therefore come from destructive boundary-row
+  replacement by a transition path that is not yet watertight enough.
+
+Fix:
+
+- Regular MC boundary rows are now retained under transition aprons. The
+  transition triangles are still emitted, but they no longer destructively
+  delete the regular surface.
+- The hole probe now reports `transition_owner_faces` separately while keeping
+  `skipped_regular_faces` empty, matching the mesher behavior.
+- This is intentionally a pragmatic spike fallback: it should close the visible
+  holes while preserving transition-apron evidence. Pure destructive
+  replacement should only be restored after transition-cell watertight tests pass
+  on the live repro cases.
+
+Regression:
+
+- Added `transition_apron_keeps_regular_boundary_rows`.
+
+Verification:
+
+```powershell
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_apron_keeps_regular_boundary_rows -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel pos_z_transition_case_uses_reversed_u_mapping -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel empty_transition_owner_keeps_regular_boundary_row -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_triangle_winding_matches_vertex_normals -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel face_frames_match_transvoxel_tangent_orientation -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel transition_cell_mapping_respects_reversed_tangent_axes -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel forensics -- --nocapture
+rtk cargo test -j 1 --lib --features mc_transvoxel oracle_cell_selection -- --nocapture
+rtk cargo check -j 1 --lib --features mc_transvoxel
+rtk cargo build -j 1 --release --features mc_transvoxel
+```
+
+Status:
+
+- All focused tests above passed.
+- Release MC binary rebuilt successfully.
+- Next live retest: restart with `.\scripts\startVoxels.ps1 -Mc`, aim at the
+  same seam, and run Shift+F9. Expected dump change: `skipped_regular_faces`
+  should be empty for transition-owner cells; the two previous
+  `missing_transition_geometry_or_face_frame` rays should either disappear or
+  reclassify as regular/vertex issues if there is a deeper MC-table problem.
