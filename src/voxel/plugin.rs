@@ -2020,9 +2020,15 @@ fn forensics_mesh_mode_override(
     }
 }
 
-fn mesh_forensics_options(forensics: Option<&BenchForensicsConfig>) -> MeshForensicsOptions {
+fn mesh_forensics_options(
+    forensics: Option<&BenchForensicsConfig>,
+    mc_settings: &McTransvoxelSettings,
+) -> MeshForensicsOptions {
     let Some(forensics) = forensics.filter(|config| config.enabled) else {
-        return MeshForensicsOptions::default();
+        return MeshForensicsOptions {
+            enabled: mc_settings.debug_triangle_sources,
+            mc_transitions: McTransitionForensicsMode::Enabled,
+        };
     };
     MeshForensicsOptions {
         enabled: true,
@@ -2486,7 +2492,7 @@ fn mesh_dirty_chunks_system(
                 &skirt_config,
                 &ao_config.baked,
                 mesh_settings.water_air_exposure_mode,
-                mesh_forensics_options(bench_params.forensics.as_deref()),
+                mesh_forensics_options(bench_params.forensics.as_deref(), &mc_spike.settings),
             )
         } else {
             continue;

@@ -671,3 +671,69 @@ Updated conclusion:
 - The next useful repro must retarget the probe onto a pixel that is visibly
   black/dark in the screenshot, then rerun schema 10. Only that visually dark
   ray should drive a mesh/table/transition fix.
+
+### Live Shift+F9 dark-region probe
+
+User-provided live runtime dump on 2026-05-24:
+
+- `debug/terrain-hole-probe-20260524-123352.json`
+
+Logged summary:
+
+```text
+target_voxel_position = (95, 46, 97)
+target_chunk_position = (5, 2, 6)
+camera_ray.first_voxel_solid_distance = 227.25
+camera_ray.first_mesher_iso_distance = 228.0654
+camera_ray.first_any_render_hit.distance = 265.58856
+camera_ray.first_front_render_hit = null
+camera_ray.first_backface_render_hit.distance = 265.58856
+camera_ray_fan.rays_total = 81
+camera_ray_fan.rays_with_gap = 20
+source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
+```
+
+Important findings:
+
+- This is a better visual target than the previous fixed bench fan; the center
+  ray has no front-facing render hit near the raw or mesher-iso surface.
+- The dump did not include `McTriangleSources` because live runtime meshing was
+  not enabling source maps. Therefore `actual_regular_triangle_count = null`
+  means "unknown", not zero.
+- The old classifier was incorrectly treating unknown source counts as zero,
+  inflating the fan to `missing_regular_mc_geometry = 16`.
+- The old classifier also treated any later back-facing hit as winding, even
+  when it was 37.5 m behind the mesher iso. Backface/winding is only evidence
+  when the backface is at the expected surface.
+
+Probe fixes:
+
+- Missing regular/transition geometry now requires a known zero source count,
+  not a missing source map.
+- Backface/winding classification now requires the backface to be near the raw
+  or mesher-iso surface.
+- Added `mc_transvoxel.debug_triangle_sources` so live MC runtime meshes can
+  carry `McTriangleSources`, not just bench-forensics meshes.
+- Enabled `debug_triangle_sources: true` in the active MC config while this
+  investigation is running.
+
+Verification:
+
+```powershell
+rtk cargo test --lib --features mc_transvoxel camera_gap_does_not_classify_far_backface_as_winding -j 1
+rtk cargo test --lib --features mc_transvoxel camera_gap_classifies_backface_when_front_hit_is_late -j 1
+rtk cargo test --lib --features mc_transvoxel missing_regular_geometry_requires_known_zero_source_count -j 1
+rtk cargo test --lib --features mc_transvoxel known_zero_regular_source_count_classifies_missing_geometry -j 1
+rtk cargo test --lib --features mc_transvoxel config_deserializes_debug_triangle_sources -j 1
+rtk cargo test --lib --features mc_transvoxel forensics -j 1
+```
+
+Next live repro requirement:
+
+- Restart/rebuild the MC runtime so `debug_triangle_sources: true` is active
+  during mesh generation.
+- Let the visible region remesh, then run Shift+F9 again on the same dark
+  patch.
+- The next dump should have non-null `actual_regular_triangle_count` and
+  `first_render_hit_source` for MC chunks. That is the first dump that can
+  legitimately classify missing regular/transition geometry in live mode.

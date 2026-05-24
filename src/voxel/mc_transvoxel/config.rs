@@ -51,6 +51,8 @@ struct McTransvoxelSettingsRaw {
     debug_draw_transition_faces: bool,
     #[serde(default)]
     debug_log_transition_stats: bool,
+    #[serde(default)]
+    debug_triangle_sources: bool,
     #[serde(default = "default_sandbox_radius")]
     sandbox_radius_chunks: i32,
 }
@@ -74,6 +76,7 @@ pub struct McTransvoxelSettings {
     pub material_mode: McTransvoxelMaterialMode,
     pub debug_draw_transition_faces: bool,
     pub debug_log_transition_stats: bool,
+    pub debug_triangle_sources: bool,
     pub sandbox_radius_chunks: i32,
 }
 
@@ -89,6 +92,7 @@ impl Default for McTransvoxelSettings {
             material_mode: McTransvoxelMaterialMode::SingleTriplanar,
             debug_draw_transition_faces: false,
             debug_log_transition_stats: false,
+            debug_triangle_sources: false,
             sandbox_radius_chunks: 2,
         }
     }
@@ -98,8 +102,7 @@ impl McTransvoxelSettings {
     pub fn load_or_default() -> Self {
         match crate::config::loader::load_config::<McTransvoxelConfigFile, _>(
             MC_TRANSVOXEL_CONFIG_PATH,
-        )
-        {
+        ) {
             Ok(file) => Self::from_raw(file.mc_transvoxel),
             Err(err) => {
                 log::warn!(
@@ -121,6 +124,7 @@ impl McTransvoxelSettings {
             material_mode: raw.material_mode,
             debug_draw_transition_faces: raw.debug_draw_transition_faces,
             debug_log_transition_stats: raw.debug_log_transition_stats,
+            debug_triangle_sources: raw.debug_triangle_sources,
             sandbox_radius_chunks: raw.sandbox_radius_chunks.max(0),
         }
     }
@@ -149,5 +153,26 @@ impl McTransvoxelSettings {
                     && delta.z.abs() <= self.sandbox_radius_chunks
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_deserializes_debug_triangle_sources() {
+        let file: McTransvoxelConfigFile = serde_yaml::from_str(
+            r#"
+mc_transvoxel:
+  enabled: true
+  debug_triangle_sources: true
+"#,
+        )
+        .expect("mc_transvoxel config should deserialize");
+        let settings = McTransvoxelSettings::from_raw(file.mc_transvoxel);
+
+        assert!(settings.enabled);
+        assert!(settings.debug_triangle_sources);
     }
 }

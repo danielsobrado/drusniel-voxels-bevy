@@ -8,4 +8,5 @@ mc_transvoxel:
   material_mode: single_triplanar
   debug_draw_transition_faces: false
   debug_log_transition_stats: false
+  debug_triangle_sources: true
   sandbox_radius_chunks: 2

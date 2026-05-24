@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+#[cfg(feature = "mc_transvoxel")]
+use std::collections::HashMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3023,6 +3025,7 @@ fn collect_emitted_triangle_evidence(
         .collect()
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn mesh_triangle_vertices(
     mesh: &Mesh,
     translation: Vec3,
@@ -3041,6 +3044,7 @@ fn mesh_triangle_vertices(
     ])
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn emitted_triangle_probe(
     triangle_start: usize,
     ray_origin: Vec3,
@@ -3057,6 +3061,7 @@ fn emitted_triangle_probe(
     }
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn nearest_triangle_hit_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
     triangles
         .iter()
@@ -3064,6 +3069,7 @@ fn nearest_triangle_hit_distance(triangles: &[McEmittedTriangleProbe]) -> Option
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn closest_triangle_ray_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
     triangles
         .iter()
@@ -3071,6 +3077,7 @@ fn closest_triangle_ray_distance(triangles: &[McEmittedTriangleProbe]) -> Option
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn closest_sampled_triangle_ray_distance(origin: Vec3, dir: Vec3, vertices: [Vec3; 3]) -> f32 {
     let points = [
         vertices[0],
@@ -3087,6 +3094,7 @@ fn closest_sampled_triangle_ray_distance(origin: Vec3, dir: Vec3, vertices: [Vec
         .fold(f32::INFINITY, f32::min)
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn point_to_ray_distance(point: Vec3, origin: Vec3, dir: Vec3) -> f32 {
     let dir = dir.normalize_or_zero();
     if dir == Vec3::ZERO {
@@ -3097,6 +3105,7 @@ fn point_to_ray_distance(point: Vec3, origin: Vec3, dir: Vec3) -> f32 {
     (to_point - dir * along).length()
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn mc_cell_agreement(
     raw_cell: Option<&McCellOracleProbe>,
     iso_cell: Option<&McCellOracleProbe>,
@@ -3128,10 +3137,12 @@ fn mc_cell_agreement(
     }
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn mc_cells_same(a: &McCellOracleProbe, b: &McCellOracleProbe) -> bool {
     a.chunk_position == b.chunk_position && a.cell == b.cell
 }
 
+#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
 fn mc_source_matches_cell_probe(source: &McTriangleSourceProbe, cell: &McCellOracleProbe) -> bool {
     match source {
         McTriangleSourceProbe::Regular {
@@ -3395,9 +3406,10 @@ fn classify_camera_gap(
         .map_or(true, |hit| hit.distance > raw_distance + 1.0);
 
     if front_late
-        && first_backface
-            .as_ref()
-            .is_some_and(|hit| hit.distance <= raw_distance + 1.0)
+        && first_backface.as_ref().is_some_and(|hit| {
+            hit.distance <= raw_distance + 1.0
+                || first_mesher_iso_distance.is_some_and(|iso| (hit.distance - iso).abs() <= 1.0)
+        })
     {
         return GapClassification::BackfaceOrWinding;
     }
@@ -3421,7 +3433,7 @@ fn classify_camera_gap(
         {
             return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
         }
-        if front_late && !hit.front_face {
+        if front_late && !hit.front_face && (near_raw || near_iso) {
             return GapClassification::BackfaceOrWinding;
         }
     }
@@ -3433,35 +3445,38 @@ fn classify_camera_gap(
     }
 
     if let Some(cell) = mc_cell {
-        let actual_regular = cell.actual_regular_triangle_count.unwrap_or(0);
+        let actual_regular = cell.actual_regular_triangle_count;
         let expected_transition: u32 = cell
             .transition_cells
             .iter()
             .map(|transition| transition.expected_triangle_count as u32)
             .sum();
-        let actual_transition: u32 = cell
+        let actual_transition = cell
             .transition_cells
             .iter()
-            .map(|transition| transition.actual_triangle_count.unwrap_or(0))
-            .sum();
+            .try_fold(0u32, |total, transition| {
+                transition
+                    .actual_triangle_count
+                    .map(|actual| total.saturating_add(actual))
+            });
 
         if !cell.skipped_regular_faces.is_empty()
             && expected_transition > 0
-            && actual_transition == 0
+            && actual_transition == Some(0)
         {
             return GapClassification::MissingTransitionGeometryOrFaceFrame;
         }
-        if cell.expected_regular_triangle_count > 0 && actual_regular == 0 {
+        if cell.expected_regular_triangle_count > 0 && actual_regular == Some(0) {
             if !cell.skipped_regular_faces.is_empty() {
                 return GapClassification::MissingTransitionGeometryOrFaceFrame;
             }
             return GapClassification::MissingRegularMcGeometry;
         }
-        if expected_transition > 0 && actual_transition == 0 {
+        if expected_transition > 0 && actual_transition == Some(0) {
             return GapClassification::MissingTransitionGeometryOrFaceFrame;
         }
         if cell.expected_regular_triangle_count > 0
-            && actual_regular > 0
+            && actual_regular.is_some_and(|actual| actual > 0)
             && first_any
                 .as_ref()
                 .map_or(true, |hit| hit.distance > raw_distance + 1.0)
@@ -4655,6 +4670,44 @@ mod tests {
     }
 
     #[test]
+    fn camera_gap_does_not_classify_far_backface_as_winding() {
+        let gap = Some(SeeThroughGap {
+            voxel_surface_distance: 227.25,
+            first_front_render_hit_distance: None,
+            gap_length: 284.75,
+            note: "test".to_string(),
+        });
+        let far_backface = CameraRayHit {
+            distance: 265.58856,
+            point: Vec3::ZERO.into(),
+            front_face: false,
+            geometric_normal: Vec3::Y.into(),
+            normal_dot_ray: 0.27,
+            vertex_normal: Some(Vec3::Y.into()),
+            material_weights: Some([0.0, 0.0, 0.78, 0.22]),
+            chunk_position: Some(IVec3::new(4, 3, 4).into()),
+            entity: "Entity(0)".to_string(),
+            mesh_section: MeshTriangleSectionProbe::Unknown,
+            triangle_start_index: 51,
+            vertices: None,
+            source: None,
+        };
+
+        assert_eq!(
+            classify_camera_gap(
+                &gap,
+                &Some(far_backface.clone()),
+                &None,
+                &Some(far_backface),
+                Some(228.0654),
+                None,
+                &CameraRayVisualSamples::default(),
+            ),
+            GapClassification::Unknown
+        );
+    }
+
+    #[test]
     fn screenshot_pixel_classifier_detects_dark_and_lit_pixels() {
         assert_eq!(
             classify_visual_pixel(RgbaProbe {
@@ -4879,6 +4932,56 @@ mod tests {
                 &visual_samples,
             ),
             GapClassification::VertexPositionOrTableDecodeError
+        );
+    }
+
+    #[test]
+    fn missing_regular_geometry_requires_known_zero_source_count() {
+        let gap = SeeThroughGap {
+            voxel_surface_distance: 95.5,
+            first_front_render_hit_distance: None,
+            gap_length: 6.6655655,
+            note: "test".to_string(),
+        };
+        let mut cell = classification_test_cell();
+        cell.actual_regular_triangle_count = None;
+
+        assert_eq!(
+            classify_camera_gap(
+                &Some(gap),
+                &None,
+                &None,
+                &None,
+                None,
+                Some(&cell),
+                &CameraRayVisualSamples::default(),
+            ),
+            GapClassification::Unknown
+        );
+    }
+
+    #[test]
+    fn known_zero_regular_source_count_classifies_missing_geometry() {
+        let gap = SeeThroughGap {
+            voxel_surface_distance: 95.5,
+            first_front_render_hit_distance: None,
+            gap_length: 6.6655655,
+            note: "test".to_string(),
+        };
+        let mut cell = classification_test_cell();
+        cell.actual_regular_triangle_count = Some(0);
+
+        assert_eq!(
+            classify_camera_gap(
+                &Some(gap),
+                &None,
+                &None,
+                &None,
+                None,
+                Some(&cell),
+                &CameraRayVisualSamples::default(),
+            ),
+            GapClassification::MissingRegularMcGeometry
         );
     }
 

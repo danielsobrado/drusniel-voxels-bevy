@@ -19,6 +19,7 @@ pub struct McTransvoxelStats {
 pub struct McTransvoxelSettings {
     pub enabled: bool,
     pub lod_delta_policy: McTransvoxelLodDeltaPolicy,
+    pub debug_triangle_sources: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -32,6 +33,7 @@ impl Default for McTransvoxelSettings {
         Self {
             enabled: false,
             lod_delta_policy: McTransvoxelLodDeltaPolicy::MaxOne,
+            debug_triangle_sources: false,
         }
     }
 }
