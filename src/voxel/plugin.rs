@@ -1253,26 +1253,36 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
 
     for y in 0..height {
         let v = y as f32 / height_f;
-        let heat = (1.0 - v).clamp(0.0, 1.0).powf(1.45);
+        let from_bottom = v.clamp(0.0, 1.0);
+        let flame_band = smoothstep(0.58, 1.0, from_bottom);
+        let base_line = smoothstep(0.965, 1.0, from_bottom);
+        let smoke_band = smoothstep(0.08, 0.78, 1.0 - from_bottom);
         for x in 0..width {
             let u = x as f32 / width_f;
-            let center_fuel = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.35);
-            let n1 = flame_hash_noise(u * 7.0, v * 4.0 - time * 0.9);
-            let n2 = flame_hash_noise(u * 18.0 + time * 0.3, v * 11.0 - time * 2.1);
-            let lick = ((n1 * 0.62 + n2 * 0.38) * center_fuel + heat * 0.85).clamp(0.0, 1.0);
-            let intensity = (heat * lick * 1.7).clamp(0.0, 1.0);
-            let smoke = ((1.0 - heat) * n2 * center_fuel * 0.18).clamp(0.0, 1.0);
-            let alpha = ((intensity * 0.78 + smoke * 0.35) * 255.0).clamp(0.0, 235.0) as u8;
+            let center_fuel = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.72);
+            let edge_falloff = smoothstep(0.0, 0.16, u) * smoothstep(0.0, 0.16, 1.0 - u);
+            let n1 = flame_hash_noise(u * 9.0, v * 6.0 - time * 1.25);
+            let n2 = flame_hash_noise(u * 23.0 + time * 0.35, v * 15.0 - time * 2.4);
+            let tongues = ((n1 * 0.58 + n2 * 0.42) * center_fuel * edge_falloff).powf(1.35);
+            let intensity = (base_line * 0.92 + flame_band * tongues * 0.55).clamp(0.0, 1.0);
+            let smoke_center = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(1.8);
+            let smoke = (smoke_band * smoke_center * n2 * 0.085).clamp(0.0, 1.0);
+            let alpha = ((intensity * 0.18 + smoke * 0.16) * 255.0).clamp(0.0, 72.0) as u8;
             let idx = ((y * width + x) * 4) as usize;
 
-            pixels[idx] = ((intensity * 255.0) + smoke * 45.0).clamp(0.0, 255.0) as u8;
-            pixels[idx + 1] = ((intensity.powf(1.55) * 105.0) + smoke * 35.0).clamp(0.0, 255.0) as u8;
-            pixels[idx + 2] = ((intensity.powf(3.0) * 18.0) + smoke * 42.0).clamp(0.0, 255.0) as u8;
+            pixels[idx] = ((intensity * 240.0) + smoke * 26.0).clamp(0.0, 255.0) as u8;
+            pixels[idx + 1] = ((intensity.powf(1.45) * 78.0) + smoke * 24.0).clamp(0.0, 255.0) as u8;
+            pixels[idx + 2] = ((intensity.powf(2.8) * 12.0) + smoke * 24.0).clamp(0.0, 255.0) as u8;
             pixels[idx + 3] = alpha;
         }
     }
 
     pixels
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn flame_hash_noise(x: f32, y: f32) -> f32 {
