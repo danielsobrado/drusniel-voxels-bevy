@@ -8,6 +8,7 @@
 
 struct LoadingFlamesUniform {
     time: f32,
+    _time_padding: f32,
     resolution: vec2<f32>,
     mouse: vec2<f32>,
 };

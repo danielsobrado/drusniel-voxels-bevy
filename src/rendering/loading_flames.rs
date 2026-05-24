@@ -34,6 +34,7 @@ pub struct LoadingFlamesLabel;
 #[derive(Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
 struct LoadingFlamesUniform {
     time: f32,
+    _time_padding: f32,
     resolution: [f32; 2],
     mouse: [f32; 2],
 }
@@ -87,6 +88,7 @@ fn extract_loading_flames(world: &mut World) {
     world.insert_resource(ExtractedLoadingFlames {
         uniform: LoadingFlamesUniform {
             time,
+            _time_padding: 0.0,
             resolution: [resolution.x, resolution.y],
             mouse: [mouse.x, mouse.y],
         },
