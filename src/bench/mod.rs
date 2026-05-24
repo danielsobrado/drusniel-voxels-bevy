@@ -234,6 +234,55 @@ pub struct BenchRenderToggles {
     pub naadf_use_for_contact_shadows: Option<bool>,
 }
 
+#[derive(Resource, Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BenchForensicsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub terrain_mesher: BenchForensicsTerrainMesher,
+    #[serde(default)]
+    pub terrain_lod: BenchForensicsTerrainLod,
+    #[serde(default)]
+    pub mc_transitions: BenchForensicsMcTransitions,
+}
+
+impl Default for BenchForensicsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            terrain_mesher: BenchForensicsTerrainMesher::Auto,
+            terrain_lod: BenchForensicsTerrainLod::Auto,
+            mc_transitions: BenchForensicsMcTransitions::Enabled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchForensicsTerrainMesher {
+    #[default]
+    Auto,
+    SurfaceNets,
+    McTransvoxel,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchForensicsTerrainLod {
+    #[default]
+    Auto,
+    AllLod0,
+    AllLod1,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchForensicsMcTransitions {
+    #[default]
+    Enabled,
+    DisabledKeepBoundaryRows,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 struct StartupTraceConfig {
     #[serde(default)]
@@ -479,6 +528,8 @@ struct BenchScene {
     startup_trace: StartupTraceConfig,
     #[serde(default)]
     render_toggles: BenchRenderToggles,
+    #[serde(default)]
+    forensics: Option<BenchForensicsConfig>,
     #[serde(rename = "checkpoint")]
     checkpoints: Vec<BenchCheckpoint>,
 }
@@ -952,6 +1003,7 @@ impl Plugin for BenchPlugin {
         }
 
         let render_toggles = scene.render_toggles.clone();
+        let forensics = scene.forensics.unwrap_or_default();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.insert_resource(render_toggles.clone());
         }
@@ -974,6 +1026,7 @@ impl Plugin for BenchPlugin {
         app.insert_resource(BenchSceneResource(scene.clone()))
             .insert_resource(bench_world_persistence(&scene))
             .insert_resource(render_toggles)
+            .insert_resource(forensics)
             .insert_resource(BenchState {
                 phase: BenchPhase::Warmup,
                 checkpoint_index: 0,
@@ -4316,6 +4369,45 @@ hole_probe = { frame = 30, label = "mctx-static-mountain-hole", target_voxel = [
     }
 
     #[test]
+    fn forensics_scene_config_deserializes() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 6
+
+[forensics]
+terrain_mesher = "mc_transvoxel"
+terrain_lod = "all_lod1"
+mc_transitions = "disabled_keep_boundary_rows"
+
+[[checkpoint]]
+name = "mctx-static"
+position = [285.84256, 38.747417, 144.33394]
+look_at = [188.1263, 36.347652, 123.22059]
+time_of_day = 0.42
+hold_frames = 90
+"#,
+        )
+        .expect("forensics bench scene should deserialize");
+
+        let forensics = scene
+            .forensics
+            .expect("forensics section should produce a config");
+        assert!(forensics.enabled);
+        assert_eq!(
+            forensics.terrain_mesher,
+            BenchForensicsTerrainMesher::McTransvoxel
+        );
+        assert_eq!(forensics.terrain_lod, BenchForensicsTerrainLod::AllLod1);
+        assert_eq!(
+            forensics.mc_transitions,
+            BenchForensicsMcTransitions::DisabledKeepBoundaryRows
+        );
+    }
+
+    #[test]
     fn naadf_bench_cache_toggles_deserialize() {
         let scene: BenchScene = toml::from_str(
             r#"
@@ -4456,6 +4548,7 @@ hold_frames = 30
             freeze_terrain_lod_after_ready: true,
             startup_trace: StartupTraceConfig::default(),
             render_toggles: BenchRenderToggles::default(),
+            forensics: None,
             checkpoints: Vec::new(),
         };
         let mut world = VoxelWorld::new(IVec3::ONE);

@@ -18,21 +18,21 @@ mod normals;
 #[cfg(feature = "mc_transvoxel")]
 mod stats;
 #[cfg(feature = "mc_transvoxel")]
-mod tables;
+pub(crate) mod tables;
 #[cfg(feature = "mc_transvoxel")]
 mod transvoxel;
 
 #[cfg(feature = "mc_transvoxel")]
 pub use config::{
-    McTransvoxelLodDeltaPolicy, McTransvoxelMaterialMode, McTransvoxelSettings,
-    McTransvoxelSpikeMode, MC_TRANSVOXEL_CONFIG_PATH,
+    MC_TRANSVOXEL_CONFIG_PATH, McTransvoxelLodDeltaPolicy, McTransvoxelMaterialMode,
+    McTransvoxelSettings, McTransvoxelSpikeMode,
 };
 #[cfg(feature = "mc_transvoxel")]
 pub use debug::log_transition_stats_if_due;
 #[cfg(feature = "mc_transvoxel")]
-pub use face_mask::TransvoxelFaceMask;
+pub use face_mask::{TransvoxelFaceMask, compute_transvoxel_face_mask};
 #[cfg(feature = "mc_transvoxel")]
-pub use mc::{generate_mc_chunk_mesh, McMeshInput, McMeshOutput};
+pub use mc::{McMeshInput, McMeshOutput, generate_mc_chunk_mesh};
 #[cfg(feature = "mc_transvoxel")]
 pub use stats::{McTransvoxelRuntimeStats, McTransvoxelStats};
 

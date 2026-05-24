@@ -3,18 +3,16 @@
 //! Transition cells replace the outermost regular-MC cell row on faces where the
 //! neighbor LOD index is exactly `my_lod_index + 1` (coarser neighbor).
 
-use crate::voxel::chunk::Chunk;
-use crate::voxel::meshing::MeshData;
+use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::meshing::{McTriangleSource, MeshData};
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 
 use super::face_mask::TransvoxelFaceMask;
-use super::mc::{push_mc_triangle, SdfGrid};
+use super::mc::{SdfGrid, push_mc_triangle};
 use super::stats::McTransvoxelStats;
-use super::tables::{
-    TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA, TRANSITION_VERTEX_DATA,
-};
+use super::tables::{TRANSITION_CELL_CLASS, TRANSITION_CELL_DATA, TRANSITION_VERTEX_DATA};
 
 #[derive(Copy, Clone)]
 struct TransitionVertexData(u16);
@@ -177,6 +175,8 @@ pub fn append_transition_meshes(
     subdivisions: usize,
     _step: i32,
     transition_mask: TransvoxelFaceMask,
+    lod: LodLevel,
+    triangle_sources: &mut Option<Vec<McTriangleSource>>,
     stats: &mut McTransvoxelStats,
 ) {
     for (face_index, face) in ChunkFace::ALL.iter().enumerate() {
@@ -199,6 +199,9 @@ pub fn append_transition_meshes(
                     &frame,
                     cell_u,
                     cell_v,
+                    *face,
+                    lod,
+                    triangle_sources,
                 );
             }
         }
@@ -217,15 +220,13 @@ fn extract_transition_cell(
     frame: &FaceFrame,
     cell_u: usize,
     cell_v: usize,
+    face: ChunkFace,
+    lod: LodLevel,
+    triangle_sources: &mut Option<Vec<McTriangleSource>>,
 ) -> u32 {
     let mut case = 0usize;
     for (i, delta) in HIGH_RES_FACE_GRID.iter().enumerate() {
-        let coords = frame.grid_coords(
-            subdivisions,
-            cell_u,
-            cell_v,
-            GridPoint::HighRes(*delta),
-        );
+        let coords = frame.grid_coords(subdivisions, cell_u, cell_v, GridPoint::HighRes(*delta));
         if sdf.get(coords[0], coords[1], coords[2]) < 0.0 {
             case |= HIGH_RES_CASE_BITS[i];
         }
@@ -264,22 +265,31 @@ fn extract_transition_cell(
         let i0 = tri_data.vertex_index[t * 3] as usize;
         let i1 = tri_data.vertex_index[t * 3 + 1] as usize;
         let i2 = tri_data.vertex_index[t * 3 + 2] as usize;
-        let Some(mut p0) = cell_vertices[i0] else { continue };
-        let Some(mut p1) = cell_vertices[i1] else { continue };
-        let Some(mut p2) = cell_vertices[i2] else { continue };
+        let Some(p0) = cell_vertices[i0] else {
+            continue;
+        };
+        let Some(mut p1) = cell_vertices[i1] else {
+            continue;
+        };
+        let Some(mut p2) = cell_vertices[i2] else {
+            continue;
+        };
         if invert {
             std::mem::swap(&mut p1, &mut p2);
         }
-        push_mc_triangle(
-            mesh,
-            chunk,
-            world,
-            chunk_origin,
-            chunk_center,
-            p0,
-            p1,
-            p2,
-        );
+        push_mc_triangle(mesh, chunk, world, chunk_origin, chunk_center, p0, p1, p2);
+        if let Some(sources) = triangle_sources.as_mut() {
+            sources.push(McTriangleSource::Transition {
+                chunk_pos: chunk.position(),
+                lod,
+                face,
+                cell_u: cell_u as u16,
+                cell_v: cell_v as u16,
+                case_index: case as u16,
+                class_index: class,
+                invert,
+            });
+        }
         emitted += 1;
     }
     emitted
@@ -309,8 +319,16 @@ mod tests {
         // W = y axis, plane at the boundary (16) for HighRes and one cell in
         // (15) for LowRes. Together they span padded y [15, 16].
         assert_eq!(hi[1], SUBDIVISIONS, "PosY HighRes plane is the boundary");
-        assert_eq!(lo[1], SUBDIVISIONS - 1, "PosY LowRes is one cell into the chunk");
-        assert_eq!(hi[1] - lo[1], 1, "transition cell is exactly one W cell thick");
+        assert_eq!(
+            lo[1],
+            SUBDIVISIONS - 1,
+            "PosY LowRes is one cell into the chunk"
+        );
+        assert_eq!(
+            hi[1] - lo[1],
+            1,
+            "transition cell is exactly one W cell thick"
+        );
     }
 
     /// NegY mirrors PosY: HighRes at padded index 1 (boundary), LowRes at 2.
@@ -329,8 +347,15 @@ mod tests {
         let lo = frame.grid_coords(SUBDIVISIONS, 0, 0, GridPoint::LowRes(0, 0));
 
         assert_eq!(hi[1], 1, "NegY HighRes plane is the boundary at padded y=1");
-        assert_eq!(lo[1], 2, "NegY LowRes is one cell into the chunk at padded y=2");
-        assert_eq!(lo[1] - hi[1], 1, "transition cell is exactly one W cell thick");
+        assert_eq!(
+            lo[1], 2,
+            "NegY LowRes is one cell into the chunk at padded y=2"
+        );
+        assert_eq!(
+            lo[1] - hi[1],
+            1,
+            "transition cell is exactly one W cell thick"
+        );
     }
 
     /// Each transition cell covers a 2x2 high-res sub-cell area. The four
@@ -357,12 +382,7 @@ mod tests {
                 cell_v,
                 GridPoint::LowRes(fu as usize, fv as usize),
             );
-            let hi = frame.grid_coords(
-                SUBDIVISIONS,
-                cell_u,
-                cell_v,
-                GridPoint::HighRes(hr_delta),
-            );
+            let hi = frame.grid_coords(SUBDIVISIONS, cell_u, cell_v, GridPoint::HighRes(hr_delta));
             // u_axis = 0, v_axis = 2 for PosY: LowRes and HighRes corner must
             // share U and V (only W differs).
             assert_eq!(lo[0], hi[0], "U mismatch for LowRes({fu},{fv})");

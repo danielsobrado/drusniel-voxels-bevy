@@ -35,8 +35,8 @@ use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
 use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats,
-    extract_boundary_edges, generate_skirts_with_apron_only_faces,
+    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
+    generate_skirts_with_apron_only_faces,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -83,9 +83,7 @@ pub fn barycentric_section(uv: [f32; 2]) -> u8 {
 
 /// Decode the chunk LOD index written by [`encode_barycentric_uv`].
 pub fn barycentric_lod_index(uv: [f32; 2]) -> u8 {
-    (uv[0] / TERRAIN_BARYCENTRIC_LOD_U_SCALE)
-        .floor()
-        .min(3.0) as u8
+    (uv[0] / TERRAIN_BARYCENTRIC_LOD_U_SCALE).floor().min(3.0) as u8
 }
 
 /// Decode the barycentric U coordinate from encoded UV1.
@@ -116,6 +114,54 @@ pub struct TerrainMeshDebug {
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum McTransitionForensicsMode {
+    #[default]
+    Enabled,
+    DisabledKeepBoundaryRows,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MeshForensicsOptions {
+    pub enabled: bool,
+    pub mc_transitions: McTransitionForensicsMode,
+}
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct McTriangleSources {
+    pub sources: Vec<McTriangleSource>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McTriangleSource {
+    Regular {
+        chunk_pos: IVec3,
+        lod: LodLevel,
+        cell: UVec3,
+        case_index: u16,
+        class_index: u8,
+    },
+    Transition {
+        chunk_pos: IVec3,
+        lod: LodLevel,
+        face: ChunkFace,
+        cell_u: u16,
+        cell_v: u16,
+        case_index: u16,
+        class_index: u8,
+        invert: bool,
+    },
+}
+
+impl McTriangleSources {
+    pub fn source_for_triangle_start(
+        &self,
+        triangle_start_index: usize,
+    ) -> Option<&McTriangleSource> {
+        self.sources.get(triangle_start_index / 3)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -432,6 +478,7 @@ pub struct ChunkMeshResult {
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
+    pub mc_triangle_sources: Option<McTriangleSources>,
 }
 
 // =============================================================================
@@ -893,6 +940,7 @@ pub fn generate_chunk_mesh(
         lod_transition_snap_stats: LodTransitionSnapStats::default(),
         mesh_section_stats: TerrainMeshSectionStats::default(),
         mc_transvoxel_stats: None,
+        mc_triangle_sources: None,
     }
 }
 
@@ -2848,7 +2896,11 @@ fn smoothed_sdf_from_block(block: &[f32], px: u32, py: u32, pz: u32) -> f32 {
     }
     let smoothed = sum / weight;
     let raw = block[(px + 1) + (py + 1) * n + (pz + 1) * n * n];
-    if raw < 0.0 { -1.0 } else { smoothed.max(SIGN_GUARD) }
+    if raw < 0.0 {
+        -1.0
+    } else {
+        smoothed.max(SIGN_GUARD)
+    }
 }
 
 /// Mesher SDF at a world position (matches Surface Nets / iso-band debug sampling).
@@ -3764,6 +3816,7 @@ pub fn generate_chunk_mesh_surface_nets(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats: None,
+        mc_triangle_sources: None,
     }
 }
 
@@ -3965,6 +4018,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats: None,
+        mc_triangle_sources: None,
     }
 }
 
@@ -4166,6 +4220,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats: None,
+        mc_triangle_sources: None,
     }
 }
 
@@ -4367,6 +4422,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats: None,
+        mc_triangle_sources: None,
     }
 }
 
@@ -4627,7 +4683,10 @@ mod tests {
                         );
                         // Face-adjacent air voxels of the cube are exactly the
                         // pre-clamp negative-blur case we want to exercise.
-                        if (p.x == 6 || p.x == 10) && (7..=9).contains(&p.y) && (7..=9).contains(&p.z) {
+                        if (p.x == 6 || p.x == 10)
+                            && (7..=9).contains(&p.y)
+                            && (7..=9).contains(&p.z)
+                        {
                             saw_air_with_solid_neighbours = true;
                         }
                     }
@@ -4666,8 +4725,8 @@ mod tests {
         for pz in 6..=12 {
             for py in 6..=12 {
                 for px in 6..=12 {
-                    let world_voxel = chunk_origin
-                        + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
+                    let world_voxel =
+                        chunk_origin + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
                     let raw = terrain_occupancy_sdf_at_world(&world, world_voxel);
                     let smoothed = smoothed_sdf_from_block(&block, px, py, pz);
                     if raw < 0.0 {
@@ -5868,7 +5927,10 @@ mod tests {
         mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_VERTICAL_SKIRT);
 
         assert_eq!(barycentric_lod_index(mesh.barycentric_uvs[0]), 2);
-        assert_eq!(barycentric_section(mesh.barycentric_uvs[0]), TERRAIN_MESH_SECTION_MAIN);
+        assert_eq!(
+            barycentric_section(mesh.barycentric_uvs[0]),
+            TERRAIN_MESH_SECTION_MAIN
+        );
         assert_eq!(
             barycentric_section(mesh.barycentric_uvs[3]),
             TERRAIN_MESH_SECTION_VERTICAL_SKIRT
@@ -5929,6 +5991,31 @@ pub fn generate_chunk_mesh_with_mode(
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
+    generate_chunk_mesh_with_mode_and_forensics(
+        chunk,
+        world,
+        mode,
+        my_lod,
+        neighbor_lods,
+        skirt_config,
+        ao_config,
+        water_exposure_mode,
+        MeshForensicsOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_chunk_mesh_with_mode_and_forensics(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    mode: MeshMode,
+    my_lod: LodLevel,
+    neighbor_lods: NeighborLods,
+    skirt_config: &SkirtConfig,
+    ao_config: &BakedAoConfig,
+    water_exposure_mode: WaterAirExposureMode,
+    forensics: MeshForensicsOptions,
+) -> ChunkMeshResult {
     match mode {
         MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config, water_exposure_mode),
         MeshMode::McTransvoxel => generate_chunk_mesh_mc_transvoxel(
@@ -5938,6 +6025,7 @@ pub fn generate_chunk_mesh_with_mode(
             neighbor_lods,
             ao_config,
             water_exposure_mode,
+            forensics,
         ),
         MeshMode::SurfaceNets => {
             // Select LOD-appropriate mesh generation
@@ -6003,6 +6091,7 @@ pub fn generate_chunk_mesh_with_mode(
                         lod_transition_snap_stats: LodTransitionSnapStats::default(),
                         mesh_section_stats: TerrainMeshSectionStats::default(),
                         mc_transvoxel_stats: None,
+                        mc_triangle_sources: None,
                     }
                 }
             }
@@ -6018,8 +6107,9 @@ fn generate_chunk_mesh_mc_transvoxel(
     neighbor_lods: NeighborLods,
     _ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
+    forensics: MeshForensicsOptions,
 ) -> ChunkMeshResult {
-    use crate::voxel::mc_transvoxel::{generate_mc_chunk_mesh, McMeshInput, McTransvoxelSettings};
+    use crate::voxel::mc_transvoxel::{McMeshInput, McTransvoxelSettings, generate_mc_chunk_mesh};
 
     let settings = McTransvoxelSettings::load_or_default();
     if !settings.enabled {
@@ -6043,6 +6133,7 @@ fn generate_chunk_mesh_mc_transvoxel(
         neighbor_lods,
         settings: &settings,
         water_exposure_mode,
+        forensics,
     });
     output.result
 }
@@ -6055,6 +6146,7 @@ fn generate_chunk_mesh_mc_transvoxel(
     neighbor_lods: NeighborLods,
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
+    _forensics: MeshForensicsOptions,
 ) -> ChunkMeshResult {
     generate_chunk_mesh_with_mode(
         chunk,
@@ -6113,6 +6205,7 @@ pub(crate) mod mc_support {
         }
     }
 
+    #[allow(dead_code)]
     pub fn sample_smoothed_sdf_at_padded(
         world: &VoxelWorld,
         chunk_origin: IVec3,
@@ -6139,11 +6232,7 @@ pub(crate) mod mc_support {
         scale_vertex_from_center(local, chunk_center)
     }
 
-    pub fn gradient_normal(
-        world: &VoxelWorld,
-        chunk_origin: IVec3,
-        local_pos: Vec3,
-    ) -> [f32; 3] {
+    pub fn gradient_normal(world: &VoxelWorld, chunk_origin: IVec3, local_pos: Vec3) -> [f32; 3] {
         sdf_gradient_normal_at_local(world, chunk_origin, local_pos)
     }
 }

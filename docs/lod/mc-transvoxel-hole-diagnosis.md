@@ -334,3 +334,158 @@ Normalization note:
 - Treat stable fields as regression checks: target voxel/chunk, LOD states,
   neighbor LODs, transition counts, skipped-delta counts, camera-ray distances,
   signed surface errors, and per-chunk triangle counts.
+
+## Mesh forensics pass
+
+Implemented after the deterministic repro showed the SDF sign clamp and
+scheduler refinement did not remove the visible mountain holes.
+
+New probe evidence:
+
+- `camera_ray.first_any_render_hit`
+- `camera_ray.first_backface_render_hit`
+- per-hit geometric normal, averaged vertex normal, material weights, and
+  `normal_dot_ray`
+- MC triangle source for render hits when MC forensics are enabled
+- `camera_ray.first_mesher_iso_distance`
+- `camera_ray.first_mesher_iso_point`
+- `camera_ray.mc_cell`
+- `camera_ray.gap_classification`
+- the same classification and MC-cell evidence on each fan gap
+
+Classification buckets:
+
+```text
+raw_occupancy_vs_mesher_iso_false_positive
+geometry_present_but_shading_or_normal_darkening
+backface_or_winding
+missing_regular_mc_geometry
+missing_transition_geometry_or_face_frame
+vertex_position_or_table_decode_error
+missing_mesh_entity_or_render_layer
+unknown
+```
+
+MC cell oracle fields now recorded for each source gap:
+
+- effective LOD at mesh time,
+- neighbor LODs at mesh time,
+- nearest regular MC cell,
+- regular case/class index,
+- expected regular triangle count,
+- actual emitted regular triangle count from `McTriangleSources`,
+- boundary faces,
+- skipped regular boundary faces,
+- transition owner faces,
+- transition cell case/class/expected/actual counts for owning faces,
+- source chunk `skipped_lod_delta_gt_one`.
+
+Runtime plumbing:
+
+- Added `McTriangleSources` as a separate debug component, not part of
+  `TerrainMeshDebug`.
+- MC generation only fills sources when bench forensics are enabled.
+- Non-MC and non-forensics meshes remove or omit the component.
+- Bench forensics overrides can force mesher, LOD, and transition mode before
+  initial LOD assignment and during LOD updates.
+
+Isolation bench variants:
+
+```text
+bench/scenes/visual/mc-transvoxel-static-hole-probe.toml
+bench/scenes/visual/mc-transvoxel-static-hole-probe-surface-nets.toml
+bench/scenes/visual/mc-transvoxel-static-hole-probe-all-lod0.toml
+bench/scenes/visual/mc-transvoxel-static-hole-probe-all-lod1.toml
+bench/scenes/visual/mc-transvoxel-static-hole-probe-no-transitions.toml
+bench/scenes/visual/mc-transvoxel-static-hole-probe-all-lod1-no-transitions.toml
+```
+
+Verification added:
+
+```powershell
+rtk cargo test --lib --features mc_transvoxel forensics
+rtk cargo test --lib --features mc_transvoxel ray_triangle_hit_reports_front_and_backface_hits
+rtk cargo test --lib --features mc_transvoxel camera_gap_classifies_backface_when_front_hit_is_late
+rtk cargo test --lib --features mc_transvoxel mesher_iso_oracle_matches_flat_plane_sdf
+rtk cargo test --lib --features mc_transvoxel regular_mc_flat_plane_has_no_ray_gaps
+rtk cargo test --lib --features mc_transvoxel regular_mc_diagonal_plane_has_no_ray_gaps
+rtk cargo test --lib --features mc_transvoxel sloped_chunk_with_coarser_pos_y_neighbor_emits_transition_triangles
+rtk cargo test --lib --features mc_transvoxel hole_probe_checkpoint_config_deserializes
+rtk cargo test --lib --features mc_transvoxel forensics_scene_config_deserializes
+```
+
+Next acceptance target:
+
+- Run normal MC+Transvoxel fixed repro twice.
+- Compare normalized classification counts.
+- Confirm every `33 / 81` fan gap has non-`unknown` classification.
+- Confirm every classified source chunk records `skipped_lod_delta_gt_one = 0`
+  before ruling scheduler out for that gap.
+- Then run all-LOD1 and no-transition variants to split regular MC from
+  transition face-frame/boundary-row replacement.
+
+### First mesh-forensics repro result
+
+Run:
+
+```powershell
+rtk cargo run --release --features mc_transvoxel -- --bench bench/scenes/visual/mc-transvoxel-static-hole-probe.toml
+```
+
+Artifacts:
+
+- `bench-runs/2026-05-24T07-55-35Z/summary.json`
+- `debug/terrain-hole-probe-mctx-static-mountain-hole-20260524-075652.json`
+
+The shell wrapper returned nonzero because the run output still includes the
+known missing prop/billboard asset errors, but the bench did produce summary,
+screenshots, CSV, and the labelled probe dump.
+
+Normalized result:
+
+```text
+schema_version = 9
+camera_ray.first_any_render_hit.distance = 181.07278
+camera_ray.first_front_render_hit.distance = 181.07278
+camera_ray.first_backface_render_hit.distance = 225.6785
+camera_ray.first_mesher_iso_distance = 180.96196
+camera_ray.gap_classification = raw_occupancy_vs_mesher_iso_false_positive
+camera_ray_fan.rays_total = 81
+camera_ray_fan.rays_with_gap = 33
+camera_ray_fan.gap_classification counts:
+  raw_occupancy_vs_mesher_iso_false_positive = 29
+  vertex_position_or_table_decode_error = 4
+  unknown = 0
+source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
+```
+
+Interpretation:
+
+- The new evidence rules out GPU culling for the center ray: first-any and
+  first-front are the same triangle distance.
+- All 33 fan gaps classify as non-unknown in this run.
+- Every classified fan-gap source chunk reports `skipped_lod_delta_gt_one = 0`,
+  so this fixed-camera result should not trigger more scheduler work.
+- Most fan gaps are raw-occupancy-vs-mesher-iso differences, but four LOD0
+  interior cells classify as emitted triangles whose ray still misses the
+  expected near surface; those are the next concrete mesh-forensics targets.
+
+All-LOD1 isolation run:
+
+- `bench-runs/2026-05-24T07-59-04Z/summary.json`
+- `debug/terrain-hole-probe-mctx-static-mountain-hole-all-lod1-20260524-075949.json`
+
+```text
+camera_ray.gap_classification = raw_occupancy_vs_mesher_iso_false_positive
+camera_ray_fan.rays_total = 81
+camera_ray_fan.rays_with_gap = 27
+camera_ray_fan.gap_classification counts:
+  raw_occupancy_vs_mesher_iso_false_positive = 25
+  vertex_position_or_table_decode_error = 2
+  unknown = 0
+source_chunk_skipped_lod_delta_gt_one values across fan gaps = [0]
+```
+
+This is comparable to the normal-LOD run: the dominant bucket remains
+raw-occupancy-vs-mesher-iso, with a smaller but persistent set of
+vertex-position/table-decode suspects.

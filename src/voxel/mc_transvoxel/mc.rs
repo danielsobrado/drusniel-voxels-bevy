@@ -2,7 +2,8 @@ use crate::constants::{CHUNK_SIZE, VOXEL_SIZE};
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::meshing::mc_support;
 use crate::voxel::meshing::{
-    generate_water_mesh, ChunkMeshResult, MeshData, TerrainMeshSectionStats, WaterAirExposureMode,
+    ChunkMeshResult, McTransitionForensicsMode, McTriangleSource, McTriangleSources, MeshData,
+    MeshForensicsOptions, TerrainMeshSectionStats, WaterAirExposureMode, generate_water_mesh,
 };
 use crate::voxel::skirt::NeighborLods;
 use crate::voxel::world::VoxelWorld;
@@ -10,12 +11,10 @@ use bevy::prelude::*;
 use std::time::Instant;
 
 use super::config::McTransvoxelSettings;
-use super::face_mask::{compute_transvoxel_face_mask, TransvoxelFaceMask};
+use super::face_mask::{TransvoxelFaceMask, compute_transvoxel_face_mask};
 use super::normals::sdf_gradient_normal_at_world;
 use super::stats::McTransvoxelStats;
-use super::tables::{
-    CUBE_CORNERS, REGULAR_CELL_CLASS, REGULAR_CELL_DATA, REGULAR_VERTEX_DATA,
-};
+use super::tables::{CUBE_CORNERS, REGULAR_CELL_CLASS, REGULAR_CELL_DATA, REGULAR_VERTEX_DATA};
 use super::transvoxel::append_transition_meshes;
 
 pub struct McMeshInput<'a> {
@@ -26,6 +25,7 @@ pub struct McMeshInput<'a> {
     pub neighbor_lods: NeighborLods,
     pub settings: &'a McTransvoxelSettings,
     pub water_exposure_mode: WaterAirExposureMode,
+    pub forensics: MeshForensicsOptions,
 }
 
 pub struct McMeshOutput {
@@ -42,11 +42,9 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
 
     let step = input.lod.step_size() as i32;
     let subdivisions = (CHUNK_SIZE as u32 / input.lod.step_size()) as usize;
-    let padded = subdivisions + 2;
     let chunk_origin = VoxelWorld::chunk_to_world(input.chunk_pos);
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
-    let (transition_mask, skipped) =
-        compute_transvoxel_face_mask(input.lod, &input.neighbor_lods);
+    let (transition_mask, skipped) = compute_transvoxel_face_mask(input.lod, &input.neighbor_lods);
     stats.skipped_lod_delta_gt_one = skipped;
 
     let sdf = SdfGrid::new(
@@ -57,6 +55,7 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
         chunk_origin,
     );
     let mut mesh = MeshData::with_capacity(4096, 6144);
+    let mut triangle_sources = input.forensics.enabled.then(Vec::new);
     // Tag the LOD index so the wireframe-debug material can colour MC chunks
     // by LOD (matches the SN paths in meshing.rs that do the same). Without
     // this, every MC chunk renders as LOD0 (white) under Alt+F7, hiding the
@@ -72,22 +71,32 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
         chunk_center,
         subdivisions,
         step,
-        transition_mask,
+        if input.forensics.mc_transitions == McTransitionForensicsMode::DisabledKeepBoundaryRows {
+            TransvoxelFaceMask::default()
+        } else {
+            transition_mask
+        },
+        input.lod,
+        &mut triangle_sources,
         &mut stats,
     );
 
-    append_transition_meshes(
-        &sdf,
-        &mut mesh,
-        input.chunk,
-        input.world,
-        chunk_origin,
-        chunk_center,
-        subdivisions,
-        step,
-        transition_mask,
-        &mut stats,
-    );
+    if input.forensics.mc_transitions == McTransitionForensicsMode::Enabled {
+        append_transition_meshes(
+            &sdf,
+            &mut mesh,
+            input.chunk,
+            input.world,
+            chunk_origin,
+            chunk_center,
+            subdivisions,
+            step,
+            transition_mask,
+            input.lod,
+            &mut triangle_sources,
+            &mut stats,
+        );
+    }
 
     let (water_mesh, water_stats) = generate_water_mesh(
         input.chunk,
@@ -107,6 +116,7 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
             lod_transition_snap_stats: Default::default(),
             mesh_section_stats: TerrainMeshSectionStats::default(),
             mc_transvoxel_stats: Some(stats),
+            mc_triangle_sources: triangle_sources.map(|sources| McTriangleSources { sources }),
         },
         stats,
     }
@@ -116,7 +126,6 @@ pub(crate) struct SdfGrid {
     values: Vec<f32>,
     padded: usize,
     step: i32,
-    chunk_origin: IVec3,
 }
 
 impl SdfGrid {
@@ -125,7 +134,7 @@ impl SdfGrid {
         world: &VoxelWorld,
         my_lod: LodLevel,
         neighbor_lods: &NeighborLods,
-        chunk_origin: IVec3,
+        _chunk_origin: IVec3,
     ) -> Self {
         let (padded, values, step) =
             mc_support::build_mc_sdf_values(chunk, world, my_lod, neighbor_lods);
@@ -133,7 +142,6 @@ impl SdfGrid {
             values,
             padded,
             step,
-            chunk_origin,
         }
     }
 
@@ -192,6 +200,8 @@ fn extract_regular_mc(
     subdivisions: usize,
     _step: i32,
     transition_mask: TransvoxelFaceMask,
+    lod: LodLevel,
+    triangle_sources: &mut Option<Vec<McTriangleSource>>,
     stats: &mut McTransvoxelStats,
 ) {
     let skip_regular_on_face = |cx: usize, cy: usize, cz: usize| -> bool {
@@ -270,19 +280,25 @@ fn extract_regular_mc(
                     let i0 = tri_data.vertex_index[t * 3] as usize;
                     let i1 = tri_data.vertex_index[t * 3 + 1] as usize;
                     let i2 = tri_data.vertex_index[t * 3 + 2] as usize;
-                    let Some(p0) = cell_vertices[i0] else { continue };
-                    let Some(p1) = cell_vertices[i1] else { continue };
-                    let Some(p2) = cell_vertices[i2] else { continue };
-                    push_mc_triangle(
-                        mesh,
-                        chunk,
-                        world,
-                        chunk_origin,
-                        chunk_center,
-                        p0,
-                        p1,
-                        p2,
-                    );
+                    let Some(p0) = cell_vertices[i0] else {
+                        continue;
+                    };
+                    let Some(p1) = cell_vertices[i1] else {
+                        continue;
+                    };
+                    let Some(p2) = cell_vertices[i2] else {
+                        continue;
+                    };
+                    push_mc_triangle(mesh, chunk, world, chunk_origin, chunk_center, p0, p1, p2);
+                    if let Some(sources) = triangle_sources.as_mut() {
+                        sources.push(McTriangleSource::Regular {
+                            chunk_pos: chunk.position(),
+                            lod,
+                            cell: UVec3::new(cx as u32, cy as u32, cz as u32),
+                            case_index: case as u16,
+                            class_index: class,
+                        });
+                    }
                     stats.record_regular_triangles(1);
                 }
             }
@@ -320,8 +336,8 @@ pub(crate) fn push_mc_triangle(
 mod tests {
     use super::*;
     use crate::constants::CHUNK_SIZE_I32;
-    use crate::voxel::types::VoxelType;
     use crate::voxel::meshing::WaterAirExposureMode;
+    use crate::voxel::types::VoxelType;
 
     fn sphere_world() -> VoxelWorld {
         let mut world = VoxelWorld::new(IVec3::new(4, 4, 4));
@@ -341,6 +357,64 @@ mod tests {
         world
     }
 
+    fn first_mesh_ray_hit(mesh: &MeshData, origin: Vec3, dir: Vec3) -> Option<(f32, bool)> {
+        let mut best: Option<(f32, bool)> = None;
+        for tri in mesh.indices.chunks_exact(3) {
+            let p0 = Vec3::from_array(mesh.positions[tri[0] as usize]);
+            let p1 = Vec3::from_array(mesh.positions[tri[1] as usize]);
+            let p2 = Vec3::from_array(mesh.positions[tri[2] as usize]);
+            if let Some(hit) = ray_triangle_hit_for_test(origin, dir, p0, p1, p2) {
+                if best.map_or(true, |best| hit.0 < best.0) {
+                    best = Some(hit);
+                }
+            }
+        }
+        best
+    }
+
+    fn ray_triangle_hit_for_test(
+        origin: Vec3,
+        dir: Vec3,
+        p0: Vec3,
+        p1: Vec3,
+        p2: Vec3,
+    ) -> Option<(f32, bool)> {
+        let edge1 = p1 - p0;
+        let edge2 = p2 - p0;
+        let pvec = dir.cross(edge2);
+        let det = edge1.dot(pvec);
+        if det.abs() < 1e-7 {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        let tvec = origin - p0;
+        let u = tvec.dot(pvec) * inv_det;
+        if !(-1e-4..=1.0 + 1e-4).contains(&u) {
+            return None;
+        }
+        let qvec = tvec.cross(edge1);
+        let v = dir.dot(qvec) * inv_det;
+        if v < -1e-4 || u + v > 1.0 + 1e-4 {
+            return None;
+        }
+        let distance = edge2.dot(qvec) * inv_det;
+        (distance >= 0.0).then_some((distance, dir.dot(edge1.cross(edge2)) < 0.0))
+    }
+
+    fn world_with_heightfield(height: impl Fn(i32, i32) -> i32) -> VoxelWorld {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        for z in 0..CHUNK_SIZE_I32 {
+            for x in 0..CHUNK_SIZE_I32 {
+                let column_height = height(x, z).clamp(0, CHUNK_SIZE_I32 - 2);
+                for y in 0..=column_height {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+        world
+    }
+
     #[test]
     fn sphere_fixture_has_triangles_and_valid_attributes() {
         let world = sphere_world();
@@ -354,6 +428,7 @@ mod tests {
             neighbor_lods: NeighborLods::default(),
             settings: &settings,
             water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
         });
         let mesh = &out.result.solid;
         assert!(!mesh.is_empty());
@@ -361,6 +436,68 @@ mod tests {
         assert_eq!(mesh.positions.len(), mesh.uvs.len());
         assert_eq!(mesh.positions.len(), mesh.colors.len());
         assert_eq!(mesh.indices.len() % 3, 0);
+    }
+
+    #[test]
+    fn regular_mc_flat_plane_has_no_ray_gaps() {
+        let world = world_with_heightfield(|_, _| 7);
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
+        });
+        let mesh = &out.result.solid;
+        for z in (3..13).step_by(3) {
+            for x in (3..13).step_by(3) {
+                let hit = first_mesh_ray_hit(
+                    mesh,
+                    Vec3::new(x as f32 + 0.5, 20.0, z as f32 + 0.5),
+                    Vec3::NEG_Y,
+                );
+                assert!(
+                    hit.is_some(),
+                    "flat-plane MC mesh had no ray hit at column ({x}, {z})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn regular_mc_diagonal_plane_has_no_ray_gaps() {
+        let world = world_with_heightfield(|x, _| 3 + x / 2);
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
+        });
+        let mesh = &out.result.solid;
+        for z in (3..13).step_by(3) {
+            for x in (3..13).step_by(3) {
+                let hit = first_mesh_ray_hit(
+                    mesh,
+                    Vec3::new(x as f32 + 0.5, 20.0, z as f32 + 0.5),
+                    Vec3::NEG_Y,
+                );
+                assert!(
+                    hit.is_some(),
+                    "diagonal-plane MC mesh had no ray hit at column ({x}, {z})"
+                );
+            }
+        }
     }
 
     /// A single solid voxel surrounded by air produces eight MC cells each
@@ -387,6 +524,7 @@ mod tests {
             neighbor_lods: NeighborLods::default(),
             settings: &settings,
             water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
         });
         let mesh = &out.result.solid;
         assert!(
@@ -408,6 +546,42 @@ mod tests {
     /// holes along the LOD-transition boundary on any sloped terrain.
     /// Fixture: a sloped wedge inside the chunk with the PosY face flagged
     /// as having a coarser neighbour, so the transvoxel apron runs along it.
+    #[test]
+    fn forensics_sources_track_regular_triangles() {
+        let world = sphere_world();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        assert_eq!(sources.sources.len(), out.result.solid.indices.len() / 3);
+        assert!(sources.sources.iter().any(|source| {
+            matches!(
+                source,
+                McTriangleSource::Regular {
+                    chunk_pos: IVec3::ZERO,
+                    lod: LodLevel::Lod0,
+                    ..
+                }
+            )
+        }));
+    }
+
     #[test]
     fn sloped_chunk_with_coarser_pos_y_neighbor_emits_transition_triangles() {
         use crate::voxel::chunk::LodLevel;
@@ -442,6 +616,7 @@ mod tests {
             neighbor_lods,
             settings: &settings,
             water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
         });
         assert!(
             out.stats.triangle_count_transition > 0,
@@ -449,6 +624,59 @@ mod tests {
              but got 0 — the single-corner transition-cell filter has \
              likely been re-introduced in extract_transition_cell"
         );
+    }
+
+    #[test]
+    fn forensics_sources_track_transition_triangles() {
+        use crate::voxel::chunk::LodLevel;
+
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        for x in 0..CHUNK_SIZE_I32 {
+            let height = 14 + (x % 2);
+            for z in 0..CHUNK_SIZE_I32 {
+                for y in 0..=height {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let neighbor_lods = NeighborLods {
+            pos_y: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods,
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        assert_eq!(sources.sources.len(), out.result.solid.indices.len() / 3);
+        assert!(sources.sources.iter().any(|source| {
+            matches!(
+                source,
+                McTriangleSource::Transition {
+                    chunk_pos: IVec3::ZERO,
+                    lod: LodLevel::Lod0,
+                    face: crate::voxel::skirt::ChunkFace::PosY,
+                    ..
+                }
+            )
+        }));
     }
 
     /// MC mesh at Lod1 must tag its per-triangle barycentric UV1 with LOD
@@ -471,6 +699,7 @@ mod tests {
             neighbor_lods: NeighborLods::default(),
             settings: &settings,
             water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions::default(),
         });
         let mesh = &out.result.solid;
         assert!(!mesh.is_empty(), "Lod1 sphere should still produce a mesh");
