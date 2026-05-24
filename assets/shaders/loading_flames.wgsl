@@ -202,6 +202,7 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     }
 
     let flame_source = max(fire, sparks) + smoke;
-    let alpha = clamp(max(max(flame_source.r, flame_source.g), flame_source.b) * 0.72, 0.0, 0.86);
-    return vec4<f32>(flame_source, alpha);
+    let flame_luma = max(max(flame_source.r, flame_source.g), flame_source.b);
+    let alpha = clamp(0.18 + flame_luma * 1.25, 0.0, 0.96);
+    return vec4<f32>(flame_source * vec3<f32>(1.8, 1.35, 1.1), alpha);
 }

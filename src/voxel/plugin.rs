@@ -1244,25 +1244,13 @@ fn spawn_world_startup_overlay(
                     ..default()
                 },
                 ImageNode::new(background_image).with_mode(NodeImageMode::Stretch),
+                ZIndex(-2),
                 WorldStartupBackgroundImage,
-                ));
+            ));
 
-              root.spawn((
-                  MaterialNode(flame_material),
-                  Node {
-                      position_type: PositionType::Absolute,
-                      left: Val::Px(0.0),
-                      right: Val::Px(0.0),
-                      top: Val::Px(0.0),
-                      bottom: Val::Px(0.0),
-                      ..default()
-                  },
-                  WorldStartupFlamesMaterial,
-              ));
-
-              root.spawn((
-                  Node {
-                      position_type: PositionType::Absolute,
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
                     right: Val::Px(0.0),
                     top: Val::Px(0.0),
@@ -1270,15 +1258,33 @@ fn spawn_world_startup_overlay(
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.58)),
+                ZIndex(-1),
             ));
 
-            root.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(12.0),
-                ..default()
-            })
+            root.spawn((
+                MaterialNode(flame_material),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+                ZIndex(1),
+                WorldStartupFlamesMaterial,
+            ));
+
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(12.0),
+                    ..default()
+                },
+                ZIndex(2),
+            ))
             .with_children(|content| {
                 content.spawn((
                     Text::new("Loading existing world"),
