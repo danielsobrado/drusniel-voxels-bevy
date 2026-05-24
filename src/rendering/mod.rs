@@ -29,6 +29,7 @@ pub mod cutscene;
 pub mod god_rays;
 pub mod gtao;
 pub mod materials;
+pub mod loading_flames;
 pub mod mipmaps;
 pub mod pcss;
 pub mod photo_mode;

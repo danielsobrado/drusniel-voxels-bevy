@@ -522,6 +522,11 @@ struct WorldStartupOverlayState {
 }
 
 #[derive(Resource, Default, Debug)]
+pub(crate) struct WorldStartupLoadingFlames {
+    pub active: bool,
+}
+
+#[derive(Resource, Default, Debug)]
 struct WorldStartupSetupState {
     frames_waited: u8,
     started: bool,
@@ -657,14 +662,15 @@ impl Plugin for VoxelPlugin {
         .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
-        .insert_resource(RuntimeChunkStats::default())
-        .insert_resource(WaterBodyRegistry::default())
-        // Async chunk generation state
-        .insert_resource(ChunkGenerationState::default())
-        .insert_resource(WorldStartupOverlayState::default())
-        .insert_resource(WorldStartupSetupState::default())
-        .insert_resource(PendingWorldGeneration::default())
-        .insert_resource(WorldGenerationQueue::default())
+                .insert_resource(RuntimeChunkStats::default())
+                .insert_resource(WaterBodyRegistry::default())
+                // Async chunk generation state
+                .insert_resource(ChunkGenerationState::default())
+                .insert_resource(WorldStartupOverlayState::default())
+                .insert_resource(WorldStartupLoadingFlames::default())
+                .insert_resource(WorldStartupSetupState::default())
+                .insert_resource(PendingWorldGeneration::default())
+                .insert_resource(WorldGenerationQueue::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -1191,8 +1197,13 @@ fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     );
 }
 
-fn spawn_world_startup_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn spawn_world_startup_overlay(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut loading_flames: ResMut<WorldStartupLoadingFlames>,
+) {
     let background_image = asset_server.load("images/DrunsielShyntara.png");
+    loading_flames.active = true;
 
     commands
         .spawn((
@@ -1353,6 +1364,7 @@ fn update_world_startup_overlay(
     chunk_stats: Res<RuntimeChunkStats>,
     setup_state: Res<WorldStartupSetupState>,
     mut overlay_state: ResMut<WorldStartupOverlayState>,
+    mut loading_flames: ResMut<WorldStartupLoadingFlames>,
     root_query: Query<Entity, With<WorldStartupOverlay>>,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<WorldStartupTitleText>>,
@@ -1362,17 +1374,22 @@ fn update_world_startup_overlay(
     mut fill_query: Query<&mut Node, With<WorldStartupProgressFill>>,
 ) {
     let Ok(root_entity) = root_query.single() else {
+        loading_flames.active = false;
         return;
     };
+    loading_flames.active = true;
 
     let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, setup_state.started);
     if snapshot.complete {
+        loading_flames.active = false;
         overlay_state.ready_seconds += time.delta_secs();
     } else {
+        loading_flames.active = true;
         overlay_state.ready_seconds = 0.0;
     }
 
     if overlay_state.ready_seconds >= WORLD_STARTUP_READY_HOLD_SECONDS {
+        loading_flames.active = false;
         commands.entity(root_entity).despawn();
         return;
     }

@@ -21,6 +21,7 @@ use crate::rendering::materials::{
     setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
     sync_fog_to_materials, sync_voxel_water_material_overrides, sync_weather_to_materials,
 };
+use crate::rendering::loading_flames::LoadingFlamesPlugin;
 use crate::rendering::pcss::PcssPlugin;
 use crate::rendering::photo_mode::PhotoModePlugin;
 use crate::rendering::props_material::PropsMaterial;
@@ -91,6 +92,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(GodRayPlugin)
             // Shader-generated precipitation overlay; inactive clear weather exits before a pass.
             .add_plugins(WeatherOverlayPlugin)
+            // Loading screen flame overlay generated in fullscreen shader.
+            .add_plugins(LoadingFlamesPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
             // Path A lighting backend: inactive unless NAADF is selected and query routing is enabled.
