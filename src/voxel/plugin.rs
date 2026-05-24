@@ -1203,6 +1203,7 @@ fn spawn_queued_chunk_generation_tasks(
 const MC_SPIKE_BUILD_TAG: &str = "mc-spike-2026-05-24-sdf-sign-guard-and-lod-refine-coarser";
 const WORLD_STARTUP_FLAME_TEXTURE_WIDTH: u32 = 384;
 const WORLD_STARTUP_FLAME_TEXTURE_HEIGHT: u32 = 216;
+const WORLD_STARTUP_SPARK_LAYERS: u32 = 9;
 
 fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     #[cfg(feature = "mc_transvoxel")]
@@ -1267,17 +1268,69 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
             let intensity = (base_line * 0.92 + flame_band * tongues * 0.55).clamp(0.0, 1.0);
             let smoke_center = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(1.8);
             let smoke = (smoke_band * smoke_center * n2 * 0.085).clamp(0.0, 1.0);
-            let alpha = ((intensity * 0.18 + smoke * 0.16) * 255.0).clamp(0.0, 72.0) as u8;
+            let particle = startup_fire_particles(u, v, time);
+            let smoke_column = startup_smoke_column(u, v, time);
+            let alpha = ((intensity * 0.16 + smoke * 0.12 + particle * 0.38 + smoke_column * 0.10)
+                * 255.0)
+                .clamp(0.0, 78.0) as u8;
             let idx = ((y * width + x) * 4) as usize;
 
-            pixels[idx] = ((intensity * 240.0) + smoke * 26.0).clamp(0.0, 255.0) as u8;
-            pixels[idx + 1] = ((intensity.powf(1.45) * 78.0) + smoke * 24.0).clamp(0.0, 255.0) as u8;
-            pixels[idx + 2] = ((intensity.powf(2.8) * 12.0) + smoke * 24.0).clamp(0.0, 255.0) as u8;
+            pixels[idx] =
+                ((intensity * 230.0) + particle * 255.0 + smoke * 22.0 + smoke_column * 32.0)
+                    .clamp(0.0, 255.0) as u8;
+            pixels[idx + 1] =
+                ((intensity.powf(1.45) * 72.0) + particle * 92.0 + smoke * 20.0 + smoke_column * 22.0)
+                    .clamp(0.0, 255.0) as u8;
+            pixels[idx + 2] =
+                ((intensity.powf(2.8) * 10.0) + particle * 10.0 + smoke * 18.0 + smoke_column * 12.0)
+                    .clamp(0.0, 255.0) as u8;
             pixels[idx + 3] = alpha;
         }
     }
 
     pixels
+}
+
+fn startup_smoke_column(u: f32, v: f32, time: f32) -> f32 {
+    let center = (1.0 - ((u - 0.5).abs() / 0.32)).clamp(0.0, 1.0).powf(1.65);
+    let height = smoothstep(0.08, 0.78, 1.0 - v) * smoothstep(0.12, 0.72, v);
+    let drift = flame_hash_noise(u * 5.0 + time * 0.2, v * 8.0 - time * 0.9);
+    (center * height * drift.powf(2.0) * 0.34).clamp(0.0, 1.0)
+}
+
+fn startup_fire_particles(u: f32, v: f32, time: f32) -> f32 {
+    let mut particles = 0.0;
+    let mut scale = 1.0;
+    let mut alpha = 1.0;
+
+    for layer in 0..WORLD_STARTUP_SPARK_LAYERS {
+        let layer_f = layer as f32;
+        let cell_size = 20.0 * scale;
+        let drift_x = time * 0.45 * scale + layer_f * 3.17;
+        let drift_y = time * 2.6 * scale + layer_f * 5.31;
+        let cell_x = (u * cell_size + drift_x).floor();
+        let cell_y = ((1.0 - v) * cell_size + drift_y).floor();
+        let seed = flame_hash(cell_x + layer_f * 19.1, cell_y + layer_f * 7.7);
+
+        if seed > 0.83 {
+            let local_x = (u * cell_size + drift_x).fract();
+            let local_y = ((1.0 - v) * cell_size + drift_y).fract();
+            let spark_x = flame_hash(cell_x, cell_y) * 0.76 + 0.12;
+            let spark_y = flame_hash(cell_x + 4.2, cell_y + 1.7) * 0.76 + 0.12;
+            let dx = (local_x - spark_x) * 1.2;
+            let dy = (local_y - spark_y) * 2.6;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let ember = (1.0 - smoothstep(0.015, 0.09, dist)).powf(2.2);
+            let vertical_life = smoothstep(0.18, 0.98, v) * smoothstep(0.0, 0.65, 1.0 - v);
+            let center_life = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.55);
+            particles += ember * vertical_life * center_life * alpha;
+        }
+
+        scale *= 1.08;
+        alpha *= 0.76;
+    }
+
+    (particles * 1.25).clamp(0.0, 1.0)
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
