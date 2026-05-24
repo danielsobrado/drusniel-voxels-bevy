@@ -185,6 +185,16 @@ impl LodLevel {
         self.detail_value() > other.detail_value()
     }
 
+    /// Index 0–3 for terrain wireframe debug tinting (shader + UV1 encoding).
+    pub fn wireframe_lod_index(self) -> u8 {
+        match self {
+            LodLevel::Lod0 => 0,
+            LodLevel::Lod1 => 1,
+            LodLevel::Lod2 => 2,
+            LodLevel::Lod3 | LodLevel::Culled => 3,
+        }
+    }
+
     /// Get the step size for this LOD level (used in mesh generation)
     pub fn step_size(&self) -> u32 {
         match self {

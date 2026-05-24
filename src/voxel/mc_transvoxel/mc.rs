@@ -57,6 +57,11 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
         chunk_origin,
     );
     let mut mesh = MeshData::with_capacity(4096, 6144);
+    // Tag the LOD index so the wireframe-debug material can colour MC chunks
+    // by LOD (matches the SN paths in meshing.rs that do the same). Without
+    // this, every MC chunk renders as LOD0 (white) under Alt+F7, hiding the
+    // LOD0↔LOD1 transition the user is trying to debug.
+    mesh.wireframe_lod_index = input.lod.wireframe_lod_index();
 
     extract_regular_mc(
         &sdf,
@@ -226,12 +231,15 @@ fn extract_regular_mc(
                         case |= 1 << i;
                     }
                 }
-                let solid_corners = case.count_ones();
-                // Smoothed SDF can leave isolated negative corners in air; single-corner
-                // MC cases become floating debris (shoreline peak shatter). SN never emits these.
-                if solid_corners <= 1 || solid_corners >= 7 {
-                    continue;
-                }
+                // Only 0 and 255 emit no triangles. Earlier this code also
+                // dropped cases with exactly 1 or 7 solid corners as a defence
+                // against "shatter" from the unclamped smoothed SDF — but that
+                // produced a regular pattern of triangular holes along any
+                // sloping surface (every cell where the iso clips one corner
+                // hits that count). The sign-guard clamp in `smoothed_sdf_*`
+                // now keeps air corners strictly positive, so the underlying
+                // shatter source is gone and the filter must not drop real
+                // single-corner cases.
                 if case == 0 || case == 255 {
                     continue;
                 }
@@ -353,5 +361,44 @@ mod tests {
         assert_eq!(mesh.positions.len(), mesh.uvs.len());
         assert_eq!(mesh.positions.len(), mesh.colors.len());
         assert_eq!(mesh.indices.len() % 3, 0);
+    }
+
+    /// A single solid voxel surrounded by air produces eight MC cells each
+    /// with exactly one solid corner — the canonical "1-bit case". A previous
+    /// guard skipped `solid_corners <= 1 || solid_corners >= 7` as a defence
+    /// against unclamped-smoothed-SDF shatter; that guard left a regular
+    /// pattern of triangular holes along every sloping surface. Now that
+    /// `smoothed_sdf_*` clamp air corners ≥ SIGN_GUARD, the guard is gone
+    /// and these cases must emit triangles. If this assertion ever fails,
+    /// look for a re-introduced single-corner filter in `extract_regular_mc`.
+    #[test]
+    fn single_solid_voxel_emits_corner_triangles() {
+        let mut world = VoxelWorld::new(IVec3::new(1, 1, 1));
+        world.insert_chunk(Chunk::new(IVec3::ZERO));
+        world.set_voxel(IVec3::new(8, 8, 8), VoxelType::Rock);
+
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+        });
+        let mesh = &out.result.solid;
+        assert!(
+            !mesh.is_empty(),
+            "single-solid-voxel fixture produced no triangles — the \
+             single-corner MC filter has likely been re-introduced"
+        );
+        assert!(
+            out.stats.triangle_count_regular >= 8,
+            "expected ≥ 8 triangles from the 8 cells touching the lone solid \
+             voxel, got {}",
+            out.stats.triangle_count_regular
+        );
     }
 }

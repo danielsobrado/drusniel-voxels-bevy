@@ -115,6 +115,37 @@ Use `space=viewport` for native Bevy viewport-relative coordinates, `space=windo
 
 Viewport/window mouse actions intentionally fail if the editor cannot become the foreground window, preventing accidental clicks into another app. Screenshots use the Tauri window capture path first, so they can still verify editor layout when another window is covering the desktop.
 
+## Terrain Debug Views
+
+Live in-game overlays for diagnosing LOD seams, holes, normals, and skirt
+geometry. Implementation: [`src/voxel/terrain_debug.rs`](src/voxel/terrain_debug.rs).
+Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md).
+
+| Hotkey | What it does | Output |
+|---|---|---|
+| **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
+| **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
+| **Alt+Shift+F7** | Capture current frame. ⚠ Known bug: also fires the Alt+F7 toggle — state flips on every capture. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
+| **Shift+F9** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, lod-delta>1 faces, missing-neighbor counts). | `debug/terrain-hole-probe-<ts>.json` |
+
+Wireframe colour key — section × LOD tint:
+
+| Section colour | Meaning | | LOD tint | LOD |
+|---|---|---|---|---|
+| White | Main Surface Nets mesh | | White (none) | LOD0 |
+| Cyan | Horizontal skirt / transition apron | | Light blue | LOD1 |
+| Magenta | Vertical skirt | | Green | LOD2 |
+| Yellow | Transvoxel transition apron (MC+Transvoxel) | | Orange | LOD3 / Culled |
+
+Diagnostic recipe (friend's rule of thumb, per [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md) WIRE-008):
+
+- **Stepped geometry** in wireframe → DC/QEF/SDF placement issue.
+- **Smooth geometry, stepped colour in Alt+F8** → normals issue (not geometry).
+- **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` in the hole-probe dump.
+- **Coloured (non-white) edges visible at an altitude band** → a skirt is being used to hide a real gap. Skirt is a band-aid, not a fix.
+
+To launch with MC+Transvoxel for an A/B against Surface Nets, use `.\scripts\startVoxels.ps1 -Mc` (also compiles in the `mc_transvoxel` cargo feature) and set `enabled: true` + `mode: replace_surface_nets` in [`assets/config/mc_transvoxel.yaml`](assets/config/mc_transvoxel.yaml). Pre-staged config variants live at [`bench-runs/baseline-mctx/mc_transvoxel.{replace,sandbox}.yaml`](bench-runs/baseline-mctx/).
+
 Standard commands the agent should use:
 
 ```bash

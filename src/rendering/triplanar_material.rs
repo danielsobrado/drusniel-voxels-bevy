@@ -118,7 +118,11 @@ pub struct TriplanarMaterial {
     pub dirt_normal: Option<Handle<Image>>,
 
     /// Mesher SDF brick for iso-band debug (`epsilon <= 0` disables sampling in shader).
-    #[texture(10)]
+    /// Must be `dimension = "3d"` because the shader binding declares
+    /// `texture_3d<f32>` (see `assets/shaders/triplanar_terrain.wgsl:287`).
+    /// Without this, Bevy's `AsBindGroup` derives a 2D binding descriptor and
+    /// `Device::create_bind_group` panics with "given a view with dimension = D3".
+    #[texture(10, dimension = "3d")]
     #[sampler(11)]
     pub iso_band_volume: Option<Handle<Image>>,
 

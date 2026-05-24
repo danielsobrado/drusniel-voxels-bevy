@@ -56,6 +56,8 @@ const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
 /// UV1.y section scale for wireframe mesh-section colouring (`TERRAIN_DEBUG_WIREFRAME`).
 pub const TERRAIN_BARYCENTRIC_SECTION_SCALE: f32 = 4.0;
+/// UV1.x LOD slot scale — barycentric U stays in `[0, 1]` within each slot.
+pub const TERRAIN_BARYCENTRIC_LOD_U_SCALE: f32 = 2.0;
 
 /// Main Surface Nets mesh triangles.
 pub const TERRAIN_MESH_SECTION_MAIN: u8 = 0;
@@ -66,10 +68,10 @@ pub const TERRAIN_MESH_SECTION_VERTICAL_SKIRT: u8 = 2;
 /// Reserved for future MC+Transvoxel transition aprons.
 pub const TERRAIN_MESH_SECTION_TRANSITION_APRON: u8 = 3;
 
-/// Encode barycentric UV1 with a mesh-generation section tag in the spare Y channel.
-pub fn encode_barycentric_uv(bary: [f32; 2], section: u8) -> [f32; 2] {
+/// Encode barycentric UV1 with LOD (X slots) and mesh-generation section (Y bands).
+pub fn encode_barycentric_uv(bary: [f32; 2], section: u8, lod_index: u8) -> [f32; 2] {
     [
-        bary[0],
+        bary[0] + lod_index as f32 * TERRAIN_BARYCENTRIC_LOD_U_SCALE,
         bary[1] + section as f32 * TERRAIN_BARYCENTRIC_SECTION_SCALE,
     ]
 }
@@ -77,6 +79,19 @@ pub fn encode_barycentric_uv(bary: [f32; 2], section: u8) -> [f32; 2] {
 /// Decode the mesh-generation section tag written by [`encode_barycentric_uv`].
 pub fn barycentric_section(uv: [f32; 2]) -> u8 {
     (uv[1] / TERRAIN_BARYCENTRIC_SECTION_SCALE).floor() as u8
+}
+
+/// Decode the chunk LOD index written by [`encode_barycentric_uv`].
+pub fn barycentric_lod_index(uv: [f32; 2]) -> u8 {
+    (uv[0] / TERRAIN_BARYCENTRIC_LOD_U_SCALE)
+        .floor()
+        .min(3.0) as u8
+}
+
+/// Decode the barycentric U coordinate from encoded UV1.
+pub fn barycentric_u(uv: [f32; 2]) -> f32 {
+    let lod_slots = barycentric_lod_index(uv) as f32;
+    uv[0] - lod_slots * TERRAIN_BARYCENTRIC_LOD_U_SCALE
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -296,6 +311,8 @@ pub struct MeshData {
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub barycentric_uvs: Vec<[f32; 2]>,
+    /// Chunk LOD index baked into UV1 for wireframe tinting.
+    pub wireframe_lod_index: u8,
     pub colors: Vec<[f32; 4]>, // Vertex colors for AO (blocky) or material weights (surface nets)
     pub indices: Vec<u32>,
 }
@@ -307,6 +324,7 @@ impl MeshData {
             normals: Vec::new(),
             uvs: Vec::new(),
             barycentric_uvs: Vec::new(),
+            wireframe_lod_index: 0,
             colors: Vec::new(),
             indices: Vec::new(),
         }
@@ -319,6 +337,7 @@ impl MeshData {
             normals: Vec::with_capacity(vertex_cap),
             uvs: Vec::with_capacity(vertex_cap),
             barycentric_uvs: Vec::with_capacity(vertex_cap),
+            wireframe_lod_index: 0,
             colors: Vec::with_capacity(vertex_cap),
             indices: Vec::with_capacity(index_cap),
         }
@@ -353,10 +372,11 @@ impl MeshData {
     }
 
     pub(crate) fn push_triangle_barycentrics_with_section(&mut self, section: u8) {
+        let lod_index = self.wireframe_lod_index;
         self.barycentric_uvs.extend_from_slice(&[
-            encode_barycentric_uv([1.0, 0.0], section),
-            encode_barycentric_uv([0.0, 1.0], section),
-            encode_barycentric_uv([0.0, 0.0], section),
+            encode_barycentric_uv([1.0, 0.0], section, lod_index),
+            encode_barycentric_uv([0.0, 1.0], section, lod_index),
+            encode_barycentric_uv([0.0, 0.0], section, lod_index),
         ]);
     }
 }
@@ -2785,8 +2805,16 @@ fn build_sdf_smoothing_block(world: &VoxelWorld, chunk_origin: IVec3) -> Vec<f32
 /// air), occupied centre samples stay fully negative while air samples receive
 /// the fractional blur. This preserves edits/caves/overhangs that smoothing would
 /// otherwise erase, while still moving interpolation off the voxel stair step.
+///
+/// Air samples are clamped to ≥ `SIGN_GUARD`. The clamp matters for the MC
+/// consumer: classical MC's case index uses `< 0.0` per corner. Without it, an
+/// air cell with mostly-solid neighbours can blur to a small NEGATIVE value,
+/// flipping that corner's bit and selecting a wrong MC case → missing
+/// triangles → scattered holes across the surface. Surface Nets tolerates the
+/// sign flip; MC does not. Must mirror `smoothed_terrain_sdf_at_world_pos`.
 fn smoothed_sdf_from_block(block: &[f32], px: u32, py: u32, pz: u32) -> f32 {
     const W: [f32; 3] = [1.0, 2.0, 1.0];
+    const SIGN_GUARD: f32 = 1.0e-3;
     let n = SDF_SMOOTH_BLOCK_SIZE;
     let (px, py, pz) = (px as usize, py as usize, pz as usize);
     let mut sum = 0.0;
@@ -2803,7 +2831,7 @@ fn smoothed_sdf_from_block(block: &[f32], px: u32, py: u32, pz: u32) -> f32 {
     }
     let smoothed = sum / weight;
     let raw = block[(px + 1) + (py + 1) * n + (pz + 1) * n * n];
-    if raw < 0.0 { -1.0 } else { smoothed }
+    if raw < 0.0 { -1.0 } else { smoothed.max(SIGN_GUARD) }
 }
 
 /// Mesher SDF at a world position (matches Surface Nets / iso-band debug sampling).
@@ -2819,7 +2847,16 @@ pub fn mesher_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: Vec3) -> 
 }
 
 pub(crate) fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) -> f32 {
+    // Sign-preserving asymmetric blur:
+    //   solid centre  → hard -1 (preserves thin features under blur),
+    //   air centre    → 1-2-1 blur of 27 neighbours, clamped to ≥ SIGN_GUARD.
+    // The clamp is critical for the MC consumer: classical MC's case index uses
+    // `< 0.0` per corner. Without the clamp, an air cell with mostly-solid
+    // neighbours can return a small NEGATIVE blur, flipping that corner's bit
+    // and selecting a wrong MC case → missing triangles → scattered holes
+    // across the surface. Surface Nets is robust to this; MC is not.
     const W: [f32; 3] = [1.0, 2.0, 1.0];
+    const SIGN_GUARD: f32 = 1.0e-3;
     if terrain_occupancy_sdf_at_world(world, world_pos) < 0.0 {
         return -1.0;
     }
@@ -2836,7 +2873,7 @@ pub(crate) fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: I
             }
         }
     }
-    sum / weight
+    (sum / weight).max(SIGN_GUARD)
 }
 
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
@@ -3526,6 +3563,7 @@ pub fn generate_chunk_mesh_surface_nets(
     water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(2048, 3072);
+    solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let chunk_origin_vec = chunk_origin.as_vec3();
@@ -3725,6 +3763,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(512, 768);
+    solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -3925,6 +3964,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(256, 384);
+    solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -4125,6 +4165,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     water_exposure_mode: WaterAirExposureMode,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(128, 192);
+    solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -4524,6 +4565,121 @@ mod tests {
             neighbor_lod1_sdf[neighbor_boundary_idx]
         );
         assert_eq!(transition_sdf[boundary_idx], -1.0);
+    }
+
+    /// The smoothed SDF must never invert sign relative to the raw occupancy
+    /// at the same world voxel: solid centres return strict ≤ 0, air centres
+    /// return strict > 0. Classical Marching Cubes builds its case index from
+    /// `sdf < 0.0` per corner, so an air corner with a slightly-negative blur
+    /// flips a bit, selects the wrong case, and drops triangles — manifesting
+    /// as the scattered tiny holes we observed on MC LOD0 chunks. This test
+    /// guards against re-introducing that regression.
+    #[test]
+    fn smoothed_terrain_sdf_never_inverts_sign() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        // 3x3x3 solid cube centred at (8, 8, 8). Air voxels in the surrounding
+        // shell have 9 of their 27-cell neighbourhood as solid — the exact
+        // configuration whose unclamped 1-2-1 blur could go negative.
+        for x in 7..=9 {
+            for y in 7..=9 {
+                for z in 7..=9 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+
+        // Sample a 7x7x7 region around the cube — covers cube interior, shell,
+        // and far-air cells.
+        let mut saw_air_with_solid_neighbours = false;
+        for z in 5..=11 {
+            for x in 5..=11 {
+                for y in 5..=11 {
+                    let p = IVec3::new(x, y, z);
+                    let raw = terrain_occupancy_sdf_at_world(&world, p);
+                    let smoothed = smoothed_terrain_sdf_at_world_pos(&world, p);
+                    if raw < 0.0 {
+                        assert!(
+                            smoothed <= 0.0,
+                            "solid voxel {p:?} got smoothed = {smoothed} (must stay ≤ 0)"
+                        );
+                    } else {
+                        assert!(
+                            smoothed > 0.0,
+                            "air voxel {p:?} got smoothed = {smoothed} \
+                             (must stay > 0; MC case index uses `< 0.0` per corner)"
+                        );
+                        // Face-adjacent air voxels of the cube are exactly the
+                        // pre-clamp negative-blur case we want to exercise.
+                        if (p.x == 6 || p.x == 10) && (7..=9).contains(&p.y) && (7..=9).contains(&p.z) {
+                            saw_air_with_solid_neighbours = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_air_with_solid_neighbours,
+            "test fixture failed to exercise the air-adjacent-to-solid case"
+        );
+    }
+
+    /// Same sign-invariant as `smoothed_terrain_sdf_never_inverts_sign` but
+    /// exercised through the block path used by `generate_sdf` for LOD0
+    /// non-transition cells — which is the MC LOD0 consumer's source. This
+    /// catches the case where only the per-voxel path got the clamp but the
+    /// block path still let an air corner go slightly negative.
+    #[test]
+    fn smoothed_block_sdf_never_inverts_sign() {
+        let mut world = world_with_test_chunks(IVec3::new(1, 1, 1));
+        // 3x3x3 solid cube centred at (8, 8, 8) — same fixture as the per-voxel test.
+        for x in 7..=9 {
+            for y in 7..=9 {
+                for z in 7..=9 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+
+        let chunk_origin = VoxelWorld::chunk_to_world(IVec3::ZERO);
+        let block = build_sdf_smoothing_block(&world, chunk_origin);
+
+        // Padded cell (px, py, pz) maps to world voxel chunk_origin + (px-1, py-1, pz-1).
+        // Walk a padded region that covers the cube interior, shell, and far-air cells.
+        let mut saw_air_with_solid_neighbours = false;
+        for pz in 6..=12 {
+            for py in 6..=12 {
+                for px in 6..=12 {
+                    let world_voxel = chunk_origin
+                        + IVec3::new(px as i32 - 1, py as i32 - 1, pz as i32 - 1);
+                    let raw = terrain_occupancy_sdf_at_world(&world, world_voxel);
+                    let smoothed = smoothed_sdf_from_block(&block, px, py, pz);
+                    if raw < 0.0 {
+                        assert!(
+                            smoothed <= 0.0,
+                            "solid padded cell ({px},{py},{pz}) -> world {world_voxel:?} \
+                             got smoothed = {smoothed} (must stay ≤ 0)"
+                        );
+                    } else {
+                        assert!(
+                            smoothed > 0.0,
+                            "air padded cell ({px},{py},{pz}) -> world {world_voxel:?} \
+                             got smoothed = {smoothed} (must stay > 0; MC case index \
+                             uses `< 0.0` per corner — the LOD0 hole regression)"
+                        );
+                        if (world_voxel.x == 6 || world_voxel.x == 10)
+                            && (7..=9).contains(&world_voxel.y)
+                            && (7..=9).contains(&world_voxel.z)
+                        {
+                            saw_air_with_solid_neighbours = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_air_with_solid_neighbours,
+            "test fixture failed to exercise the air-adjacent-to-solid case via the block path"
+        );
     }
 
     #[test]
@@ -5541,14 +5697,17 @@ mod tests {
     #[test]
     fn barycentric_uv_section_tags_round_trip() {
         let mut mesh = MeshData::new();
+        mesh.wireframe_lod_index = 2;
         mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_MAIN);
         mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_VERTICAL_SKIRT);
 
+        assert_eq!(barycentric_lod_index(mesh.barycentric_uvs[0]), 2);
         assert_eq!(barycentric_section(mesh.barycentric_uvs[0]), TERRAIN_MESH_SECTION_MAIN);
         assert_eq!(
             barycentric_section(mesh.barycentric_uvs[3]),
             TERRAIN_MESH_SECTION_VERTICAL_SKIRT
         );
+        assert!((barycentric_u(mesh.barycentric_uvs[0]) - 1.0).abs() < f32::EPSILON);
     }
 }
 

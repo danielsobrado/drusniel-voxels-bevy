@@ -3032,7 +3032,14 @@ fn update_terrain_material_lod(
     );
 
     for (transform, mut chunk_mesh, mut material, mesh_debug) in &mut terrain_meshes {
-        if chunk_mesh.mesh_mode != MeshMode::SurfaceNets {
+        // Both Surface Nets and MC+Transvoxel chunks render with TriplanarMaterial
+        // and need the debug-overlay material swap (Alt+F7 / Alt+F8). Without MC
+        // here the indicator flips "WIRE ON" but the wireframe never appears on
+        // MC chunks because their material handle is never updated.
+        if !matches!(
+            chunk_mesh.mesh_mode,
+            MeshMode::SurfaceNets | MeshMode::McTransvoxel
+        ) {
             continue;
         }
         if debug_mode != crate::voxel::terrain_debug::TerrainDebugMaterialMode::None {

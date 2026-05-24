@@ -35,6 +35,48 @@ When you claim a perf improvement, include:
 
 If a change was not benchmarked, say so directly.
 
+## Terrain Debug Views
+
+Live in-game overlays for diagnosing LOD seams, holes, normals, and skirt
+geometry. Implementation: [`src/voxel/terrain_debug.rs`](src/voxel/terrain_debug.rs).
+Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md).
+
+| Hotkey | What it does | Output |
+|---|---|---|
+| **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
+| **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
+| **Alt+Shift+F7** | Capture current frame. ⚠ Known bug: also fires the Alt+F7 toggle — state flips on every capture. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
+| **Shift+F9** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, lod-delta>1 faces, missing-neighbor counts). | `debug/terrain-hole-probe-<ts>.json` |
+
+### Wireframe colour key
+
+Section colour (multiplied by LOD tint):
+
+| Colour | Mesh section |
+|---|---|
+| White | Main Surface Nets mesh |
+| Cyan | Horizontal skirt / transition apron |
+| Magenta | Vertical skirt |
+| Yellow | Transvoxel transition apron (MC+Transvoxel only) |
+
+LOD tint:
+
+| Tint | LOD |
+|---|---|
+| White (no tint) | LOD0 |
+| Light blue | LOD1 |
+| Green | LOD2 |
+| Orange | LOD3 / Culled |
+
+### Diagnostic recipe (friend's rule of thumb)
+
+Per [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md) → WIRE-008:
+
+- **Stepped geometry** in wireframe → DC/QEF/SDF placement issue.
+- **Smooth geometry, stepped colour in Alt+F8** → normals issue (not geometry).
+- **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` in the hole-probe dump.
+- **Coloured (non-white) edges visible at an altitude band** → a skirt is being used to hide a real gap. Skirt is a band-aid, not a fix.
+
 # Behavioral guidelines to reduce common LLM coding mistakes. 
 
 Merge with project-specific instructions as needed.

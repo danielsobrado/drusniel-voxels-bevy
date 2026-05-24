@@ -241,6 +241,7 @@ fn terrain_snow_mask(normal: vec3<f32>) -> f32 {
 }
 
 const TERRAIN_BARYCENTRIC_SECTION_SCALE: f32 = 4.0;
+const TERRAIN_BARYCENTRIC_LOD_U_SCALE: f32 = 2.0;
 
 fn terrain_debug_section_color(section: u32) -> vec3<f32> {
     switch section {
@@ -252,24 +253,34 @@ fn terrain_debug_section_color(section: u32) -> vec3<f32> {
     }
 }
 
-fn terrain_debug_lod_tint(lod: u32) -> vec3<f32> {
+fn terrain_debug_lod_wire_color(lod: u32) -> vec3<f32> {
     switch lod {
-        case 0u: { return vec3<f32>(1.0, 1.0, 1.0); }
-        case 1u: { return vec3<f32>(0.75, 0.88, 1.0); }
-        case 2u: { return vec3<f32>(0.65, 1.0, 0.65); }
-        case 3u: { return vec3<f32>(1.0, 0.72, 0.35); }
-        default: { return vec3<f32>(1.0, 1.0, 1.0); }
+        case 0u: { return vec3<f32>(1.00, 1.00, 1.00); }
+        case 1u: { return vec3<f32>(0.35, 0.65, 1.00); }
+        case 2u: { return vec3<f32>(0.20, 0.95, 0.30); }
+        case 3u: { return vec3<f32>(1.00, 0.50, 0.08); }
+        default: { return vec3<f32>(1.00, 1.00, 1.00); }
     }
 }
 
+fn terrain_debug_wire_color(section: u32, lod: u32) -> vec3<f32> {
+    let lod_color = terrain_debug_lod_wire_color(lod);
+    if (section == 0u) {
+        return lod_color;
+    }
+    let section_color = terrain_debug_section_color(section);
+    return mix(lod_color, section_color, 0.72);
+}
+
 fn apply_terrain_debug_wireframe(base_color: vec4<f32>, uv_b: vec2<f32>) -> vec4<f32> {
+    let lod = min(u32(floor(uv_b.x / TERRAIN_BARYCENTRIC_LOD_U_SCALE)), 3u);
+    let bary_u = uv_b.x - f32(lod) * TERRAIN_BARYCENTRIC_LOD_U_SCALE;
     let section = u32(floor(uv_b.y / TERRAIN_BARYCENTRIC_SECTION_SCALE));
     let bary_v = uv_b.y - f32(section) * TERRAIN_BARYCENTRIC_SECTION_SCALE;
-    let bary = vec3<f32>(uv_b.x, bary_v, 1.0 - uv_b.x - bary_v);
+    let bary = vec3<f32>(bary_u, bary_v, 1.0 - bary_u - bary_v);
     let edge = min(bary.x, min(bary.y, bary.z));
     let line = 1.0 - smoothstep(0.01, 0.03, edge);
-    let lod = min(triplanar_debug_lod_level(), 3u);
-    let wire_color = terrain_debug_section_color(section) * terrain_debug_lod_tint(lod);
+    let wire_color = terrain_debug_wire_color(section, lod);
     return vec4<f32>(mix(base_color.rgb, wire_color, line * 0.85), base_color.a);
 }
 

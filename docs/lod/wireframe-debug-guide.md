@@ -27,13 +27,13 @@ Renders triangle edges in-shader using barycentric UV1 data.
   - Cyan: horizontal transition apron / seal
   - Magenta: vertical drop curtain
   - Yellow: reserved for future MC+Transvoxel aprons
-- **Edge tint by chunk LOD** (multiplied with section colour)
-  - LOD0: neutral white
-  - LOD1: light blue
+- **Edge tint by chunk LOD** (main surface uses the LOD colour directly; skirt sections blend section + LOD)
+  - LOD0: white
+  - LOD1: blue
   - LOD2: green
   - LOD3: orange (also used for **Culled** chunks that still have mesh entities)
 
-LOD index is baked into per-chunk debug material handles (`weather_flags` bits 24–31).
+LOD index is baked into mesh UV1 at generation time (X slots) and mirrored in per-chunk debug material handles (`weather_flags` bits 24–31).
 
 If you see stepped **triangle edges** on a slope, the artifact is geometric.
 

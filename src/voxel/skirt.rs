@@ -348,13 +348,13 @@ fn push_boundary_quad_indices(indices: &mut Vec<u32>, face: ChunkFace, base_idx:
     }
 }
 
-fn push_quad_barycentrics(barycentric_uvs: &mut Vec<[f32; 2]>, section: u8) {
+fn push_quad_barycentrics(barycentric_uvs: &mut Vec<[f32; 2]>, section: u8, lod_index: u8) {
     use crate::voxel::meshing::encode_barycentric_uv;
     barycentric_uvs.extend_from_slice(&[
-        encode_barycentric_uv([1.0, 0.0], section),
-        encode_barycentric_uv([0.0, 1.0], section),
-        encode_barycentric_uv([0.0, 0.0], section),
-        encode_barycentric_uv([0.0, 1.0], section),
+        encode_barycentric_uv([1.0, 0.0], section, lod_index),
+        encode_barycentric_uv([0.0, 1.0], section, lod_index),
+        encode_barycentric_uv([0.0, 0.0], section, lod_index),
+        encode_barycentric_uv([0.0, 1.0], section, lod_index),
     ]);
 }
 
@@ -404,6 +404,7 @@ pub fn generate_skirts_with_apron_only_faces(
     apron_only_face_mask: u8,
 ) -> SkirtGenerationStats {
     let mut stats = SkirtGenerationStats::default();
+    let wireframe_lod_index = my_lod.wireframe_lod_index();
     if config.depth <= 0.0 {
         return stats;
     }
@@ -510,6 +511,7 @@ pub fn generate_skirts_with_apron_only_faces(
             push_quad_barycentrics(
                 barycentric_uvs,
                 crate::voxel::meshing::TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT,
+                wireframe_lod_index,
             );
             push_boundary_quad_indices(indices, edge.face, base_idx);
             stats.transition_apron_index_count += 6;
@@ -553,6 +555,7 @@ pub fn generate_skirts_with_apron_only_faces(
         push_quad_barycentrics(
             barycentric_uvs,
             crate::voxel::meshing::TERRAIN_MESH_SECTION_VERTICAL_SKIRT,
+            wireframe_lod_index,
         );
         push_boundary_quad_indices(indices, edge.face, vertical_idx);
         stats.vertical_skirt_index_count += 6;

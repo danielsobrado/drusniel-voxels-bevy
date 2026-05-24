@@ -121,12 +121,7 @@ impl TerrainDebugMaterialHandles {
 }
 
 pub fn lod_debug_index(lod: LodLevel) -> usize {
-    match lod {
-        LodLevel::Lod0 => 0,
-        LodLevel::Lod1 => 1,
-        LodLevel::Lod2 => 2,
-        LodLevel::Lod3 | LodLevel::Culled => 3,
-    }
+    lod.wireframe_lod_index() as usize
 }
 
 pub fn terrain_debug_material_mode(
