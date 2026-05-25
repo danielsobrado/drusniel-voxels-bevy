@@ -1262,9 +1262,11 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
             let u = x as f32 / width_f;
             let center_fuel = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.72);
             let edge_falloff = smoothstep(0.0, 0.16, u) * smoothstep(0.0, 0.16, 1.0 - u);
-            let n1 = flame_hash_noise(u * 9.0, v * 6.0 - time * 1.25);
-            let n2 = flame_hash_noise(u * 23.0 + time * 0.35, v * 15.0 - time * 2.4);
-            let tongues = ((n1 * 0.58 + n2 * 0.42) * center_fuel * edge_falloff).powf(1.35);
+            let sway = flame_hash_noise(u * 3.0 + time * 0.25, v * 2.0 + time * 0.55) - 0.5;
+            let n1 = flame_hash_noise(u * 9.0 + sway * 1.6, v * 6.0 + time * 1.35);
+            let n2 = flame_hash_noise(u * 23.0 + time * 0.28 + sway * 2.4, v * 15.0 + time * 2.65);
+            let tongues =
+                ((n1 * 0.58 + n2 * 0.42) * center_fuel * edge_falloff).powf(1.55);
             let intensity = (base_line * 0.92 + flame_band * tongues * 0.55).clamp(0.0, 1.0);
             let smoke_center = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(1.8);
             let smoke = (smoke_band * smoke_center * n2 * 0.085).clamp(0.0, 1.0);
@@ -1276,13 +1278,13 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
             let idx = ((y * width + x) * 4) as usize;
 
             pixels[idx] =
-                ((intensity * 220.0) + particle * 255.0 + smoke * 20.0 + smoke_column * 82.0)
+                ((intensity * 220.0) + particle * 255.0 + smoke * 20.0 + smoke_column * 58.0)
                     .clamp(0.0, 255.0) as u8;
             pixels[idx + 1] =
-                ((intensity.powf(1.45) * 68.0) + particle * 120.0 + smoke * 18.0 + smoke_column * 64.0)
+                ((intensity.powf(1.45) * 68.0) + particle * 105.0 + smoke * 18.0 + smoke_column * 42.0)
                     .clamp(0.0, 255.0) as u8;
             pixels[idx + 2] =
-                ((intensity.powf(2.8) * 10.0) + particle * 18.0 + smoke * 16.0 + smoke_column * 38.0)
+                ((intensity.powf(2.8) * 10.0) + particle * 4.0 + smoke * 10.0 + smoke_column * 18.0)
                     .clamp(0.0, 255.0) as u8;
             pixels[idx + 3] = alpha;
         }
@@ -1294,49 +1296,120 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
 fn startup_smoke_column(u: f32, v: f32, time: f32) -> f32 {
     let center = (1.0 - ((u - 0.5).abs() / 0.36)).clamp(0.0, 1.0).powf(1.35);
     let height = smoothstep(0.12, 0.82, 1.0 - v) * smoothstep(0.18, 0.84, v);
-    let drift = flame_hash_noise(u * 5.0 + time * 0.22, v * 8.0 - time * 0.92);
-    let holes = flame_hash_noise(u * 11.0 - time * 0.18, v * 15.0 - time * 0.55);
+    let movement = Vec2::new(0.7, -1.0);
+    let uv = Vec2::new((u - 0.5) * 3.6, (1.0 - v) * 2.2);
+    let drift_uv = uv * 5.0 + movement * time * 0.95;
+    let drift = startup_layered_noise1_2(drift_uv, 1.7, 0.7, 6, time * 0.2);
+    let holes = startup_layered_noise1_2(uv * 4.0 + movement * time * 0.5, 1.8, 0.5, 3, time * 0.2);
     (center * height * drift.powf(1.45) * holes.powf(0.8) * 0.72).clamp(0.0, 1.0)
 }
 
 fn startup_fire_particles(u: f32, v: f32, time: f32) -> f32 {
     let mut particles = 0.0;
-    let mut scale = 1.0;
     let mut alpha = 1.0;
 
     for layer in 0..WORLD_STARTUP_SPARK_LAYERS {
         let layer_f = layer as f32;
-        let cell_size = 15.0 * scale;
-        let drift_x = time * 0.52 * scale + layer_f * 3.17;
-        let drift_y = time * 2.9 * scale + layer_f * 5.31;
-        let cell_x = (u * cell_size + drift_x).floor();
-        let cell_y = ((1.0 - v) * cell_size + drift_y).floor();
-        let seed = flame_hash(cell_x + layer_f * 19.1, cell_y + layer_f * 7.7);
+        let columns = 7.0 + layer_f * 0.75;
+        let movement = Vec2::new(0.7, -1.0);
+        let uv = Vec2::new(u * columns, (1.0 - v) * columns);
+        let noise_offset = (startup_noise2_2(uv * 2.0 + Vec2::splat(layer_f * 0.41)) - Vec2::splat(0.5)) * 0.24;
+        let moved_uv = uv + movement * time * (0.52 + layer_f * 0.018) + noise_offset;
+        let cell = moved_uv.x.floor();
+        let row = moved_uv.y.floor();
+        let seed = startup_hash1_2(Vec2::new(cell + layer_f * 19.1, row + layer_f * 7.7));
+        let progress = (time * (0.18 + seed * 0.2) + seed + layer_f * 0.073).fract();
+        let spark_y = 1.03 - progress * (0.82 + seed * 0.16);
+        let base_x = (cell + 0.18 + startup_hash1_2(Vec2::new(cell, row + 2.0)) * 0.64) / columns;
+        let sway = (progress * 6.283185 + seed * 12.7).sin() * (0.012 + seed * 0.026);
+        let spark_x = base_x + sway + progress * 0.08;
+        let dx = (u - spark_x) / (0.0045 + seed * 0.0035);
+        let dy = (v - spark_y) / (0.013 + seed * 0.014);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let ember = (1.0 - smoothstep(0.0, 1.0, dist)).powf(2.0);
+        let fade_in = smoothstep(0.0, 0.18, progress);
+        let fade_out = smoothstep(1.0, 0.58, progress);
+        let center_life = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.45);
 
-        if seed > 0.72 {
-            let local_x = (u * cell_size + drift_x).fract();
-            let local_y = ((1.0 - v) * cell_size + drift_y).fract();
-            let spark_x = flame_hash(cell_x, cell_y) * 0.76 + 0.12;
-            let spark_y = flame_hash(cell_x + 4.2, cell_y + 1.7) * 0.76 + 0.12;
-            let dx = (local_x - spark_x) * 1.2;
-            let dy = (local_y - spark_y) * 2.6;
-            let dist = (dx * dx + dy * dy).sqrt();
-            let ember = (1.0 - smoothstep(0.018, 0.12, dist)).powf(1.85);
-            let vertical_life = smoothstep(0.18, 0.96, v) * smoothstep(0.02, 0.82, 1.0 - v);
-            let center_life = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(0.38);
-            particles += ember * vertical_life * center_life * alpha;
-        }
-
-        scale *= 1.07;
+        particles += ember * fade_in * fade_out * center_life * alpha;
         alpha *= 0.82;
     }
 
-    (particles * 1.9).clamp(0.0, 1.0)
+    (particles * 1.65).clamp(0.0, 1.0)
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn startup_layered_noise1_2(
+    mut uv: Vec2,
+    size_mod: f32,
+    alpha_mod: f32,
+    layers: u32,
+    animation: f32,
+) -> f32 {
+    let mut noise = 0.0;
+    let mut alpha = 1.0;
+    let mut size = 1.0;
+    let mut offset = Vec2::ZERO;
+
+    for _ in 0..layers {
+        offset += startup_hash2_2(Vec2::new(alpha, size)) * 10.0;
+        noise += startup_noise1_2(uv * size + Vec2::new(0.7, -1.0) * animation * 8.0 + offset) * alpha;
+        alpha *= alpha_mod;
+        size *= size_mod;
+    }
+
+    uv += offset * 0.0;
+    noise * (1.0 - alpha_mod) / (1.0 - alpha_mod.powf(layers as f32))
+}
+
+fn startup_hash1_2(x: Vec2) -> f32 {
+    (x.dot(Vec2::new(52.127, 61.2871)).sin() * 521.582).fract().abs()
+}
+
+fn startup_hash2_2(x: Vec2) -> Vec2 {
+    Vec2::new(
+        (x.dot(Vec2::new(20.52, 70.291)).sin() * 492.194).fract().abs(),
+        (x.dot(Vec2::new(24.1994, 80.171)).sin() * 492.194).fract().abs(),
+    )
+}
+
+fn startup_noise2_2(uv: Vec2) -> Vec2 {
+    let f = Vec2::new(
+        smoothstep(0.0, 1.0, uv.x.fract()),
+        smoothstep(0.0, 1.0, uv.y.fract()),
+    );
+    let uv00 = uv.floor();
+    let uv01 = uv00 + Vec2::Y;
+    let uv10 = uv00 + Vec2::X;
+    let uv11 = uv00 + Vec2::ONE;
+
+    let v00 = startup_hash2_2(uv00);
+    let v01 = startup_hash2_2(uv01);
+    let v10 = startup_hash2_2(uv10);
+    let v11 = startup_hash2_2(uv11);
+    let v0 = v00.lerp(v01, f.y);
+    let v1 = v10.lerp(v11, f.y);
+    v0.lerp(v1, f.x)
+}
+
+fn startup_noise1_2(uv: Vec2) -> f32 {
+    let f = uv.fract();
+    let uv00 = uv.floor();
+    let uv01 = uv00 + Vec2::Y;
+    let uv10 = uv00 + Vec2::X;
+    let uv11 = uv00 + Vec2::ONE;
+
+    let v00 = startup_hash1_2(uv00);
+    let v01 = startup_hash1_2(uv01);
+    let v10 = startup_hash1_2(uv10);
+    let v11 = startup_hash1_2(uv11);
+    let v0 = v00 + (v01 - v00) * f.y;
+    let v1 = v10 + (v11 - v10) * f.y;
+    v0 + (v1 - v0) * f.x
 }
 
 fn flame_hash_noise(x: f32, y: f32) -> f32 {
