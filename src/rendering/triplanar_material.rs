@@ -137,10 +137,13 @@ pub enum TerrainMaterialQuality {
     FullTriplanar,
     CheapTriplanar,
     SingleProjectionFar,
+    HorizonProxy,
     AtlasOnlyDebug,
     WireframeDebug,
     NormalsDebug,
     WireframeNormalsDebug,
+    FlatUnlitDebug,
+    WireframeFlatUnlitDebug,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -215,6 +218,9 @@ impl Material for TriplanarMaterial {
                         .shader_defs
                         .push("TERRAIN_SINGLE_PROJECTION_FAR".into());
                 }
+                TerrainMaterialQuality::HorizonProxy => {
+                    fragment.shader_defs.push("TERRAIN_HORIZON_PROXY".into());
+                }
                 TerrainMaterialQuality::AtlasOnlyDebug => {
                     fragment.shader_defs.push("TERRAIN_ATLAS_ONLY_DEBUG".into());
                 }
@@ -228,6 +234,13 @@ impl Material for TriplanarMaterial {
                     fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
                     fragment.shader_defs.push("TERRAIN_DEBUG_NORMALS".into());
                 }
+                TerrainMaterialQuality::FlatUnlitDebug => {
+                    fragment.shader_defs.push("TERRAIN_DEBUG_FLAT_UNLIT".into());
+                }
+                TerrainMaterialQuality::WireframeFlatUnlitDebug => {
+                    fragment.shader_defs.push("TERRAIN_DEBUG_WIREFRAME".into());
+                    fragment.shader_defs.push("TERRAIN_DEBUG_FLAT_UNLIT".into());
+                }
             }
         }
         Ok(())
@@ -240,10 +253,13 @@ pub struct TriplanarMaterialHandle {
     pub handle: Handle<TriplanarMaterial>,
     pub cheap_handle: Handle<TriplanarMaterial>,
     pub single_projection_far_handle: Handle<TriplanarMaterial>,
+    pub horizon_proxy_handle: Handle<TriplanarMaterial>,
     pub atlas_only_debug_handle: Handle<TriplanarMaterial>,
     pub wireframe_debug_handle: Handle<TriplanarMaterial>,
     pub normals_debug_handle: Handle<TriplanarMaterial>,
     pub wireframe_normals_debug_handle: Handle<TriplanarMaterial>,
+    pub flat_unlit_debug_handle: Handle<TriplanarMaterial>,
+    pub wireframe_flat_unlit_debug_handle: Handle<TriplanarMaterial>,
 }
 
 impl TriplanarMaterialHandle {
@@ -254,11 +270,16 @@ impl TriplanarMaterialHandle {
             TerrainMaterialQuality::SingleProjectionFar => {
                 self.single_projection_far_handle.clone()
             }
+            TerrainMaterialQuality::HorizonProxy => self.horizon_proxy_handle.clone(),
             TerrainMaterialQuality::AtlasOnlyDebug => self.atlas_only_debug_handle.clone(),
             TerrainMaterialQuality::WireframeDebug => self.wireframe_debug_handle.clone(),
             TerrainMaterialQuality::NormalsDebug => self.normals_debug_handle.clone(),
             TerrainMaterialQuality::WireframeNormalsDebug => {
                 self.wireframe_normals_debug_handle.clone()
+            }
+            TerrainMaterialQuality::FlatUnlitDebug => self.flat_unlit_debug_handle.clone(),
+            TerrainMaterialQuality::WireframeFlatUnlitDebug => {
+                self.wireframe_flat_unlit_debug_handle.clone()
             }
         }
     }

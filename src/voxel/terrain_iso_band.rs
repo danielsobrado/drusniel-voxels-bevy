@@ -7,9 +7,7 @@ use crate::voxel::terrain_debug::TerrainDebugMaterialHandles;
 use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::render_resource::{
-    Extent3d, TextureDimension, TextureFormat, TextureUsages,
-};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 
 pub const ISO_BAND_VOLUME_RESOLUTION: UVec3 = UVec3::new(64, 48, 64);
 pub const ISO_BAND_WORLD_EXTENT: Vec3 = Vec3::new(64.0, 48.0, 64.0);
@@ -57,8 +55,7 @@ pub fn create_iso_band_volume_image() -> Image {
         TextureFormat::R32Float,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.texture_descriptor.usage =
-        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
+    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
     image
 }
 
@@ -94,6 +91,8 @@ pub fn sync_iso_band_material_bindings(
     patch(&triplanar_handles.wireframe_debug_handle);
     patch(&triplanar_handles.normals_debug_handle);
     patch(&triplanar_handles.wireframe_normals_debug_handle);
+    patch(&triplanar_handles.flat_unlit_debug_handle);
+    patch(&triplanar_handles.wireframe_flat_unlit_debug_handle);
 
     if let Some(debug_handles) = debug_handles {
         for handle in debug_handles.all_handles() {
@@ -200,8 +199,8 @@ fn fill_iso_band_volume(
     for z in 0..res.z {
         for y in 0..res.y {
             for x in 0..res.x {
-                let world_pos = world_min
-                    + Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+                let world_pos =
+                    world_min + Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
                 let sdf = mesher_smoothed_sdf_at_world_pos(world, world_pos);
                 let index = ((x + y * res.x + z * res.x * res.y) * 4) as usize;
                 data[index..index + 4].copy_from_slice(&sdf.to_le_bytes());

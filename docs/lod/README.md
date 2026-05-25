@@ -8,6 +8,7 @@ Document status (2026-05-17): current index/reference.
 - [LOD review handoff](lod-review-handoff.md)
 - [LOD terrain hole investigation](lod-terrain-hole-investigation.md)
 - [LOD visual artifact fixes](lod-visual-artifact-fixes.md)
+- [Terrain horizon proxy band](horizon-proxy-band.md)
 
 ## LOD imagery
 

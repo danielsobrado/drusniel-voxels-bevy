@@ -59,7 +59,9 @@ use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::materials::{
     MaterialCatalog, MaterialId, MaterialReplaceSummary, VoxelMaterialDefinition,
 };
-use crate::voxel::meshing::{ChunkMesh, TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode};
+use crate::voxel::meshing::{
+    ChunkMesh, TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode,
+};
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
 use crate::voxel::terrain::{Biome, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise};
@@ -5417,6 +5419,8 @@ fn set_baked_ao_strength(world: &mut World, strength: f32) {
                 handles.wireframe_debug_handle.clone(),
                 handles.normals_debug_handle.clone(),
                 handles.wireframe_normals_debug_handle.clone(),
+                handles.flat_unlit_debug_handle.clone(),
+                handles.wireframe_flat_unlit_debug_handle.clone(),
             ]
         })
         .unwrap_or_default();
@@ -5527,17 +5531,22 @@ fn set_terrain_wireframe_debug_material(world: &mut World, enabled: bool) {
     };
     let restore_handles = (!enabled)
         .then(|| {
-            world.get_resource::<TriplanarMaterialHandle>().map(|handles| {
-                (
-                    handles.handle.clone(),
-                    handles.cheap_handle.clone(),
-                    handles.single_projection_far_handle.clone(),
-                    handles.atlas_only_debug_handle.clone(),
-                    handles.wireframe_debug_handle.clone(),
-                    handles.normals_debug_handle.clone(),
-                    handles.wireframe_normals_debug_handle.clone(),
-                )
-            })
+            world
+                .get_resource::<TriplanarMaterialHandle>()
+                .map(|handles| {
+                    (
+                        handles.handle.clone(),
+                        handles.cheap_handle.clone(),
+                        handles.single_projection_far_handle.clone(),
+                        handles.horizon_proxy_handle.clone(),
+                        handles.atlas_only_debug_handle.clone(),
+                        handles.wireframe_debug_handle.clone(),
+                        handles.normals_debug_handle.clone(),
+                        handles.wireframe_normals_debug_handle.clone(),
+                        handles.flat_unlit_debug_handle.clone(),
+                        handles.wireframe_flat_unlit_debug_handle.clone(),
+                    )
+                })
         })
         .flatten();
     let wireframe_fallback = world
@@ -5565,21 +5574,27 @@ fn set_terrain_wireframe_debug_material(world: &mut World, enabled: bool) {
             full,
             cheap,
             single_projection_far,
+            horizon_proxy,
             atlas_only_debug,
             wireframe_debug,
             normals_debug,
             wireframe_normals_debug,
+            flat_unlit_debug,
+            wireframe_flat_unlit_debug,
         )) = restore_handles.as_ref()
         {
             match chunk_mesh.material_quality {
                 TerrainMaterialQuality::FullTriplanar => full.clone(),
                 TerrainMaterialQuality::CheapTriplanar => cheap.clone(),
                 TerrainMaterialQuality::SingleProjectionFar => single_projection_far.clone(),
+                TerrainMaterialQuality::HorizonProxy => horizon_proxy.clone(),
                 TerrainMaterialQuality::AtlasOnlyDebug => atlas_only_debug.clone(),
                 TerrainMaterialQuality::WireframeDebug => wireframe_debug.clone(),
                 TerrainMaterialQuality::NormalsDebug => normals_debug.clone(),
-                TerrainMaterialQuality::WireframeNormalsDebug => {
-                    wireframe_normals_debug.clone()
+                TerrainMaterialQuality::WireframeNormalsDebug => wireframe_normals_debug.clone(),
+                TerrainMaterialQuality::FlatUnlitDebug => flat_unlit_debug.clone(),
+                TerrainMaterialQuality::WireframeFlatUnlitDebug => {
+                    wireframe_flat_unlit_debug.clone()
                 }
             }
         } else {

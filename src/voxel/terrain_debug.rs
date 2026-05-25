@@ -21,14 +21,22 @@ pub struct TerrainDebugView {
     pub wireframe: bool,
     pub normals: bool,
     pub iso_band: bool,
+    pub flat_unlit: bool,
 }
 
 impl TerrainDebugView {
     pub fn active(self) -> bool {
-        self.wireframe || self.normals || self.iso_band
+        self.wireframe || self.normals || self.iso_band || self.flat_unlit
     }
 
     pub fn material_mode(self) -> TerrainDebugMaterialMode {
+        if self.flat_unlit {
+            return if self.wireframe {
+                TerrainDebugMaterialMode::WireframeFlatUnlit
+            } else {
+                TerrainDebugMaterialMode::FlatUnlit
+            };
+        }
         match (self.wireframe, self.normals) {
             (true, true) => TerrainDebugMaterialMode::WireframeNormals,
             (true, false) => TerrainDebugMaterialMode::Wireframe,
@@ -44,6 +52,8 @@ pub enum TerrainDebugMaterialMode {
     Wireframe,
     Normals,
     WireframeNormals,
+    FlatUnlit,
+    WireframeFlatUnlit,
 }
 
 impl TerrainDebugMaterialMode {
@@ -53,6 +63,8 @@ impl TerrainDebugMaterialMode {
             Self::Wireframe => Some(TerrainMaterialQuality::WireframeDebug),
             Self::Normals => Some(TerrainMaterialQuality::NormalsDebug),
             Self::WireframeNormals => Some(TerrainMaterialQuality::WireframeNormalsDebug),
+            Self::FlatUnlit => Some(TerrainMaterialQuality::FlatUnlitDebug),
+            Self::WireframeFlatUnlit => Some(TerrainMaterialQuality::WireframeFlatUnlitDebug),
         }
     }
 }
@@ -63,6 +75,8 @@ pub struct TerrainDebugMaterialHandles {
     wireframe: [Handle<TriplanarMaterial>; LOD_MATERIAL_SLOTS],
     normals: [Handle<TriplanarMaterial>; LOD_MATERIAL_SLOTS],
     wireframe_normals: [Handle<TriplanarMaterial>; LOD_MATERIAL_SLOTS],
+    flat_unlit: [Handle<TriplanarMaterial>; LOD_MATERIAL_SLOTS],
+    wireframe_flat_unlit: [Handle<TriplanarMaterial>; LOD_MATERIAL_SLOTS],
 }
 
 impl TerrainDebugMaterialHandles {
@@ -71,27 +85,32 @@ impl TerrainDebugMaterialHandles {
         wireframe: &Handle<TriplanarMaterial>,
         normals: &Handle<TriplanarMaterial>,
         wireframe_normals: &Handle<TriplanarMaterial>,
+        flat_unlit: &Handle<TriplanarMaterial>,
+        wireframe_flat_unlit: &Handle<TriplanarMaterial>,
         iso_band_volume: &Handle<Image>,
         materials: &mut Assets<TriplanarMaterial>,
     ) -> Self {
         let mut clone_with_lod =
             |source: &Handle<TriplanarMaterial>, lod_index: u8| -> Handle<TriplanarMaterial> {
                 let mut material = materials.get(source).cloned().unwrap_or_default();
-                material.uniforms.weather_flags = crate::rendering::triplanar_material::triplanar_weather_flags_with_debug_lod(
-                    material.uniforms.weather_flags,
-                    lod_index,
-                );
+                material.uniforms.weather_flags =
+                    crate::rendering::triplanar_material::triplanar_weather_flags_with_debug_lod(
+                        material.uniforms.weather_flags,
+                        lod_index,
+                    );
                 material.iso_band_volume = Some(iso_band_volume.clone());
                 materials.add(material)
             };
 
         Self {
-            wireframe: std::array::from_fn(|lod| {
-                clone_with_lod(wireframe, lod as u8)
-            }),
+            wireframe: std::array::from_fn(|lod| clone_with_lod(wireframe, lod as u8)),
             normals: std::array::from_fn(|lod| clone_with_lod(normals, lod as u8)),
             wireframe_normals: std::array::from_fn(|lod| {
                 clone_with_lod(wireframe_normals, lod as u8)
+            }),
+            flat_unlit: std::array::from_fn(|lod| clone_with_lod(flat_unlit, lod as u8)),
+            wireframe_flat_unlit: std::array::from_fn(|lod| {
+                clone_with_lod(wireframe_flat_unlit, lod as u8)
             }),
         }
     }
@@ -109,6 +128,10 @@ impl TerrainDebugMaterialHandles {
             TerrainDebugMaterialMode::WireframeNormals => {
                 Some(self.wireframe_normals[index].clone())
             }
+            TerrainDebugMaterialMode::FlatUnlit => Some(self.flat_unlit[index].clone()),
+            TerrainDebugMaterialMode::WireframeFlatUnlit => {
+                Some(self.wireframe_flat_unlit[index].clone())
+            }
         }
     }
 
@@ -117,6 +140,8 @@ impl TerrainDebugMaterialHandles {
             .iter()
             .chain(self.normals.iter())
             .chain(self.wireframe_normals.iter())
+            .chain(self.flat_unlit.iter())
+            .chain(self.wireframe_flat_unlit.iter())
     }
 }
 
@@ -155,6 +180,7 @@ struct TerrainDebugCaptureModes {
     wireframe: bool,
     normals: bool,
     iso_band: bool,
+    flat_unlit: bool,
     editor_wireframe: bool,
 }
 
@@ -210,6 +236,18 @@ pub fn toggle_terrain_debug_view(
             if terrain_debug.iso_band { "ON" } else { "OFF" }
         );
     }
+
+    if keyboard.just_pressed(KeyCode::F10) {
+        terrain_debug.flat_unlit = !terrain_debug.flat_unlit;
+        info!(
+            "Terrain flat unlit debug: {} (Alt+F10)",
+            if terrain_debug.flat_unlit {
+                "ON"
+            } else {
+                "OFF"
+            }
+        );
+    }
 }
 
 /// Returns true when Alt+F7 should toggle wireframe (not Alt+Shift+F7 capture).
@@ -257,6 +295,7 @@ pub fn capture_terrain_debug_frame(
             wireframe: terrain_debug.wireframe,
             normals: terrain_debug.normals,
             iso_band: terrain_debug.iso_band,
+            flat_unlit: terrain_debug.flat_unlit,
             editor_wireframe: runtime_debug.is_some_and(|state| state.wireframe),
         },
         terrain_settings_hash: terrain_settings_hash(&mesh_settings, &lod_settings),
@@ -265,7 +304,10 @@ pub fn capture_terrain_debug_frame(
     match serde_json::to_string_pretty(&sidecar) {
         Ok(json) => {
             if let Err(err) = std::fs::write(&json_path, json) {
-                warn!("Failed to write terrain debug sidecar {}: {err}", json_path.display());
+                warn!(
+                    "Failed to write terrain debug sidecar {}: {err}",
+                    json_path.display()
+                );
             } else {
                 info!("Terrain debug sidecar written to {}", json_path.display());
             }
@@ -308,6 +350,9 @@ fn terrain_debug_indicator_label(view: TerrainDebugView) -> String {
     }
     if view.iso_band {
         parts.push("ISO");
+    }
+    if view.flat_unlit {
+        parts.push("FLAT");
     }
     if parts.is_empty() {
         String::new()
@@ -362,6 +407,7 @@ mod tests {
             wireframe: false,
             normals: true,
             iso_band: false,
+            flat_unlit: false,
         };
         assert_eq!(
             terrain_debug_material_mode(&view, true, Some(TerrainMaterialQuality::WireframeDebug)),
@@ -375,6 +421,20 @@ mod tests {
         assert_eq!(
             terrain_debug_material_mode(&view, false, Some(TerrainMaterialQuality::WireframeDebug)),
             TerrainDebugMaterialMode::Wireframe
+        );
+    }
+
+    #[test]
+    fn terrain_debug_material_mode_prefers_flat_unlit() {
+        let view = TerrainDebugView {
+            wireframe: true,
+            normals: true,
+            iso_band: false,
+            flat_unlit: true,
+        };
+        assert_eq!(
+            terrain_debug_material_mode(&view, false, None),
+            TerrainDebugMaterialMode::WireframeFlatUnlit
         );
     }
 

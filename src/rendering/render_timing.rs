@@ -441,10 +441,15 @@ fn visible_terrain_pressure_inventory(
             TerrainMaterialQuality::SingleProjectionFar => {
                 stats.single_projection_far_meshes += 1;
             }
+            TerrainMaterialQuality::HorizonProxy => {
+                stats.single_projection_far_meshes += 1;
+            }
             TerrainMaterialQuality::AtlasOnlyDebug => stats.atlas_only_debug_meshes += 1,
             TerrainMaterialQuality::WireframeDebug
             | TerrainMaterialQuality::NormalsDebug
-            | TerrainMaterialQuality::WireframeNormalsDebug => stats.wireframe_debug_meshes += 1,
+            | TerrainMaterialQuality::WireframeNormalsDebug
+            | TerrainMaterialQuality::FlatUnlitDebug
+            | TerrainMaterialQuality::WireframeFlatUnlitDebug => stats.wireframe_debug_meshes += 1,
         }
     }
 

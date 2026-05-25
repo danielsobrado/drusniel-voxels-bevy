@@ -10,7 +10,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_mesh::{Indices, VertexAttributeValues};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::camera::controller::PlayerCamera;
 use crate::constants::{CHUNK_SIZE_I32, VOXEL_SIZE};
@@ -397,6 +397,8 @@ struct VisualPointProbe {
     screen_position: Option<Vec2Dump>,
     screenshot_path: Option<String>,
     pixel: Option<RgbaProbe>,
+    pixel_window: Option<VisualPixelWindowProbe>,
+    nearby_pixel_window: Option<VisualPixelWindowProbe>,
     classification: VisualPixelClassification,
     note: String,
 }
@@ -419,6 +421,20 @@ struct RgbaProbe {
     b: u8,
     a: u8,
     luminance: f32,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct VisualPixelWindowProbe {
+    radius_px: u32,
+    sampled_pixels: u32,
+    dark_or_missing_pixels: u32,
+    sky_or_background_pixels: u32,
+    bright_pixels: u32,
+    lit_or_non_dark_pixels: u32,
+    min_luminance: f32,
+    max_luminance: f32,
+    luminance_range: f32,
+    mean_luminance: f32,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -710,6 +726,14 @@ struct ProbeImage {
     pixels: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+struct TerrainDebugCaptureSidecarProbe {
+    camera_pos: [f32; 3],
+}
+
+const TERRAIN_DEBUG_CAPTURE_MAX_AGE_SECS: u64 = 10 * 60;
+const TERRAIN_DEBUG_CAPTURE_CAMERA_EPSILON: f32 = 0.75;
+
 #[allow(clippy::too_many_arguments)]
 fn dump_terrain_hole_probe(
     keys: Res<ButtonInput<KeyCode>>,
@@ -783,7 +807,18 @@ fn dump_terrain_hole_probe(
     } else {
         camera_transform.map(|(transform, _)| transform.up().as_vec3())
     };
-    let visual_image_path = request.and_then(|request| request.screenshot_path.clone());
+    let explicit_visual_image_path = request.and_then(|request| request.screenshot_path.clone());
+    let visual_image_path = explicit_visual_image_path
+        .clone()
+        .or_else(|| latest_matching_terrain_debug_screenshot(camera_pos));
+    if explicit_visual_image_path.is_none() {
+        if let Some(path) = visual_image_path.as_ref() {
+            info!(
+                "Terrain hole probe using latest matching terrain debug screenshot {}",
+                path.display()
+            );
+        }
+    }
     let visual_image = visual_image_path
         .as_deref()
         .and_then(load_probe_image)
@@ -3187,6 +3222,56 @@ fn load_probe_image(path: &Path) -> Option<ProbeImage> {
     })
 }
 
+fn latest_matching_terrain_debug_screenshot(camera_pos: Option<Vec3>) -> Option<PathBuf> {
+    latest_matching_terrain_debug_screenshot_in_dir(Path::new("debug"), camera_pos)
+}
+
+fn latest_matching_terrain_debug_screenshot_in_dir(
+    output_dir: &Path,
+    camera_pos: Option<Vec3>,
+) -> Option<PathBuf> {
+    let camera_pos = camera_pos?;
+    let mut candidates = fs::read_dir(output_dir)
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let file_name = path.file_name()?.to_str()?;
+            if !file_name.starts_with("wireframe-") || path.extension()?.to_str()? != "json" {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((path, modified))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let now = SystemTime::now();
+    for (sidecar_path, modified) in candidates.into_iter().take(20) {
+        if let Ok(age) = now.duration_since(modified) {
+            if age.as_secs() > TERRAIN_DEBUG_CAPTURE_MAX_AGE_SECS {
+                continue;
+            }
+        }
+        let Some(sidecar) = read_terrain_debug_capture_sidecar(&sidecar_path) else {
+            continue;
+        };
+        let capture_camera_pos = Vec3::from_array(sidecar.camera_pos);
+        if capture_camera_pos.distance(camera_pos) > TERRAIN_DEBUG_CAPTURE_CAMERA_EPSILON {
+            continue;
+        }
+        let png_path = sidecar_path.with_extension("png");
+        if png_path.is_file() {
+            return Some(png_path);
+        }
+    }
+    None
+}
+
+fn read_terrain_debug_capture_sidecar(path: &Path) -> Option<TerrainDebugCaptureSidecarProbe> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
 fn visual_samples_for_camera_ray(
     context: Option<&VisualProbeContext>,
     raw_surface_point: Option<Vec3>,
@@ -3205,12 +3290,16 @@ fn visual_samples_for_camera_ray(
 }
 
 fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> VisualPointProbe {
+    const VISUAL_PIXEL_WINDOW_RADIUS_PX: u32 = 4;
+    const VISUAL_NEARBY_PIXEL_WINDOW_RADIUS_PX: u32 = 18;
     let Some(context) = context else {
         return VisualPointProbe {
             world_point: point.into(),
             screen_position: None,
             screenshot_path: None,
             pixel: None,
+            pixel_window: None,
+            nearby_pixel_window: None,
             classification: VisualPixelClassification::ProjectionUnavailable,
             note: "camera projection context was unavailable".to_string(),
         };
@@ -3224,6 +3313,8 @@ fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> Visu
             screen_position: None,
             screenshot_path,
             pixel: None,
+            pixel_window: None,
+            nearby_pixel_window: None,
             classification: VisualPixelClassification::ProjectionUnavailable,
             note: "point could not be projected with the active camera projection".to_string(),
         };
@@ -3242,6 +3333,8 @@ fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> Visu
             screen_position: Some(screen_dump),
             screenshot_path,
             pixel: None,
+            pixel_window: None,
+            nearby_pixel_window: None,
             classification: VisualPixelClassification::Offscreen,
             note: "projected point is outside the screenshot".to_string(),
         };
@@ -3252,11 +3345,20 @@ fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> Visu
             screen_position: Some(screen_dump),
             screenshot_path,
             pixel: None,
+            pixel_window: None,
+            nearby_pixel_window: None,
             classification: VisualPixelClassification::ScreenshotUnavailable,
             note: "screenshot was not available when the probe ran".to_string(),
         };
     };
     let pixel = sample_probe_image(image, screen_position);
+    let pixel_window =
+        sample_probe_image_window(image, screen_position, VISUAL_PIXEL_WINDOW_RADIUS_PX);
+    let nearby_pixel_window = sample_probe_image_window(
+        image,
+        screen_position,
+        VISUAL_NEARBY_PIXEL_WINDOW_RADIUS_PX,
+    );
     let classification = pixel
         .map(classify_visual_pixel)
         .unwrap_or(VisualPixelClassification::Offscreen);
@@ -3265,8 +3367,11 @@ fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> Visu
         screen_position: Some(screen_dump),
         screenshot_path,
         pixel,
+        pixel_window,
+        nearby_pixel_window,
         classification,
-        note: "sampled screenshot pixel at the projected probe point".to_string(),
+        note: "sampled screenshot pixel plus local and nearby pixel windows at the projected probe point"
+            .to_string(),
     }
 }
 
@@ -3343,6 +3448,81 @@ fn sample_probe_image(image: &ProbeImage, screen_position: Vec2) -> Option<RgbaP
     })
 }
 
+fn sample_probe_image_window(
+    image: &ProbeImage,
+    screen_position: Vec2,
+    radius_px: u32,
+) -> Option<VisualPixelWindowProbe> {
+    let center_x = screen_position.x.floor() as i32;
+    let center_y = screen_position.y.floor() as i32;
+    if center_x < 0
+        || center_y < 0
+        || center_x >= image.width as i32
+        || center_y >= image.height as i32
+    {
+        return None;
+    }
+
+    let radius = radius_px as i32;
+    let mut sampled_pixels = 0u32;
+    let mut dark_or_missing_pixels = 0u32;
+    let mut sky_or_background_pixels = 0u32;
+    let mut bright_pixels = 0u32;
+    let mut lit_or_non_dark_pixels = 0u32;
+    let mut min_luminance = f32::INFINITY;
+    let mut max_luminance = f32::NEG_INFINITY;
+    let mut luminance_sum = 0.0f32;
+
+    for y in (center_y - radius)..=(center_y + radius) {
+        for x in (center_x - radius)..=(center_x + radius) {
+            if x < 0 || y < 0 || x >= image.width as i32 || y >= image.height as i32 {
+                continue;
+            }
+            let Some(pixel) = sample_probe_image(image, Vec2::new(x as f32, y as f32)) else {
+                continue;
+            };
+            sampled_pixels = sampled_pixels.saturating_add(1);
+            min_luminance = min_luminance.min(pixel.luminance);
+            max_luminance = max_luminance.max(pixel.luminance);
+            luminance_sum += pixel.luminance;
+            if pixel.luminance >= 0.80 {
+                bright_pixels = bright_pixels.saturating_add(1);
+            }
+            match classify_visual_pixel(pixel) {
+                VisualPixelClassification::DarkOrMissing => {
+                    dark_or_missing_pixels = dark_or_missing_pixels.saturating_add(1);
+                }
+                VisualPixelClassification::SkyOrBackground => {
+                    sky_or_background_pixels = sky_or_background_pixels.saturating_add(1);
+                }
+                VisualPixelClassification::LitOrNonDark => {
+                    lit_or_non_dark_pixels = lit_or_non_dark_pixels.saturating_add(1);
+                }
+                VisualPixelClassification::Offscreen
+                | VisualPixelClassification::ScreenshotUnavailable
+                | VisualPixelClassification::ProjectionUnavailable => {}
+            }
+        }
+    }
+
+    if sampled_pixels == 0 {
+        return None;
+    }
+
+    Some(VisualPixelWindowProbe {
+        radius_px,
+        sampled_pixels,
+        dark_or_missing_pixels,
+        sky_or_background_pixels,
+        bright_pixels,
+        lit_or_non_dark_pixels,
+        min_luminance,
+        max_luminance,
+        luminance_range: max_luminance - min_luminance,
+        mean_luminance: luminance_sum / sampled_pixels as f32,
+    })
+}
+
 fn pixel_luminance(r: u8, g: u8, b: u8) -> f32 {
     (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
 }
@@ -3390,7 +3570,19 @@ fn visual_samples_show_background(samples: &CameraRayVisualSamples) -> bool {
     ]
     .into_iter()
     .flatten()
-    .any(|sample| sample.classification == VisualPixelClassification::SkyOrBackground)
+    .any(|sample| {
+        sample.classification == VisualPixelClassification::SkyOrBackground
+            || sample.pixel_window.is_some_and(|window| {
+                window.sky_or_background_pixels > 0
+                    || window.bright_pixels > 0
+                    || window.luminance_range > 0.45
+            })
+            || sample.nearby_pixel_window.is_some_and(|window| {
+                window.sky_or_background_pixels > 0
+                    || window.bright_pixels > 0
+                    || window.luminance_range > 0.50
+            })
+    })
 }
 
 fn classify_camera_gap(
@@ -3798,12 +3990,7 @@ impl ProbeFaceFrame {
         }
     }
 
-    fn tangent_grid_coord(
-        subdivisions: usize,
-        cell: usize,
-        delta: usize,
-        sign: i32,
-    ) -> usize {
+    fn tangent_grid_coord(subdivisions: usize, cell: usize, delta: usize, sign: i32) -> usize {
         if sign >= 0 {
             1 + cell * 2 + delta
         } else {
@@ -3827,7 +4014,7 @@ impl ProbeFaceFrame {
                 .saturating_sub(1)
                 .saturating_sub(regular_axis_cell)
                 / 2)
-                .min(transition_cells - 1)
+            .min(transition_cells - 1)
         }
     }
 
@@ -3845,18 +4032,10 @@ impl ProbeFaceFrame {
         };
         let mut coords = [0usize; 3];
         coords[self.w_axis as usize] = high_w;
-        coords[self.u_axis as usize] = Self::tangent_grid_coord(
-            subdivisions,
-            cell_u,
-            delta.u as usize,
-            self.u_sign,
-        );
-        coords[self.v_axis as usize] = Self::tangent_grid_coord(
-            subdivisions,
-            cell_v,
-            delta.v as usize,
-            self.v_sign,
-        );
+        coords[self.u_axis as usize] =
+            Self::tangent_grid_coord(subdivisions, cell_u, delta.u as usize, self.u_sign);
+        coords[self.v_axis as usize] =
+            Self::tangent_grid_coord(subdivisions, cell_v, delta.v as usize, self.v_sign);
         coords
     }
 }
@@ -3887,8 +4066,11 @@ fn sample_camera_ray_fan(
     water_lod_guard_chunks: &HashSet<IVec3>,
     visual_context: Option<&VisualProbeContext>,
 ) -> CameraRayFan {
-    const HALF_ANGLE_DEGREES: f32 = 10.0;
-    const GRID_SIZE: u32 = 9;
+    // Use a wide fan for visual seam diagnosis. The previous 10-degree cone
+    // sampled only the center of a 45-degree, 16:9 screenshot and missed
+    // off-center LOD seam holes visible near the left/right thirds.
+    const HALF_ANGLE_DEGREES: f32 = 35.0;
+    const GRID_SIZE: u32 = 13;
 
     let half_angle = HALF_ANGLE_DEGREES.to_radians();
     let mut gaps: Vec<FanGap> = Vec::new();
@@ -4824,6 +5006,52 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_pixel_window_reports_nearby_bright_pixels() {
+        let image = ProbeImage {
+            path: PathBuf::from("synthetic.png"),
+            width: 3,
+            height: 3,
+            pixels: vec![
+                180, 180, 180, 255, 180, 180, 180, 255, 180, 180, 180, 255, 180, 180, 180, 255,
+                180, 180, 180, 255, 255, 255, 255, 255, 180, 180, 180, 255, 180, 180, 180, 255,
+                180, 180, 180, 255,
+            ],
+        };
+
+        let window = sample_probe_image_window(&image, Vec2::new(1.0, 1.0), 1).unwrap();
+
+        assert_eq!(window.sampled_pixels, 9);
+        assert_eq!(window.bright_pixels, 1);
+        assert_eq!(window.lit_or_non_dark_pixels, 9);
+        assert!(window.max_luminance > 0.99);
+    }
+
+    #[test]
+    fn latest_matching_terrain_debug_screenshot_uses_recent_camera_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let sidecar_path = temp.path().join("wireframe-test.json");
+        let png_path = temp.path().join("wireframe-test.png");
+        fs::write(&sidecar_path, r#"{"camera_pos":[1.0,2.0,3.0]}"#).unwrap();
+        fs::write(&png_path, [0_u8]).unwrap();
+
+        assert_eq!(
+            latest_matching_terrain_debug_screenshot_in_dir(
+                temp.path(),
+                Some(Vec3::new(1.2, 2.0, 3.0))
+            ),
+            Some(png_path)
+        );
+        assert!(
+            latest_matching_terrain_debug_screenshot_in_dir(
+                temp.path(),
+                Some(Vec3::new(10.0, 2.0, 3.0))
+            )
+            .is_none()
+        );
+        assert!(latest_matching_terrain_debug_screenshot_in_dir(temp.path(), None).is_none());
+    }
+
+    #[test]
     fn ray_to_emitted_triangle_residual_reports_hit_and_miss() {
         let vertices = [
             Vec3::new(0.0, 0.0, 5.0),
@@ -4944,6 +5172,8 @@ mod tests {
                     a: 255,
                     luminance: pixel_luminance(52, 69, 14),
                 }),
+                pixel_window: None,
+                nearby_pixel_window: None,
                 classification,
                 note: "test visual sample".to_string(),
             }),

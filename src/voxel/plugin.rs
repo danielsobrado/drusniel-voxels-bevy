@@ -10,14 +10,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
+use avian3d::prelude::{Collider, CollisionLayers, CollisionMargin, RigidBody};
+use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::SystemParam;
-use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::extract_component::ExtractComponentPlugin;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::window::PrimaryWindow;
 
@@ -90,7 +91,10 @@ const WORLD_STARTUP_BACKGROUND_ZOOM: f32 = 1.12;
 const WORLD_STARTUP_SETUP_DELAY_FRAMES: u8 = 1;
 const WORLD_GENERATION_TASK_SPAWN_BATCH: usize = 192;
 use crate::constants::WATER_LEVEL;
-use crate::physics::NeedsCollider;
+use crate::physics::{
+    ChunkCollider, NeedsCollider, TerrainColliderBakeTask, TerrainCollisionChunk,
+    TerrainCollisionState,
+};
 use crate::rendering::AmbientOcclusionConfig;
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
@@ -679,15 +683,15 @@ impl Plugin for VoxelPlugin {
         .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
-                .insert_resource(RuntimeChunkStats::default())
-                .insert_resource(WaterBodyRegistry::default())
-                // Async chunk generation state
-                .insert_resource(ChunkGenerationState::default())
-                .insert_resource(WorldStartupOverlayState::default())
-                .insert_resource(WorldStartupLoadingFlames::default())
-                .insert_resource(WorldStartupSetupState::default())
-                .insert_resource(PendingWorldGeneration::default())
-                .insert_resource(WorldGenerationQueue::default())
+        .insert_resource(RuntimeChunkStats::default())
+        .insert_resource(WaterBodyRegistry::default())
+        // Async chunk generation state
+        .insert_resource(ChunkGenerationState::default())
+        .insert_resource(WorldStartupOverlayState::default())
+        .insert_resource(WorldStartupLoadingFlames::default())
+        .insert_resource(WorldStartupSetupState::default())
+        .insert_resource(PendingWorldGeneration::default())
+        .insert_resource(WorldGenerationQueue::default())
         // World persistence settings (set force_regenerate to true to regenerate)
         .insert_resource(WorldPersistence {
             force_regenerate: false,
@@ -1272,8 +1276,7 @@ fn fill_world_startup_flame_pixels(pixels: &mut [u8], width: u32, height: u32, t
             let sway = flame_hash_noise(u * 3.0 + time * 0.25, v * 2.0 + time * 0.55) - 0.5;
             let n1 = flame_hash_noise(u * 9.0 + sway * 1.6, v * 6.0 + time * 1.35);
             let n2 = flame_hash_noise(u * 23.0 + time * 0.28 + sway * 2.4, v * 15.0 + time * 2.65);
-            let tongues =
-                ((n1 * 0.58 + n2 * 0.42) * center_fuel * edge_falloff).powf(1.55);
+            let tongues = ((n1 * 0.58 + n2 * 0.42) * center_fuel * edge_falloff).powf(1.55);
             let intensity = (base_line * 0.92 + flame_band * tongues * 0.55).clamp(0.0, 1.0);
             let smoke_center = (1.0 - (2.0 * u - 1.0).abs()).clamp(0.0, 1.0).powf(1.8);
             let smoke = (smoke_band * smoke_center * n2 * 0.085).clamp(0.0, 1.0);
@@ -1287,12 +1290,16 @@ fn fill_world_startup_flame_pixels(pixels: &mut [u8], width: u32, height: u32, t
             pixels[idx] =
                 ((intensity * 220.0) + particle * 255.0 + smoke * 20.0 + smoke_column * 58.0)
                     .clamp(0.0, 255.0) as u8;
-            pixels[idx + 1] =
-                ((intensity.powf(1.45) * 68.0) + particle * 105.0 + smoke * 18.0 + smoke_column * 42.0)
-                    .clamp(0.0, 255.0) as u8;
-            pixels[idx + 2] =
-                ((intensity.powf(2.8) * 10.0) + particle * 4.0 + smoke * 10.0 + smoke_column * 18.0)
-                    .clamp(0.0, 255.0) as u8;
+            pixels[idx + 1] = ((intensity.powf(1.45) * 68.0)
+                + particle * 105.0
+                + smoke * 18.0
+                + smoke_column * 42.0)
+                .clamp(0.0, 255.0) as u8;
+            pixels[idx + 2] = ((intensity.powf(2.8) * 10.0)
+                + particle * 4.0
+                + smoke * 10.0
+                + smoke_column * 18.0)
+                .clamp(0.0, 255.0) as u8;
             pixels[idx + 3] = alpha;
         }
     }
@@ -1318,7 +1325,8 @@ fn startup_fire_particles(u: f32, v: f32, time: f32) -> f32 {
         let columns = 7.0 + layer_f * 0.75;
         let movement = Vec2::new(0.7, -1.0);
         let uv = Vec2::new(u * columns, (1.0 - v) * columns);
-        let noise_offset = (startup_noise2_2(uv * 2.0 + Vec2::splat(layer_f * 0.41)) - Vec2::splat(0.5)) * 0.24;
+        let noise_offset =
+            (startup_noise2_2(uv * 2.0 + Vec2::splat(layer_f * 0.41)) - Vec2::splat(0.5)) * 0.24;
         let moved_uv = uv + movement * time * (0.52 + layer_f * 0.018) + noise_offset;
         let cell = moved_uv.x.floor();
         let row = moved_uv.y.floor();
@@ -1362,7 +1370,8 @@ fn startup_layered_noise1_2(
 
     for _ in 0..layers {
         offset += startup_hash2_2(Vec2::new(alpha, size)) * 10.0;
-        noise += startup_noise1_2(uv * size + Vec2::new(0.7, -1.0) * animation * 8.0 + offset) * alpha;
+        noise +=
+            startup_noise1_2(uv * size + Vec2::new(0.7, -1.0) * animation * 8.0 + offset) * alpha;
         alpha *= alpha_mod;
         size *= size_mod;
     }
@@ -1372,13 +1381,19 @@ fn startup_layered_noise1_2(
 }
 
 fn startup_hash1_2(x: Vec2) -> f32 {
-    (x.dot(Vec2::new(52.127, 61.2871)).sin() * 521.582).fract().abs()
+    (x.dot(Vec2::new(52.127, 61.2871)).sin() * 521.582)
+        .fract()
+        .abs()
 }
 
 fn startup_hash2_2(x: Vec2) -> Vec2 {
     Vec2::new(
-        (x.dot(Vec2::new(20.52, 70.291)).sin() * 492.194).fract().abs(),
-        (x.dot(Vec2::new(24.1994, 80.171)).sin() * 492.194).fract().abs(),
+        (x.dot(Vec2::new(20.52, 70.291)).sin() * 492.194)
+            .fract()
+            .abs(),
+        (x.dot(Vec2::new(24.1994, 80.171)).sin() * 492.194)
+            .fract()
+            .abs(),
     )
 }
 
@@ -2891,6 +2906,7 @@ fn mesh_dirty_chunks_system(
             chunk.clear_dirty();
 
             let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
+            let horizon_proxy = is_horizon_proxy_lod(lod_level);
             let terrain_quality =
                 terrain_material_quality_for_lod(lod_level, bench_params.toggles.as_deref());
             let triplanar_handle = triplanar_material.handle_for_quality(terrain_quality);
@@ -2927,9 +2943,19 @@ fn mesh_dirty_chunks_system(
                     chunk.clear_mesh_entity();
                 }
             } else {
-                let mesh = mesh_result.solid.into_mesh();
-                let mesh_handle = meshes.add(mesh);
-                let horizon_proxy = is_horizon_proxy_lod(lod_level);
+            let mesh = mesh_result.solid.into_mesh();
+            let mesh_handle = meshes.add(mesh);
+            let needs_collider = terrain_lod_requires_collider(lod_level);
+            // Chunks whose top Y exceeds the water line are visible from above
+                // (or straddle the surface) and must appear in the reflection pass.
+                // Horizon proxy terrain is intentionally excluded from reflection
+                // rendering because it is only a fog-muted silhouette band.
+                let chunk_top_y = (chunk_pos.y + 1) * CHUNK_SIZE_I32;
+                let terrain_layers = if !horizon_proxy && chunk_top_y > WATER_LEVEL {
+                    RenderLayers::default().with(REFLECTION_RENDER_LAYER)
+                } else {
+                    RenderLayers::default()
+                };
 
                 if let Some(entity) = chunk.mesh_entity() {
                     // Update existing entity with new mesh AND correct material for current mode
@@ -2962,10 +2988,35 @@ fn mesh_dirty_chunks_system(
                         }
                     }
                     let mut entity_cmd = commands.entity(entity);
-                    if horizon_proxy {
-                        entity_cmd.remove::<NeedsCollider>().insert(NotShadowCaster);
+                    if needs_collider {
+                        entity_cmd
+                            .insert((NeedsCollider, terrain_layers))
+                            .remove::<NotShadowCaster>();
+                    } else if horizon_proxy {
+                        entity_cmd
+                            .remove::<NeedsCollider>()
+                            .remove::<TerrainColliderBakeTask>()
+                            .remove::<TerrainCollisionChunk>()
+                            .remove::<TerrainCollisionState>()
+                            .remove::<RigidBody>()
+                            .remove::<Collider>()
+                            .remove::<CollisionMargin>()
+                            .remove::<CollisionLayers>()
+                            .remove::<ChunkCollider>()
+                            .insert((NotShadowCaster, terrain_layers));
                     } else {
-                        entity_cmd.insert(NeedsCollider).remove::<NotShadowCaster>();
+                        entity_cmd
+                            .remove::<NeedsCollider>()
+                            .remove::<TerrainColliderBakeTask>()
+                            .remove::<TerrainCollisionChunk>()
+                            .remove::<TerrainCollisionState>()
+                            .remove::<RigidBody>()
+                            .remove::<Collider>()
+                            .remove::<CollisionMargin>()
+                            .remove::<CollisionLayers>()
+                            .remove::<ChunkCollider>()
+                            .insert(terrain_layers)
+                            .remove::<NotShadowCaster>();
                     }
                     if let Some(sources) = mc_triangle_sources.clone() {
                         entity_cmd.insert(sources);
@@ -2973,16 +3024,6 @@ fn mesh_dirty_chunks_system(
                         entity_cmd.remove::<McTriangleSources>();
                     }
                 } else {
-                    // Chunks whose top Y exceeds the water line are visible from above
-                    // (or straddle the surface) and must appear in the reflection pass.
-                    // Fully underwater chunks stay in layer 0 only.
-                    let chunk_top_y = (chunk_pos.y + 1) * CHUNK_SIZE_I32;
-                    let terrain_layers = if !horizon_proxy && chunk_top_y > WATER_LEVEL {
-                        RenderLayers::default().with(REFLECTION_RENDER_LAYER)
-                    } else {
-                        RenderLayers::default()
-                    };
-
                     // Spawn with appropriate material based on mesh mode
                     let entity = match target_mode {
                         MeshMode::Blocky => {
@@ -3020,10 +3061,10 @@ fn mesh_dirty_chunks_system(
                             .id(),
                     };
                     let mut entity_cmd = commands.entity(entity);
-                    if horizon_proxy {
-                        entity_cmd.insert(NotShadowCaster);
-                    } else {
+                    if needs_collider {
                         entity_cmd.insert(NeedsCollider);
+                    } else if horizon_proxy {
+                        entity_cmd.insert(NotShadowCaster);
                     }
                     if let Some(sources) = mc_triangle_sources {
                         entity_cmd.insert(sources);
@@ -3035,7 +3076,7 @@ fn mesh_dirty_chunks_system(
             }
 
             // Handle water mesh
-            if mesh_result.water.is_empty() {
+            if horizon_proxy || mesh_result.water.is_empty() {
                 if let Some(entity) = chunk.water_mesh_entity() {
                     commands.entity(entity).despawn();
                     chunk.clear_water_mesh_entity();
@@ -3392,7 +3433,7 @@ fn terrain_material_quality_for_lod(
     match lod_level {
         LodLevel::Lod0 => TerrainMaterialQuality::FullTriplanar,
         LodLevel::Lod1 | LodLevel::Lod2 => TerrainMaterialQuality::CheapTriplanar,
-        LodLevel::Lod3 | LodLevel::Culled => TerrainMaterialQuality::SingleProjectionFar,
+        LodLevel::Lod3 | LodLevel::Culled => TerrainMaterialQuality::HorizonProxy,
     }
 }
 
@@ -3423,10 +3464,13 @@ fn terrain_material_quality_for_distance(
         }
         TerrainMaterialQuality::CheapTriplanar
         | TerrainMaterialQuality::SingleProjectionFar
+        | TerrainMaterialQuality::HorizonProxy
         | TerrainMaterialQuality::AtlasOnlyDebug
         | TerrainMaterialQuality::WireframeDebug
         | TerrainMaterialQuality::NormalsDebug
-        | TerrainMaterialQuality::WireframeNormalsDebug => current,
+        | TerrainMaterialQuality::WireframeNormalsDebug
+        | TerrainMaterialQuality::FlatUnlitDebug
+        | TerrainMaterialQuality::WireframeFlatUnlitDebug => current,
         _ => current,
     }
 }
@@ -4620,6 +4664,10 @@ fn horizon_proxy_cull_distance(settings: &LodSettings) -> f32 {
 
 fn is_horizon_proxy_lod(lod_level: LodLevel) -> bool {
     lod_level == LodLevel::Lod3
+}
+
+fn terrain_lod_requires_collider(lod_level: LodLevel) -> bool {
+    matches!(lod_level, LodLevel::Lod0 | LodLevel::Lod1)
 }
 
 // =============================================================================

@@ -10,6 +10,7 @@ Runtime diagnostic for classifying terrain artifacts as **geometry**, **shading*
 | **Alt+F8** | Toggle normal-as-colour visualisation |
 | **Alt+F7 + Alt+F8** | Wireframe edges over normal-fill (combined) |
 | **Alt+F9** | Toggle mesher SDF iso-band overlay (composable with other modes) |
+| **Alt+F10** | Toggle flat unlit terrain material (composable with wireframe) |
 | **Alt+Shift+F7** | Capture PNG + JSON sidecar to `debug/wireframe-<timestamp>.*` |
 
 > **Note:** Plain F7/F8 are already used for grass visibility and terrain AO style. Terrain mesh debug uses **Alt** modifiers. **Alt+Shift+F7** captures only — it does not toggle wireframe.
@@ -60,6 +61,13 @@ The overlay samples a 64×48×64 world-space brick centered on the camera (rebui
 
 Use this when wireframe shows continuous tris but you suspect the extracted surface is offset from the occupancy field (common at LOD seams).
 
+### Flat Unlit (Alt+F10)
+
+Renders terrain with a constant unlit colour while preserving the same mesh and
+depth test. Use this to separate real missing geometry from lighting, shadow,
+fog, texture, material, and normal-map artifacts. Combine with Alt+F7 when
+triangle ownership or LOD tint is useful.
+
 ### Capture (Alt+Shift+F7)
 
 Writes:
@@ -86,6 +94,8 @@ The hash covers mesh mode, water air-exposure mode, and LOD distance bands — *
 | Holes in the surface | Alt+F7 | No triangles where some should exist | **Missing mesh** — failed chunk, dirty flag, or neighbor gap. Check hole-probe `missing_boundary_neighbors`. |
 | Holes with tris nearby | Alt+F9 iso-band | Magenta band drifts away from mesh edge | **Mesh/SDF disagreement** — extractor placed surface off the mesher zero crossing. |
 | Dark patches on flats | Alt+F8 normals | Normal gradient looks smooth | **Lighting / AO**, not geometry or normals. |
+| Dark patches on lit terrain | Alt+F10 flat unlit | Patch becomes solid | **Material / lighting / fog / shadow**, not geometry. |
+| Dark patches on lit terrain | Alt+F10 flat unlit | Patch remains missing/dark | **Render visibility / depth / extraction**, inspect render path. |
 
 ## Quick workflow
 
@@ -94,7 +104,8 @@ The hash covers mesh mode, water air-exposure mode, and LOD distance bands — *
 3. Note section edge colours (cyan/magenta = skirt geometry at the seam).
 4. Note LOD tints where chunks of different detail meet.
 5. **Alt+F9** if you need to see whether mesh vertices sit on the mesher SDF zero crossing.
-6. **Alt+Shift+F7** to capture evidence; run hole-probe from the same camera if needed.
+6. **Alt+F10** if you need to distinguish shading from missing geometry.
+7. **Alt+Shift+F7** to capture evidence; run hole-probe from the same camera if needed.
 
 ## Bench / editor activation
 

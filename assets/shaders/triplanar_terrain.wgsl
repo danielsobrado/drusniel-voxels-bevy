@@ -358,6 +358,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     debug_color = apply_terrain_iso_band_overlay(debug_color, world_pos, world_normal);
     return vec4<f32>(debug_color.rgb, 1.0);
 #endif
+
+#ifdef TERRAIN_DEBUG_FLAT_UNLIT
+    var flat_color = vec4<f32>(0.72, 0.82, 0.88, 1.0);
+#ifdef TERRAIN_DEBUG_WIREFRAME
+    flat_color = apply_terrain_debug_wireframe(flat_color, in.uv_b);
+#endif
+    flat_color = apply_terrain_iso_band_overlay(flat_color, world_pos, world_normal);
+    return vec4<f32>(flat_color.rgb, 1.0);
+#endif
     
     // Use vertex colors as material weights
     let mat_weights = in.color; 
@@ -371,6 +380,27 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     if (w.y == w_max) { mat_idx = 1; }
     else if (w.z == w_max) { mat_idx = 2; }
     else if (w.w == w_max) { mat_idx = 3; }
+
+#ifdef TERRAIN_HORIZON_PROXY
+    let proxy_uv = compute_uv(world_pos.xz);
+    var proxy_albedo = vec4<f32>(0.0);
+    if (w_max > 0.95) {
+        proxy_albedo = sample_albedo_single(proxy_uv, mat_idx);
+    } else {
+        if (w.x > 0.001) { proxy_albedo += sample_albedo_single(proxy_uv, 0) * w.x; }
+        if (w.y > 0.001) { proxy_albedo += sample_albedo_single(proxy_uv, 1) * w.y; }
+        if (w.z > 0.001) { proxy_albedo += sample_albedo_single(proxy_uv, 2) * w.z; }
+        if (w.w > 0.001) { proxy_albedo += sample_albedo_single(proxy_uv, 3) * w.w; }
+    }
+    proxy_albedo = proxy_albedo * uniforms.base_color;
+    let fog_color = vec3<f32>(0.56, 0.68, 0.82);
+    let frag_dist = length(view.world_position - pbr_input.world_position.xyz);
+    let fog_mix = clamp((frag_dist - 220.0) / 220.0, 0.35, 0.82);
+    let height_tint = clamp((world_pos.y - WATER_LEVEL) / 128.0, 0.0, 1.0);
+    let textured_silhouette = proxy_albedo.rgb * mix(0.72, 0.9, height_tint);
+    let horizon_color = mix(textured_silhouette, fog_color, fog_mix);
+    return vec4<f32>(horizon_color, 1.0);
+#endif
 
 #ifdef TERRAIN_ATLAS_ONLY_DEBUG
     pbr_input.material.base_color = vec4<f32>(

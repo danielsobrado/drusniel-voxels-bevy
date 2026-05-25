@@ -10,8 +10,8 @@ use crate::rendering::building_material::{
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::triplanar_material::{
-    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle, TriplanarUniforms,
-    TerrainIsoBandUniforms,
+    TerrainIsoBandUniforms, TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
+    TriplanarUniforms,
 };
 use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig, WaterShaderToggles};
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
@@ -688,6 +688,8 @@ pub fn setup_triplanar_material(
     cheap_material.quality = TerrainMaterialQuality::CheapTriplanar;
     let mut single_projection_far_material = base_material.clone();
     single_projection_far_material.quality = TerrainMaterialQuality::SingleProjectionFar;
+    let mut horizon_proxy_material = base_material.clone();
+    horizon_proxy_material.quality = TerrainMaterialQuality::HorizonProxy;
     let mut atlas_only_debug_material = base_material.clone();
     atlas_only_debug_material.quality = TerrainMaterialQuality::AtlasOnlyDebug;
     let mut wireframe_debug_material = base_material.clone();
@@ -696,6 +698,10 @@ pub fn setup_triplanar_material(
     normals_debug_material.quality = TerrainMaterialQuality::NormalsDebug;
     let mut wireframe_normals_debug_material = base_material.clone();
     wireframe_normals_debug_material.quality = TerrainMaterialQuality::WireframeNormalsDebug;
+    let mut flat_unlit_debug_material = base_material.clone();
+    flat_unlit_debug_material.quality = TerrainMaterialQuality::FlatUnlitDebug;
+    let mut wireframe_flat_unlit_debug_material = base_material.clone();
+    wireframe_flat_unlit_debug_material.quality = TerrainMaterialQuality::WireframeFlatUnlitDebug;
 
     let iso_band_image = crate::voxel::terrain_iso_band::create_iso_band_volume_image();
     let iso_band_texture = images.add(iso_band_image);
@@ -706,36 +712,49 @@ pub fn setup_triplanar_material(
     attach_iso_band(&mut full_material);
     attach_iso_band(&mut cheap_material);
     attach_iso_band(&mut single_projection_far_material);
+    attach_iso_band(&mut horizon_proxy_material);
     attach_iso_band(&mut atlas_only_debug_material);
     attach_iso_band(&mut wireframe_debug_material);
     attach_iso_band(&mut normals_debug_material);
     attach_iso_band(&mut wireframe_normals_debug_material);
+    attach_iso_band(&mut flat_unlit_debug_material);
+    attach_iso_band(&mut wireframe_flat_unlit_debug_material);
 
     let material_handle = materials.add(full_material);
     let cheap_handle = materials.add(cheap_material);
     let single_projection_far_handle = materials.add(single_projection_far_material);
+    let horizon_proxy_handle = materials.add(horizon_proxy_material);
     let atlas_only_debug_handle = materials.add(atlas_only_debug_material);
     let wireframe_debug_handle = materials.add(wireframe_debug_material);
     let normals_debug_handle = materials.add(normals_debug_material);
     let wireframe_normals_debug_handle = materials.add(wireframe_normals_debug_material);
+    let flat_unlit_debug_handle = materials.add(flat_unlit_debug_material);
+    let wireframe_flat_unlit_debug_handle = materials.add(wireframe_flat_unlit_debug_material);
 
     commands.insert_resource(TriplanarMaterialHandle {
         handle: material_handle.clone(),
         cheap_handle: cheap_handle.clone(),
         single_projection_far_handle: single_projection_far_handle.clone(),
+        horizon_proxy_handle: horizon_proxy_handle.clone(),
         atlas_only_debug_handle: atlas_only_debug_handle.clone(),
         wireframe_debug_handle: wireframe_debug_handle.clone(),
         normals_debug_handle: normals_debug_handle.clone(),
         wireframe_normals_debug_handle: wireframe_normals_debug_handle.clone(),
+        flat_unlit_debug_handle: flat_unlit_debug_handle.clone(),
+        wireframe_flat_unlit_debug_handle: wireframe_flat_unlit_debug_handle.clone(),
     });
-    commands.insert_resource(crate::voxel::terrain_debug::TerrainDebugMaterialHandles::from_base(
-        &material_handle,
-        &wireframe_debug_handle,
-        &normals_debug_handle,
-        &wireframe_normals_debug_handle,
-        &iso_band_texture,
-        &mut materials,
-    ));
+    commands.insert_resource(
+        crate::voxel::terrain_debug::TerrainDebugMaterialHandles::from_base(
+            &material_handle,
+            &wireframe_debug_handle,
+            &normals_debug_handle,
+            &wireframe_normals_debug_handle,
+            &flat_unlit_debug_handle,
+            &wireframe_flat_unlit_debug_handle,
+            &iso_band_texture,
+            &mut materials,
+        ),
+    );
     commands.insert_resource(crate::voxel::terrain_iso_band::TerrainIsoBandVolume::new(
         iso_band_texture,
     ));
@@ -1240,6 +1259,8 @@ pub fn sync_weather_to_materials(
             (&handles.wireframe_debug_handle, 0.0),
             (&handles.normals_debug_handle, 0.0),
             (&handles.wireframe_normals_debug_handle, 0.0),
+            (&handles.flat_unlit_debug_handle, 0.0),
+            (&handles.wireframe_flat_unlit_debug_handle, 0.0),
         ] {
             if let Some(material) = triplanar_materials.get_mut(handle) {
                 material.uniforms.rain_factor = uniforms.rain_factor;

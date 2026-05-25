@@ -55,6 +55,7 @@ Document status (2026-05-17): historical release/reference record; keep for vers
   * **Volumetric Cloud Optimization**: Primary raymarching steps reduced from 64 to 32, render scale from 0.5× to 0.25× (quarter resolution). Temporal reprojection compensates for the lower sample count.
   * **Prop LOD Improvements**: Material LOD now enabled by default (distant props skip PBR normal maps). Shadow cull distance tightened from 80m to 64m. Base view distance reduced from 350m to 280m. Billboard switch distance tightened from 250m to 180m. Flower visibility multiplier reduced (0.35→0.25).
   * **Terrain Cull Distance**: High-detail distance reduced from 160m to 128m (aligned with shadow cull). Overall cull distance tightened from 400m to 320m (fog hides terrain beyond ~220m).
+  * **Terrain Horizon Proxy Band**: Distant `Lod3` terrain now remains as a cheap silhouette proxy for an extra 256m beyond the normal cull frontier, using single-projection albedo sampling with no normal maps, PBR lighting, colliders, shadows, reflections, or water meshes so fog-muted mountains no longer disappear abruptly. See [terrain horizon proxy band](../lod/horizon-proxy-band.md).
 * **New Editor**: Initial Draft of the editor, most functioanlity is Mock
 
   * **Embedded Bevy view with Debug Bridge**

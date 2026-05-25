@@ -1213,3 +1213,807 @@ Status:
   should be empty for transition-owner cells; the two previous
   `missing_transition_geometry_or_face_frame` rays should either disappear or
   reclassify as regular/vertex issues if there is a deeper MC-table problem.
+
+### Live seam repro after keeping regular boundary rows
+
+User-provided live runtime dump on 2026-05-24 after retaining regular MC
+boundary rows under transition aprons:
+
+- `debug/terrain-hole-probe-20260524-162818.json`
+
+User observation:
+
+- Improved, but some visible seam holes remain.
+
+Logged summary:
+
+```text
+camera_ray.first_voxel_solid_distance = 187.75
+camera_ray.first_front_render_hit.distance = 187.81879
+camera_ray.first_mesher_iso_distance = 187.59807
+camera_ray.gap_classification = unknown
+camera_ray_fan.rays_with_gap = 32 / 81
+camera_ray_fan.gap_classification counts =
+  unknown:30
+  vertex_position_or_table_decode_error:2
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:27
+  Lod1:5
+camera_ray_fan transition_owner_faces rays = 0
+camera_ray_fan skipped_regular_faces rays = 0
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+camera_ray_fan mesher_iso visual pixel classifications =
+  screenshot_unavailable:32
+height fan worst negative sample =
+  error=-1.81 chunk=(6,2,5) local=(5.53,13.19,14.88) Lod1 near pos_z
+height fan Lod1 interior median minus Lod0 interior median = -0.42
+target classification =
+  world_data_hole=false
+  mesh_missing=false
+  mesh_surface_mismatch=false
+  vertical_chunk_boundary_surface=true
+```
+
+Important finding:
+
+- The destructive transition replacement class is no longer present in this
+  dump: fan rays report no skipped regular rows and no transition-owner cells.
+- The scheduler is still ruled down for this repro: every source chunk reports
+  `skipped_lod_delta_gt_one = 0`.
+- The center ray has front-facing regular MC geometry almost immediately after
+  the raw solid distance, so the center target is not a missing mesh.
+- The remaining fan evidence is now dominated by raw voxel vs mesher/SDF height
+  disagreement and visual uncertainty. The probe cannot yet distinguish a real
+  dark pixel from a raw-occupancy false positive because no current screenshot
+  was attached to the Shift+F9 dump.
+- The strongest numeric clue is the residual LOD height disagreement: the worst
+  sample is a Lod1 near-face point depressed by `-1.81`, and Lod1 interior
+  samples are still lower than Lod0 interior samples by a median `-0.42`.
+
+Probe improvement:
+
+- Shift+F9 now auto-selects the newest recent `Alt+Shift+F7` terrain debug
+  screenshot when the sidecar camera position matches the current camera. Bench
+  probes with an explicit screenshot path still use the explicit path.
+- This should turn the next live dump's `visual_samples` from
+  `screenshot_unavailable` into pixel classifications at raw surface,
+  mesher-iso, and render-hit points.
+
+Next live retest:
+
+1. Aim at the remaining seam hole.
+2. Press `Alt+Shift+F7` and wait for the wireframe screenshot/sidecar log.
+3. Without moving the camera, press `Shift+F9`.
+4. Inspect the new dump for `visual_samples` classifications.
+
+Interpretation for the next dump:
+
+- `dark_or_missing` at the mesher iso or first render hit means the visual seam
+  is still real and the next target is shading/material/normal or missing local
+  geometry.
+- `lit_or_non_dark` at the mesher iso or first render hit means that fan ray is
+  a raw-occupancy-vs-smoothed/coarse-mesher false positive.
+- Persistent negative Lod1 near-face height errors with lit pixels point to LOD
+  SDF/coarse sampling displacement rather than transition deletion.
+
+### Live seam repro: 2026-05-25 off-center seam holes
+
+User-provided live runtime dump and screenshot on 2026-05-25:
+
+- `debug/terrain-hole-probe-20260525-013029.json`
+- `debug/wireframe-1779672632.png`
+- `debug/wireframe-1779672632.json`
+
+User observation:
+
+- The issue is reduced, but left/right off-center seam holes are still visible.
+
+Logged summary:
+
+```text
+camera_ray.first_voxel_solid_distance = 183.0
+camera_ray.first_front_render_hit.distance = 183.20956
+camera_ray.first_mesher_iso_distance = 183.24927
+camera_ray.gap_classification = unknown
+camera_ray_fan.rays_with_gap = 36 / 81
+camera_ray_fan.gap_classification counts =
+  unknown:34
+  vertex_position_or_table_decode_error:1
+  backface_or_winding:1
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:28
+  Lod1:8
+camera_ray_fan transition_owner_faces rays = 2
+camera_ray_fan skipped_regular_faces rays = 0
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+camera_ray_fan mesher_iso visual pixel classifications =
+  screenshot_unavailable:35
+```
+
+The screenshot was captured at `01:30:32`, three seconds after the `01:30:29`
+Shift+F9 dump, so schema-10 visual fields were still `screenshot_unavailable`.
+The sidecar camera position matched the dump camera exactly, so the screenshot
+was sampled offline against the dump's projected ray points.
+
+Offline screenshot sampling result:
+
+```text
+fan projected screen x range = 730..1189 on a 1920-wide screenshot
+mesher_iso pixels:
+  lit_or_non_dark:34
+  sky_or_background:1
+  none/offscreen-missing-point:1
+dark_or_missing pixels at fan mesher_iso/front points = 0
+```
+
+Important finding:
+
+- The 10-degree fan did not cover the user-circled left/right holes. It sampled
+  the middle of the image, where the pixels were lit terrain or sky.
+- The visible residual is now off-center relative to the crosshair, so the
+  previous fan output cannot prove the circled holes are raw-vs-mesher false
+  positives.
+- Scheduler remains ruled down for this dump: source chunks again report
+  `skipped_lod_delta_gt_one = 0`.
+- Boundary-row deletion is still not present: `skipped_regular_faces = 0`.
+
+Probe improvement:
+
+- The Shift+F9 camera fan has been widened from a 10-degree 9x9 cone to a
+  35-degree 13x13 cone so it covers most of a 45-degree, 16:9 screenshot and
+  reaches off-center seam holes.
+
+Next live retest:
+
+1. Aim at the same scene.
+2. Press `Alt+Shift+F7` first and wait for the screenshot/sidecar log.
+3. Without moving, press `Shift+F9`.
+4. Confirm the dump logs the widened fan and has populated visual samples.
+
+### Live seam repro: screenshot-backed wide fan
+
+User-provided live runtime dump and screenshot on 2026-05-25:
+
+- `debug/wireframe-1779673953.png`
+- `debug/wireframe-1779673953.json`
+- `debug/terrain-hole-probe-20260525-015242.json`
+
+This run used the correct capture order:
+
+```text
+Alt+Shift+F7 screenshot at 01:52:33
+Shift+F9 probe at 01:52:41
+Terrain hole probe using latest matching terrain debug screenshot debug\wireframe-1779673953.png
+```
+
+Logged summary:
+
+```text
+camera_ray_fan.rays_with_gap = 25 / 169
+camera_ray_fan.half_angle_degrees = 35
+camera_ray_fan.grid_size = 13
+camera_ray_fan.gap_classification counts =
+  raw_occupancy_vs_mesher_iso_false_positive:18
+  geometry_present_but_shading_or_normal_darkening:2
+  missing_mesh_entity_or_render_layer:1
+  vertex_position_or_table_decode_error:1
+  unknown:3
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:22
+  Lod1:3
+camera_ray_fan.mesher_iso visual pixel classifications =
+  lit_or_non_dark:18
+  dark_or_missing:2
+  sky_or_background:1
+  offscreen:3
+camera_ray_fan transition_owner_faces rays = 0
+camera_ray_fan skipped_regular_faces rays = 0
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+```
+
+Confirmed visual-backed rays:
+
+```text
+grid (7,9):
+  classification = geometry_present_but_shading_or_normal_darkening
+  screen = (1093,951)
+  chunk = (15,1,12), Lod0, cell=(8,0,9), case=51
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 1
+  front hit distance = mesher iso distance = 30.235
+  visual pixel = dark_or_missing, rgb=(12,17,26), luminance=0.065
+  hit triangle y = 16.666666 for all vertices
+
+grid (8,9):
+  classification = geometry_present_but_shading_or_normal_darkening
+  screen = (1229,951)
+  chunk = (15,1,12), Lod0, cell=(10,0,7), case=51
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 1
+  front hit distance = mesher iso distance = 30.670
+  visual pixel = dark_or_missing, rgb=(12,17,26), luminance=0.065
+  hit triangle y = 16.666666 for all vertices
+
+grid (0,6):
+  classification = missing_mesh_entity_or_render_layer
+  screen = (47,540)
+  chunk = (3,1,13), Lod0, cell=(9,14,14), case=119
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 1
+  visual pixel = sky_or_background, rgb=(149,157,176)
+
+grid (7,5):
+  classification = vertex_position_or_table_decode_error
+  chunk = (6,3,4), Lod1, cell=(3,3,7), case=17
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 0
+  closest emitted triangle ray distance = 0.389
+  raw surface pixel = sky_or_background
+```
+
+Important finding:
+
+- This is the first useful screenshot-backed wide-fan classification.
+- The dominant class is now benign for the visible image:
+  18 / 25 gap rays are lit terrain where raw occupancy is earlier than the
+  mesher iso/render surface.
+- The scheduler and destructive transition replacement are still ruled down:
+  all source chunks report `skipped_lod_delta_gt_one = 0`, and no rays have
+  `skipped_regular_faces`.
+- The two confirmed dark pixels are not missing MC triangles. They have
+  front-facing regular Lod0 geometry exactly at the mesher iso. This points to
+  shading/material/normal/debug overlay darkening or a depth/material path issue
+  for those pixels, not transition-cell topology.
+- The one sky/background pixel despite CPU-visible geometry points to
+  render-layer/entity/depth visibility mismatch and should be inspected
+  separately from MC topology.
+
+Next target:
+
+- Do not return to scheduler work for this scene.
+- Inspect the regular Lod0 dark pixels at chunk `(15,1,12)`, cells `(8,0,9)`
+  and `(10,0,7)`, both `case=51`, using material weights, vertex normals,
+  triangle winding, depth ordering, and debug material mode.
+- Inspect the single sky/background mismatch at chunk `(3,1,13)`, cell
+  `(9,14,14)`, `case=119`, to determine whether the CPU probe is intersecting a
+  mesh that is not visible in the rendered frame or whether projection/depth
+  ordering differs from the screenshot.
+
+### Live normals-view follow-up
+
+User-provided live runtime dump and normals-view screenshot on 2026-05-25:
+
+- `debug/wireframe-1779675115.png`
+- `debug/wireframe-1779675115.json`
+- `debug/terrain-hole-probe-20260525-021201.json`
+
+Logged summary:
+
+```text
+camera_ray_fan.rays_with_gap = 35 / 169
+camera_ray_fan.half_angle_degrees = 35
+camera_ray_fan.grid_size = 13
+camera_ray_fan.gap_classification counts =
+  raw_occupancy_vs_mesher_iso_false_positive:28
+  geometry_present_but_shading_or_normal_darkening:1
+  vertex_position_or_table_decode_error:2
+  unknown:4
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:34
+  Lod1:1
+camera_ray_fan.mesher_iso visual pixel classifications =
+  lit_or_non_dark:28
+  dark_or_missing:1
+  offscreen:5
+camera_ray_fan transition_owner_faces rays = 0
+camera_ray_fan skipped_regular_faces rays = 0
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+```
+
+Important sidecar note:
+
+```text
+debug/wireframe-1779675115.json mode_flags =
+  wireframe=false
+  normals=false
+  iso_band=false
+  editor_wireframe=false
+```
+
+The attached image visually appears to show normals/wire debugging, but the
+saved sidecar says those terrain debug flags were false. Treat the mode flag as
+suspect until we verify whether the overlay is coming from another debug path or
+whether the sidecar is sampling stale/debug-incomplete state.
+
+Confirmed non-benign in-frame ray:
+
+```text
+grid (8,9):
+  classification = geometry_present_but_shading_or_normal_darkening
+  screen = (1229,951)
+  chunk = (24,1,18), Lod0, cell=(14,6,4), case=51
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 1
+  first_front distance = 56.226
+  mesher_iso distance = 56.247
+  visual pixel = dark_or_missing, rgb=(15,20,28), luminance=0.077
+```
+
+Other non-benign rays:
+
+```text
+grid (11,6):
+  classification = vertex_position_or_table_decode_error
+  screen = (1688,540)
+  chunk = (28,2,14), Lod0, cell=(15,2,12), case=17
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 0
+  closest emitted triangle ray distance = 0.430
+  raw pixel = lit_or_non_dark
+
+grid (8,11):
+  classification = vertex_position_or_table_decode_error
+  screen = offscreen y=1268
+  chunk = (24,1,20), Lod0, cell=(3,12,0), case=48
+  actual/expected regular triangles = 2/2
+  emitted regular ray hits = 0
+  first render source is adjacent chunk (24,1,19), cell=(3,11,15), case=51
+```
+
+Interpretation:
+
+- The visible circled seam areas in the attached normals-view image are largely
+  colored rather than black/transparent. That strongly suggests geometry exists
+  in those regions.
+- The remaining in-frame dark classification is a regular Lod0 `case=51` cell
+  with real front-facing geometry. That points away from MC/Transvoxel topology
+  and toward material/lighting/depth/debug-shading behavior.
+- One in-frame `case=17` vertex/table suspect remains, but its sampled pixel is
+  lit, so it is not currently a visually dark hole.
+- Scheduler and destructive transition replacement remain ruled down.
+
+Next target:
+
+- Add or use a terrain material/debug mode that renders MC terrain as a flat
+  unlit solid color with depth testing unchanged. If the circled regions become
+  solid, the remaining issue is lighting/material/normal/shadow/fog. If they
+  stay visually missing, inspect render extraction/layers/depth.
+- Fix the debug sidecar if needed so `mode_flags.normals` accurately records
+  the screenshot mode used for the visual sample.
+
+### Flat unlit terrain debug mode
+
+Implemented after the normals-view follow-up:
+
+- `Alt+F10` toggles a flat unlit terrain material.
+- `Alt+F7 + Alt+F10` keeps the existing wireframe overlay over the flat unlit
+  fill.
+- The capture sidecar now records `mode_flags.flat_unlit`.
+- The shader path returns a constant unlit terrain colour before triplanar
+  texture sampling, normal maps, PBR lighting, fog post-processing, weather
+  darkening, and caustics.
+
+Use this mode on the same residual seam views:
+
+```text
+Alt+F10 -> Alt+Shift+F7 -> Shift+F9
+```
+
+Interpretation:
+
+- If the circled regions become solid in flat unlit mode, the remaining issue
+  is material/lighting/fog/shadow/weather/debug shading.
+- If the circled regions remain missing/dark, inspect render
+  extraction/layers/depth for the source cells reported by the wide fan.
+
+### Flat unlit follow-up: residual small polygon defects
+
+User-provided flat-unlit runtime dump and screenshot on 2026-05-25:
+
+- `debug/wireframe-1779677014.png`
+- `debug/wireframe-1779677014.json`
+- `debug/terrain-hole-probe-20260525-024354.json`
+
+Logged and parsed summary:
+
+```text
+mode_flags.flat_unlit = true
+camera_ray_fan.rays_with_gap = 35 / 169
+camera_ray_fan.half_angle_degrees = 35
+camera_ray_fan.grid_size = 13
+camera_ray_fan.gap_classification counts =
+  raw_occupancy_vs_mesher_iso_false_positive:25
+  vertex_position_or_table_decode_error:2
+  geometry_present_but_shading_or_normal_darkening:2
+  backface_or_winding:3
+  unknown:3
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:34
+  Lod1:1
+camera_ray_fan.mesher_iso visual pixel classifications =
+  lit_or_non_dark:29
+  dark_or_missing:2
+  offscreen:4
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+```
+
+The flat-unlit image removes most broad shading ambiguity. The remaining
+user-circled issue is small and polygonal, so it should be treated as real mesh
+coverage evidence rather than a lighting-only artifact.
+
+Center ray:
+
+```text
+classification = vertex_position_or_table_decode_error
+first_voxel_solid_distance = 198.5
+first_mesher_iso_distance = 198.428
+first_front_render_hit = None
+first_any_render_hit = 251.069, back-facing, unrelated transition source
+visual mesher-iso pixel = lit_or_non_dark, rgb=(173,190,173)
+
+mc_cell =
+  chunk = (6,1,7), Lod0
+  neighbor_lods = neg_x:Lod0 pos_x:Lod0 neg_y:Lod1 pos_y:Lod1 neg_z:Lod0 pos_z:Lod0
+  cell = (15,15,0)
+  case = 51
+  class = 3
+  boundary_faces = pos_x,pos_y,neg_z
+  transition_owner_faces = pos_y
+  expected_regular_triangle_count = 2
+  actual_regular_triangle_count = 2
+  emitted_regular_ray_hits = 0
+  closest_regular_ray_distance = 0.132
+
+transition owner =
+  face = pos_y
+  cell_u = 7
+  cell_v = 0
+  case = 495
+  class = 1
+  invert = true
+  expected_transition_triangle_count = 2
+  actual_transition_triangle_count = 2
+  emitted_transition_ray_hits = 0
+  closest_transition_ray_distance = 0.358
+```
+
+Second similar ray:
+
+```text
+grid = (7,6)
+classification = vertex_position_or_table_decode_error
+chunk = (7,1,6), Lod0
+cell = (15,15,2)
+case = 51
+transition_owner_faces = pos_y
+first_front_render_hit = None
+first_any_render_hit = 261.586
+closest_regular_ray_distance = 0.387
+```
+
+Interpretation:
+
+- The remaining center defect is not scheduler-related:
+  `source_chunk_skipped_lod_delta_gt_one = 0`.
+- It is not the broad normals/material-darkening problem: flat unlit mode is
+  active and most sampled pixels are lit/non-dark.
+- It is not a missing-mesh-entity case for the source chunk: both regular and
+  transition triangle counts match the expected table counts.
+- It is a boundary-corner coverage problem: the mesher-iso owner is a Lod0
+  `case=51` cell on `pos_x,pos_y,neg_z`, the only transition owner is `pos_y`,
+  and the emitted regular plus transition triangles both miss the ray by a
+  small but visible margin.
+
+Next target:
+
+- Build a minimal replay fixture from the center ray:
+  chunk `(6,1,7)`, cell `(15,15,0)`, regular `case=51`, `pos_y` transition
+  cell `(u=7,v=0)`, transition `case=495`, `invert=true`.
+- The regression should assert that a ray through the mesher-iso point is
+  covered by either the owning regular cell triangles or the owning transition
+  cell triangles. It should fail on the current dump-derived data.
+- Extend the oracle to report all boundary-corner transition candidates, not
+  only the selected transition owner face, because this source cell is on three
+  chunk faces while only `pos_y` is currently represented as transition-owned.
+- Do not return to scheduler or SDF work for this residual defect unless a new
+  source chunk reports nonzero `skipped_lod_delta_gt_one`.
+
+### Normals-highlighted artifacts are not holes
+
+User-provided normals-view screenshot on 2026-05-25 shows several circled
+magenta/blue/purple regions on the mountain. These are visible in normals mode,
+but the user confirmed they are not terrain holes.
+
+Interpretation update:
+
+- Treat these as normals/material-orientation/debug-shading artifacts, not
+  missing geometry.
+- Do not use normals-highlighted-only regions as evidence for MC/Transvoxel
+  topology failure unless the same region is also missing in flat-unlit mode.
+- For topology work, prioritize only defects that remain visible as missing
+  coverage in `Alt+F10` flat-unlit mode.
+- For normals work, investigate vertex normals, geometric normal orientation,
+  transition-normal blending, and material/debug normal visualization around
+  the highlighted regions separately from the seam-hole investigation.
+
+Current split:
+
+```text
+flat-unlit missing or white polygon/sliver -> mesh coverage / depth / extraction suspect
+normals-only magenta/blue/purple highlight -> normals/material debug suspect
+lit-mode dark band that disappears in flat unlit -> lighting/material/fog/AO suspect
+```
+
+### Flat unlit follow-up: intermittent small gaps remain
+
+User-provided flat-unlit runtime dump and screenshot on 2026-05-25:
+
+- `debug/wireframe-1779678080.png`
+- `debug/wireframe-1779678080.json`
+- `debug/terrain-hole-probe-20260525-030140.json`
+
+Sidecar confirms:
+
+```text
+mode_flags.flat_unlit = true
+mode_flags.normals = false
+mode_flags.iso_band = false
+```
+
+Logged and parsed summary:
+
+```text
+camera_ray_fan.rays_with_gap = 28 / 169
+camera_ray_fan.gap_classification counts =
+  raw_occupancy_vs_mesher_iso_false_positive:16
+  vertex_position_or_table_decode_error:2
+  backface_or_winding:1
+  unknown:9
+camera_ray_fan.effective_lod_at_mesh counts =
+  Lod0:25
+  Lod1:1
+  Lod2:2
+camera_ray_fan source_chunk_skipped_lod_delta_gt_one rays = 0
+camera_ray_fan transition-owner rays = 0
+```
+
+Center ray:
+
+```text
+classification = vertex_position_or_table_decode_error
+first_voxel_solid_distance = 229.0
+first_mesher_iso_distance = 228.862
+first_front_render_hit = None
+first_any_render_hit = None
+visual mesher-iso pixel = lit_or_non_dark, rgb=(193,187,188)
+
+mc_cell =
+  chunk = (9,1,18), Lod0
+  neighbor_lods = neg_x:Lod0 pos_x:Lod0 neg_y:Lod1 pos_y:Lod0 neg_z:Lod0 pos_z:Lod0
+  cell = (6,15,15)
+  case = 16
+  class = 1
+  boundary_faces = pos_y,pos_z
+  transition_owner_faces = none
+  expected_regular_triangle_count = 1
+  actual_regular_triangle_count = 1
+  emitted_regular_ray_hits = 0
+  closest_regular_ray_distance = 0.312
+```
+
+Raw-surface cell differs from mesher-iso owner:
+
+```text
+raw_surface_cell =
+  chunk = (9,1,19), Lod0
+  cell = (6,15,0)
+  case = 51
+  transition_owner_faces = pos_y
+  pos_y transition case = 511, expected_transition_triangle_count = 0
+  regular triangles = 2 / 2, emitted_regular_ray_hits = 0
+```
+
+Interpretation:
+
+- This confirms small flat-unlit defects still occur, but the latest center
+  ray is not transition-owned. It is a regular Lod0 boundary cell with a
+  single expected triangle that misses the ray.
+- The failure is still not scheduler-related:
+  `source_chunk_skipped_lod_delta_gt_one = 0`.
+- The exact single-pixel screenshot classifier is too weak for these tiny
+  slivers: it samples the center projection as normal flat terrain even though
+  the user-visible defect is a small white polygon nearby.
+
+Instrumentation update:
+
+- The hole probe now records a local screenshot pixel window around each
+  projected visual point, including bright, sky/background, dark, and lit pixel
+  counts. This is intended to catch tiny flat-unlit white slivers that are
+  missed by the exact one-pixel sample.
+
+Next target:
+
+- Re-run `Alt+F10 -> Alt+Shift+F7 -> Shift+F9` on one small visible gap after
+  rebuilding, then inspect `visual_samples.*.pixel_window`.
+- If the center ray still reports `case=16` or `case=51` with expected
+  triangles emitted but no ray hit, build the replay fixture around that exact
+  cell and ray.
+
+### Flat unlit/wireframe confirmation: red rear LOD visible through foreground
+
+User clarification on 2026-05-25: the latest `Alt+F10` screenshots still show
+real holes because red rear-LOD wireframe can be seen through the foreground
+terrain surface.
+
+Interpretation update:
+
+- Treat this as a true see-through geometry/render coverage failure.
+- Do not let a single `lit_or_non_dark` center-pixel sample veto the ray
+  evidence. The defect is sub-pixel/small-polygon enough that the exact center
+  sample can land on adjacent grey terrain.
+- The stronger evidence is the probe ray:
+
+```text
+first_front_render_hit = None
+first_any_render_hit = None
+expected_regular_triangle_count > 0
+actual_regular_triangle_count > 0
+emitted_regular_ray_hits = 0
+source_chunk_skipped_lod_delta_gt_one = 0
+```
+
+- The screenshot pixel-window classifier is now supporting evidence only. It
+  records local and nearby luminance ranges/bright-pixel counts so tiny white
+  slivers and visible rear wireframe are easier to correlate with ray data.
+
+Current leading bug class:
+
+```text
+regular/transition MC vertex placement or table decode produces triangles
+for the owning cell, but those triangles do not cover the mesher-iso ray.
+```
+
+Current replay candidates:
+
+```text
+20260525-030140 center:
+  Lod0 chunk=(9,1,18), cell=(6,15,15), case=16
+  expected/actual regular triangles = 1/1
+  emitted regular ray hits = 0
+
+20260525-035752 center:
+  Lod1 chunk=(9,1,19), cell=(6,7,0), case=51
+  transition_owner_faces = pos_y
+  expected/actual regular triangles = 2/2
+  emitted regular ray hits = 0
+```
+
+Next implementation target:
+
+- Add a dump-derived replay test for the center-ray geometry. The acceptance
+  should be: ray through the mesher-iso point intersects at least one triangle
+  emitted for the owning regular cell or its owning transition cell.
+
+### Dynamic LOD settling holes and popping
+
+User-reported runtime issue on 2026-05-25:
+
+- While walking and LODs update gradually, small holes appear and then repair as
+  adjacent chunks finish remeshing.
+- This is visually distinct from the static fixed-camera mesh bug. It is a
+  temporal consistency problem: one chunk can display a new LOD/transition state
+  while its neighbor still displays an old mesh for a few frames.
+
+Current code path:
+
+```text
+update_chunk_lod_system:
+  computes a coherent desired LOD field
+  enforces max-one logical LOD deltas
+  calls chunk.set_lod_level(...)
+  marks only changed chunks' face halos dirty
+
+mesh_dirty_chunks_system:
+  drains dirty chunks under a per-frame budget
+  generates each chunk against the current world LOD/neighbor LOD state
+  swaps each mesh entity as soon as that chunk is ready
+```
+
+Why this can pop holes:
+
+- The logical LOD graph can be coherent while the displayed mesh graph is not.
+- A chunk can be remeshed using neighbor LODs that are not yet represented by
+  the neighbor's visible mesh.
+- The throttled dirty queue can expose intermediate states like:
+
+```text
+frame N:   center switched to Lod1 mesh, neighbor still visible as old Lod0 mesh
+frame N+1: transition/neighbor halo remesh arrives
+frame N+2: visible hole disappears
+```
+
+Mitigation direction:
+
+```text
+Do not publish partial LOD neighborhoods.
+```
+
+Recommended design:
+
+1. Split terrain LOD into at least two states:
+
+```text
+desired_lod      = what camera/hysteresis wants
+active_lod       = what visible mesh entities currently represent
+pending_lod      = target for an in-flight remesh transaction
+```
+
+2. Build LOD transactions instead of single chunk swaps:
+
+```text
+transaction seed = chunks whose desired_lod != active_lod
+transaction closure =
+  seed chunks
+  all face neighbors
+  transition-owner faces
+  any chunks whose neighbor_lods_at_mesh would change
+```
+
+3. Generate every mesh in the transaction against one frozen LOD snapshot:
+
+```text
+snapshot_lods = active_lod with this transaction's pending_lod applied
+```
+
+4. Keep old visible meshes alive until the full transaction is ready.
+
+5. Commit all ready meshes in one frame:
+
+```text
+active_lod = pending_lod for transaction chunks
+swap mesh handles/entities together
+clear dirty flags together
+```
+
+6. If the transaction is too large, split it into spatial waves, but each wave
+   must include its face-neighbor halo and must preserve visible max-one LOD
+   deltas after commit.
+
+Important policy choices:
+
+- Upgrades should be allowed to prepare in the background, but old lower-detail
+  meshes must remain visible until the high-detail chunk plus required neighbors
+  are ready.
+- Downgrades should be delayed even more aggressively: keep fine meshes visible
+  until the coarser mesh and its seam-neighbor closure are ready.
+- If the dirty queue is backed up, freeze accepting new LOD transactions rather
+  than continually changing desired targets. This trades delayed LOD response
+  for stable terrain.
+- Throttle by transaction count or triangle cost, not by individual chunks that
+  can expose invalid intermediate seams.
+
+Diagnostics to add:
+
+```text
+visible_lod_delta_gt_one_faces
+mesh_neighbor_lod_mismatch_faces
+pending_lod_transactions
+lod_transaction_chunks_waiting
+lod_transaction_chunks_ready
+lod_transaction_commits_per_second
+lod_publish_blocked_by_missing_neighbor_mesh
+```
+
+Acceptance for the dynamic path:
+
+- While walking through the live LOD scene, the displayed mesh graph should
+  never contain a face where the two visible meshes disagree by more than one
+  LOD.
+- A displayed mesh's `neighbor_lods_at_mesh` should match the neighbor's
+  displayed `active_lod`, not merely the chunk's newest logical desired LOD.
+- If a chunk is waiting for a transaction, the old mesh remains visible.
+- Holes should not appear during LOD settling even when the dirty mesh budget is
+  low.
+
+This dynamic settling fix should be tracked separately from the static
+dump-derived `case=16` / `case=51` replay fixtures.
