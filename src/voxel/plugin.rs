@@ -70,6 +70,11 @@ const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
 const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
 const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
 const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
+/// Extra distance after the normal cull frontier where terrain remains as a
+/// cheap Lod3 horizon proxy. This preserves fog-muted mountain silhouettes
+/// without paying for colliders, shadow casting, reflections, or full
+/// triplanar material work.
+const HORIZON_PROXY_BAND_DISTANCE: f32 = 256.0;
 pub(crate) const WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA: f32 = 80.0;
 const WATER_BODY_UPDATE_INTERVAL: f32 = 0.5;
 const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
@@ -1200,6 +1205,7 @@ const WORLD_STARTUP_FLAME_TEXTURE_WIDTH: u32 = 256;
 const WORLD_STARTUP_FLAME_TEXTURE_HEIGHT: u32 = 144;
 const WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS: f32 = 1.0 / 12.0;
 const WORLD_STARTUP_SPARK_LAYERS: u32 = 8;
+const WORLD_STARTUP_FLAMES_ENABLED: bool = false;
 
 fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     #[cfg(feature = "mc_transvoxel")]
@@ -1439,10 +1445,13 @@ fn spawn_world_startup_overlay(
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
 ) {
     let background_image = asset_server.load("images/DrunsielShyntara.png");
-    let flame_image = create_world_startup_flame_image(&mut images);
-    commands.insert_resource(WorldStartupFlameTexture {
-        handle: flame_image.clone(),
-        last_update_secs: -WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS,
+    let flame_image = WORLD_STARTUP_FLAMES_ENABLED.then(|| {
+        let flame_image = create_world_startup_flame_image(&mut images);
+        commands.insert_resource(WorldStartupFlameTexture {
+            handle: flame_image.clone(),
+            last_update_secs: -WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS,
+        });
+        flame_image
     });
     loading_flames.active = true;
 
@@ -1495,21 +1504,23 @@ fn spawn_world_startup_overlay(
                 ZIndex(-1),
             ));
 
-            root.spawn((
-                ImageNode::new(flame_image).with_mode(NodeImageMode::Stretch),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                ZIndex(0),
-                WorldStartupFlamesImage,
-            ));
+            if let Some(flame_image) = flame_image {
+                root.spawn((
+                    ImageNode::new(flame_image).with_mode(NodeImageMode::Stretch),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    ZIndex(0),
+                    WorldStartupFlamesImage,
+                ));
+            }
 
             root.spawn((
                 Node {
@@ -2918,6 +2929,7 @@ fn mesh_dirty_chunks_system(
             } else {
                 let mesh = mesh_result.solid.into_mesh();
                 let mesh_handle = meshes.add(mesh);
+                let horizon_proxy = is_horizon_proxy_lod(lod_level);
 
                 if let Some(entity) = chunk.mesh_entity() {
                     // Update existing entity with new mesh AND correct material for current mode
@@ -2931,7 +2943,6 @@ fn mesh_dirty_chunks_system(
                                         MeshMaterial3d(blocky_mat.handle.clone()),
                                         chunk_mesh,
                                         terrain_mesh_debug,
-                                        NeedsCollider,
                                     ))
                                     .remove::<MeshMaterial3d<
                                         crate::rendering::triplanar_material::TriplanarMaterial,
@@ -2946,12 +2957,16 @@ fn mesh_dirty_chunks_system(
                                     MeshMaterial3d(triplanar_handle),
                                     chunk_mesh,
                                     terrain_mesh_debug,
-                                    NeedsCollider,
                                 ))
                                 .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
                         }
                     }
                     let mut entity_cmd = commands.entity(entity);
+                    if horizon_proxy {
+                        entity_cmd.remove::<NeedsCollider>().insert(NotShadowCaster);
+                    } else {
+                        entity_cmd.insert(NeedsCollider).remove::<NotShadowCaster>();
+                    }
                     if let Some(sources) = mc_triangle_sources.clone() {
                         entity_cmd.insert(sources);
                     } else {
@@ -2962,7 +2977,7 @@ fn mesh_dirty_chunks_system(
                     // (or straddle the surface) and must appear in the reflection pass.
                     // Fully underwater chunks stay in layer 0 only.
                     let chunk_top_y = (chunk_pos.y + 1) * CHUNK_SIZE_I32;
-                    let terrain_layers = if chunk_top_y > WATER_LEVEL {
+                    let terrain_layers = if !horizon_proxy && chunk_top_y > WATER_LEVEL {
                         RenderLayers::default().with(REFLECTION_RENDER_LAYER)
                     } else {
                         RenderLayers::default()
@@ -2985,7 +3000,6 @@ fn mesh_dirty_chunks_system(
                                     ),
                                     chunk_mesh,
                                     terrain_mesh_debug,
-                                    NeedsCollider,
                                     terrain_layers,
                                 ))
                                 .id()
@@ -3001,12 +3015,16 @@ fn mesh_dirty_chunks_system(
                                 ),
                                 chunk_mesh,
                                 terrain_mesh_debug,
-                                NeedsCollider,
                                 terrain_layers,
                             ))
                             .id(),
                     };
                     let mut entity_cmd = commands.entity(entity);
+                    if horizon_proxy {
+                        entity_cmd.insert(NotShadowCaster);
+                    } else {
+                        entity_cmd.insert(NeedsCollider);
+                    }
                     if let Some(sources) = mc_triangle_sources {
                         entity_cmd.insert(sources);
                     } else {
@@ -3373,9 +3391,8 @@ fn terrain_material_quality_for_lod(
     }
     match lod_level {
         LodLevel::Lod0 => TerrainMaterialQuality::FullTriplanar,
-        LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 | LodLevel::Culled => {
-            TerrainMaterialQuality::CheapTriplanar
-        }
+        LodLevel::Lod1 | LodLevel::Lod2 => TerrainMaterialQuality::CheapTriplanar,
+        LodLevel::Lod3 | LodLevel::Culled => TerrainMaterialQuality::SingleProjectionFar,
     }
 }
 
@@ -3401,9 +3418,7 @@ fn terrain_material_quality_for_distance(
         TerrainMaterialQuality::FullTriplanar if distance > switch_out => {
             TerrainMaterialQuality::CheapTriplanar
         }
-        TerrainMaterialQuality::CheapTriplanar | TerrainMaterialQuality::SingleProjectionFar
-            if distance < switch_in =>
-        {
+        TerrainMaterialQuality::CheapTriplanar if distance < switch_in => {
             TerrainMaterialQuality::FullTriplanar
         }
         TerrainMaterialQuality::CheapTriplanar
@@ -4550,20 +4565,25 @@ pub(crate) fn calculate_target_lod_with_hysteresis(
 
     let h = terrain_lod_hysteresis(settings);
 
-    // Distance thresholds for LOD transitions
+    // Distance thresholds for LOD transitions.
     // Lod0: 0 to high_detail_distance
-    // Lod1: high_detail_distance to lod1_distance (midpoint to cull)
-    // Lod2+: lod1_distance to cull_distance
+    // Lod1: high_detail_distance to lod1_distance (midpoint to normal cull)
+    // Lod2: lod1_distance to lod2_distance
+    // Lod3: lod2_distance through the horizon proxy band
+    // Culled: beyond the horizon proxy band
     let lod1_distance = (settings.high_detail_distance + settings.cull_distance) * 0.5;
     let lod2_distance = lod1_distance + (settings.cull_distance - lod1_distance) * 0.5;
+    let horizon_cull_distance = horizon_proxy_cull_distance(settings);
 
     // Coarsening thresholds: Lod0|1 at high_detail_distance, Lod1|2 at
-    // lod1_distance, Lod2|3 at lod2_distance, Lod3|Culled at cull_distance.
+    // lod1_distance, Lod2|3 at lod2_distance, Lod3|Culled after the horizon
+    // proxy band. `settings.cull_distance` is now the start of the cheap
+    // horizon band, not the first distance where terrain disappears.
     let thresholds = [
         settings.high_detail_distance,
         lod1_distance,
         lod2_distance,
-        settings.cull_distance,
+        horizon_cull_distance,
     ];
 
     // Rank 0..=4 == Lod0..=Culled: how many coarsening thresholds `distance`
@@ -4592,6 +4612,14 @@ pub(crate) fn calculate_target_lod_with_hysteresis(
         3 => LodLevel::Lod3,
         _ => LodLevel::Culled,
     }
+}
+
+fn horizon_proxy_cull_distance(settings: &LodSettings) -> f32 {
+    settings.cull_distance + HORIZON_PROXY_BAND_DISTANCE
+}
+
+fn is_horizon_proxy_lod(lod_level: LodLevel) -> bool {
+    lod_level == LodLevel::Lod3
 }
 
 // =============================================================================
