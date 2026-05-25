@@ -88,7 +88,6 @@ use crate::constants::WATER_LEVEL;
 use crate::physics::NeedsCollider;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::loading_flames::{LoadingFlamesMaterial, LoadingFlamesUniform};
 use crate::rendering::materials::{VoxelMaterial, WaterMaterial};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::{
@@ -124,7 +123,6 @@ use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
 use crate::voxel::world::{VoxelSample, VoxelWorld, WorldBounds};
 use bevy::camera::visibility::RenderLayers;
-use bevy_ui_render::prelude::MaterialNode;
 use bevy_water::water::material::StandardWaterMaterial;
 
 fn env_flag(name: &str) -> bool {
@@ -529,7 +527,7 @@ struct WorldStartupOverlayState {
 #[derive(Resource, Debug)]
 struct WorldStartupFlameTexture {
     handle: Handle<Image>,
-    last_frame: u32,
+    last_update_secs: f32,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -599,9 +597,6 @@ struct WorldStartupOverlay;
 
 #[derive(Component)]
 struct WorldStartupBackgroundImage;
-
-#[derive(Component)]
-struct WorldStartupFlamesMaterial;
 
 #[derive(Component)]
 struct WorldStartupFlamesImage;
@@ -1201,9 +1196,10 @@ fn spawn_queued_chunk_generation_tasks(
 /// without guessing from visuals. Bump when landing a fix that should affect
 /// the visible mesh.
 const MC_SPIKE_BUILD_TAG: &str = "mc-spike-2026-05-24-sdf-sign-guard-and-lod-refine-coarser";
-const WORLD_STARTUP_FLAME_TEXTURE_WIDTH: u32 = 384;
-const WORLD_STARTUP_FLAME_TEXTURE_HEIGHT: u32 = 216;
-const WORLD_STARTUP_SPARK_LAYERS: u32 = 13;
+const WORLD_STARTUP_FLAME_TEXTURE_WIDTH: u32 = 256;
+const WORLD_STARTUP_FLAME_TEXTURE_HEIGHT: u32 = 144;
+const WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS: f32 = 1.0 / 12.0;
+const WORLD_STARTUP_SPARK_LAYERS: u32 = 8;
 
 fn log_mc_spike_build_tag(mc_settings: Res<McTransvoxelSettings>) {
     #[cfg(feature = "mc_transvoxel")]
@@ -1249,6 +1245,11 @@ fn create_world_startup_flame_image(images: &mut Assets<Image>) -> Handle<Image>
 
 fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u8> {
     let mut pixels = vec![0; (width * height * 4) as usize];
+    fill_world_startup_flame_pixels(&mut pixels, width, height, time);
+    pixels
+}
+
+fn fill_world_startup_flame_pixels(pixels: &mut [u8], width: u32, height: u32, time: f32) {
     let width_f = width.max(1) as f32;
     let height_f = height.max(1) as f32;
 
@@ -1289,8 +1290,6 @@ fn build_world_startup_flame_pixels(width: u32, height: u32, time: f32) -> Vec<u
             pixels[idx + 3] = alpha;
         }
     }
-
-    pixels
 }
 
 fn startup_smoke_column(u: f32, v: f32, time: f32) -> f32 {
@@ -1437,17 +1436,13 @@ fn spawn_world_startup_overlay(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
-    mut flame_materials: ResMut<Assets<LoadingFlamesMaterial>>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
 ) {
     let background_image = asset_server.load("images/DrunsielShyntara.png");
     let flame_image = create_world_startup_flame_image(&mut images);
-    let flame_material = flame_materials.add(LoadingFlamesMaterial {
-        uniform: LoadingFlamesUniform::default(),
-    });
     commands.insert_resource(WorldStartupFlameTexture {
         handle: flame_image.clone(),
-        last_frame: u32::MAX,
+        last_update_secs: -WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS,
     });
     loading_flames.active = true;
 
@@ -1514,20 +1509,6 @@ fn spawn_world_startup_overlay(
                 },
                 ZIndex(0),
                 WorldStartupFlamesImage,
-            ));
-
-            root.spawn((
-                MaterialNode(flame_material),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                ZIndex(1),
-                WorldStartupFlamesMaterial,
             ));
 
             root.spawn((
@@ -1643,7 +1624,6 @@ fn world_startup_background_cover_size(
 fn update_world_startup_overlay(
     mut commands: Commands,
     time: Res<Time>,
-    frame: Res<FrameCount>,
     gen_state: Res<ChunkGenerationState>,
     chunk_stats: Res<RuntimeChunkStats>,
     setup_state: Res<WorldStartupSetupState>,
@@ -1651,10 +1631,7 @@ fn update_world_startup_overlay(
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
     flame_texture: Option<ResMut<WorldStartupFlameTexture>>,
     mut images: ResMut<Assets<Image>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
     root_query: Query<Entity, With<WorldStartupOverlay>>,
-    flame_query: Query<&MaterialNode<LoadingFlamesMaterial>, With<WorldStartupFlamesMaterial>>,
-    mut flame_materials: ResMut<Assets<LoadingFlamesMaterial>>,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<WorldStartupTitleText>>,
         Query<&mut Text, With<WorldStartupDetailText>>,
@@ -1669,33 +1646,19 @@ fn update_world_startup_overlay(
     loading_flames.active = true;
 
     if let Some(mut flame_texture) = flame_texture {
-        if flame_texture.last_frame != frame.0 {
+        let now = time.elapsed_secs();
+        if now - flame_texture.last_update_secs >= WORLD_STARTUP_FLAME_UPDATE_INTERVAL_SECS {
             if let Some(image) = images.get_mut(&flame_texture.handle) {
-                image.data = Some(build_world_startup_flame_pixels(
-                    WORLD_STARTUP_FLAME_TEXTURE_WIDTH,
-                    WORLD_STARTUP_FLAME_TEXTURE_HEIGHT,
-                    time.elapsed_secs(),
-                ));
+                if let Some(data) = image.data.as_mut() {
+                    fill_world_startup_flame_pixels(
+                        data,
+                        WORLD_STARTUP_FLAME_TEXTURE_WIDTH,
+                        WORLD_STARTUP_FLAME_TEXTURE_HEIGHT,
+                        now,
+                    );
+                }
             }
-            flame_texture.last_frame = frame.0;
-        }
-    }
-
-    let (resolution, mouse) = windows
-        .single()
-        .ok()
-        .map(|window| {
-            (
-                Vec2::new(window.width().max(1.0), window.height().max(1.0)),
-                window.cursor_position().unwrap_or(Vec2::ZERO),
-            )
-        })
-        .unwrap_or((Vec2::new(1280.0, 720.0), Vec2::ZERO));
-    for material_node in flame_query.iter() {
-        if let Some(material) = flame_materials.get_mut(&material_node.0) {
-            material.uniform.time = time.elapsed_secs();
-            material.uniform.resolution = resolution;
-            material.uniform.mouse = mouse;
+            flame_texture.last_update_secs = now;
         }
     }
 

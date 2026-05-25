@@ -6280,7 +6280,6 @@ dependencies = [
  "bevy_mod_outline",
  "bevy_shader",
  "bevy_tweening",
- "bevy_ui_render",
  "bevy_water",
  "bincode",
  "bytemuck",
