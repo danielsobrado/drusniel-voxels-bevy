@@ -59,7 +59,7 @@ const MAX_CHUNKS_PER_FRAME: usize = 4;
 const MAX_STARTUP_CHUNKS_PER_FRAME: usize = 12;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
-const MAX_LOD_DIRTY_CHUNKS_PER_FRAME: usize = 4;
+const MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME: usize = 96;
 // Raised from 4: at 4 changes/update the LOD backlog never drained, leaving
 // scattered chunks stuck at a stale LOD (isolated islands that crack).
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 32;
@@ -2573,7 +2573,7 @@ fn chunks_per_frame_limit_for_dirty_meshes(
     generation_complete: bool,
 ) -> usize {
     if lod_churn_only {
-        return MAX_LOD_DIRTY_CHUNKS_PER_FRAME;
+        return MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME;
     }
 
     if generation_complete && reason_counts.generation > 0 && reason_counts.terrain_mutation == 0 {
@@ -2581,6 +2581,138 @@ fn chunks_per_frame_limit_for_dirty_meshes(
     }
 
     MAX_CHUNKS_PER_FRAME
+}
+
+#[derive(Default)]
+struct LodMeshTransactionSelection {
+    chunks: Vec<IVec3>,
+    component_count: usize,
+    deferred_chunks: usize,
+    oversize_component_chunks: usize,
+}
+
+fn select_lod_mesh_transaction_chunks(
+    dirty_chunks: &[IVec3],
+    camera_pos: Option<Vec3>,
+    max_chunks: usize,
+) -> LodMeshTransactionSelection {
+    if dirty_chunks.is_empty() || max_chunks == 0 {
+        return LodMeshTransactionSelection::default();
+    }
+
+    let mut components = lod_dirty_components(dirty_chunks);
+    components.sort_by(|a, b| compare_lod_component_priority(a, b, camera_pos));
+
+    let mut selected = Vec::new();
+    let mut component_count = 0usize;
+    let mut oversize_component_chunks = 0usize;
+    for mut component in components {
+        component.sort_by(|a, b| {
+            camera_pos
+                .map(|camera_pos| compare_dirty_chunk_distance(a, b, camera_pos))
+                .unwrap_or_else(|| compare_chunk_pos_lex(*a, *b))
+        });
+
+        let component_len = component.len();
+        if !selected.is_empty() && selected.len() + component_len > max_chunks {
+            break;
+        }
+        if selected.is_empty() && component_len > max_chunks {
+            // Publishing half a connected LOD component is exactly what causes
+            // transient see-through seams. Prefer one bounded spike over a
+            // visible invalid intermediate topology.
+            oversize_component_chunks = component_len;
+        }
+        selected.extend(component);
+        component_count += 1;
+    }
+
+    let deferred_chunks = dirty_chunks.len().saturating_sub(selected.len());
+    LodMeshTransactionSelection {
+        chunks: selected,
+        component_count,
+        deferred_chunks,
+        oversize_component_chunks,
+    }
+}
+
+fn lod_dirty_components(dirty_chunks: &[IVec3]) -> Vec<Vec<IVec3>> {
+    const FACE_OFFSETS: [IVec3; 6] = [
+        IVec3::new(1, 0, 0),
+        IVec3::new(-1, 0, 0),
+        IVec3::new(0, 1, 0),
+        IVec3::new(0, -1, 0),
+        IVec3::new(0, 0, 1),
+        IVec3::new(0, 0, -1),
+    ];
+
+    let dirty_set: HashSet<IVec3> = dirty_chunks.iter().copied().collect();
+    let mut visited: HashSet<IVec3> = HashSet::new();
+    let mut components = Vec::new();
+
+    for &start in dirty_chunks {
+        if !visited.insert(start) {
+            continue;
+        }
+
+        let mut queue = VecDeque::from([start]);
+        let mut component = Vec::new();
+        while let Some(pos) = queue.pop_front() {
+            component.push(pos);
+            for offset in FACE_OFFSETS {
+                let neighbor = pos + offset;
+                if dirty_set.contains(&neighbor) && visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        components.push(component);
+    }
+
+    components
+}
+
+fn compare_lod_component_priority(
+    a: &[IVec3],
+    b: &[IVec3],
+    camera_pos: Option<Vec3>,
+) -> std::cmp::Ordering {
+    match camera_pos {
+        Some(camera_pos) => lod_component_distance_sq(a, camera_pos)
+            .partial_cmp(&lod_component_distance_sq(b, camera_pos))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.len().cmp(&a.len()))
+            .then_with(|| {
+                compare_chunk_pos_lex(lod_component_min_pos(a), lod_component_min_pos(b))
+            }),
+        None => compare_chunk_pos_lex(lod_component_min_pos(a), lod_component_min_pos(b))
+            .then_with(|| b.len().cmp(&a.len())),
+    }
+}
+
+fn lod_component_distance_sq(component: &[IVec3], camera_pos: Vec3) -> f32 {
+    component
+        .iter()
+        .map(|pos| {
+            let world_pos =
+                VoxelWorld::chunk_to_world(*pos).as_vec3() + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
+            world_pos.distance_squared(camera_pos)
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+fn lod_component_min_pos(component: &[IVec3]) -> IVec3 {
+    component
+        .iter()
+        .copied()
+        .min_by(|a, b| compare_chunk_pos_lex(*a, *b))
+        .unwrap_or(IVec3::ZERO)
+}
+
+fn compare_chunk_pos_lex(a: IVec3, b: IVec3) -> std::cmp::Ordering {
+    a.x.cmp(&b.x)
+        .then_with(|| a.y.cmp(&b.y))
+        .then_with(|| a.z.cmp(&b.z))
 }
 
 #[derive(SystemParam)]
@@ -2678,11 +2810,20 @@ fn mesh_dirty_chunks_system(
         && (reason_counts.lod > 0
             || reason_counts.neighbor_lod > 0
             || reason_counts.water_material > 0);
-    let chunks_per_frame_limit = chunks_per_frame_limit_for_dirty_meshes(
+    let mut chunks_per_frame_limit = chunks_per_frame_limit_for_dirty_meshes(
         &reason_counts,
         lod_churn_only,
         generation_complete,
     );
+    let lod_transaction_selection = if lod_churn_only {
+        let selection =
+            select_lod_mesh_transaction_chunks(&dirty_chunks, camera_pos, chunks_per_frame_limit);
+        chunks_per_frame_limit = selection.chunks.len().max(1);
+        dirty_chunks = selection.chunks.clone();
+        selection
+    } else {
+        LodMeshTransactionSelection::default()
+    };
     let mut terrain_mesh_empty_but_solid_voxels = 0u32;
     let mut terrain_mesh_boundary_missing_neighbor = 0u32;
     let mut surface_nets_chunks_deferred_for_halo = 0u32;
@@ -2692,8 +2833,9 @@ fn mesh_dirty_chunks_system(
     for chunk_pos in dirty_chunks {
         // Throttle expensive mesh generation, but let cheap empty/culled clears
         // drain faster so dirty queues do not stay backed up for hundreds of frames.
-        let dirty_visit_limit = if !lod_churn_only
-            && surface_nets_chunks_deferred_for_halo > 0
+        let dirty_visit_limit = if lod_churn_only {
+            chunks_per_frame_limit
+        } else if surface_nets_chunks_deferred_for_halo > 0
             && chunks_meshed as usize <= chunks_per_frame_limit
         {
             MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
@@ -2943,10 +3085,10 @@ fn mesh_dirty_chunks_system(
                     chunk.clear_mesh_entity();
                 }
             } else {
-            let mesh = mesh_result.solid.into_mesh();
-            let mesh_handle = meshes.add(mesh);
-            let needs_collider = terrain_lod_requires_collider(lod_level);
-            // Chunks whose top Y exceeds the water line are visible from above
+                let mesh = mesh_result.solid.into_mesh();
+                let mesh_handle = meshes.add(mesh);
+                let needs_collider = terrain_lod_requires_collider(lod_level);
+                // Chunks whose top Y exceeds the water line are visible from above
                 // (or straddle the surface) and must appear in the reflection pass.
                 // Horizon proxy terrain is intentionally excluded from reflection
                 // rendering because it is only a fog-muted silhouette band.
@@ -3258,7 +3400,9 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Visit Limit",
-        if !lod_churn_only && surface_nets_chunks_deferred_for_halo > 0 {
+        if lod_churn_only {
+            chunks_per_frame_limit
+        } else if surface_nets_chunks_deferred_for_halo > 0 {
             MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME
         } else {
             MAX_DIRTY_CHUNKS_VISITED_PER_FRAME
@@ -3273,6 +3417,26 @@ fn mesh_dirty_chunks_system(
         frame.0,
         "Mesh Dirty LOD Churn Only",
         lod_churn_only as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transactions Selected",
+        lod_transaction_selection.component_count as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Chunks Selected",
+        lod_transaction_selection.chunks.len() as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Chunks Deferred",
+        lod_transaction_selection.deferred_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Oversize Chunks",
+        lod_transaction_selection.oversize_component_chunks as f64,
     );
     timing.record_count(
         frame.0,
@@ -5974,8 +6138,58 @@ mod tests {
 
         assert_eq!(
             chunks_per_frame_limit_for_dirty_meshes(&reason_counts, true, true),
-            MAX_LOD_DIRTY_CHUNKS_PER_FRAME
+            MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME
         );
+    }
+
+    #[test]
+    fn lod_mesh_transaction_keeps_connected_component_together() {
+        let dirty_chunks = vec![
+            IVec3::new(0, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(2, 0, 0),
+            IVec3::new(20, 0, 0),
+        ];
+
+        let selection = select_lod_mesh_transaction_chunks(&dirty_chunks, Some(Vec3::ZERO), 2);
+
+        assert_eq!(
+            selection.chunks,
+            vec![
+                IVec3::new(0, 0, 0),
+                IVec3::new(1, 0, 0),
+                IVec3::new(2, 0, 0)
+            ]
+        );
+        assert_eq!(selection.component_count, 1);
+        assert_eq!(selection.deferred_chunks, 1);
+        assert_eq!(selection.oversize_component_chunks, 3);
+    }
+
+    #[test]
+    fn lod_mesh_transaction_batches_complete_components_under_limit() {
+        let dirty_chunks = vec![
+            IVec3::new(0, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(10, 0, 0),
+            IVec3::new(11, 0, 0),
+            IVec3::new(30, 0, 0),
+        ];
+
+        let selection = select_lod_mesh_transaction_chunks(&dirty_chunks, Some(Vec3::ZERO), 4);
+
+        assert_eq!(
+            selection.chunks,
+            vec![
+                IVec3::new(0, 0, 0),
+                IVec3::new(1, 0, 0),
+                IVec3::new(10, 0, 0),
+                IVec3::new(11, 0, 0),
+            ]
+        );
+        assert_eq!(selection.component_count, 2);
+        assert_eq!(selection.deferred_chunks, 1);
+        assert_eq!(selection.oversize_component_chunks, 0);
     }
 
     #[test]
