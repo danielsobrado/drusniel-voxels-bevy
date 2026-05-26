@@ -2017,3 +2017,206 @@ Acceptance for the dynamic path:
 
 This dynamic settling fix should be tracked separately from the static
 dump-derived `case=16` / `case=51` replay fixtures.
+
+### First transactional LOD publish implementation
+
+Implemented first-stage mitigation:
+
+- LOD-only dirty mesh work is grouped into face-connected components before
+  meshing.
+- A selected component is processed as a whole in one `mesh_dirty_chunks_system`
+  pass instead of being split by the old 4-chunks-per-frame LOD limit.
+- If the nearest component is larger than the nominal transaction budget, the
+  whole component is still processed. This prefers a bounded frame spike over
+  publishing half of a visible LOD seam.
+- Independent components can be batched together up to
+  `MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME`.
+- Old visible meshes remain in place until the selected component's mesh swaps
+  are queued by the same system pass, so the renderer should no longer see the
+  four-chunks-at-a-time LOD-settling topology for that component.
+
+New counters:
+
+```text
+LOD Mesh Transactions Selected
+LOD Mesh Transaction Chunks Selected
+LOD Mesh Transaction Chunks Deferred
+LOD Mesh Transaction Oversize Chunks
+```
+
+Limitations:
+
+- This is not the full long-lived background transaction model yet. It does not
+  store partially prepared meshes across frames.
+- Very large connected LOD churn components can still be expensive because they
+  are committed as a whole. If this creates frame spikes, the next step is a
+  persistent transaction resource that builds meshes across frames and only
+  publishes when the component is fully ready.
+- This does not address the static MC replay bugs; it only targets transient
+  holes caused by gradual LOD settling.
+
+Verification on 2026-05-25:
+
+- `cargo check -j 1 --lib --features mc_transvoxel` passed.
+- Focused transaction tests passed with `CARGO_INCREMENTAL=0`:
+  `cargo test -j 1 --lib --features mc_transvoxel lod_mesh_transaction`.
+  The same test command without disabling incremental hit a Windows/rustc
+  pagefile mmap failure before executing tests.
+- `visual-regression-live-lod.toml` completed and wrote
+  `bench-runs/2026-05-25T17-52-45Z/summary.json`.
+- The live-LOD bench shows the new counters are active. Example p99 selected
+  transaction chunks were 84, 94, and 82 across the three checkpoints, with
+  oversize chunks at 0.
+- `bench_guard` failed the live-LOD mesh-dirty p99 checks:
+  72.238 ms, 55.516 ms, and 35.256 ms against the 10 ms fail threshold. This
+  confirms the first-stage same-frame transaction is useful as a visual
+  isolation experiment but is not the final shipping shape.
+- The next version should be a persistent LOD mesh transaction: build selected
+  transaction chunks over multiple frames while keeping old visible meshes in
+  place, then publish all prepared replacements in one commit frame.
+
+### Persistent LOD mesh transaction follow-up
+
+Implemented second-stage mitigation on 2026-05-26:
+
+- Added a `LodMeshTransactionState` resource that keeps one active LOD publish
+  transaction across frames.
+- LOD-only dirty work now selects a face-connected component once, prepares mesh
+  handles over multiple frames, keeps old visible meshes alive while preparation
+  is incomplete, then commits all prepared replacements together.
+- The prepare budget is intentionally separate from the publish component
+  budget. The first persistent bench used 4 prepared chunks per frame; the
+  current code has been lowered to 2 prepared chunks per frame after profiling
+  showed generation p99 still above guard limits.
+- Prepared commits now revalidate immediately before publication. A transaction
+  aborts and retries if the chunk LOD, target mesh mode, effective mesh LOD,
+  neighbor LODs, missing-boundary-neighbor count, or empty-surface cap state no
+  longer match the prepared mesh. Generation and terrain-mutation dirties also
+  invalidate the transaction.
+- New counters from the first-stage transaction remain active and now describe
+  the persistent transaction state:
+
+```text
+LOD Mesh Transaction Active
+LOD Mesh Transaction Pending Chunks
+LOD Mesh Transaction Prepared Chunks
+LOD Mesh Transaction Build Chunks This Frame
+LOD Mesh Transaction Commit Chunks
+LOD Mesh Transaction Aborted
+```
+
+Persistent transaction bench, prepare budget 4:
+
+- Scene: `bench/scenes/visual/visual-regression-live-lod.toml`
+- Output: `bench-runs/2026-05-26T04-00-47Z/summary.json`
+- `bench_guard` still failed, but the failure shape changed from same-frame
+  transaction commit spikes to per-frame mesh generation spikes:
+
+| Checkpoint | Frame p99 | Mesh Dirty p99 | Mesh Dirty Generate p99 | Mesh Dirty Apply p99 | Build chunks p99 |
+|---|---:|---:|---:|---:|---:|
+| ridge-run-noon | 45.021 ms | 12.895 ms | 12.032 ms | 0.128 ms | 4 |
+| jump-water-sunset | 51.821 ms | 16.676 ms | 15.784 ms | 0.000 ms | 4 |
+| forest-look-sweep | 49.509 ms | 16.504 ms | 15.705 ms | 0.000 ms | 4 |
+
+Interpretation:
+
+- The transaction commit itself is cheap after handles are prebuilt. Apply p99
+  is effectively gone from the live-LOD failure.
+- The remaining bench failure is mesh generation budget: 4 chunks per frame is
+  still too high for the live-LOD guard on this scene.
+- Reducing the prepare budget to 2 is the next measured variant. It should keep
+  old visible meshes alive longer, but reduce per-frame mesh generation p99 and
+  avoid visible partial LOD seam swaps.
+- A clean `cargo check --release -j 1 --lib --features mc_transvoxel` completed
+  after the stale-commit validation was added.
+
+Follow-up verification notes:
+
+- The budget-2 code path also explicitly removes prepared mesh assets when a
+  transaction aborts before publication, so stale retry loops should not leave
+  abandoned prepared meshes in `Assets<Mesh>`.
+- `cargo check --release -j 1 --lib --features mc_transvoxel` still completes
+  cleanly after the asset-discard path was added.
+- A focused release test command for `lod_mesh_transaction` timed out after five
+  minutes in the local Windows toolchain before completing. The leftover
+  `cargo`/`rustc` processes were stopped.
+- The budget-2 live-LOD bench could not be measured yet because compiling the
+  release binary for `cargo run --release --features mc_transvoxel -- --bench
+  bench/scenes/visual/visual-regression-live-lod.toml` hit
+  `rustc-LLVM ERROR: out of memory` / `STATUS_STACK_BUFFER_OVERRUN` before the
+  runtime launched. A local-only `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=256`
+  build attempt also failed to finish within ten minutes and was stopped.
+
+### Persistent transaction bench updates
+
+Update on 2026-05-26: the previous budget-2 compile blocker was worked around
+with the local low-memory release profile:
+
+```powershell
+$env:CARGO_INCREMENTAL='0'
+$env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS='512'
+$env:CARGO_PROFILE_RELEASE_LTO='false'
+rtk proxy cargo run --release -j 1 --features mc_transvoxel -- --bench bench/scenes/visual/visual-regression-live-lod.toml
+```
+
+Findings from the measured transaction variants:
+
+| Variant | Bench run | Result |
+|---|---|---|
+| Prepare budget 2, unbounded component | `bench-runs/2026-05-26T06-06-48Z/summary.json` | Huge transactions never reached commit. Pending chunks reached thousands and `Commit Chunks` stayed 0. |
+| Bounded 96-chunk wave | `bench-runs/2026-05-26T06-49-17Z/summary.json` | Selected/prepared 96 chunks but still aborted before commit. |
+| Pause LOD assignment while transaction active, 96-chunk wave | no summary | Runtime allocation failure while old and prepared meshes were both resident. |
+| Pause LOD assignment, 32-chunk wave | `bench-runs/2026-05-26T07-28-05Z/summary.json` | Memory stable, but still aborted before commit. |
+| 32-chunk wave with abort-reason counters | `bench-runs/2026-05-26T07-46-29Z/summary.json` | Dominant abort was `Validation No Visible Mesh Mismatch`; commit stayed 0. |
+| Allow generated no-visible results to validate and publish | `bench-runs/2026-05-26T08-53-12Z/summary.json` | First successful persistent transaction run: abort p99 0, commit p99 32. Mesh Dirty p99 still failed guard at 10.594/15.554/6.296 ms. |
+| Prepare budget 1 | `bench-runs/2026-05-26T09-13-51Z/summary.json` | Abort p99 0, commit p99 32, build p99 1. Mesh Dirty p99 improved to 6.510/5.216/8.052 ms. |
+
+Implementation updates from this pass:
+
+- LOD-only dirty chunks are now prepared as a persistent transaction and
+  published together once all prepared replacements validate.
+- Oversized dirty components are split into a bounded connected wave instead of
+  attempting to prepare the entire dirty graph.
+- LOD assignment updates are paused while a mesh transaction is active so the
+  transaction snapshot can settle before publication.
+- Prepared mesh handles are explicitly removed from `Assets<Mesh>` when a
+  transaction is discarded.
+- The validator no longer treats a generated no-visible mesh result as stale by
+  itself. True clear commits (culled, all-solid, or all-empty without an
+  empty-surface cap) can skip context validation; generated no-visible results
+  still validate LOD, mode, effective mesh LOD, neighbor LODs,
+  missing-boundary-neighbor count, and empty-surface cap state before publish.
+- A duplicate `frag_dist` declaration in `triplanar_terrain.wgsl` blocked
+  release bench compilation after the flat/unlit terrain debug material work;
+  it was fixed so the live-LOD bench loop can run again.
+
+Current measured state:
+
+| Checkpoint | Frame p99 | Mesh Dirty p99 | Mesh Dirty Generate p99 | Transaction abort p99 | Transaction commit p99 |
+|---|---:|---:|---:|---:|---:|
+| ridge-run-noon | 49.680 ms | 6.510 ms | 6.372 ms | 0 | 32 |
+| jump-water-sunset | 51.373 ms | 5.216 ms | 5.002 ms | 0 | 32 |
+| forest-look-sweep | 51.235 ms | 8.052 ms | 7.798 ms | 0 | 32 |
+
+`bench_guard` on `bench-runs/2026-05-26T09-13-51Z/summary.json` still failed:
+
+```text
+live_lod_ridge_mesh_dirty_p99   6.510 ms  WARN
+live_lod_jump_mesh_dirty_p99    5.216 ms  WARN
+live_lod_forest_mesh_dirty_p99  8.052 ms  WARN
+live_lod_frame_p99             51.235 ms  FAIL
+```
+
+Interpretation:
+
+- The transaction mechanism now works: prepared LOD waves commit atomically and
+  no longer abort/retry forever.
+- The specific visible problem where neighboring chunks swap gradually should
+  be reduced because old meshes remain visible until a whole 32-chunk wave is
+  ready.
+- This does not prove every static MC+Transvoxel seam hole is fixed. The
+  persistent `Terrain Mesh Empty But Solid Voxels` counter remains the next
+  geometry-side suspect for the small static polygon holes.
+- The remaining live-LOD guard failure is not a transaction abort. It is a
+  broader frame-p99/render-readiness problem in the forest checkpoint, with
+  `LOD Update`, `Render Graph CPU`, and render prepare rows also contributing.

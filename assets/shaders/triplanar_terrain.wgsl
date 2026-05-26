@@ -349,6 +349,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let world_pos = pbr_input.world_position.xyz;
     let world_normal = normalize(pbr_input.world_normal);
     let view_dir = pbr_input.V;
+    let frag_dist = length(view.world_position - world_pos);
 
 #ifdef TERRAIN_DEBUG_NORMALS
     var debug_color = vec4<f32>(world_normal * 0.5 + 0.5, 1.0);
@@ -394,7 +395,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     }
     proxy_albedo = proxy_albedo * uniforms.base_color;
     let fog_color = vec3<f32>(0.56, 0.68, 0.82);
-    let frag_dist = length(view.world_position - pbr_input.world_position.xyz);
     let fog_mix = clamp((frag_dist - 220.0) / 220.0, 0.35, 0.82);
     let height_tint = clamp((world_pos.y - WATER_LEVEL) / 128.0, 0.0, 1.0);
     let textured_silhouette = proxy_albedo.rgb * mix(0.72, 0.9, height_tint);
@@ -435,7 +435,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 #ifdef TERRAIN_CHEAP_TRIPLANAR
     let skip_normals = true;
 #else
-    let frag_dist = length(view.world_position - pbr_input.world_position.xyz);
     let skip_normals = frag_dist > 120.0; // normal maps invisible past 120 u
 #endif
 

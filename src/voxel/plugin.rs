@@ -59,7 +59,8 @@ const MAX_CHUNKS_PER_FRAME: usize = 4;
 const MAX_STARTUP_CHUNKS_PER_FRAME: usize = 12;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
-const MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME: usize = 96;
+const MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME: usize = 32;
+const MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME: usize = 1;
 // Raised from 4: at 4 changes/update the LOD backlog never drained, leaving
 // scattered chunks stuck at a stale LOD (isolated islands that crack).
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 32;
@@ -115,9 +116,9 @@ use crate::voxel::mc_transvoxel::{
     log_transition_stats_if_due,
 };
 use crate::voxel::meshing::{
-    ChunkMesh, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions, MeshMode,
-    MeshSettings, TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh,
-    WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
+    ChunkMesh, ChunkMeshResult, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions,
+    MeshMode, MeshSettings, TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode,
+    WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_with_mode_and_forensics,
     lod_delta_gt_one_face_mask,
 };
@@ -681,6 +682,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(McTransvoxelRuntimeStats::default())
         .insert_resource(TerrainLodControl::default())
         .insert_resource(TerrainLodTransitionState::default())
+        .insert_resource(LodMeshTransactionState::default())
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
         .insert_resource(RuntimeChunkStats::default())
@@ -2591,6 +2593,131 @@ struct LodMeshTransactionSelection {
     oversize_component_chunks: usize,
 }
 
+#[derive(Resource, Default)]
+struct LodMeshTransactionState {
+    active: Option<LodMeshTransaction>,
+}
+
+struct LodMeshTransaction {
+    chunks: Vec<IVec3>,
+    pending: VecDeque<IVec3>,
+    prepared: HashMap<IVec3, PreparedLodChunkCommit>,
+}
+
+impl LodMeshTransaction {
+    fn new(chunks: Vec<IVec3>) -> Self {
+        Self {
+            pending: VecDeque::from(chunks.clone()),
+            chunks,
+            prepared: HashMap::new(),
+        }
+    }
+
+    fn prepared_len(&self) -> usize {
+        self.prepared.len()
+    }
+
+    fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    fn is_ready_to_commit(&self) -> bool {
+        self.prepared.len() == self.chunks.len()
+    }
+}
+
+struct PreparedLodChunkCommit {
+    chunk_pos: IVec3,
+    target_mode: MeshMode,
+    lod_level: LodLevel,
+    terrain_quality: TerrainMaterialQuality,
+    terrain_mesh_debug: TerrainMeshDebug,
+    solid_mesh_handle: Option<Handle<Mesh>>,
+    vertex_count: u32,
+    triangle_count: u32,
+    mc_triangle_sources: Option<McTriangleSources>,
+    water_mesh_handle: Option<Handle<Mesh>>,
+    water_vertex_count: u32,
+    water_triangle_count: u32,
+    water_depth_detail: WaterChunkDepthDetail,
+}
+
+enum LodChunkPrepareOutcome {
+    Prepared(PreparedLodChunkCommit),
+    DeferredForHalo,
+    Skipped,
+    Stale,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LodMeshTransactionAbortReason {
+    PrepareDeferredForHalo,
+    PrepareSkipped,
+    PrepareStale,
+    ValidationMissingChunk,
+    ValidationGenerationOrMutationDirty,
+    ValidationLodChanged,
+    ValidationTargetModeChanged,
+    ValidationMeshLodChanged,
+    ValidationNoVisibleMeshMismatch,
+    ValidationNeighborLodsChanged,
+    ValidationMissingBoundaryNeighborsChanged,
+    ValidationEmptySurfaceCapChanged,
+    MissingPreparedCommit,
+    NonLodDirty,
+}
+
+fn lod_transaction_abort_reason_count(
+    stats: &LodMeshTransactionFrameStats,
+    reason: LodMeshTransactionAbortReason,
+) -> f64 {
+    f64::from(stats.abort_reason == Some(reason))
+}
+
+fn lod_commit_no_visible_mesh_skips_context_validation(
+    lod_level: LodLevel,
+    uniformity: ChunkUniformity,
+    empty_surface_neighbor: bool,
+) -> bool {
+    // True clear commits do not depend on neighbor/cap context. Generated
+    // no-visible results still validate the context below before publishing.
+    lod_level == LodLevel::Culled
+        || uniformity == ChunkUniformity::Solid
+        || (uniformity == ChunkUniformity::Empty && !empty_surface_neighbor)
+}
+
+#[derive(Default)]
+struct LodMeshTransactionFrameStats {
+    selected_transactions: usize,
+    selected_chunks: usize,
+    deferred_chunks: usize,
+    oversize_component_chunks: usize,
+    pending_chunks: usize,
+    prepared_chunks_total: usize,
+    prepared_chunks_this_frame: usize,
+    committed_chunks: usize,
+    aborted_transactions: usize,
+    chunks_processed: usize,
+    chunks_meshed: u32,
+    chunks_skipped: u32,
+    terrain_mesh_empty_but_solid_voxels: u32,
+    terrain_mesh_boundary_missing_neighbor: u32,
+    surface_nets_chunks_deferred_for_halo: u32,
+    terrain_mesh_lod_seam_repairs: u32,
+    mesh_dirty_generate_us: u64,
+    mesh_dirty_apply_us: u64,
+    abort_reason: Option<LodMeshTransactionAbortReason>,
+}
+
+const LOD_TRANSACTION_FACE_OFFSETS: [IVec3; 6] = [
+    IVec3::new(1, 0, 0),
+    IVec3::new(-1, 0, 0),
+    IVec3::new(0, 1, 0),
+    IVec3::new(0, -1, 0),
+    IVec3::new(0, 0, 1),
+    IVec3::new(0, 0, -1),
+];
+
 fn select_lod_mesh_transaction_chunks(
     dirty_chunks: &[IVec3],
     camera_pos: Option<Vec3>,
@@ -2618,10 +2745,15 @@ fn select_lod_mesh_transaction_chunks(
             break;
         }
         if selected.is_empty() && component_len > max_chunks {
-            // Publishing half a connected LOD component is exactly what causes
-            // transient see-through seams. Prefer one bounded spike over a
-            // visible invalid intermediate topology.
+            // Huge live-LOD updates can connect most loaded chunks into one
+            // dirty graph. Publish a bounded connected wave so old visible
+            // meshes stay up, but the transaction still reaches a commit.
             oversize_component_chunks = component_len;
+            selected.extend(bounded_lod_component_wave(
+                &component, camera_pos, max_chunks,
+            ));
+            component_count += 1;
+            break;
         }
         selected.extend(component);
         component_count += 1;
@@ -2637,15 +2769,6 @@ fn select_lod_mesh_transaction_chunks(
 }
 
 fn lod_dirty_components(dirty_chunks: &[IVec3]) -> Vec<Vec<IVec3>> {
-    const FACE_OFFSETS: [IVec3; 6] = [
-        IVec3::new(1, 0, 0),
-        IVec3::new(-1, 0, 0),
-        IVec3::new(0, 1, 0),
-        IVec3::new(0, -1, 0),
-        IVec3::new(0, 0, 1),
-        IVec3::new(0, 0, -1),
-    ];
-
     let dirty_set: HashSet<IVec3> = dirty_chunks.iter().copied().collect();
     let mut visited: HashSet<IVec3> = HashSet::new();
     let mut components = Vec::new();
@@ -2659,7 +2782,7 @@ fn lod_dirty_components(dirty_chunks: &[IVec3]) -> Vec<Vec<IVec3>> {
         let mut component = Vec::new();
         while let Some(pos) = queue.pop_front() {
             component.push(pos);
-            for offset in FACE_OFFSETS {
+            for offset in LOD_TRANSACTION_FACE_OFFSETS {
                 let neighbor = pos + offset;
                 if dirty_set.contains(&neighbor) && visited.insert(neighbor) {
                     queue.push_back(neighbor);
@@ -2670,6 +2793,58 @@ fn lod_dirty_components(dirty_chunks: &[IVec3]) -> Vec<Vec<IVec3>> {
     }
 
     components
+}
+
+fn bounded_lod_component_wave(
+    component: &[IVec3],
+    camera_pos: Option<Vec3>,
+    max_chunks: usize,
+) -> Vec<IVec3> {
+    if component.is_empty() || max_chunks == 0 {
+        return Vec::new();
+    }
+    if component.len() <= max_chunks {
+        return component.to_vec();
+    }
+
+    let component_set: HashSet<IVec3> = component.iter().copied().collect();
+    let seed = component
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            camera_pos
+                .map(|camera_pos| compare_dirty_chunk_distance(a, b, camera_pos))
+                .unwrap_or_else(|| compare_chunk_pos_lex(*a, *b))
+        })
+        .unwrap_or(component[0]);
+
+    let mut selected = Vec::with_capacity(max_chunks);
+    let mut visited = HashSet::from([seed]);
+    let mut queue = VecDeque::from([seed]);
+    while let Some(pos) = queue.pop_front() {
+        selected.push(pos);
+        if selected.len() == max_chunks {
+            break;
+        }
+
+        let mut neighbors: Vec<IVec3> = LOD_TRANSACTION_FACE_OFFSETS
+            .iter()
+            .map(|offset| pos + *offset)
+            .filter(|neighbor| component_set.contains(neighbor) && !visited.contains(neighbor))
+            .collect();
+        neighbors.sort_by(|a, b| {
+            camera_pos
+                .map(|camera_pos| compare_dirty_chunk_distance(a, b, camera_pos))
+                .unwrap_or_else(|| compare_chunk_pos_lex(*a, *b))
+        });
+        for neighbor in neighbors {
+            if visited.insert(neighbor) {
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    selected
 }
 
 fn compare_lod_component_priority(
@@ -2715,11 +2890,871 @@ fn compare_chunk_pos_lex(a: IVec3, b: IVec3) -> std::cmp::Ordering {
         .then_with(|| a.z.cmp(&b.z))
 }
 
+#[inline(never)]
+fn process_lod_mesh_transaction(
+    state: &mut LodMeshTransactionState,
+    dirty_chunks: &[IVec3],
+    camera_pos: Option<Vec3>,
+    commands: &mut Commands,
+    world: &mut VoxelWorld,
+    meshes: &mut Assets<Mesh>,
+    blocky_material: Option<&VoxelMaterial>,
+    triplanar_material: &TriplanarMaterialHandle,
+    water_material: &WaterMaterial,
+    bench_toggles: Option<&BenchRenderToggles>,
+    bench_forensics: Option<&BenchForensicsConfig>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    mc_settings: &McTransvoxelSettings,
+    skirt_config: &SkirtConfig,
+    ao_config: &AmbientOcclusionConfig,
+    runtime_mc_stats: &mut McTransvoxelRuntimeStats,
+    chunk_stats: &mut RuntimeChunkStats,
+    frame: u32,
+) -> LodMeshTransactionFrameStats {
+    let mut frame_stats = LodMeshTransactionFrameStats::default();
+
+    if state.active.is_none() {
+        let selection = select_lod_mesh_transaction_chunks(
+            dirty_chunks,
+            camera_pos,
+            MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME,
+        );
+        frame_stats.selected_transactions = selection.component_count;
+        frame_stats.selected_chunks = selection.chunks.len();
+        frame_stats.deferred_chunks = selection.deferred_chunks;
+        frame_stats.oversize_component_chunks = selection.oversize_component_chunks;
+        if selection.chunks.is_empty() {
+            return frame_stats;
+        }
+        state.active = Some(LodMeshTransaction::new(selection.chunks));
+    }
+
+    let mut abort_transaction = false;
+    if let Some(transaction) = state.active.as_mut() {
+        while frame_stats.prepared_chunks_this_frame < MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME
+        {
+            let Some(chunk_pos) = transaction.pending.pop_front() else {
+                break;
+            };
+            frame_stats.chunks_processed += 1;
+            match prepare_lod_chunk_commit(
+                world,
+                meshes,
+                chunk_pos,
+                frame,
+                camera_pos,
+                blocky_material.is_some(),
+                bench_toggles,
+                bench_forensics,
+                mesh_settings,
+                lod_settings,
+                mc_settings,
+                skirt_config,
+                ao_config,
+                runtime_mc_stats,
+                chunk_stats,
+                &mut frame_stats,
+            ) {
+                LodChunkPrepareOutcome::Prepared(commit) => {
+                    transaction.prepared.insert(chunk_pos, commit);
+                    frame_stats.prepared_chunks_this_frame += 1;
+                }
+                LodChunkPrepareOutcome::DeferredForHalo => {
+                    abort_transaction = true;
+                    frame_stats.abort_reason =
+                        Some(LodMeshTransactionAbortReason::PrepareDeferredForHalo);
+                    break;
+                }
+                LodChunkPrepareOutcome::Skipped => {
+                    abort_transaction = true;
+                    frame_stats.abort_reason = Some(LodMeshTransactionAbortReason::PrepareSkipped);
+                    break;
+                }
+                LodChunkPrepareOutcome::Stale => {
+                    abort_transaction = true;
+                    frame_stats.abort_reason = Some(LodMeshTransactionAbortReason::PrepareStale);
+                    break;
+                }
+            }
+        }
+        frame_stats.pending_chunks = transaction.pending_len();
+        frame_stats.prepared_chunks_total = transaction.prepared_len();
+    }
+
+    if abort_transaction {
+        if let Some(transaction) = state.active.take() {
+            discard_lod_mesh_transaction(transaction, meshes);
+        }
+        frame_stats.aborted_transactions = 1;
+        return frame_stats;
+    }
+
+    let ready_to_commit = state
+        .active
+        .as_ref()
+        .is_some_and(LodMeshTransaction::is_ready_to_commit);
+    if ready_to_commit {
+        let mut transaction = state.active.take().expect("transaction existed above");
+        if let Some(reason) = transaction.prepared.values().find_map(|commit| {
+            prepared_lod_commit_stale_reason(
+                commit,
+                world,
+                camera_pos,
+                bench_forensics,
+                mesh_settings,
+                lod_settings,
+                mc_settings,
+            )
+        }) {
+            discard_lod_mesh_transaction(transaction, meshes);
+            frame_stats.aborted_transactions = 1;
+            frame_stats.abort_reason = Some(reason);
+            return frame_stats;
+        }
+        for chunk_pos in transaction.chunks {
+            let Some(commit) = transaction.prepared.remove(&chunk_pos) else {
+                frame_stats.aborted_transactions = 1;
+                frame_stats.abort_reason =
+                    Some(LodMeshTransactionAbortReason::MissingPreparedCommit);
+                break;
+            };
+            apply_prepared_lod_chunk_commit(
+                commit,
+                commands,
+                world,
+                blocky_material,
+                triplanar_material,
+                water_material,
+                chunk_stats,
+                &mut frame_stats,
+            );
+        }
+        frame_stats.committed_chunks = frame_stats
+            .chunks_meshed
+            .saturating_add(frame_stats.chunks_skipped)
+            as usize;
+        frame_stats.pending_chunks = 0;
+        frame_stats.prepared_chunks_total = 0;
+    }
+
+    frame_stats
+}
+
+#[inline(never)]
+fn prepare_lod_chunk_commit(
+    world: &mut VoxelWorld,
+    meshes: &mut Assets<Mesh>,
+    chunk_pos: IVec3,
+    frame: u32,
+    camera_pos: Option<Vec3>,
+    blocky_material_available: bool,
+    bench_toggles: Option<&BenchRenderToggles>,
+    bench_forensics: Option<&BenchForensicsConfig>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    mc_settings: &McTransvoxelSettings,
+    skirt_config: &SkirtConfig,
+    ao_config: &AmbientOcclusionConfig,
+    runtime_mc_stats: &mut McTransvoxelRuntimeStats,
+    chunk_stats: &mut RuntimeChunkStats,
+    frame_stats: &mut LodMeshTransactionFrameStats,
+) -> LodChunkPrepareOutcome {
+    let dirty_flags = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        chunk.dirty_reason_flags()
+    } else {
+        return LodChunkPrepareOutcome::Stale;
+    };
+    if dirty_flags & MeshDirtyReason::Generation.bit() != 0
+        || dirty_flags & MeshDirtyReason::TerrainMutation.bit() != 0
+    {
+        return LodChunkPrepareOutcome::Stale;
+    }
+
+    if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+        if chunk.uniformity() == ChunkUniformity::Unknown {
+            chunk.compute_uniformity();
+        }
+    }
+
+    let (target_mode, lod_level, uniformity) = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        let base_mode =
+            target_terrain_mesh_mode_for_lod(chunk.lod_level(), mesh_settings, lod_settings);
+        let target_mode = resolve_terrain_mesh_mode(
+            base_mode,
+            chunk_pos,
+            chunk.lod_level(),
+            mc_settings,
+            camera_pos,
+        );
+        let target_mode = forensics_mesh_mode_override(target_mode, bench_forensics);
+        (target_mode, chunk.lod_level(), chunk.uniformity())
+    } else {
+        return LodChunkPrepareOutcome::Stale;
+    };
+
+    if lod_level == LodLevel::Culled {
+        return LodChunkPrepareOutcome::Prepared(PreparedLodChunkCommit::clear_for_chunk(
+            chunk_pos,
+            lod_level,
+            target_mode,
+            mesh_lod_level_for_surface_nets_cap(target_mode, uniformity, false, lod_level),
+            NeighborLods::default(),
+            0,
+            false,
+            frame,
+        ));
+    }
+
+    let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
+        && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
+        && empty_chunk_has_surface_nets_boundary_surface(world, chunk_pos);
+    let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
+        target_mode,
+        uniformity,
+        empty_surface_neighbor,
+        lod_level,
+    );
+
+    if uniformity == ChunkUniformity::Empty {
+        if empty_surface_neighbor {
+            frame_stats.terrain_mesh_lod_seam_repairs += 1;
+        } else {
+            return LodChunkPrepareOutcome::Prepared(PreparedLodChunkCommit::clear_for_chunk(
+                chunk_pos,
+                lod_level,
+                target_mode,
+                mesh_lod_level,
+                NeighborLods::default(),
+                0,
+                false,
+                frame,
+            ));
+        }
+    }
+
+    let missing_boundary_neighbors = count_missing_in_bounds_boundary_neighbors(world, chunk_pos);
+    if missing_boundary_neighbors > 0 {
+        frame_stats.terrain_mesh_boundary_missing_neighbor += 1;
+        if should_defer_surface_nets_mesh(target_mode, missing_boundary_neighbors) {
+            frame_stats.surface_nets_chunks_deferred_for_halo += 1;
+            return LodChunkPrepareOutcome::DeferredForHalo;
+        }
+    }
+
+    if matches!(target_mode, MeshMode::Blocky) && !blocky_material_available {
+        return LodChunkPrepareOutcome::Skipped;
+    }
+
+    let neighbor_lods = build_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
+    let mesh_start = Instant::now();
+    let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        generate_chunk_mesh_with_mode_and_forensics(
+            chunk,
+            world,
+            target_mode,
+            mesh_lod_level,
+            neighbor_lods,
+            skirt_config,
+            &ao_config.baked,
+            mesh_settings.water_air_exposure_mode,
+            mesh_forensics_options(bench_forensics, mc_settings),
+        )
+    } else {
+        return LodChunkPrepareOutcome::Stale;
+    };
+    let mesh_elapsed = mesh_start.elapsed();
+    frame_stats.mesh_dirty_generate_us += mesh_elapsed.as_micros() as u64;
+    chunk_stats.meshing_time_us += mesh_elapsed.as_micros() as u64;
+
+    let ChunkMeshResult {
+        solid,
+        water,
+        water_stats,
+        lod_transition_snap_stats,
+        mesh_section_stats,
+        mc_transvoxel_stats,
+        mc_triangle_sources,
+    } = mesh_result;
+
+    let vertex_count = solid.positions.len() as u32;
+    let triangle_count = (solid.indices.len() / 3) as u32;
+    if uniformity == ChunkUniformity::Mixed && triangle_count == 0 {
+        frame_stats.terrain_mesh_empty_but_solid_voxels += 1;
+    }
+    record_water_meshing_stats(chunk_stats, water_stats);
+    if let Some(stats) = mc_transvoxel_stats {
+        record_mc_transvoxel_generation_stats(runtime_mc_stats, stats);
+    }
+
+    let horizon_proxy = is_horizon_proxy_lod(lod_level);
+    let water_depth_detail = if water.is_empty() {
+        WaterChunkDepthDetail::default()
+    } else {
+        compute_water_chunk_depth_detail(world, chunk_pos)
+    };
+    let water_vertex_count = water.positions.len() as u32;
+    let water_triangle_count = (water.indices.len() / 3) as u32;
+    let solid_mesh_handle = if solid.is_empty() {
+        None
+    } else {
+        Some(meshes.add(solid.into_mesh()))
+    };
+    let water_mesh_handle = if horizon_proxy || water.is_empty() {
+        None
+    } else {
+        Some(meshes.add(water.into_mesh()))
+    };
+    let terrain_quality = terrain_material_quality_for_lod(lod_level, bench_toggles);
+    let terrain_mesh_debug = TerrainMeshDebug {
+        logical_lod_at_mesh: lod_level,
+        effective_lod_at_mesh: mesh_lod_level,
+        target_mode_at_mesh: target_mode,
+        neighbor_lods_at_mesh: neighbor_lods,
+        lod_delta_gt_one_face_mask: lod_delta_gt_one_face_mask(lod_level, &neighbor_lods),
+        missing_boundary_neighbors_at_mesh: missing_boundary_neighbors,
+        empty_surface_cap_at_mesh: empty_surface_neighbor,
+        generated_frame: frame,
+        lod_transition_snap_stats,
+        mesh_section_stats,
+        mc_transvoxel_stats,
+    };
+
+    LodChunkPrepareOutcome::Prepared(PreparedLodChunkCommit {
+        chunk_pos,
+        target_mode,
+        lod_level,
+        terrain_quality,
+        terrain_mesh_debug,
+        solid_mesh_handle,
+        vertex_count,
+        triangle_count,
+        mc_triangle_sources,
+        water_mesh_handle,
+        water_vertex_count,
+        water_triangle_count,
+        water_depth_detail,
+    })
+}
+
+impl PreparedLodChunkCommit {
+    #[cfg(test)]
+    fn clear(chunk_pos: IVec3) -> Self {
+        Self::clear_for_chunk(
+            chunk_pos,
+            LodLevel::Culled,
+            MeshMode::SurfaceNets,
+            LodLevel::Culled,
+            NeighborLods::default(),
+            0,
+            false,
+            0,
+        )
+    }
+
+    fn clear_for_chunk(
+        chunk_pos: IVec3,
+        lod_level: LodLevel,
+        target_mode: MeshMode,
+        mesh_lod_level: LodLevel,
+        neighbor_lods: NeighborLods,
+        missing_boundary_neighbors: u32,
+        empty_surface_neighbor: bool,
+        frame: u32,
+    ) -> Self {
+        Self {
+            chunk_pos,
+            target_mode,
+            lod_level,
+            terrain_quality: TerrainMaterialQuality::FullTriplanar,
+            terrain_mesh_debug: TerrainMeshDebug {
+                logical_lod_at_mesh: lod_level,
+                effective_lod_at_mesh: mesh_lod_level,
+                target_mode_at_mesh: target_mode,
+                neighbor_lods_at_mesh: neighbor_lods,
+                lod_delta_gt_one_face_mask: lod_delta_gt_one_face_mask(lod_level, &neighbor_lods),
+                missing_boundary_neighbors_at_mesh: missing_boundary_neighbors,
+                empty_surface_cap_at_mesh: empty_surface_neighbor,
+                generated_frame: frame,
+                lod_transition_snap_stats: Default::default(),
+                mesh_section_stats: Default::default(),
+                mc_transvoxel_stats: None,
+            },
+            solid_mesh_handle: None,
+            vertex_count: 0,
+            triangle_count: 0,
+            mc_triangle_sources: None,
+            water_mesh_handle: None,
+            water_vertex_count: 0,
+            water_triangle_count: 0,
+            water_depth_detail: WaterChunkDepthDetail::default(),
+        }
+    }
+}
+
+fn prepared_lod_commit_stale_reason(
+    commit: &PreparedLodChunkCommit,
+    world: &VoxelWorld,
+    camera_pos: Option<Vec3>,
+    bench_forensics: Option<&BenchForensicsConfig>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    mc_settings: &McTransvoxelSettings,
+) -> Option<LodMeshTransactionAbortReason> {
+    let Some(chunk) = world.get_chunk(commit.chunk_pos) else {
+        return Some(LodMeshTransactionAbortReason::ValidationMissingChunk);
+    };
+    let dirty_flags = chunk.dirty_reason_flags();
+    if dirty_flags & MeshDirtyReason::Generation.bit() != 0
+        || dirty_flags & MeshDirtyReason::TerrainMutation.bit() != 0
+    {
+        return Some(LodMeshTransactionAbortReason::ValidationGenerationOrMutationDirty);
+    }
+
+    let lod_level = chunk.lod_level();
+    if lod_level != commit.lod_level {
+        return Some(LodMeshTransactionAbortReason::ValidationLodChanged);
+    }
+
+    let base_mode = target_terrain_mesh_mode_for_lod(lod_level, mesh_settings, lod_settings);
+    let target_mode = resolve_terrain_mesh_mode(
+        base_mode,
+        commit.chunk_pos,
+        lod_level,
+        mc_settings,
+        camera_pos,
+    );
+    let target_mode = forensics_mesh_mode_override(target_mode, bench_forensics);
+    if target_mode != commit.target_mode {
+        return Some(LodMeshTransactionAbortReason::ValidationTargetModeChanged);
+    }
+
+    let uniformity = chunk.uniformity();
+    let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
+        && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
+        && empty_chunk_has_surface_nets_boundary_surface(world, commit.chunk_pos);
+    let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
+        target_mode,
+        uniformity,
+        empty_surface_neighbor,
+        lod_level,
+    );
+    if mesh_lod_level != commit.terrain_mesh_debug.effective_lod_at_mesh {
+        return Some(LodMeshTransactionAbortReason::ValidationMeshLodChanged);
+    }
+
+    let has_visible_mesh = commit.solid_mesh_handle.is_some() || commit.water_mesh_handle.is_some();
+    if !has_visible_mesh
+        && lod_commit_no_visible_mesh_skips_context_validation(
+            lod_level,
+            uniformity,
+            empty_surface_neighbor,
+        )
+    {
+        return None;
+    }
+
+    let current_neighbor_lods =
+        build_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
+    if !neighbor_lods_match(
+        current_neighbor_lods,
+        commit.terrain_mesh_debug.neighbor_lods_at_mesh,
+    ) {
+        return Some(LodMeshTransactionAbortReason::ValidationNeighborLodsChanged);
+    }
+    if count_missing_in_bounds_boundary_neighbors(world, commit.chunk_pos)
+        != commit.terrain_mesh_debug.missing_boundary_neighbors_at_mesh
+    {
+        return Some(LodMeshTransactionAbortReason::ValidationMissingBoundaryNeighborsChanged);
+    }
+    if empty_surface_neighbor != commit.terrain_mesh_debug.empty_surface_cap_at_mesh {
+        return Some(LodMeshTransactionAbortReason::ValidationEmptySurfaceCapChanged);
+    }
+    None
+}
+
+fn neighbor_lods_match(a: NeighborLods, b: NeighborLods) -> bool {
+    a.neg_x == b.neg_x
+        && a.pos_x == b.pos_x
+        && a.neg_y == b.neg_y
+        && a.pos_y == b.pos_y
+        && a.neg_z == b.neg_z
+        && a.pos_z == b.pos_z
+}
+
+fn discard_lod_mesh_transaction(transaction: LodMeshTransaction, meshes: &mut Assets<Mesh>) {
+    for commit in transaction.prepared.into_values() {
+        discard_prepared_lod_chunk_commit(commit, meshes);
+    }
+}
+
+fn discard_prepared_lod_chunk_commit(commit: PreparedLodChunkCommit, meshes: &mut Assets<Mesh>) {
+    if let Some(handle) = commit.solid_mesh_handle {
+        meshes.remove(handle.id());
+    }
+    if let Some(handle) = commit.water_mesh_handle {
+        meshes.remove(handle.id());
+    }
+}
+
+fn record_water_meshing_stats(
+    chunk_stats: &mut RuntimeChunkStats,
+    stats: crate::voxel::meshing::WaterMeshingStats,
+) {
+    chunk_stats.water_air_boundaries_total += stats.air_boundaries_total as u64;
+    chunk_stats.water_air_boundaries_exposed += stats.air_boundaries_exposed as u64;
+    chunk_stats.water_air_boundaries_sealed += stats.air_boundaries_sealed as u64;
+    chunk_stats.water_triangles_removed_sealed += stats.triangles_removed_sealed as u64;
+    chunk_stats.invalid_water_meshes_suppressed += stats.invalid_meshes_suppressed as u64;
+    chunk_stats.edge_water_faces_suppressed += stats.edge_water_faces_suppressed as u64;
+    chunk_stats.water_flood_fill_boundary_hits += stats.flood_fill_boundary_hits as u64;
+    chunk_stats.water_exposure_outside_world_rejected +=
+        stats.exposure_outside_world_rejected as u64;
+}
+
+fn record_mc_transvoxel_generation_stats(
+    runtime_stats: &mut McTransvoxelRuntimeStats,
+    stats: crate::voxel::mc_transvoxel::McTransvoxelStats,
+) {
+    runtime_stats.chunks_meshed_this_frame += 1;
+    runtime_stats.aggregated.regular_chunks_meshed = runtime_stats
+        .aggregated
+        .regular_chunks_meshed
+        .saturating_add(stats.regular_chunks_meshed);
+    for (dst, src) in runtime_stats
+        .aggregated
+        .transition_faces_meshed
+        .iter_mut()
+        .zip(stats.transition_faces_meshed)
+    {
+        *dst = dst.saturating_add(src);
+    }
+    runtime_stats.aggregated.transition_triangles_total = runtime_stats
+        .aggregated
+        .transition_triangles_total
+        .saturating_add(stats.transition_triangles_total);
+    runtime_stats.aggregated.skipped_lod_delta_gt_one = runtime_stats
+        .aggregated
+        .skipped_lod_delta_gt_one
+        .saturating_add(stats.skipped_lod_delta_gt_one);
+    runtime_stats.aggregated.skipped_missing_neighbor = runtime_stats
+        .aggregated
+        .skipped_missing_neighbor
+        .saturating_add(stats.skipped_missing_neighbor);
+    runtime_stats.aggregated.mesh_generation_ms_total += stats.mesh_generation_ms_total;
+    runtime_stats.aggregated.triangle_count_regular = runtime_stats
+        .aggregated
+        .triangle_count_regular
+        .saturating_add(stats.triangle_count_regular);
+    runtime_stats.aggregated.triangle_count_transition = runtime_stats
+        .aggregated
+        .triangle_count_transition
+        .saturating_add(stats.triangle_count_transition);
+}
+
+#[inline(never)]
+fn apply_prepared_lod_chunk_commit(
+    commit: PreparedLodChunkCommit,
+    commands: &mut Commands,
+    world: &mut VoxelWorld,
+    blocky_material: Option<&VoxelMaterial>,
+    triplanar_material: &TriplanarMaterialHandle,
+    water_material: &WaterMaterial,
+    chunk_stats: &mut RuntimeChunkStats,
+    frame_stats: &mut LodMeshTransactionFrameStats,
+) {
+    let PreparedLodChunkCommit {
+        chunk_pos,
+        target_mode,
+        lod_level,
+        terrain_quality,
+        terrain_mesh_debug,
+        solid_mesh_handle,
+        vertex_count,
+        triangle_count,
+        mc_triangle_sources,
+        water_mesh_handle,
+        water_vertex_count,
+        water_triangle_count,
+        water_depth_detail,
+    } = commit;
+
+    if matches!(target_mode, MeshMode::Blocky) && blocky_material.is_none() {
+        frame_stats.chunks_skipped += 1;
+        return;
+    }
+
+    let apply_start = Instant::now();
+    let Some(mut chunk) = world.get_chunk_mut(chunk_pos) else {
+        frame_stats.chunks_skipped += 1;
+        return;
+    };
+    chunk.clear_dirty();
+
+    let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
+    let horizon_proxy = is_horizon_proxy_lod(lod_level);
+    let needs_collider = terrain_lod_requires_collider(lod_level);
+    let chunk_top_y = (chunk_pos.y + 1) * CHUNK_SIZE_I32;
+    let terrain_layers = if !horizon_proxy && chunk_top_y > WATER_LEVEL {
+        RenderLayers::default().with(REFLECTION_RENDER_LAYER)
+    } else {
+        RenderLayers::default()
+    };
+    let had_visible_mesh = solid_mesh_handle.is_some() || water_mesh_handle.is_some();
+
+    if let Some(mesh_handle) = solid_mesh_handle {
+        let chunk_mesh = ChunkMesh {
+            chunk_position: chunk_pos,
+            vertex_count,
+            triangle_count,
+            mesh_mode: target_mode,
+            material_quality: terrain_quality,
+        };
+        chunk_stats.add_mesh_vertices(vertex_count, lod_level);
+        if let Some(entity) = chunk.mesh_entity() {
+            match target_mode {
+                MeshMode::Blocky => {
+                    if let Some(blocky_mat) = blocky_material {
+                        commands
+                            .entity(entity)
+                            .insert((
+                                Mesh3d(mesh_handle),
+                                MeshMaterial3d(blocky_mat.handle.clone()),
+                                chunk_mesh,
+                                terrain_mesh_debug,
+                            ))
+                            .remove::<MeshMaterial3d<
+                                crate::rendering::triplanar_material::TriplanarMaterial,
+                            >>();
+                    }
+                }
+                MeshMode::SurfaceNets | MeshMode::McTransvoxel => {
+                    commands
+                        .entity(entity)
+                        .insert((
+                            Mesh3d(mesh_handle),
+                            MeshMaterial3d(triplanar_material.handle_for_quality(terrain_quality)),
+                            chunk_mesh,
+                            terrain_mesh_debug,
+                        ))
+                        .remove::<MeshMaterial3d<
+                            crate::rendering::blocky_material::BlockyMaterial,
+                        >>();
+                }
+            }
+            let mut entity_cmd = commands.entity(entity);
+            if needs_collider {
+                entity_cmd
+                    .insert((NeedsCollider, terrain_layers))
+                    .remove::<NotShadowCaster>();
+            } else if horizon_proxy {
+                entity_cmd
+                    .remove::<NeedsCollider>()
+                    .remove::<TerrainColliderBakeTask>()
+                    .remove::<TerrainCollisionChunk>()
+                    .remove::<TerrainCollisionState>()
+                    .remove::<RigidBody>()
+                    .remove::<Collider>()
+                    .remove::<CollisionMargin>()
+                    .remove::<CollisionLayers>()
+                    .remove::<ChunkCollider>()
+                    .insert((NotShadowCaster, terrain_layers));
+            } else {
+                entity_cmd
+                    .remove::<NeedsCollider>()
+                    .remove::<TerrainColliderBakeTask>()
+                    .remove::<TerrainCollisionChunk>()
+                    .remove::<TerrainCollisionState>()
+                    .remove::<RigidBody>()
+                    .remove::<Collider>()
+                    .remove::<CollisionMargin>()
+                    .remove::<CollisionLayers>()
+                    .remove::<ChunkCollider>()
+                    .insert(terrain_layers)
+                    .remove::<NotShadowCaster>();
+            }
+            if let Some(sources) = mc_triangle_sources.clone() {
+                entity_cmd.insert(sources);
+            } else {
+                entity_cmd.remove::<McTriangleSources>();
+            }
+        } else {
+            let entity = match target_mode {
+                MeshMode::Blocky => {
+                    let Some(blocky_material) = blocky_material else {
+                        frame_stats.chunks_skipped += 1;
+                        return;
+                    };
+                    commands
+                        .spawn((
+                            Mesh3d(mesh_handle),
+                            MeshMaterial3d(blocky_material.handle.clone()),
+                            Transform::from_xyz(
+                                world_pos.x as f32,
+                                world_pos.y as f32,
+                                world_pos.z as f32,
+                            ),
+                            chunk_mesh,
+                            terrain_mesh_debug,
+                            terrain_layers,
+                        ))
+                        .id()
+                }
+                MeshMode::SurfaceNets | MeshMode::McTransvoxel => commands
+                    .spawn((
+                        Mesh3d(mesh_handle),
+                        MeshMaterial3d(triplanar_material.handle_for_quality(terrain_quality)),
+                        Transform::from_xyz(
+                            world_pos.x as f32,
+                            world_pos.y as f32,
+                            world_pos.z as f32,
+                        ),
+                        chunk_mesh,
+                        terrain_mesh_debug,
+                        terrain_layers,
+                    ))
+                    .id(),
+            };
+            let mut entity_cmd = commands.entity(entity);
+            if needs_collider {
+                entity_cmd.insert(NeedsCollider);
+            } else if horizon_proxy {
+                entity_cmd.insert(NotShadowCaster);
+            }
+            if let Some(sources) = mc_triangle_sources {
+                entity_cmd.insert(sources);
+            } else {
+                entity_cmd.remove::<McTriangleSources>();
+            }
+            chunk.set_mesh_entity(entity);
+        }
+    } else if let Some(entity) = chunk.mesh_entity() {
+        commands.entity(entity).despawn();
+        chunk.clear_mesh_entity();
+    }
+
+    if horizon_proxy || water_mesh_handle.is_none() {
+        if let Some(entity) = chunk.water_mesh_entity() {
+            commands.entity(entity).despawn();
+            chunk.clear_water_mesh_entity();
+        }
+        if let Some(entity) = chunk.water_mask_mesh_entity() {
+            commands.entity(entity).despawn();
+            chunk.clear_water_mask_mesh_entity();
+        }
+    } else if let Some(water_mesh_handle) = water_mesh_handle {
+        let force_fancy = env_flag("VOXEL_FORCE_ALL_WATER_FANCY");
+        let force_cheap = env_flag("VOXEL_FORCE_ALL_WATER_CHEAP");
+        let use_fancy_water = force_fancy && !force_cheap;
+
+        if let Some(entity) = chunk.water_mesh_entity() {
+            let mut entity_cmd = commands.entity(entity);
+            entity_cmd.insert((
+                Mesh3d(water_mesh_handle.clone()),
+                ChunkMesh {
+                    chunk_position: chunk_pos,
+                    vertex_count: water_vertex_count,
+                    triangle_count: water_triangle_count,
+                    mesh_mode: MeshMode::Blocky,
+                    material_quality: TerrainMaterialQuality::FullTriplanar,
+                },
+                WaterMesh,
+                WaterMeshDetail {
+                    triangle_count: water_triangle_count as usize,
+                    max_depth: water_depth_detail.max_depth,
+                    average_depth: water_depth_detail.average_depth,
+                    surface_area: water_depth_detail.surface_area,
+                },
+                RenderLayers::default(),
+                NotShadowCaster,
+            ));
+            if use_fancy_water {
+                entity_cmd
+                    .insert(MeshMaterial3d(
+                        water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                    ))
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
+            } else {
+                entity_cmd
+                    .insert(MeshMaterial3d(
+                        water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                    ))
+                    .remove::<MeshMaterial3d<StandardWaterMaterial>>();
+            }
+        } else {
+            let mut entity_cmd = commands.spawn((
+                Mesh3d(water_mesh_handle.clone()),
+                Transform::from_xyz(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32),
+                ChunkMesh {
+                    chunk_position: chunk_pos,
+                    vertex_count: water_vertex_count,
+                    triangle_count: water_triangle_count,
+                    mesh_mode: MeshMode::Blocky,
+                    material_quality: TerrainMaterialQuality::FullTriplanar,
+                },
+                WaterMesh,
+                WaterMeshDetail {
+                    triangle_count: water_triangle_count as usize,
+                    max_depth: water_depth_detail.max_depth,
+                    average_depth: water_depth_detail.average_depth,
+                    surface_area: water_depth_detail.surface_area,
+                },
+                RenderLayers::default(),
+                NotShadowCaster,
+            ));
+            if use_fancy_water {
+                entity_cmd.insert(MeshMaterial3d(
+                    water_material.near_handle_for_kind(WaterBodyKind::Unknown),
+                ));
+            } else {
+                entity_cmd.insert(MeshMaterial3d(
+                    water_material.far_handle_for_kind(WaterBodyKind::Unknown),
+                ));
+            }
+            let entity = entity_cmd.id();
+            chunk.set_water_mesh_entity(entity);
+        }
+
+        let mask_transform =
+            Transform::from_xyz(world_pos.x as f32, world_pos.y as f32, world_pos.z as f32);
+        if let Some(mask_entity) = chunk.water_mask_mesh_entity() {
+            commands.entity(mask_entity).insert((
+                Mesh3d(water_mesh_handle.clone()),
+                MeshMaterial3d(water_material.mask_handle.clone()),
+                mask_transform,
+                WaterMaskProxy,
+                RenderLayers::layer(WATER_MASK_RENDER_LAYER),
+                NotShadowCaster,
+            ));
+        } else {
+            let mask_entity = commands
+                .spawn((
+                    Mesh3d(water_mesh_handle),
+                    MeshMaterial3d(water_material.mask_handle.clone()),
+                    mask_transform,
+                    WaterMaskProxy,
+                    RenderLayers::layer(WATER_MASK_RENDER_LAYER),
+                    NotShadowCaster,
+                ))
+                .id();
+            chunk.set_water_mask_mesh_entity(mask_entity);
+        }
+    }
+
+    if had_visible_mesh {
+        frame_stats.chunks_meshed += 1;
+    } else {
+        frame_stats.chunks_skipped += 1;
+    }
+    frame_stats.mesh_dirty_apply_us += apply_start.elapsed().as_micros() as u64;
+}
+
 #[derive(SystemParam)]
 struct MeshDirtyTimingParams<'w> {
     frame: Res<'w, FrameCount>,
     timing: ResMut<'w, AreaTimingRecorder>,
     gen_state: Res<'w, ChunkGenerationState>,
+    lod_transaction: ResMut<'w, LodMeshTransactionState>,
 }
 
 #[derive(SystemParam)]
@@ -2815,20 +3850,57 @@ fn mesh_dirty_chunks_system(
         lod_churn_only,
         generation_complete,
     );
-    let lod_transaction_selection = if lod_churn_only {
-        let selection =
-            select_lod_mesh_transaction_chunks(&dirty_chunks, camera_pos, chunks_per_frame_limit);
-        chunks_per_frame_limit = selection.chunks.len().max(1);
-        dirty_chunks = selection.chunks.clone();
-        selection
-    } else {
-        LodMeshTransactionSelection::default()
-    };
+    let mut lod_transaction_frame_stats = LodMeshTransactionFrameStats::default();
+    if lod_churn_only {
+        lod_transaction_frame_stats = process_lod_mesh_transaction(
+            &mut timing_params.lod_transaction,
+            &dirty_chunks,
+            camera_pos,
+            &mut commands,
+            &mut world,
+            &mut meshes,
+            blocky_material.as_deref(),
+            &triplanar_material,
+            &water_material,
+            bench_params.toggles.as_deref(),
+            bench_params.forensics.as_deref(),
+            &mesh_settings,
+            &lod_settings,
+            &mc_spike.settings,
+            &skirt_config,
+            &ao_config,
+            &mut mc_spike.stats,
+            &mut chunk_stats,
+            frame.0,
+        );
+        chunks_per_frame_limit = MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME;
+        chunks_processed = lod_transaction_frame_stats.chunks_processed;
+        chunks_meshed = lod_transaction_frame_stats.chunks_meshed;
+        chunks_skipped = lod_transaction_frame_stats.chunks_skipped;
+        mesh_dirty_generate_us = lod_transaction_frame_stats.mesh_dirty_generate_us;
+        mesh_dirty_apply_us = lod_transaction_frame_stats.mesh_dirty_apply_us;
+        dirty_chunks.clear();
+    } else if timing_params.lod_transaction.active.is_some() {
+        if let Some(transaction) = timing_params.lod_transaction.active.take() {
+            discard_lod_mesh_transaction(transaction, &mut meshes);
+        }
+        lod_transaction_frame_stats.aborted_transactions = 1;
+        lod_transaction_frame_stats.abort_reason = Some(LodMeshTransactionAbortReason::NonLodDirty);
+    }
     let mut terrain_mesh_empty_but_solid_voxels = 0u32;
     let mut terrain_mesh_boundary_missing_neighbor = 0u32;
     let mut surface_nets_chunks_deferred_for_halo = 0u32;
     let terrain_mesh_degenerate_triangles_removed = 0u32;
     let mut terrain_mesh_lod_seam_repairs = 0u32;
+    if lod_churn_only {
+        terrain_mesh_empty_but_solid_voxels =
+            lod_transaction_frame_stats.terrain_mesh_empty_but_solid_voxels;
+        terrain_mesh_boundary_missing_neighbor =
+            lod_transaction_frame_stats.terrain_mesh_boundary_missing_neighbor;
+        surface_nets_chunks_deferred_for_halo =
+            lod_transaction_frame_stats.surface_nets_chunks_deferred_for_halo;
+        terrain_mesh_lod_seam_repairs = lod_transaction_frame_stats.terrain_mesh_lod_seam_repairs;
+    }
 
     for chunk_pos in dirty_chunks {
         // Throttle expensive mesh generation, but let cheap empty/culled clears
@@ -3421,22 +4493,164 @@ fn mesh_dirty_chunks_system(
     timing.record_count(
         frame.0,
         "LOD Mesh Transactions Selected",
-        lod_transaction_selection.component_count as f64,
+        lod_transaction_frame_stats.selected_transactions as f64,
     );
     timing.record_count(
         frame.0,
         "LOD Mesh Transaction Chunks Selected",
-        lod_transaction_selection.chunks.len() as f64,
+        lod_transaction_frame_stats.selected_chunks as f64,
     );
     timing.record_count(
         frame.0,
         "LOD Mesh Transaction Chunks Deferred",
-        lod_transaction_selection.deferred_chunks as f64,
+        lod_transaction_frame_stats.deferred_chunks as f64,
     );
     timing.record_count(
         frame.0,
         "LOD Mesh Transaction Oversize Chunks",
-        lod_transaction_selection.oversize_component_chunks as f64,
+        lod_transaction_frame_stats.oversize_component_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Active",
+        timing_params.lod_transaction.active.is_some() as u8 as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Pending Chunks",
+        lod_transaction_frame_stats.pending_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Prepared Chunks",
+        lod_transaction_frame_stats.prepared_chunks_total as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Build Chunks This Frame",
+        lod_transaction_frame_stats.prepared_chunks_this_frame as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Commit Chunks",
+        lod_transaction_frame_stats.committed_chunks as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Aborted",
+        lod_transaction_frame_stats.aborted_transactions as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Prepare Deferred For Halo",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::PrepareDeferredForHalo,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Prepare Skipped",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::PrepareSkipped,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Prepare Stale",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::PrepareStale,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Missing Chunk",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationMissingChunk,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Dirty",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationGenerationOrMutationDirty,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation LOD Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationLodChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Target Mode Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationTargetModeChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Mesh LOD Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationMeshLodChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation No Visible Mesh Mismatch",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationNoVisibleMeshMismatch,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Neighbor LODs Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationNeighborLodsChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Missing Boundary Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationMissingBoundaryNeighborsChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Validation Empty Surface Cap Changed",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::ValidationEmptySurfaceCapChanged,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Missing Prepared Commit",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::MissingPreparedCommit,
+        ),
+    );
+    timing.record_count(
+        frame.0,
+        "LOD Mesh Transaction Abort Non LOD Dirty",
+        lod_transaction_abort_reason_count(
+            &lod_transaction_frame_stats,
+            LodMeshTransactionAbortReason::NonLodDirty,
+        ),
     );
     timing.record_count(
         frame.0,
@@ -4975,6 +6189,7 @@ fn update_chunk_lod_system(
     bench_forensics: Option<Res<BenchForensicsConfig>>,
     mc_spike: McSpikeMeshParams,
     lod_control: Res<TerrainLodControl>,
+    lod_transaction: Res<LodMeshTransactionState>,
     mut lod_transitions: ResMut<TerrainLodTransitionState>,
     time: Res<Time>,
     frame: Res<FrameCount>,
@@ -4988,6 +6203,23 @@ fn update_chunk_lod_system(
     lod_transitions.repeated_chunks_this_frame = 0;
     if lod_control.freeze_lod {
         drop(_timer);
+        record_lod_counters(
+            &mut timing,
+            frame.0,
+            0,
+            lod_transitions.changes_per_second,
+            0,
+        );
+        return;
+    }
+    if lod_transaction.active.is_some() {
+        refresh_lod_change_rate(time.elapsed_secs(), &mut lod_transitions);
+        drop(_timer);
+        timing.record_count(
+            frame.0,
+            "Terrain LOD Update Paused For Mesh Transaction",
+            1.0,
+        );
         record_lod_counters(
             &mut timing,
             frame.0,
@@ -6143,7 +7375,36 @@ mod tests {
     }
 
     #[test]
-    fn lod_mesh_transaction_keeps_connected_component_together() {
+    fn lod_transaction_skips_context_validation_for_clear_no_visible_commits() {
+        assert!(lod_commit_no_visible_mesh_skips_context_validation(
+            LodLevel::Lod1,
+            ChunkUniformity::Solid,
+            false
+        ));
+        assert!(lod_commit_no_visible_mesh_skips_context_validation(
+            LodLevel::Culled,
+            ChunkUniformity::Mixed,
+            false
+        ));
+        assert!(lod_commit_no_visible_mesh_skips_context_validation(
+            LodLevel::Lod1,
+            ChunkUniformity::Empty,
+            false
+        ));
+        assert!(!lod_commit_no_visible_mesh_skips_context_validation(
+            LodLevel::Lod1,
+            ChunkUniformity::Empty,
+            true
+        ));
+        assert!(!lod_commit_no_visible_mesh_skips_context_validation(
+            LodLevel::Lod1,
+            ChunkUniformity::Mixed,
+            false
+        ));
+    }
+
+    #[test]
+    fn lod_mesh_transaction_bounds_oversize_connected_component_wave() {
         let dirty_chunks = vec![
             IVec3::new(0, 0, 0),
             IVec3::new(1, 0, 0),
@@ -6155,14 +7416,10 @@ mod tests {
 
         assert_eq!(
             selection.chunks,
-            vec![
-                IVec3::new(0, 0, 0),
-                IVec3::new(1, 0, 0),
-                IVec3::new(2, 0, 0)
-            ]
+            vec![IVec3::new(0, 0, 0), IVec3::new(1, 0, 0)]
         );
         assert_eq!(selection.component_count, 1);
-        assert_eq!(selection.deferred_chunks, 1);
+        assert_eq!(selection.deferred_chunks, 2);
         assert_eq!(selection.oversize_component_chunks, 3);
     }
 
@@ -6190,6 +7447,35 @@ mod tests {
         assert_eq!(selection.component_count, 2);
         assert_eq!(selection.deferred_chunks, 1);
         assert_eq!(selection.oversize_component_chunks, 0);
+    }
+
+    #[test]
+    fn lod_mesh_transaction_waits_until_all_chunks_are_prepared() {
+        let chunks = vec![IVec3::new(0, 0, 0), IVec3::new(1, 0, 0)];
+        let mut transaction = LodMeshTransaction::new(chunks.clone());
+
+        assert_eq!(transaction.pending_len(), 2);
+        assert_eq!(transaction.prepared_len(), 0);
+        assert!(!transaction.is_ready_to_commit());
+
+        let first = transaction.pending.pop_front().unwrap();
+        transaction
+            .prepared
+            .insert(first, PreparedLodChunkCommit::clear(first));
+
+        assert_eq!(transaction.pending_len(), 1);
+        assert_eq!(transaction.prepared_len(), 1);
+        assert!(!transaction.is_ready_to_commit());
+
+        let second = transaction.pending.pop_front().unwrap();
+        transaction
+            .prepared
+            .insert(second, PreparedLodChunkCommit::clear(second));
+
+        assert_eq!(transaction.chunks, chunks);
+        assert_eq!(transaction.pending_len(), 0);
+        assert_eq!(transaction.prepared_len(), 2);
+        assert!(transaction.is_ready_to_commit());
     }
 
     #[test]
