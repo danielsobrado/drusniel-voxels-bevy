@@ -2281,6 +2281,7 @@ fn highest_render_mesh_hit_at(
     }
 }
 
+#[cfg(feature = "mc_transvoxel")]
 fn nearest_render_mesh_hit_along_ray(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
@@ -2403,6 +2404,7 @@ struct VerticalMeshHit {
     mesh_section: MeshTriangleSectionProbe,
 }
 
+#[cfg(feature = "mc_transvoxel")]
 struct CompactMeshRayHit {
     distance: f32,
     point: Vec3,
