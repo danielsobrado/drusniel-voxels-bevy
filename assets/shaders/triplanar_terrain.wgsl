@@ -347,16 +347,17 @@ fn apply_terrain_iso_band_overlay(
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
     var pbr_input = pbr_fragment::pbr_input_from_vertex_output(in, is_front, true);
     let world_pos = pbr_input.world_position.xyz;
+    let raw_world_normal = normalize(in.world_normal);
     let world_normal = normalize(pbr_input.world_normal);
     let view_dir = pbr_input.V;
     let frag_dist = length(view.world_position - world_pos);
 
 #ifdef TERRAIN_DEBUG_NORMALS
-    var debug_color = vec4<f32>(world_normal * 0.5 + 0.5, 1.0);
+    var debug_color = vec4<f32>(raw_world_normal * 0.5 + 0.5, 1.0);
 #ifdef TERRAIN_DEBUG_WIREFRAME
     debug_color = apply_terrain_debug_wireframe(debug_color, in.uv_b);
 #endif
-    debug_color = apply_terrain_iso_band_overlay(debug_color, world_pos, world_normal);
+    debug_color = apply_terrain_iso_band_overlay(debug_color, world_pos, raw_world_normal);
     return vec4<f32>(debug_color.rgb, 1.0);
 #endif
 

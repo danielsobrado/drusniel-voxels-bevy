@@ -15,9 +15,9 @@ use super::face_mask::{TransvoxelFaceMask, compute_transvoxel_face_mask};
 use super::normals::sdf_gradient_normal_at_world;
 use super::stats::McTransvoxelStats;
 use super::tables::{CUBE_CORNERS, REGULAR_CELL_CLASS, REGULAR_CELL_DATA, REGULAR_VERTEX_DATA};
-use super::transvoxel::{append_transition_meshes, transition_triangle_count_for_regular_cell};
 #[cfg(test)]
 use super::transvoxel::transition_case_for_regular_cell;
+use super::transvoxel::{append_transition_meshes, transition_triangle_count_for_regular_cell};
 
 pub struct McMeshInput<'a> {
     pub world: &'a VoxelWorld,
@@ -170,6 +170,63 @@ impl SdfGrid {
         let pb = self.local_position(b[0], b[1], b[2]);
         interpolate_iso(pa, pb, va, vb)
     }
+
+    fn sample_trilinear_grid_space(&self, p: Vec3) -> f32 {
+        let max = self.padded.saturating_sub(1) as f32;
+        let x = p.x.clamp(0.0, max);
+        let y = p.y.clamp(0.0, max);
+        let z = p.z.clamp(0.0, max);
+
+        let x0 = x.floor() as usize;
+        let y0 = y.floor() as usize;
+        let z0 = z.floor() as usize;
+        let x1 = (x0 + 1).min(self.padded - 1);
+        let y1 = (y0 + 1).min(self.padded - 1);
+        let z1 = (z0 + 1).min(self.padded - 1);
+
+        let tx = x - x0 as f32;
+        let ty = y - y0 as f32;
+        let tz = z - z0 as f32;
+
+        let c000 = self.get(x0, y0, z0);
+        let c100 = self.get(x1, y0, z0);
+        let c010 = self.get(x0, y1, z0);
+        let c110 = self.get(x1, y1, z0);
+        let c001 = self.get(x0, y0, z1);
+        let c101 = self.get(x1, y0, z1);
+        let c011 = self.get(x0, y1, z1);
+        let c111 = self.get(x1, y1, z1);
+
+        let c00 = lerp_f32(c000, c100, tx);
+        let c10 = lerp_f32(c010, c110, tx);
+        let c01 = lerp_f32(c001, c101, tx);
+        let c11 = lerp_f32(c011, c111, tx);
+        let c0 = lerp_f32(c00, c10, ty);
+        let c1 = lerp_f32(c01, c11, ty);
+        lerp_f32(c0, c1, tz)
+    }
+
+    fn normal_at_local(&self, local: Vec3) -> Option<Vec3> {
+        if self.padded < 2 || self.step <= 0 {
+            return None;
+        }
+        let step = self.step as f32;
+        let grid_pos = Vec3::new(
+            local.x / step + 1.0,
+            local.y / step + 1.0,
+            local.z / step + 1.0,
+        );
+        let gradient = Vec3::new(
+            self.sample_trilinear_grid_space(grid_pos + Vec3::X)
+                - self.sample_trilinear_grid_space(grid_pos - Vec3::X),
+            self.sample_trilinear_grid_space(grid_pos + Vec3::Y)
+                - self.sample_trilinear_grid_space(grid_pos - Vec3::Y),
+            self.sample_trilinear_grid_space(grid_pos + Vec3::Z)
+                - self.sample_trilinear_grid_space(grid_pos - Vec3::Z),
+        );
+        let normal = gradient.normalize_or_zero();
+        (normal.length_squared() > 0.0).then_some(normal)
+    }
 }
 
 fn interpolate_iso(a: Vec3, b: Vec3, va: f32, vb: f32) -> Vec3 {
@@ -178,6 +235,10 @@ fn interpolate_iso(a: Vec3, b: Vec3, va: f32, vb: f32) -> Vec3 {
     }
     let t = va / (va - vb);
     a.lerp(b, t.clamp(0.0, 1.0))
+}
+
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 #[derive(Copy, Clone)]
@@ -333,7 +394,17 @@ fn extract_regular_mc(
                     let Some(p2) = cell_vertices[i2] else {
                         continue;
                     };
-                    push_mc_triangle(mesh, chunk, world, chunk_origin, chunk_center, p0, p1, p2);
+                    push_mc_triangle(
+                        mesh,
+                        chunk,
+                        world,
+                        chunk_origin,
+                        chunk_center,
+                        sdf,
+                        p0,
+                        p1,
+                        p2,
+                    );
                     if let Some(sources) = triangle_sources.as_mut() {
                         sources.push(McTriangleSource::Regular {
                             chunk_pos: chunk.position(),
@@ -356,17 +427,36 @@ pub(crate) fn push_mc_triangle(
     world: &VoxelWorld,
     chunk_origin: IVec3,
     chunk_center: Vec3,
+    sdf: &SdfGrid,
     p0: Vec3,
     p1: Vec3,
     p2: Vec3,
 ) {
     let base = mesh.positions.len() as u32;
-    for local in [p0, p1, p2] {
-        let normal = sdf_gradient_normal_at_world(world, chunk_origin, local);
+    let normal_at = |local: Vec3| {
+        sdf.normal_at_local(local).unwrap_or_else(|| {
+            Vec3::from_array(sdf_gradient_normal_at_world(world, chunk_origin, local))
+        })
+    };
+    let mut vertices = [
+        (p0, normal_at(p0)),
+        (p1, normal_at(p1)),
+        (p2, normal_at(p2)),
+    ];
+    let geometric = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+    let vertex_normal = (vertices[0].1 + vertices[1].1 + vertices[2].1).normalize_or_zero();
+    if geometric.length_squared() > 0.0
+        && vertex_normal.length_squared() > 0.0
+        && geometric.dot(vertex_normal) < 0.0
+    {
+        vertices.swap(1, 2);
+    }
+
+    for (local, normal) in vertices {
         let weights = mc_support::vertex_material_weights(local, chunk, world, chunk_origin);
         mesh.positions
             .push(mc_support::scale_vertex(local, chunk_center));
-        mesh.normals.push(normal);
+        mesh.normals.push(normal.to_array());
         mesh.uvs.push([1.0, 0.0]);
         mesh.colors.push(weights);
     }
@@ -1034,6 +1124,67 @@ mod tests {
         assert!(
             worst_dot > 0.0,
             "all checked PosY transition triangles should align, worst dot={worst_dot}"
+        );
+    }
+
+    #[test]
+    fn regular_lod1_triangle_winding_matches_vertex_normals() {
+        use crate::voxel::chunk::LodLevel;
+
+        let world = sphere_world();
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let settings = McTransvoxelSettings::default();
+        let out = generate_mc_chunk_mesh(McMeshInput {
+            world: &world,
+            chunk,
+            chunk_pos: IVec3::ZERO,
+            lod: LodLevel::Lod1,
+            neighbor_lods: NeighborLods::default(),
+            settings: &settings,
+            water_exposure_mode: WaterAirExposureMode::default(),
+            forensics: MeshForensicsOptions {
+                enabled: true,
+                ..Default::default()
+            },
+        });
+        let mesh = &out.result.solid;
+        let sources = out
+            .result
+            .mc_triangle_sources
+            .as_ref()
+            .expect("forensics-enabled MC mesh should carry triangle sources");
+        let mut checked = 0usize;
+        let mut worst_dot = 1.0f32;
+
+        for (triangle_index, source) in sources.sources.iter().enumerate() {
+            if !matches!(source, McTriangleSource::Regular { .. }) {
+                continue;
+            }
+            let indices = &mesh.indices[triangle_index * 3..triangle_index * 3 + 3];
+            let p0 = Vec3::from_array(mesh.positions[indices[0] as usize]);
+            let p1 = Vec3::from_array(mesh.positions[indices[1] as usize]);
+            let p2 = Vec3::from_array(mesh.positions[indices[2] as usize]);
+            let n0 = Vec3::from_array(mesh.normals[indices[0] as usize]);
+            let n1 = Vec3::from_array(mesh.normals[indices[1] as usize]);
+            let n2 = Vec3::from_array(mesh.normals[indices[2] as usize]);
+            let geometric = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+            let vertex = (n0 + n1 + n2).normalize_or_zero();
+            if geometric == Vec3::ZERO || vertex == Vec3::ZERO {
+                continue;
+            }
+            let dot = geometric.dot(vertex);
+            worst_dot = worst_dot.min(dot);
+            checked += 1;
+            assert!(
+                dot > 0.0,
+                "regular triangle {triangle_index} has geometric normal opposite vertex normal: dot={dot}, source={source:?}"
+            );
+        }
+
+        assert!(checked > 0, "fixture did not emit regular Lod1 triangles");
+        assert!(
+            worst_dot > 0.0,
+            "all checked regular Lod1 triangles should align, worst dot={worst_dot}"
         );
     }
 

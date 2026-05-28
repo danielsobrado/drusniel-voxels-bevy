@@ -443,22 +443,13 @@ pub fn editor_load_world_from_path(path: impl AsRef<Path>) -> EditorLoadResult {
     let path = path.as_ref();
     let save_path = path_to_string(path);
     match read_world_data_from_path(path) {
-        Ok(data) if data.terrain_config_fingerprint == terrain_config_fingerprint() => {
-            EditorLoadResult {
-                loaded: true,
-                metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
-                save_path,
-                error_kind: None,
-                error_message: None,
-            }
-        }
-        Ok(data) => editor_load_error(
+        Ok(data) => EditorLoadResult {
+            loaded: true,
+            metadata: Some(editor_world_metadata_from_data(&data, &save_path)),
             save_path,
-            PersistenceError::TerrainFingerprintMismatch {
-                saved: data.terrain_config_fingerprint,
-                current: terrain_config_fingerprint(),
-            },
-        ),
+            error_kind: None,
+            error_message: None,
+        },
         Err(error) => editor_load_error(save_path, error),
     }
 }

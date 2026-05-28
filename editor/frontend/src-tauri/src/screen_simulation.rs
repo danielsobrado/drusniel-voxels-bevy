@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 use crate::{append_shell_log, editor_diagnostics_enabled, EditorRuntimeProcess};
 
 const DEFAULT_AUTOMATION_ADDR: &str = "127.0.0.1:17778";
+const AUTOMATION_TOKEN_ENV: &str = "DRUSNIEL_EDITOR_AUTOMATION_TOKEN";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,8 +66,20 @@ pub(crate) fn start_screen_simulation_server(app: AppHandle) {
         return;
     }
 
-    let addr = std::env::var("DRUSNIEL_EDITOR_AUTOMATION_ADDR")
-        .unwrap_or_else(|_| DEFAULT_AUTOMATION_ADDR.to_string());
+    let addr = match configured_automation_addr() {
+        Ok(addr) => addr,
+        Err(error) => {
+            append_shell_log(&app, &format!("[screen-simulation] {error}"));
+            return;
+        }
+    };
+    let token = match configured_automation_token() {
+        Ok(token) => token,
+        Err(error) => {
+            append_shell_log(&app, &format!("[screen-simulation] {error}"));
+            return;
+        }
+    };
     let listener = match TcpListener::bind(&addr) {
         Ok(listener) => listener,
         Err(error) => {
@@ -80,13 +93,17 @@ pub(crate) fn start_screen_simulation_server(app: AppHandle) {
 
     append_shell_log(
         &app,
-        &format!("[screen-simulation] automation endpoint listening at http://{addr}"),
+        &format!(
+            "[screen-simulation] automation endpoint listening at http://{addr}; \
+             authenticated requests must send Authorization: Bearer ${AUTOMATION_TOKEN_ENV}"
+        ),
     );
 
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let app = app.clone();
-            thread::spawn(move || handle_http_request(app, stream));
+            let token = token.clone();
+            thread::spawn(move || handle_http_request(app, stream, token));
         }
     });
 }
@@ -158,8 +175,44 @@ fn ensure_enabled() -> Result<(), String> {
 }
 
 fn automation_addr() -> String {
-    std::env::var("DRUSNIEL_EDITOR_AUTOMATION_ADDR")
-        .unwrap_or_else(|_| DEFAULT_AUTOMATION_ADDR.to_string())
+    configured_automation_addr().unwrap_or_else(|error| format!("invalid: {error}"))
+}
+
+fn configured_automation_addr() -> Result<String, String> {
+    let addr = std::env::var("DRUSNIEL_EDITOR_AUTOMATION_ADDR")
+        .unwrap_or_else(|_| DEFAULT_AUTOMATION_ADDR.to_string());
+    validate_automation_addr(&addr)
+}
+
+fn validate_automation_addr(addr: &str) -> Result<String, String> {
+    let socket: SocketAddr = addr
+        .parse()
+        .map_err(|error| format!("invalid screen simulation bind address '{addr}': {error}"))?;
+    if !socket.ip().is_loopback() {
+        return Err(format!(
+            "screen simulation bind address '{addr}' is not loopback; use 127.0.0.1 or ::1"
+        ));
+    }
+    Ok(socket.to_string())
+}
+
+fn configured_automation_token() -> Result<String, String> {
+    let token = std::env::var(AUTOMATION_TOKEN_ENV).map_err(|_| {
+        format!(
+            "screen simulation requires {AUTOMATION_TOKEN_ENV}; set a non-empty local token before enabling the HTTP endpoint"
+        )
+    })?;
+    validate_automation_token(&token)
+}
+
+fn validate_automation_token(token: &str) -> Result<String, String> {
+    let token = token.trim();
+    if token.len() < 16 {
+        return Err(format!(
+            "screen simulation {AUTOMATION_TOKEN_ENV} must be at least 16 characters"
+        ));
+    }
+    Ok(token.to_string())
 }
 
 fn main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -167,7 +220,20 @@ fn main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .ok_or_else(|| "main editor window is not available".to_string())
 }
 
-fn handle_http_request(app: AppHandle, mut stream: TcpStream) {
+fn handle_http_request(app: AppHandle, mut stream: TcpStream, token: String) {
+    if !stream
+        .peer_addr()
+        .map(|addr| addr.ip().is_loopback())
+        .unwrap_or(false)
+    {
+        respond_json(
+            &mut stream,
+            403,
+            json!({ "ok": false, "error": "screen simulation accepts loopback clients only" }),
+        );
+        return;
+    }
+
     let mut buffer = [0_u8; 4096];
     let Ok(read) = stream.read(&mut buffer) else {
         return;
@@ -180,16 +246,32 @@ fn handle_http_request(app: AppHandle, mut stream: TcpStream) {
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let target = parts.next().unwrap_or_default();
-    if method != "GET" {
+    let (path, params) = parse_target(target);
+    if path == "/health" && method != "GET" {
         respond_json(
             &mut stream,
             405,
-            json!({ "ok": false, "error": "only GET is supported" }),
+            json!({ "ok": false, "error": "/health only supports GET" }),
+        );
+        return;
+    }
+    if path != "/health" && method != "POST" {
+        respond_json(
+            &mut stream,
+            405,
+            json!({ "ok": false, "error": "screen simulation actions require POST" }),
+        );
+        return;
+    }
+    if path != "/health" && !request_has_bearer_token(&request, &token) {
+        respond_json(
+            &mut stream,
+            401,
+            json!({ "ok": false, "error": "missing or invalid automation token" }),
         );
         return;
     }
 
-    let (path, params) = parse_target(target);
     let response = match path.as_str() {
         "/health" => Ok(json!({
             "ok": true,
@@ -203,7 +285,7 @@ fn handle_http_request(app: AppHandle, mut stream: TcpStream) {
                 status_for(&window, Some(&runtime)).map_err(|error| error.to_string())
             })
             .and_then(|status| serde_json::to_value(status).map_err(|error| error.to_string())),
-    "/screenshot" => {
+        "/screenshot" => {
             let label = params.get("label").cloned();
             main_window(&app)
                 .and_then(|window| capture_window_screenshot(&app, &window, label))
@@ -280,6 +362,21 @@ fn parse_target(target: &str) -> (String, HashMap<String, String>) {
     (path, params)
 }
 
+fn request_has_bearer_token(request: &str, expected_token: &str) -> bool {
+    request
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("authorization")
+                && value
+                    .trim()
+                    .strip_prefix("Bearer ")
+                    .is_some_and(|token| token == expected_token)
+        })
+}
+
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
@@ -322,6 +419,8 @@ fn respond_json(stream: &mut TcpStream, status: u16, value: serde_json::Value) {
     let status_text = match status {
         200 => "OK",
         400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
         405 => "Method Not Allowed",
         _ => "Internal Server Error",
     };
@@ -782,4 +881,44 @@ fn sanitize_label(label: &str) -> String {
         })
         .take(48)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screen_simulation_bind_address_must_be_loopback() {
+        assert_eq!(
+            validate_automation_addr("127.0.0.1:17778").unwrap(),
+            "127.0.0.1:17778"
+        );
+        assert_eq!(
+            validate_automation_addr("[::1]:17778").unwrap(),
+            "[::1]:17778"
+        );
+        assert!(validate_automation_addr("0.0.0.0:17778").is_err());
+        assert!(validate_automation_addr("192.168.1.10:17778").is_err());
+    }
+
+    #[test]
+    fn screen_simulation_token_must_be_non_trivial() {
+        assert_eq!(
+            validate_automation_token("0123456789abcdef").unwrap(),
+            "0123456789abcdef"
+        );
+        assert!(validate_automation_token("").is_err());
+        assert!(validate_automation_token("short").is_err());
+    }
+
+    #[test]
+    fn http_request_requires_bearer_automation_token() {
+        let request = "POST /focus HTTP/1.1\r\nAuthorization: Bearer 0123456789abcdef\r\n\r\n";
+        assert!(request_has_bearer_token(request, "0123456789abcdef"));
+        assert!(!request_has_bearer_token(request, "wrong-token"));
+        assert!(!request_has_bearer_token(
+            "GET /focus HTTP/1.1\r\n\r\n",
+            "0123456789abcdef"
+        ));
+    }
 }

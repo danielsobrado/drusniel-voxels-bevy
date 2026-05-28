@@ -1,6 +1,4 @@
-#[cfg(feature = "mc_transvoxel")]
-use std::collections::HashMap;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,7 +34,7 @@ use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldB
 
 pub struct TerrainHoleProbePlugin;
 
-const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 10;
+const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 15;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
@@ -90,7 +88,41 @@ struct TerrainHoleProbeDump {
     render_mesh_ray_grid: Vec<RenderMeshRayGridProbe>,
     camera_ray: Option<CameraRayProbe>,
     camera_ray_fan: Option<CameraRayFan>,
+    normalized_summary: TerrainHoleProbeSummary,
+    active_seam_faces: Vec<SeamFaceProbe>,
+    render_entity_checklist: Vec<RenderEntityChecklistProbe>,
+    screenshot_overlay_points: Vec<ScreenshotOverlayPointProbe>,
     chunks: Vec<ChunkProbe>,
+}
+
+#[derive(Serialize, Default)]
+struct TerrainHoleProbeSummary {
+    gap_classification_counts: Vec<NamedCountProbe>,
+    seam_terrace_counts: Vec<NamedCountProbe>,
+    gaps_by_lod_pair: Vec<NamedCountProbe>,
+    gaps_by_nearest_face: Vec<NamedCountProbe>,
+    max_gap_seam_delta_voxels: Option<f32>,
+    max_active_seam_delta_voxels: Option<f32>,
+    active_seam_face_count: u32,
+    active_seam_faces_with_possible_terrace: u32,
+    active_seam_faces_with_open_edges: u32,
+    active_seam_faces_with_transition_coverage_gaps: u32,
+    chunks_with_skipped_lod_delta_gt_one: Vec<IVec3Dump>,
+    stale_or_pending_mesh_chunks: Vec<IVec3Dump>,
+    top_suspect_chunks: Vec<ChunkSuspectProbe>,
+}
+
+#[derive(Serialize, Clone)]
+struct NamedCountProbe {
+    name: String,
+    count: u32,
+}
+
+#[derive(Serialize)]
+struct ChunkSuspectProbe {
+    chunk_position: IVec3Dump,
+    score: u32,
+    reasons: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -268,6 +300,7 @@ struct CameraRayProbe {
     mesher_iso_mc_cell: Option<McCellOracleProbe>,
     first_render_hit_source: Option<McTriangleSourceProbe>,
     cell_agreement: Option<McCellAgreementProbe>,
+    seam_terrace: Option<SeamTerraceProbe>,
     visual_samples: CameraRayVisualSamples,
     gap_classification: GapClassification,
     /// All render-mesh hits along the ray, sorted by distance (capped).
@@ -299,6 +332,7 @@ struct CameraRayHit {
 enum GapClassification {
     RawOccupancyVsMesherIsoFalsePositive,
     GeometryPresentButShadingOrNormalDarkening,
+    SeamTerraceOrLodSurfaceDisplacement,
     BackfaceOrWinding,
     MissingRegularMcGeometry,
     MissingTransitionGeometryOrFaceFrame,
@@ -381,6 +415,48 @@ struct McCellAgreementProbe {
     mesher_iso_cell_matches_first_render_hit_source: Option<bool>,
     raw_surface_cell_matches_first_render_hit_source: Option<bool>,
     note: String,
+}
+
+#[derive(Serialize, Clone)]
+struct SeamTerraceProbe {
+    sample_point: Vec3Dump,
+    threshold_voxels: f32,
+    threshold_world: f32,
+    pairs: Vec<SeamTerracePairProbe>,
+    worst_abs_height_delta: Option<f32>,
+    classification: SeamTerraceClassification,
+    note: String,
+}
+
+#[derive(Serialize, Clone)]
+struct SeamTerracePairProbe {
+    face: String,
+    source_chunk: IVec3Dump,
+    neighbor_chunk: IVec3Dump,
+    source_lod: String,
+    neighbor_lod: String,
+    fine_chunk: IVec3Dump,
+    coarse_chunk: IVec3Dump,
+    fine_lod: String,
+    coarse_lod: String,
+    fine_sample_point: Vec3Dump,
+    coarse_sample_point: Vec3Dump,
+    fine_iso_height: Option<f32>,
+    coarse_iso_height: Option<f32>,
+    signed_height_delta_coarse_minus_fine: Option<f32>,
+    abs_height_delta: Option<f32>,
+    source_chunk_skipped_lod_delta_gt_one: Option<u32>,
+    neighbor_chunk_skipped_lod_delta_gt_one: Option<u32>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
+#[serde(rename_all = "snake_case")]
+enum SeamTerraceClassification {
+    NotNearLodSeam,
+    InsufficientData,
+    NoTerrace,
+    PossibleTerrace,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -487,6 +563,7 @@ struct FanGap {
     mesher_iso_mc_cell: Option<McCellOracleProbe>,
     first_render_hit_source: Option<McTriangleSourceProbe>,
     cell_agreement: Option<McCellAgreementProbe>,
+    seam_terrace: Option<SeamTerraceProbe>,
     visual_samples: CameraRayVisualSamples,
     gap_length: f32,
     surface_point: Vec3Dump,
@@ -518,6 +595,145 @@ struct FanGapChunkState {
     mesh_sections_at_mesh: Option<TerrainMeshSectionStatsProbe>,
     empty_surface_cap_at_mesh: Option<bool>,
     empty_cap: EmptyCapProbe,
+}
+
+#[derive(Serialize)]
+struct SeamFaceProbe {
+    source_chunk: IVec3Dump,
+    neighbor_chunk: IVec3Dump,
+    face: String,
+    source_lod: String,
+    neighbor_lod: String,
+    fine_chunk: IVec3Dump,
+    coarse_chunk: IVec3Dump,
+    fine_lod: String,
+    coarse_lod: String,
+    source_mesh_status: LodMeshStatus,
+    neighbor_mesh_status: LodMeshStatus,
+    source_generated_frame: Option<u32>,
+    neighbor_generated_frame: Option<u32>,
+    same_generated_frame_as_neighbor: Option<bool>,
+    source_dirty_reasons: Vec<String>,
+    neighbor_dirty_reasons: Vec<String>,
+    source_render_entity: Option<RenderEntityChecklistProbe>,
+    neighbor_render_entity: Option<RenderEntityChecklistProbe>,
+    transition_owner: bool,
+    skipped_regular_boundary_row: bool,
+    lod_delta_gt_one: bool,
+    source_chunk_skipped_lod_delta_gt_one: Option<u32>,
+    neighbor_chunk_skipped_lod_delta_gt_one: Option<u32>,
+    samples: Vec<SeamFaceSampleProbe>,
+    sample_grid_u: u32,
+    sample_grid_v: u32,
+    sample_count: u32,
+    possible_terrace_sample_count: u32,
+    missing_render_coverage_sample_count: u32,
+    max_abs_height_delta: Option<f32>,
+    median_abs_height_delta: Option<f32>,
+    max_abs_face_offset_delta: Option<f32>,
+    median_abs_face_offset_delta: Option<f32>,
+    transition_coverage: TransitionCoverageProbe,
+    boundary_edges: BoundaryEdgeLeakProbe,
+}
+
+#[derive(Serialize)]
+struct SeamFaceSampleProbe {
+    sample_index: u32,
+    face_u: f32,
+    face_v: f32,
+    seam_point: Vec3Dump,
+    screen_position: Option<Vec2Dump>,
+    fine_iso_height: Option<f32>,
+    coarse_iso_height: Option<f32>,
+    signed_height_delta_coarse_minus_fine: Option<f32>,
+    abs_height_delta: Option<f32>,
+    fine_face_iso_offset: Option<f32>,
+    coarse_face_iso_offset: Option<f32>,
+    signed_face_offset_delta_coarse_minus_fine: Option<f32>,
+    abs_face_offset_delta: Option<f32>,
+    render_hit_y: Option<f32>,
+    render_hit_chunk: Option<IVec3Dump>,
+    render_hit_entity: Option<String>,
+    render_hit_mesh_section: Option<MeshTriangleSectionProbe>,
+    render_distance_from_fine_iso: Option<f32>,
+    render_distance_from_coarse_iso: Option<f32>,
+    render_face_offset: Option<f32>,
+    render_face_hit_point: Option<Vec3Dump>,
+    render_face_hit_chunk: Option<IVec3Dump>,
+    render_face_hit_entity: Option<String>,
+    render_face_hit_mesh_section: Option<MeshTriangleSectionProbe>,
+    render_distance_from_fine_face_iso: Option<f32>,
+    render_distance_from_coarse_face_iso: Option<f32>,
+    has_render_coverage_near_either_iso: bool,
+    visual: VisualPointProbe,
+}
+
+#[derive(Serialize)]
+struct TransitionCoverageProbe {
+    skipped_regular_face: bool,
+    transition_owner: bool,
+    actual_transition_triangle_count: Option<u32>,
+    actual_transition_cell_count: Option<u32>,
+    sample_count: u32,
+    samples_without_render_coverage: u32,
+    samples_without_transition_render_coverage: u32,
+    coverage_note: String,
+}
+
+#[derive(Serialize)]
+struct BoundaryEdgeLeakProbe {
+    inspected_triangle_count: u32,
+    seam_edge_count: u32,
+    unmatched_seam_edge_count: u32,
+    unmatched_transition_edge_count: u32,
+    unmatched_regular_edge_count: u32,
+    longest_unmatched_edge: Option<f32>,
+    examples: Vec<BoundaryEdgeExampleProbe>,
+}
+
+#[derive(Serialize)]
+struct BoundaryEdgeExampleProbe {
+    start: Vec3Dump,
+    end: Vec3Dump,
+    length: f32,
+    source: Option<McTriangleSourceProbe>,
+}
+
+#[derive(Serialize, Clone)]
+struct RenderEntityChecklistProbe {
+    chunk_position: IVec3Dump,
+    mesh_entity_from_world: Option<String>,
+    entity_query_found: bool,
+    mesh_handle_present: bool,
+    mesh_asset_loaded: bool,
+    position_attribute_present: bool,
+    normal_attribute_present: bool,
+    index_buffer_present: bool,
+    vertex_count: Option<u32>,
+    triangle_count: Option<u32>,
+    chunk_mesh_component_present: bool,
+    terrain_debug_present: bool,
+    visibility: Option<String>,
+    inherited_visibility: Option<bool>,
+    view_visibility: Option<bool>,
+    visible_to_render: Option<bool>,
+    mesh_mode_at_component: Option<String>,
+    target_mode_at_mesh: Option<String>,
+    current_lod: Option<String>,
+    logical_lod_at_mesh: Option<String>,
+    effective_lod_at_mesh: Option<String>,
+    generated_frame: Option<u32>,
+    dirty: Option<bool>,
+    dirty_reasons: Vec<String>,
+    mesh_status: LodMeshStatus,
+}
+
+#[derive(Serialize)]
+struct ScreenshotOverlayPointProbe {
+    label: String,
+    world_point: Vec3Dump,
+    screen_position: Option<Vec2Dump>,
+    classification: VisualPixelClassification,
 }
 
 #[derive(Serialize)]
@@ -729,10 +945,12 @@ struct ProbeImage {
 #[derive(Deserialize)]
 struct TerrainDebugCaptureSidecarProbe {
     camera_pos: [f32; 3],
+    camera_rot: Option<[f32; 4]>,
 }
 
 const TERRAIN_DEBUG_CAPTURE_MAX_AGE_SECS: u64 = 10 * 60;
 const TERRAIN_DEBUG_CAPTURE_CAMERA_EPSILON: f32 = 0.75;
+const TERRAIN_DEBUG_CAPTURE_CAMERA_FORWARD_DOT_MIN: f32 = 0.999;
 
 #[allow(clippy::too_many_arguments)]
 fn dump_terrain_hole_probe(
@@ -810,7 +1028,7 @@ fn dump_terrain_hole_probe(
     let explicit_visual_image_path = request.and_then(|request| request.screenshot_path.clone());
     let visual_image_path = explicit_visual_image_path
         .clone()
-        .or_else(|| latest_matching_terrain_debug_screenshot(camera_pos));
+        .or_else(|| latest_matching_terrain_debug_screenshot(camera_pos, camera_dir));
     if explicit_visual_image_path.is_none() {
         if let Some(path) = visual_image_path.as_ref() {
             info!(
@@ -961,6 +1179,30 @@ fn dump_terrain_hole_probe(
                  (may be hole or depressed surface)",
                 fan.rays_with_gap, fan.rays_total, fan.half_angle_degrees,
             );
+            let terrace_gaps: Vec<&FanGap> = fan
+                .gaps
+                .iter()
+                .filter(|gap| {
+                    gap.seam_terrace.as_ref().is_some_and(|terrace| {
+                        terrace.classification == SeamTerraceClassification::PossibleTerrace
+                    })
+                })
+                .collect();
+            if !terrace_gaps.is_empty() {
+                let max_delta = terrace_gaps
+                    .iter()
+                    .filter_map(|gap| {
+                        gap.seam_terrace
+                            .as_ref()
+                            .and_then(|terrace| terrace.worst_abs_height_delta)
+                    })
+                    .fold(0.0_f32, f32::max);
+                info!(
+                    "Camera-ray fan: {} gap rays report possible seam terraces; max paired fine/coarse iso height delta {:.2} voxels",
+                    terrace_gaps.len(),
+                    max_delta,
+                );
+            }
         } else {
             info!(
                 "Camera-ray fan: 0 of {} rays found solid-before-render candidates in the {} degree cone \
@@ -978,6 +1220,40 @@ fn dump_terrain_hole_probe(
         &mesh_settings,
         &lod_settings,
         &water_lod_guard_chunks,
+    );
+    let active_seam_faces = sample_active_seam_faces(
+        &world,
+        &terrain_entities,
+        &meshes,
+        target_chunk,
+        camera_ray_fan.as_ref(),
+        visual_context.as_ref(),
+        camera_pos,
+        &mesh_settings,
+        &lod_settings,
+        &water_lod_guard_chunks,
+    );
+    let render_entity_checklist = render_entity_checklist_for_probe(
+        &world,
+        &terrain_entities,
+        &meshes,
+        target_chunk,
+        camera_ray_fan.as_ref(),
+        &active_seam_faces,
+        camera_pos,
+        &mesh_settings,
+        &lod_settings,
+        &water_lod_guard_chunks,
+    );
+    let normalized_summary = normalized_probe_summary(
+        camera_ray_fan.as_ref(),
+        &active_seam_faces,
+        &render_entity_checklist,
+    );
+    let screenshot_overlay_points = screenshot_overlay_points(
+        camera_ray.as_ref(),
+        camera_ray_fan.as_ref(),
+        &active_seam_faces,
     );
     let classification = classify_probe(
         target_pos,
@@ -1077,6 +1353,10 @@ fn dump_terrain_hole_probe(
         render_mesh_ray_grid,
         camera_ray,
         camera_ray_fan,
+        normalized_summary,
+        active_seam_faces,
+        render_entity_checklist,
+        screenshot_overlay_points,
         chunks,
     };
 
@@ -2001,9 +2281,133 @@ fn highest_render_mesh_hit_at(
     }
 }
 
+fn nearest_render_mesh_hit_along_ray(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    center_chunk: IVec3,
+    origin: Vec3,
+    dir: Vec3,
+    max_distance: f32,
+    preferred_distances: &[f32],
+) -> Option<CompactMeshRayHit> {
+    let dir = dir.normalize_or_zero();
+    if dir == Vec3::ZERO {
+        return None;
+    }
+
+    let mut best: Option<(f32, CompactMeshRayHit)> = None;
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let chunk_pos = center_chunk + IVec3::new(dx, dy, dz);
+                let Some(entity) = world
+                    .get_chunk(chunk_pos)
+                    .and_then(|chunk| chunk.mesh_entity())
+                else {
+                    continue;
+                };
+                let Ok((
+                    entity,
+                    mesh3d,
+                    transform,
+                    chunk_mesh,
+                    terrain_debug,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                )) = terrain_entities.get(entity)
+                else {
+                    continue;
+                };
+                let Some(mesh3d) = mesh3d else {
+                    continue;
+                };
+                let Some(mesh) = meshes.get(&mesh3d.0) else {
+                    continue;
+                };
+                let transform = transform
+                    .map(|transform| transform.translation)
+                    .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+                if !ray_intersects_chunk_bounds(origin, dir, transform, max_distance) {
+                    continue;
+                }
+
+                let _ = for_each_mesh_triangle_with_indices(
+                    mesh,
+                    transform,
+                    |triangle_start_index, indices, p0, p1, p2| {
+                        let Some((distance, _front_face)) =
+                            ray_triangle_hit(origin, dir, p0, p1, p2)
+                        else {
+                            return;
+                        };
+                        if distance > max_distance {
+                            return;
+                        }
+
+                        let score = if preferred_distances.is_empty() {
+                            distance
+                        } else {
+                            preferred_distances
+                                .iter()
+                                .map(|preferred| (distance - *preferred).abs())
+                                .fold(f32::INFINITY, f32::min)
+                        };
+                        let replace = best.as_ref().map_or(true, |(best_score, best_hit)| {
+                            score < *best_score - 1.0e-4
+                                || ((score - *best_score).abs() <= 1.0e-4
+                                    && distance < best_hit.distance)
+                        });
+                        if replace {
+                            let hit_chunk = chunk_mesh
+                                .map(|chunk| chunk.chunk_position)
+                                .unwrap_or(chunk_pos)
+                                .into();
+                            best = Some((
+                                score,
+                                CompactMeshRayHit {
+                                    distance,
+                                    point: origin + dir * distance,
+                                    chunk: hit_chunk,
+                                    entity: format!("{entity:?}"),
+                                    mesh_section: classify_mesh_triangle_section(
+                                        terrain_debug,
+                                        triangle_start_index,
+                                        indices,
+                                        p0,
+                                        p1,
+                                        p2,
+                                    ),
+                                },
+                            ));
+                        }
+                    },
+                );
+            }
+        }
+    }
+
+    best.map(|(_, hit)| hit)
+}
+
 #[derive(Clone, Copy)]
 struct VerticalMeshHit {
     y: f32,
+    mesh_section: MeshTriangleSectionProbe,
+}
+
+struct CompactMeshRayHit {
+    distance: f32,
+    point: Vec3,
+    chunk: IVec3Dump,
+    entity: String,
     mesh_section: MeshTriangleSectionProbe,
 }
 
@@ -2308,6 +2712,9 @@ fn sample_camera_ray(
     let cell_agreement = mc_forensics
         .as_ref()
         .and_then(|forensics| forensics.cell_agreement.clone());
+    let seam_terrace = mc_forensics
+        .as_ref()
+        .and_then(|forensics| forensics.seam_terrace.clone());
     let mc_cell = mc_forensics
         .as_ref()
         .and_then(|forensics| forensics.mc_cell.clone());
@@ -2347,6 +2754,7 @@ fn sample_camera_ray(
         &first_backface_render_hit,
         first_mesher_iso_distance,
         mc_cell.as_ref(),
+        seam_terrace.as_ref(),
         &visual_samples,
     );
 
@@ -2370,6 +2778,7 @@ fn sample_camera_ray(
         mesher_iso_mc_cell,
         first_render_hit_source,
         cell_agreement,
+        seam_terrace,
         visual_samples,
         gap_classification,
         render_hits,
@@ -2568,6 +2977,7 @@ struct McGapForensics {
     mesher_iso_mc_cell: Option<McCellOracleProbe>,
     first_render_hit_source: Option<McTriangleSourceProbe>,
     cell_agreement: Option<McCellAgreementProbe>,
+    seam_terrace: Option<SeamTerraceProbe>,
 }
 
 #[cfg(feature = "mc_transvoxel")]
@@ -2620,6 +3030,8 @@ fn mc_forensics_for_gap(
         mesher_iso_mc_cell.as_ref(),
         first_render_hit_source.as_ref(),
     ));
+    let seam_terrace_point = first_mesher_iso_point.unwrap_or(surface_point);
+    let seam_terrace = seam_terrace_probe_for_point(world, terrain_entities, seam_terrace_point);
 
     Some(McGapForensics {
         first_mesher_iso_distance,
@@ -2629,6 +3041,7 @@ fn mc_forensics_for_gap(
         mesher_iso_mc_cell,
         first_render_hit_source,
         cell_agreement,
+        seam_terrace,
     })
 }
 
@@ -2805,6 +3218,1102 @@ fn first_mesher_iso_multi_chunk(
         distance += 0.25;
     }
     None
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn seam_terrace_probe_for_point(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    point: Vec3,
+) -> Option<SeamTerraceProbe> {
+    const TERRACE_THRESHOLD_VOXELS: f32 = 0.5;
+
+    let source_voxel = IVec3::new(
+        point.x.floor() as i32,
+        point.y.floor() as i32,
+        point.z.floor() as i32,
+    );
+    let source_chunk = VoxelWorld::world_to_chunk(source_voxel);
+    let source_grid = build_mc_sdf_grid_probe(world, terrain_entities, source_chunk)?;
+    let source_origin = VoxelWorld::chunk_to_world(source_chunk).as_vec3();
+    let local = point - source_origin;
+    let near_face_threshold = (source_grid.step as f32 * 1.5).max(2.0);
+    let mut pairs = Vec::new();
+
+    for face in ChunkFace::ALL {
+        if distance_to_chunk_face(local, face) > near_face_threshold {
+            continue;
+        }
+        let Some(neighbor_lod_at_source_mesh) =
+            neighbor_lod_for_probe_face(&source_grid.neighbor_lods, face)
+        else {
+            continue;
+        };
+        if neighbor_lod_at_source_mesh == source_grid.lod {
+            continue;
+        }
+
+        let neighbor_chunk = source_chunk + face.direction();
+        let Some(neighbor_grid) = build_mc_sdf_grid_probe(world, terrain_entities, neighbor_chunk)
+        else {
+            continue;
+        };
+        if neighbor_grid.lod == source_grid.lod {
+            continue;
+        }
+
+        let seam_sample_point = project_point_to_chunk_face(point, source_origin, face);
+        let source_sample_point = seam_sample_point;
+        let neighbor_sample_point = seam_sample_point;
+        let source_height = highest_vertical_iso_height_in_grid(
+            &source_grid,
+            source_sample_point.x,
+            source_sample_point.z,
+        );
+        let neighbor_height = highest_vertical_iso_height_in_grid(
+            &neighbor_grid,
+            neighbor_sample_point.x,
+            neighbor_sample_point.z,
+        );
+
+        let source_is_coarser = source_grid.lod.is_lower_detail_than(neighbor_grid.lod);
+        let (fine_chunk, fine_lod, fine_sample_point, fine_height) = if source_is_coarser {
+            (
+                neighbor_chunk,
+                neighbor_grid.lod,
+                neighbor_sample_point,
+                neighbor_height,
+            )
+        } else {
+            (
+                source_chunk,
+                source_grid.lod,
+                source_sample_point,
+                source_height,
+            )
+        };
+        let (coarse_chunk, coarse_lod, coarse_sample_point, coarse_height) = if source_is_coarser {
+            (
+                source_chunk,
+                source_grid.lod,
+                source_sample_point,
+                source_height,
+            )
+        } else {
+            (
+                neighbor_chunk,
+                neighbor_grid.lod,
+                neighbor_sample_point,
+                neighbor_height,
+            )
+        };
+        let signed_delta = fine_height
+            .zip(coarse_height)
+            .map(|(fine, coarse)| coarse - fine);
+
+        pairs.push(SeamTerracePairProbe {
+            face: chunk_face_name(face).to_string(),
+            source_chunk: source_chunk.into(),
+            neighbor_chunk: neighbor_chunk.into(),
+            source_lod: lod_string(source_grid.lod),
+            neighbor_lod: lod_string(neighbor_grid.lod),
+            fine_chunk: fine_chunk.into(),
+            coarse_chunk: coarse_chunk.into(),
+            fine_lod: lod_string(fine_lod),
+            coarse_lod: lod_string(coarse_lod),
+            fine_sample_point: fine_sample_point.into(),
+            coarse_sample_point: coarse_sample_point.into(),
+            fine_iso_height: fine_height,
+            coarse_iso_height: coarse_height,
+            signed_height_delta_coarse_minus_fine: signed_delta,
+            abs_height_delta: signed_delta.map(f32::abs),
+            source_chunk_skipped_lod_delta_gt_one: source_grid
+                .source_chunk_skipped_lod_delta_gt_one,
+            neighbor_chunk_skipped_lod_delta_gt_one: neighbor_grid
+                .source_chunk_skipped_lod_delta_gt_one,
+        });
+    }
+
+    let worst_abs_height_delta = pairs
+        .iter()
+        .filter_map(|pair| pair.abs_height_delta)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let classification = if pairs.is_empty() {
+        SeamTerraceClassification::NotNearLodSeam
+    } else if worst_abs_height_delta.is_none() {
+        SeamTerraceClassification::InsufficientData
+    } else if worst_abs_height_delta.is_some_and(|delta| delta > TERRACE_THRESHOLD_VOXELS) {
+        SeamTerraceClassification::PossibleTerrace
+    } else {
+        SeamTerraceClassification::NoTerrace
+    };
+    let note = match classification {
+        SeamTerraceClassification::NotNearLodSeam => {
+            "sample was not close to an active LOD-mismatched chunk face".to_string()
+        }
+        SeamTerraceClassification::InsufficientData => {
+            "nearby LOD seam exists, but one or both paired SDF grids had no vertical iso crossing"
+                .to_string()
+        }
+        SeamTerraceClassification::NoTerrace => {
+            "paired fine/coarse seam iso heights agree within tolerance".to_string()
+        }
+        SeamTerraceClassification::PossibleTerrace => {
+            "paired fine/coarse seam iso heights differ beyond tolerance".to_string()
+        }
+    };
+
+    Some(SeamTerraceProbe {
+        sample_point: point.into(),
+        threshold_voxels: TERRACE_THRESHOLD_VOXELS,
+        threshold_world: TERRACE_THRESHOLD_VOXELS * VOXEL_SIZE,
+        pairs,
+        worst_abs_height_delta,
+        classification,
+        note,
+    })
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn distance_to_chunk_face(local: Vec3, face: ChunkFace) -> f32 {
+    let chunk_size = CHUNK_SIZE_I32 as f32;
+    match face {
+        ChunkFace::NegX => local.x,
+        ChunkFace::PosX => chunk_size - local.x,
+        ChunkFace::NegY => local.y,
+        ChunkFace::PosY => chunk_size - local.y,
+        ChunkFace::NegZ => local.z,
+        ChunkFace::PosZ => chunk_size - local.z,
+    }
+    .abs()
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn project_point_to_chunk_face(point: Vec3, chunk_origin: Vec3, face: ChunkFace) -> Vec3 {
+    let chunk_size = CHUNK_SIZE_I32 as f32;
+    match face {
+        ChunkFace::NegX => Vec3::new(chunk_origin.x, point.y, point.z),
+        ChunkFace::PosX => Vec3::new(chunk_origin.x + chunk_size, point.y, point.z),
+        ChunkFace::NegY => Vec3::new(point.x, chunk_origin.y, point.z),
+        ChunkFace::PosY => Vec3::new(point.x, chunk_origin.y + chunk_size, point.z),
+        ChunkFace::NegZ => Vec3::new(point.x, point.y, chunk_origin.z),
+        ChunkFace::PosZ => Vec3::new(point.x, point.y, chunk_origin.z + chunk_size),
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn neighbor_lod_for_probe_face(neighbor_lods: &NeighborLods, face: ChunkFace) -> Option<LodLevel> {
+    match face {
+        ChunkFace::NegX => neighbor_lods.neg_x,
+        ChunkFace::PosX => neighbor_lods.pos_x,
+        ChunkFace::NegY => neighbor_lods.neg_y,
+        ChunkFace::PosY => neighbor_lods.pos_y,
+        ChunkFace::NegZ => neighbor_lods.neg_z,
+        ChunkFace::PosZ => neighbor_lods.pos_z,
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn highest_vertical_iso_height_in_grid(
+    grid: &McSdfGridProbe,
+    world_x: f32,
+    world_z: f32,
+) -> Option<f32> {
+    let chunk_origin = VoxelWorld::chunk_to_world(grid.chunk_position).as_vec3();
+    let step = (grid.step as f32 * 0.25).clamp(0.25, 1.0);
+    let mut y = chunk_origin.y + CHUNK_SIZE_I32 as f32 + grid.step as f32;
+    let min_y = chunk_origin.y - grid.step as f32;
+    let mut previous: Option<(f32, f32)> = None;
+
+    while y >= min_y {
+        let point = Vec3::new(world_x, y, world_z);
+        if let Some(value) =
+            sample_mc_sdf_trilinear(point, chunk_origin, grid.padded, &grid.values, grid.step)
+        {
+            if value.abs() <= f32::EPSILON {
+                return Some(y);
+            }
+            if let Some((previous_y, previous_value)) = previous {
+                if (previous_value < 0.0) != (value < 0.0) {
+                    let t = previous_value / (previous_value - value);
+                    return Some(previous_y + (y - previous_y) * t.clamp(0.0, 1.0));
+                }
+            }
+            previous = Some((y, value));
+        } else {
+            previous = None;
+        }
+        y -= step;
+    }
+
+    None
+}
+
+#[cfg(feature = "mc_transvoxel")]
+#[allow(clippy::too_many_arguments)]
+fn sample_active_seam_faces(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    target_chunk: IVec3,
+    camera_ray_fan: Option<&CameraRayFan>,
+    visual_context: Option<&VisualProbeContext>,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> Vec<SeamFaceProbe> {
+    use crate::voxel::mc_transvoxel::compute_transvoxel_face_mask;
+
+    const MAX_SEAM_FACES: usize = 32;
+    const SEAM_SAMPLE_GRID_U: u32 = 5;
+    const SEAM_SAMPLE_GRID_V: u32 = 5;
+
+    let mut probes = Vec::new();
+    let mut visited = HashSet::new();
+    let candidate_chunks = probe_candidate_chunks(world, target_chunk, camera_ray_fan);
+
+    for source_chunk in candidate_chunks {
+        if probes.len() >= MAX_SEAM_FACES {
+            break;
+        }
+        let Some(source_grid) = build_mc_sdf_grid_probe(world, terrain_entities, source_chunk)
+        else {
+            continue;
+        };
+        for face in ChunkFace::ALL {
+            if probes.len() >= MAX_SEAM_FACES {
+                break;
+            }
+            let neighbor_chunk = source_chunk + face.direction();
+            let Some(neighbor_grid) =
+                build_mc_sdf_grid_probe(world, terrain_entities, neighbor_chunk)
+            else {
+                continue;
+            };
+            if source_grid.lod == neighbor_grid.lod
+                || !source_grid.lod.is_higher_detail_than(neighbor_grid.lod)
+            {
+                continue;
+            }
+            let key = (source_chunk, neighbor_chunk, face_mask_bit(face));
+            if !visited.insert(key) {
+                continue;
+            }
+
+            let source_chunk_data = world.get_chunk(source_chunk);
+            let neighbor_chunk_data = world.get_chunk(neighbor_chunk);
+            let source_debug = terrain_mesh_debug_for_chunk(world, terrain_entities, source_chunk);
+            let neighbor_debug =
+                terrain_mesh_debug_for_chunk(world, terrain_entities, neighbor_chunk);
+            let (transition_mask, _) =
+                compute_transvoxel_face_mask(source_grid.lod, &source_grid.neighbor_lods);
+            let transition_owner = transition_mask.get(face);
+            let skipped_regular_boundary_row = false;
+            let lod_delta_gt_one = source_debug
+                .map(|debug| (debug.lod_delta_gt_one_face_mask & (1u8 << face_mask_bit(face))) != 0)
+                .unwrap_or(false);
+
+            let samples = seam_face_samples(
+                world,
+                terrain_entities,
+                meshes,
+                &source_grid,
+                &neighbor_grid,
+                face,
+                SEAM_SAMPLE_GRID_U,
+                SEAM_SAMPLE_GRID_V,
+                visual_context,
+            );
+            let mut height_deltas: Vec<f32> = samples
+                .iter()
+                .filter_map(|sample| sample.abs_height_delta)
+                .collect();
+            height_deltas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let max_abs_height_delta = height_deltas.last().copied();
+            let median_abs_height_delta = median_sorted(&height_deltas);
+            let mut face_offset_deltas: Vec<f32> = samples
+                .iter()
+                .filter_map(|sample| sample.abs_face_offset_delta)
+                .collect();
+            face_offset_deltas
+                .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let max_abs_face_offset_delta = face_offset_deltas.last().copied();
+            let median_abs_face_offset_delta = median_sorted(&face_offset_deltas);
+            let possible_terrace_sample_count = samples
+                .iter()
+                .filter(|sample| {
+                    seam_sample_displacement_delta(sample).is_some_and(|delta| delta > 0.5)
+                })
+                .count() as u32;
+            let missing_render_coverage_sample_count = samples
+                .iter()
+                .filter(|sample| !sample.has_render_coverage_near_either_iso)
+                .count() as u32;
+
+            let transition_coverage = transition_coverage_probe(
+                world,
+                terrain_entities,
+                source_chunk,
+                face,
+                skipped_regular_boundary_row,
+                transition_owner,
+                &samples,
+            );
+            let boundary_edges =
+                boundary_edge_leak_probe(world, terrain_entities, meshes, source_chunk, face);
+
+            probes.push(SeamFaceProbe {
+                source_chunk: source_chunk.into(),
+                neighbor_chunk: neighbor_chunk.into(),
+                face: chunk_face_name(face).to_string(),
+                source_lod: lod_string(source_grid.lod),
+                neighbor_lod: lod_string(neighbor_grid.lod),
+                fine_chunk: source_chunk.into(),
+                coarse_chunk: neighbor_chunk.into(),
+                fine_lod: lod_string(source_grid.lod),
+                coarse_lod: lod_string(neighbor_grid.lod),
+                source_mesh_status: mesh_status_for_chunk(
+                    world,
+                    source_chunk,
+                    camera_pos,
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                    source_debug.as_ref(),
+                ),
+                neighbor_mesh_status: mesh_status_for_chunk(
+                    world,
+                    neighbor_chunk,
+                    camera_pos,
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                    neighbor_debug.as_ref(),
+                ),
+                source_generated_frame: source_debug.map(|debug| debug.generated_frame),
+                neighbor_generated_frame: neighbor_debug.map(|debug| debug.generated_frame),
+                same_generated_frame_as_neighbor: source_debug
+                    .zip(neighbor_debug)
+                    .map(|(source, neighbor)| source.generated_frame == neighbor.generated_frame),
+                source_dirty_reasons: source_chunk_data
+                    .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
+                    .unwrap_or_default(),
+                neighbor_dirty_reasons: neighbor_chunk_data
+                    .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
+                    .unwrap_or_default(),
+                source_render_entity: render_entity_checklist_for_chunk(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    source_chunk,
+                    camera_pos,
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                ),
+                neighbor_render_entity: render_entity_checklist_for_chunk(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    neighbor_chunk,
+                    camera_pos,
+                    mesh_settings,
+                    lod_settings,
+                    water_lod_guard_chunks,
+                ),
+                transition_owner,
+                skipped_regular_boundary_row,
+                lod_delta_gt_one,
+                source_chunk_skipped_lod_delta_gt_one: source_grid
+                    .source_chunk_skipped_lod_delta_gt_one,
+                neighbor_chunk_skipped_lod_delta_gt_one: neighbor_grid
+                    .source_chunk_skipped_lod_delta_gt_one,
+                sample_count: samples.len() as u32,
+                sample_grid_u: SEAM_SAMPLE_GRID_U,
+                sample_grid_v: SEAM_SAMPLE_GRID_V,
+                possible_terrace_sample_count,
+                missing_render_coverage_sample_count,
+                max_abs_height_delta,
+                median_abs_height_delta,
+                max_abs_face_offset_delta,
+                median_abs_face_offset_delta,
+                samples,
+                transition_coverage,
+                boundary_edges,
+            });
+        }
+    }
+
+    probes
+}
+
+#[cfg(not(feature = "mc_transvoxel"))]
+#[allow(clippy::too_many_arguments)]
+fn sample_active_seam_faces(
+    _world: &VoxelWorld,
+    _terrain_entities: &TerrainEntityQuery,
+    _meshes: &Assets<Mesh>,
+    _target_chunk: IVec3,
+    _camera_ray_fan: Option<&CameraRayFan>,
+    _visual_context: Option<&VisualProbeContext>,
+    _camera_pos: Option<Vec3>,
+    _mesh_settings: &MeshSettings,
+    _lod_settings: &LodSettings,
+    _water_lod_guard_chunks: &HashSet<IVec3>,
+) -> Vec<SeamFaceProbe> {
+    Vec::new()
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn probe_candidate_chunks(
+    world: &VoxelWorld,
+    target_chunk: IVec3,
+    camera_ray_fan: Option<&CameraRayFan>,
+) -> Vec<IVec3> {
+    let mut anchors = HashSet::from([target_chunk]);
+    if let Some(fan) = camera_ray_fan {
+        for gap in &fan.gaps {
+            anchors.insert(ivec3_from_dump(gap.surface_chunk));
+            if let Some(cell) = &gap.mc_cell {
+                anchors.insert(ivec3_from_dump(cell.chunk_position));
+            }
+            if let Some(cell) = &gap.mesher_iso_mc_cell {
+                anchors.insert(ivec3_from_dump(cell.chunk_position));
+            }
+        }
+    }
+
+    let mut chunks: Vec<IVec3> = world
+        .chunk_positions()
+        .filter(|chunk| {
+            anchors.iter().any(|anchor| {
+                let delta = (*chunk - *anchor).abs();
+                delta.x <= 2 && delta.y <= 1 && delta.z <= 2
+            })
+        })
+        .collect();
+    chunks.sort_by(|a, b| {
+        let da = (*a - target_chunk).abs().max_element();
+        let db = (*b - target_chunk).abs().max_element();
+        da.cmp(&db).then_with(|| compare_chunk_pos_lex(*a, *b))
+    });
+    chunks.truncate(96);
+    chunks
+}
+
+#[cfg(feature = "mc_transvoxel")]
+#[allow(clippy::too_many_arguments)]
+fn seam_face_samples(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    source_grid: &McSdfGridProbe,
+    neighbor_grid: &McSdfGridProbe,
+    face: ChunkFace,
+    sample_grid_u: u32,
+    sample_grid_v: u32,
+    visual_context: Option<&VisualProbeContext>,
+) -> Vec<SeamFaceSampleProbe> {
+    let source_origin = VoxelWorld::chunk_to_world(source_grid.chunk_position).as_vec3();
+    let normal = face.direction().as_vec3();
+    let mut samples = Vec::new();
+
+    for sample_v_index in 0..sample_grid_v {
+        let face_v = normalized_grid_coord(sample_v_index, sample_grid_v);
+        for sample_u_index in 0..sample_grid_u {
+            let face_u = normalized_grid_coord(sample_u_index, sample_grid_u);
+            let sample_index = sample_v_index * sample_grid_u + sample_u_index;
+            let seam_point_base = seam_face_sample_point(source_origin, face, face_u, face_v);
+            let fine_iso_height = highest_vertical_iso_height_in_grid(
+                source_grid,
+                seam_point_base.x,
+                seam_point_base.z,
+            );
+            let coarse_iso_height = highest_vertical_iso_height_in_grid(
+                neighbor_grid,
+                seam_point_base.x,
+                seam_point_base.z,
+            );
+            let signed_delta = fine_iso_height
+                .zip(coarse_iso_height)
+                .map(|(fine, coarse)| coarse - fine);
+            let seam_y = fine_iso_height
+                .zip(coarse_iso_height)
+                .map(|(fine, coarse)| (fine + coarse) * 0.5)
+                .or(fine_iso_height)
+                .or(coarse_iso_height)
+                .unwrap_or(seam_point_base.y);
+            let seam_point = if matches!(face, ChunkFace::NegY | ChunkFace::PosY) {
+                seam_point_base
+            } else {
+                Vec3::new(seam_point_base.x, seam_y, seam_point_base.z)
+            };
+            let fine_face_iso_offset =
+                nearest_face_normal_iso_offset_in_grid(source_grid, seam_point, normal);
+            let coarse_face_iso_offset =
+                nearest_face_normal_iso_offset_in_grid(neighbor_grid, seam_point, normal);
+            let signed_face_offset_delta = fine_face_iso_offset
+                .zip(coarse_face_iso_offset)
+                .map(|(fine, coarse)| coarse - fine);
+            let (render_hit_y, render_hit_chunk, render_hit_entity, render_hit_mesh_section) =
+                highest_render_mesh_hit_at(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    source_grid.chunk_position,
+                    seam_point_base.x,
+                    seam_point_base.z,
+                    seam_y + CHUNK_SIZE_I32 as f32,
+                );
+            let render_distance_from_fine_iso = render_hit_y
+                .zip(fine_iso_height)
+                .map(|(render, iso)| render - iso);
+            let render_distance_from_coarse_iso = render_hit_y
+                .zip(coarse_iso_height)
+                .map(|(render, iso)| render - iso);
+            let face_render_radius =
+                (source_grid.step.max(neighbor_grid.step) as f32 * 2.5).max(2.0);
+            let preferred_face_render_distances = [fine_face_iso_offset, coarse_face_iso_offset]
+                .into_iter()
+                .flatten()
+                .map(|offset| face_render_radius + offset)
+                .collect::<Vec<_>>();
+            let face_render_hit = (!matches!(face, ChunkFace::NegY | ChunkFace::PosY))
+                .then(|| {
+                    nearest_render_mesh_hit_along_ray(
+                        world,
+                        terrain_entities,
+                        meshes,
+                        source_grid.chunk_position,
+                        seam_point - normal * face_render_radius,
+                        normal,
+                        face_render_radius * 2.0,
+                        &preferred_face_render_distances,
+                    )
+                })
+                .flatten();
+            let render_face_offset = face_render_hit
+                .as_ref()
+                .map(|hit| hit.distance - face_render_radius);
+            let render_distance_from_fine_face_iso = render_face_offset
+                .zip(fine_face_iso_offset)
+                .map(|(render, iso)| render - iso);
+            let render_distance_from_coarse_face_iso = render_face_offset
+                .zip(coarse_face_iso_offset)
+                .map(|(render, iso)| render - iso);
+            let vertical_render_coverage = render_distance_from_fine_iso
+                .is_some_and(|delta| delta.abs() <= 1.0)
+                || render_distance_from_coarse_iso.is_some_and(|delta| delta.abs() <= 1.0);
+            let face_render_coverage = render_distance_from_fine_face_iso
+                .is_some_and(|delta| delta.abs() <= 1.0)
+                || render_distance_from_coarse_face_iso.is_some_and(|delta| delta.abs() <= 1.0);
+            let has_render_coverage_near_either_iso =
+                if matches!(face, ChunkFace::NegY | ChunkFace::PosY) {
+                    vertical_render_coverage
+                } else {
+                    face_render_coverage
+                };
+            let visual = visual_point_probe(visual_context, seam_point);
+            samples.push(SeamFaceSampleProbe {
+                sample_index,
+                face_u,
+                face_v,
+                seam_point: seam_point.into(),
+                screen_position: visual.screen_position,
+                fine_iso_height,
+                coarse_iso_height,
+                signed_height_delta_coarse_minus_fine: signed_delta,
+                abs_height_delta: signed_delta.map(f32::abs),
+                fine_face_iso_offset,
+                coarse_face_iso_offset,
+                signed_face_offset_delta_coarse_minus_fine: signed_face_offset_delta,
+                abs_face_offset_delta: signed_face_offset_delta.map(f32::abs),
+                render_hit_y,
+                render_hit_chunk,
+                render_hit_entity,
+                render_hit_mesh_section,
+                render_distance_from_fine_iso,
+                render_distance_from_coarse_iso,
+                render_face_offset,
+                render_face_hit_point: face_render_hit.as_ref().map(|hit| hit.point.into()),
+                render_face_hit_chunk: face_render_hit.as_ref().map(|hit| hit.chunk),
+                render_face_hit_entity: face_render_hit.as_ref().map(|hit| hit.entity.clone()),
+                render_face_hit_mesh_section: face_render_hit.as_ref().map(|hit| hit.mesh_section),
+                render_distance_from_fine_face_iso,
+                render_distance_from_coarse_face_iso,
+                has_render_coverage_near_either_iso,
+                visual,
+            });
+        }
+    }
+
+    samples
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn normalized_grid_coord(index: u32, count: u32) -> f32 {
+    if count <= 1 {
+        0.5
+    } else {
+        index as f32 / (count - 1) as f32
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn seam_face_sample_point(chunk_origin: Vec3, face: ChunkFace, face_u: f32, face_v: f32) -> Vec3 {
+    let size = CHUNK_SIZE_I32 as f32;
+    let min_x = chunk_origin.x;
+    let min_y = chunk_origin.y;
+    let min_z = chunk_origin.z;
+    let max_x = chunk_origin.x + size;
+    let max_y = chunk_origin.y + size;
+    let max_z = chunk_origin.z + size;
+    let u = face_u.clamp(0.0, 1.0);
+    let v = face_v.clamp(0.0, 1.0);
+    match face {
+        ChunkFace::NegX => Vec3::new(min_x, min_y + size * v, min_z + size * u),
+        ChunkFace::PosX => Vec3::new(max_x, min_y + size * v, min_z + size * u),
+        ChunkFace::NegY => Vec3::new(min_x + size * u, min_y, min_z + size * v),
+        ChunkFace::PosY => Vec3::new(min_x + size * u, max_y, min_z + size * v),
+        ChunkFace::NegZ => Vec3::new(min_x + size * u, min_y + size * v, min_z),
+        ChunkFace::PosZ => Vec3::new(min_x + size * u, min_y + size * v, max_z),
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn nearest_face_normal_iso_offset_in_grid(
+    grid: &McSdfGridProbe,
+    seam_point: Vec3,
+    normal: Vec3,
+) -> Option<f32> {
+    let normal = normal.normalize_or_zero();
+    if normal == Vec3::ZERO {
+        return None;
+    }
+    let chunk_origin = VoxelWorld::chunk_to_world(grid.chunk_position).as_vec3();
+    let radius = (grid.step as f32 * 2.5).max(2.0);
+    let origin = seam_point - normal * radius;
+    first_mesher_iso_in_sdf_grid(
+        origin,
+        normal,
+        radius * 2.0,
+        chunk_origin,
+        grid.padded,
+        &grid.values,
+        grid.step,
+    )
+    .map(|(distance, _)| distance - radius)
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn seam_sample_displacement_delta(sample: &SeamFaceSampleProbe) -> Option<f32> {
+    sample.abs_face_offset_delta.or(sample.abs_height_delta)
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn transition_coverage_probe(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    source_chunk: IVec3,
+    face: ChunkFace,
+    skipped_regular_face: bool,
+    transition_owner: bool,
+    samples: &[SeamFaceSampleProbe],
+) -> TransitionCoverageProbe {
+    let sources = terrain_triangle_sources_for_chunk(world, terrain_entities, source_chunk);
+    let actual_transition_triangle_count = sources.map(|sources| {
+        sources
+            .sources
+            .iter()
+            .filter(|source| {
+                matches!(
+                    source,
+                    McTriangleSource::Transition {
+                        chunk_pos,
+                        face: source_face,
+                        ..
+                    } if *chunk_pos == source_chunk && *source_face == face
+                )
+            })
+            .count() as u32
+    });
+    let actual_transition_cell_count = sources.map(|sources| {
+        let mut cells = HashSet::new();
+        for source in &sources.sources {
+            if let McTriangleSource::Transition {
+                chunk_pos,
+                face: source_face,
+                cell_u,
+                cell_v,
+                ..
+            } = source
+            {
+                if *chunk_pos == source_chunk && *source_face == face {
+                    cells.insert((*cell_u, *cell_v));
+                }
+            }
+        }
+        cells.len() as u32
+    });
+    let samples_without_render_coverage = samples
+        .iter()
+        .filter(|sample| !sample.has_render_coverage_near_either_iso)
+        .count() as u32;
+    let samples_without_transition_render_coverage = if skipped_regular_face && transition_owner {
+        samples
+            .iter()
+            .filter(|sample| {
+                let render_section = sample
+                    .render_face_hit_mesh_section
+                    .or(sample.render_hit_mesh_section);
+                !matches!(
+                    render_section,
+                    Some(MeshTriangleSectionProbe::TransitionApron)
+                        | Some(MeshTriangleSectionProbe::TransitionGeometry)
+                )
+            })
+            .count() as u32
+    } else {
+        0
+    };
+    let coverage_note = if !skipped_regular_face {
+        "regular boundary row is kept for this face; transition geometry is supplemental"
+            .to_string()
+    } else if actual_transition_triangle_count == Some(0) {
+        "regular boundary row is skipped, but no transition triangles were recorded for this face"
+            .to_string()
+    } else if samples_without_render_coverage > 0 {
+        "regular boundary row is skipped and at least one seam sample lacks render coverage near either iso"
+            .to_string()
+    } else if samples_without_transition_render_coverage > 0 {
+        "regular boundary row is skipped; render coverage exists, but some samples did not hit transition-tagged geometry first"
+            .to_string()
+    } else {
+        "transition-tagged geometry covers the sampled skipped boundary row".to_string()
+    };
+
+    TransitionCoverageProbe {
+        skipped_regular_face,
+        transition_owner,
+        actual_transition_triangle_count,
+        actual_transition_cell_count,
+        sample_count: samples.len() as u32,
+        samples_without_render_coverage,
+        samples_without_transition_render_coverage,
+        coverage_note,
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn boundary_edge_leak_probe(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+) -> BoundaryEdgeLeakProbe {
+    let mut inspected_triangle_count = 0u32;
+    let mut edges = Vec::new();
+    collect_boundary_edges_for_chunk(
+        world,
+        terrain_entities,
+        meshes,
+        chunk_pos,
+        face,
+        &mut inspected_triangle_count,
+        &mut edges,
+    );
+    collect_boundary_edges_for_chunk(
+        world,
+        terrain_entities,
+        meshes,
+        chunk_pos + face.direction(),
+        face.opposite(),
+        &mut inspected_triangle_count,
+        &mut edges,
+    );
+
+    let mut unmatched: Vec<&BoundaryEdgeAccum> = edges
+        .iter()
+        .filter(|edge| !edge_has_opposite_side_coverage(edge, &edges))
+        .collect();
+    unmatched.sort_by(|a, b| {
+        b.length
+            .partial_cmp(&a.length)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let unmatched_transition_edge_count =
+        unmatched.iter().filter(|edge| edge.transition).count() as u32;
+    let unmatched_regular_edge_count =
+        unmatched.iter().filter(|edge| !edge.transition).count() as u32;
+    let longest_unmatched_edge = unmatched.first().map(|edge| edge.length);
+    let examples = unmatched
+        .iter()
+        .take(8)
+        .map(|edge| BoundaryEdgeExampleProbe {
+            start: edge.start.into(),
+            end: edge.end.into(),
+            length: edge.length,
+            source: edge.source.clone(),
+        })
+        .collect();
+
+    BoundaryEdgeLeakProbe {
+        inspected_triangle_count,
+        seam_edge_count: edges.len() as u32,
+        unmatched_seam_edge_count: unmatched.len() as u32,
+        unmatched_transition_edge_count,
+        unmatched_regular_edge_count,
+        longest_unmatched_edge,
+        examples,
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn collect_boundary_edges_for_chunk(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+    inspected_triangle_count: &mut u32,
+    edges: &mut Vec<BoundaryEdgeAccum>,
+) {
+    let Some((mesh, translation, sources)) =
+        terrain_mesh_and_sources_for_chunk(world, terrain_entities, meshes, chunk_pos)
+    else {
+        return;
+    };
+
+    for (triangle_index, source) in sources.sources.iter().enumerate() {
+        if !source_touches_face(source, chunk_pos, face) {
+            continue;
+        }
+        let triangle_start = triangle_index * 3;
+        let Some(vertices) = mesh_triangle_vertices(mesh, translation, triangle_start) else {
+            continue;
+        };
+        *inspected_triangle_count += 1;
+        for (a, b) in [
+            (vertices[0], vertices[1]),
+            (vertices[1], vertices[2]),
+            (vertices[2], vertices[0]),
+        ] {
+            if !edge_lies_on_chunk_face(a, b, chunk_pos, face) {
+                continue;
+            }
+            edges.push(BoundaryEdgeAccum {
+                source: Some(mc_triangle_source_probe(source)),
+                start: a,
+                end: b,
+                length: a.distance(b),
+                transition: matches!(source, McTriangleSource::Transition { .. }),
+            });
+        }
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+struct BoundaryEdgeAccum {
+    source: Option<McTriangleSourceProbe>,
+    start: Vec3,
+    end: Vec3,
+    length: f32,
+    transition: bool,
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn edge_has_opposite_side_coverage(edge: &BoundaryEdgeAccum, edges: &[BoundaryEdgeAccum]) -> bool {
+    const EPSILON: f32 = 0.05;
+    if edge.length <= EPSILON {
+        return true;
+    }
+
+    let mut intervals = edges
+        .iter()
+        .filter(|candidate| !std::ptr::eq(*candidate, edge))
+        .filter_map(|candidate| edge_overlap_interval(edge, candidate, EPSILON))
+        .collect::<Vec<_>>();
+    if intervals.is_empty() {
+        return false;
+    }
+    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut covered_until = 0.0_f32;
+    for (start, end) in intervals {
+        if end <= covered_until + EPSILON {
+            covered_until = covered_until.max(end);
+            continue;
+        }
+        if start > covered_until + EPSILON {
+            return false;
+        }
+        covered_until = covered_until.max(end);
+        if covered_until >= edge.length - EPSILON {
+            return true;
+        }
+    }
+
+    covered_until >= edge.length - EPSILON
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn edge_overlap_interval(
+    edge: &BoundaryEdgeAccum,
+    candidate: &BoundaryEdgeAccum,
+    epsilon: f32,
+) -> Option<(f32, f32)> {
+    if candidate.length <= epsilon {
+        return None;
+    }
+    let dir = (edge.end - edge.start).normalize_or_zero();
+    if dir == Vec3::ZERO {
+        return None;
+    }
+    if point_line_distance(candidate.start, edge.start, dir) > epsilon
+        || point_line_distance(candidate.end, edge.start, dir) > epsilon
+    {
+        return None;
+    }
+    let a = (candidate.start - edge.start).dot(dir);
+    let b = (candidate.end - edge.start).dot(dir);
+    let start = a.min(b).max(0.0);
+    let end = a.max(b).min(edge.length);
+    (end - start > epsilon).then_some((start, end))
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn point_line_distance(point: Vec3, line_origin: Vec3, line_dir: Vec3) -> f32 {
+    let to_point = point - line_origin;
+    (to_point - line_dir * to_point.dot(line_dir)).length()
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn source_touches_face(source: &McTriangleSource, chunk_pos: IVec3, face: ChunkFace) -> bool {
+    match source {
+        McTriangleSource::Transition {
+            chunk_pos: source_chunk,
+            face: source_face,
+            ..
+        } => *source_chunk == chunk_pos && *source_face == face,
+        McTriangleSource::Regular {
+            chunk_pos: source_chunk,
+            lod,
+            cell,
+            ..
+        } => {
+            if *source_chunk != chunk_pos {
+                return false;
+            }
+            let subdivisions = CHUNK_SIZE_I32 as u32 / lod.step_size().max(1);
+            let max_cell = subdivisions.saturating_sub(1);
+            match face {
+                ChunkFace::NegX => cell.x == 0,
+                ChunkFace::PosX => cell.x >= max_cell,
+                ChunkFace::NegY => cell.y == 0,
+                ChunkFace::PosY => cell.y >= max_cell,
+                ChunkFace::NegZ => cell.z == 0,
+                ChunkFace::PosZ => cell.z >= max_cell,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn edge_lies_on_chunk_face(a: Vec3, b: Vec3, chunk_pos: IVec3, face: ChunkFace) -> bool {
+    const EPSILON: f32 = 0.05;
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
+    let face_coord = match face {
+        ChunkFace::NegX => chunk_origin.x,
+        ChunkFace::PosX => chunk_origin.x + CHUNK_SIZE_I32 as f32,
+        ChunkFace::NegY => chunk_origin.y,
+        ChunkFace::PosY => chunk_origin.y + CHUNK_SIZE_I32 as f32,
+        ChunkFace::NegZ => chunk_origin.z,
+        ChunkFace::PosZ => chunk_origin.z + CHUNK_SIZE_I32 as f32,
+    };
+    let (a_coord, b_coord) = match face {
+        ChunkFace::NegX | ChunkFace::PosX => (a.x, b.x),
+        ChunkFace::NegY | ChunkFace::PosY => (a.y, b.y),
+        ChunkFace::NegZ | ChunkFace::PosZ => (a.z, b.z),
+    };
+    (a_coord - face_coord).abs() <= EPSILON && (b_coord - face_coord).abs() <= EPSILON
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn terrain_mesh_and_sources_for_chunk<'a>(
+    world: &VoxelWorld,
+    terrain_entities: &'a TerrainEntityQuery,
+    meshes: &'a Assets<Mesh>,
+    chunk_pos: IVec3,
+) -> Option<(&'a Mesh, Vec3, &'a McTriangleSources)> {
+    let entity = world.get_chunk(chunk_pos)?.mesh_entity()?;
+    let Ok((
+        _entity,
+        mesh3d,
+        transform,
+        _chunk_mesh,
+        _terrain_debug,
+        sources,
+        _water_mesh,
+        _visibility,
+        _inherited_visibility,
+        _view_visibility,
+        _needs_collider,
+        _chunk_collider,
+        _collider,
+        _rigid_body,
+    )) = terrain_entities.get(entity)
+    else {
+        return None;
+    };
+    let mesh = meshes.get(&mesh3d?.0)?;
+    let translation = transform
+        .map(|transform| transform.translation)
+        .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+    Some((mesh, translation, sources?))
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn terrain_triangle_sources_for_chunk<'a>(
+    world: &VoxelWorld,
+    terrain_entities: &'a TerrainEntityQuery,
+    chunk_pos: IVec3,
+) -> Option<&'a McTriangleSources> {
+    let entity = world.get_chunk(chunk_pos)?.mesh_entity()?;
+    let Ok((
+        _entity,
+        _mesh3d,
+        _transform,
+        _chunk_mesh,
+        _terrain_debug,
+        sources,
+        _water_mesh,
+        _visibility,
+        _inherited_visibility,
+        _view_visibility,
+        _needs_collider,
+        _chunk_collider,
+        _collider,
+        _rigid_body,
+    )) = terrain_entities.get(entity)
+    else {
+        return None;
+    };
+    sources
+}
+
+#[cfg(feature = "mc_transvoxel")]
+fn median_sorted(values: &[f32]) -> Option<f32> {
+    if values.is_empty() {
+        return None;
+    }
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        Some((values[mid - 1] + values[mid]) * 0.5)
+    } else {
+        Some(values[mid])
+    }
 }
 
 #[cfg(feature = "mc_transvoxel")]
@@ -3065,7 +4574,7 @@ fn collect_emitted_triangle_evidence(
         .collect()
 }
 
-#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 fn mesh_triangle_vertices(
     mesh: &Mesh,
     translation: Vec3,
@@ -3101,7 +4610,7 @@ fn emitted_triangle_probe(
     }
 }
 
-#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 fn nearest_triangle_hit_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
     triangles
         .iter()
@@ -3109,7 +4618,7 @@ fn nearest_triangle_hit_distance(triangles: &[McEmittedTriangleProbe]) -> Option
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 fn closest_triangle_ray_distance(triangles: &[McEmittedTriangleProbe]) -> Option<f32> {
     triangles
         .iter()
@@ -3145,7 +4654,7 @@ fn point_to_ray_distance(point: Vec3, origin: Vec3, dir: Vec3) -> f32 {
     (to_point - dir * along).length()
 }
 
-#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 fn mc_cell_agreement(
     raw_cell: Option<&McCellOracleProbe>,
     iso_cell: Option<&McCellOracleProbe>,
@@ -3177,7 +4686,7 @@ fn mc_cell_agreement(
     }
 }
 
-#[cfg_attr(not(any(feature = "mc_transvoxel", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 fn mc_cells_same(a: &McCellOracleProbe, b: &McCellOracleProbe) -> bool {
     a.chunk_position == b.chunk_position && a.cell == b.cell
 }
@@ -3222,15 +4731,23 @@ fn load_probe_image(path: &Path) -> Option<ProbeImage> {
     })
 }
 
-fn latest_matching_terrain_debug_screenshot(camera_pos: Option<Vec3>) -> Option<PathBuf> {
-    latest_matching_terrain_debug_screenshot_in_dir(Path::new("debug"), camera_pos)
+fn latest_matching_terrain_debug_screenshot(
+    camera_pos: Option<Vec3>,
+    camera_forward: Option<Vec3>,
+) -> Option<PathBuf> {
+    latest_matching_terrain_debug_screenshot_in_dir(Path::new("debug"), camera_pos, camera_forward)
 }
 
 fn latest_matching_terrain_debug_screenshot_in_dir(
     output_dir: &Path,
     camera_pos: Option<Vec3>,
+    camera_forward: Option<Vec3>,
 ) -> Option<PathBuf> {
     let camera_pos = camera_pos?;
+    let camera_forward = camera_forward?.normalize_or_zero();
+    if camera_forward == Vec3::ZERO {
+        return None;
+    }
     let mut candidates = fs::read_dir(output_dir)
         .ok()?
         .filter_map(|entry| {
@@ -3260,6 +4777,9 @@ fn latest_matching_terrain_debug_screenshot_in_dir(
         if capture_camera_pos.distance(camera_pos) > TERRAIN_DEBUG_CAPTURE_CAMERA_EPSILON {
             continue;
         }
+        if !terrain_debug_capture_matches_camera_forward(&sidecar, camera_forward) {
+            continue;
+        }
         let png_path = sidecar_path.with_extension("png");
         if png_path.is_file() {
             return Some(png_path);
@@ -3270,6 +4790,28 @@ fn latest_matching_terrain_debug_screenshot_in_dir(
 
 fn read_terrain_debug_capture_sidecar(path: &Path) -> Option<TerrainDebugCaptureSidecarProbe> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+fn terrain_debug_capture_matches_camera_forward(
+    sidecar: &TerrainDebugCaptureSidecarProbe,
+    camera_forward: Vec3,
+) -> bool {
+    let Some(capture_forward) = terrain_debug_capture_forward(sidecar) else {
+        return false;
+    };
+    capture_forward.dot(camera_forward) >= TERRAIN_DEBUG_CAPTURE_CAMERA_FORWARD_DOT_MIN
+}
+
+fn terrain_debug_capture_forward(sidecar: &TerrainDebugCaptureSidecarProbe) -> Option<Vec3> {
+    let [x, y, z, w] = sidecar.camera_rot?;
+    let len_sq = x * x + y * y + z * z + w * w;
+    if !len_sq.is_finite() || len_sq <= f32::EPSILON {
+        return None;
+    }
+    let inv_len = len_sq.sqrt().recip();
+    let rotation = Quat::from_xyzw(x * inv_len, y * inv_len, z * inv_len, w * inv_len);
+    let forward = (rotation * Vec3::NEG_Z).normalize_or_zero();
+    (forward != Vec3::ZERO).then_some(forward)
 }
 
 fn visual_samples_for_camera_ray(
@@ -3354,11 +4896,8 @@ fn visual_point_probe(context: Option<&VisualProbeContext>, point: Vec3) -> Visu
     let pixel = sample_probe_image(image, screen_position);
     let pixel_window =
         sample_probe_image_window(image, screen_position, VISUAL_PIXEL_WINDOW_RADIUS_PX);
-    let nearby_pixel_window = sample_probe_image_window(
-        image,
-        screen_position,
-        VISUAL_NEARBY_PIXEL_WINDOW_RADIUS_PX,
-    );
+    let nearby_pixel_window =
+        sample_probe_image_window(image, screen_position, VISUAL_NEARBY_PIXEL_WINDOW_RADIUS_PX);
     let classification = pixel
         .map(classify_visual_pixel)
         .unwrap_or(VisualPixelClassification::Offscreen);
@@ -3592,6 +5131,7 @@ fn classify_camera_gap(
     first_backface: &Option<CameraRayHit>,
     first_mesher_iso_distance: Option<f32>,
     mc_cell: Option<&McCellOracleProbe>,
+    seam_terrace: Option<&SeamTerraceProbe>,
     visual_samples: &CameraRayVisualSamples,
 ) -> GapClassification {
     let Some(gap) = gap else {
@@ -3616,6 +5156,14 @@ fn classify_camera_gap(
         let near_iso =
             first_mesher_iso_distance.is_some_and(|iso| (hit.distance - iso).abs() <= 1.0);
         if (near_raw || near_iso)
+            && seam_terrace.is_some_and(|terrace| {
+                terrace.classification == SeamTerraceClassification::PossibleTerrace
+            })
+            && !visual_samples_show_background(visual_samples)
+        {
+            return GapClassification::SeamTerraceOrLodSurfaceDisplacement;
+        }
+        if (near_raw || near_iso)
             && (hit_has_shading_or_normal_anomaly(hit)
                 || visual_samples_have_dark_geometry(visual_samples))
         {
@@ -3638,6 +5186,11 @@ fn classify_camera_gap(
     if first_mesher_iso_distance.is_some_and(|iso| iso > raw_distance + 0.75)
         && visual_samples_confirm_non_dark(visual_samples)
     {
+        if seam_terrace.is_some_and(|terrace| {
+            terrace.classification == SeamTerraceClassification::PossibleTerrace
+        }) {
+            return GapClassification::SeamTerraceOrLodSurfaceDisplacement;
+        }
         return GapClassification::RawOccupancyVsMesherIsoFalsePositive;
     }
 
@@ -3769,31 +5322,37 @@ fn sample_mc_sdf_trilinear(
     values: &[f32],
     step: i32,
 ) -> Option<f32> {
+    if padded < 2 || step <= 0 || values.len() < padded * padded * padded {
+        return None;
+    }
     let grid = (point - chunk_origin) / step as f32 + Vec3::ONE;
     if grid.x < 0.0
         || grid.y < 0.0
         || grid.z < 0.0
-        || grid.x >= (padded - 1) as f32
-        || grid.y >= (padded - 1) as f32
-        || grid.z >= (padded - 1) as f32
+        || grid.x > (padded - 1) as f32
+        || grid.y > (padded - 1) as f32
+        || grid.z > (padded - 1) as f32
     {
         return None;
     }
     let x0 = grid.x.floor() as usize;
     let y0 = grid.y.floor() as usize;
     let z0 = grid.z.floor() as usize;
+    let x1 = (x0 + 1).min(padded - 1);
+    let y1 = (y0 + 1).min(padded - 1);
+    let z1 = (z0 + 1).min(padded - 1);
     let tx = grid.x - x0 as f32;
     let ty = grid.y - y0 as f32;
     let tz = grid.z - z0 as f32;
     let sample = |x: usize, y: usize, z: usize| values[x + y * padded + z * padded * padded];
     let c000 = sample(x0, y0, z0);
-    let c100 = sample(x0 + 1, y0, z0);
-    let c010 = sample(x0, y0 + 1, z0);
-    let c110 = sample(x0 + 1, y0 + 1, z0);
-    let c001 = sample(x0, y0, z0 + 1);
-    let c101 = sample(x0 + 1, y0, z0 + 1);
-    let c011 = sample(x0, y0 + 1, z0 + 1);
-    let c111 = sample(x0 + 1, y0 + 1, z0 + 1);
+    let c100 = sample(x1, y0, z0);
+    let c010 = sample(x0, y1, z0);
+    let c110 = sample(x1, y1, z0);
+    let c001 = sample(x0, y0, z1);
+    let c101 = sample(x1, y0, z1);
+    let c011 = sample(x0, y1, z1);
+    let c111 = sample(x1, y1, z1);
     let c00 = c000.lerp(c100, tx);
     let c10 = c010.lerp(c110, tx);
     let c01 = c001.lerp(c101, tx);
@@ -4135,6 +5694,7 @@ fn sample_camera_ray_fan(
                     mesher_iso_mc_cell: probe.mesher_iso_mc_cell,
                     first_render_hit_source: probe.first_render_hit_source,
                     cell_agreement: probe.cell_agreement,
+                    seam_terrace: probe.seam_terrace,
                     visual_samples: probe.visual_samples,
                     gap_length: gap.gap_length,
                     surface_point: surface_point.into(),
@@ -4161,6 +5721,361 @@ fn sample_camera_ray_fan(
         rays_total,
         rays_with_gap: gaps.len() as u32,
         gaps,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_entity_checklist_for_probe(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    target_chunk: IVec3,
+    camera_ray_fan: Option<&CameraRayFan>,
+    active_seam_faces: &[SeamFaceProbe],
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> Vec<RenderEntityChecklistProbe> {
+    let mut chunks = HashSet::from([target_chunk]);
+    if let Some(fan) = camera_ray_fan {
+        for gap in &fan.gaps {
+            chunks.insert(ivec3_from_dump(gap.surface_chunk));
+            if let Some(cell) = &gap.mc_cell {
+                chunks.insert(ivec3_from_dump(cell.chunk_position));
+            }
+            if let Some(cell) = &gap.mesher_iso_mc_cell {
+                chunks.insert(ivec3_from_dump(cell.chunk_position));
+            }
+            if let Some(source) = &gap.first_render_hit_source {
+                if let Some(chunk) = mc_source_probe_chunk(source) {
+                    chunks.insert(chunk);
+                }
+            }
+        }
+    }
+    for seam in active_seam_faces {
+        chunks.insert(ivec3_from_dump(seam.source_chunk));
+        chunks.insert(ivec3_from_dump(seam.neighbor_chunk));
+    }
+
+    let mut chunks: Vec<_> = chunks.into_iter().collect();
+    chunks.sort_by(|a, b| compare_chunk_pos_lex(*a, *b));
+    chunks
+        .into_iter()
+        .filter_map(|chunk| {
+            render_entity_checklist_for_chunk(
+                world,
+                terrain_entities,
+                meshes,
+                chunk,
+                camera_pos,
+                mesh_settings,
+                lod_settings,
+                water_lod_guard_chunks,
+            )
+        })
+        .collect()
+}
+
+fn normalized_probe_summary(
+    camera_ray_fan: Option<&CameraRayFan>,
+    active_seam_faces: &[SeamFaceProbe],
+    render_entity_checklist: &[RenderEntityChecklistProbe],
+) -> TerrainHoleProbeSummary {
+    let mut gap_classification_counts = BTreeMap::new();
+    let mut seam_terrace_counts = BTreeMap::new();
+    let mut gaps_by_lod_pair = BTreeMap::new();
+    let mut gaps_by_nearest_face = BTreeMap::new();
+    let mut max_gap_seam_delta_voxels: Option<f32> = None;
+    let mut skipped_lod_chunks = HashSet::new();
+    let mut suspect_scores: HashMap<IVec3, ChunkSuspectProbe> = HashMap::new();
+
+    if let Some(fan) = camera_ray_fan {
+        for gap in &fan.gaps {
+            increment_count(
+                &mut gap_classification_counts,
+                format!("{:?}", gap.gap_classification),
+            );
+            if let Some(face) = gap.nearest_chunk_faces.first() {
+                increment_count(&mut gaps_by_nearest_face, face.face.clone());
+            }
+            increment_count(&mut gaps_by_lod_pair, gap_lod_pair_name(gap));
+            if let Some(terrace) = &gap.seam_terrace {
+                increment_count(
+                    &mut seam_terrace_counts,
+                    format!("{:?}", terrace.classification),
+                );
+                if let Some(delta) = terrace.worst_abs_height_delta {
+                    max_gap_seam_delta_voxels =
+                        Some(max_gap_seam_delta_voxels.map_or(delta, |max| max.max(delta)));
+                }
+            }
+            if gap
+                .surface_chunk_state
+                .mc_transvoxel_at_mesh
+                .is_some_and(|stats| stats.skipped_lod_delta_gt_one > 0)
+            {
+                skipped_lod_chunks.insert(ivec3_from_dump(gap.surface_chunk));
+            }
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(gap.surface_chunk),
+                format!("fan gap classified {:?}", gap.gap_classification),
+            );
+        }
+    }
+
+    let mut max_active_seam_delta_voxels: Option<f32> = None;
+    for seam in active_seam_faces {
+        if let Some(delta) = seam.max_abs_face_offset_delta.or(seam.max_abs_height_delta) {
+            max_active_seam_delta_voxels =
+                Some(max_active_seam_delta_voxels.map_or(delta, |max| max.max(delta)));
+        }
+        if seam
+            .source_chunk_skipped_lod_delta_gt_one
+            .is_some_and(|count| count > 0)
+        {
+            skipped_lod_chunks.insert(ivec3_from_dump(seam.source_chunk));
+        }
+        if seam
+            .neighbor_chunk_skipped_lod_delta_gt_one
+            .is_some_and(|count| count > 0)
+        {
+            skipped_lod_chunks.insert(ivec3_from_dump(seam.neighbor_chunk));
+        }
+        if seam.possible_terrace_sample_count > 0 {
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(seam.source_chunk),
+                format!(
+                    "{} seam possible terrace max_delta={:.2}",
+                    seam.face,
+                    seam.max_abs_face_offset_delta
+                        .or(seam.max_abs_height_delta)
+                        .unwrap_or_default()
+                ),
+            );
+        }
+        if seam.boundary_edges.unmatched_seam_edge_count > 0 {
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(seam.source_chunk),
+                format!(
+                    "{} seam has {} unmatched boundary edges",
+                    seam.face, seam.boundary_edges.unmatched_seam_edge_count
+                ),
+            );
+        }
+        if seam.transition_coverage.samples_without_render_coverage > 0 {
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(seam.source_chunk),
+                format!(
+                    "{} seam has {} uncovered transition samples",
+                    seam.face, seam.transition_coverage.samples_without_render_coverage
+                ),
+            );
+        }
+    }
+
+    let stale_or_pending_mesh_chunks = render_entity_checklist
+        .iter()
+        .filter(|check| check.mesh_status != LodMeshStatus::Current)
+        .map(|check| check.chunk_position)
+        .collect();
+    for check in render_entity_checklist {
+        if check.mesh_status != LodMeshStatus::Current {
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(check.chunk_position),
+                format!("render checklist mesh_status={:?}", check.mesh_status),
+            );
+        }
+        if !check.mesh_asset_loaded && check.mesh_handle_present {
+            add_suspect_reason(
+                &mut suspect_scores,
+                ivec3_from_dump(check.chunk_position),
+                "mesh handle exists but mesh asset is not loaded".to_string(),
+            );
+        }
+    }
+
+    let mut top_suspect_chunks: Vec<_> = suspect_scores.into_values().collect();
+    top_suspect_chunks.sort_by(|a, b| {
+        b.score.cmp(&a.score).then_with(|| {
+            compare_chunk_pos_lex(
+                ivec3_from_dump(a.chunk_position),
+                ivec3_from_dump(b.chunk_position),
+            )
+        })
+    });
+    top_suspect_chunks.truncate(12);
+
+    let mut chunks_with_skipped_lod_delta_gt_one: Vec<_> =
+        skipped_lod_chunks.into_iter().map(Into::into).collect();
+    chunks_with_skipped_lod_delta_gt_one
+        .sort_by(|a, b| compare_chunk_pos_lex(ivec3_from_dump(*a), ivec3_from_dump(*b)));
+
+    TerrainHoleProbeSummary {
+        gap_classification_counts: counts_to_vec(gap_classification_counts),
+        seam_terrace_counts: counts_to_vec(seam_terrace_counts),
+        gaps_by_lod_pair: counts_to_vec(gaps_by_lod_pair),
+        gaps_by_nearest_face: counts_to_vec(gaps_by_nearest_face),
+        max_gap_seam_delta_voxels,
+        max_active_seam_delta_voxels,
+        active_seam_face_count: active_seam_faces.len() as u32,
+        active_seam_faces_with_possible_terrace: active_seam_faces
+            .iter()
+            .filter(|seam| seam.possible_terrace_sample_count > 0)
+            .count() as u32,
+        active_seam_faces_with_open_edges: active_seam_faces
+            .iter()
+            .filter(|seam| seam.boundary_edges.unmatched_seam_edge_count > 0)
+            .count() as u32,
+        active_seam_faces_with_transition_coverage_gaps: active_seam_faces
+            .iter()
+            .filter(|seam| seam.transition_coverage.samples_without_render_coverage > 0)
+            .count() as u32,
+        chunks_with_skipped_lod_delta_gt_one,
+        stale_or_pending_mesh_chunks,
+        top_suspect_chunks,
+    }
+}
+
+fn screenshot_overlay_points(
+    camera_ray: Option<&CameraRayProbe>,
+    camera_ray_fan: Option<&CameraRayFan>,
+    active_seam_faces: &[SeamFaceProbe],
+) -> Vec<ScreenshotOverlayPointProbe> {
+    let mut points = Vec::new();
+    if let Some(ray) = camera_ray {
+        push_visual_overlay_point(
+            &mut points,
+            "center.raw_surface",
+            ray.visual_samples.raw_surface.as_ref(),
+        );
+        push_visual_overlay_point(
+            &mut points,
+            "center.mesher_iso",
+            ray.visual_samples.mesher_iso.as_ref(),
+        );
+        push_visual_overlay_point(
+            &mut points,
+            "center.first_any_hit",
+            ray.visual_samples.first_any_render_hit.as_ref(),
+        );
+        push_visual_overlay_point(
+            &mut points,
+            "center.first_front_hit",
+            ray.visual_samples.first_front_render_hit.as_ref(),
+        );
+    }
+    if let Some(fan) = camera_ray_fan {
+        for gap in &fan.gaps {
+            let prefix = format!("fan.{}.{}", gap.grid_x, gap.grid_y);
+            push_visual_overlay_point(
+                &mut points,
+                format!("{prefix}.raw_surface"),
+                gap.visual_samples.raw_surface.as_ref(),
+            );
+            push_visual_overlay_point(
+                &mut points,
+                format!("{prefix}.mesher_iso"),
+                gap.visual_samples.mesher_iso.as_ref(),
+            );
+        }
+    }
+    for seam in active_seam_faces {
+        for sample in &seam.samples {
+            push_visual_overlay_point(
+                &mut points,
+                format!(
+                    "seam.{}.{}.sample_{}_{:.2}_{:.2}",
+                    format_ivec3_dump(seam.source_chunk),
+                    seam.face,
+                    sample.sample_index,
+                    sample.face_u,
+                    sample.face_v
+                ),
+                Some(&sample.visual),
+            );
+        }
+    }
+    points
+}
+
+fn push_visual_overlay_point(
+    points: &mut Vec<ScreenshotOverlayPointProbe>,
+    label: impl Into<String>,
+    visual: Option<&VisualPointProbe>,
+) {
+    let Some(visual) = visual else {
+        return;
+    };
+    points.push(ScreenshotOverlayPointProbe {
+        label: label.into(),
+        world_point: visual.world_point,
+        screen_position: visual.screen_position,
+        classification: visual.classification,
+    });
+}
+
+fn increment_count(counts: &mut BTreeMap<String, u32>, name: String) {
+    *counts.entry(name).or_default() += 1;
+}
+
+fn counts_to_vec(counts: BTreeMap<String, u32>) -> Vec<NamedCountProbe> {
+    counts
+        .into_iter()
+        .map(|(name, count)| NamedCountProbe { name, count })
+        .collect()
+}
+
+fn add_suspect_reason(
+    scores: &mut HashMap<IVec3, ChunkSuspectProbe>,
+    chunk_position: IVec3,
+    reason: String,
+) {
+    let entry = scores
+        .entry(chunk_position)
+        .or_insert_with(|| ChunkSuspectProbe {
+            chunk_position: chunk_position.into(),
+            score: 0,
+            reasons: Vec::new(),
+        });
+    entry.score = entry.score.saturating_add(1);
+    if !entry.reasons.iter().any(|existing| existing == &reason) {
+        entry.reasons.push(reason);
+    }
+}
+
+fn gap_lod_pair_name(gap: &FanGap) -> String {
+    if let Some(terrace) = &gap.seam_terrace {
+        if let Some(pair) = terrace.pairs.first() {
+            return format!("{}->{}", pair.fine_lod, pair.coarse_lod);
+        }
+    }
+    let mesh_lod = gap
+        .mc_cell
+        .as_ref()
+        .map(|cell| cell.effective_lod_at_mesh.clone())
+        .or_else(|| gap.surface_chunk_state.lod_level.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let surface_lod = gap
+        .surface_chunk_state
+        .lod_level
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("{mesh_lod}->{surface_lod}")
+}
+
+fn mc_source_probe_chunk(source: &McTriangleSourceProbe) -> Option<IVec3> {
+    match source {
+        McTriangleSourceProbe::Regular { chunk_position, .. }
+        | McTriangleSourceProbe::Transition { chunk_position, .. } => {
+            Some(ivec3_from_dump(*chunk_position))
+        }
     }
 }
 
@@ -4469,6 +6384,202 @@ fn entity_probe(entity: Entity, terrain_entities: &TerrainEntityQuery) -> Option
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn render_entity_checklist_for_chunk(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    chunk_pos: IVec3,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+) -> Option<RenderEntityChecklistProbe> {
+    let chunk = world.get_chunk(chunk_pos);
+    let mesh_entity = chunk.and_then(|chunk| chunk.mesh_entity());
+    let (
+        entity_query_found,
+        mesh_handle_present,
+        mesh_asset_loaded,
+        position_attribute_present,
+        normal_attribute_present,
+        index_buffer_present,
+        chunk_mesh_component_present,
+        terrain_debug_present,
+        visibility,
+        inherited_visibility,
+        view_visibility,
+        mesh_mode_at_component,
+        target_mode_at_mesh,
+        logical_lod_at_mesh,
+        effective_lod_at_mesh,
+        generated_frame,
+        component_vertex_count,
+        component_triangle_count,
+    ) = if let Some(entity) = mesh_entity {
+        match terrain_entities.get(entity) {
+            Ok((
+                _entity,
+                mesh3d,
+                _transform,
+                chunk_mesh,
+                terrain_debug,
+                _mc_triangle_sources,
+                _water_mesh,
+                visibility,
+                inherited_visibility,
+                view_visibility,
+                _needs_collider,
+                _chunk_collider,
+                _collider,
+                _rigid_body,
+            )) => {
+                let mesh = mesh3d.and_then(|mesh3d| meshes.get(&mesh3d.0));
+                (
+                    true,
+                    mesh3d.is_some(),
+                    mesh.is_some(),
+                    mesh.is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some()),
+                    mesh.is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some()),
+                    mesh.is_some_and(|mesh| mesh.indices().is_some()),
+                    chunk_mesh.is_some(),
+                    terrain_debug.is_some(),
+                    visibility.map(|visibility| format!("{visibility:?}")),
+                    inherited_visibility.map(|visibility| visibility.get()),
+                    view_visibility.map(|visibility| visibility.get()),
+                    chunk_mesh.map(|chunk_mesh| format!("{:?}", chunk_mesh.mesh_mode)),
+                    terrain_debug.map(|debug| mesh_mode_string(debug.target_mode_at_mesh)),
+                    terrain_debug.map(|debug| lod_string(debug.logical_lod_at_mesh)),
+                    terrain_debug.map(|debug| lod_string(debug.effective_lod_at_mesh)),
+                    terrain_debug.map(|debug| debug.generated_frame),
+                    chunk_mesh.map(|chunk_mesh| chunk_mesh.vertex_count),
+                    chunk_mesh.map(|chunk_mesh| chunk_mesh.triangle_count),
+                )
+            }
+            Err(_) => (
+                false, false, false, false, false, false, false, false, None, None, None, None,
+                None, None, None, None, None, None,
+            ),
+        }
+    } else {
+        (
+            false, false, false, false, false, false, false, false, None, None, None, None, None,
+            None, None, None, None, None,
+        )
+    };
+
+    let terrain_debug = terrain_mesh_debug_for_chunk(world, terrain_entities, chunk_pos);
+    let current_lod = chunk.map(|chunk| chunk.lod_level());
+    let dirty = chunk.map(|chunk| chunk.is_dirty());
+    let mesh_status = mesh_status_for_chunk(
+        world,
+        chunk_pos,
+        camera_pos,
+        mesh_settings,
+        lod_settings,
+        water_lod_guard_chunks,
+        terrain_debug.as_ref(),
+    );
+    Some(RenderEntityChecklistProbe {
+        chunk_position: chunk_pos.into(),
+        mesh_entity_from_world: mesh_entity.map(|entity| format!("{entity:?}")),
+        entity_query_found,
+        mesh_handle_present,
+        mesh_asset_loaded,
+        position_attribute_present,
+        normal_attribute_present,
+        index_buffer_present,
+        vertex_count: component_vertex_count,
+        triangle_count: component_triangle_count,
+        chunk_mesh_component_present,
+        terrain_debug_present,
+        visibility,
+        inherited_visibility,
+        view_visibility,
+        visible_to_render: inherited_visibility
+            .zip(view_visibility)
+            .map(|(a, b)| a && b),
+        mesh_mode_at_component,
+        target_mode_at_mesh,
+        current_lod: current_lod.map(lod_string),
+        logical_lod_at_mesh,
+        effective_lod_at_mesh,
+        generated_frame,
+        dirty,
+        dirty_reasons: chunk
+            .map(|chunk| dirty_reason_names(chunk.dirty_reason_flags()))
+            .unwrap_or_default(),
+        mesh_status,
+    })
+}
+
+fn terrain_mesh_debug_for_chunk(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    chunk_pos: IVec3,
+) -> Option<TerrainMeshDebug> {
+    let entity = world.get_chunk(chunk_pos)?.mesh_entity()?;
+    let Ok((
+        _entity,
+        _mesh3d,
+        _transform,
+        _chunk_mesh,
+        terrain_debug,
+        _mc_triangle_sources,
+        _water_mesh,
+        _visibility,
+        _inherited_visibility,
+        _view_visibility,
+        _needs_collider,
+        _chunk_collider,
+        _collider,
+        _rigid_body,
+    )) = terrain_entities.get(entity)
+    else {
+        return None;
+    };
+    terrain_debug.copied()
+}
+
+fn mesh_status_for_chunk(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    camera_pos: Option<Vec3>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    water_lod_guard_chunks: &HashSet<IVec3>,
+    terrain_debug: Option<&TerrainMeshDebug>,
+) -> LodMeshStatus {
+    let chunk = world.get_chunk(chunk_pos);
+    let current_lod = chunk.map(|chunk| chunk.lod_level());
+    let remesh_pending = chunk.is_some_and(|chunk| chunk.is_dirty());
+    let effective_mesh_lod_now =
+        effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
+    let _water_shore_guarded = water_lod_guard_chunks.contains(&chunk_pos);
+    let mesh_lod_mismatch = terrain_debug.map(|debug| {
+        current_lod != Some(debug.logical_lod_at_mesh)
+            || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
+            || camera_pos
+                .and_then(|camera_pos| {
+                    let distance = terrain_lod_distance_xz(chunk_pos, camera_pos);
+                    current_lod.map(|current_lod| {
+                        water_shore_guarded_lod(
+                            calculate_target_lod_with_hysteresis(
+                                distance,
+                                current_lod,
+                                lod_settings,
+                            ),
+                            distance,
+                            lod_settings,
+                            water_lod_guard_chunks.contains(&chunk_pos),
+                        )
+                    })
+                })
+                .is_some_and(|target_lod| current_lod != Some(target_lod))
+    });
+    lod_mesh_status(mesh_lod_mismatch, remesh_pending)
+}
+
 fn classify_probe(
     target_pos: IVec3,
     target_local: UVec3,
@@ -4727,6 +6838,24 @@ fn face_mask_names(mask: u8) -> Vec<String> {
     .collect()
 }
 
+#[cfg(feature = "mc_transvoxel")]
+fn face_mask_bit(face: ChunkFace) -> u8 {
+    match face {
+        ChunkFace::NegX => 0,
+        ChunkFace::PosX => 1,
+        ChunkFace::NegY => 2,
+        ChunkFace::PosY => 3,
+        ChunkFace::NegZ => 4,
+        ChunkFace::PosZ => 5,
+    }
+}
+
+fn compare_chunk_pos_lex(a: IVec3, b: IVec3) -> std::cmp::Ordering {
+    a.x.cmp(&b.x)
+        .then_with(|| a.y.cmp(&b.y))
+        .then_with(|| a.z.cmp(&b.z))
+}
+
 fn uniformity_name(uniformity: ChunkUniformity) -> &'static str {
     match uniformity {
         ChunkUniformity::Unknown => "Unknown",
@@ -4915,6 +7044,7 @@ mod tests {
                 &Some(backface),
                 None,
                 None,
+                None,
                 &CameraRayVisualSamples::default()
             ),
             GapClassification::BackfaceOrWinding
@@ -4952,6 +7082,7 @@ mod tests {
                 &None,
                 &Some(far_backface),
                 Some(228.0654),
+                None,
                 None,
                 &CameraRayVisualSamples::default(),
             ),
@@ -5031,24 +7162,49 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let sidecar_path = temp.path().join("wireframe-test.json");
         let png_path = temp.path().join("wireframe-test.png");
-        fs::write(&sidecar_path, r#"{"camera_pos":[1.0,2.0,3.0]}"#).unwrap();
+        fs::write(
+            &sidecar_path,
+            r#"{"camera_pos":[1.0,2.0,3.0],"camera_rot":[0.0,0.0,0.0,1.0]}"#,
+        )
+        .unwrap();
         fs::write(&png_path, [0_u8]).unwrap();
 
         assert_eq!(
             latest_matching_terrain_debug_screenshot_in_dir(
                 temp.path(),
-                Some(Vec3::new(1.2, 2.0, 3.0))
+                Some(Vec3::new(1.2, 2.0, 3.0)),
+                Some(Vec3::NEG_Z),
             ),
             Some(png_path)
         );
         assert!(
             latest_matching_terrain_debug_screenshot_in_dir(
                 temp.path(),
-                Some(Vec3::new(10.0, 2.0, 3.0))
+                Some(Vec3::new(10.0, 2.0, 3.0)),
+                Some(Vec3::NEG_Z),
             )
             .is_none()
         );
-        assert!(latest_matching_terrain_debug_screenshot_in_dir(temp.path(), None).is_none());
+        assert!(
+            latest_matching_terrain_debug_screenshot_in_dir(
+                temp.path(),
+                Some(Vec3::new(1.2, 2.0, 3.0)),
+                Some(Vec3::Z),
+            )
+            .is_none()
+        );
+        assert!(
+            latest_matching_terrain_debug_screenshot_in_dir(temp.path(), None, Some(Vec3::NEG_Z))
+                .is_none()
+        );
+        assert!(
+            latest_matching_terrain_debug_screenshot_in_dir(
+                temp.path(),
+                Some(Vec3::new(1.2, 2.0, 3.0)),
+                None
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -5181,6 +7337,36 @@ mod tests {
         }
     }
 
+    fn possible_seam_terrace_probe() -> SeamTerraceProbe {
+        SeamTerraceProbe {
+            sample_point: Vec3::new(96.0, 32.0, 96.0).into(),
+            threshold_voxels: 0.5,
+            threshold_world: 0.5,
+            pairs: vec![SeamTerracePairProbe {
+                face: "pos_x".to_string(),
+                source_chunk: IVec3::new(5, 2, 6).into(),
+                neighbor_chunk: IVec3::new(6, 2, 6).into(),
+                source_lod: "Lod0".to_string(),
+                neighbor_lod: "Lod1".to_string(),
+                fine_chunk: IVec3::new(5, 2, 6).into(),
+                coarse_chunk: IVec3::new(6, 2, 6).into(),
+                fine_lod: "Lod0".to_string(),
+                coarse_lod: "Lod1".to_string(),
+                fine_sample_point: Vec3::new(95.75, 32.0, 96.0).into(),
+                coarse_sample_point: Vec3::new(96.25, 32.0, 96.0).into(),
+                fine_iso_height: Some(31.0),
+                coarse_iso_height: Some(32.25),
+                signed_height_delta_coarse_minus_fine: Some(1.25),
+                abs_height_delta: Some(1.25),
+                source_chunk_skipped_lod_delta_gt_one: Some(0),
+                neighbor_chunk_skipped_lod_delta_gt_one: Some(0),
+            }],
+            worst_abs_height_delta: Some(1.25),
+            classification: SeamTerraceClassification::PossibleTerrace,
+            note: "test seam terrace".to_string(),
+        }
+    }
+
     #[test]
     fn lit_mesher_iso_visual_overrides_case3_triangle_miss_classification() {
         let gap = SeeThroughGap {
@@ -5202,9 +7388,39 @@ mod tests {
                 &None,
                 Some(98.228195),
                 Some(&cell),
+                None,
                 &visual_samples,
             ),
             GapClassification::RawOccupancyVsMesherIsoFalsePositive
+        );
+    }
+
+    #[test]
+    fn possible_seam_terrace_is_distinct_from_raw_occupancy_false_positive() {
+        let gap = SeeThroughGap {
+            voxel_surface_distance: 95.5,
+            first_front_render_hit_distance: Some(98.25),
+            gap_length: 2.75,
+            note: "test".to_string(),
+        };
+        let hit = classification_test_hit(98.25);
+        let cell = classification_test_cell();
+        let visual_samples =
+            visual_samples_with_mesher_iso(VisualPixelClassification::LitOrNonDark);
+        let terrace = possible_seam_terrace_probe();
+
+        assert_eq!(
+            classify_camera_gap(
+                &Some(gap),
+                &Some(hit.clone()),
+                &Some(hit),
+                &None,
+                Some(98.0),
+                Some(&cell),
+                Some(&terrace),
+                &visual_samples,
+            ),
+            GapClassification::SeamTerraceOrLodSurfaceDisplacement
         );
     }
 
@@ -5229,6 +7445,7 @@ mod tests {
                 &None,
                 Some(98.228195),
                 Some(&cell),
+                None,
                 &visual_samples,
             ),
             GapClassification::VertexPositionOrTableDecodeError
@@ -5254,6 +7471,7 @@ mod tests {
                 &None,
                 None,
                 Some(&cell),
+                None,
                 &CameraRayVisualSamples::default(),
             ),
             GapClassification::Unknown
@@ -5279,6 +7497,7 @@ mod tests {
                 &None,
                 None,
                 Some(&cell),
+                None,
                 &CameraRayVisualSamples::default(),
             ),
             GapClassification::MissingRegularMcGeometry
@@ -5311,6 +7530,177 @@ mod tests {
 
         assert!((distance - 1.5).abs() < 1.0e-5);
         assert!((point.z - 1.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn seam_terrace_vertical_iso_height_matches_flat_plane_sdf() {
+        let padded = 4usize;
+        let mut values = vec![0.0_f32; padded * padded * padded];
+        for z in 0..padded {
+            for y in 0..padded {
+                for x in 0..padded {
+                    values[x + y * padded + z * padded * padded] = y as f32 - 2.0;
+                }
+            }
+        }
+        let grid = McSdfGridProbe {
+            chunk_position: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            padded,
+            values,
+            step: 1,
+            source_chunk_skipped_lod_delta_gt_one: Some(0),
+        };
+
+        let height = highest_vertical_iso_height_in_grid(&grid, 0.5, 0.5)
+            .expect("vertical probe should cross the flat SDF plane");
+
+        assert!((height - 1.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn seam_terrace_vertical_iso_height_samples_upper_padded_boundary() {
+        let padded = 4usize;
+        let mut values = vec![0.0_f32; padded * padded * padded];
+        for z in 0..padded {
+            for y in 0..padded {
+                for x in 0..padded {
+                    values[x + y * padded + z * padded * padded] = y as f32 - 2.0;
+                }
+            }
+        }
+        let grid = McSdfGridProbe {
+            chunk_position: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            padded,
+            values,
+            step: 1,
+            source_chunk_skipped_lod_delta_gt_one: Some(0),
+        };
+
+        let height = highest_vertical_iso_height_in_grid(&grid, 2.0, 0.5)
+            .expect("vertical probe should sample the upper padded X boundary");
+
+        assert!((height - 1.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn seam_face_sample_point_covers_y_face_as_2d_grid() {
+        let point = seam_face_sample_point(Vec3::ZERO, ChunkFace::PosY, 0.25, 0.75);
+
+        assert!((point.x - CHUNK_SIZE_I32 as f32 * 0.25).abs() < 1.0e-5);
+        assert!((point.y - CHUNK_SIZE_I32 as f32).abs() < 1.0e-5);
+        assert!((point.z - CHUNK_SIZE_I32 as f32 * 0.75).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn face_normal_iso_offset_matches_flat_x_plane_sdf() {
+        let padded = 6usize;
+        let mut values = vec![0.0_f32; padded * padded * padded];
+        for z in 0..padded {
+            for y in 0..padded {
+                for x in 0..padded {
+                    values[x + y * padded + z * padded * padded] = x as f32 - 3.0;
+                }
+            }
+        }
+        let grid = McSdfGridProbe {
+            chunk_position: IVec3::ZERO,
+            lod: LodLevel::Lod0,
+            neighbor_lods: NeighborLods::default(),
+            padded,
+            values,
+            step: 1,
+            source_chunk_skipped_lod_delta_gt_one: Some(0),
+        };
+
+        let offset =
+            nearest_face_normal_iso_offset_in_grid(&grid, Vec3::new(2.0, 1.0, 1.0), Vec3::X)
+                .expect("face-normal probe should cross the flat SDF plane");
+
+        assert!((offset - 0.0).abs() < 1.0e-5);
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn split_boundary_edges_cover_long_opposite_edge() {
+        let edges = vec![
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::ZERO,
+                end: Vec3::new(2.0, 0.0, 0.0),
+                length: 2.0,
+                transition: false,
+            },
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::ZERO,
+                end: Vec3::new(1.0, 0.0, 0.0),
+                length: 1.0,
+                transition: true,
+            },
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::new(1.0, 0.0, 0.0),
+                end: Vec3::new(2.0, 0.0, 0.0),
+                length: 1.0,
+                transition: true,
+            },
+        ];
+
+        assert!(edge_has_opposite_side_coverage(&edges[0], &edges));
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn same_chunk_duplicate_boundary_edge_counts_as_covered() {
+        let edges = vec![
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::ZERO,
+                end: Vec3::new(1.0, 0.0, 0.0),
+                length: 1.0,
+                transition: false,
+            },
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::new(1.0, 0.0, 0.0),
+                end: Vec3::ZERO,
+                length: 1.0,
+                transition: true,
+            },
+        ];
+
+        assert!(edge_has_opposite_side_coverage(&edges[0], &edges));
+    }
+
+    #[cfg(feature = "mc_transvoxel")]
+    #[test]
+    fn missing_split_boundary_edge_half_remains_unmatched() {
+        let edges = vec![
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::ZERO,
+                end: Vec3::new(2.0, 0.0, 0.0),
+                length: 2.0,
+                transition: false,
+            },
+            BoundaryEdgeAccum {
+                source: None,
+                start: Vec3::ZERO,
+                end: Vec3::new(1.0, 0.0, 0.0),
+                length: 1.0,
+                transition: true,
+            },
+        ];
+
+        assert!(!edge_has_opposite_side_coverage(&edges[0], &edges));
     }
 
     #[cfg(feature = "mc_transvoxel")]

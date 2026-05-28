@@ -1272,9 +1272,10 @@ Important finding:
 
 Probe improvement:
 
-- Shift+F9 now auto-selects the newest recent `Alt+Shift+F7` terrain debug
-  screenshot when the sidecar camera position matches the current camera. Bench
-  probes with an explicit screenshot path still use the explicit path.
+- Shift+F9 auto-selects the newest recent `Alt+Shift+F7` terrain debug
+  screenshot when the sidecar camera position and facing direction match the
+  current camera. Bench probes with an explicit screenshot path still use the
+  explicit path.
 - This should turn the next live dump's `visual_samples` from
   `screenshot_unavailable` into pixel classifications at raw surface,
   mesher-iso, and render-hit points.
@@ -2220,3 +2221,349 @@ Interpretation:
 - The remaining live-LOD guard failure is not a transaction abort. It is a
   broader frame-p99/render-readiness problem in the forest checkpoint, with
   `LOD Update`, `Render Graph CPU`, and render prepare rows also contributing.
+
+### Pending work after transactional publish
+
+Status as of 2026-05-26:
+
+- Transactional LOD publishing is implemented, committed, and pushed to
+  `main` in commit `430e9a4` (`Batch LOD mesh publishes into transactions`).
+- The transaction path now reaches publication: latest live-LOD bench shows
+  transaction abort p99 `0` and transaction commit p99 `32`.
+- This primarily addresses transient LOD-settling holes caused by chunks
+  swapping one at a time. It does not prove the remaining static
+  MC+Transvoxel seam holes are fixed.
+
+Still pending:
+
+1. Re-test the pushed transaction build visually with
+   `.\scripts\startVoxels.ps1 -Mc`.
+2. Confirm whether holes that appear/disappear during LOD settling are reduced.
+3. Capture one remaining static seam hole with:
+   - `Alt+F10` flat unlit terrain,
+   - `Alt+F7` wireframe,
+   - `Alt+F8` normals if needed,
+   - `Shift+F9` terrain hole probe.
+4. Classify the remaining static hole as one of:
+   - missing transition geometry,
+   - missing regular MC geometry,
+   - empty/mixed zero-triangle chunk,
+   - vertex/table decode issue,
+   - normals/material-only artifact.
+5. Investigate `Terrain Mesh Empty But Solid Voxels`; it remains the best
+   geometry-side lead for small static polygon holes.
+6. Continue performance cleanup separately. Latest guard result still has one
+   live-LOD frame-p99 failure and three mesh-dirty warnings:
+
+```text
+live_lod_ridge_mesh_dirty_p99   6.510 ms  WARN
+live_lod_jump_mesh_dirty_p99    5.216 ms  WARN
+live_lod_forest_mesh_dirty_p99  8.052 ms  WARN
+live_lod_frame_p99             51.235 ms  FAIL
+```
+
+Known verification caveat:
+
+- `cargo check --release -j 1 --lib --features mc_transvoxel` passes under the
+  low-memory release profile used above.
+- The focused unit test for the transaction helper still cannot execute on the
+  local Windows toolchain because `cargo test --lib --features mc_transvoxel`
+  hits a rustc memory allocation failure before running tests.
+
+### 2026-05-27 normals-view seam finding
+
+Probe: `debug/terrain-hole-probe-20260527-013703.json`.
+
+The screenshot showed colored artifacts in `Alt+F8` normals view, but the user
+confirmed these are not holes. The probe agrees for the center ray:
+
+- `first_mesher_iso_distance`: `197.33475`
+- `first_any_render_hit.distance`: `197.88008`
+- `first_front_render_hit`: `None`
+- `first_backface_render_hit.distance`: `197.88008`
+- `gap_classification`: `backface_or_winding`
+- owning cell: regular MC, chunk `(4,4,5)`, `Lod1`, cell `(7,2,0)`,
+  `case_index=10`, `class_index=3`
+- expected regular triangles: `2`
+- actual regular triangles: `2`
+- `source_chunk_skipped_lod_delta_gt_one`: `0`
+
+Interpretation:
+
+- This sample has geometry close to the mesher iso; it is not a missing-terrain
+  hole.
+- The hit triangle is backfacing from the camera ray. Because terrain is
+  rendered double-sided, Bevy's PBR normal preparation flips normals on
+  backfaces. The old `Alt+F8` debug path used that flipped PBR normal, so
+  backface/winding cases could appear as wrong-color normal patches.
+- `Alt+F8` now uses the raw interpolated mesh normal (`in.world_normal`) for
+  diagnostic color instead of the double-sided PBR-prepared normal. If the
+  colored seam patches disappear in `Alt+F8`, the issue was primarily
+  backface/winding classification. If they remain, the next suspect is true
+  vertex normal discontinuity at LOD seams.
+
+Follow-up implementation:
+
+- MC+Transvoxel vertex normals now come from the same padded SDF grid used to
+  place the MC/transition vertices, instead of from the generic world-space
+  smoothed terrain SDF. This keeps LOD1+ seam normals aligned with the mesher
+  field that actually emitted the geometry.
+- `push_mc_triangle` now compares the triangle geometric normal against the
+  averaged emitted vertex normal and swaps the last two vertices when they
+  disagree. This prevents valid seam geometry from being reported/rendered as a
+  backface only because the regular/transition table winding and local normal
+  estimate disagree.
+- Regression checks added/run:
+  - `regular_lod1_triangle_winding_matches_vertex_normals`
+  - `transition_triangle_winding_matches_vertex_normals`
+
+Verification:
+
+- `cargo check --release -j 1 --lib --features mc_transvoxel` passed.
+- `cargo test --lib --features mc_transvoxel winding_matches_vertex_normals`
+  passed (`2 passed, 421 filtered out`).
+- Live-LOD visual bench with `mc_transvoxel` produced
+  `bench-runs/2026-05-27T02-21-03Z/summary.json`. The bench scene still reports
+  missing prop/billboard assets in the log, but it completed enough to write the
+  summary and screenshots.
+- `bench_guard` on that summary:
+  - live LOD ridge mesh dirty p99: `1.721 ms` PASS
+  - live LOD jump mesh dirty p99: `1.775 ms` PASS
+  - live LOD forest mesh dirty p99: `3.796 ms` PASS
+  - live LOD forest frame p99: `48.584 ms` FAIL
+- Compared with the previous transaction verification run
+  `bench-runs/2026-05-26T09-13-51Z`, mesh-dirty p99 improved from
+  `6.510 / 5.216 / 8.052 ms` to `1.721 / 1.775 / 3.796 ms`. The remaining
+  guard failure is the already-known forest frame p99 class, not a new
+  mesh-dirty regression from the normal fix.
+
+Expected visual effect: 
+
+- The remaining `Alt+F8` seam-color patches should shrink or disappear when 
+  they were caused by winding/PBR backface normal preparation. 
+- Any remaining bright normal patches after this should be treated as a real 
+  vertex-normal discontinuity or a residual seam geometry issue, not as a raw 
+  missing-triangle hole unless `Alt+F10` flat unlit mode shows background or 
+  farther LOD wireframe through the terrain.
+
+### 2026-05-27 seam terrace measurement
+
+Problem statement:
+
+- Some remaining artifacts are not holes and not normal-color artifacts. They
+  look like small terraces or ledges where fine and coarse LOD surfaces meet.
+- The old probe could classify missing geometry, raw-occupancy displacement,
+  and normal/backface issues, but it did not explicitly measure whether the
+  fine and coarse mesher SDF surfaces disagree at an LOD seam.
+
+Implementation:
+
+- Terrain hole-probe schema is now `11`.
+- Each center/fan gap can include a `seam_terrace` block.
+- For a sample near an active LOD-mismatched chunk face, the probe builds the
+  exact MC SDF grids for the source chunk and neighbor chunk, samples paired
+  points on the fine/coarse sides of the seam, then compares the highest
+  vertical mesher-iso height in each grid.
+- The per-pair output records:
+  - face,
+  - source and neighbor chunks,
+  - source/fine/coarse LODs,
+  - fine and coarse sample points,
+  - `fine_iso_height`,
+  - `coarse_iso_height`,
+  - `signed_height_delta_coarse_minus_fine`,
+  - `abs_height_delta`,
+  - both chunks' `skipped_lod_delta_gt_one`.
+- The summary output records `worst_abs_height_delta` and one of:
+  - `not_near_lod_seam`,
+  - `insufficient_data`,
+  - `no_terrace`,
+  - `possible_terrace`.
+
+Interpretation:
+
+- `possible_terrace` means paired fine/coarse seam iso heights differ by more
+  than `0.5` voxel. This is reported as a seam displacement measurement, not as
+  proof of missing triangles.
+- Final `gap_classification` can now be
+  `seam_terrace_or_lod_surface_displacement` when geometry exists near the
+  mesher iso and the screenshot sample does not show background.
+- If `Alt+F10` shows background or farther LOD wireframe through the terrain,
+  treat it as a real hole first; use `seam_terrace` only as supporting evidence
+  for why the seam surfaces may have separated.
+- If `Alt+F8` shows color differences but `Alt+F10` is solid and
+  `seam_terrace.classification=no_terrace`, treat it as a normal/material issue
+  rather than geometry displacement.
+
+Verification:
+
+- `rtk cargo test --lib --features mc_transvoxel seam_terrace -- --nocapture`
+  passed (`2 passed, 423 filtered out`).
+- `rtk cargo check --release -j 1 --lib --features mc_transvoxel` passed.
+
+### 2026-05-27 schema 12 seam-face forensics
+
+Problem statement:
+
+- A single camera ray can prove that something is wrong at one pixel, but it
+  does not describe the whole LOD seam. The next useful artifact is a seam-face
+  grid that measures the face itself.
+
+Implementation:
+
+- Terrain hole-probe schema is now `12`.
+- Added top-level `active_seam_faces`.
+- For nearby active LOD-mismatched faces, the probe now records:
+  - source and neighbor chunks,
+  - fine/coarse LOD pair,
+  - mesh status and `generated_frame` for both sides,
+  - whether both sides came from the same generated frame,
+  - dirty reasons for both sides,
+  - transition ownership and skipped boundary-row status,
+  - per-sample fine/coarse vertical mesher-iso heights,
+  - per-sample render coverage near either iso,
+  - per-sample screenshot projection/classification,
+  - max and median seam displacement.
+- Added `transition_coverage` to each active seam face. This reports whether a
+  skipped regular boundary row is backed by transition-tagged geometry and
+  whether any sampled seam points lack render coverage.
+- Added `boundary_edges` to each active seam face. This inspects emitted
+  regular/transition triangles touching that face and reports unmatched seam
+  edges with examples.
+- Added `render_entity_checklist`, a compact ECS/render sanity table for target,
+  fan, and seam chunks:
+  - mesh entity exists,
+  - mesh handle exists,
+  - mesh asset is loaded,
+  - positions/normals/indices exist,
+  - visibility flags,
+  - current/rendered/effective LOD,
+  - `generated_frame`,
+  - dirty reasons,
+  - mesh status.
+- Added `normalized_summary`:
+  - gap classification counts,
+  - seam terrace counts,
+  - gaps by LOD pair,
+  - gaps by nearest face,
+  - max gap seam delta,
+  - max active seam delta,
+  - active seam faces with possible terraces,
+  - active seam faces with open edges,
+  - active seam faces with transition coverage gaps,
+  - chunks with `skipped_lod_delta_gt_one`,
+  - stale/pending mesh chunks,
+  - top suspect chunks.
+- Added `screenshot_overlay_points`, a normalized list of projected points for
+  center ray, fan gaps, and active seam-face samples. This is intended for
+  drawing overlays without manually walking nested JSON.
+
+Interpretation:
+
+- If `active_seam_faces[*].boundary_edges.unmatched_seam_edge_count > 0`, treat
+  that seam as a topology/open-edge suspect.
+- If `transition_coverage.samples_without_render_coverage > 0` while
+  `skipped_regular_face=true`, treat that seam as a transition replacement
+  suspect.
+- If `max_abs_height_delta > 0.5` with render coverage present, treat it as a
+  terrace/displacement suspect rather than a true hole.
+- If `render_entity_checklist` reports unloaded mesh assets, missing index
+  buffers, or hidden visibility for a suspect chunk, rule out ECS/render plumbing
+  before changing MC tables.
+- `generated_frame` is the current transaction provenance proxy. There is still
+  no explicit transaction id on the mesh component, so "same generated frame" is
+  useful evidence but not a perfect publish-wave id.
+
+Verification:
+
+- `rtk cargo check --release -j 1 --lib --features mc_transvoxel` passed.
+- `rtk cargo check --release -j 1 --lib` passed.
+
+### 2026-05-28 schema 13 review fixes
+
+Implementation:
+
+- Terrain hole-probe schema is now `13`.
+- Active seam `skipped_regular_boundary_row` now reflects the current generator:
+  regular boundary rows are kept while transition geometry is supplemental.
+- `transition_coverage.samples_without_transition_render_coverage` is only
+  treated as required when a regular boundary row is actually skipped.
+- `boundary_edges` now compares seam edges from both adjacent chunk meshes
+  before reporting an unmatched edge.
+- Fine/coarse seam-height sampling now probes both SDF grids at the same
+  face-projected X/Z point instead of nudging to opposite sides of the seam.
+- Auto-matched terrain debug screenshots now require the sidecar camera
+  rotation to face the current probe direction, not just the same camera
+  position.
+
+Verification:
+
+- `rtk cargo check --features mc_transvoxel` completed successfully at the
+  Cargo level.
+- `rtk cargo test --lib --features mc_transvoxel latest_matching_terrain_debug_screenshot_uses_recent_camera_match -j 1`
+  passed.
+- `rtk cargo test --lib --features mc_transvoxel seam_terrace_vertical_iso_height -j 1`
+  passed.
+
+### 2026-05-28 schema 14 review fixes
+
+Implementation:
+
+- Terrain hole-probe schema is now `14`.
+- Active seam faces now sample a `5 x 5` grid over the actual chunk face plane
+  instead of a single diagonal/line sample.
+- Each seam sample records both:
+  - the older vertical fine/coarse iso heights, and
+  - new face-normal fine/coarse iso offsets for X/Y/Z seams.
+- Y-face samples now cover the whole horizontal X/Z face, so stacked LOD seams
+  and overhang-adjacent cases are no longer reduced to one diagonal.
+- `boundary_edges` now treats colinear split 2:1 edges as covered when the
+  opposite side covers the whole edge interval. Exact segment equality is no
+  longer required before the probe rules out an open seam edge.
+- The editor screen-simulation HTTP endpoint is now loopback-only:
+  `DRUSNIEL_EDITOR_AUTOMATION_ADDR` must parse to `127.0.0.1` or `::1`, and
+  non-loopback peer connections are rejected.
+
+Verification:
+
+- `rtk cargo check --features mc_transvoxel` completed successfully at the
+  Cargo level.
+- `rtk cargo test --lib --features mc_transvoxel boundary_edge -j 1` passed.
+- `rtk cargo test --lib --features mc_transvoxel seam_face_sample_point -j 1`
+  passed.
+- `rtk cargo test --lib --features mc_transvoxel face_normal_iso_offset -j 1`
+  passed.
+- Still pending: release check and a visual MC+Transvoxel bench/guard run.
+
+### 2026-05-28 schema 15 security and coverage fixes
+
+Implementation:
+
+- Terrain hole-probe schema is now `15`.
+- Non-Y active seam samples now choose render coverage from a face-normal mesh
+  ray near the fine/coarse face-normal iso offsets, rather than from the older
+  vertical `x/z` ray.
+- Seam sample output now includes `render_face_offset`,
+  `render_face_hit_point`, face-hit chunk/entity/section, and face-hit
+  distances from the fine/coarse face-normal iso offsets. The older
+  `render_hit_y` fields remain as vertical reference data.
+- Boundary edge coverage now ignores only the exact edge being tested. Colinear
+  split coverage from the opposite chunk or from another edge in the same chunk
+  can cover the interval, reducing false open-edge reports for supplemental
+  transition geometry.
+- The editor screen-simulation HTTP endpoint now requires
+  `DRUSNIEL_EDITOR_AUTOMATION_TOKEN` before startup. `/health` remains a `GET`;
+  `/status`, `/focus`, `/screenshot`, `/move`, and `/click` require `POST`
+  plus `Authorization: Bearer <token>`.
+
+Verification:
+
+- `rtk cargo check --features mc_transvoxel` completed successfully at the
+  Cargo level.
+- `rtk cargo test --lib --features mc_transvoxel boundary_edge -j 1` passed.
+- `rtk cargo test --lib --features mc_transvoxel seam_face_sample_point -j 1`
+  passed.
+- `rtk cargo test --lib --features mc_transvoxel face_normal_iso_offset -j 1`
+  passed.
+- Still pending: focused editor endpoint tests, release check, and any visual
+  MC+Transvoxel bench/guard run needed for performance claims.

@@ -134,12 +134,7 @@ impl FaceFrame {
         }
     }
 
-    fn tangent_grid_coord(
-        subdivisions: usize,
-        cell: usize,
-        delta: usize,
-        sign: i32,
-    ) -> usize {
+    fn tangent_grid_coord(subdivisions: usize, cell: usize, delta: usize, sign: i32) -> usize {
         if sign >= 0 {
             1 + cell * 2 + delta
         } else {
@@ -163,7 +158,7 @@ impl FaceFrame {
                 .saturating_sub(1)
                 .saturating_sub(regular_axis_cell)
                 / 2)
-                .min(transition_cells - 1)
+            .min(transition_cells - 1)
         }
     }
 
@@ -193,18 +188,10 @@ impl FaceFrame {
             GridPoint::HighRes(delta) => {
                 // 3x3 high-res sub-grid within the cell.
                 coords[self.w_axis as usize] = high_w;
-                coords[self.u_axis as usize] = Self::tangent_grid_coord(
-                    subdivisions,
-                    cell_u,
-                    delta.u as usize,
-                    self.u_sign,
-                );
-                coords[self.v_axis as usize] = Self::tangent_grid_coord(
-                    subdivisions,
-                    cell_v,
-                    delta.v as usize,
-                    self.v_sign,
-                );
+                coords[self.u_axis as usize] =
+                    Self::tangent_grid_coord(subdivisions, cell_u, delta.u as usize, self.u_sign);
+                coords[self.v_axis as usize] =
+                    Self::tangent_grid_coord(subdivisions, cell_v, delta.v as usize, self.v_sign);
             }
             GridPoint::LowRes(fu, fv) => {
                 // 4 low-res corners coincide with the 4 corners of the same 3x3
@@ -348,7 +335,17 @@ fn extract_transition_cell(
         if !invert {
             std::mem::swap(&mut p1, &mut p2);
         }
-        push_mc_triangle(mesh, chunk, world, chunk_origin, chunk_center, p0, p1, p2);
+        push_mc_triangle(
+            mesh,
+            chunk,
+            world,
+            chunk_origin,
+            chunk_center,
+            sdf,
+            p0,
+            p1,
+            p2,
+        );
         if let Some(sources) = triangle_sources.as_mut() {
             sources.push(McTriangleSource::Transition {
                 chunk_pos: chunk.position(),
@@ -530,10 +527,7 @@ mod tests {
             0,
             GridPoint::HighRes(HighResDelta { u: 2, v: 0 }),
         );
-        assert!(
-            pos_z_u0[0] > pos_z_u2[0],
-            "HighZ/PosZ U must run toward -X"
-        );
+        assert!(pos_z_u0[0] > pos_z_u2[0], "HighZ/PosZ U must run toward -X");
 
         let neg_x = FaceFrame::for_face(ChunkFace::NegX);
         let neg_x_u0 = neg_x.grid_coords(
@@ -548,10 +542,7 @@ mod tests {
             0,
             GridPoint::HighRes(HighResDelta { u: 2, v: 0 }),
         );
-        assert!(
-            neg_x_u0[2] > neg_x_u2[2],
-            "LowX/NegX U must run toward -Z"
-        );
+        assert!(neg_x_u0[2] > neg_x_u2[2], "LowX/NegX U must run toward -Z");
 
         let neg_y = FaceFrame::for_face(ChunkFace::NegY);
         let neg_y_v0 = neg_y.grid_coords(
@@ -566,10 +557,7 @@ mod tests {
             0,
             GridPoint::HighRes(HighResDelta { u: 0, v: 2 }),
         );
-        assert!(
-            neg_y_v0[2] > neg_y_v2[2],
-            "LowY/NegY V must run toward -Z"
-        );
+        assert!(neg_y_v0[2] > neg_y_v2[2], "LowY/NegY V must run toward -Z");
     }
 
     #[test]

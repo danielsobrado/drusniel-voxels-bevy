@@ -15,7 +15,7 @@ tools/*.html
 assets/*.html
 
 # World save file
-*.bin![1778071754577](image/.gitignore/1778071754577.png)![1778071758337](image/.gitignore/1778071758337.png)
+*.bin
 *.local.json
 *.fbx
 *.gltf
@@ -57,7 +57,7 @@ editor/frontend/src-tauri/binaries/
 assets/temp/
 world_data.bin
 
-!assets\images\
+!assets/images/
 assets\models\glTF\*.png
 editor/frontend/src-tauri/icons/ios/*.png
 editor/frontend/src-tauri/icons/android/mipmap-mdpi/*.png

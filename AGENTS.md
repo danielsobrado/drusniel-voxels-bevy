@@ -2,6 +2,9 @@
 
 This repo has an active rendering/performance workflow. Treat profiling as part of the implementation, not as optional cleanup after the fact.
 
+Use $godogen to generate or update this Bevy game from a natural language description.
+
+
 ## Profiling Rules
 
 1. Any change that can affect rendering, terrain meshing, props, shadows, water, post-processing, or frame timing should be measured.
@@ -103,15 +106,18 @@ Use `DRUSNIEL_EDITOR_DIAGNOSTICS=1` when starting the editor/runtime to enable h
 
 When diagnostics are enabled, the Tauri shell also exposes a local-only screen simulation endpoint at `http://127.0.0.1:17778` for automated verification:
 
-```bash
+```powershell
+$env:DRUSNIEL_EDITOR_AUTOMATION_TOKEN = "replace-with-local-random-token"
 curl http://127.0.0.1:17778/health
-curl http://127.0.0.1:17778/focus
-curl "http://127.0.0.1:17778/screenshot?label=viewport-check"
-curl "http://127.0.0.1:17778/move?space=viewport&x=100&y=100"
-curl "http://127.0.0.1:17778/click?space=viewport&x=100&y=100&button=left"
+curl -X POST -H "Authorization: Bearer $env:DRUSNIEL_EDITOR_AUTOMATION_TOKEN" http://127.0.0.1:17778/focus
+curl -X POST -H "Authorization: Bearer $env:DRUSNIEL_EDITOR_AUTOMATION_TOKEN" "http://127.0.0.1:17778/screenshot?label=viewport-check"
+curl -X POST -H "Authorization: Bearer $env:DRUSNIEL_EDITOR_AUTOMATION_TOKEN" "http://127.0.0.1:17778/move?space=viewport&x=100&y=100"
+curl -X POST -H "Authorization: Bearer $env:DRUSNIEL_EDITOR_AUTOMATION_TOKEN" "http://127.0.0.1:17778/click?space=viewport&x=100&y=100&button=left"
 ```
 
 Use `space=viewport` for native Bevy viewport-relative coordinates, `space=window` for editor-window-relative coordinates, and `space=screen` for absolute screen coordinates.
+
+`DRUSNIEL_EDITOR_AUTOMATION_ADDR`, when set, must still bind to loopback (`127.0.0.1` or `::1`). Do not expose screen simulation on a LAN or wildcard address. The HTTP endpoint will not start unless `DRUSNIEL_EDITOR_AUTOMATION_TOKEN` is set to a non-trivial local token; send it as `Authorization: Bearer <token>` for every non-health request.
 
 Viewport/window mouse actions intentionally fail if the editor cannot become the foreground window, preventing accidental clicks into another app. Screenshots use the Tauri window capture path first, so they can still verify editor layout when another window is covering the desktop.
 
