@@ -2558,12 +2558,30 @@ Implementation:
 
 Verification:
 
-- `rtk cargo check --features mc_transvoxel` completed successfully at the
-  Cargo level.
-- `rtk cargo test --lib --features mc_transvoxel boundary_edge -j 1` passed.
+- `rtk cargo test screen_simulation --lib -j 1` in
+  `editor/frontend/src-tauri` passed (`3 passed`).
+- `rtk cargo test --lib --features mc_transvoxel boundary_edge -j 1`
+  passed (`3 passed`).
 - `rtk cargo test --lib --features mc_transvoxel seam_face_sample_point -j 1`
   passed.
 - `rtk cargo test --lib --features mc_transvoxel face_normal_iso_offset -j 1`
   passed.
-- Still pending: focused editor endpoint tests, release check, and any visual
-  MC+Transvoxel bench/guard run needed for performance claims.
+- `rtk cargo check --quiet --release -j 1 --lib --features mc_transvoxel`
+  passed.
+- `rtk cargo check --quiet` in `editor/frontend/src-tauri` passed.
+- `rtk cargo check --quiet --bin bench_guard` passed.
+- Live-LOD MC+Transvoxel visual bench wrote
+  `bench-runs/2026-05-28T06-30-42Z/summary.json`. The bench still logs the
+  pre-existing missing vegetation/billboard assets, but it completed and wrote
+  screenshots/CSVs.
+- `bench_guard` on that summary still fails the known live-LOD forest frame
+  p99 check:
+  - `live_lod_ridge_mesh_dirty_p99 = 3.174 ms` PASS
+  - `live_lod_jump_mesh_dirty_p99 = 2.720 ms` PASS
+  - `live_lod_forest_mesh_dirty_p99 = 3.347 ms` PASS
+  - `live_lod_frame_p99 = 62.709 ms` FAIL
+- Spot-checked generated screenshots:
+  `forest-look-sweep-center`, `ridge-run-noon-mid`, and
+  `jump-water-sunset-landing` rendered successfully; the bench does not prove
+  the static MC+Transvoxel seam artifact is fixed because these changes are
+  diagnostic/security changes.
