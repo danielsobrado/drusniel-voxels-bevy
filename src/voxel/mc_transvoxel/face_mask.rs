@@ -39,12 +39,7 @@ impl TransvoxelFaceMask {
     }
 
     pub fn any(self) -> bool {
-        self.neg_x
-            || self.pos_x
-            || self.neg_y
-            || self.pos_y
-            || self.neg_z
-            || self.pos_z
+        self.neg_x || self.pos_x || self.neg_y || self.pos_y || self.neg_z || self.pos_z
     }
 }
 
@@ -71,9 +66,7 @@ pub fn compute_transvoxel_face_mask(
     };
 
     let delta_mask = lod_delta_gt_one_face_mask(my_lod, neighbor_lods);
-    if delta_mask != 0
-        && LOD_DELTA_GT_ONE_WARNINGS.fetch_add(1, Ordering::Relaxed) < 8
-    {
+    if delta_mask != 0 && LOD_DELTA_GT_ONE_WARNINGS.fetch_add(1, Ordering::Relaxed) < 8 {
         log::warn!(
             "MC+Transvoxel: lod_delta_gt_one_face_mask=0x{delta_mask:02x} for {my_lod:?}; skipping transition on those faces"
         );

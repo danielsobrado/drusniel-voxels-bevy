@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use crate::voxel::meshing::mc_support;
 use crate::voxel::world::VoxelWorld;
+use bevy::prelude::*;
 
 pub fn sdf_gradient_normal_at_world(
     world: &VoxelWorld,
@@ -25,10 +25,7 @@ mod tests {
         for z in 0..CHUNK_SIZE_I32 {
             for y in 0..CHUNK_SIZE_I32 {
                 for x in 0..CHUNK_SIZE_I32 {
-                    world.set_voxel(
-                        pos * CHUNK_SIZE_I32 + IVec3::new(x, y, z),
-                        VoxelType::Rock,
-                    );
+                    world.set_voxel(pos * CHUNK_SIZE_I32 + IVec3::new(x, y, z), VoxelType::Rock);
                 }
             }
         }

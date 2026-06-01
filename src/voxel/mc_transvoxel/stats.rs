@@ -19,9 +19,7 @@ impl McTransvoxelStats {
             self.transition_faces_meshed[face_index] += 1;
         }
         self.transition_triangles_total = self.transition_triangles_total.saturating_add(triangles);
-        self.triangle_count_transition = self
-            .triangle_count_transition
-            .saturating_add(triangles);
+        self.triangle_count_transition = self.triangle_count_transition.saturating_add(triangles);
     }
 
     pub fn record_regular_triangles(&mut self, triangles: u32) {
