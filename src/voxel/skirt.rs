@@ -1121,11 +1121,15 @@ mod tests {
 
         assert!(stats.transition_apron_index_count > 0);
         assert!(stats.vertical_skirt_index_count > 0);
-        assert!(barycentric_uvs.iter().any(|uv| {
-            barycentric_section(*uv) == TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT
-        }));
-        assert!(barycentric_uvs.iter().any(|uv| {
-            barycentric_section(*uv) == TERRAIN_MESH_SECTION_VERTICAL_SKIRT
-        }));
+        assert!(
+            barycentric_uvs
+                .iter()
+                .any(|uv| { barycentric_section(*uv) == TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT })
+        );
+        assert!(
+            barycentric_uvs
+                .iter()
+                .any(|uv| { barycentric_section(*uv) == TERRAIN_MESH_SECTION_VERTICAL_SKIRT })
+        );
     }
 }
