@@ -2745,13 +2745,11 @@ fn select_lod_mesh_transaction_chunks(
             break;
         }
         if selected.is_empty() && component_len > max_chunks {
-            // Huge live-LOD updates can connect most loaded chunks into one
-            // dirty graph. Publish a bounded connected wave so old visible
-            // meshes stay up, but the transaction still reaches a commit.
+            // A connected LOD component must publish atomically. Bounding this
+            // to a partial wave lets adjacent chunks display different LOD
+            // generations at the same boundary, which creates visible seams.
             oversize_component_chunks = component_len;
-            selected.extend(bounded_lod_component_wave(
-                &component, camera_pos, max_chunks,
-            ));
+            selected.extend(component);
             component_count += 1;
             break;
         }
@@ -2793,58 +2791,6 @@ fn lod_dirty_components(dirty_chunks: &[IVec3]) -> Vec<Vec<IVec3>> {
     }
 
     components
-}
-
-fn bounded_lod_component_wave(
-    component: &[IVec3],
-    camera_pos: Option<Vec3>,
-    max_chunks: usize,
-) -> Vec<IVec3> {
-    if component.is_empty() || max_chunks == 0 {
-        return Vec::new();
-    }
-    if component.len() <= max_chunks {
-        return component.to_vec();
-    }
-
-    let component_set: HashSet<IVec3> = component.iter().copied().collect();
-    let seed = component
-        .iter()
-        .copied()
-        .min_by(|a, b| {
-            camera_pos
-                .map(|camera_pos| compare_dirty_chunk_distance(a, b, camera_pos))
-                .unwrap_or_else(|| compare_chunk_pos_lex(*a, *b))
-        })
-        .unwrap_or(component[0]);
-
-    let mut selected = Vec::with_capacity(max_chunks);
-    let mut visited = HashSet::from([seed]);
-    let mut queue = VecDeque::from([seed]);
-    while let Some(pos) = queue.pop_front() {
-        selected.push(pos);
-        if selected.len() == max_chunks {
-            break;
-        }
-
-        let mut neighbors: Vec<IVec3> = LOD_TRANSACTION_FACE_OFFSETS
-            .iter()
-            .map(|offset| pos + *offset)
-            .filter(|neighbor| component_set.contains(neighbor) && !visited.contains(neighbor))
-            .collect();
-        neighbors.sort_by(|a, b| {
-            camera_pos
-                .map(|camera_pos| compare_dirty_chunk_distance(a, b, camera_pos))
-                .unwrap_or_else(|| compare_chunk_pos_lex(*a, *b))
-        });
-        for neighbor in neighbors {
-            if visited.insert(neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    selected
 }
 
 fn compare_lod_component_priority(
@@ -7404,7 +7350,7 @@ mod tests {
     }
 
     #[test]
-    fn lod_mesh_transaction_bounds_oversize_connected_component_wave() {
+    fn lod_mesh_transaction_keeps_oversize_connected_component_atomic() {
         let dirty_chunks = vec![
             IVec3::new(0, 0, 0),
             IVec3::new(1, 0, 0),
@@ -7416,10 +7362,14 @@ mod tests {
 
         assert_eq!(
             selection.chunks,
-            vec![IVec3::new(0, 0, 0), IVec3::new(1, 0, 0)]
+            vec![
+                IVec3::new(0, 0, 0),
+                IVec3::new(1, 0, 0),
+                IVec3::new(2, 0, 0),
+            ]
         );
         assert_eq!(selection.component_count, 1);
-        assert_eq!(selection.deferred_chunks, 2);
+        assert_eq!(selection.deferred_chunks, 1);
         assert_eq!(selection.oversize_component_chunks, 3);
     }
 
