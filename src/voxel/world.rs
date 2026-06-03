@@ -1,6 +1,9 @@
 use crate::constants::{BEDROCK_DEPTH, CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WORLD_KILL_Y};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
+use crate::voxel::mesh_invalidation::{
+    mesh_invalidation_neighbor_offsets, CHUNK_FACE_NEIGHBOR_OFFSETS,
+};
 use crate::voxel::materials::{MaterialId, MaterialReplaceSummary};
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
@@ -301,6 +304,12 @@ impl VoxelWorld {
         self.chunks.insert(position, chunk);
     }
 
+    pub fn mark_generation_face_neighbors_dirty(&mut self, chunk_pos: IVec3) {
+        for offset in CHUNK_FACE_NEIGHBOR_OFFSETS {
+            self.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::Generation);
+        }
+    }
+
     pub fn mark_chunk_dirty_with_reason(
         &mut self,
         chunk_pos: IVec3,
@@ -488,26 +497,11 @@ impl VoxelWorld {
         }
         drop(chunk);
 
-        for dz in -1..=1 {
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    if dx == 0 && dy == 0 && dz == 0 {
-                        continue;
-                    }
-                    let touches_neighbor = (dx < 0 && local_pos.x <= 1)
-                        || (dx > 0 && local_pos.x >= (CHUNK_SIZE_I32 - 2) as u32)
-                        || (dy < 0 && local_pos.y <= 1)
-                        || (dy > 0 && local_pos.y >= (CHUNK_SIZE_I32 - 2) as u32)
-                        || (dz < 0 && local_pos.z <= 1)
-                        || (dz > 0 && local_pos.z >= (CHUNK_SIZE_I32 - 2) as u32);
-                    if touches_neighbor {
-                        self.mark_chunk_dirty_with_reason(
-                            chunk_pos + IVec3::new(dx, dy, dz),
-                            MeshDirtyReason::TerrainMutation,
-                        );
-                    }
-                }
-            }
+        for offset in mesh_invalidation_neighbor_offsets(local_pos) {
+            self.mark_chunk_dirty_with_reason(
+                chunk_pos + offset,
+                MeshDirtyReason::TerrainMutation,
+            );
         }
         VoxelEditResult::Applied
     }
@@ -1004,6 +998,40 @@ mod tests {
         assert_eq!(
             world.derived_dirty_chunks().collect::<Vec<_>>(),
             vec![IVec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn voxel_edit_corner_does_not_mark_unrelated_diagonal_neighbor() {
+        let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
+        let center = IVec3::new(1, 1, 1);
+        for dx in 0..3 {
+            for dy in 0..3 {
+                for dz in 0..3 {
+                    world.insert_chunk(Chunk::new(IVec3::new(dx, dy, dz)));
+                }
+            }
+        }
+        let chunk_positions: Vec<IVec3> = world.chunk_positions().collect();
+        for chunk_pos in chunk_positions {
+            world.get_chunk_mut(chunk_pos).unwrap().clear_dirty();
+        }
+
+        let corner_world = VoxelWorld::chunk_to_world(center)
+            + IVec3::new(CHUNK_SIZE_I32 - 1, CHUNK_SIZE_I32 - 1, CHUNK_SIZE_I32 - 1);
+        assert_eq!(
+            world.set_voxel(corner_world, VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
+
+        let unrelated = center + IVec3::new(1, 0, -1);
+        assert!(
+            world.get_chunk(unrelated).is_some(),
+            "diagonal neighbor chunk should exist in fixture"
+        );
+        assert!(
+            !world.get_chunk(unrelated).unwrap().is_dirty(),
+            "edit on +X/+Y/+Z corner must not dirty unrelated -Z face neighbor"
         );
     }
 

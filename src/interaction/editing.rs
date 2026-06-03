@@ -5,7 +5,6 @@
 //! - Drag mode: Click and drag blocks to move them
 //! - Delete mode: Toggle with Delete key in edit mode to remove blocks
 
-use crate::constants::CHUNK_SIZE_I32;
 use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::interaction::targeting::TargetedBlock;
 use crate::voxel::chunk::MeshDirtyReason;
@@ -422,39 +421,19 @@ pub fn find_grounded_position(start: IVec3, world: &VoxelWorld) -> Option<IVec3>
     }
 }
 
-/// Mark a block and its neighbors as dirty for mesh regeneration.
+/// Mark the edited chunk and any neighbors affected by the 1-voxel mesh halo.
 ///
-/// This marks neighbor chunks when the modified voxel is within 1 position of a
-/// chunk boundary, since AO calculations sample neighbors up to 1 voxel away.
-/// This ensures cross-chunk AO is properly recalculated.
+/// Prefer `set_voxel` / `apply_voxel_edit` when changing voxels; they already
+/// propagate `TerrainMutation` with the same surgical rules in
+/// `mesh_invalidation`. Use this only when voxels were changed without `set_voxel`.
 pub fn mark_neighbors_dirty(world: &mut VoxelWorld, pos: IVec3) {
-    // Mark the chunk containing this block
     let chunk_pos = VoxelWorld::world_to_chunk(pos);
     if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
         chunk.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
     }
 
-    // Check if we're near a chunk boundary and mark neighbor chunks
-    // We check within 1 voxel of the boundary because AO calculations
-    // sample neighbors that can cross chunk boundaries
     let local = VoxelWorld::world_to_local(pos);
-    let positive_edge = (CHUNK_SIZE_I32 - 2) as u32;
-
-    let offsets = [
-        (local.x <= 1, IVec3::new(-1, 0, 0)), // Near -X boundary
-        (local.x >= positive_edge, IVec3::new(1, 0, 0)), // Near +X boundary
-        (local.y <= 1, IVec3::new(0, -1, 0)), // Near -Y boundary
-        (local.y >= positive_edge, IVec3::new(0, 1, 0)), // Near +Y boundary
-        (local.z <= 1, IVec3::new(0, 0, -1)), // Near -Z boundary
-        (local.z >= positive_edge, IVec3::new(0, 0, 1)), // Near +Z boundary
-    ];
-
-    for (near_edge, offset) in offsets {
-        if near_edge {
-            let neighbor_chunk = chunk_pos + offset;
-            if let Some(mut chunk) = world.get_chunk_mut(neighbor_chunk) {
-                chunk.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
-            }
-        }
+    for offset in crate::voxel::mesh_invalidation::mesh_invalidation_neighbor_offsets(local) {
+        world.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::TerrainMutation);
     }
 }

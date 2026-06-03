@@ -22,6 +22,7 @@ pub mod gravity;
 pub mod hole_probe;
 pub mod mc_transvoxel;
 pub mod materials;
+pub mod mesh_invalidation;
 pub mod meshing;
 pub mod model_io;
 pub mod occlusion;

@@ -16,7 +16,6 @@ use super::{
     foliage::GrassPropWind,
 };
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
-use crate::interaction::mark_neighbors_dirty;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::player::Player;
 use crate::props::persistence::{
@@ -948,7 +947,6 @@ fn conform_terrain_under_prop(
                         continue;
                     }
                     if matches!(world.set_voxel(pos, fill_voxel), VoxelEditResult::Applied) {
-                        mark_neighbors_dirty(world, pos);
                         modified_any = true;
                     }
                 }
@@ -964,7 +962,6 @@ fn conform_terrain_under_prop(
                                 world.set_voxel(pos, VoxelType::Air),
                                 VoxelEditResult::Applied
                             ) {
-                                mark_neighbors_dirty(world, pos);
                                 modified_any = true;
                             }
                         }
