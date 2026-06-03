@@ -80,17 +80,26 @@ impl ChunkFace {
     }
 }
 
-/// Determine boundary flags for a vertex position in chunk-local voxel units.
-pub fn compute_boundary_flags(local_pos: Vec3, chunk_size: f32) -> BoundaryFlags {
-    const EPSILON: f32 = 0.01;
+/// Determine boundary flags for a vertex in chunk-local voxel units.
+///
+/// `boundary_band` is the outermost cell row width on each face (typically
+/// `LodLevel::step_size()`), matching `in_boundary_cell` in `meshing.rs` snap
+/// logic. Fractional Surface Nets vertices sit inside that band, not on the
+/// exact face plane.
+pub fn compute_boundary_flags(
+    local_pos: Vec3,
+    chunk_size: f32,
+    boundary_band: f32,
+) -> BoundaryFlags {
+    let band = boundary_band.max(0.0);
 
     BoundaryFlags {
-        neg_x: local_pos.x <= EPSILON,
-        pos_x: local_pos.x >= chunk_size - EPSILON,
-        neg_y: local_pos.y <= EPSILON,
-        pos_y: local_pos.y >= chunk_size - EPSILON,
-        neg_z: local_pos.z <= EPSILON,
-        pos_z: local_pos.z >= chunk_size - EPSILON,
+        neg_x: local_pos.x <= band,
+        pos_x: local_pos.x >= chunk_size - band,
+        neg_y: local_pos.y <= band,
+        pos_y: local_pos.y >= chunk_size - band,
+        neg_z: local_pos.z <= band,
+        pos_z: local_pos.z >= chunk_size - band,
     }
 }
 
@@ -139,6 +148,9 @@ fn ordered_edge(a: QuantizedPos, b: QuantizedPos) -> (QuantizedPos, QuantizedPos
 }
 
 /// Extract boundary edges from mesh triangles using local positions to detect faces.
+///
+/// Pass `boundary_band` = `my_lod.step_size() as f32` so edges are found in the
+/// same outer-cell band used for LOD snap and transition skirts.
 pub fn extract_boundary_edges(
     local_positions: &[Vec3],
     positions: &[[f32; 3]],
@@ -146,6 +158,7 @@ pub fn extract_boundary_edges(
     indices: &[u32],
     material_weights: &[[f32; 4]],
     chunk_size: f32,
+    boundary_band: f32,
 ) -> Vec<BoundaryEdge> {
     let mut boundary_edges: Vec<BoundaryEdge> = Vec::new();
     let mut edge_indices: HashMap<EdgeKey, usize> = HashMap::new();
@@ -169,8 +182,8 @@ pub fn extract_boundary_edges(
             let local0 = local_positions[i0];
             let local1 = local_positions[i1];
 
-            let flags0 = compute_boundary_flags(local0, chunk_size);
-            let flags1 = compute_boundary_flags(local1, chunk_size);
+            let flags0 = compute_boundary_flags(local0, chunk_size, boundary_band);
+            let flags1 = compute_boundary_flags(local1, chunk_size, boundary_band);
 
             for face in ChunkFace::ALL {
                 if !flags0.on_face(face) || !flags1.on_face(face) {
@@ -650,12 +663,60 @@ mod tests {
             &indices,
             &weights,
             16.0,
+            1.0,
         );
 
         assert_eq!(
             edges.len(),
             4,
             "the shared diagonal should not receive a visible skirt or transition apron"
+        );
+    }
+
+    #[test]
+    fn boundary_extraction_finds_neg_x_band_vertices_inside_outer_cell() {
+        // Fractional Surface Nets places boundary verts near x=0.5, not x=0.0.
+        let local_positions = vec![
+            Vec3::new(0.5, 2.0, 4.0),
+            Vec3::new(0.5, 3.0, 4.0),
+            Vec3::new(0.5, 2.0, 5.0),
+        ];
+        let positions = local_positions
+            .iter()
+            .map(|position| position.to_array())
+            .collect::<Vec<_>>();
+        let normals = vec![[-1.0, 0.0, 0.0]; positions.len()];
+        let weights = vec![[1.0, 0.0, 0.0, 0.0]; positions.len()];
+        let indices = vec![0, 1, 2];
+
+        let edges_tight_plane = extract_boundary_edges(
+            &local_positions,
+            &positions,
+            &normals,
+            &indices,
+            &weights,
+            16.0,
+            0.01,
+        );
+        assert!(
+            edges_tight_plane.is_empty(),
+            "plane epsilon must not treat x=0.5 as on NegX"
+        );
+
+        let edges_lod0_band = extract_boundary_edges(
+            &local_positions,
+            &positions,
+            &normals,
+            &indices,
+            &weights,
+            16.0,
+            1.0,
+        );
+        assert!(
+            edges_lod0_band
+                .iter()
+                .any(|edge| edge.face == ChunkFace::NegX),
+            "Lod0 step_size band should find NegX silhouette edges at x=0.5"
         );
     }
 
