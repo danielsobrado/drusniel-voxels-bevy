@@ -38,6 +38,8 @@ use crate::voxel::skirt::{
     ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
     generate_skirts_with_apron_only_faces,
 };
+use crate::voxel::meshing_lod::append_morph_targets;
+use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::asset::RenderAssetUsages;
@@ -46,6 +48,7 @@ use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponent;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::OnceLock;
 
 // Surface nets imports for smooth meshing
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
@@ -360,6 +363,11 @@ pub struct MeshData {
     /// Chunk LOD index baked into UV1 for wireframe tinting.
     pub wireframe_lod_index: u8,
     pub colors: Vec<[f32; 4]>, // Vertex colors for AO (blocky) or material weights (surface nets)
+    /// Per-vertex GPU geomorph target (`ATTRIBUTE_MORPH_TARGET`): `xyz` coarse-aligned
+    /// local position, `w` seam weight. Filled by `meshing_lod::append_morph_targets`
+    /// (PR1) and uploaded by `into_mesh` only when its length matches `positions`
+    /// (PR2). Left empty on the blocky/water paths, which never morph.
+    pub morph_targets: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
 }
 
@@ -372,6 +380,7 @@ impl MeshData {
             barycentric_uvs: Vec::new(),
             wireframe_lod_index: 0,
             colors: Vec::new(),
+            morph_targets: Vec::new(),
             indices: Vec::new(),
         }
     }
@@ -385,6 +394,7 @@ impl MeshData {
             barycentric_uvs: Vec::with_capacity(vertex_cap),
             wireframe_lod_index: 0,
             colors: Vec::with_capacity(vertex_cap),
+            morph_targets: Vec::new(),
             indices: Vec::with_capacity(index_cap),
         }
     }
@@ -409,6 +419,14 @@ impl MeshData {
         };
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uv1);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
+        // GPU geomorph: only upload the morph attribute when it is fully populated
+        // (one row per vertex). Empty on the blocky/water paths and whenever morph
+        // is disabled, in which case the mesh is byte-identical to the legacy result.
+        // An unused extra attribute is ignored by pipelines that do not request it
+        // (the PR3 vertex shader), so this is safe to land before PR3.
+        if self.morph_targets.len() == vertex_count {
+            mesh.insert_attribute(ATTRIBUTE_MORPH_TARGET, self.morph_targets);
+        }
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
@@ -2489,7 +2507,10 @@ fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] 
     smoothed
 }
 
-fn neighbor_lod_for_face(neighbor_lods: &NeighborLods, face: ChunkFace) -> Option<LodLevel> {
+pub(crate) fn neighbor_lod_for_face(
+    neighbor_lods: &NeighborLods,
+    face: ChunkFace,
+) -> Option<LodLevel> {
     match face {
         ChunkFace::NegX => neighbor_lods.neg_x,
         ChunkFace::PosX => neighbor_lods.pos_x,
@@ -2671,7 +2692,7 @@ fn single_solid_to_air_iso_height(samples: impl IntoIterator<Item = (i32, f32)>)
     crossing
 }
 
-fn coarse_lod_iso_height_for_column(
+pub(crate) fn coarse_lod_iso_height_for_column(
     world: &VoxelWorld,
     world_x: i32,
     world_z: i32,
@@ -3176,7 +3197,11 @@ pub(crate) fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32;
     [scaled.x, scaled.y, scaled.z]
 }
 
-fn snap_column_for_face(chunk_origin: IVec3, local: Vec3, face: ChunkFace) -> Option<IVec2> {
+pub(crate) fn snap_column_for_face(
+    chunk_origin: IVec3,
+    local: Vec3,
+    face: ChunkFace,
+) -> Option<IVec2> {
     match face {
         ChunkFace::NegX => Some(IVec2::new(
             chunk_origin.x,
@@ -3198,7 +3223,7 @@ fn snap_column_for_face(chunk_origin: IVec3, local: Vec3, face: ChunkFace) -> Op
     }
 }
 
-fn coarse_lattice_y_face_target(
+pub(crate) fn coarse_lattice_y_face_target(
     chunk_origin: IVec3,
     local: Vec3,
     face: ChunkFace,
@@ -3228,6 +3253,93 @@ fn coarse_lattice_y_face_target(
         )
         .clamp(Vec3::ZERO, Vec3::splat(chunk_size)),
     )
+}
+
+/// Process-level GPU geomorph gate (v1). Read once from `VOXELS_TERRAIN_MORPH`
+/// (`1` / `true` enables) and cached; default **off**. The v1 toggle is an env var,
+/// not YAML, to avoid per-chunk file IO on the SN path — see decision D3 in
+/// `docs/lod/gpu-terrain-geomorph-plan.md`.
+pub(crate) fn terrain_morph_config() -> &'static TerrainMorphConfig {
+    static CACHE: OnceLock<TerrainMorphConfig> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let enabled = std::env::var("VOXELS_TERRAIN_MORPH")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        TerrainMorphConfig {
+            enabled,
+            ..Default::default()
+        }
+    })
+}
+
+/// LOD-boundary weld for a Surface Nets chunk: either the legacy CPU snap (morph
+/// off — the default, byte-identical path) or GPU morph-target baking (morph on,
+/// which keeps the fine mesh in `POSITION` for colliders and welds only on display).
+/// Returns the snap stats; default when snap is skipped.
+#[allow(clippy::too_many_arguments)]
+fn apply_snap_or_morph(
+    solid_mesh: &mut MeshData,
+    local_positions: &mut Vec<Vec3>,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    morph: &TerrainMorphConfig,
+) -> LodTransitionSnapStats {
+    let bake_targets = |solid_mesh: &mut MeshData, local_positions: &[Vec3]| {
+        if let Err(err) = append_morph_targets(
+            solid_mesh,
+            local_positions,
+            world,
+            chunk_origin,
+            chunk_center,
+            my_lod,
+            neighbor_lods,
+            morph,
+        ) {
+            warn!("terrain morph target generation skipped: {err:?}");
+            solid_mesh.morph_targets.clear();
+        }
+    };
+
+    if morph.enabled && !morph.cpu_snap_when_morph_enabled {
+        // Keep the fine mesh in POSITION; weld lives in ATTRIBUTE_MORPH_TARGET only.
+        bake_targets(solid_mesh, local_positions);
+        LodTransitionSnapStats::default()
+    } else {
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
+            solid_mesh,
+            local_positions,
+            chunk,
+            world,
+            chunk_origin,
+            chunk_center,
+            my_lod,
+            neighbor_lods,
+        );
+        if morph.enabled {
+            // cpu_snap_when_morph_enabled: snap AND publish targets (~= snapped pos).
+            bake_targets(solid_mesh, local_positions);
+        }
+        stats
+    }
+}
+
+/// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
+/// after morph baking (skirts / aprons), preserving the
+/// `morph_targets.len() == positions.len()` invariant that `into_mesh` checks before
+/// uploading the attribute. No-op when morph produced no targets.
+fn pad_morph_targets_identity(solid_mesh: &mut MeshData) {
+    if solid_mesh.morph_targets.is_empty() {
+        return;
+    }
+    while solid_mesh.morph_targets.len() < solid_mesh.positions.len() {
+        let i = solid_mesh.morph_targets.len();
+        let p = solid_mesh.positions[i];
+        solid_mesh.morph_targets.push([p[0], p[1], p[2], 0.0]);
+    }
 }
 
 fn snap_boundary_vertices_to_lower_detail_neighbor(
@@ -3757,7 +3869,8 @@ pub fn generate_chunk_mesh_surface_nets(
         }
     }
 
-    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+    let morph = terrain_morph_config();
+    let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -3766,6 +3879,7 @@ pub fn generate_chunk_mesh_surface_nets(
         chunk_center,
         my_lod,
         &neighbor_lods,
+        morph,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -3803,6 +3917,12 @@ pub fn generate_chunk_mesh_surface_nets(
     }
 
     // Generate water mesh using the extracted helper
+    // Skirts/aprons appended after morph baking get identity targets so
+    // morph_targets stays parallel to positions (into_mesh upload invariant).
+    if morph.enabled {
+        pad_morph_targets_identity(&mut solid_mesh);
+    }
+
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -3959,7 +4079,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         }
     }
 
-    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+    let morph = terrain_morph_config();
+    let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -3968,6 +4089,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         chunk_center,
         my_lod,
         &neighbor_lods,
+        morph,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -4007,6 +4129,12 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
+    // Skirts/aprons appended after morph baking get identity targets so
+    // morph_targets stays parallel to positions (into_mesh upload invariant).
+    if morph.enabled {
+        pad_morph_targets_identity(&mut solid_mesh);
+    }
+
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -4163,7 +4291,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         }
     }
 
-    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+    let morph = terrain_morph_config();
+    let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -4172,6 +4301,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         chunk_center,
         my_lod,
         &neighbor_lods,
+        morph,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -4211,6 +4341,12 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
+    // Skirts/aprons appended after morph baking get identity targets so
+    // morph_targets stays parallel to positions (into_mesh upload invariant).
+    if morph.enabled {
+        pad_morph_targets_identity(&mut solid_mesh);
+    }
+
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -4367,7 +4503,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         }
     }
 
-    let lod_transition_snap_stats = snap_boundary_vertices_to_lower_detail_neighbor(
+    let morph = terrain_morph_config();
+    let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -4376,6 +4513,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         chunk_center,
         my_lod,
         &neighbor_lods,
+        morph,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -4415,6 +4553,12 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
+    // Skirts/aprons appended after morph baking get identity targets so
+    // morph_targets stays parallel to positions (into_mesh upload invariant).
+    if morph.enabled {
+        pad_morph_targets_identity(&mut solid_mesh);
+    }
+
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -5329,6 +5473,151 @@ mod tests {
             mesh.colors.push([0.0; 4]);
         }
         mesh
+    }
+
+    fn morph_enabled_config() -> TerrainMorphConfig {
+        TerrainMorphConfig {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn into_mesh_uploads_morph_attribute_only_when_parallel() {
+        let base = || {
+            let mut mesh = MeshData::new();
+            for _ in 0..3 {
+                mesh.positions.push([0.0, 0.0, 0.0]);
+                mesh.normals.push([0.0, 1.0, 0.0]);
+                mesh.uvs.push([0.0, 0.0]);
+                mesh.colors.push([0.0; 4]);
+            }
+            mesh.indices.extend_from_slice(&[0, 1, 2]);
+            mesh
+        };
+
+        // No morph targets → attribute omitted.
+        assert!(
+            base().into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_none(),
+            "empty morph_targets must not upload the attribute"
+        );
+
+        // Mismatched length → attribute omitted (guards the Bevy length panic).
+        let mut short = base();
+        short.morph_targets = vec![[0.0; 4]; 2];
+        assert!(
+            short.into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_none(),
+            "mismatched morph_targets must not upload the attribute"
+        );
+
+        // Parallel length → attribute uploaded.
+        let mut full = base();
+        full.morph_targets = vec![[1.0, 2.0, 3.0, 1.0]; 3];
+        assert!(
+            full.into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_some(),
+            "parallel morph_targets must upload the attribute"
+        );
+    }
+
+    #[test]
+    fn pad_morph_targets_identity_restores_invariant() {
+        let mut mesh = MeshData::new();
+        // Two "main" vertices already morphed.
+        mesh.positions.push([1.0, 1.0, 1.0]);
+        mesh.positions.push([2.0, 2.0, 2.0]);
+        mesh.morph_targets.push([9.0, 9.0, 9.0, 1.0]);
+        mesh.morph_targets.push([8.0, 8.0, 8.0, 0.0]);
+        // Two "skirt" vertices appended after baking.
+        mesh.positions.push([3.0, 3.0, 3.0]);
+        mesh.positions.push([4.0, 4.0, 4.0]);
+
+        pad_morph_targets_identity(&mut mesh);
+
+        assert_eq!(mesh.morph_targets.len(), mesh.positions.len());
+        assert_eq!(mesh.morph_targets[2], [3.0, 3.0, 3.0, 0.0]);
+        assert_eq!(mesh.morph_targets[3], [4.0, 4.0, 4.0, 0.0]);
+        // Pre-existing rows are untouched.
+        assert_eq!(mesh.morph_targets[0], [9.0, 9.0, 9.0, 1.0]);
+    }
+
+    #[test]
+    fn pad_morph_targets_identity_is_noop_without_targets() {
+        let mut mesh = MeshData::new();
+        mesh.positions.push([1.0, 1.0, 1.0]);
+        pad_morph_targets_identity(&mut mesh);
+        assert!(mesh.morph_targets.is_empty());
+    }
+
+    #[test]
+    fn apply_snap_or_morph_enabled_skips_snap_and_bakes_targets() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![
+            Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0),
+            Vec3::new(8.0, 8.0, 8.0),
+        ];
+        let mut mesh = mesh_data_for_local_positions(&local_positions, center);
+        let positions_before = mesh.positions.clone();
+        let neighbors = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let stats = apply_snap_or_morph(
+            &mut mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &neighbors,
+            &morph_enabled_config(),
+        );
+
+        // Snap was skipped: stats default, POSITION untouched (fine mesh kept).
+        assert_eq!(stats.snapped_vertex_count, 0);
+        assert_eq!(mesh.positions, positions_before);
+        // Targets baked: boundary vertex morphs, interior does not.
+        assert_eq!(mesh.morph_targets.len(), mesh.positions.len());
+        assert_eq!(mesh.morph_targets[0][3], 1.0);
+        assert_eq!(mesh.morph_targets[1][3], 0.0);
+    }
+
+    #[test]
+    fn apply_snap_or_morph_disabled_snaps_and_leaves_targets_empty() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0)];
+        let mut mesh = mesh_data_for_local_positions(&local_positions, center);
+        let neighbors = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let stats = apply_snap_or_morph(
+            &mut mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &neighbors,
+            &TerrainMorphConfig::default(), // disabled
+        );
+
+        assert!(stats.snapped_vertex_count > 0, "snap should run when morph off");
+        assert!(
+            mesh.morph_targets.is_empty(),
+            "disabled morph must leave morph_targets empty so into_mesh stays legacy"
+        );
     }
 
     #[test]

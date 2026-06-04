@@ -24,6 +24,8 @@ pub mod materials;
 pub mod mc_transvoxel;
 pub mod mesh_invalidation;
 pub mod meshing;
+pub mod meshing_lod;
+pub mod meshing_types;
 pub mod model_io;
 pub mod occlusion;
 pub mod octree;

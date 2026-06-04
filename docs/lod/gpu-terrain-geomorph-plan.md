@@ -35,6 +35,129 @@ without doubling geometry for whole chunks.
 | **A — Full-chunk dual positions** | Reject. ~2× vertex bandwidth; interior verts never tear. |
 | **B — Boundary-only morph targets** | **Adopt.** `ATTRIBUTE_MORPH_TARGET` on transition-band verts only; interior `w = 0`. |
 
+## Decisions log (v1) — 2026-06-03
+
+These resolve the open forks for the **first shippable version**. Each records the
+chosen path *and* the alternatives rejected, so the trade is auditable later.
+
+### D1 — v1 is a **static GPU weld**, not dynamic geomorph
+
+**Chosen:** drop the per-frame distance factor for v1. `t` is the baked per-vertex
+seam weight only (`{0, 1}`), so a boundary vertex renders at exactly its coarse
+target — i.e. the same final geometry CPU snap produces.
+
+**Why / honest consequence:** with the distance factor dropped, **v1 is visually
+equivalent to the existing CPU snap** (and in v1 slightly *worse*, because normals /
+material weights pass through unchanged while [snap refreshes weights at the new
+height](../../src/voxel/meshing.rs)). The concrete wins are therefore narrow and
+must be stated plainly:
+
+1. **Fine-mesh colliders** — `POSITION` stays the true fine mesh, so physics reads
+   fine geometry while only the display welds. CPU snap mutates the mesh both see.
+2. **Infrastructure** for a future distance factor (real pop smoothing) without a
+   second rewrite.
+
+**Rejected — keep the distance factor in v1:** real visual win (pop smoothing) but
+reintroduces the motion-vector/TAA work (see D2) and needs interior targets
+(effectively Option A). Deferred to **v2**, not abandoned.
+
+**Rejected — drop geomorph entirely, keep snap-only:** loses the collider win and
+the v2 groundwork. If neither matters to the product, this is still the cheapest
+option — flagged for the product owner, not blocking.
+
+### D2 — prepass / shadows / TAA: weld in the depth passes, motion vectors fall out
+
+Because D1 makes the weld **static for the lifespan of a mesh instance** (a
+neighbor-LOD change re-meshes into a *new* asset), the morphed position is identical
+every frame. Therefore:
+
+- Apply the **same** weld in the forward vertex stage **and** the **depth prepass**
+  **and** the **motion-vector prepass**. Motion vectors then fall out correctly with
+  no per-frame math — but only because the same static position is used for current
+  and previous frame. **Skipping the morph in the motion-vector prepass still breaks
+  TAA reprojection**, so "motion vectors are trivial" ≠ "ignore the prepass".
+- **Shadow-caster path (PR3 spike, must verify):** in Bevy 0.18 a `Material`'s
+  custom vertex/prepass shader may **not** be picked up by the shadow depth pipeline.
+  If it isn't, shadows are cast from the **fine** (un-welded) geometry. Given the
+  displacement is small and only at seams, **accept fine-mesh shadows for v1** and
+  note it; do not block on it. De-risk with a spike before writing PR3.
+
+### D3 — config: keep a minimal **enable gate**, drop the distance uniforms
+
+**Chosen:** no `morph_start` / `morph_end` uniforms and **no YAML loader** for v1
+(consistent with D1). Keep `TerrainMorphConfig { enabled, cpu_snap_when_morph_enabled }`.
+The v1 toggle is the **`VOXELS_TERRAIN_MORPH` env var**, read once and cached
+(pattern: `terrain_collider_mode_from_env`); default **off**.
+
+**Why not drop the config entirely:** success criterion #2 needs an A/B against a
+**snap-on baseline**, and the feature must ship off by default — both require a gate.
+Per-chunk YAML IO (as the MC path does in `generate_chunk_mesh_mc_transvoxel`) is
+**not** acceptable on the SN path (every chunk), so the gate is an env-cached value,
+not a file read. YAML can return in v2 alongside the distance fields.
+
+**Hot-path guarantee:** with the gate **off**, the SN functions take the existing
+snap branch unchanged and never touch `morph_targets`, so mesh output is
+byte-identical and no bench is required (per `CLAUDE.md`). Benches are only needed
+once the gate is turned on for seam sign-off.
+
+## Implementation status — 2026-06-03
+
+| PR | State | Notes |
+|----|-------|-------|
+| **PR1** | ✅ landed | `meshing_types` (attribute, `TerrainMorphConfig`, error), `meshing_lod::append_morph_targets` + 7 tests, `MeshData.morph_targets`. |
+| **PR2** | ✅ landed | `into_mesh` guarded upload, `terrain_morph_config()` env gate, `apply_snap_or_morph` (snap-skip), `pad_morph_targets_identity` (skirt invariant), wired into all 4 SN LOD fns, +5 tests. |
+| **PR3** | ✅ **runs in-game** (bench-validated 2026-06-03) | `triplanar_terrain_vertex.wgsl` (forward + prepass weld), `TriplanarMaterial::vertex_shader`/`prepass_vertex_shader`/`specialize` — all gated on `morph_gate_enabled()`. Renders without panic; seams closed; visually equivalent to the snap baseline (per D1). |
+
+### PR3 validation results (2026-06-03, `visual-regression-live-lod`)
+
+Ran the bench with `VOXELS_TERRAIN_MORPH=1` (MC off). Findings:
+
+- **Two prepass mistakes found and fixed by actually running it** (the WGSL could not be
+  CI-validated, so this was essential):
+  1. `Material::specialize` **does** run for the prepass (`prepass/mod.rs:357`,
+     contrary to an earlier note here) — so the buffer override leaked into the
+     prepass.
+  2. `prepass_io::Vertex` uses a **different `@location` scheme** than
+     `forward_io::Vertex` (`uv@1, uv_b@2, normal@3, color@7` vs
+     `normal@1, uv@2, uv_b@3, color@5`). `specialize` now branches the layout by the
+     `prepass_pipeline` / `opaque_mesh_pipeline` label, and the prepass is morphed too
+     (so reverse-z `GreaterEqual` depth doesn't re-open seams).
+- **Result:** morph-on renders correctly, no validation panic, no shadow-pipeline
+  error, screenshots captured (`bench-runs/2026-06-03T19-42-31Z/`). Output is
+  pixel-comparable to the snap baseline (`bench-runs/2026-06-03T19-24-13Z/`),
+  confirming D1 (v1 weld == snap). Because morph-on **skips CPU snap** yet seams stay
+  closed, the GPU weld is provably doing the work (a no-op morph would crack).
+- **Still open:** GTAO/TAA-motion correctness under morph not separately verified;
+  a known **pre-existing** floating slab near the shoreline appears in *both* runs
+  (not caused by morph). Bench `summary.json` not yet diffed for perf.
+
+### Gate
+
+`VOXELS_TERRAIN_MORPH=1` (or `true`) turns the whole path on, process-wide, read once.
+**Requires `mc_transvoxel.enabled: false`** — MC chunks omit `ATTRIBUTE_MORPH_TARGET`,
+and with the gate on `specialize` binds the morph layout for SN chunks; an MC chunk
+reaching the SN material with the gate on will fail layout selection.
+
+### PR3 validation checklist (must pass before trusting the gate)
+
+The WGSL was written to the proven `water_vertex.wgsl` pattern but **cannot be GPU-
+validated in CI**. Before relying on morph, with `VOXELS_TERRAIN_MORPH=1`:
+
+1. **It runs at all** — terrain renders, no naga/pipeline panic. Confirms the
+   `forward_io`/`prepass_io` field names, defs (`VERTEX_UVS_B`,
+   `NORMAL_PREPASS_OR_DEFERRED_PREPASS`, `MOTION_VECTOR_PREPASS`,
+   `VERTEX_OUTPUT_INSTANCE_INDEX`) and the `@location(8)` morph slot are correct on
+   this Bevy build. **These are the most likely break points.**
+2. **Seam closes** — Alt+F7 wireframe: boundary verts sit on the coarse neighbour;
+   no holes where the morph moves verts away from camera (the depth-prepass weld
+   reason — D2). If holes appear, the prepass weld is wrong.
+3. **No TAA smear** — move the camera with TAA on; the morph band must not ghost
+   (validates the `previous_world_position` motion-vector weld).
+4. **Shadows** — confirm whether the shadow caster path picked up the weld (D2
+   spike). If shadows detach at seams, accept as a documented v1 limitation.
+5. **Bench** — only after the above, run `visual-regression-live-lod` with the gate
+   on and compare `summary.json` (per `CLAUDE.md`).
+
 ## Morph semantics (critical)
 
 ### Two factors, not camera alone
@@ -73,6 +196,42 @@ this does not fix inter-chunk SDF divergence.
 **Resolved policy (v1):** when `terrain_morph.enabled` is true,
 `cpu_snap_when_morph_enabled` defaults to **false** — skip snap on verts with
 `morph_target.w == 1.0`. When morph is disabled, keep full snap + skirts unchanged.
+
+### Benefit vs. CPU snap (scope honesty)
+
+This is the load-bearing caveat: with the v1 policy, a seam vert gets `t = 1` and
+`morph_target.xyz` is computed from the **same** `coarse_*` math as snap. At `t = 1`
+the vert lands on **exactly the snap destination**, so for inter-chunk seams **GPU
+morph is functionally equivalent to the CPU snap it replaces** — it does *not* fix
+field disagreement, it relocates the same weld to the GPU. The problem statement's
+"snap is a band-aid" framing should not be read as "geomorph removes the band-aid."
+
+What geomorph genuinely buys, and the only reasons to take on the pipeline work:
+
+1. **Same-chunk LOD pop smoothing** (the distance factor) — there is no CPU-snap
+   equivalent for this. This is the real new capability.
+2. **Fine positions survive to physics** — POSITION stays the true fine mesh, so
+   colliders read fine geometry while display morphs (snap mutates the mesh both see).
+
+Consequence for sign-off: **success criterion #1 cannot be satisfied by snap
+equivalence alone** — it must compare morph-on against a snap-on baseline and show
+the *pop* is smoothed, not just that seams are closed (snap already closes them).
+
+> **⚠ Unresolved design inconsistency — the distance factor is inert under Option B.**
+> The "two factors" model promises distance-based same-chunk pop smoothing, but
+> Option B writes morph targets on **boundary verts only** (interior `w = 0`). With
+> the shader `t = select(distance_t, 1.0, seam > 0.5)`:
+> - boundary verts (`w = 1`) are pinned at `t = 1` → distance ignored;
+> - interior verts (`w = 0`) use `distance_t`, but have **no next-LOD target**
+>   (their `morph_target.xyz` must be set to their own position to keep `mix` a
+>   no-op, otherwise they drift toward the origin as distance grows).
+>
+> Net: the distance factor has nothing meaningful to act on. **Real pop smoothing
+> needs per-vertex next-LOD targets on *all* verts (the rejected Option A, or the
+> "alternative pop-only" path), not Option B.** Until this is resolved, the only
+> concrete win over CPU snap is "fine positions survive to physics." Decide before
+> PR3 whether to (i) ship Option B as a GPU-side snap (drop the pop-smoothing claim),
+> or (ii) widen targets to interior verts for genuine pop smoothing.
 
 ### Remaining CPU gap (Y faces)
 
@@ -196,6 +355,7 @@ Output per vertex:
 pub fn append_morph_targets(
     mesh: &mut MeshData,
     local_positions: &[Vec3],
+    world: &VoxelWorld,
     chunk_origin: IVec3,
     chunk_center: Vec3,
     my_lod: LodLevel,
@@ -203,6 +363,14 @@ pub fn append_morph_targets(
     config: &TerrainMorphConfig,
 ) -> Result<(), MorphTargetError>;
 ```
+
+> **Signature note:** X/Z seam targets require sampling the coarse iso height
+> (`coarse_lod_iso_height_for_column`), which reads the SDF — so `world: &VoxelWorld`
+> is **required**, exactly as `snap_boundary_vertices_to_lower_detail_neighbor` takes
+> it. Only Y-face targets (`coarse_lattice_y_face_target`) are purely geometric. An
+> earlier draft omitting `world` could not compute seam targets. `&Chunk` is **not**
+> needed unless morph also refreshes material weights (it does not in v1; snap takes
+> `&Chunk` only for that weight refresh).
 
 **Tests (unit, no visuals):**
 
@@ -230,6 +398,12 @@ not `generate_mc_chunk_mesh`.
    `morph_targets.len() == positions.len()`:
    - Skirt/apron verts on transition faces: `w = 1`, targets from edge coarse
      curve (reuse apron anchor logic where possible).
+   - **This is where the length invariant actually breaks.** Skirts/aprons append
+     their own vertices in `skirt.rs` after the main surface; every append path must
+     also push a matching `morph_target` row, or `into_mesh` silently drops the
+     attribute (the `warn!` branch). Do **not** rely on the warn guard as the only
+     safety net — add a unit test asserting `morph_targets.len() == positions.len()`
+     after a full main-surface + apron + vertical-skirt build on a transition chunk.
 4. `into_mesh()`:
 
 ```rust
@@ -247,25 +421,56 @@ on length mismatch.
 
 ### Phase 3 — Shader and material (`triplanar_material.rs`, WGSL)
 
-Today `TriplanarMaterial` only overrides **fragment**; terrain uses default PBR
-vertex IO. Geomorph requires a custom vertex stage (see `GrassMaterial` pattern).
+Today `TriplanarMaterial` only overrides **fragment**
+([`triplanar_material.rs:182`](../../src/rendering/triplanar_material.rs); no
+`vertex_shader()`); terrain rides Bevy's default PBR vertex IO. Geomorph requires a
+custom vertex stage. **This is the largest and riskiest phase — treat it as its own
+PR with the sub-steps below, not a paragraph.**
 
-1. Add `vertex_shader()` → `shaders/triplanar_terrain.wgsl` (or split
-   `triplanar_terrain_vertex.wgsl`).
-2. `specialize()`: declare vertex layout — `POSITION`, `NORMAL`, `UV_0`, `UV_1`,
-   `COLOR`, `ATTRIBUTE_MORPH_TARGET` at fixed `@location` values matching Rust
-   `at_shader_location`.
-3. Vertex stage:
-   - Read `morph_target: vec4<f32>`.
-   - Compute `t` from seam w + distance uniforms.
-   - `final_local = mix(position, morph_target.xyz, t)`.
-   - Build `VertexOutput` with **morphed** world position for triplanar fragment.
+**Pattern sources (two different things — the plan previously conflated them):**
+
+- `GrassMaterial` ([`grass_material.rs:152`](../../src/vegetation/grass_material.rs))
+  shows how to attach a custom `vertex_shader()` on a `Material`. It does **not**
+  show a custom vertex attribute — its `specialize()` only sets `cull_mode`.
+- Pulling a **custom vertex attribute** into the layout is done via
+  `layout.0.get_layout(&[ … .at_shader_location(n)])` →
+  `descriptor.vertex.buffers[0]`, as in
+  [`instanced_render.rs:2125`](../../src/props/instanced_render.rs#L2125). Adapt that
+  into `TriplanarMaterial::specialize` using the currently-unused `_layout` arg.
+
+1. Add `vertex_shader()` → split `triplanar_terrain_vertex.wgsl` (keep the 25 KB
+   fragment file fragment-only).
+2. `specialize()`: set `descriptor.vertex.buffers[0]` from `_layout.0.get_layout`
+   with `POSITION`, `NORMAL`, `UV_0`, `UV_1`, `COLOR`, `ATTRIBUTE_MORPH_TARGET` at
+   fixed `@location`s matching the WGSL `@location` decls.
+3. Vertex stage must **faithfully rebuild the full PBR `VertexOutput`** via Bevy's
+   `mesh_functions` (clip pos, world pos, world normal, UV0/UV1, color,
+   instance_index, visibility range). Anything dropped here silently breaks the
+   fragment shader's lighting / GI / wireframe / iso-band paths. Then:
+   - Read `morph_target: vec4<f32>`; compute `t` from seam w + distance uniforms;
+   - `final_local = mix(position, morph_target.xyz, t)`; emit **morphed** world pos.
 4. v1: pass through normals unchanged (normal morph = v2).
-5. Prepass: confirm IO compatibility or disable prepass if specialization panics
-   (same caution as grass).
-6. **Horizon-proxy / cheap triplanar** quality tiers: either use the same vertex
-   layout with morph attribute bound, or disable morph in shader when quality tier
-   lacks the attribute (see open questions).
+5. **Prepass / shadows / TAA — decision required, not a footnote.**
+   `TriplanarMaterial::enable_prepass()` is `true` and TAA is user-selectable
+   ([`camera/controller.rs:391`](../../src/camera/controller.rs#L391)), which turns
+   on the **motion-vector prepass**. The prepass + shadow + motion-vector passes use
+   their **own** default vertex shaders and will render **un-morphed** positions
+   while the forward pass shows morphed ones:
+   - The static seam (`t = 1`) is constant per camera pose → minor depth/shadow/GTAO
+     mismatch only.
+   - The **distance** morph moves geometry every frame as the camera dollies, with
+     zero/incorrect motion vectors → **TAA ghosting** along the morph band.
+   - "Disable prepass" is **not** an acceptable fallback for terrain (GTAO/SSAO and
+     forward depth depend on it — unlike grass). So pick one, explicitly:
+     - **(a)** apply the same morph in the prepass + motion-vector vertex shaders
+       (larger scope, correct), or
+     - **(b)** force the **distance** factor to 0 whenever the motion-vector prepass
+       is active (seam `t = 1` still allowed, since it is static), accepting that
+       pop-smoothing is off under TAA.
+   v1 recommendation: **(b)**, and note it as a known limitation.
+6. **Horizon-proxy / cheap triplanar** quality tiers: either bind the morph
+   attribute on all `TriplanarMaterial` quality handles, or `#define`-gate morph off
+   in the vertex shader for proxy tiers (see open questions).
 
 **Do not** overload `UV_1` (wireframe section/LOD) or `COLOR` (material weights).
 
@@ -299,7 +504,9 @@ explicitly says otherwise.
 
 1. With `terrain_morph.enabled: true`, no visible cracks at Lod0/Lod1 **X/Z**
    boundaries in `visual-regression-live-lod` screenshots (fixed camera
-   checkpoints).
+   checkpoints) **and** the same-chunk LOD-swap pop is visibly smoothed vs. a
+   **snap-on baseline** (not just vs. morph-off) — see "Benefit vs. CPU snap".
+   Seam closure alone is satisfied by snap and does not validate the morph.
 2. With `terrain_morph.enabled: false`, behavior matches pre-geomorph baseline
    (snap + skirts + boundary-band edge extraction).
 3. `rtk cargo test --lib meshing_lod::` and `skirt::` pass.

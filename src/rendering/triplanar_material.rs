@@ -5,8 +5,16 @@ use bevy::{
         AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     },
 };
+use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
+
+/// Whether the GPU terrain geomorph gate is on (env `VOXELS_TERRAIN_MORPH`, read
+/// once and cached). When off — the default — `TriplanarMaterial` keeps Bevy's stock
+/// vertex/prepass shaders and the render path is byte-identical to pre-geomorph.
+fn morph_gate_enabled() -> bool {
+    crate::voxel::meshing::terrain_morph_config().enabled
+}
 
 /// All triplanar material uniforms in a single struct for proper GPU alignment
 #[derive(Clone, Copy, ShaderType, Debug)]
@@ -183,6 +191,29 @@ impl Material for TriplanarMaterial {
         "shaders/triplanar_terrain.wgsl".into()
     }
 
+    fn vertex_shader() -> ShaderRef {
+        // Custom vertex stage only when the geomorph gate is on; otherwise keep the
+        // stock mesh vertex shader so default terrain is unaffected (and so the morph
+        // vertex layout below is never required of meshes that lack the attribute).
+        if morph_gate_enabled() {
+            "shaders/triplanar_terrain_vertex.wgsl".into()
+        } else {
+            ShaderRef::Default
+        }
+    }
+
+    fn prepass_vertex_shader() -> ShaderRef {
+        // The prepass DOES call `Material::specialize` (prepass/mod.rs:357), so we can
+        // bind the morph attribute there too (see `specialize`), and we apply the same
+        // static weld in the prepass — otherwise the un-morphed prepass depth would
+        // fight the morphed forward pass (reverse-z `GreaterEqual`) and re-open seams.
+        if morph_gate_enabled() {
+            "shaders/triplanar_terrain_vertex.wgsl".into()
+        } else {
+            ShaderRef::Default
+        }
+    }
+
     fn prepass_fragment_shader() -> ShaderRef {
         ShaderRef::Default
     }
@@ -202,11 +233,46 @@ impl Material for TriplanarMaterial {
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayoutRef,
+        layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         // Disable backface culling to match v0.3 behavior
         descriptor.primitive.cull_mode = None;
+
+        // GPU geomorph: when the gate is on AND this mesh carries the morph attribute
+        // (SN terrain — MC chunks omit it; gate-on requires mc_transvoxel off), feed
+        // ATTRIBUTE_MORPH_TARGET to the custom vertex shader at @location(8). This
+        // `specialize` runs for BOTH the forward (`opaque_mesh_pipeline`) and the
+        // prepass (`prepass_pipeline`) pipelines, and `forward_io::Vertex` and
+        // `prepass_io::Vertex` use DIFFERENT location schemes — so the base layout must
+        // be branched by pipeline, or the prepass loses an attribute it reads.
+        // Untouched when the gate is off, so the default path is byte-identical.
+        if morph_gate_enabled() && layout.0.contains(ATTRIBUTE_MORPH_TARGET.id) {
+            let is_prepass = descriptor.label.as_deref() == Some("prepass_pipeline");
+            descriptor.vertex.buffers[0] = if is_prepass {
+                // prepass_io::Vertex: uv@1, uv_b@2, normal@3, color@7 (normal harmless
+                // when the normal prepass is off — extra buffer attrs are ignored).
+                layout.0.get_layout(&[
+                    Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                    Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+                    Mesh::ATTRIBUTE_UV_1.at_shader_location(2),
+                    Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
+                    Mesh::ATTRIBUTE_COLOR.at_shader_location(7),
+                    ATTRIBUTE_MORPH_TARGET.at_shader_location(8),
+                ])?
+            } else {
+                // forward_io::Vertex: normal@1, uv@2, uv_b@3, color@5.
+                layout.0.get_layout(&[
+                    Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                    Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+                    Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+                    Mesh::ATTRIBUTE_UV_1.at_shader_location(3),
+                    Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
+                    ATTRIBUTE_MORPH_TARGET.at_shader_location(8),
+                ])?
+            };
+        }
+
         if let Some(fragment) = descriptor.fragment.as_mut() {
             match _key.bind_group_data.quality {
                 TerrainMaterialQuality::FullTriplanar => {}

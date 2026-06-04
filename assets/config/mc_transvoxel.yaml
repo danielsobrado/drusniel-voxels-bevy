@@ -1,5 +1,5 @@
 mc_transvoxel:
-  enabled: true
+  enabled: false
   mode: replace_surface_nets
   max_chunks_per_frame: 2
   lod_delta_policy: max_one
