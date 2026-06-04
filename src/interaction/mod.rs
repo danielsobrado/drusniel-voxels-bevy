@@ -1101,6 +1101,8 @@ impl Plugin for InteractionPlugin {
                     debug::toggle_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_debug_details.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_mesh_mode.run_if(|state: Res<PauseMenuState>| !state.open),
+                    debug::toggle_mc_transvoxel_spike
+                        .run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::toggle_terrain_lod.run_if(|state: Res<PauseMenuState>| !state.open),
                     crate::voxel::terrain_debug::toggle_terrain_debug_view
                         .run_if(|state: Res<PauseMenuState>| !state.open),

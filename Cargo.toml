@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "voxel_builder"
 
 [features]
-default = []
+default = ["mc_transvoxel"]
 # cargo run --release --features tracy then connect with Tracy 0.11.x.
 tracy = ["bevy/trace_tracy"]
 legacy_prop_spawn = []

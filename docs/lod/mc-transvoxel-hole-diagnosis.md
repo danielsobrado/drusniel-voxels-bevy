@@ -1,10 +1,26 @@
 # MC + Transvoxel Hole Diagnosis Log
 
-Last updated: 2026-05-24
+Last updated: 2026-06-04
 
 This file tracks the active MC+Transvoxel hole investigation. It is intentionally
 evidence-first: keep failed hypotheses, commands, probe IDs, and fixed repro
 coordinates here so the next debugging pass does not restart from screenshots.
+
+## Code verification (2026-06-04)
+
+Facts from the tree (not doc assumptions):
+
+- **Default build:** `mc_transvoxel` is a default Cargo feature; spike **off** at startup (`mc_transvoxel.yaml` `enabled: false`).
+- **Runtime toggle:** **Alt+F5** flips `McTransvoxelSettings::enabled` and remeshes all chunks ([`toggle_mc_transvoxel_spike`](../../src/interaction/debug.rs)); F3 shows `MC+TVX: ON/OFF`.
+- **`--no-default-features`:** stub path; `MeshMode::McTransvoxel` falls back to Surface Nets ([`meshing.rs`](../../src/voxel/meshing.rs)).
+- **Active when enabled:** With `enabled: true` + `mode: replace_surface_nets`, `resolve_terrain_mesh_mode` routes eligible chunks to `McTransvoxel` ([`plugin.rs`](../../src/voxel/plugin.rs)).
+- **Transitions on in normal runs:** `mesh_forensics_options` sets `mc_transitions: Enabled` whenever bench forensics are disabled (default gameplay).
+- **No skirts on MC meshes:** `src/voxel/mc_transvoxel/` does not call `generate_skirts`.
+- **Config fields not wired:** `generate_colliders`, `use_secondary_positions`, `material_mode`, `max_chunks_per_frame` are loaded from YAML but unused in Rust call sites (grep 2026-06-04).
+- **Tests:** `rtk cargo test --features mc_transvoxel --lib` — 437 passed.
+- **Go/no-go:** No `docs/lod/mctx-decision.md`; spike remains experimental per [`mc-transvoxel-plan.md`](mc-transvoxel-plan.md).
+
+The visual failure notes below remain the open problem; passing unit tests does not mean seam closure is done.
 
 ## Current visible failure
 

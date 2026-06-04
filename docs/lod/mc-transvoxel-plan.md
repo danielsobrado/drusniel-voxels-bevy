@@ -1,6 +1,7 @@
 # MC + Transvoxel Implementation Plan
 
-> Created: 2026-05-23 · Status: Planning
+> Created: 2026-05-23 · **Status: implemented spike, validation incomplete (not production-ready)**
+> Last code audit: 2026-06-04
 > Supersedes (for the LOD-seam direction): [`docs/lod/lod-seam-closure-plan.md`](lod-seam-closure-plan.md)
 > Scope: `src/voxel/mc_transvoxel/` (new), `src/voxel/meshing.rs`, `src/voxel/plugin.rs`,
 > `src/rendering/triplanar_material.rs`, `assets/shaders/`, `bench/scenes/visual/`
@@ -29,6 +30,25 @@ collider parity at production quality) is **separate downstream work** estimated
 **8–14 engineer-weeks plus 2–4 weeks stabilization** per the original research
 the user shared. The spike itself targets **3 engineer-weeks (1 senior engineer)**.
 
+## Implementation status (code-verified, 2026-06-04)
+
+This section reflects the **current tree**, not ticket checkboxes. Use it when answering “is MC+Transvoxel finished?”
+
+| Area | In code today | Notes |
+|------|----------------|-------|
+| **Default `cargo run`** | MC mesher compiled, spike **off** at startup | `Cargo.toml` `default = ["mc_transvoxel"]`. YAML [`mc_transvoxel.yaml`](../../assets/config/mc_transvoxel.yaml) `enabled: false`; **Alt+F5** toggles [`McTransvoxelSettings::enabled`](../../src/voxel/mc_transvoxel/config.rs) at runtime (remesh all chunks). |
+| **`--no-default-features`** | Surface Nets only | Stub module; Alt+F5 logs a warning. |
+| **Runtime toggle** | **Alt+F5** | [`toggle_mc_transvoxel_spike`](../../src/interaction/debug.rs); requires `MeshSettings.mode == SurfaceNets`. F3 overlay shows `MC+TVX: ON/OFF`. |
+| **Lib tests** | Feature on | `rtk cargo test --features mc_transvoxel --lib` — 437 passed (2026-06-04). |
+| **Transitions** | All six faces | `transvoxel.rs` implements Neg/Pos X/Y/Z. Normal gameplay uses `McTransitionForensicsMode::Enabled` via `mesh_forensics_options` when bench forensics are off. |
+| **LOD max-one** | When MC enabled | `enforce_lod_delta_max_one` in `update_chunk_lod_system` runs only if `mc_settings.enabled && lod_delta_policy == MaxOne`. |
+| **Skirts / SN snap** | Not on MC path | MC output has no `generate_skirts`; `snap_boundary_vertices_to_lower_detail_neighbor` is Surface-Nets-only. |
+| **YAML knobs (unused)** | Parsed only | `generate_colliders`, `use_secondary_positions`, `material_mode`, `max_chunks_per_frame` are stored in `McTransvoxelSettings` but **not read** by meshing or plugin throttling yet. |
+| **MTX-002 baselines** | Missing in repo | Seam bench TOMLs exist under `bench/scenes/visual/visual-regression-seam-*.toml`; `bench-runs/baseline-mctx/` is **not** present. |
+| **MTX-037 go/no-go** | Missing | `docs/lod/mctx-decision.md` does not exist. Spike **defaults to NO-GO** per Definition of Done below until that memo ships. |
+
+**Bottom line:** The mesher spike is **substantially implemented and test-covered**, but **not finished or production-ready** — no quantitative go/no-go, known visible holes still tracked in [`mc-transvoxel-hole-diagnosis.md`](mc-transvoxel-hole-diagnosis.md), and the default binary still uses Surface Nets.
+
 ## Scope
 
 **In scope (spike):**
@@ -42,7 +62,7 @@ the user shared. The spike itself targets **3 engineer-weeks (1 senior engineer)
 
 **Out of scope:**
 
-- Tearing out Surface Nets. SN remains the default path; MC runs only when `mc_transvoxel_spike.enabled = true`.
+- Tearing out Surface Nets. SN remains the default path; MC runs only when `McTransvoxelSettings::enabled` is true (YAML startup default or **Alt+F5** at runtime).
 - Full material / triplanar / weight-blend parity across all LODs.
 - Water-mesh changes (continue to use the existing water mesher; MC produces terrain only).
 - Foliage / props / building system changes.
@@ -131,9 +151,12 @@ assets/config/mc_transvoxel.yaml              — default off, all knobs
 ```
 
 **Required config (`mc_transvoxel.yaml`):**
+
+Shipped file uses `enabled: false` at startup. **Alt+F5** toggles `McTransvoxelSettings::enabled` at runtime (see [`docs/reference/controls.md`](../reference/controls.md)). Benches may override via variant YAML (`enabled: true`, `replace_surface_nets`).
+
 ```yaml
 mc_transvoxel:
-  enabled: false                        # master switch
+  enabled: false                        # startup default; Alt+F5 overrides for the session
   mode: sandbox                         # sandbox | selected_chunks | replace_surface_nets
   max_chunks_per_frame: 2               # rate-limit for fairness
   lod_delta_policy: max_one             # spike enforces 2:1 only
@@ -148,7 +171,7 @@ mc_transvoxel:
 - `cargo check` and `cargo test --lib` pass.
 - With `enabled = false`, no chunk mesh changes and zero new entities/components — verified by a hole-probe dump diff before/after merging the skeleton.
 - The new `MeshMode::McTransvoxel` variant compiles but only routes when `enabled = true`.
-- Feature `mc_transvoxel` in `Cargo.toml` is **off by default** to avoid CI cost when nobody is on the spike.
+- Feature `mc_transvoxel` in `Cargo.toml` is in **`default` features** (2026-06-04); use `cargo run --no-default-features` to omit it. Runtime spike remains **off** until `enabled` is true (YAML or Alt+F5).
 
 ---
 

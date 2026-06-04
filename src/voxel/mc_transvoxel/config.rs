@@ -69,10 +69,14 @@ fn default_sandbox_radius() -> i32 {
 pub struct McTransvoxelSettings {
     pub enabled: bool,
     pub mode: McTransvoxelSpikeMode,
+    /// Parsed from YAML; not yet enforced by the mesh queue (spike backlog).
     pub max_chunks_per_frame: u32,
     pub lod_delta_policy: McTransvoxelLodDeltaPolicy,
+    /// Parsed from YAML; no mesher/shader wiring yet (MTX-024).
     pub use_secondary_positions: bool,
+    /// Parsed from YAML; no collider routing yet (MTX-035 / MTX-043).
     pub generate_colliders: bool,
+    /// Parsed from YAML; triplanar path unchanged (MTX-041).
     pub material_mode: McTransvoxelMaterialMode,
     pub debug_draw_transition_faces: bool,
     pub debug_log_transition_stats: bool,

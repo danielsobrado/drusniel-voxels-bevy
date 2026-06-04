@@ -150,7 +150,7 @@ Diagnostic recipe (friend's rule of thumb, per [`docs/lod/wireframe-debug-plan.m
 - **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` in the hole-probe dump.
 - **Coloured (non-white) edges visible at an altitude band** → a skirt is being used to hide a real gap. Skirt is a band-aid, not a fix.
 
-To launch with MC+Transvoxel for an A/B against Surface Nets, use `.\scripts\startVoxels.ps1 -Mc` (also compiles in the `mc_transvoxel` cargo feature) and set `enabled: true` + `mode: replace_surface_nets` in [`assets/config/mc_transvoxel.yaml`](assets/config/mc_transvoxel.yaml). Pre-staged config variants live at [`bench-runs/baseline-mctx/mc_transvoxel.{replace,sandbox}.yaml`](bench-runs/baseline-mctx/).
+MC+Transvoxel A/B at runtime: keep terrain on Surface Nets (F5), press **Alt+F5** to toggle the spike (`McTransvoxelSettings::enabled`; remeshes all chunks). F3 overlay shows `MC+TVX: ON/OFF`. Default builds include `mc_transvoxel` (`Cargo.toml` default features); YAML [`assets/config/mc_transvoxel.yaml`](assets/config/mc_transvoxel.yaml) only sets the startup default (`enabled: false`). Bench replace mode: set `enabled: true` + `mode: replace_surface_nets` or use `bench-runs/baseline-mctx/*.yaml`. Spike status: [`docs/lod/mc-transvoxel-plan.md`](docs/lod/mc-transvoxel-plan.md).
 
 Standard commands the agent should use:
 

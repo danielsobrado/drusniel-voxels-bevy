@@ -26,8 +26,8 @@ use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
-use crate::voxel::mc_transvoxel::McTransvoxelRuntimeStats;
-use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
+use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
+use crate::voxel::meshing::{ChunkMesh, Face, MeshMode, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::OcclusionConfig;
 use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,
@@ -84,6 +84,7 @@ pub struct DebugOverlayParams<'w> {
     pub water_visual_debug: Option<Res<'w, WaterVisualDebugState>>,
     pub water_bodies: Option<Res<'w, WaterBodyRegistry>>,
     pub mc_spike_stats: Res<'w, McTransvoxelRuntimeStats>,
+    pub mc_spike_settings: Res<'w, McTransvoxelSettings>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
@@ -430,6 +431,47 @@ pub fn toggle_debug_details(
     }
 }
 
+/// Toggle MC+Transvoxel spike at runtime with **Alt+F5** (Surface Nets terrain only).
+///
+/// Flips [`McTransvoxelSettings::enabled`] for this session (YAML is only the startup
+/// default). Marks all loaded chunks dirty so meshes rebuild. Requires the
+/// `mc_transvoxel` Cargo feature (on by default in `Cargo.toml`).
+pub fn toggle_mc_transvoxel_spike(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mesh_settings: Res<MeshSettings>,
+    mut mc_settings: ResMut<McTransvoxelSettings>,
+    mut world: ResMut<crate::voxel::world::VoxelWorld>,
+) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if !alt_held || !keyboard.just_pressed(KeyCode::F5) {
+        return;
+    }
+
+    #[cfg(not(feature = "mc_transvoxel"))]
+    {
+        log::warn!(
+            "MC+Transvoxel runtime toggle ignored: rebuild with --features mc_transvoxel"
+        );
+        return;
+    }
+
+    if mesh_settings.mode != MeshMode::SurfaceNets {
+        log::warn!(
+            "MC+Transvoxel spike applies only when terrain mesh mode is SurfaceNets (current: {:?}). Press F5 to switch.",
+            mesh_settings.mode
+        );
+        return;
+    }
+
+    mc_settings.enabled = !mc_settings.enabled;
+    world.mark_all_loaded_chunks_dirty_with_reason(MeshDirtyReason::Lod);
+    info!(
+        "MC+Transvoxel spike: {} (mode={:?}, Alt+F5 to toggle). Remeshing...",
+        if mc_settings.enabled { "ON" } else { "OFF" },
+        mc_settings.mode,
+    );
+}
+
 /// Toggle mesh mode with F5 key (Blocky <-> SurfaceNets).
 ///
 /// Marks all chunks dirty to trigger re-meshing with the new mode.
@@ -441,6 +483,10 @@ pub fn toggle_mesh_mode(
     mut lod_settings: ResMut<LodSettings>,
     mut world: ResMut<crate::voxel::world::VoxelWorld>,
 ) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if alt_held {
+        return;
+    }
     if keyboard.just_pressed(KeyCode::F5) {
         mesh_settings.mode.toggle();
         // Also toggle the low_detail_mode so ALL LOD levels use the same mode
@@ -852,7 +898,12 @@ pub fn update_debug_overlay(
     }
 
     if debug.toggles.show_chunk_stats {
-        append_chunk_stats_debug(&mut text_content, &chunk_stats, &debug.mc_spike_stats);
+        append_chunk_stats_debug(
+            &mut text_content,
+            &chunk_stats,
+            &debug.mc_spike_stats,
+            &debug.mc_spike_settings,
+        );
     }
 
     if debug.toggles.show_performance {
@@ -1130,6 +1181,7 @@ fn append_chunk_stats_debug(
     text_content: &mut String,
     stats: &RuntimeChunkStats,
     mc_stats: &McTransvoxelRuntimeStats,
+    mc_settings: &McTransvoxelSettings,
 ) {
     text_content.push_str("\n[Chunk Statistics]\n");
 
@@ -1194,9 +1246,17 @@ fn append_chunk_stats_debug(
         ));
     }
 
+    #[cfg(feature = "mc_transvoxel")]
+    let mc_feature = "compiled";
+    #[cfg(not(feature = "mc_transvoxel"))]
+    let mc_feature = "stub (rebuild with --features mc_transvoxel)";
     text_content.push_str(&format!(
-        "MC+TVX: meshed/frame={} lod_delta_gt_one_skips={}\n",
-        mc_stats.chunks_meshed_this_frame, mc_stats.aggregated.skipped_lod_delta_gt_one,
+        "MC+TVX: {} mode={:?} feature={} meshed/frame={} lod_delta_gt_one_skips={} (Alt+F5)\n",
+        if mc_settings.enabled { "ON" } else { "OFF" },
+        mc_settings.mode,
+        mc_feature,
+        mc_stats.chunks_meshed_this_frame,
+        mc_stats.aggregated.skipped_lod_delta_gt_one,
     ));
 
     // Per-frame stats

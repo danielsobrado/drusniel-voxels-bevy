@@ -1,9 +1,9 @@
-//! MC + Transvoxel spike — off-by-default LOD seam closure experiment.
+//! MC + Transvoxel spike — experimental LOD seam closure (not production-ready).
 //!
 //! See `docs/lod/mc-transvoxel-plan.md` for scope, gates, and go/no-go criteria.
-//! Production terrain continues to use Surface Nets unless
-//! `assets/config/mc_transvoxel.yaml` has `enabled: true` **and** the `mc_transvoxel`
-//! Cargo feature is enabled at compile time.
+//! Default builds compile the real mesher (`mc_transvoxel` is a default Cargo feature).
+//! Terrain stays Surface Nets until `McTransvoxelSettings::enabled` is true (YAML
+//! startup default or **Alt+F5** at runtime). `--no-default-features` uses [`stub`](stub.rs).
 
 #[cfg(feature = "mc_transvoxel")]
 mod config;
