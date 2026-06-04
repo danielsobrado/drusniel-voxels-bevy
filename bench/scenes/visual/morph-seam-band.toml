@@ -1,0 +1,22 @@
+# Reproduce the user's distant LOD-seam dark band on the mountain (skirt-normal
+# shading artifact). Camera matches the user's reported pose so before/after skirt-
+# normal fixes are directly comparable.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "mountain-dark-band"
+position = [256.5, 22.7, 256.5]
+look_at = [110.0, 30.0, 114.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "view", frame = 150 },
+]

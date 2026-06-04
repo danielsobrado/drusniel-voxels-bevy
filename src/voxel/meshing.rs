@@ -2589,20 +2589,21 @@ fn generate_low_lod_sdf<const N: usize>(
 ) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let smooth_coarse = coarse_terrain_sdf_smooth_enabled();
 
     for z in 0..padded_size {
         for y in 0..padded_size {
             for x in 0..padded_size {
                 let idx = linearize([x, y, z]) as usize;
-                let effective_step = lower_detail_transition_step_for_padded_size(
+                let transition_step = lower_detail_transition_step_for_padded_size(
                     my_lod,
                     neighbor_lods,
                     x,
                     y,
                     z,
                     padded_size,
-                )
-                .unwrap_or(step);
+                );
+                let effective_step = transition_step.unwrap_or(step);
                 let base_world_pos = coarse_aligned_lod_sample_base_with_stride(
                     chunk_origin,
                     x,
@@ -2611,7 +2612,16 @@ fn generate_low_lod_sdf<const N: usize>(
                     step,
                     effective_step,
                 );
-                sdf[idx] = smoothed_terrain_sdf_at_world_pos(world, base_world_pos);
+                sdf[idx] = if transition_step.is_none() && smooth_coarse {
+                    // Interior coarse cell: step-scaled anti-terrace blur so the
+                    // mesh stops snapping to the coarse lattice (the terraces).
+                    coarse_smoothed_sdf_at_world_pos(world, base_world_pos, step)
+                } else {
+                    // LOD-transition cell (or smoothing disabled): keep the binary
+                    // weld so the boundary still matches the lower-detail neighbour
+                    // that snap/skirts target.
+                    smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
+                };
             }
         }
     }
@@ -2966,6 +2976,71 @@ pub(crate) fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: I
     (sum / weight).max(SIGN_GUARD)
 }
 
+/// Step-scaled anti-terrace blur for coarse LODs (LOD1/2/3).
+///
+/// Same policy as [`smoothed_terrain_sdf_at_world_pos`] — a solid centre stays a
+/// hard `-1` (preserves thin features under blur), an air centre gets a 1-2-1
+/// blur of its neighbours clamped to `≥ SIGN_GUARD` — but the 1-2-1 taps are
+/// spaced `step` voxels apart instead of one. A ±1-voxel blur is *sub-sample* at
+/// `step ≥ 2`, so the coarse field is effectively raw binary occupancy on the
+/// coarse lattice and Surface Nets snaps vertices to it → the visible terraces.
+/// Widening the taps to the coarse spacing makes the field fractional across a
+/// coarse cell, so the zero crossing interpolates between coarse layers and the
+/// terraces flatten out — the same fix [`smoothed_sdf_from_block`] applies at
+/// LOD0, scaled up.
+///
+/// Reads only world occupancy at coarse-aligned offsets, so two adjacent coarse
+/// chunks compute identical values on shared cells (no new seams). The
+/// sign-preserving clamp is mandatory for the MC consumer for the same reason it
+/// is in `smoothed_terrain_sdf_at_world_pos`.
+fn coarse_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3, step: i32) -> f32 {
+    const W: [f32; 3] = [1.0, 2.0, 1.0];
+    const SIGN_GUARD: f32 = 1.0e-3;
+    if terrain_occupancy_sdf_at_world(world, world_pos) < 0.0 {
+        return -1.0;
+    }
+
+    let h = step.max(1);
+    let mut sum = 0.0;
+    let mut weight = 0.0;
+    for (oz, &wz) in W.iter().enumerate() {
+        for (oy, &wy) in W.iter().enumerate() {
+            for (ox, &wx) in W.iter().enumerate() {
+                let w = wx * wy * wz;
+                let offset = IVec3::new(
+                    (ox as i32 - 1) * h,
+                    (oy as i32 - 1) * h,
+                    (oz as i32 - 1) * h,
+                );
+                sum += w * terrain_occupancy_sdf_at_world(world, world_pos + offset);
+                weight += w;
+            }
+        }
+    }
+    (sum / weight).max(SIGN_GUARD)
+}
+
+/// Coarse-LOD anti-terrace smoothing gate (env `VOXELS_COARSE_SDF_SMOOTH`).
+///
+/// Default **on**: extends the LOD0 anti-terrace policy to LOD1/2/3 interior
+/// cells (see [`coarse_smoothed_sdf_at_world_pos`]). Set `VOXELS_COARSE_SDF_SMOOTH=0`
+/// (or `false`) to restore the legacy binary coarse field for an A/B baseline.
+/// Read once and cached; LOD-transition cells are unaffected either way.
+fn coarse_terrain_sdf_smooth_enabled() -> bool {
+    static CACHE: OnceLock<bool> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let enabled = std::env::var("VOXELS_COARSE_SDF_SMOOTH")
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
+        if !enabled {
+            info!(
+                "Coarse-LOD SDF anti-terrace smoothing: DISABLED (VOXELS_COARSE_SDF_SMOOTH=0) — legacy binary coarse field"
+            );
+        }
+        enabled
+    })
+}
+
 /// Generate an SDF array from voxel data with 1-voxel padding for neighbor sampling.
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
 /// This is the LOD0 (high detail) version - samples every voxel.
@@ -3265,6 +3340,9 @@ pub(crate) fn terrain_morph_config() -> &'static TerrainMorphConfig {
         let enabled = std::env::var("VOXELS_TERRAIN_MORPH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        if enabled {
+            info!("GPU terrain morph gate: ENABLED (VOXELS_TERRAIN_MORPH) — SN path welds on GPU");
+        }
         TerrainMorphConfig {
             enabled,
             ..Default::default()
@@ -5329,6 +5407,67 @@ mod tests {
             neighbor_lod3_sdf[neighbor_boundary_idx]
         );
         assert_eq!(transition_sdf[boundary_idx], -1.0);
+    }
+
+    #[test]
+    fn coarse_smoothed_solid_center_stays_hard_negative() {
+        // A solid centre must stay a hard -1 under the blur, exactly like the
+        // LOD0 path — otherwise thin features blur away to air.
+        let mut world = world_with_test_chunks(IVec3::splat(3));
+        let center = IVec3::new(24, 24, 24);
+        world.set_voxel(center, VoxelType::Rock);
+
+        for step in [2, 4, 8] {
+            assert_eq!(
+                coarse_smoothed_sdf_at_world_pos(&world, center, step),
+                -1.0,
+                "solid centre must stay -1 at step {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn coarse_smoothed_air_center_blurs_step_distant_solid() {
+        // The point of the step-scaled kernel: an air cell whose nearest solid is
+        // a full coarse step away must read a FRACTIONAL value (so the Surface-Nets
+        // crossing slides off the coarse lattice and the terrace flattens). The
+        // legacy ±1-voxel blur is sub-sample at this spacing and returns a flat
+        // 1.0, which is exactly what produces the terraces.
+        let mut world = world_with_test_chunks(IVec3::splat(3));
+        let center = IVec3::new(24, 24, 24);
+        let step = 4;
+        // Solid slab one coarse step below the air centre.
+        for x in 16..=32 {
+            for z in 16..=32 {
+                world.set_voxel(IVec3::new(x, center.y - step, z), VoxelType::Rock);
+            }
+        }
+
+        let coarse = coarse_smoothed_sdf_at_world_pos(&world, center, step);
+        let legacy = smoothed_terrain_sdf_at_world_pos(&world, center);
+
+        assert!(
+            coarse > 0.0 && coarse < 1.0,
+            "step-scaled blur should be fractional, got {coarse}"
+        );
+        assert_eq!(
+            legacy, 1.0,
+            "±1-voxel blur misses the step-distant solid (the terrace cause)"
+        );
+    }
+
+    #[test]
+    fn coarse_smoothed_deep_air_stays_positive_one() {
+        // Far from any solid the blur must return a clean +1 (no spurious pull).
+        let world = world_with_test_chunks(IVec3::splat(3));
+        let center = IVec3::new(24, 24, 24);
+        for step in [2, 4, 8] {
+            assert_eq!(
+                coarse_smoothed_sdf_at_world_pos(&world, center, step),
+                1.0,
+                "deep air must stay +1 at step {step}"
+            );
+        }
     }
 
     fn set_column(

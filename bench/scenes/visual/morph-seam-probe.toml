@@ -1,0 +1,24 @@
+# Diagnostic scene: dump a terrain hole-probe at the LOD-seam mountain the user
+# circled, with frozen LODs for a stable read. Run with morph off (snap state the
+# user sees) for the seam diagnosis; run with VOXELS_TERRAIN_MORPH=1 to confirm the
+# morph path is active (look for "GPU terrain morph ACTIVE" in the log).
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "mountain-seam-probe"
+position = [255.0, 92.0, 219.0]
+look_at = [288.0, 62.0, 254.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "view", frame = 150 },
+]
+hole_probe = { frame = 160, target_voxel = [288, 62, 254], label = "mountain-seam" }

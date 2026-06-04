@@ -100,6 +100,14 @@ snap branch unchanged and never touch `morph_targets`, so mesh output is
 byte-identical and no bench is required (per `CLAUDE.md`). Benches are only needed
 once the gate is turned on for seam sign-off.
 
+> **Update 2026-06-04 — geomorph is not the terrace fix.** Investigation of the
+> distant mountain "terraces" concluded the artifact is **coarse-LOD terrace
+> geometry** in the SDF, which neither v1 (weld == snap, D1) nor v2 (distance pop
+> smoothing) removes — at a fixed distance a coarse chunk still renders terraced.
+> The terrace fix is **coarse-LOD anti-terrace SDF smoothing**, shipped separately;
+> see [lod-terrace-investigation.md](lod-terrace-investigation.md). This plan stays
+> valid as v2 infrastructure / the fine-mesh-collider win, **not** as a terrace fix.
+
 ## Implementation status — 2026-06-03
 
 | PR | State | Notes |
