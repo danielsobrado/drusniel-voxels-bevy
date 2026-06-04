@@ -181,6 +181,43 @@ Perf caveat:
 - **Uncommitted, this work:** coarse-LOD anti-terrace smoothing (`meshing.rs`) + tests;
   skirt-normal shading fix (`skirt.rs`); morph-active logs; diagnostic bench scenes.
 
+## Perf regression from the promotion, and the levers tried (2026-06-05)
+
+`transition_refined_surface_nets_lod` (d78d0bb) fixes the visual band by promoting
+every Lod1 chunk that touches a Lod0 neighbor to **full Lod0 meshing**. That meshes a
+one-chunk-wide ring at ~5–8× cost and re-meshes it as the LOD front moves. Two
+symptoms: `visual-regression-live-lod` `Mesh Dirty:p99 ≈ 60 ms` (frame p99 ~100 ms vs
+~40 baseline), and — because a LOD transaction prepares 1 chunk/frame and publishes
+atomically — displayed seams lag ~1.3 s behind a moving camera and tear open (the
+"vertical spikes / moving cracks" the user reported, confirmed via the camera-height
+fan: transient, worst on promoted chunks during motion; steady-state near_face ≈
+interior, so **not** a snap depression).
+
+Cheap levers tried, each benched — **all rejected or neutral**:
+
+| Lever | Result | Verdict |
+|-------|--------|---------|
+| Snap-target iso uses solid-preserving blur (match coarse surface) | probe byte-identical (near_face≈interior) | **no-op, reverted** |
+| Dedup `NeighborLod`-only re-meshes with unchanged inputs (`Chunk::last_terrain_mesh_key`) | live-LOD within noise (continuous motion = genuine churn, not redundant) | **kept** (helps stop-and-go only; not the fix) |
+| LOD transaction prepare rate 1 → 8 / frame | frame p99 133–136 ms, Mesh Dirty p99 ~106 ms | **regression, reverted** (heals cracks but worse stutter) |
+
+**Conclusion:** the cost is *genuine* Lod0 meshing of the promotion ring. No cheap
+lever removes it — you either mesh the ring (cost), don't (band returns), or replace
+whole-chunk promotion with real transition geometry. The remaining true fix is
+**face-local refinement (Transvoxel-style transition cells)**:
+
+- Keep the chunk body at its native Lod1; emit a **fine transition strip only on the
+  Lod0-facing boundary band** that interpolates Lod1→Lod0 (no internal T-junction).
+- This is the same mechanism as the gated `src/voxel/mc_transvoxel/` spike, so the
+  pragmatic path is to **evaluate MC+Transvoxel as the SN transition solution**
+  (MTX-037) rather than hand-roll a second transition mesher.
+- Scope: new mesh section + winding/normals + its own dirty/transaction handling +
+  tests + full live-LOD/visual A/B. A dedicated effort, not a hot-path tweak.
+
+Diagnostic tooling for this lives in the bench now: `terrain_debug = { wireframe|normals }`
+per checkpoint, plus `morph-seam-spike-probe.toml` (camera-height fan) and the
+`morph-seam-*` scenes.
+
 ## Open / follow-ups
 
 - Y-face coarse cells: the step-scaled blur applies on all axes, but the
