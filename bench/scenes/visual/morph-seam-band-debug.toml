@@ -1,0 +1,49 @@
+# Classify the distant-mountain LOD "dark band" deterministically. Same camera as
+# morph-seam-band.toml (the user's reported pose), but each checkpoint forces a
+# terrain debug overlay so the screenshot tells us WHAT the band is:
+#   - wireframe section colours: white=main surface, cyan=horiz skirt/apron,
+#     magenta=vert skirt, yellow=transvoxel; LOD tint blue=LOD1/green=LOD2/orange=LOD3.
+#   - normals-as-colour: smooth geometry but stepped colour => normals issue;
+#     stepped geometry => real coarse steps.
+# Plus a hole-probe dump of per-chunk LODs at the band.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "band-wireframe"
+position = [256.5, 22.7, 256.5]
+look_at = [110.0, 30.0, 114.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+terrain_debug = { wireframe = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+hole_probe = { frame = 170, target_voxel = [110, 30, 114], label = "band" }
+
+[[checkpoint]]
+name = "band-normals"
+position = [256.5, 22.7, 256.5]
+look_at = [110.0, 30.0, 114.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+terrain_debug = { normals = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "band-wire-normals"
+position = [256.5, 22.7, 256.5]
+look_at = [110.0, 30.0, 114.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+terrain_debug = { wireframe = true, normals = true }
+screenshot_points = [{ name = "view", frame = 150 }]

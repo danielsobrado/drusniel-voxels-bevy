@@ -1,0 +1,43 @@
+# Exact reproduction of the user's vertical "spike"/notch artifact, from the
+# hole-probe camera (debug/terrain-hole-probe-20260604-150851.json). Mountain near
+# voxel (159,72,417); promoted chunk (9,5,25) Lod1->rendered Lod0 borders Lod1 (8,5,25).
+# Wireframe is the FIRST checkpoint so the debug material reliably applies.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "spike-wire"
+position = [315.57, 36.69, 356.18]
+look_at = [159.0, 72.0, 417.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+terrain_debug = { wireframe = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "spike-plain"
+position = [315.57, 36.69, 356.18]
+look_at = [159.0, 72.0, 417.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "spike-normals"
+position = [315.57, 36.69, 356.18]
+look_at = [159.0, 72.0, 417.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+terrain_debug = { normals = true }
+screenshot_points = [{ name = "view", frame = 150 }]

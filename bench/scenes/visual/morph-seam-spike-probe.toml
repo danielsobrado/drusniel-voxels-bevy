@@ -1,0 +1,22 @@
+# Quantitative loop for the snap-depression "spike" fix. One checkpoint at the
+# user's hole-probe camera; dumps the camera-height fan so signed render-vs-voxel
+# errors can be compared before/after the fix (baseline worst -3.10, median -1.04,
+# 28/49 negative). A plain screenshot is captured for the visual A/B.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "spike-probe"
+position = [315.57, 36.69, 356.18]
+look_at = [159.0, 72.0, 417.0]
+time_of_day = 0.42
+hold_frames = 260
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 220 }]
+hole_probe = { frame = 240, target_voxel = [159, 72, 417], label = "spike" }

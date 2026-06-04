@@ -1,0 +1,53 @@
+# Hunt the vertical "spike" artifact on the mountain slope from a few close angles.
+# Each angle is captured twice: plain (as the user sees it) and wireframe (so the
+# spikes' mesh section is identified: white=main surface, cyan=horiz skirt/apron,
+# magenta=vertical skirt). Camera poses are best-guess around the [110,30,114]
+# mountain; adjust position/look_at to the in-game HUD Pos/Target if they miss.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "se-plain"
+position = [160.0, 44.0, 152.0]
+look_at = [114.0, 30.0, 118.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "se-wire"
+position = [160.0, 44.0, 152.0]
+look_at = [114.0, 30.0, 118.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+terrain_debug = { wireframe = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "sw-plain"
+position = [150.0, 42.0, 78.0]
+look_at = [114.0, 30.0, 112.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "nw-plain"
+position = [70.0, 44.0, 150.0]
+look_at = [110.0, 30.0, 116.0]
+time_of_day = 0.42
+hold_frames = 200
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 150 }]

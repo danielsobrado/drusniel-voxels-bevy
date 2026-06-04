@@ -552,6 +552,22 @@ struct BenchCheckpoint {
     gameplay: Option<BenchGameplay>,
     inventory_ui: Option<BenchInventoryUi>,
     hole_probe: Option<BenchHoleProbe>,
+    /// Diagnostic: force terrain debug overlays (Alt+F7 wireframe / Alt+F8
+    /// normals) on for this checkpoint so seam artifacts can be classified
+    /// deterministically from a bench screenshot.
+    terrain_debug: Option<BenchTerrainDebug>,
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+struct BenchTerrainDebug {
+    #[serde(default)]
+    wireframe: bool,
+    #[serde(default)]
+    normals: bool,
+    #[serde(default)]
+    iso_band: bool,
+    #[serde(default)]
+    flat_unlit: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -2369,6 +2385,19 @@ fn run_bench_state_machine(
             if let Some(render_features) = checkpoint.render_features.clone() {
                 commands.queue(move |world: &mut World| {
                     apply_checkpoint_render_features(world, &render_features);
+                });
+            }
+            {
+                let debug = checkpoint.terrain_debug.clone().unwrap_or_default();
+                commands.queue(move |world: &mut World| {
+                    if let Some(mut view) = world
+                        .get_resource_mut::<crate::voxel::terrain_debug::TerrainDebugView>()
+                    {
+                        view.wireframe = debug.wireframe;
+                        view.normals = debug.normals;
+                        view.iso_band = debug.iso_band;
+                        view.flat_unlit = debug.flat_unlit;
+                    }
                 });
             }
             apply_checkpoint_inventory_ui(checkpoint, inventory_control.as_deref_mut());
