@@ -137,6 +137,20 @@ pub fn append_morph_targets(
         }
     }
 
+    // Proof-of-life: emit once when the morph first welds boundary verts, so a run
+    // with VOXELS_TERRAIN_MORPH=1 visibly confirms the GPU path is doing work (the
+    // visual result still matches snap — see decision D1).
+    let welded = mesh.morph_targets.iter().filter(|t| t[3] > 0.5).count();
+    if welded > 0 {
+        static LOGGED: std::sync::Once = std::sync::Once::new();
+        LOGGED.call_once(|| {
+            bevy::log::info!(
+                "GPU terrain morph ACTIVE: welded {welded} of {} verts on a transition chunk",
+                mesh.morph_targets.len()
+            );
+        });
+    }
+
     Ok(())
 }
 

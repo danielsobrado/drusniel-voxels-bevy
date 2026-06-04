@@ -482,22 +482,26 @@ pub fn generate_skirts_with_apron_only_faces(
         let apron1 =
             top1 + transition_apron_offset(skirt_normal, edge.v1_normal, apron_width) + apron_drop;
 
-        let blend_factor = 0.2;
-        let blended_normal0 =
-            (edge.v0_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
-        let blended_normal1 =
-            (edge.v1_normal * (1.0 - blend_factor) + skirt_normal * blend_factor).normalize();
+        // Skirt/apron verts are a hidden band-aid: shade them like the adjacent
+        // surface so they disappear. The previous `blended_normal` tilted 20% toward
+        // the horizontal `skirt_normal`, which on steep slopes pushed the strip's
+        // normal sideways/down — under an overhead sun it shaded black, the LOD
+        // "dark band" (magenta strip in Alt+F8). Inheriting the surface normal removes
+        // it without touching geometry. `upward_biased_normal` is kept for the gentle
+        // edges it already handles.
+        let surface_normal0 = edge.v0_normal.try_normalize().unwrap_or(Vec3::Y);
+        let surface_normal1 = edge.v1_normal.try_normalize().unwrap_or(Vec3::Y);
         let use_upward_transition_normals =
             has_lower_lod_neighbor && edge_prefers_upward_transition_normals(edge);
         let transition_normal0 = if use_upward_transition_normals {
             upward_biased_normal(edge.v0_normal)
         } else {
-            blended_normal0
+            surface_normal0
         };
         let transition_normal1 = if use_upward_transition_normals {
             upward_biased_normal(edge.v1_normal)
         } else {
-            blended_normal1
+            surface_normal1
         };
 
         let (vertical_top0, vertical_top1) = if emit_transition_apron {
