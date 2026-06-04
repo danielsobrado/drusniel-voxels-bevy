@@ -233,6 +233,12 @@ pub struct Chunk {
     face_visibility: FaceVisibility,
     /// Whether face visibility needs recomputation.
     visibility_dirty: bool,
+    /// Hash of the mesh-determining LOD inputs `(target_mode, effective mesh LOD,
+    /// effective neighbor LODs)` from the last committed terrain mesh. Lets the
+    /// LOD-churn path skip re-meshing a chunk whose only dirty reason is
+    /// `NeighborLod` and whose inputs are unchanged (no visible change, byte-
+    /// identical mesh). `None` until first committed.
+    last_terrain_mesh_key: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,6 +280,7 @@ impl Chunk {
             // Empty chunk - all faces connected
             face_visibility: FaceVisibility::all_connected(),
             visibility_dirty: false,
+            last_terrain_mesh_key: None,
         }
     }
 
@@ -292,6 +299,7 @@ impl Chunk {
             uniformity,
             face_visibility: FaceVisibility::all_connected(),
             visibility_dirty: uniformity != ChunkUniformity::Empty,
+            last_terrain_mesh_key: None,
         }
     }
 
@@ -440,6 +448,17 @@ impl Chunk {
     pub fn reset_dirty_to_reason(&mut self, reason: MeshDirtyReason) {
         self.dirty = true;
         self.dirty_reasons = reason.bit();
+    }
+
+    /// Hash of the mesh-determining LOD inputs from the last committed terrain mesh.
+    pub fn last_terrain_mesh_key(&self) -> Option<u64> {
+        self.last_terrain_mesh_key
+    }
+
+    /// Record the mesh-determining LOD inputs of the just-committed terrain mesh, so
+    /// a later `NeighborLod`-only dirty with identical inputs can be skipped.
+    pub fn set_last_terrain_mesh_key(&mut self, key: u64) {
+        self.last_terrain_mesh_key = Some(key);
     }
 
     pub fn set_mesh_entity(&mut self, entity: Entity) {
@@ -593,6 +612,7 @@ impl Chunk {
             uniformity: ChunkUniformity::Unknown, // Will be computed on first mesh attempt
             face_visibility: data.face_visibility,
             visibility_dirty,
+            last_terrain_mesh_key: None,
         }
     }
 

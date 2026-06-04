@@ -2805,6 +2805,7 @@ struct LodMeshTransactionFrameStats {
     chunks_processed: usize,
     chunks_meshed: u32,
     chunks_skipped: u32,
+    skipped_unchanged_chunks: u32,
     terrain_mesh_empty_but_solid_voxels: u32,
     terrain_mesh_boundary_missing_neighbor: u32,
     surface_nets_chunks_deferred_for_halo: u32,
@@ -2941,6 +2942,97 @@ fn compare_chunk_pos_lex(a: IVec3, b: IVec3) -> std::cmp::Ordering {
         .then_with(|| a.z.cmp(&b.z))
 }
 
+/// Compact key over the mesh-determining LOD inputs: target mesh mode, the final
+/// (post-promotion) mesh LOD, and the six effective neighbor LODs. Two chunks with
+/// the same key and identical voxels produce a byte-identical Surface Nets mesh, so
+/// a `NeighborLod`-only re-mesh whose key is unchanged can be skipped.
+fn terrain_mesh_dedup_key(
+    target_mode: MeshMode,
+    mesh_lod_level: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> u64 {
+    let lod_code = |lod: LodLevel| -> u64 {
+        match lod.lod_index() {
+            Some(i) => (i as u64) + 1,
+            None => 5, // Culled
+        }
+    };
+    let opt_code = |lod: Option<LodLevel>| -> u64 { lod.map(lod_code).unwrap_or(0) };
+    let mode_code = match target_mode {
+        MeshMode::Blocky => 1,
+        MeshMode::SurfaceNets => 2,
+        MeshMode::McTransvoxel => 3,
+    };
+    mode_code
+        | (lod_code(mesh_lod_level) << 3)
+        | (opt_code(neighbor_lods.neg_x) << 6)
+        | (opt_code(neighbor_lods.pos_x) << 9)
+        | (opt_code(neighbor_lods.neg_y) << 12)
+        | (opt_code(neighbor_lods.pos_y) << 15)
+        | (opt_code(neighbor_lods.neg_z) << 18)
+        | (opt_code(neighbor_lods.pos_z) << 21)
+}
+
+/// True when a chunk dirtied **only** for `NeighborLod` would re-mesh to exactly the
+/// mesh it already has — same target mode, same post-promotion mesh LOD, same
+/// effective neighbor LODs as the last committed mesh. Such a re-mesh is wasted work
+/// (a byte-identical result), so the LOD-churn path can drop it from the transaction.
+///
+/// Mirrors the mesh-producing input resolution in [`prepare_lod_chunk_commit`]; any
+/// case it cannot resolve cheaply (unknown uniformity, culled/empty-clear, would
+/// defer for halo) returns `false` so the normal path handles it.
+#[allow(clippy::too_many_arguments)]
+fn lod_churn_chunk_mesh_unchanged(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    bench_forensics: Option<&BenchForensicsConfig>,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+    mc_settings: &McTransvoxelSettings,
+    camera_pos: Option<Vec3>,
+) -> bool {
+    let Some(chunk) = world.get_chunk(chunk_pos) else {
+        return false;
+    };
+    // Only dedup pure neighbor-LOD churn: voxels (Generation/TerrainMutation) and the
+    // chunk's own LOD (Lod) and water (WaterMaterial) must be unchanged.
+    if chunk.dirty_reason_flags() != MeshDirtyReason::NeighborLod.bit() {
+        return false;
+    }
+    let Some(stored_key) = chunk.last_terrain_mesh_key() else {
+        return false;
+    };
+    let lod_level = chunk.lod_level();
+    if lod_level == LodLevel::Culled {
+        return false;
+    }
+    let uniformity = chunk.uniformity();
+    if uniformity == ChunkUniformity::Unknown {
+        return false;
+    }
+    let base_mode = target_terrain_mesh_mode_for_lod(lod_level, mesh_settings, lod_settings);
+    let target_mode = resolve_terrain_mesh_mode(base_mode, chunk_pos, lod_level, mc_settings, camera_pos);
+    let target_mode = forensics_mesh_mode_override(target_mode, bench_forensics);
+    let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
+        && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
+        && empty_chunk_has_surface_nets_boundary_surface(world, chunk_pos);
+    if uniformity == ChunkUniformity::Empty && !empty_surface_neighbor {
+        return false;
+    }
+    let mesh_lod_level =
+        mesh_lod_level_for_surface_nets_cap(target_mode, uniformity, empty_surface_neighbor, lod_level);
+    let missing_boundary_neighbors = count_missing_in_bounds_boundary_neighbors(world, chunk_pos);
+    if missing_boundary_neighbors > 0 && should_defer_surface_nets_mesh(target_mode, missing_boundary_neighbors) {
+        return false;
+    }
+    let base_neighbor_lods =
+        build_base_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
+    let neighbor_lods = build_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
+    let mesh_lod_level =
+        transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
+    terrain_mesh_dedup_key(target_mode, mesh_lod_level, &neighbor_lods) == stored_key
+}
+
 #[inline(never)]
 fn process_lod_mesh_transaction(
     state: &mut LodMeshTransactionState,
@@ -2966,8 +3058,31 @@ fn process_lod_mesh_transaction(
     let mut frame_stats = LodMeshTransactionFrameStats::default();
 
     if state.active.is_none() {
+        // Dedup pass: drop pure NeighborLod churn whose mesh inputs are unchanged so
+        // the transaction only re-meshes chunks that actually changed. This is the
+        // dominant source of the LOD-churn backlog (one LOD change halo-dirties six
+        // neighbors, most of which would re-mesh to an identical result).
+        let mut changed_chunks: Vec<IVec3> = Vec::with_capacity(dirty_chunks.len());
+        for &chunk_pos in dirty_chunks {
+            if lod_churn_chunk_mesh_unchanged(
+                world,
+                chunk_pos,
+                bench_forensics,
+                mesh_settings,
+                lod_settings,
+                mc_settings,
+                camera_pos,
+            ) {
+                if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+                    chunk.clear_dirty();
+                }
+                frame_stats.skipped_unchanged_chunks += 1;
+            } else {
+                changed_chunks.push(chunk_pos);
+            }
+        }
         let selection = select_lod_mesh_transaction_chunks(
-            dirty_chunks,
+            &changed_chunks,
             camera_pos,
             MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME,
         );
@@ -3552,6 +3667,13 @@ fn apply_prepared_lod_chunk_commit(
         return;
     };
     chunk.clear_dirty();
+    // Record the mesh-determining LOD inputs so a later NeighborLod-only dirty with
+    // identical inputs can be skipped (see `lod_churn_chunk_mesh_unchanged`).
+    chunk.set_last_terrain_mesh_key(terrain_mesh_dedup_key(
+        terrain_mesh_debug.target_mode_at_mesh,
+        terrain_mesh_debug.effective_lod_at_mesh,
+        &terrain_mesh_debug.neighbor_lods_at_mesh,
+    ));
 
     let world_pos = VoxelWorld::chunk_to_world(chunk_pos);
     let horizon_proxy = is_horizon_proxy_lod(lod_level);
