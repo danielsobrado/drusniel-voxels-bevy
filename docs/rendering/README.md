@@ -18,7 +18,7 @@ Document status (2026-05-17): current index/reference.
 
 ## LOD seam experiments
 
-- [MC + Transvoxel spike plan](../lod/mc-transvoxel-plan.md) — off-by-default Marching Cubes + transition-cell seam closure spike (`mc_transvoxel` Cargo feature).
+- [MC + Transvoxel spike plan](../lod/mc-transvoxel-plan.md) — Marching Cubes + transition cells (default Cargo feature). **Alt+F5** toggles spike vs Surface Nets at runtime ([controls](../reference/controls.md)). Not production-ready until MTX-037 go/no-go. See [hole diagnosis log](../lod/mc-transvoxel-hole-diagnosis.md).
 
 ### Path A: NAADF GI backend migration
 
