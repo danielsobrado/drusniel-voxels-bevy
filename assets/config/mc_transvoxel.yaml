@@ -1,5 +1,8 @@
+# Startup default for McTransvoxelSettings::enabled. Toggle at runtime with Alt+F5 (F3 shows ON/OFF).
+# Requires Surface Nets terrain (F5); Blocky mode ignores the spike.
+# mc_transvoxel is in Cargo default features; disable with: cargo run --no-default-features
 mc_transvoxel:
-  enabled: true
+  enabled: false
   mode: replace_surface_nets
   max_chunks_per_frame: 2
   lod_delta_policy: max_one
