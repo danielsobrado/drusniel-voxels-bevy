@@ -3771,6 +3771,7 @@ pub fn generate_chunk_mesh_surface_nets(
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
 
     if !solid_mesh.indices.is_empty() {
+        let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
@@ -3778,6 +3779,7 @@ pub fn generate_chunk_mesh_surface_nets(
             &solid_mesh.indices,
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
+            boundary_band,
         );
 
         let mut local_skirt_config = skirt_config.clone();
@@ -3972,6 +3974,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
+        let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
@@ -3979,6 +3982,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             &solid_mesh.indices,
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
+            boundary_band,
         );
 
         let mut local_skirt_config = skirt_config.clone();
@@ -4174,6 +4178,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
+        let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
@@ -4181,6 +4186,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             &solid_mesh.indices,
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
+            boundary_band,
         );
 
         let mut local_skirt_config = skirt_config.clone();
@@ -4376,6 +4382,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
+        let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
             &local_positions,
             &solid_mesh.positions,
@@ -4383,6 +4390,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             &solid_mesh.indices,
             &solid_mesh.colors,
             CHUNK_SIZE as f32,
+            boundary_band,
         );
 
         let mut local_skirt_config = skirt_config.clone();

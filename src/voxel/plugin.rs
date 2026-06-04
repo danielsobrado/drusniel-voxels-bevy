@@ -59,6 +59,8 @@ const MAX_CHUNKS_PER_FRAME: usize = 4;
 const MAX_STARTUP_CHUNKS_PER_FRAME: usize = 12;
 const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
+/// Log when the dirty mesh queue stays large after world generation has finished.
+const MESH_DIRTY_QUEUE_WARN_THRESHOLD: usize = 96;
 const MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME: usize = 32;
 const MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME: usize = 1;
 // Raised from 4: at 4 changes/update the LOD backlog never drained, leaving
@@ -2198,7 +2200,7 @@ fn poll_chunk_generation_tasks(
 }
 
 fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
-    mark_chunk_halo_dirty(world, chunk_pos, MeshDirtyReason::Generation);
+    world.mark_generation_face_neighbors_dirty(chunk_pos);
 }
 
 fn mark_chunk_lod_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
@@ -2211,21 +2213,6 @@ fn mark_chunk_lod_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
         IVec3::new(0, 0, -1),
     ] {
         world.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::NeighborLod);
-    }
-}
-
-fn mark_chunk_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3, reason: MeshDirtyReason) {
-    for dz in -1..=1 {
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                if dx == 0 && dy == 0 && dz == 0 {
-                    continue;
-                }
-
-                let neighbor_pos = chunk_pos + IVec3::new(dx, dy, dz);
-                world.mark_chunk_dirty_with_reason(neighbor_pos, reason);
-            }
-        }
     }
 }
 
@@ -3761,6 +3748,12 @@ fn mesh_dirty_chunks_system(
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
     let dirty_chunks_queued = dirty_chunks.len();
+    if generation_complete && dirty_chunks_queued >= MESH_DIRTY_QUEUE_WARN_THRESHOLD {
+        warn!(
+            "mesh dirty queue backed up: {} queued (per-frame visit cap {})",
+            dirty_chunks_queued, MAX_DIRTY_CHUNKS_VISITED_PER_FRAME,
+        );
+    }
     let had_dirty_chunks = !dirty_chunks.is_empty();
     let mut reason_counts = MeshDirtyReasonCounts::default();
     for chunk_pos in &dirty_chunks {
@@ -6943,7 +6936,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_chunk_marks_full_3d_halo_dirty() {
+    fn generated_chunk_marks_face_neighbors_dirty() {
         let center = IVec3::new(1, 1, 1);
         let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
 
@@ -6960,11 +6953,11 @@ mod tests {
         mark_surface_nets_halo_dirty(&mut world, center);
 
         let dirty = world.dirty_chunks().collect::<HashSet<_>>();
-        assert_eq!(dirty.len(), 26);
+        assert_eq!(dirty.len(), 6);
         assert!(!dirty.contains(&center));
-        assert!(dirty.contains(&(center + IVec3::new(-1, -1, -1))));
-        assert!(dirty.contains(&(center + IVec3::new(1, 1, 1))));
-        assert!(dirty.contains(&(center + IVec3::Y)));
+        assert!(dirty.contains(&(center + IVec3::X)));
+        assert!(dirty.contains(&(center + IVec3::NEG_Y)));
+        assert!(!dirty.contains(&(center + IVec3::new(-1, -1, -1))));
     }
 
     #[test]
