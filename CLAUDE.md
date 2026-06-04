@@ -35,6 +35,13 @@ When you claim a perf improvement, include:
 
 If a change was not benchmarked, say so directly.
 
+## Compile-Time Notes
+
+- Project Cargo config already enables `sccache` via `.cargo/config.toml`; keep it unless diagnosing compiler-wrapper issues.
+- `Cargo.toml` already enables Bevy `dynamic_linking` and dev profile optimizations for faster local iteration. Do not remove those for normal development.
+- Do not add nightly-only compile accelerators such as the parallel front-end or Cranelift to the default project config unless the task explicitly asks for that experiment.
+- If changing linker/debug-info/profile settings to reduce compile times, verify the exact command still works on Windows and document the tradeoff. Avoid shipping/release claims from dynamic-linking dev builds.
+
 ## Terrain Debug Views
 
 Live in-game overlays for diagnosing LOD seams, holes, normals, and skirt

@@ -61,6 +61,7 @@ const MAX_DIRTY_CHUNKS_VISITED_PER_FRAME: usize = 64;
 const MAX_DIRTY_CHUNKS_VISITED_WITH_DEFERRED_PER_FRAME: usize = 512;
 /// Log when the dirty mesh queue stays large after world generation has finished.
 const MESH_DIRTY_QUEUE_WARN_THRESHOLD: usize = 96;
+const MESH_DIRTY_QUEUE_WARN_INTERVAL_SECS: f32 = 1.0;
 const MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME: usize = 32;
 const MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME: usize = 1;
 // Raised from 4: at 4 changes/update the LOD backlog never drained, leaving
@@ -554,6 +555,24 @@ struct WorldStartupSetupState {
 }
 
 #[derive(Resource, Default, Debug)]
+struct MeshDirtyQueueWarningState {
+    last_warn_secs: Option<f32>,
+}
+
+impl MeshDirtyQueueWarningState {
+    fn should_warn(&mut self, now_secs: f32) -> bool {
+        let should_warn = self
+            .last_warn_secs
+            .map(|last| now_secs - last >= MESH_DIRTY_QUEUE_WARN_INTERVAL_SECS)
+            .unwrap_or(true);
+        if should_warn {
+            self.last_warn_secs = Some(now_secs);
+        }
+        should_warn
+    }
+}
+
+#[derive(Resource, Default, Debug)]
 struct PendingWorldGeneration {
     requested: bool,
 }
@@ -685,6 +704,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(TerrainLodControl::default())
         .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(LodMeshTransactionState::default())
+        .insert_resource(MeshDirtyQueueWarningState::default())
         .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
         .insert_resource(RuntimeChunkStats::default())
@@ -2455,7 +2475,35 @@ fn mesh_lod_level_for_surface_nets_cap(
     }
 }
 
-pub(crate) fn effective_terrain_mesh_lod_for_chunk(
+fn transition_refined_surface_nets_lod(
+    target_mode: MeshMode,
+    mesh_lod_level: LodLevel,
+    neighbor_lods: NeighborLods,
+) -> LodLevel {
+    if target_mode != MeshMode::SurfaceNets || mesh_lod_level != LodLevel::Lod1 {
+        return mesh_lod_level;
+    }
+
+    let touches_lod0_neighbor = [
+        neighbor_lods.neg_x,
+        neighbor_lods.pos_x,
+        neighbor_lods.neg_y,
+        neighbor_lods.pos_y,
+        neighbor_lods.neg_z,
+        neighbor_lods.pos_z,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|lod| lod == LodLevel::Lod0);
+
+    if touches_lod0_neighbor {
+        LodLevel::Lod0
+    } else {
+        mesh_lod_level
+    }
+}
+
+fn base_effective_terrain_mesh_lod_for_chunk(
     world: &VoxelWorld,
     chunk_pos: IVec3,
     mesh_settings: &MeshSettings,
@@ -2479,6 +2527,76 @@ pub(crate) fn effective_terrain_mesh_lod_for_chunk(
         empty_surface_neighbor,
         lod_level,
     ))
+}
+
+pub(crate) fn effective_terrain_mesh_lod_for_chunk(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+) -> Option<LodLevel> {
+    let chunk = world.get_chunk(chunk_pos)?;
+    let lod_level = chunk.lod_level();
+    let base_lod =
+        base_effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings)?;
+    if base_lod == LodLevel::Culled {
+        return Some(base_lod);
+    }
+
+    let target_mode = target_terrain_mesh_mode_for_lod(lod_level, mesh_settings, lod_settings);
+    let base_neighbor_lods =
+        build_base_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
+    Some(transition_refined_surface_nets_lod(
+        target_mode,
+        base_lod,
+        base_neighbor_lods,
+    ))
+}
+
+fn build_base_terrain_neighbor_lods(
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    mesh_settings: &MeshSettings,
+    lod_settings: &LodSettings,
+) -> NeighborLods {
+    NeighborLods {
+        neg_x: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(-1, 0, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_x: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(1, 0, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        neg_y: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, -1, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_y: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 1, 0),
+            mesh_settings,
+            lod_settings,
+        ),
+        neg_z: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 0, -1),
+            mesh_settings,
+            lod_settings,
+        ),
+        pos_z: base_effective_terrain_mesh_lod_for_chunk(
+            world,
+            chunk_pos + IVec3::new(0, 0, 1),
+            mesh_settings,
+            lod_settings,
+        ),
+    }
 }
 
 pub(crate) fn build_terrain_neighbor_lods(
@@ -3079,7 +3197,11 @@ fn prepare_lod_chunk_commit(
         return LodChunkPrepareOutcome::Skipped;
     }
 
+    let base_neighbor_lods =
+        build_base_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
     let neighbor_lods = build_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
+    let mesh_lod_level =
+        transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
     let mesh_start = Instant::now();
     let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
         generate_chunk_mesh_with_mode_and_forensics(
@@ -3272,6 +3394,15 @@ fn prepared_lod_commit_stale_reason(
         empty_surface_neighbor,
         lod_level,
     );
+    let current_base_neighbor_lods =
+        build_base_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
+    let current_neighbor_lods =
+        build_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
+    let mesh_lod_level = transition_refined_surface_nets_lod(
+        target_mode,
+        mesh_lod_level,
+        current_base_neighbor_lods,
+    );
     if mesh_lod_level != commit.terrain_mesh_debug.effective_lod_at_mesh {
         return Some(LodMeshTransactionAbortReason::ValidationMeshLodChanged);
     }
@@ -3287,8 +3418,6 @@ fn prepared_lod_commit_stale_reason(
         return None;
     }
 
-    let current_neighbor_lods =
-        build_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
     if !neighbor_lods_match(
         current_neighbor_lods,
         commit.terrain_mesh_debug.neighbor_lods_at_mesh,
@@ -3685,9 +3814,11 @@ fn apply_prepared_lod_chunk_commit(
 #[derive(SystemParam)]
 struct MeshDirtyTimingParams<'w> {
     frame: Res<'w, FrameCount>,
+    time: Res<'w, Time>,
     timing: ResMut<'w, AreaTimingRecorder>,
     gen_state: Res<'w, ChunkGenerationState>,
     lod_transaction: ResMut<'w, LodMeshTransactionState>,
+    queue_warning: ResMut<'w, MeshDirtyQueueWarningState>,
 }
 
 #[derive(SystemParam)]
@@ -3748,7 +3879,12 @@ fn mesh_dirty_chunks_system(
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
     let dirty_chunks_queued = dirty_chunks.len();
-    if generation_complete && dirty_chunks_queued >= MESH_DIRTY_QUEUE_WARN_THRESHOLD {
+    if generation_complete
+        && dirty_chunks_queued >= MESH_DIRTY_QUEUE_WARN_THRESHOLD
+        && timing_params
+            .queue_warning
+            .should_warn(timing_params.time.elapsed_secs())
+    {
         warn!(
             "mesh dirty queue backed up: {} queued (per-frame visit cap {})",
             dirty_chunks_queued, MAX_DIRTY_CHUNKS_VISITED_PER_FRAME,
@@ -3956,8 +4092,12 @@ fn mesh_dirty_chunks_system(
             continue;
         }
 
+        let base_neighbor_lods =
+            build_base_terrain_neighbor_lods(&world, chunk_pos, &mesh_settings, &lod_settings);
         let neighbor_lods =
             build_terrain_neighbor_lods(&world, chunk_pos, &mesh_settings, &lod_settings);
+        let mesh_lod_level =
+            transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
 
         // Step 1: Generate mesh data using immutable borrow (with timing)
         let mesh_start = Instant::now();
@@ -6540,6 +6680,18 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
 mod tests {
     use super::*;
 
+    #[test]
+    fn mesh_dirty_queue_warning_is_rate_limited_to_once_per_second() {
+        let mut state = MeshDirtyQueueWarningState::default();
+
+        assert!(state.should_warn(10.0));
+        assert!(!state.should_warn(10.25));
+        assert!(!state.should_warn(10.99));
+        assert!(state.should_warn(11.0));
+        assert!(!state.should_warn(11.5));
+        assert!(state.should_warn(12.01));
+    }
+
     fn assert_face_lod_deltas_le_one(desired: &HashMap<IVec3, LodLevel>) {
         const FACE_OFFSETS: [IVec3; 3] = [
             IVec3::new(1, 0, 0),
@@ -6565,6 +6717,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn surface_nets_transition_mesh_lod_refines_to_finer_neighbor() {
+        let neighbor_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod0),
+            neg_z: Some(LodLevel::Lod2),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            transition_refined_surface_nets_lod(
+                MeshMode::SurfaceNets,
+                LodLevel::Lod1,
+                neighbor_lods,
+            ),
+            LodLevel::Lod0
+        );
+        assert_eq!(
+            transition_refined_surface_nets_lod(MeshMode::Blocky, LodLevel::Lod1, neighbor_lods),
+            LodLevel::Lod1
+        );
+        assert_eq!(
+            transition_refined_surface_nets_lod(
+                MeshMode::SurfaceNets,
+                LodLevel::Lod2,
+                NeighborLods {
+                    pos_x: Some(LodLevel::Lod1),
+                    ..Default::default()
+                },
+            ),
+            LodLevel::Lod2
+        );
+        assert_eq!(
+            transition_refined_surface_nets_lod(
+                MeshMode::SurfaceNets,
+                LodLevel::Lod1,
+                NeighborLods {
+                    pos_x: Some(LodLevel::Culled),
+                    ..Default::default()
+                },
+            ),
+            LodLevel::Lod1
+        );
     }
 
     /// `enforce_lod_delta_max_one` must (a) clamp deltas to 1 and (b) return

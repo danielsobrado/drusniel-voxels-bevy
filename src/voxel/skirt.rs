@@ -416,6 +416,68 @@ pub fn generate_skirts_with_apron_only_faces(
     neighbor_lods: &NeighborLods,
     apron_only_face_mask: u8,
 ) -> SkirtGenerationStats {
+    generate_skirts_with_masks(
+        positions,
+        normals,
+        uvs,
+        barycentric_uvs,
+        material_weights,
+        indices,
+        boundary_edges,
+        config,
+        my_lod,
+        neighbor_lods,
+        apron_only_face_mask,
+        0,
+    )
+}
+
+/// Generate skirt geometry, skipping faces in `sealed_face_mask` entirely.
+/// CPU snap has already welded those boundaries to the lower-detail surface, so
+/// emitting a visible apron there creates a shelf instead of hiding a gap.
+pub fn generate_skirts_with_sealed_faces(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    barycentric_uvs: &mut Vec<[f32; 2]>,
+    material_weights: &mut Vec<[f32; 4]>,
+    indices: &mut Vec<u32>,
+    boundary_edges: &[BoundaryEdge],
+    config: &SkirtConfig,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    sealed_face_mask: u8,
+) -> SkirtGenerationStats {
+    generate_skirts_with_masks(
+        positions,
+        normals,
+        uvs,
+        barycentric_uvs,
+        material_weights,
+        indices,
+        boundary_edges,
+        config,
+        my_lod,
+        neighbor_lods,
+        0,
+        sealed_face_mask,
+    )
+}
+
+fn generate_skirts_with_masks(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    barycentric_uvs: &mut Vec<[f32; 2]>,
+    material_weights: &mut Vec<[f32; 4]>,
+    indices: &mut Vec<u32>,
+    boundary_edges: &[BoundaryEdge],
+    config: &SkirtConfig,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    apron_only_face_mask: u8,
+    sealed_face_mask: u8,
+) -> SkirtGenerationStats {
     let mut stats = SkirtGenerationStats::default();
     let wireframe_lod_index = my_lod.wireframe_lod_index();
     if config.depth <= 0.0 {
@@ -423,6 +485,10 @@ pub fn generate_skirts_with_apron_only_faces(
     }
 
     for edge in boundary_edges {
+        if sealed_face_mask & chunk_face_mask(edge.face) != 0 {
+            continue;
+        }
+
         let has_lower_lod_neighbor = neighbor_lods
             .lod_for_face(edge.face)
             .is_some_and(|lod| lod.is_lower_detail_than(my_lod));
@@ -816,6 +882,43 @@ mod tests {
             (positions[2][0] - 18.0).abs() < 1e-4,
             "snap seal apron should still cover the Lod1 sample step"
         );
+    }
+
+    #[test]
+    fn sealed_lod_transition_face_emits_no_apron_or_vertical_wall() {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+        let mut barycentric_uvs = Vec::new();
+        let mut weights = Vec::new();
+        let mut indices = Vec::new();
+        let neighbor_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let stats = generate_skirts_with_sealed_faces(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut barycentric_uvs,
+            &mut weights,
+            &mut indices,
+            &[edge_on_pos_x()],
+            &SkirtConfig {
+                depth: 1.5,
+                adaptive: true,
+            },
+            LodLevel::Lod0,
+            &neighbor_lods,
+            chunk_face_mask(ChunkFace::PosX),
+        );
+
+        assert!(positions.is_empty());
+        assert!(barycentric_uvs.is_empty());
+        assert!(indices.is_empty());
+        assert_eq!(stats.transition_apron_index_count, 0);
+        assert_eq!(stats.vertical_skirt_index_count, 0);
     }
 
     #[test]

@@ -137,7 +137,42 @@ skirt-apron strips**, not the interior coarse surface. Needs the follow-up
 classification + fix in [Open / follow-ups](#open--follow-ups). Coarse smoothing is
 kept (correct, cheap, default on) but is not the whole answer.
 
-_Perf (`visual-regression-live-lod` + `bench_guard`): not yet run for this change._
+### 2026-06-04 follow-up: transition boundary geometry
+
+The user's later screenshots narrowed the remaining artifact to the **seams
+between LOD junctions**. Additional A/B runs confirmed that:
+
+- Disabling transition skirts/aprons did not remove the dark horizontal band.
+- Keeping every chunk at LOD0 removed the band.
+- Coarse smoothing alone, including transition-band smoothing, reduced coarse
+  stair-stepping but did not remove the visible junction shelf.
+
+The working fix is therefore transition-boundary **effective mesh LOD refinement**
+for Surface Nets: a Lod1 chunk that directly borders a base Lod0 neighbor is
+meshed as Lod0 for the terrain surface. Refinement decisions use base neighbor
+LODs to avoid a cascading promotion front; the mesh still receives effective
+neighbor LODs for seam sampling and debug metadata.
+
+Validation:
+
+- `bench-runs/2026-06-04T09-49-25Z/morph-seam-band-mountain-dark-band-view-run0.png`
+  removes the dark horizontal mountain seam band.
+- `debug/terrain-hole-probe-mountain-seam-20260604-100300.json` matches the
+  earlier probe: `active_seam_face_count = 0`,
+  `active_seam_faces_with_possible_terrace = 0`,
+  `active_seam_faces_with_open_edges = 0`, and
+  `active_seam_faces_with_transition_coverage_gaps = 0`.
+- The same probe still reports `rays_with_gap = 4`,
+  `gap_classification = "unknown"`, and `world_data_hole = true`; this matched
+  the prior probe and was not introduced by the fix.
+
+Perf caveat:
+
+- `visual-regression-live-lod` remains a guard failure after this fix. The latest
+  run (`bench-runs/2026-06-04T09-52-18Z`) reports `Mesh Dirty:p99_ms` around
+  57-61 ms and forest frame p99 98.344 ms. The visual fix is correct, but the
+  transition-promotion path still needs a face-local or incremental meshing
+  follow-up before it is performance-clean.
 
 ## Status of the tree (branch `feat/gpu-geomorph`)
 

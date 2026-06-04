@@ -34,12 +34,12 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
-use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
-    generate_skirts_with_apron_only_faces,
-};
 use crate::voxel::meshing_lod::append_morph_targets;
 use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
+use crate::voxel::skirt::{
+    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
+    generate_skirts_with_sealed_faces,
+};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::asset::RenderAssetUsages;
@@ -2521,7 +2521,7 @@ pub(crate) fn neighbor_lod_for_face(
     }
 }
 
-fn lower_detail_transition_step_for_padded_size(
+fn lod_transition_step_for_padded_size(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     px: u32,
@@ -2530,13 +2530,13 @@ fn lower_detail_transition_step_for_padded_size(
     padded_size: u32,
 ) -> Option<i32> {
     let mut transition_step = my_lod.step_size();
+    let mut has_transition = false;
 
-    // Coarsen the two outermost padded planes on each chunk face, not just the
-    // single outermost one. The Surface-Nets cell that welds this chunk to a
-    // lower-detail neighbour straddles the shared boundary and uses *both*
-    // outer planes as its corners. Coarsening only the outermost plane leaves
-    // that cell's inner corner at fine resolution, so its boundary vertex sits
-    // at the fine (true) surface height while the neighbour's coarse vertex
+    // Treat the two outermost padded planes on each chunk face as transition
+    // cells whenever the neighbor has a different non-culled LOD. The Surface
+    // Nets cell at an LOD junction straddles the shared boundary and uses both
+    // outer planes as corners; both sides must evaluate the same effective
+    // coarse field or the seam lights as a terrace even when it is watertight.
     // sits ~one step lower — and a see-through seam opens between them.
     for (face, on_boundary_band) in [
         (ChunkFace::NegX, px <= 1),
@@ -2553,29 +2553,23 @@ fn lower_detail_transition_step_for_padded_size(
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
         };
-        if neighbor_lod.is_lower_detail_than(my_lod) {
+        if neighbor_lod != LodLevel::Culled && neighbor_lod != my_lod {
+            has_transition = true;
             transition_step = transition_step.max(neighbor_lod.step_size());
         }
     }
 
-    (transition_step > my_lod.step_size()).then_some(transition_step as i32)
+    has_transition.then_some(transition_step as i32)
 }
 
-fn lower_detail_transition_step(
+fn lod_transition_step(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     px: u32,
     py: u32,
     pz: u32,
 ) -> Option<i32> {
-    lower_detail_transition_step_for_padded_size(
-        my_lod,
-        neighbor_lods,
-        px,
-        py,
-        pz,
-        LOD0_PADDED_SIZE,
-    )
+    lod_transition_step_for_padded_size(my_lod, neighbor_lods, px, py, pz, LOD0_PADDED_SIZE)
 }
 
 fn generate_low_lod_sdf<const N: usize>(
@@ -2587,15 +2581,36 @@ fn generate_low_lod_sdf<const N: usize>(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
 ) -> [f32; N] {
+    generate_low_lod_sdf_with_smoothing(
+        chunk,
+        world,
+        padded_size,
+        step,
+        linearize,
+        my_lod,
+        neighbor_lods,
+        coarse_terrain_sdf_smooth_enabled(),
+    )
+}
+
+fn generate_low_lod_sdf_with_smoothing<const N: usize>(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    padded_size: u32,
+    step: i32,
+    linearize: impl Fn([u32; 3]) -> u32,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    smooth_coarse: bool,
+) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
-    let smooth_coarse = coarse_terrain_sdf_smooth_enabled();
 
     for z in 0..padded_size {
         for y in 0..padded_size {
             for x in 0..padded_size {
                 let idx = linearize([x, y, z]) as usize;
-                let transition_step = lower_detail_transition_step_for_padded_size(
+                let transition_step = lod_transition_step_for_padded_size(
                     my_lod,
                     neighbor_lods,
                     x,
@@ -2612,14 +2627,21 @@ fn generate_low_lod_sdf<const N: usize>(
                     step,
                     effective_step,
                 );
-                sdf[idx] = if transition_step.is_none() && smooth_coarse {
-                    // Interior coarse cell: step-scaled anti-terrace blur so the
-                    // mesh stops snapping to the coarse lattice (the terraces).
-                    coarse_smoothed_sdf_at_world_pos(world, base_world_pos, step)
+                sdf[idx] = if smooth_coarse {
+                    // Coarse cell: step-scaled anti-terrace blur so the mesh stops
+                    // snapping to the coarse lattice. On LOD-transition cells use
+                    // the coarser neighbor's effective step so both sides agree.
+                    if transition_step.is_some() {
+                        coarse_transition_smoothed_sdf_at_world_pos(
+                            world,
+                            base_world_pos,
+                            effective_step,
+                        )
+                    } else {
+                        coarse_smoothed_sdf_at_world_pos(world, base_world_pos, effective_step)
+                    }
                 } else {
-                    // LOD-transition cell (or smoothing disabled): keep the binary
-                    // weld so the boundary still matches the lower-detail neighbour
-                    // that snap/skirts target.
+                    // Legacy coarse field for A/B baselines.
                     smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
                 };
             }
@@ -2708,6 +2730,22 @@ pub(crate) fn coarse_lod_iso_height_for_column(
     world_z: i32,
     coarse_lod: LodLevel,
 ) -> Option<f32> {
+    coarse_lod_iso_height_for_column_with_smoothing(
+        world,
+        world_x,
+        world_z,
+        coarse_lod,
+        coarse_terrain_sdf_smooth_enabled(),
+    )
+}
+
+fn coarse_lod_iso_height_for_column_with_smoothing(
+    world: &VoxelWorld,
+    world_x: i32,
+    world_z: i32,
+    coarse_lod: LodLevel,
+    smooth_coarse: bool,
+) -> Option<f32> {
     let step = coarse_lod.step_size() as i32;
     if step <= 1 {
         return None;
@@ -2722,8 +2760,91 @@ pub(crate) fn coarse_lod_iso_height_for_column(
         return None;
     }
 
-    let sample_x = world_x.div_euclid(step) * step;
-    let sample_z = world_z.div_euclid(step) * step;
+    let (x0, x1, tx) = coarse_lod_axis_bracket(
+        world_x,
+        bounds.horizontal_min.x,
+        bounds.horizontal_max.x,
+        step,
+    )?;
+    let (z0, z1, tz) = coarse_lod_axis_bracket(
+        world_z,
+        bounds.horizontal_min.y,
+        bounds.horizontal_max.y,
+        step,
+    )?;
+
+    if !smooth_coarse || (x0 == x1 && z0 == z1) {
+        return coarse_lod_iso_height_for_sample_column(world, x0, z0, coarse_lod, smooth_coarse);
+    }
+
+    let h00 = coarse_lod_iso_height_for_sample_column(world, x0, z0, coarse_lod, true)?;
+    let h10 = if x1 == x0 {
+        h00
+    } else {
+        coarse_lod_iso_height_for_sample_column(world, x1, z0, coarse_lod, true)?
+    };
+    let h01 = if z1 == z0 {
+        h00
+    } else {
+        coarse_lod_iso_height_for_sample_column(world, x0, z1, coarse_lod, true)?
+    };
+    let h11 = if x1 == x0 {
+        h01
+    } else if z1 == z0 {
+        h10
+    } else {
+        coarse_lod_iso_height_for_sample_column(world, x1, z1, coarse_lod, true)?
+    };
+
+    let hx0 = h00 + (h10 - h00) * tx;
+    let hx1 = h01 + (h11 - h01) * tx;
+    Some(hx0 + (hx1 - hx0) * tz)
+}
+
+fn coarse_lod_axis_bracket(value: i32, min: i32, max: i32, step: i32) -> Option<(i32, i32, f32)> {
+    if value < min || value > max || step <= 0 {
+        return None;
+    }
+
+    let lower = value.div_euclid(step) * step;
+    let upper = if value == lower {
+        lower
+    } else {
+        lower.saturating_add(step)
+    };
+    if upper > max {
+        return Some((lower, lower, 0.0));
+    }
+
+    let t = if upper == lower {
+        0.0
+    } else {
+        (value - lower) as f32 / (upper - lower) as f32
+    };
+    Some((lower, upper, t))
+}
+
+fn coarse_lod_iso_height_for_sample_column(
+    world: &VoxelWorld,
+    sample_x: i32,
+    sample_z: i32,
+    coarse_lod: LodLevel,
+    smooth_coarse: bool,
+) -> Option<f32> {
+    let step = coarse_lod.step_size() as i32;
+    if step <= 1 {
+        return None;
+    }
+
+    let bounds = world.bounds();
+    if sample_x < bounds.horizontal_min.x
+        || sample_x > bounds.horizontal_max.x
+        || sample_z < bounds.horizontal_min.y
+        || sample_z > bounds.horizontal_max.y
+    {
+        return None;
+    }
+
     let first_y = bounds.min_world_y.div_euclid(step) * step;
     let mut prev: Option<(i32, f32)> = None;
     let mut crossing = None;
@@ -2731,7 +2852,12 @@ pub(crate) fn coarse_lod_iso_height_for_column(
     let mut y = first_y;
     while y <= bounds.max_world_y {
         let sample_pos = IVec3::new(sample_x, y, sample_z);
-        let sdf = sample_lod_sdf_at_world_pos_if_loaded(world, sample_pos)?;
+        let raw_sdf = sample_lod_sdf_at_world_pos_if_loaded(world, sample_pos)?;
+        let sdf = if smooth_coarse {
+            coarse_transition_smoothed_sdf_at_world_pos(world, sample_pos, step)
+        } else {
+            raw_sdf
+        };
         if let Some((prev_y, prev_sdf)) = prev {
             if (prev_sdf > 0.0) != (sdf > 0.0) {
                 sign_change_count += 1;
@@ -2755,16 +2881,13 @@ pub(crate) fn sdf_gradient_normal_at_local(
     local_pos: Vec3,
 ) -> [f32; 3] {
     let world_pos = chunk_origin.as_vec3() + local_pos;
-    let base = IVec3::new(
-        world_pos.x.floor() as i32,
-        world_pos.y.floor() as i32,
-        world_pos.z.floor() as i32,
-    );
-    let sample = |offset: IVec3| smoothed_terrain_sdf_at_world_pos(world, base + offset);
+    let sample =
+        |offset: Vec3| trilinear_smoothed_terrain_sdf_at_world_pos(world, world_pos + offset);
+    let h = 0.5;
     let gradient = Vec3::new(
-        sample(IVec3::X) - sample(IVec3::NEG_X),
-        sample(IVec3::Y) - sample(IVec3::NEG_Y),
-        sample(IVec3::Z) - sample(IVec3::NEG_Z),
+        sample(Vec3::X * h) - sample(Vec3::NEG_X * h),
+        sample(Vec3::Y * h) - sample(Vec3::NEG_Y * h),
+        sample(Vec3::Z * h) - sample(Vec3::NEG_Z * h),
     );
     let normal = gradient.normalize_or_zero();
     if normal.length_squared() > 0.0 {
@@ -2772,6 +2895,27 @@ pub(crate) fn sdf_gradient_normal_at_local(
     } else {
         [0.0, 1.0, 0.0]
     }
+}
+
+fn trilinear_smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: Vec3) -> f32 {
+    let base = IVec3::new(
+        world_pos.x.floor() as i32,
+        world_pos.y.floor() as i32,
+        world_pos.z.floor() as i32,
+    );
+    let frac = (world_pos - base.as_vec3()).clamp(Vec3::ZERO, Vec3::ONE);
+    let sample = |dx: i32, dy: i32, dz: i32| {
+        smoothed_terrain_sdf_at_world_pos(world, base + IVec3::new(dx, dy, dz))
+    };
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+
+    let x00 = lerp(sample(0, 0, 0), sample(1, 0, 0), frac.x);
+    let x10 = lerp(sample(0, 1, 0), sample(1, 1, 0), frac.x);
+    let x01 = lerp(sample(0, 0, 1), sample(1, 0, 1), frac.x);
+    let x11 = lerp(sample(0, 1, 1), sample(1, 1, 1), frac.x);
+    let y0 = lerp(x00, x10, frac.y);
+    let y1 = lerp(x01, x11, frac.y);
+    lerp(y0, y1, frac.z)
 }
 
 pub fn lod_delta_gt_one_face_mask(my_lod: LodLevel, neighbor_lods: &NeighborLods) -> u8 {
@@ -2978,25 +3122,26 @@ pub(crate) fn smoothed_terrain_sdf_at_world_pos(world: &VoxelWorld, world_pos: I
 
 /// Step-scaled anti-terrace blur for coarse LODs (LOD1/2/3).
 ///
-/// Same policy as [`smoothed_terrain_sdf_at_world_pos`] — a solid centre stays a
-/// hard `-1` (preserves thin features under blur), an air centre gets a 1-2-1
-/// blur of its neighbours clamped to `≥ SIGN_GUARD` — but the 1-2-1 taps are
-/// spaced `step` voxels apart instead of one. A ±1-voxel blur is *sub-sample* at
-/// `step ≥ 2`, so the coarse field is effectively raw binary occupancy on the
-/// coarse lattice and Surface Nets snaps vertices to it → the visible terraces.
-/// Widening the taps to the coarse spacing makes the field fractional across a
-/// coarse cell, so the zero crossing interpolates between coarse layers and the
-/// terraces flatten out — the same fix [`smoothed_sdf_from_block`] applies at
-/// LOD0, scaled up.
+/// Coarse-grid 1-2-1 occupancy blur. Interior coarse cells use the conservative
+/// solid-centre policy from [`smoothed_terrain_sdf_at_world_pos`] to preserve thin
+/// features; LOD-transition cells can soften solid centres while keeping a
+/// negative guard so the MC case sign stays stable.
 ///
 /// Reads only world occupancy at coarse-aligned offsets, so two adjacent coarse
 /// chunks compute identical values on shared cells (no new seams). The
 /// sign-preserving clamp is mandatory for the MC consumer for the same reason it
 /// is in `smoothed_terrain_sdf_at_world_pos`.
-fn coarse_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3, step: i32) -> f32 {
+fn coarse_sdf_blur_at_world_pos(
+    world: &VoxelWorld,
+    world_pos: IVec3,
+    step: i32,
+    preserve_solid_center: bool,
+) -> f32 {
     const W: [f32; 3] = [1.0, 2.0, 1.0];
     const SIGN_GUARD: f32 = 1.0e-3;
-    if terrain_occupancy_sdf_at_world(world, world_pos) < 0.0 {
+    const TRANSITION_SOLID_GUARD: f32 = 0.75;
+    let center_sdf = terrain_occupancy_sdf_at_world(world, world_pos);
+    if preserve_solid_center && center_sdf < 0.0 {
         return -1.0;
     }
 
@@ -3017,15 +3162,31 @@ fn coarse_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3, step: 
             }
         }
     }
-    (sum / weight).max(SIGN_GUARD)
+    let blurred = sum / weight;
+    if center_sdf < 0.0 {
+        blurred.min(-TRANSITION_SOLID_GUARD)
+    } else {
+        blurred.max(SIGN_GUARD)
+    }
+}
+
+fn coarse_smoothed_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3, step: i32) -> f32 {
+    coarse_sdf_blur_at_world_pos(world, world_pos, step, true)
+}
+
+fn coarse_transition_smoothed_sdf_at_world_pos(
+    world: &VoxelWorld,
+    world_pos: IVec3,
+    step: i32,
+) -> f32 {
+    coarse_sdf_blur_at_world_pos(world, world_pos, step, false)
 }
 
 /// Coarse-LOD anti-terrace smoothing gate (env `VOXELS_COARSE_SDF_SMOOTH`).
 ///
-/// Default **on**: extends the LOD0 anti-terrace policy to LOD1/2/3 interior
-/// cells (see [`coarse_smoothed_sdf_at_world_pos`]). Set `VOXELS_COARSE_SDF_SMOOTH=0`
-/// (or `false`) to restore the legacy binary coarse field for an A/B baseline.
-/// Read once and cached; LOD-transition cells are unaffected either way.
+/// Default **on**: extends the LOD0 anti-terrace policy to LOD1/2/3 interior and
+/// LOD-transition cells. Set `VOXELS_COARSE_SDF_SMOOTH=0` (or `false`) to restore
+/// the legacy binary coarse field for an A/B baseline. Read once and cached.
 fn coarse_terrain_sdf_smooth_enabled() -> bool {
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| {
@@ -3046,8 +3207,9 @@ fn coarse_terrain_sdf_smooth_enabled() -> bool {
 /// This is the LOD0 (high detail) version - samples every voxel.
 ///
 /// When `smooth` is set, non-transition cells get a world-space blurred SDF to
-/// remove terracing (see `smoothed_sdf_from_block`). LOD-transition cells keep
-/// their coarse binary value so the LOD-boundary weld is unaffected.
+/// remove terracing (see `smoothed_sdf_from_block`). LOD-transition cells use the
+/// same step-scaled coarse smoothing policy as lower LODs so the boundary weld
+/// targets a de-terraced coarse field.
 fn generate_sdf(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -3064,10 +3226,10 @@ fn generate_sdf(
 
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        if let Some(step) = lower_detail_transition_step(my_lod, neighbor_lods, px, py, pz) {
+        if let Some(step) = lod_transition_step(my_lod, neighbor_lods, px, py, pz) {
             let base_world_pos = coarse_aligned_lod_sample_base(chunk_origin, px, py, pz, step);
             sdf[i] = if smooth {
-                smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
+                coarse_transition_smoothed_sdf_at_world_pos(world, base_world_pos, step)
             } else {
                 sample_lod_sdf_at_world_pos(world, base_world_pos)
             };
@@ -3423,7 +3585,7 @@ fn pad_morph_targets_identity(solid_mesh: &mut MeshData) {
 fn snap_boundary_vertices_to_lower_detail_neighbor(
     solid_mesh: &mut MeshData,
     local_positions: &mut [Vec3],
-    chunk: &Chunk,
+    _chunk: &Chunk,
     world: &VoxelWorld,
     chunk_origin: IVec3,
     chunk_center: Vec3,
@@ -3516,10 +3678,12 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
     let mut conflicting_vertices: HashSet<usize> = HashSet::new();
     for (face, targets) in &face_targets {
         for (index, target) in targets.iter().copied() {
-            if let Some((existing_target, existing_face)) = vertex_targets.get(&index).copied() {
+            if let Some((existing_target, _existing_face)) = vertex_targets.get(&index).copied() {
                 if (existing_target - target).length() > VOXEL_SIZE * 0.05 {
-                    stats.mark_fallback(existing_face);
-                    stats.mark_fallback(*face);
+                    // Multi-face corner/edge vertices can legitimately resolve to
+                    // different coarse targets for each face. Skip only the
+                    // conflicted vertex; marking both whole faces as fallback emits
+                    // a full-width transition apron/skirt for a sparse corner case.
                     conflicting_vertices.insert(index);
                 }
             } else {
@@ -3537,9 +3701,10 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
             }
             local_positions[index] = local;
             solid_mesh.positions[index] = scale_vertex_from_center(local, chunk_center);
-            if let Some(weights) = solid_mesh.colors.get_mut(index) {
-                *weights = compute_vertex_material_weights(local, chunk, world, chunk_origin);
-            }
+            // Preserve the pre-snap material weights. The snap target is a seam
+            // weld position, not the semantic surface sample; recomputing here
+            // can sample deeper subsoil/rock and paint a dark material band
+            // along LOD junctions.
             if let Some(normal) = solid_mesh.normals.get_mut(index) {
                 *normal = sdf_gradient_normal_at_local(world, chunk_origin, local);
             }
@@ -3673,6 +3838,55 @@ fn compute_vertex_material_weights_lod(
         ]
     } else {
         [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+fn local_pos_in_lod_transition_band(
+    local_pos: Vec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> bool {
+    if my_lod.step_size() == 0 {
+        return false;
+    }
+
+    let chunk_size = CHUNK_SIZE as f32;
+    let face_tolerance = my_lod.step_size() as f32;
+    for (face, in_band) in [
+        (ChunkFace::NegX, local_pos.x <= face_tolerance),
+        (ChunkFace::PosX, local_pos.x >= chunk_size - face_tolerance),
+        (ChunkFace::NegY, local_pos.y <= face_tolerance),
+        (ChunkFace::PosY, local_pos.y >= chunk_size - face_tolerance),
+        (ChunkFace::NegZ, local_pos.z <= face_tolerance),
+        (ChunkFace::PosZ, local_pos.z >= chunk_size - face_tolerance),
+    ] {
+        if !in_band {
+            continue;
+        }
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        if neighbor_lod != LodLevel::Culled && neighbor_lod != my_lod {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn compute_vertex_material_weights_lod_transition_aware(
+    local_pos: Vec3,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    step_size: u32,
+) -> [f32; 4] {
+    if local_pos_in_lod_transition_band(local_pos, my_lod, neighbor_lods) {
+        compute_vertex_material_weights(local_pos, chunk, world, chunk_origin)
+    } else {
+        compute_vertex_material_weights_lod(local_pos, chunk, world, chunk_origin, step_size)
     }
 }
 
@@ -3868,6 +4082,19 @@ pub fn generate_chunk_mesh_surface_nets(
         &mut buffer,
     );
 
+    let low_cost_transition_shading = my_lod == LodLevel::Lod0
+        && [
+            neighbor_lods.neg_x,
+            neighbor_lods.pos_x,
+            neighbor_lods.neg_y,
+            neighbor_lods.pos_y,
+            neighbor_lods.neg_z,
+            neighbor_lods.pos_z,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|lod| lod != LodLevel::Culled && lod.is_lower_detail_than(my_lod));
+
     // Convert surface nets output to MeshData
     // Use per-triangle vertices to ensure consistent material indices (no interpolation artifacts)
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
@@ -3886,10 +4113,12 @@ pub fn generate_chunk_mesh_surface_nets(
             let local1 = Vec3::new(p1[0] - 1.0, p1[1] - 1.0, p1[2] - 1.0);
             let local2 = Vec3::new(p2[0] - 1.0, p2[1] - 1.0, p2[2] - 1.0);
 
-            // Get normals for this triangle
-            let normal0 = get_normalized_normal(&buffer.normals, i0);
-            let normal1 = get_normalized_normal(&buffer.normals, i1);
-            let normal2 = get_normalized_normal(&buffer.normals, i2);
+            // Shade terrain from the smoothed SDF rather than Surface Nets'
+            // cell normals. The cell normals quantize with the meshing grid and
+            // show up as horizontal terrace bands under triplanar lighting.
+            let normal0 = sdf_gradient_normal_at_local(world, chunk_origin, local0);
+            let normal1 = sdf_gradient_normal_at_local(world, chunk_origin, local1);
+            let normal2 = sdf_gradient_normal_at_local(world, chunk_origin, local2);
 
             // Calculate material weights for each vertex
             let weights0 = compute_vertex_material_weights(local0, chunk, world, chunk_origin);
@@ -3898,7 +4127,7 @@ pub fn generate_chunk_mesh_surface_nets(
 
             // Compute AO for each vertex
             let compute_ao = |local: Vec3, normal: [f32; 3]| -> f32 {
-                if !ao_config.enabled {
+                if low_cost_transition_shading || !ao_config.enabled {
                     return 1.0;
                 }
                 let normal = Vec3::from_array(normal).normalize_or_zero();
@@ -3977,7 +4206,7 @@ pub fn generate_chunk_mesh_surface_nets(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        let skirt_stats = generate_skirts_with_apron_only_faces(
+        let skirt_stats = generate_skirts_with_sealed_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -4087,31 +4316,39 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
                 (p2[2] - 1.0) * step,
             );
 
-            // Get normals for this triangle
-            let normal0 = get_normalized_normal(&buffer.normals, i0);
-            let normal1 = get_normalized_normal(&buffer.normals, i1);
-            let normal2 = get_normalized_normal(&buffer.normals, i2);
+            // Shade low-LOD terrain from the fine smoothed SDF. The coarse
+            // Surface Nets normals quantize at the LOD sample step and show up
+            // as horizontal terrace bands even when the mesh is watertight.
+            let normal0 = sdf_gradient_normal_at_local(world, chunk_origin, local0);
+            let normal1 = sdf_gradient_normal_at_local(world, chunk_origin, local1);
+            let normal2 = sdf_gradient_normal_at_local(world, chunk_origin, local2);
 
             // Calculate material weights with larger sampling radius for LOD1
-            let weights0 = compute_vertex_material_weights_lod(
+            let weights0 = compute_vertex_material_weights_lod_transition_aware(
                 local0,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD1_STEP_SIZE,
             );
-            let weights1 = compute_vertex_material_weights_lod(
+            let weights1 = compute_vertex_material_weights_lod_transition_aware(
                 local1,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD1_STEP_SIZE,
             );
-            let weights2 = compute_vertex_material_weights_lod(
+            let weights2 = compute_vertex_material_weights_lod_transition_aware(
                 local2,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD1_STEP_SIZE,
             );
 
@@ -4188,7 +4425,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        let skirt_stats = generate_skirts_with_apron_only_faces(
+        let skirt_stats = generate_skirts_with_sealed_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -4299,31 +4536,39 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
                 (p2[2] - 1.0) * step,
             );
 
-            // Get normals for this triangle
-            let normal0 = get_normalized_normal(&buffer.normals, i0);
-            let normal1 = get_normalized_normal(&buffer.normals, i1);
-            let normal2 = get_normalized_normal(&buffer.normals, i2);
+            // Shade low-LOD terrain from the fine smoothed SDF. The coarse
+            // Surface Nets normals quantize at the LOD sample step and show up
+            // as horizontal terrace bands even when the mesh is watertight.
+            let normal0 = sdf_gradient_normal_at_local(world, chunk_origin, local0);
+            let normal1 = sdf_gradient_normal_at_local(world, chunk_origin, local1);
+            let normal2 = sdf_gradient_normal_at_local(world, chunk_origin, local2);
 
             // Calculate material weights with larger sampling radius for LOD2
-            let weights0 = compute_vertex_material_weights_lod(
+            let weights0 = compute_vertex_material_weights_lod_transition_aware(
                 local0,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD2_STEP_SIZE,
             );
-            let weights1 = compute_vertex_material_weights_lod(
+            let weights1 = compute_vertex_material_weights_lod_transition_aware(
                 local1,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD2_STEP_SIZE,
             );
-            let weights2 = compute_vertex_material_weights_lod(
+            let weights2 = compute_vertex_material_weights_lod_transition_aware(
                 local2,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD2_STEP_SIZE,
             );
 
@@ -4400,7 +4645,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        let skirt_stats = generate_skirts_with_apron_only_faces(
+        let skirt_stats = generate_skirts_with_sealed_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -4511,31 +4756,39 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
                 (p2[2] - 1.0) * step,
             );
 
-            // Get normals for this triangle
-            let normal0 = get_normalized_normal(&buffer.normals, i0);
-            let normal1 = get_normalized_normal(&buffer.normals, i1);
-            let normal2 = get_normalized_normal(&buffer.normals, i2);
+            // Shade low-LOD terrain from the fine smoothed SDF. The coarse
+            // Surface Nets normals quantize at the LOD sample step and show up
+            // as horizontal terrace bands even when the mesh is watertight.
+            let normal0 = sdf_gradient_normal_at_local(world, chunk_origin, local0);
+            let normal1 = sdf_gradient_normal_at_local(world, chunk_origin, local1);
+            let normal2 = sdf_gradient_normal_at_local(world, chunk_origin, local2);
 
             // Calculate material weights with larger sampling radius for LOD3
-            let weights0 = compute_vertex_material_weights_lod(
+            let weights0 = compute_vertex_material_weights_lod_transition_aware(
                 local0,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD3_STEP_SIZE,
             );
-            let weights1 = compute_vertex_material_weights_lod(
+            let weights1 = compute_vertex_material_weights_lod_transition_aware(
                 local1,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD3_STEP_SIZE,
             );
-            let weights2 = compute_vertex_material_weights_lod(
+            let weights2 = compute_vertex_material_weights_lod_transition_aware(
                 local2,
                 chunk,
                 world,
                 chunk_origin,
+                my_lod,
+                &neighbor_lods,
                 LOD3_STEP_SIZE,
             );
 
@@ -4612,7 +4865,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         let mut local_skirt_config = skirt_config.clone();
         local_skirt_config.depth = skirt_depth_for_lod(my_lod);
 
-        let skirt_stats = generate_skirts_with_apron_only_faces(
+        let skirt_stats = generate_skirts_with_sealed_faces(
             &mut solid_mesh.positions,
             &mut solid_mesh.normals,
             &mut solid_mesh.uvs,
@@ -4744,6 +4997,85 @@ mod tests {
         assert_eq!(weights, [0.0, 0.0, 1.0, 0.0]);
     }
 
+    #[test]
+    fn lod_mismatch_material_weights_use_fine_sampler_in_boundary_band() {
+        let mut world = world_with_test_chunks(IVec3::new(2, 1, 1));
+        for x in 15..19 {
+            for y in 8..12 {
+                for z in 8..12 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+        for x in 15..17 {
+            for y in 8..10 {
+                for z in 8..10 {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::TopSoil);
+                }
+            }
+        }
+
+        let chunk = world.get_chunk(IVec3::ZERO).unwrap();
+        let local_pos = Vec3::new(CHUNK_SIZE as f32 - 0.25, 8.0, 8.0);
+        let coarse_weights = compute_vertex_material_weights_lod(
+            local_pos,
+            chunk,
+            &world,
+            IVec3::ZERO,
+            LOD2_STEP_SIZE,
+        );
+        let transition_weights = compute_vertex_material_weights_lod_transition_aware(
+            local_pos,
+            chunk,
+            &world,
+            IVec3::ZERO,
+            LodLevel::Lod2,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod3),
+                ..Default::default()
+            },
+            LOD2_STEP_SIZE,
+        );
+        let higher_neighbor_transition_weights =
+            compute_vertex_material_weights_lod_transition_aware(
+                local_pos,
+                chunk,
+                &world,
+                IVec3::ZERO,
+                LodLevel::Lod2,
+                &NeighborLods {
+                    pos_x: Some(LodLevel::Lod1),
+                    ..Default::default()
+                },
+                LOD2_STEP_SIZE,
+            );
+        let no_transition_weights = compute_vertex_material_weights_lod_transition_aware(
+            local_pos,
+            chunk,
+            &world,
+            IVec3::ZERO,
+            LodLevel::Lod2,
+            &NeighborLods::default(),
+            LOD2_STEP_SIZE,
+        );
+
+        assert!(
+            coarse_weights[1] > 0.75,
+            "fixture should make the coarse sampler mostly rock: {coarse_weights:?}"
+        );
+        assert_eq!(no_transition_weights, coarse_weights);
+        assert_eq!(
+            transition_weights,
+            [1.0, 0.0, 0.0, 0.0],
+            "transition seam vertices should keep the fine material neighborhood"
+        );
+        assert_eq!(
+            higher_neighbor_transition_weights,
+            [1.0, 0.0, 0.0, 0.0],
+            "the lower-detail side of a seam should also keep the fine material neighborhood"
+        );
+    }
+
     fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
         let chunk = world.get_chunk(chunk_pos).unwrap();
         generate_chunk_mesh_surface_nets(
@@ -4795,7 +5127,16 @@ mod tests {
 
         let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods, false);
         let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, false);
-        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
+        let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            neighbor,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &NeighborLods::default(),
+            false,
+        );
 
         assert_eq!(
             transition_sdf[boundary_idx],
@@ -4860,7 +5201,16 @@ mod tests {
 
         let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods, false);
         let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, false);
-        let neighbor_lod1_sdf = generate_sdf_lod1(neighbor, &world, &NeighborLods::default());
+        let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            neighbor,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &NeighborLods::default(),
+            false,
+        );
 
         assert_eq!(raw_sdf[boundary_idx], 1.0);
         assert_eq!(
@@ -5346,7 +5696,7 @@ mod tests {
             (&transition_left.solid, lod0_origin),
             (&transition_right.solid, lod1_origin),
         ];
-        let tolerance = reference_max_abs_error + VOXEL_SIZE * 0.5;
+        let tolerance = reference_max_abs_error + VOXEL_SIZE * 0.75;
 
         for sample in samples {
             let hit_y = highest_vertical_hit_y_for_meshes(&transition_meshes, sample.x, sample.z)
@@ -5399,30 +5749,38 @@ mod tests {
 
         let raw_sdf = generate_sdf_lod1(chunk, &world, &no_transition_lods);
         let transition_sdf = generate_sdf_lod1(chunk, &world, &transition_lods);
-        let neighbor_lod3_sdf = generate_sdf_lod3(neighbor, &world, &NeighborLods::default());
+        let neighbor_lod3_sdf = generate_sdf_lod3(
+            neighbor,
+            &world,
+            &NeighborLods {
+                neg_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+        );
 
         assert_eq!(raw_sdf[boundary_idx], 1.0);
         assert_eq!(
             transition_sdf[boundary_idx],
             neighbor_lod3_sdf[neighbor_boundary_idx]
         );
-        assert_eq!(transition_sdf[boundary_idx], -1.0);
+        assert!(
+            transition_sdf[boundary_idx] < 0.0 && transition_sdf[boundary_idx] > -1.0,
+            "transition boundary should keep the solid sign without snapping to hard -1: {}",
+            transition_sdf[boundary_idx]
+        );
     }
 
     #[test]
     fn coarse_smoothed_solid_center_stays_hard_negative() {
-        // A solid centre must stay a hard -1 under the blur, exactly like the
-        // LOD0 path — otherwise thin features blur away to air.
+        // Interior coarse smoothing keeps a solid centre hard-negative so thin
+        // features do not blur away to air.
         let mut world = world_with_test_chunks(IVec3::splat(3));
         let center = IVec3::new(24, 24, 24);
         world.set_voxel(center, VoxelType::Rock);
 
         for step in [2, 4, 8] {
-            assert_eq!(
-                coarse_smoothed_sdf_at_world_pos(&world, center, step),
-                -1.0,
-                "solid centre must stay -1 at step {step}"
-            );
+            let sdf = coarse_smoothed_sdf_at_world_pos(&world, center, step);
+            assert_eq!(sdf, -1.0, "solid centre must stay hard -1 at step {step}");
         }
     }
 
@@ -5468,6 +5826,193 @@ mod tests {
                 "deep air must stay +1 at step {step}"
             );
         }
+    }
+
+    fn set_coarse_xz_slab(world: &mut VoxelWorld, center: IVec3, step: i32) {
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                world.set_voxel(
+                    center + IVec3::new(dx * step, 0, dz * step),
+                    VoxelType::Rock,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lod0_transition_boundary_sdf_matches_smoothed_lod1_neighbor_fractional() {
+        let chunk_pos = IVec3::new(1, 0, 2);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
+        let transition_step = LOD1_STEP_SIZE as i32;
+        let sample_pos = chunk_origin + IVec3::new(16, 4, 4);
+        set_coarse_xz_slab(
+            &mut world,
+            sample_pos - IVec3::new(0, transition_step, 0),
+            transition_step,
+        );
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
+        let transition_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let boundary_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 1, 5, 5]) as usize;
+        let neighbor_boundary_idx = LodShape1::linearize([1, 3, 3]) as usize;
+
+        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, true);
+        let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            neighbor,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &NeighborLods {
+                neg_x: Some(LodLevel::Lod0),
+                ..Default::default()
+            },
+            true,
+        );
+        let expected =
+            coarse_transition_smoothed_sdf_at_world_pos(&world, sample_pos, transition_step);
+
+        assert!(
+            expected > 0.0 && expected < 1.0,
+            "test fixture should produce a fractional transition value, got {expected}"
+        );
+        assert_eq!(transition_sdf[boundary_idx], expected);
+        assert_eq!(neighbor_lod1_sdf[neighbor_boundary_idx], expected);
+    }
+
+    #[test]
+    fn lod1_transition_boundary_sdf_matches_smoothed_lod3_neighbor_fractional() {
+        let chunk_pos = IVec3::new(1, 0, 0);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 2));
+        let transition_step = LOD3_STEP_SIZE as i32;
+        let sample_pos = chunk_origin + IVec3::new(16, 8, 8);
+        set_coarse_xz_slab(
+            &mut world,
+            sample_pos - IVec3::new(0, transition_step, 0),
+            transition_step,
+        );
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let neighbor = world.get_chunk(chunk_pos + IVec3::X).unwrap();
+        let transition_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod3),
+            ..Default::default()
+        };
+
+        let boundary_idx = LodShape1::linearize([LOD1_PADDED_SIZE - 1, 5, 5]) as usize;
+        let neighbor_boundary_idx = LodShape3::linearize([1, 2, 2]) as usize;
+
+        let transition_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            chunk,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &transition_lods,
+            true,
+        );
+        let neighbor_lod3_sdf = generate_low_lod_sdf_with_smoothing::<LOD3_GRID_VOLUME>(
+            neighbor,
+            &world,
+            LOD3_PADDED_SIZE,
+            LOD3_STEP_SIZE as i32,
+            LodShape3::linearize,
+            LodLevel::Lod3,
+            &NeighborLods {
+                neg_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            true,
+        );
+        let expected =
+            coarse_transition_smoothed_sdf_at_world_pos(&world, sample_pos, transition_step);
+
+        assert!(
+            expected > 0.0 && expected < 1.0,
+            "test fixture should produce a fractional transition value, got {expected}"
+        );
+        assert_eq!(transition_sdf[boundary_idx], expected);
+        assert_eq!(neighbor_lod3_sdf[neighbor_boundary_idx], expected);
+    }
+
+    #[test]
+    fn coarse_lod_iso_height_for_column_uses_smoothed_coarse_sdf() {
+        let mut world = world_with_test_chunks(IVec3::new(3, 2, 3));
+        let step = LOD2_STEP_SIZE as i32;
+        let x = 16;
+        let z = 16;
+        for y in [0, step, step * 2] {
+            world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+        }
+
+        let legacy =
+            coarse_lod_iso_height_for_column_with_smoothing(&world, x, z, LodLevel::Lod2, false)
+                .expect("legacy column should have one crossing");
+        let smoothed =
+            coarse_lod_iso_height_for_column_with_smoothing(&world, x, z, LodLevel::Lod2, true)
+                .expect("smoothed column should have one crossing");
+
+        assert!(
+            smoothed < legacy,
+            "smoothed iso height should move off the raw coarse midpoint: legacy={legacy}, smoothed={smoothed}"
+        );
+        assert!((legacy - 10.0).abs() <= 1.0e-4);
+        assert!((smoothed - 9.846154).abs() <= 1.0e-4);
+    }
+
+    #[test]
+    fn smoothed_coarse_iso_height_interpolates_within_coarse_xz_cell() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_z_slope(&mut world);
+
+        let x = 32;
+        let z_near = 21;
+        let z_far = 23;
+        let legacy_near = coarse_lod_iso_height_for_column_with_smoothing(
+            &world,
+            x,
+            z_near,
+            LodLevel::Lod2,
+            false,
+        )
+        .expect("legacy near column should have one crossing");
+        let legacy_far = coarse_lod_iso_height_for_column_with_smoothing(
+            &world,
+            x,
+            z_far,
+            LodLevel::Lod2,
+            false,
+        )
+        .expect("legacy far column should have one crossing");
+        let smoothed_near = coarse_lod_iso_height_for_column_with_smoothing(
+            &world,
+            x,
+            z_near,
+            LodLevel::Lod2,
+            true,
+        )
+        .expect("smoothed near column should have one crossing");
+        let smoothed_far =
+            coarse_lod_iso_height_for_column_with_smoothing(&world, x, z_far, LodLevel::Lod2, true)
+                .expect("smoothed far column should have one crossing");
+
+        assert!(
+            (legacy_near - legacy_far).abs() <= 1.0e-4,
+            "legacy snap floors both columns to the same coarse z: near={legacy_near}, far={legacy_far}"
+        );
+        assert!(
+            smoothed_far > smoothed_near + 0.25,
+            "smoothed snap should interpolate across the coarse cell instead of terracing: near={smoothed_near}, far={smoothed_far}"
+        );
     }
 
     fn set_column(
@@ -5557,6 +6102,18 @@ mod tests {
         }
     }
 
+    fn fill_steep_z_slope(world: &mut VoxelWorld) {
+        let bounds = world.bounds();
+        for z in bounds.horizontal_min.y..=bounds.horizontal_max.y {
+            let surface_y = (20 + z / 2).min(bounds.max_world_y);
+            for x in bounds.horizontal_min.x..=bounds.horizontal_max.x {
+                for y in bounds.min_world_y..surface_y {
+                    world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+                }
+            }
+        }
+    }
+
     fn assert_snapped_local_vertices_match_coarse_surface(
         stats: LodTransitionSnapStats,
         local_positions: &[Vec3],
@@ -5637,7 +6194,10 @@ mod tests {
 
         // No morph targets → attribute omitted.
         assert!(
-            base().into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_none(),
+            base()
+                .into_mesh()
+                .attribute(ATTRIBUTE_MORPH_TARGET)
+                .is_none(),
             "empty morph_targets must not upload the attribute"
         );
 
@@ -5645,7 +6205,10 @@ mod tests {
         let mut short = base();
         short.morph_targets = vec![[0.0; 4]; 2];
         assert!(
-            short.into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_none(),
+            short
+                .into_mesh()
+                .attribute(ATTRIBUTE_MORPH_TARGET)
+                .is_none(),
             "mismatched morph_targets must not upload the attribute"
         );
 
@@ -5752,7 +6315,10 @@ mod tests {
             &TerrainMorphConfig::default(), // disabled
         );
 
-        assert!(stats.snapped_vertex_count > 0, "snap should run when morph off");
+        assert!(
+            stats.snapped_vertex_count > 0,
+            "snap should run when morph off"
+        );
         assert!(
             mesh.morph_targets.is_empty(),
             "disabled morph must leave morph_targets empty so into_mesh stays legacy"
@@ -5797,6 +6363,12 @@ mod tests {
             Vec3::new(CHUNK_SIZE as f32, 9.0, 14.0),
         ];
         let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+        let original_colors = vec![
+            [0.6, 0.2, 0.1, 0.1],
+            [0.1, 0.6, 0.2, 0.1],
+            [0.1, 0.2, 0.6, 0.1],
+        ];
+        solid_mesh.colors.clone_from(&original_colors);
 
         let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             &mut solid_mesh,
@@ -5814,9 +6386,9 @@ mod tests {
 
         assert_eq!(stats.fallback_face_mask, 0);
         assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
-        assert!(
-            solid_mesh.colors.iter().all(|weights| *weights != [0.0; 4]),
-            "snapped vertices should refresh material weights at the new height"
+        assert_eq!(
+            solid_mesh.colors, original_colors,
+            "seam welding should preserve pre-snap material weights"
         );
         assert_snapped_local_vertices_match_coarse_surface(
             stats,
@@ -5868,6 +6440,51 @@ mod tests {
     }
 
     #[test]
+    fn lod_boundary_snap_interpolates_smoothed_coarse_targets_within_cell() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_z_slope(&mut world);
+
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![
+            Vec3::new(CHUNK_SIZE as f32, 8.0, 5.0),
+            Vec3::new(CHUNK_SIZE as f32, 8.0, 7.0),
+        ];
+        let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod2),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.fallback_face_mask, 0);
+        assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
+        assert!(
+            local_positions[1].y > local_positions[0].y + 0.25,
+            "snap targets inside one coarse z span should no longer collapse to a terrace: {:?}",
+            local_positions
+        );
+        for local in local_positions.iter().copied() {
+            let column = snap_column_for_face(chunk_origin, local, ChunkFace::PosX).unwrap();
+            let expected_y =
+                coarse_lod_iso_height_for_column(&world, column.x, column.y, LodLevel::Lod2)
+                    .expect("synthetic slope should have a single coarse crossing");
+            let world_y = chunk_origin.y as f32 + local.y;
+            assert!((world_y - expected_y).abs() <= 0.02);
+        }
+    }
+
+    #[test]
     fn ambiguous_snap_column_skips_only_that_vertex() {
         let mut world = world_with_test_chunks(IVec3::new(2, 2, 1));
         for y in 0..=2 {
@@ -5903,12 +6520,55 @@ mod tests {
         assert_eq!(stats.snapped_vertex_count, 1);
         assert_eq!(stats.skipped_vertex_count, 1);
         assert!(stats.fallback_face_mask & LodTransitionSnapStats::face_mask(ChunkFace::PosX) != 0);
-        assert!((local_positions[0].y - 3.0).abs() <= 0.02);
+        let expected_y =
+            coarse_lod_iso_height_for_column(&world, CHUNK_SIZE_I32, 4, LodLevel::Lod1)
+                .expect("valid column should have one coarse crossing");
+        assert!((local_positions[0].y - expected_y).abs() <= 0.02);
         assert_eq!(local_positions[1], ambiguous_local);
         assert_eq!(
             solid_mesh.positions[1],
             scale_vertex_from_center(ambiguous_local, chunk_center)
         );
+    }
+
+    #[test]
+    fn conflicting_snap_corner_does_not_fallback_whole_faces() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let conflicted_corner = Vec3::new(CHUNK_SIZE as f32, 0.0, 5.7);
+        let pos_x_only = Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0);
+        let neg_y_only = Vec3::new(5.7, 0.0, 7.2);
+        let mut local_positions = vec![conflicted_corner, pos_x_only, neg_y_only];
+        let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                neg_y: Some(LodLevel::Lod2),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.conflicting_vertex_count, 1);
+        assert_eq!(stats.skipped_vertex_count, 0);
+        assert_eq!(stats.fallback_face_mask, 0);
+        assert!(stats.face_snapped(ChunkFace::PosX));
+        assert!(stats.face_snapped(ChunkFace::NegY));
+        assert_eq!(stats.snapped_vertex_count, 2);
+        assert_eq!(local_positions[0], conflicted_corner);
+        assert_ne!(local_positions[1], pos_x_only);
+        assert_eq!(local_positions[2], Vec3::new(4.0, 0.0, 4.0));
     }
 
     #[test]
