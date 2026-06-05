@@ -1,6 +1,6 @@
 # NAADF Rendering Backend
 
-Document status: 2026-05-19.  
+Document status: 2026-06-05.
 Implementation status details live in
 [`naadf-implementation-status.md`](naadf-implementation-status.md).
 
@@ -32,7 +32,8 @@ not yet a production replacement for terrain rendering.
 
 NAADF is default-off in checked-in configuration:
 
-- the `naadf` Cargo feature must be enabled;
+- the `naadf` Cargo feature is compiled by default, but can be omitted with
+  `--no-default-features`;
 - `assets/config/naadf.yaml` has `enabled: false`;
 - Path-B compositor mode defaults to `off`;
 - Path-B `foundation_200_210_verified` defaults to `false`;
@@ -110,10 +111,10 @@ path_b:
   enable_temporal: false
 ```
 
-Run with the feature:
+Run the default build:
 
 ```powershell
-rtk cargo run --release --features naadf
+rtk cargo run --release
 ```
 
 Interactive preview keys:
@@ -130,20 +131,20 @@ is implemented.
 Run the focused code checks:
 
 ```powershell
-rtk cargo test --lib --features naadf rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off
-rtk cargo test --lib --features naadf rendering::naadf::preview
-rtk cargo test --lib --features naadf rendering::naadf::layout::tests::wgsl
-rtk cargo test --features naadf --test naadf_gpu_layout
-rtk cargo test --lib --features naadf bench::tests::naadf_bench_cache_toggles_deserialize
+rtk cargo test --lib rendering::naadf::config::tests::checked_in_config_keeps_naadf_default_off
+rtk cargo test --lib rendering::naadf::preview
+rtk cargo test --lib rendering::naadf::layout::tests::wgsl
+rtk cargo test --test naadf_gpu_layout
+rtk cargo test --lib bench::tests::naadf_bench_cache_toggles_deserialize
 ```
 
 Run the visual/runtime benches:
 
 ```powershell
-rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-hybrid.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-depth-audit.toml
-rtk cargo run --release --features naadf -- --bench bench/scenes/naadf/visual-regression-naadf-startup-stability.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-preview-only.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-hybrid.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-path-b-depth-audit.toml
+rtk cargo run --release -- --bench bench/scenes/naadf/visual-regression-naadf-startup-stability.toml
 ```
 
 After each bench, run the guard against the newest summary:

@@ -26,9 +26,9 @@ Keyboard and mode reference for Drusniel Voxels.
 * **Alt+Shift+F9**: Cycle water reflection debug view
 * **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 * **Shift+F10**: Dump water visual probe JSON
-* **F11**: Toggle NAADF fullscreen preview (NAADF builds only)
+* **F11**: Toggle NAADF fullscreen preview (default builds compile NAADF)
 * **Alt+F11**: Toggle terrain morph-vector seam debug overlay
-* **Shift+N**: Toggle NAADF split view with a yellow center divider (NAADF builds only)
+* **Shift+N**: Toggle NAADF split view with a yellow center divider (default builds compile NAADF)
 * **Shift+F11**: Toggle enclosure culling force-disable/automatic
 * **F12**: Toggle Photo Mode (DoF, motion blur)
 * **G**: Print Detailed Block Debug Info to Console

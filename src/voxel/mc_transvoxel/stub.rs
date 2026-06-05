@@ -18,8 +18,15 @@ pub struct McTransvoxelStats {
 #[derive(Resource, Clone, Debug)]
 pub struct McTransvoxelSettings {
     pub enabled: bool,
+    pub mode: McTransvoxelSpikeMode,
     pub lod_delta_policy: McTransvoxelLodDeltaPolicy,
     pub debug_triangle_sources: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum McTransvoxelSpikeMode {
+    #[default]
+    Sandbox,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -32,6 +39,7 @@ impl Default for McTransvoxelSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            mode: McTransvoxelSpikeMode::Sandbox,
             lod_delta_policy: McTransvoxelLodDeltaPolicy::MaxOne,
             debug_triangle_sources: false,
         }

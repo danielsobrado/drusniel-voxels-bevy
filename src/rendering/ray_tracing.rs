@@ -7,7 +7,8 @@ use crate::rendering::naadf::{NaadfConfig, NaadfPreviewCompositeModeConfig};
 
 pub(crate) const VOXEL_RAY_NOTICE_SECONDS: f64 = 4.0;
 pub(crate) const NAADF_NOT_COMPILED_REASON: &str = "NAADF feature is not compiled in this build";
-const NAADF_RESTART_HINT: &str = "Restart with scripts/startVoxels.ps1 -Naadf to enable NAADF.";
+const NAADF_RESTART_HINT: &str =
+    "Rebuild with default features; --no-default-features omits NAADF.";
 
 #[cfg(feature = "naadf")]
 const NAADF_FEATURE_COMPILED: bool = true;
@@ -503,10 +504,10 @@ mod tests {
 
     #[test]
     #[cfg(not(feature = "naadf"))]
-    fn notice_text_includes_restart_hint_when_feature_missing() {
+    fn notice_text_includes_default_features_hint_when_feature_missing() {
         let settings = RayTracingSettings::default();
         let text = voxel_ray_backend_notice_text(&settings);
-        assert!(text.contains("scripts/startVoxels.ps1 -Naadf"));
+        assert!(text.contains("default features"));
     }
 
     #[test]

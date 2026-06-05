@@ -1,11 +1,12 @@
 # NAADF Debugging
 
-Document status (2026-05-17): historical implementation/debug note; preserve for context, but verify current behavior in code.
+Document status (2026-06-05): current debugging note; verify current behavior in code.
 
-NAADF diagnostics are available only when built with the `naadf` feature.
+NAADF diagnostics are available in default builds. Use `--no-default-features`
+only when intentionally testing the feature-missing fallback path.
 
 ```bash
-rtk cargo run --features naadf
+rtk cargo run
 ```
 
 ## Debug UI
@@ -77,7 +78,8 @@ Use chunk visualization to inspect cache residency and dirty/in-flight chunks. U
 
 NAADF can fall back when:
 
-- The `naadf` feature is not compiled.
+- The `naadf` feature is not compiled because the binary was built with
+  `--no-default-features`.
 - `assets/config/naadf.yaml` has `enabled: false`.
 - Integrated GPU policy blocks the backend.
 - The cache is not warm or has a stale dirty/build backlog.
