@@ -184,6 +184,22 @@ struct TerrainDebugCaptureModes {
     editor_wireframe: bool,
 }
 
+/// Transient on-screen confirmation that a terrain hole probe was written
+/// (Shift+F9). `seconds_left` counts down; the indicator shows the file while > 0.
+#[derive(Resource, Default)]
+pub struct TerrainProbeNotice {
+    pub seconds_left: f32,
+    pub text: String,
+}
+
+impl TerrainProbeNotice {
+    /// Show a "probe written" confirmation for a few seconds.
+    pub fn notify(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.seconds_left = 5.0;
+    }
+}
+
 pub fn setup_terrain_debug_indicator(mut commands: Commands) {
     commands.spawn((
         Text::new(""),
@@ -322,14 +338,20 @@ pub fn capture_terrain_debug_frame(
 }
 
 pub(crate) fn update_terrain_debug_indicator(
+    time: Res<Time>,
     terrain_debug: Res<TerrainDebugView>,
+    lod_control: Res<crate::voxel::plugin::TerrainLodControl>,
+    mut probe_notice: ResMut<TerrainProbeNotice>,
     mut query: Query<(&mut Text, &mut Visibility), With<TerrainDebugIndicator>>,
 ) {
-    if !terrain_debug.is_changed() {
-        return;
+    // Runs every frame: the probe-written toast decays on a timer, so we cannot
+    // gate on change detection alone.
+    if probe_notice.seconds_left > 0.0 {
+        probe_notice.seconds_left = (probe_notice.seconds_left - time.delta_secs()).max(0.0);
     }
+    let probe_text = (probe_notice.seconds_left > 0.0).then(|| probe_notice.text.clone());
 
-    let label = terrain_debug_indicator_label(*terrain_debug);
+    let label = terrain_debug_indicator_label(*terrain_debug, lod_control.freeze_lod, probe_text);
     for (mut text, mut visibility) in query.iter_mut() {
         if label.is_empty() {
             *visibility = Visibility::Hidden;
@@ -340,7 +362,18 @@ pub(crate) fn update_terrain_debug_indicator(
     }
 }
 
-fn terrain_debug_indicator_label(view: TerrainDebugView) -> String {
+fn terrain_debug_indicator_label(
+    view: TerrainDebugView,
+    lod_frozen: bool,
+    probe_written: Option<String>,
+) -> String {
+    let mut lines = Vec::new();
+    if lod_frozen {
+        lines.push("LOD FROZEN (Alt+F6)".to_string());
+    }
+    if let Some(file) = probe_written {
+        lines.push(format!("PROBE WRITTEN: {file}"));
+    }
     let mut parts = Vec::new();
     if view.wireframe {
         parts.push("WIRE");
@@ -354,11 +387,10 @@ fn terrain_debug_indicator_label(view: TerrainDebugView) -> String {
     if view.flat_unlit {
         parts.push("FLAT");
     }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!("TERRAIN DEBUG: {} ON", parts.join(" + "))
+    if !parts.is_empty() {
+        lines.push(format!("TERRAIN DEBUG: {} ON", parts.join(" + ")));
     }
+    lines.join("\n")
 }
 
 fn projection_fov_degrees(projection: &Projection) -> f32 {

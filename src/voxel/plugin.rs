@@ -699,6 +699,7 @@ impl Plugin for VoxelPlugin {
         })
         .insert_resource(LodSettings::default())
         .insert_resource(crate::voxel::terrain_debug::TerrainDebugView::default())
+        .insert_resource(crate::voxel::terrain_debug::TerrainProbeNotice::default())
         .insert_resource(McTransvoxelSettings::load_or_default())
         .insert_resource(McTransvoxelRuntimeStats::default())
         .insert_resource(TerrainLodControl::default())
@@ -2129,7 +2130,15 @@ fn poll_chunk_generation_tasks(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
+    lod_control: Res<TerrainLodControl>,
 ) {
+    // While LOD is frozen for inspection (Alt+F6), hold the scene completely
+    // static: don't insert newly generated chunks (which would pop in at fresh
+    // distance-based LODs and look like the LOD "refreshing"). Async tasks keep
+    // running and are consumed once LOD is unfrozen.
+    if lod_control.freeze_lod {
+        return;
+    }
     // Skip until actual generation work has been queued.
     if !should_poll_chunk_generation_tasks(&gen_state) {
         return;

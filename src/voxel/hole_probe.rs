@@ -968,6 +968,7 @@ fn dump_terrain_hole_probe(
     lod_settings: Res<LodSettings>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    mut probe_notice: ResMut<crate::voxel::terrain_debug::TerrainProbeNotice>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let keyboard_requested = shift_held && keys.just_pressed(KeyCode::F9);
@@ -1362,7 +1363,14 @@ fn dump_terrain_hole_probe(
 
     let output_label = request.and_then(|request| request.output_label.as_deref());
     match write_probe_dump(&dump, &timestamp, output_label) {
-        Ok(path) => info!("Terrain hole probe written to {}", path.display()),
+        Ok(path) => {
+            info!("Terrain hole probe written to {}", path.display());
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            probe_notice.notify(name);
+        }
         Err(err) => error!("Failed to write terrain hole probe: {err}"),
     }
 }
