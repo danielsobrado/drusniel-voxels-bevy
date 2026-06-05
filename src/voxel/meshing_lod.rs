@@ -12,11 +12,11 @@
 
 use bevy::math::{IVec3, Vec3};
 
-use crate::constants::CHUNK_SIZE;
+use crate::constants::{CHUNK_SIZE, VOXEL_SIZE};
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::meshing::{
-    coarse_lattice_y_face_target, neighbor_lod_for_face, scale_vertex_from_center,
-    transition_target_lod, xz_face_coarse_target_local, MeshData,
+    MeshData, coarse_lattice_y_face_target, neighbor_lod_for_face, scale_vertex_from_center,
+    transition_target_lod, xz_face_coarse_target_local,
 };
 use crate::voxel::meshing_types::{MorphTargetError, TerrainMorphConfig};
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
@@ -120,6 +120,9 @@ pub fn append_morph_targets(
         return Ok(());
     }
 
+    let mut target_locals: Vec<Option<Vec3>> = vec![None; local_positions.len()];
+    let mut conflicting_targets = vec![false; local_positions.len()];
+
     for face in ChunkFace::ALL {
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
@@ -143,9 +146,25 @@ pub fn append_morph_targets(
             ) else {
                 continue;
             };
-            let scaled = scale_vertex_from_center(target_local, chunk_center);
-            mesh.morph_targets[index] = [scaled[0], scaled[1], scaled[2], 1.0];
+            if let Some(existing) = target_locals[index] {
+                if (existing - target_local).length() > VOXEL_SIZE * 0.05 {
+                    conflicting_targets[index] = true;
+                }
+            } else {
+                target_locals[index] = Some(target_local);
+            }
         }
+    }
+
+    for (index, target_local) in target_locals.into_iter().enumerate() {
+        if conflicting_targets[index] {
+            continue;
+        }
+        let Some(target_local) = target_local else {
+            continue;
+        };
+        let scaled = scale_vertex_from_center(target_local, chunk_center);
+        mesh.morph_targets[index] = [scaled[0], scaled[1], scaled[2], 1.0];
     }
 
     // Proof-of-life: emit once when the morph first welds boundary verts, so a run
@@ -566,6 +585,47 @@ mod tests {
         assert_eq!(mesh.morph_targets[0], mesh.morph_targets[1]);
         assert_eq!(mesh.morph_targets[1], mesh.morph_targets[2]);
         assert_eq!(mesh.morph_targets[0][3], 1.0);
+    }
+
+    #[test]
+    fn conflicting_multi_face_corner_keeps_identity_target() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = test_chunk_center();
+        let corner = Vec3::new(CHUNK_SIZE as f32 - 0.4, 5.0, CHUNK_SIZE as f32 - 0.4);
+        let local_positions = vec![corner];
+        let mut mesh = mesh_for_local_positions(&local_positions, center);
+
+        append_morph_targets(
+            &mut mesh,
+            &local_positions,
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                pos_z: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            &enabled_config(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mesh.morph_targets[0][3], 0.0,
+            "conflicting corner targets must not let the last face pull a seam-end spike"
+        );
+        assert_eq!(
+            [
+                mesh.morph_targets[0][0],
+                mesh.morph_targets[0][1],
+                mesh.morph_targets[0][2]
+            ],
+            mesh.positions[0]
+        );
     }
 
     #[test]

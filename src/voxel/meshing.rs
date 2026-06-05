@@ -35,10 +35,10 @@ use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
 use crate::voxel::meshing_lod::append_morph_targets;
-use crate::voxel::meshing_types::{TerrainMorphConfig, ATTRIBUTE_MORPH_TARGET};
+use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
 use crate::voxel::skirt::{
-    extract_boundary_edges, generate_skirts_with_sealed_faces, ChunkFace, NeighborLods,
-    SkirtConfig, SkirtGenerationStats,
+    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
+    generate_skirts_with_sealed_faces,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -51,7 +51,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
@@ -2580,6 +2580,20 @@ fn lod_transition_step(
     lod_transition_step_for_padded_size(my_lod, neighbor_lods, px, py, pz, LOD0_PADDED_SIZE)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BaseSdfTransitionMode {
+    Uniform,
+    Coarsen,
+}
+
+fn surface_nets_base_sdf_transition_mode() -> BaseSdfTransitionMode {
+    if terrain_morph_config().enabled {
+        BaseSdfTransitionMode::Uniform
+    } else {
+        BaseSdfTransitionMode::Coarsen
+    }
+}
+
 fn generate_low_lod_sdf<const N: usize>(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -2589,7 +2603,7 @@ fn generate_low_lod_sdf<const N: usize>(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
 ) -> [f32; N] {
-    generate_low_lod_sdf_with_smoothing(
+    generate_low_lod_sdf_with_smoothing_and_transition_mode(
         chunk,
         world,
         padded_size,
@@ -2598,6 +2612,7 @@ fn generate_low_lod_sdf<const N: usize>(
         my_lod,
         neighbor_lods,
         coarse_terrain_sdf_smooth_enabled(),
+        surface_nets_base_sdf_transition_mode(),
     )
 }
 
@@ -2611,6 +2626,30 @@ fn generate_low_lod_sdf_with_smoothing<const N: usize>(
     neighbor_lods: &NeighborLods,
     smooth_coarse: bool,
 ) -> [f32; N] {
+    generate_low_lod_sdf_with_smoothing_and_transition_mode(
+        chunk,
+        world,
+        padded_size,
+        step,
+        linearize,
+        my_lod,
+        neighbor_lods,
+        smooth_coarse,
+        BaseSdfTransitionMode::Coarsen,
+    )
+}
+
+fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: usize>(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    padded_size: u32,
+    step: i32,
+    linearize: impl Fn([u32; 3]) -> u32,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    smooth_coarse: bool,
+    transition_mode: BaseSdfTransitionMode,
+) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
@@ -2618,14 +2657,11 @@ fn generate_low_lod_sdf_with_smoothing<const N: usize>(
         for y in 0..padded_size {
             for x in 0..padded_size {
                 let idx = linearize([x, y, z]) as usize;
-                let transition_step = lod_transition_step_for_padded_size(
-                    my_lod,
-                    neighbor_lods,
-                    x,
-                    y,
-                    z,
-                    padded_size,
-                );
+                let transition_step = if transition_mode == BaseSdfTransitionMode::Coarsen {
+                    lod_transition_step_for_padded_size(my_lod, neighbor_lods, x, y, z, padded_size)
+                } else {
+                    None
+                };
                 let effective_step = transition_step.unwrap_or(step);
                 let base_world_pos = coarse_aligned_lod_sample_base_with_stride(
                     chunk_origin,
@@ -3214,16 +3250,33 @@ fn coarse_terrain_sdf_smooth_enabled() -> bool {
 /// Uses distance-based SDF for smoother surfaces at chunk boundaries.
 /// This is the LOD0 (high detail) version - samples every voxel.
 ///
-/// When `smooth` is set, non-transition cells get a world-space blurred SDF to
-/// remove terracing (see `smoothed_sdf_from_block`). LOD-transition cells use the
-/// same step-scaled coarse smoothing policy as lower LODs so the boundary weld
-/// targets a de-terraced coarse field.
+/// When `smooth` is set, cells get a world-space blurred SDF to remove terracing
+/// (see `smoothed_sdf_from_block`). With GPU morph active, the base mesh stays
+/// uniformly fine and coarse alignment is isolated to `ATTRIBUTE_MORPH_TARGET`.
 fn generate_sdf(
     chunk: &Chunk,
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     smooth: bool,
+) -> [f32; 5832] {
+    generate_sdf_with_transition_mode(
+        chunk,
+        world,
+        my_lod,
+        neighbor_lods,
+        smooth,
+        surface_nets_base_sdf_transition_mode(),
+    )
+}
+
+fn generate_sdf_with_transition_mode(
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    smooth: bool,
+    transition_mode: BaseSdfTransitionMode,
 ) -> [f32; 5832] {
     // 18^3 = 5832
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
@@ -3234,7 +3287,12 @@ fn generate_sdf(
 
     for i in 0..PaddedChunkShape::USIZE {
         let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        if let Some(step) = lod_transition_step(my_lod, neighbor_lods, px, py, pz) {
+        let transition_step = if transition_mode == BaseSdfTransitionMode::Coarsen {
+            lod_transition_step(my_lod, neighbor_lods, px, py, pz)
+        } else {
+            None
+        };
+        if let Some(step) = transition_step {
             let base_world_pos = coarse_aligned_lod_sample_base(chunk_origin, px, py, pz, step);
             sdf[i] = if smooth {
                 coarse_transition_smoothed_sdf_at_world_pos(world, base_world_pos, step)
@@ -5274,8 +5332,22 @@ mod tests {
         let boundary_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 1, 5, 5]) as usize;
         let neighbor_boundary_idx = LodShape1::linearize([1, 3, 3]) as usize;
 
-        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods, false);
-        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, false);
+        let raw_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &no_transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
+        let transition_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
         let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
             neighbor,
             &world,
@@ -5321,13 +5393,79 @@ mod tests {
 
         let inner_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 2, 5, 5]) as usize;
 
-        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods, false);
-        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, false);
+        let raw_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &no_transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
+        let transition_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
 
         // Fine sampling at the inner plane misses the voxel.
         assert_eq!(raw_sdf[inner_idx], 1.0);
         // The transition must coarsen the inner plane too.
         assert_eq!(transition_sdf[inner_idx], -1.0);
+    }
+
+    #[test]
+    fn lod0_morph_base_sdf_keeps_transition_band_uniformly_fine() {
+        let chunk_pos = IVec3::new(1, 0, 2);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
+        world.set_voxel(chunk_origin + IVec3::new(14, 4, 4), VoxelType::Rock);
+
+        let chunk = world.get_chunk(chunk_pos).unwrap();
+        let no_transition_lods = NeighborLods::default();
+        let transition_lods = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let inner_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 2, 5, 5]) as usize;
+
+        let raw_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &no_transition_lods,
+            false,
+            BaseSdfTransitionMode::Uniform,
+        );
+        let morph_base_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            false,
+            BaseSdfTransitionMode::Uniform,
+        );
+        let legacy_coarsened_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
+
+        assert_eq!(raw_sdf[inner_idx], 1.0);
+        assert_eq!(
+            morph_base_sdf[inner_idx], raw_sdf[inner_idx],
+            "GPU morph base POSITION mesh must not create a transition-only sign change"
+        );
+        assert_eq!(
+            legacy_coarsened_sdf[inner_idx], -1.0,
+            "fixture must still exercise the old coarsened-boundary wall risk"
+        );
     }
 
     #[test]
@@ -5348,8 +5486,22 @@ mod tests {
         let boundary_idx = PaddedChunkShape::linearize([6, 1, 5]) as usize;
         let neighbor_boundary_idx = LodShape1::linearize([3, LOD1_PADDED_SIZE - 1, 3]) as usize;
 
-        let raw_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &no_transition_lods, false);
-        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, false);
+        let raw_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &no_transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
+        let transition_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            false,
+            BaseSdfTransitionMode::Coarsen,
+        );
         let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
             neighbor,
             &world,
@@ -5896,15 +6048,38 @@ mod tests {
         let boundary_idx = LodShape1::linearize([LOD1_PADDED_SIZE - 1, 5, 3]) as usize;
         let neighbor_boundary_idx = LodShape3::linearize([1, 2, 1]) as usize;
 
-        let raw_sdf = generate_sdf_lod1(chunk, &world, &no_transition_lods);
-        let transition_sdf = generate_sdf_lod1(chunk, &world, &transition_lods);
-        let neighbor_lod3_sdf = generate_sdf_lod3(
+        let raw_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            chunk,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &no_transition_lods,
+            true,
+        );
+        let transition_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
+            chunk,
+            &world,
+            LOD1_PADDED_SIZE,
+            LOD1_STEP_SIZE as i32,
+            LodShape1::linearize,
+            LodLevel::Lod1,
+            &transition_lods,
+            true,
+        );
+        let neighbor_lod3_sdf = generate_low_lod_sdf_with_smoothing::<LOD3_GRID_VOLUME>(
             neighbor,
             &world,
+            LOD3_PADDED_SIZE,
+            LOD3_STEP_SIZE as i32,
+            LodShape3::linearize,
+            LodLevel::Lod3,
             &NeighborLods {
                 neg_x: Some(LodLevel::Lod1),
                 ..Default::default()
             },
+            true,
         );
 
         assert_eq!(raw_sdf[boundary_idx], 1.0);
@@ -6011,7 +6186,14 @@ mod tests {
         let boundary_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 1, 5, 5]) as usize;
         let neighbor_boundary_idx = LodShape1::linearize([1, 3, 3]) as usize;
 
-        let transition_sdf = generate_sdf(chunk, &world, LodLevel::Lod0, &transition_lods, true);
+        let transition_sdf = generate_sdf_with_transition_mode(
+            chunk,
+            &world,
+            LodLevel::Lod0,
+            &transition_lods,
+            true,
+            BaseSdfTransitionMode::Coarsen,
+        );
         let neighbor_lod1_sdf = generate_low_lod_sdf_with_smoothing::<LOD1_GRID_VOLUME>(
             neighbor,
             &world,
@@ -7487,7 +7669,7 @@ fn generate_chunk_mesh_mc_transvoxel(
     water_exposure_mode: WaterAirExposureMode,
     forensics: MeshForensicsOptions,
 ) -> ChunkMeshResult {
-    use crate::voxel::mc_transvoxel::{generate_mc_chunk_mesh, McMeshInput, McTransvoxelSettings};
+    use crate::voxel::mc_transvoxel::{McMeshInput, McTransvoxelSettings, generate_mc_chunk_mesh};
 
     let settings = McTransvoxelSettings::load_or_default();
     if !settings.enabled {
@@ -7547,6 +7729,7 @@ pub(crate) mod mc_support {
     };
     use crate::voxel::world::VoxelWorld;
     use bevy::prelude::{IVec3, Vec3};
+    use ndshape::ConstShape;
 
     pub fn build_mc_sdf_values(
         chunk: &crate::voxel::chunk::Chunk,
@@ -7558,25 +7741,53 @@ pub(crate) mod mc_support {
         let step = my_lod.step_size() as i32;
         match my_lod {
             LodLevel::Lod0 => {
-                let sdf = super::generate_sdf(
+                let sdf = super::generate_sdf_with_transition_mode(
                     chunk,
                     world,
                     my_lod,
                     neighbor_lods,
                     super::SMOOTH_TERRAIN_SDF_LOD0,
+                    super::BaseSdfTransitionMode::Coarsen,
                 );
                 (super::LOD0_PADDED_SIZE as usize, sdf.to_vec(), step)
             }
             LodLevel::Lod1 => {
-                let sdf = super::generate_sdf_lod1(chunk, world, neighbor_lods);
+                let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD1_GRID_VOLUME }>(
+                    chunk,
+                    world,
+                    super::LOD1_PADDED_SIZE,
+                    super::LOD1_STEP_SIZE as i32,
+                    super::LodShape1::linearize,
+                    LodLevel::Lod1,
+                    neighbor_lods,
+                    super::coarse_terrain_sdf_smooth_enabled(),
+                );
                 (super::LOD1_PADDED_SIZE as usize, sdf.to_vec(), step)
             }
             LodLevel::Lod2 => {
-                let sdf = super::generate_sdf_lod2(chunk, world, neighbor_lods);
+                let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD2_GRID_VOLUME }>(
+                    chunk,
+                    world,
+                    super::LOD2_PADDED_SIZE,
+                    super::LOD2_STEP_SIZE as i32,
+                    super::LodShape2::linearize,
+                    LodLevel::Lod2,
+                    neighbor_lods,
+                    super::coarse_terrain_sdf_smooth_enabled(),
+                );
                 (super::LOD2_PADDED_SIZE as usize, sdf.to_vec(), step)
             }
             LodLevel::Lod3 => {
-                let sdf = super::generate_sdf_lod3(chunk, world, neighbor_lods);
+                let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD3_GRID_VOLUME }>(
+                    chunk,
+                    world,
+                    super::LOD3_PADDED_SIZE,
+                    super::LOD3_STEP_SIZE as i32,
+                    super::LodShape3::linearize,
+                    LodLevel::Lod3,
+                    neighbor_lods,
+                    super::coarse_terrain_sdf_smooth_enabled(),
+                );
                 (super::LOD3_PADDED_SIZE as usize, sdf.to_vec(), step)
             }
             LodLevel::Culled => (0, Vec::new(), step),

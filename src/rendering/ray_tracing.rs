@@ -255,7 +255,14 @@ pub(crate) fn toggle_voxel_ray_backend_key(
     #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if shift_held || !keys.just_pressed(KeyCode::F11) {
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !voxel_ray_backend_toggle_requested(
+        shift_held,
+        alt_held,
+        control_held,
+        keys.just_pressed(KeyCode::F11),
+    ) {
         return;
     }
 
@@ -329,6 +336,15 @@ pub(crate) fn toggle_voxel_ray_backend_key(
             settings.fallback_reason.as_deref().unwrap_or("none")
         );
     }
+}
+
+fn voxel_ray_backend_toggle_requested(
+    shift_held: bool,
+    alt_held: bool,
+    control_held: bool,
+    f11_just_pressed: bool,
+) -> bool {
+    f11_just_pressed && !shift_held && !alt_held && !control_held
 }
 
 pub(crate) fn setup_voxel_ray_backend_notice(
@@ -500,6 +516,25 @@ mod tests {
         };
         let text = voxel_ray_backend_notice_text(&settings);
         assert!(text.contains("Fallback: test reason"));
+    }
+
+    #[test]
+    fn voxel_ray_backend_toggle_requires_unmodified_f11() {
+        assert!(voxel_ray_backend_toggle_requested(
+            false, false, false, true
+        ));
+        assert!(!voxel_ray_backend_toggle_requested(
+            false, true, false, true
+        ));
+        assert!(!voxel_ray_backend_toggle_requested(
+            true, false, false, true
+        ));
+        assert!(!voxel_ray_backend_toggle_requested(
+            false, false, true, true
+        ));
+        assert!(!voxel_ray_backend_toggle_requested(
+            false, false, false, false
+        ));
     }
 
     #[test]
