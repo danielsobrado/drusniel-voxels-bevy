@@ -1,0 +1,57 @@
+# Reproduce the user's SN+promotion defect view (Shift+F9 camera 2026-06-05):
+# camera (283.9,52.7,106.8) looking at the mountain ~(85,50,82). Circled defects:
+# upper-ridge/peak dark notches, a mid-mountain horizontal dark band, and a coarse
+# flat mesa on the right with a see-through (blue) hole.
+# Captures wireframe (section colours), normals, flat-unlit (see-through holes show
+# background), and plain + a screenshot-backed hole probe that can classify dark vs hole.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 8
+skip_props = true
+freeze_terrain_lod_after_ready = true
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "wire"
+position = [283.9, 52.7, 106.8]
+look_at = [85.0, 50.0, 82.0]
+time_of_day = 0.42
+hold_frames = 240
+screenshot = true
+fog_tier = "off"
+terrain_debug = { wireframe = true }
+screenshot_points = [{ name = "view", frame = 160 }]
+
+[[checkpoint]]
+name = "normals"
+position = [283.9, 52.7, 106.8]
+look_at = [85.0, 50.0, 82.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+terrain_debug = { normals = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "flat"
+position = [283.9, 52.7, 106.8]
+look_at = [85.0, 50.0, 82.0]
+time_of_day = 0.42
+hold_frames = 220
+screenshot = true
+fog_tier = "off"
+terrain_debug = { flat_unlit = true }
+screenshot_points = [{ name = "view", frame = 150 }]
+
+[[checkpoint]]
+name = "plain"
+position = [283.9, 52.7, 106.8]
+look_at = [85.0, 50.0, 82.0]
+time_of_day = 0.42
+hold_frames = 260
+screenshot = true
+fog_tier = "off"
+screenshot_points = [{ name = "view", frame = 150 }]
+hole_probe = { frame = 200, target_voxel = [82, 62, 85], label = "sn-mtn" }

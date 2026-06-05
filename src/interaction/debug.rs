@@ -85,6 +85,7 @@ pub struct DebugOverlayParams<'w> {
     pub water_bodies: Option<Res<'w, WaterBodyRegistry>>,
     pub mc_spike_stats: Res<'w, McTransvoxelRuntimeStats>,
     pub mc_spike_settings: Res<'w, McTransvoxelSettings>,
+    pub lod_control: Res<'w, crate::voxel::plugin::TerrainLodControl>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
@@ -501,6 +502,30 @@ pub fn toggle_mesh_mode(
     }
 }
 
+/// Freeze terrain LOD updates with Alt+F6 (debug): stops the distance-based LOD
+/// reassignment so the current LOD layout holds while you fly to a seam/hole and
+/// inspect it up close, without LODs shifting under the camera. Press again to
+/// resume live LOD. Meshing/edits still work; only LOD *level* changes are paused.
+pub fn toggle_freeze_terrain_lod(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut lod_control: ResMut<crate::voxel::plugin::TerrainLodControl>,
+) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if !alt_held || !keyboard.just_pressed(KeyCode::F6) {
+        return;
+    }
+    lod_control.freeze_lod = !lod_control.freeze_lod;
+    info!(
+        "Terrain LOD updates: {} (Alt+F6). {}",
+        if lod_control.freeze_lod { "FROZEN" } else { "LIVE" },
+        if lod_control.freeze_lod {
+            "Fly to the seam and inspect; LODs will not shift."
+        } else {
+            "Resumed distance-based LOD."
+        }
+    );
+}
+
 /// Toggle terrain LOD with Alt+0 (debug): forces every loaded chunk to Lod0 so
 /// LOD-boundary artifacts can be told apart from genuine geometry. Press again
 /// to restore the previous LOD distances.
@@ -903,6 +928,7 @@ pub fn update_debug_overlay(
             &chunk_stats,
             &debug.mc_spike_stats,
             &debug.mc_spike_settings,
+            debug.lod_control.freeze_lod,
         );
     }
 
@@ -1182,8 +1208,12 @@ fn append_chunk_stats_debug(
     stats: &RuntimeChunkStats,
     mc_stats: &McTransvoxelRuntimeStats,
     mc_settings: &McTransvoxelSettings,
+    lod_frozen: bool,
 ) {
     text_content.push_str("\n[Chunk Statistics]\n");
+    if lod_frozen {
+        text_content.push_str("LOD: FROZEN (Alt+F6) - move freely to inspect; LODs held\n");
+    }
 
     // Uniformity breakdown
     let empty_pct = if stats.total_chunks > 0 {
