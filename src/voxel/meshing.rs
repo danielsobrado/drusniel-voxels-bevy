@@ -35,10 +35,10 @@ use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
 use crate::voxel::meshing_lod::append_morph_targets;
-use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
+use crate::voxel::meshing_types::{TerrainMorphConfig, ATTRIBUTE_MORPH_TARGET};
 use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
-    generate_skirts_with_sealed_faces,
+    extract_boundary_edges, generate_skirts_with_sealed_faces, ChunkFace, NeighborLods,
+    SkirtConfig, SkirtGenerationStats,
 };
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelSample, VoxelWorld};
@@ -51,7 +51,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
 
 // Surface nets imports for smooth meshing
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::{ConstShape, ConstShape3u32};
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
@@ -198,6 +198,9 @@ impl TerrainMeshSectionStats {
 pub struct LodTransitionSnapStats {
     pub snapped_face_mask: u8,
     pub fallback_face_mask: u8,
+    pub boundary_candidate_vertex_count: u32,
+    pub morph_target_vertex_count: u32,
+    pub morph_missing_target_vertex_count: u32,
     pub snapped_vertex_count: u32,
     pub skipped_vertex_count: u32,
     pub conflicting_vertex_count: u32,
@@ -3499,11 +3502,16 @@ pub(crate) fn coarse_lattice_y_face_target(
 pub(crate) fn terrain_morph_config() -> &'static TerrainMorphConfig {
     static CACHE: OnceLock<TerrainMorphConfig> = OnceLock::new();
     CACHE.get_or_init(|| {
+        // Default ON: the GPU geomorph welds the fine boundary to the coarse-LOD
+        // target so LOD levels meet directly (set VOXELS_TERRAIN_MORPH=0 to disable
+        // and fall back to the legacy CPU snap path).
         let enabled = std::env::var("VOXELS_TERRAIN_MORPH")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
         if enabled {
-            info!("GPU terrain morph gate: ENABLED (VOXELS_TERRAIN_MORPH) — SN path welds on GPU");
+            info!("GPU terrain morph gate: ENABLED (default; set VOXELS_TERRAIN_MORPH=0 to disable) — SN path welds on GPU");
+        } else {
+            info!("GPU terrain morph gate: DISABLED (VOXELS_TERRAIN_MORPH=0) — legacy CPU snap");
         }
         TerrainMorphConfig {
             enabled,
@@ -3547,7 +3555,25 @@ fn apply_snap_or_morph(
     if morph.enabled && !morph.cpu_snap_when_morph_enabled {
         // Keep the fine mesh in POSITION; weld lives in ATTRIBUTE_MORPH_TARGET only.
         bake_targets(solid_mesh, local_positions);
-        LodTransitionSnapStats::default()
+        let mut stats = LodTransitionSnapStats::default();
+        stats.boundary_candidate_vertex_count =
+            transition_boundary_vertex_count(local_positions, my_lod, neighbor_lods);
+        stats.morph_target_vertex_count = solid_mesh
+            .morph_targets
+            .iter()
+            .take(local_positions.len())
+            .filter(|target| target[3] > 0.5)
+            .count() as u32;
+        stats.morph_missing_target_vertex_count = stats
+            .boundary_candidate_vertex_count
+            .saturating_sub(stats.morph_target_vertex_count);
+        stats.snapped_face_mask = morph_welded_face_mask(
+            local_positions,
+            &solid_mesh.morph_targets,
+            my_lod,
+            neighbor_lods,
+        );
+        stats
     } else {
         let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             solid_mesh,
@@ -3565,6 +3591,75 @@ fn apply_snap_or_morph(
         }
         stats
     }
+}
+
+fn in_lod_boundary_cell(local: Vec3, face: ChunkFace, my_lod: LodLevel) -> bool {
+    let chunk_size = CHUNK_SIZE as f32;
+    let face_tolerance = my_lod.step_size() as f32;
+    match face {
+        ChunkFace::NegX => local.x <= face_tolerance,
+        ChunkFace::PosX => local.x >= chunk_size - face_tolerance,
+        ChunkFace::NegY => local.y <= face_tolerance,
+        ChunkFace::PosY => local.y >= chunk_size - face_tolerance,
+        ChunkFace::NegZ => local.z <= face_tolerance,
+        ChunkFace::PosZ => local.z >= chunk_size - face_tolerance,
+    }
+}
+
+fn transition_boundary_vertex_count(
+    local_positions: &[Vec3],
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> u32 {
+    if my_lod.step_size() == 0 {
+        return 0;
+    }
+
+    let mut count = 0u32;
+    for local in local_positions.iter().copied() {
+        for face in ChunkFace::ALL {
+            let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+                continue;
+            };
+            if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+                continue;
+            }
+            if in_lod_boundary_cell(local, face, my_lod) {
+                count = count.saturating_add(1);
+                break;
+            }
+        }
+    }
+    count
+}
+
+fn morph_welded_face_mask(
+    local_positions: &[Vec3],
+    morph_targets: &[[f32; 4]],
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> u8 {
+    if my_lod.step_size() == 0 || local_positions.len() != morph_targets.len() {
+        return 0;
+    }
+
+    let mut mask = 0;
+    for face in ChunkFace::ALL {
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+            continue;
+        }
+        if local_positions
+            .iter()
+            .zip(morph_targets)
+            .any(|(local, target)| target[3] > 0.5 && in_lod_boundary_cell(*local, face, my_lod))
+        {
+            mask |= LodTransitionSnapStats::face_mask(face);
+        }
+    }
+    mask
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
@@ -3592,30 +3687,17 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
 ) -> LodTransitionSnapStats {
-    let mut stats = LodTransitionSnapStats::default();
+    let mut stats = LodTransitionSnapStats {
+        boundary_candidate_vertex_count: transition_boundary_vertex_count(
+            local_positions,
+            my_lod,
+            neighbor_lods,
+        ),
+        ..Default::default()
+    };
     if my_lod.step_size() == 0 || solid_mesh.positions.len() != local_positions.len() {
         return stats;
     }
-
-    // A vertex qualifies as "on a chunk face" for snapping if it lies inside the
-    // outermost cell row of that face. The old `compute_boundary_flags` /
-    // EPSILON=0.01 check required the vertex to be effectively on the boundary
-    // plane, which the previous binary SDF satisfied (vertices snapped to lattice
-    // points) but the fractional smoothed SDF does not — vertices now sit inside
-    // their cells. Using `step_size` voxels of tolerance captures the boundary-
-    // cell band for any LOD without depending on lattice quantisation.
-    let chunk_size = CHUNK_SIZE as f32;
-    let face_tolerance = my_lod.step_size() as f32;
-    let in_boundary_cell = |local: Vec3, face: ChunkFace| -> bool {
-        match face {
-            ChunkFace::NegX => local.x <= face_tolerance,
-            ChunkFace::PosX => local.x >= chunk_size - face_tolerance,
-            ChunkFace::NegY => local.y <= face_tolerance,
-            ChunkFace::PosY => local.y >= chunk_size - face_tolerance,
-            ChunkFace::NegZ => local.z <= face_tolerance,
-            ChunkFace::PosZ => local.z >= chunk_size - face_tolerance,
-        }
-    };
 
     let mut face_targets: Vec<(ChunkFace, Vec<(usize, Vec3)>)> = Vec::new();
     for face in [
@@ -3635,7 +3717,7 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
 
         let mut targets = Vec::new();
         for (index, local) in local_positions.iter().copied().enumerate() {
-            if !in_boundary_cell(local, face) {
+            if !in_lod_boundary_cell(local, face, my_lod) {
                 continue;
             }
 
@@ -6282,11 +6364,109 @@ mod tests {
 
         // Snap was skipped: stats default, POSITION untouched (fine mesh kept).
         assert_eq!(stats.snapped_vertex_count, 0);
+        assert!(stats.face_snapped(ChunkFace::PosX));
         assert_eq!(mesh.positions, positions_before);
         // Targets baked: boundary vertex morphs, interior does not.
         assert_eq!(mesh.morph_targets.len(), mesh.positions.len());
         assert_eq!(mesh.morph_targets[0][3], 1.0);
         assert_eq!(mesh.morph_targets[1][3], 0.0);
+    }
+
+    #[test]
+    fn fractional_morph_target_lands_on_lod1_neighbor_mesh() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 1));
+        fill_steep_x_slope(&mut world);
+
+        let lod0_chunk_pos = IVec3::new(1, 1, 0);
+        let lod1_chunk_pos = IVec3::new(2, 1, 0);
+        let lod0_origin = VoxelWorld::chunk_to_world(lod0_chunk_pos);
+        let lod1_origin = VoxelWorld::chunk_to_world(lod1_chunk_pos);
+        let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![Vec3::new(CHUNK_SIZE as f32 - 0.6, 8.0, 7.4)];
+        let mut mesh = mesh_data_for_local_positions(&local_positions, center);
+        let neighbors = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let stats = apply_snap_or_morph(
+            &mut mesh,
+            &mut local_positions,
+            world.get_chunk(lod0_chunk_pos).unwrap(),
+            &world,
+            lod0_origin,
+            center,
+            LodLevel::Lod0,
+            &neighbors,
+            &morph_enabled_config(),
+        );
+
+        assert_eq!(stats.boundary_candidate_vertex_count, 1);
+        assert_eq!(stats.morph_target_vertex_count, 1);
+        assert_eq!(stats.morph_missing_target_vertex_count, 0);
+        assert_eq!(mesh.morph_targets[0][3], 1.0);
+
+        let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
+            world.get_chunk(lod1_chunk_pos).unwrap(),
+            &world,
+            LodLevel::Lod1,
+            NeighborLods {
+                neg_x: Some(LodLevel::Lod0),
+                ..Default::default()
+            },
+            &SkirtConfig::default(),
+            &ao_config(),
+            WaterAirExposureMode::ExteriorConnected,
+        );
+
+        let target = mesh.morph_targets[0];
+        let target_world_x = lod0_origin.x as f32 + target[0];
+        let target_world_y = lod0_origin.y as f32 + target[1];
+        let target_world_z = lod0_origin.z as f32 + target[2];
+        let neighbor_y = highest_vertical_hit_y_for_meshes(
+            &[(&lod1_mesh.solid, lod1_origin)],
+            target_world_x,
+            target_world_z,
+        )
+        .expect("morph target should sit over the generated Lod1 neighbor mesh");
+
+        assert!(
+            (target_world_y - neighbor_y).abs() <= VOXEL_SIZE * 0.75,
+            "morph target must land on the generated Lod1 mesh: target=({target_world_x:.2},{target_world_y:.2},{target_world_z:.2}) neighbor_y={neighbor_y:.2}"
+        );
+    }
+
+    #[test]
+    fn apply_snap_or_morph_enabled_does_not_seal_when_bake_fails() {
+        let world = world_with_test_chunks(IVec3::new(2, 2, 1));
+        let chunk_pos = IVec3::ZERO;
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let mut local_positions = vec![Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0)];
+        let mut mesh = mesh_data_for_local_positions(&local_positions, center);
+        mesh.positions.push([0.0, 0.0, 0.0]);
+        let neighbors = NeighborLods {
+            pos_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+
+        let stats = apply_snap_or_morph(
+            &mut mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &neighbors,
+            &morph_enabled_config(),
+        );
+
+        assert_eq!(
+            stats.snapped_face_mask, 0,
+            "morph mode must leave skirts available when weld target baking fails"
+        );
+        assert!(mesh.morph_targets.is_empty());
     }
 
     #[test]
@@ -7205,7 +7385,7 @@ fn generate_chunk_mesh_mc_transvoxel(
     water_exposure_mode: WaterAirExposureMode,
     forensics: MeshForensicsOptions,
 ) -> ChunkMeshResult {
-    use crate::voxel::mc_transvoxel::{McMeshInput, McTransvoxelSettings, generate_mc_chunk_mesh};
+    use crate::voxel::mc_transvoxel::{generate_mc_chunk_mesh, McMeshInput, McTransvoxelSettings};
 
     let settings = McTransvoxelSettings::load_or_default();
     if !settings.enabled {

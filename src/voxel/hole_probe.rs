@@ -15,18 +15,18 @@ use crate::constants::{CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::interaction::TargetedBlock;
 use crate::performance::AreaTimingRecorder;
 use crate::physics::{ChunkCollider, NeedsCollider, PhysicsLayer};
-use crate::player::{Player, classify_player_world_validity};
+use crate::player::{classify_player_world_validity, Player};
 use crate::voxel::chunk::{ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::mc_transvoxel::McTransvoxelStats;
 use crate::voxel::meshing::{
-    ChunkMesh, LodTransitionSnapStats, McTriangleSource, McTriangleSources, MeshMode, MeshSettings,
-    TerrainMeshDebug, TerrainMeshSectionStats, WaterMesh,
-    empty_chunk_has_surface_nets_boundary_surface,
+    empty_chunk_has_surface_nets_boundary_surface, ChunkMesh, LodTransitionSnapStats,
+    McTriangleSource, McTriangleSources, MeshMode, MeshSettings, TerrainMeshDebug,
+    TerrainMeshSectionStats, WaterMesh,
 };
 use crate::voxel::plugin::{
-    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
-    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    terrain_lod_distance_xz, terrain_lod_hysteresis, water_shore_guarded_lod,
+    calculate_target_lod_with_hysteresis, collect_water_shore_lod_guard_chunks,
+    effective_terrain_mesh_lod_for_chunk, terrain_lod_distance_xz, terrain_lod_hysteresis,
+    water_shore_guarded_lod, LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
 };
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::types::{Voxel, VoxelType};
@@ -853,6 +853,9 @@ struct LodTransitionSnapStatsProbe {
     fallback_face_mask: u8,
     snapped_faces: Vec<String>,
     fallback_faces: Vec<String>,
+    boundary_candidate_vertex_count: u32,
+    morph_target_vertex_count: u32,
+    morph_missing_target_vertex_count: u32,
     snapped_vertex_count: u32,
     skipped_vertex_count: u32,
     conflicting_vertex_count: u32,
@@ -2114,17 +2117,20 @@ fn mesh_status_label_for_height_sample(sample: &RenderMeshRayGridProbe) -> Strin
 }
 
 fn height_sample_mesh_pending_or_stale(sample: &RenderMeshRayGridProbe) -> bool {
+    // Use the authoritative `mesh_status`, which already folds in `remesh_pending`
+    // and an **effective-vs-effective** LOD comparison (`effective_mesh_lod_now`
+    // vs `effective_lod_at_mesh`; see `lod_eval_probe`). The previous extra check
+    // compared the last *effective* meshed LOD against the chunk's *logical*
+    // `lod_level`, which is always different for a promoted chunk (logical Lod1
+    // meshed as Lod0) and falsely reported settled, Current meshes as stale.
     sample
         .chunk_state
         .as_ref()
         .and_then(|state| {
-            state.lod_eval.as_ref().map(|eval| {
-                eval.remesh_pending
-                    || eval.mesh_status != LodMeshStatus::Current
-                    || (eval.last_meshed_lod.is_some()
-                        && state.lod_level.is_some()
-                        && eval.last_meshed_lod != state.lod_level)
-            })
+            state
+                .lod_eval
+                .as_ref()
+                .map(|eval| eval.mesh_status != LodMeshStatus::Current)
         })
         .unwrap_or(false)
 }
@@ -6806,6 +6812,9 @@ fn lod_transition_snap_stats_probe(stats: LodTransitionSnapStats) -> LodTransiti
         fallback_face_mask: stats.fallback_face_mask,
         snapped_faces: face_mask_names(stats.snapped_face_mask),
         fallback_faces: face_mask_names(stats.fallback_face_mask),
+        boundary_candidate_vertex_count: stats.boundary_candidate_vertex_count,
+        morph_target_vertex_count: stats.morph_target_vertex_count,
+        morph_missing_target_vertex_count: stats.morph_missing_target_vertex_count,
         snapped_vertex_count: stats.snapped_vertex_count,
         skipped_vertex_count: stats.skipped_vertex_count,
         conflicting_vertex_count: stats.conflicting_vertex_count,
@@ -7187,34 +7196,30 @@ mod tests {
             ),
             Some(png_path)
         );
-        assert!(
-            latest_matching_terrain_debug_screenshot_in_dir(
-                temp.path(),
-                Some(Vec3::new(10.0, 2.0, 3.0)),
-                Some(Vec3::NEG_Z),
-            )
-            .is_none()
-        );
-        assert!(
-            latest_matching_terrain_debug_screenshot_in_dir(
-                temp.path(),
-                Some(Vec3::new(1.2, 2.0, 3.0)),
-                Some(Vec3::Z),
-            )
-            .is_none()
-        );
-        assert!(
-            latest_matching_terrain_debug_screenshot_in_dir(temp.path(), None, Some(Vec3::NEG_Z))
-                .is_none()
-        );
-        assert!(
-            latest_matching_terrain_debug_screenshot_in_dir(
-                temp.path(),
-                Some(Vec3::new(1.2, 2.0, 3.0)),
-                None
-            )
-            .is_none()
-        );
+        assert!(latest_matching_terrain_debug_screenshot_in_dir(
+            temp.path(),
+            Some(Vec3::new(10.0, 2.0, 3.0)),
+            Some(Vec3::NEG_Z),
+        )
+        .is_none());
+        assert!(latest_matching_terrain_debug_screenshot_in_dir(
+            temp.path(),
+            Some(Vec3::new(1.2, 2.0, 3.0)),
+            Some(Vec3::Z),
+        )
+        .is_none());
+        assert!(latest_matching_terrain_debug_screenshot_in_dir(
+            temp.path(),
+            None,
+            Some(Vec3::NEG_Z)
+        )
+        .is_none());
+        assert!(latest_matching_terrain_debug_screenshot_in_dir(
+            temp.path(),
+            Some(Vec3::new(1.2, 2.0, 3.0)),
+            None
+        )
+        .is_none());
     }
 
     #[test]

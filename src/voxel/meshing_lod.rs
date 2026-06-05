@@ -15,8 +15,8 @@ use bevy::math::{IVec3, Vec3};
 use crate::constants::CHUNK_SIZE;
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::meshing::{
-    MeshData, coarse_lattice_y_face_target, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
-    scale_vertex_from_center, snap_column_for_face,
+    coarse_lattice_y_face_target, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
+    scale_vertex_from_center, snap_column_for_face, MeshData,
 };
 use crate::voxel::meshing_types::{MorphTargetError, TerrainMorphConfig};
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
@@ -333,6 +333,46 @@ mod tests {
         for target in &mesh.morph_targets {
             assert_eq!(target[3], 1.0, "every PosX boundary vertex should morph");
         }
+    }
+
+    #[test]
+    fn fractional_posx_boundary_cell_vertex_morphs_when_neighbor_is_coarser() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = test_chunk_center();
+        let local_positions = vec![
+            Vec3::new(CHUNK_SIZE as f32 - 0.6, 5.0, 8.0),
+            Vec3::new(CHUNK_SIZE as f32 - 0.01, 9.0, 14.0),
+            Vec3::new(CHUNK_SIZE as f32 - 1.1, 8.0, 8.0),
+        ];
+        let mut mesh = mesh_for_local_positions(&local_positions, center);
+
+        append_morph_targets(
+            &mut mesh,
+            &local_positions,
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &pos_x_transition(),
+            &enabled_config(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mesh.morph_targets[0][3], 1.0,
+            "fractional vertex inside the Lod0 boundary cell must morph"
+        );
+        assert_eq!(
+            mesh.morph_targets[1][3], 1.0,
+            "near-plane fractional vertex must morph"
+        );
+        assert_eq!(
+            mesh.morph_targets[2][3], 0.0,
+            "vertex outside the Lod0 boundary cell must stay interior"
+        );
     }
 
     #[test]
