@@ -110,3 +110,47 @@ production (visually correct) until MC passes the MTX-037 gate.
   `magick a.png b.png -compose difference -composite -auto-level diff.png`.
 - Build/bench gotcha: prefix cargo with `RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER=`
   (project `.cargo/config.toml` forces sccache, which isn't installed here).
+
+## 2026-06-05 Surface Nets geomorph target fix
+
+The GPU morph shader path was verified active: boundary vertices had morph target
+rows and the shader moved them. The visible shark-tooth seam was therefore treated
+as a target-generation bug, not a shader or normal bug.
+
+Root cause: fractional X/Z boundary vertices were selected correctly, but the
+target kept the fine vertex's fractional local coordinate while sampling coarse
+height at the seam column. That mixed fine-local and seam-world coordinates and
+could produce alternating pulled triangles along a frozen LOD seam.
+
+Changes made:
+
+- `xz_face_coarse_target_local` computes X/Z seam targets in one place.
+- X/Z face targets now anchor to the shared boundary plane before upload:
+  `+X -> local.x = CHUNK_SIZE`, `-X -> local.x = 0`,
+  `+Z -> local.z = CHUNK_SIZE`, `-Z -> local.z = 0`.
+- Coarse target height still comes from `coarse_lod_iso_height_for_column`, which
+  walks and blurs using the target neighbor LOD step size.
+- Visual Lod3 targets are clamped to Lod2 to match `visual_surface_nets_lod`.
+- LOD delta > 1, missing coarse targets, invalid values, and targets beyond
+  `TerrainMorphConfig::max_stitch_distance` reject to fallback instead of sealing
+  with bad morph targets.
+- Hole-probe snap stats now expose boundary candidate count, morph target count,
+  and missing morph target count.
+- `Alt+F11` draws morph vectors from uploaded `POSITION` to uploaded
+  `ATTRIBUTE_MORPH_TARGET.xyz`: cyan = valid, red = invalid/oversized.
+
+Verification run:
+
+- `cargo test morph --lib`: 12 passed.
+- `cargo test snap --lib`: 25 passed.
+- `cargo test terrain_debug --lib`: 5 passed.
+- `cargo check --lib`: 0 errors; two unrelated unused-import warnings remain in
+  `terrain/tools/apply.rs` and `voxel/mesh_invalidation.rs`.
+- Release visual bench: `bench-runs/2026-06-05T13-45-21Z/summary.json`.
+- `bench_guard` still fails performance thresholds (`forest_frame_avg 42.283 ms`,
+  `forest_frame_p99 95.623 ms`, `forest_mesh_dirty_p99 59.690 ms`), so this is a
+  geometry fix, not a perf fix.
+
+Status: target math for the shark-tooth GPU morph seam is fixed. Representative
+bench screenshots still show distant blocky shelves, so remaining artifacts are
+likely coarse/proxy shape or fallback behavior rather than shader transport.

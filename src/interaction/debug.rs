@@ -1742,6 +1742,8 @@ fn append_control_hints(
     text_content.push_str("\n[Alt+F7] Terrain wireframe debug");
     text_content.push_str("\n[Alt+F8] Terrain normal debug");
     text_content.push_str("\n[Alt+F9] Terrain iso-band debug");
+    text_content.push_str("\n[Alt+F10] Terrain flat-unlit debug");
+    text_content.push_str("\n[Alt+F11] Terrain morph vectors");
     text_content.push_str("\n[Alt+Shift+F7] Capture terrain debug frame");
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[F4] Dump performance CSV");

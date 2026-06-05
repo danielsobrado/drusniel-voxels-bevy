@@ -15,8 +15,8 @@ use bevy::math::{IVec3, Vec3};
 use crate::constants::CHUNK_SIZE;
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::meshing::{
-    coarse_lattice_y_face_target, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
-    scale_vertex_from_center, snap_column_for_face, MeshData,
+    coarse_lattice_y_face_target, neighbor_lod_for_face, scale_vertex_from_center,
+    transition_target_lod, xz_face_coarse_target_local, MeshData,
 };
 use crate::voxel::meshing_types::{MorphTargetError, TerrainMorphConfig};
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
@@ -50,19 +50,24 @@ fn boundary_target_local(
     face: ChunkFace,
     world: &VoxelWorld,
     chunk_origin: IVec3,
+    my_lod: LodLevel,
     neighbor_lod: LodLevel,
+    max_stitch_distance: f32,
 ) -> Option<Vec3> {
+    let target_lod = transition_target_lod(my_lod, neighbor_lod)?;
     match face {
         ChunkFace::NegX | ChunkFace::PosX | ChunkFace::NegZ | ChunkFace::PosZ => {
-            let column = snap_column_for_face(chunk_origin, local, face)?;
-            let world_y =
-                coarse_lod_iso_height_for_column(world, column.x, column.y, neighbor_lod)?;
-            let mut target = local;
-            target.y = world_y - chunk_origin.y as f32;
-            Some(target)
+            xz_face_coarse_target_local(
+                world,
+                chunk_origin,
+                local,
+                face,
+                target_lod,
+                max_stitch_distance,
+            )
         }
         ChunkFace::NegY | ChunkFace::PosY => {
-            coarse_lattice_y_face_target(chunk_origin, local, face, neighbor_lod)
+            coarse_lattice_y_face_target(chunk_origin, local, face, target_lod)
         }
     }
 }
@@ -127,9 +132,15 @@ pub fn append_morph_targets(
             if !in_boundary_cell(local, face, my_lod) {
                 continue;
             }
-            let Some(target_local) =
-                boundary_target_local(local, face, world, chunk_origin, neighbor_lod)
-            else {
+            let Some(target_local) = boundary_target_local(
+                local,
+                face,
+                world,
+                chunk_origin,
+                my_lod,
+                neighbor_lod,
+                config.max_stitch_distance,
+            ) else {
                 continue;
             };
             let scaled = scale_vertex_from_center(target_local, chunk_center);
@@ -159,6 +170,7 @@ mod tests {
     use super::*;
     use crate::constants::VOXEL_SIZE;
     use crate::voxel::chunk::Chunk;
+    use crate::voxel::meshing::{coarse_lod_iso_height_for_column, snap_column_for_face};
     use crate::voxel::types::VoxelType;
 
     fn world_with_test_chunks(size: IVec3) -> VoxelWorld {
@@ -372,6 +384,129 @@ mod tests {
         assert_eq!(
             mesh.morph_targets[2][3], 0.0,
             "vertex outside the Lod0 boundary cell must stay interior"
+        );
+    }
+
+    #[test]
+    fn fractional_xz_boundary_targets_anchor_to_seam_planes() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = test_chunk_center();
+        let local_positions = vec![
+            Vec3::new(CHUNK_SIZE as f32 - 0.6, 5.0, 8.0),
+            Vec3::new(0.6, 5.0, 8.0),
+            Vec3::new(8.0, 5.0, CHUNK_SIZE as f32 - 0.6),
+            Vec3::new(8.0, 5.0, 0.6),
+        ];
+        let mut mesh = mesh_for_local_positions(&local_positions, center);
+
+        append_morph_targets(
+            &mut mesh,
+            &local_positions,
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                neg_x: Some(LodLevel::Lod1),
+                pos_z: Some(LodLevel::Lod1),
+                neg_z: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+            &enabled_config(),
+        )
+        .unwrap();
+
+        let pos_x = scale_vertex_from_center(Vec3::new(CHUNK_SIZE as f32, 0.0, 0.0), center)[0];
+        let neg_x = scale_vertex_from_center(Vec3::new(0.0, 0.0, 0.0), center)[0];
+        let pos_z = scale_vertex_from_center(Vec3::new(0.0, 0.0, CHUNK_SIZE as f32), center)[2];
+        let neg_z = scale_vertex_from_center(Vec3::new(0.0, 0.0, 0.0), center)[2];
+
+        for target in &mesh.morph_targets {
+            assert_eq!(target[3], 1.0);
+        }
+        assert!((mesh.morph_targets[0][0] - pos_x).abs() <= 1.0e-4);
+        assert!((mesh.morph_targets[1][0] - neg_x).abs() <= 1.0e-4);
+        assert!((mesh.morph_targets[2][2] - pos_z).abs() <= 1.0e-4);
+        assert!((mesh.morph_targets[3][2] - neg_z).abs() <= 1.0e-4);
+    }
+
+    #[test]
+    fn lod3_neighbor_uses_lod2_visual_target() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = test_chunk_center();
+        let local = Vec3::new(CHUNK_SIZE as f32 - 0.4, 5.0, 8.0);
+        let local_positions = vec![local];
+        let mut mesh = mesh_for_local_positions(&local_positions, center);
+
+        append_morph_targets(
+            &mut mesh,
+            &local_positions,
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod1,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod3),
+                ..Default::default()
+            },
+            &enabled_config(),
+        )
+        .unwrap();
+
+        let column = snap_column_for_face(chunk_origin, local, ChunkFace::PosX).unwrap();
+        let world_y = coarse_lod_iso_height_for_column(&world, column.x, column.y, LodLevel::Lod2)
+            .expect("steep slope has a Lod2 visual crossing");
+        let expected = scale_vertex_from_center(
+            Vec3::new(CHUNK_SIZE as f32, world_y - chunk_origin.y as f32, local.z),
+            center,
+        );
+
+        assert_eq!(mesh.morph_targets[0][3], 1.0);
+        assert!((mesh.morph_targets[0][0] - expected[0]).abs() <= 1e-4);
+        assert!((mesh.morph_targets[0][1] - expected[1]).abs() <= 1e-4);
+        assert!((mesh.morph_targets[0][2] - expected[2]).abs() <= 1e-4);
+    }
+
+    #[test]
+    fn lod_delta_gt_one_neighbor_does_not_emit_morph_target() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_x_slope(&mut world);
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let center = test_chunk_center();
+        let local_positions = vec![Vec3::new(CHUNK_SIZE as f32 - 0.4, 5.0, 8.0)];
+        let mut mesh = mesh_for_local_positions(&local_positions, center);
+
+        append_morph_targets(
+            &mut mesh,
+            &local_positions,
+            &world,
+            chunk_origin,
+            center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod2),
+                ..Default::default()
+            },
+            &enabled_config(),
+        )
+        .unwrap();
+
+        assert_eq!(mesh.morph_targets[0][3], 0.0);
+        assert_eq!(
+            [
+                mesh.morph_targets[0][0],
+                mesh.morph_targets[0][1],
+                mesh.morph_targets[0][2]
+            ],
+            mesh.positions[0]
         );
     }
 

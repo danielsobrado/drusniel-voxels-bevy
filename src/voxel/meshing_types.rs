@@ -17,6 +17,8 @@ use bevy_mesh::{MeshVertexAttribute, VertexFormat};
 pub const ATTRIBUTE_MORPH_TARGET: MeshVertexAttribute =
     MeshVertexAttribute::new("Vertex_MorphTarget", 987654321, VertexFormat::Float32x4);
 
+pub const DEFAULT_TERRAIN_MORPH_MAX_STITCH_DISTANCE: f32 = 16.0;
+
 /// CPU-side geomorph configuration.
 ///
 /// In PR1 only `enabled` is read (by `append_morph_targets`); the distance fields
@@ -34,6 +36,8 @@ pub struct TerrainMorphConfig {
     /// When `true`, keep CPU snap even with morph enabled (usually wrong for seams;
     /// see the plan's "Snap vs morph ordering"). Consumed by the pipeline in PR2.
     pub cpu_snap_when_morph_enabled: bool,
+    /// Reject seam targets farther than this from the original fine vertex.
+    pub max_stitch_distance: f32,
 }
 
 impl Default for TerrainMorphConfig {
@@ -43,6 +47,7 @@ impl Default for TerrainMorphConfig {
             morph_start_distance: 50.0,
             morph_end_distance: 60.0,
             cpu_snap_when_morph_enabled: false,
+            max_stitch_distance: DEFAULT_TERRAIN_MORPH_MAX_STITCH_DISTANCE,
         }
     }
 }

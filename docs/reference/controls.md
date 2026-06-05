@@ -1,6 +1,6 @@
 # Controls
 
-Document status (2026-06-04): current keyboard reference for the play-game runtime.
+Document status (2026-06-05): current keyboard reference for the play-game runtime.
 
 Keyboard and mode reference for Drusniel Voxels.
 
@@ -27,6 +27,7 @@ Keyboard and mode reference for Drusniel Voxels.
 * **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 * **Shift+F10**: Dump water visual probe JSON
 * **F11**: Toggle NAADF fullscreen preview (NAADF builds only)
+* **Alt+F11**: Toggle terrain morph-vector seam debug overlay
 * **Shift+N**: Toggle NAADF split view with a yellow center divider (NAADF builds only)
 * **Shift+F11**: Toggle enclosure culling force-disable/automatic
 * **F12**: Toggle Photo Mode (DoF, motion blur)
@@ -70,6 +71,7 @@ Experimental Marching Cubes + Transvoxel transition cells for LOD seams. Default
 - **Alt+F5** flips [`McTransvoxelSettings::enabled`](../../src/voxel/mc_transvoxel/config.rs) for the session only; YAML `enabled:` is the startup default (`false` in the shipped file).
 - Remeshing can take a moment after each toggle (same class of work as **F5**).
 - **Alt+F7** wireframe: yellow edges = Transvoxel transition aprons when MC is on (see [wireframe plan](../lod/wireframe-debug-plan.md)).
+- **Alt+F11** morph vectors: cyan lines show valid terrain seam morph targets from source vertex to target; red lines show invalid or oversized targets.
 - **Shift+F9** hole-probe JSON works for both modes; compare dumps before/after Alt+F5 at the same camera pose.
 - Builds without MC: `cargo run --no-default-features` — Alt+F5 logs a warning (stub mesher).
 - Benches / scripts can still force MC via YAML (`enabled: true`) or `scripts/startVoxels.ps1 -Mc` (redundant if default features already include `mc_transvoxel`).

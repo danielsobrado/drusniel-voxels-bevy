@@ -229,6 +229,11 @@ impl LodTransitionSnapStats {
     pub fn face_snapped(self, face: ChunkFace) -> bool {
         self.snapped_face_mask & Self::face_mask(face) != 0
     }
+
+    #[inline]
+    pub fn face_fallback(self, face: ChunkFace) -> bool {
+        self.fallback_face_mask & Self::face_mask(face) != 0
+    }
 }
 
 impl ExtractComponent for ChunkMesh {
@@ -3463,6 +3468,60 @@ pub(crate) fn snap_column_for_face(
     }
 }
 
+pub(crate) fn visual_surface_nets_target_lod(lod: LodLevel) -> LodLevel {
+    match lod {
+        LodLevel::Lod3 => LodLevel::Lod2,
+        other => other,
+    }
+}
+
+pub(crate) fn transition_target_lod(my_lod: LodLevel, neighbor_lod: LodLevel) -> Option<LodLevel> {
+    let my_lod = visual_surface_nets_target_lod(my_lod);
+    let neighbor_lod = visual_surface_nets_target_lod(neighbor_lod);
+    if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+        return None;
+    }
+
+    let my_index = my_lod.lod_index()?;
+    let neighbor_index = neighbor_lod.lod_index()?;
+    if neighbor_index.saturating_sub(my_index) > 1 {
+        return None;
+    }
+
+    Some(neighbor_lod)
+}
+
+pub(crate) fn xz_face_coarse_target_local(
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    local: Vec3,
+    face: ChunkFace,
+    target_lod: LodLevel,
+    max_stitch_distance: f32,
+) -> Option<Vec3> {
+    let column = snap_column_for_face(chunk_origin, local, face)?;
+    let world_y = coarse_lod_iso_height_for_column(world, column.x, column.y, target_lod)?;
+    let chunk_size = CHUNK_SIZE as f32;
+    let mut target = local;
+    target.y = world_y - chunk_origin.y as f32;
+    match face {
+        ChunkFace::NegX => target.x = 0.0,
+        ChunkFace::PosX => target.x = chunk_size,
+        ChunkFace::NegZ => target.z = 0.0,
+        ChunkFace::PosZ => target.z = chunk_size,
+        ChunkFace::NegY | ChunkFace::PosY => return None,
+    }
+
+    if !(target.x.is_finite() && target.y.is_finite() && target.z.is_finite()) {
+        return None;
+    }
+    if (target - local).length() > max_stitch_distance.max(0.0) {
+        return None;
+    }
+
+    Some(target)
+}
+
 pub(crate) fn coarse_lattice_y_face_target(
     chunk_origin: IVec3,
     local: Vec3,
@@ -3621,7 +3680,7 @@ fn transition_boundary_vertex_count(
             let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
                 continue;
             };
-            if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+            if transition_target_lod(my_lod, neighbor_lod).is_none() {
                 continue;
             }
             if in_lod_boundary_cell(local, face, my_lod) {
@@ -3648,7 +3707,7 @@ fn morph_welded_face_mask(
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
         };
-        if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+        if transition_target_lod(my_lod, neighbor_lod).is_none() {
             continue;
         }
         if local_positions
@@ -3711,9 +3770,17 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
         };
-        if neighbor_lod == LodLevel::Culled || !neighbor_lod.is_lower_detail_than(my_lod) {
+        let visual_my_lod = visual_surface_nets_target_lod(my_lod);
+        let visual_neighbor_lod = visual_surface_nets_target_lod(neighbor_lod);
+        if visual_neighbor_lod == LodLevel::Culled
+            || !visual_neighbor_lod.is_lower_detail_than(visual_my_lod)
+        {
             continue;
         }
+        let Some(target_lod) = transition_target_lod(my_lod, neighbor_lod) else {
+            stats.mark_fallback(face);
+            continue;
+        };
 
         let mut targets = Vec::new();
         for (index, local) in local_positions.iter().copied().enumerate() {
@@ -3723,23 +3790,23 @@ fn snap_boundary_vertices_to_lower_detail_neighbor(
 
             let target = match face {
                 ChunkFace::NegX | ChunkFace::PosX | ChunkFace::NegZ | ChunkFace::PosZ => {
-                    let Some(column) = snap_column_for_face(chunk_origin, local, face) else {
-                        continue;
-                    };
-                    let Some(world_y) =
-                        coarse_lod_iso_height_for_column(world, column.x, column.y, neighbor_lod)
-                    else {
+                    let Some(target) = xz_face_coarse_target_local(
+                        world,
+                        chunk_origin,
+                        local,
+                        face,
+                        target_lod,
+                        terrain_morph_config().max_stitch_distance,
+                    ) else {
                         stats.skipped_vertex_count = stats.skipped_vertex_count.saturating_add(1);
                         stats.mark_fallback(face);
                         continue;
                     };
-                    let mut target = local;
-                    target.y = world_y - chunk_origin.y as f32;
                     target
                 }
                 ChunkFace::NegY | ChunkFace::PosY => {
                     let Some(target) =
-                        coarse_lattice_y_face_target(chunk_origin, local, face, neighbor_lod)
+                        coarse_lattice_y_face_target(chunk_origin, local, face, target_lod)
                     else {
                         stats.skipped_vertex_count = stats.skipped_vertex_count.saturating_add(1);
                         stats.mark_fallback(face);
@@ -6629,8 +6696,51 @@ mod tests {
         let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
         let mut local_positions = vec![
             Vec3::new(CHUNK_SIZE as f32, 8.0, 5.0),
-            Vec3::new(CHUNK_SIZE as f32, 8.0, 7.0),
+            Vec3::new(CHUNK_SIZE as f32, 8.0, 6.0),
         ];
+        let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
+
+        let stats = snap_boundary_vertices_to_lower_detail_neighbor(
+            &mut solid_mesh,
+            &mut local_positions,
+            world.get_chunk(chunk_pos).unwrap(),
+            &world,
+            chunk_origin,
+            chunk_center,
+            LodLevel::Lod0,
+            &NeighborLods {
+                pos_x: Some(LodLevel::Lod1),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(stats.fallback_face_mask, 0);
+        assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
+        assert!(
+            local_positions[1].y > local_positions[0].y + 0.25,
+            "snap targets inside one coarse z span should no longer collapse to a terrace: {:?}",
+            local_positions
+        );
+        for local in local_positions.iter().copied() {
+            let column = snap_column_for_face(chunk_origin, local, ChunkFace::PosX).unwrap();
+            let expected_y =
+                coarse_lod_iso_height_for_column(&world, column.x, column.y, LodLevel::Lod1)
+                    .expect("synthetic slope should have a single coarse crossing");
+            let world_y = chunk_origin.y as f32 + local.y;
+            assert!((world_y - expected_y).abs() <= 0.02);
+        }
+    }
+
+    #[test]
+    fn lod_delta_gt_one_boundary_snap_rejects_and_falls_back() {
+        let mut world = world_with_test_chunks(IVec3::new(4, 4, 4));
+        fill_steep_z_slope(&mut world);
+
+        let chunk_pos = IVec3::new(1, 1, 1);
+        let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
+        let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
+        let original = Vec3::new(CHUNK_SIZE as f32 - 0.4, 8.0, 5.0);
+        let mut local_positions = vec![original];
         let mut solid_mesh = mesh_data_for_local_positions(&local_positions, chunk_center);
 
         let stats = snap_boundary_vertices_to_lower_detail_neighbor(
@@ -6647,21 +6757,13 @@ mod tests {
             },
         );
 
-        assert_eq!(stats.fallback_face_mask, 0);
-        assert_eq!(stats.snapped_vertex_count, local_positions.len() as u32);
-        assert!(
-            local_positions[1].y > local_positions[0].y + 0.25,
-            "snap targets inside one coarse z span should no longer collapse to a terrace: {:?}",
-            local_positions
+        assert_eq!(stats.snapped_vertex_count, 0);
+        assert!(stats.face_fallback(ChunkFace::PosX));
+        assert_eq!(local_positions[0], original);
+        assert_eq!(
+            solid_mesh.positions[0],
+            scale_vertex_from_center(original, chunk_center)
         );
-        for local in local_positions.iter().copied() {
-            let column = snap_column_for_face(chunk_origin, local, ChunkFace::PosX).unwrap();
-            let expected_y =
-                coarse_lod_iso_height_for_column(&world, column.x, column.y, LodLevel::Lod2)
-                    .expect("synthetic slope should have a single coarse crossing");
-            let world_y = chunk_origin.y as f32 + local.y;
-            assert!((world_y - expected_y).abs() <= 0.02);
-        }
     }
 
     #[test]
@@ -6735,7 +6837,7 @@ mod tests {
             LodLevel::Lod0,
             &NeighborLods {
                 pos_x: Some(LodLevel::Lod1),
-                neg_y: Some(LodLevel::Lod2),
+                neg_y: Some(LodLevel::Lod1),
                 ..Default::default()
             },
         );
@@ -6748,11 +6850,11 @@ mod tests {
         assert_eq!(stats.snapped_vertex_count, 2);
         assert_eq!(local_positions[0], conflicted_corner);
         assert_ne!(local_positions[1], pos_x_only);
-        assert_eq!(local_positions[2], Vec3::new(4.0, 0.0, 4.0));
+        assert_eq!(local_positions[2], Vec3::new(4.0, 0.0, 6.0));
     }
 
     #[test]
-    fn lod0_lod2_y_boundary_snap_welds_to_coarse_xz_lattice() {
+    fn lod0_lod1_y_boundary_snap_welds_to_coarse_xz_lattice() {
         let world = world_with_test_chunks(IVec3::new(3, 3, 3));
         let chunk_pos = IVec3::new(1, 1, 1);
         let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
@@ -6769,7 +6871,7 @@ mod tests {
             chunk_center,
             LodLevel::Lod0,
             &NeighborLods {
-                neg_y: Some(LodLevel::Lod2),
+                neg_y: Some(LodLevel::Lod1),
                 ..Default::default()
             },
         );
@@ -6777,7 +6879,7 @@ mod tests {
         assert_eq!(stats.fallback_face_mask, 0);
         assert!(stats.face_snapped(ChunkFace::NegY));
         assert_eq!(stats.snapped_vertex_count, 1);
-        assert_eq!(local_positions[0], Vec3::new(4.0, 0.0, 4.0));
+        assert_eq!(local_positions[0], Vec3::new(4.0, 0.0, 6.0));
     }
 
     #[test]
