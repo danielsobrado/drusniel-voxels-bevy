@@ -2601,3 +2601,42 @@ Verification:
   `jump-water-sunset-landing` rendered successfully; the bench does not prove
   the static MC+Transvoxel seam artifact is fixed because these changes are
   diagnostic/security changes.
+
+### 2026-06-05 MTX-037 A/B + remaining root-cause classes
+
+Ran the MTX-037 A/B (memo: [mctx-decision.md](mctx-decision.md)) on `replace_surface_nets`
+vs the current SN + transition-promotion path, on `morph-seam-spike-probe.toml` and
+`visual-regression-live-lod.toml`. **Decision: NO-GO** as a drop-in replacement.
+
+- **Perf (in MC's favour, dramatically):** frame p99 ~28 ms / Mesh Dirty p99 ~1.5 ms,
+  vs SN+promotion ~100 ms / ~60 ms. MC is cheap because it does **not** re-mesh a Lod1
+  ring at Lod0; it meshes native LOD + small transition cells (throttled
+  `max_chunks_per_frame: 2`). This validates *face-local transition meshing* as the
+  right direction — the prize is real.
+- **Visual (blocks GO):** ray fraction 14.8% (25/169) vs ≤5% target; user-confirmed
+  small holes + chunk-square / terrace-line seams.
+
+The two remaining root-cause **classes** for the holes/seams (each a continuation, not a
+one-shot):
+
+1. **`lod_delta>1` transition skip is a scheduler-convergence-under-throttle bug, not a
+   table bug.** `compute_transvoxel_face_mask` correctly skips delta>1 faces (Transvoxel
+   tables are 2:1 only). `enforce_lod_delta_max_one` clamps the *desired* LOD map to
+   delta≤1, but the *applied* LODs change only `MAX_LOD_CHANGES_PER_UPDATE` (32) per
+   update, and meshing uses the **applied** LODs. Under continuous camera motion the
+   applied map never fully converges, so chunks mesh against stale (delta>1) neighbors →
+   `lod_delta_gt_one_face_mask` fires (`0x20`/`0x22` observed) → untreated seam. Fix
+   options (both scheduler, regression-risky): (a) defer a chunk's mesh commit while it
+   still has a delta>1 neighbor; (b) apply max-one-forced refinements without the
+   per-update throttle. The throttle was deliberately tuned (raised 4→32), so changing it
+   needs a full live-LOD bench.
+2. **Transition replacement not watertight + no MC skirt fallback.** Transition cells
+   emit triangles that still miss the iso on some seams (the log's last open geometry
+   item), and unlike SN, MC emits no skirt/apron to cover residual gaps. Needs the
+   per-cell replay-fixture loop used by every prior fix here.
+
+**Recommendation:** production stays **SN + promotion** (visually correct; perf-regressed,
+documented in [lod-terrace-investigation.md](lod-terrace-investigation.md)). Pursue MC
+only as a dedicated multi-pass continuation targeting (1) then (2), re-running the
+MTX-037 A/B as the gate. Do not flip the default until ray fraction ≤5% **and** the
+perf win both hold.
