@@ -2,6 +2,10 @@
 
 Document status (2026-05-17): current index/reference.
 
+## Start here
+
+- [LOD seam — master issues & solutions](lod-seam-issues-and-solutions.md) — consolidated index of every LOD-seam issue, root cause, fix, and remaining work for both meshers (2026-06-05)
+
 ## LOD implementation and review
 
 - [LOD implementation and review](lod-implementation-and-review.md)

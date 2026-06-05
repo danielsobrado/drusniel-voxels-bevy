@@ -1,0 +1,112 @@
+# LOD Seam — Master Issues & Solutions Log
+
+> Last updated: 2026-06-05. Consolidated index of the LOD-seam work across both
+> terrain meshers. Detailed evidence lives in the linked docs; this file is the
+> single source of truth for **what the problem was, what was tried, what the
+> outcome was, and what remains** to make each path production-perfect.
+
+Related detail docs:
+[lod-terrace-investigation.md](lod-terrace-investigation.md) ·
+[mc-transvoxel-hole-diagnosis.md](mc-transvoxel-hole-diagnosis.md) ·
+[mctx-decision.md](mctx-decision.md) ·
+[gpu-terrain-geomorph-plan.md](gpu-terrain-geomorph-plan.md) ·
+[lod-seam-closure-plan.md](lod-seam-closure-plan.md)
+
+## The two paths
+
+There are two terrain meshers behind a chunk LOD system (LOD0 step 1 → LOD3 step 8).
+Neither is yet perfect; they have **opposite** strengths:
+
+| Path | Visual at LOD seams | Perf | Default |
+|------|--------------------|------|---------|
+| **Surface Nets + transition promotion** (`generate_chunk_mesh_surface_nets*`, `transition_refined_surface_nets_lod`) | **Correct** (band closed) | **Regressed** (`Mesh Dirty p99 ~60 ms`, frame p99 ~100 ms) | **Production** |
+| **MC + Transvoxel** (`src/voxel/mc_transvoxel/`, gated `mc_transvoxel.enabled`) | **Broken** (open seam edges + ≤5 vox terrace) | **Excellent** (`Mesh Dirty p99 ~1.5 ms`, frame p99 ~28 ms) | Spike, off |
+
+**"Perfect both"** therefore means: give SN the MC perf, and give MC the SN visual.
+Both are large, multi-pass efforts (details below). MC is the higher-leverage target —
+if its holes close it is *both* fast and correct, collapsing the two paths into one.
+
+## Issue → root cause → solution → status
+
+| # | Issue (symptom) | Root cause | Solution tried | Status |
+|---|-----------------|-----------|----------------|--------|
+| 1 | Distant mountain **dark band** at LOD seam | Skirt/apron strip at the Lod0↔Lod1 boundary shading dark (sideways normals); under it, fine/coarse SDF disagree | SN: **transition promotion** (Lod1 touching Lod0 meshes as Lod0) + sealed-face skirts + fractional snap (`d78d0bb`) | **FIXED (SN)**, verified via wireframe/normals classifier |
+| 2 | Coarse-LOD **terraces** (stair-stepped distant surface) | Coarse LODs sampled a ±1-voxel-blurred *binary* occupancy field at coarse stride → SN snaps to coarse lattice | SN: **step-scaled coarse SDF smoothing** (`coarse_smoothed_sdf_at_world_pos`, `dbd5a44`) | **REDUCED**; inherent at LOD2/step-4 distance |
+| 3 | "Vertical spikes" / moving cracks on the SN mountain | **Transient seam lag**: LOD transaction prepares 1 chunk/frame, publishes atomically → seam lags ~1.3 s behind a moving camera. Steady-state `near_face≈interior` (not a snap depression). | Diagnosed via camera-height fan; see rejected levers below | **DIAGNOSED**; fix = MC perf path or face-local |
+| 4 | SN **perf regression** (`Mesh Dirty p99 ~60 ms`) | Promotion meshes a whole Lod1 ring at **Lod0 (~5–8×)** and re-meshes it as the LOD front moves | Levers tried, all rejected/neutral (see below) | **OPEN** — needs face-local (see Path A) |
+| 5 | MC small **holes** + **chunk-square / terrace lines** | MC transition cells are **not watertight**: adjacent fine/coarse chunk meshes have **open seam edges** (10–29 unmatched edges/face) and **seam height delta ≤5.1 voxels**. NOT delta>1 (probe: `skipped_lod_delta_gt_one = []`), NOT transition-coverage gaps (0). | Many real fixes already landed (see MC sub-table) | **OPEN** — needs watertight transition (Path B) |
+
+### SN perf levers tried (Issue 4) — all rejected or neutral
+
+| Lever | Bench result | Verdict |
+|-------|-------------|---------|
+| Snap-target solid-preserving iso march | probe byte-identical (`near_face≈interior`) | no-op, reverted |
+| Dedup `NeighborLod`-only re-meshes (`Chunk::last_terrain_mesh_key`) | live-LOD within noise (continuous motion = genuine churn) | kept (stop-and-go only), `3a6ba8d` |
+| LOD transaction prepare rate 1→8 | frame p99 133–136 ms, Mesh Dirty 106 ms | regression, reverted |
+
+Conclusion: the cost is *genuine* Lod0 ring meshing; no cheap lever removes it.
+
+### MC fixes already landed (Issue 5) — from [mc-transvoxel-hole-diagnosis.md](mc-transvoxel-hole-diagnosis.md)
+
+Padded-cell SDF offset (`cell+1+corner`); transition triangle winding (invert handling);
+PosZ/NegX/NegY face-frame tangent signs; empty-transition-owner keeps regular row;
+non-destructive boundary rows under transition aprons; MC vertex normals from the padded
+grid; SDF sign clamp; `enforce_lod_delta_max_one` (refines coarser side, forced changes
+bypass the per-update cap). These fixed real bugs but did **not** close the seam.
+
+## Path A — make SN+promotion perf-perfect
+
+**Root cause:** whole-chunk Lod0 promotion of the transition ring is expensive and
+re-runs as the camera moves. **Fix = face-local refinement:** keep the chunk body at its
+native LOD; refine only the Lod0-facing boundary band. Doing that correctly **is**
+Transvoxel-style transition cells — i.e. it converges on Path B. Net: don't build a third
+transition mesher; perfect MC instead and retire promotion.
+
+If SN must stay primary: the only safe partial mitigations are (a) accept the perf debt,
+or (b) reduce LOD-change frequency (more hysteresis), which trades visual responsiveness.
+
+## Path B — make MC+Transvoxel visually perfect
+
+**Accurate root cause (probe `terrain-hole-probe-spike-20260605-015544.json`):**
+transition cells are **not watertight** — `active_seam_face_count = 10`, every face has
+**open seam edges** and a **fine/coarse height delta up to 5.1 voxels**. The fine (Lod0)
+chunk boundary and the coarse (Lod1) neighbor boundary do not share edges and sit at
+different heights.
+
+**Remaining work (the hard part of Transvoxel), in order:**
+
+1. **Watertight transition seam.** The transition cell's low-resolution samples (the side
+   facing the coarse neighbor) must reproduce the coarse neighbor's *exact* boundary
+   vertices so edges match. Today they diverge → open edges. Build per-cell replay
+   fixtures (dumped SDF/case/ray) for the 10 active faces; compare emitted boundary
+   vertices against the coarse neighbor mesh; fix the sample/positions until
+   `unmatched_seam_edge_count = 0`.
+2. **Seam height delta (terrace).** The ≤5 voxel fine/coarse disagreement must drop to
+   ≤0.10 vox (MTX-037 gate 4). Likely the same fix as (1) once the transition vertices
+   sit on the shared coarse surface.
+3. **MC skirt fallback** for any residual unmatched edge (band-aid parity with SN), only
+   if (1)/(2) leave a small remainder.
+4. Re-run the **MTX-037 A/B** (`morph-seam-spike-probe` + `visual-regression-live-lod`).
+   Flip the default to MC only when hole-probe ray fraction ≤5% **and** the perf win both
+   hold (criteria in [mctx-decision.md](mctx-decision.md)).
+
+## Recommendation
+
+MC is the convergence point: it already wins perf, so closing its watertight-seam holes
+(Path B, items 1–2) makes it both fast and correct and lets promotion be retired. Pursue
+Path B as a dedicated continuation using the replay-fixture loop; keep SN+promotion as
+production (visually correct) until MC passes the MTX-037 gate.
+
+## Verification tooling (reusable)
+
+- Bench `terrain_debug = { wireframe | normals | iso_band | flat_unlit }` per checkpoint
+  (classifies seam artifacts: section colours / normals).
+- `morph-seam-spike-probe.toml` — camera-height fan + hole probe at the spike mountain.
+- `morph-seam-band-debug.toml`, `morph-seam-spikes*.toml` — band/spike scenes.
+- Hole-probe `normalized_summary`: `active_seam_faces_with_open_edges`,
+  `max_active_seam_delta_voxels`, `chunks_with_skipped_lod_delta_gt_one`,
+  `gap_classification_counts`.
+- ImageMagick A/B: `magick compare -metric AE a.png b.png null:`,
+  `magick a.png b.png -compose difference -composite -auto-level diff.png`.
+- Build/bench gotcha: prefix cargo with `RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER=`
+  (project `.cargo/config.toml` forces sccache, which isn't installed here).
