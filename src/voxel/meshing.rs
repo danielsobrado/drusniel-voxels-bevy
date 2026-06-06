@@ -505,6 +505,11 @@ pub struct ChunkMeshResult {
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
     pub mc_triangle_sources: Option<McTriangleSources>,
+    /// Main-surface boundary strips this chunk exports for a finer neighbour to weld to
+    /// (vertex-exact seam, Stage 2). Empty unless morph is on and the chunk borders a
+    /// strictly finer neighbour. Extracted before skirts; published to
+    /// `LodBoundaryStripCache` at commit.
+    pub boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
 }
 
 // =============================================================================
@@ -967,6 +972,7 @@ pub fn generate_chunk_mesh(
         mesh_section_stats: TerrainMeshSectionStats::default(),
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        boundary_strips: Vec::new(),
     }
 }
 
@@ -3696,7 +3702,7 @@ fn apply_snap_or_morph(
         } else {
             resolve_morph_face_coverage(
                 local_positions,
-                &mut solid_mesh.morph_targets,
+                &solid_mesh.morph_targets,
                 my_lod,
                 neighbor_lods,
             )
@@ -3766,15 +3772,21 @@ fn transition_boundary_vertex_count(
 /// Resolve per-face GPU-morph coverage for the skirt seal/fallback decision.
 ///
 /// Returns `(complete_mask, fallback_mask)`:
-/// - **complete**: a LOD-transition face where *every* boundary-band vertex got a
-///   morph target (w=1). Its skirt is sealed — the GPU welds the whole edge, so a
-///   draped apron would only add a proud lip and a left-behind skirt would tear.
-/// - **fallback**: a transition face with at least one missing target. It keeps its
-///   skirt, and any of its boundary verts not also on a complete face are
-///   **un-morphed** (w←0) so the retained skirt stays attached instead of ripping.
+/// - **complete**: a LOD-transition face with *at least one* welded boundary vert
+///   (w=1). Its skirt is sealed — sealing keeps the morph welds (which can be holding
+///   a spike vertex down), and a sealed face has no skirt to tear. The few un-welded
+///   verts on it just sit at their fine position (a small notch the vertex-exact
+///   stitch closes later) — never a wall or a spike.
+/// - **fallback**: a transition face where *no* boundary vert welded. It keeps its
+///   skirt as cover; since nothing on it moved, the skirt cannot tear.
+///
+/// Note (regression guard): an earlier "seal only when *every* vert welds, else
+/// un-morph the face" rule reintroduced the LOD-seam spikes — un-morphing a welded
+/// boundary vert released a spike the weld was pinning down — and turned
+/// partially-welded faces into skirt walls. Seal-if-any avoids both.
 fn resolve_morph_face_coverage(
     local_positions: &[Vec3],
-    morph_targets: &mut [[f32; 4]],
+    morph_targets: &[[f32; 4]],
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
 ) -> (u8, u8) {
@@ -3792,17 +3804,17 @@ fn resolve_morph_face_coverage(
             continue;
         }
         let mut any_candidate = false;
-        let mut all_welded = true;
+        let mut any_welded = false;
         for (local, target) in local_positions.iter().zip(morph_targets.iter()) {
             if in_lod_boundary_cell(*local, face, my_lod) {
                 any_candidate = true;
-                if target[3] <= 0.5 {
-                    all_welded = false;
+                if target[3] > 0.5 {
+                    any_welded = true;
                 }
             }
         }
         if any_candidate {
-            if all_welded {
+            if any_welded {
                 complete |= LodTransitionSnapStats::face_mask(face);
             } else {
                 fallback |= LodTransitionSnapStats::face_mask(face);
@@ -3810,21 +3822,44 @@ fn resolve_morph_face_coverage(
         }
     }
 
-    if fallback != 0 {
-        let on_mask = |local: Vec3, mask: u8| -> bool {
-            ChunkFace::ALL.iter().any(|&face| {
-                mask & LodTransitionSnapStats::face_mask(face) != 0
-                    && in_lod_boundary_cell(local, face, my_lod)
-            })
-        };
-        for (local, target) in local_positions.iter().zip(morph_targets.iter_mut()) {
-            if target[3] > 0.5 && on_mask(*local, fallback) && !on_mask(*local, complete) {
-                target[3] = 0.0;
-            }
-        }
-    }
-
     (complete, fallback)
+}
+
+/// Extract the main-surface boundary strips this chunk exports for a finer neighbour
+/// to weld to (vertex-exact seam). Gated for cost: only when morph is on **and** the
+/// chunk borders a strictly finer neighbour (the finer side is the consumer), so the
+/// O(triangles) walk is skipped for the interior of a uniform-LOD region. Must be
+/// called with the **main surface only** (before skirts are appended).
+fn extract_export_boundary_strips(
+    morph: &TerrainMorphConfig,
+    local_positions: &[Vec3],
+    solid_mesh: &MeshData,
+    chunk_origin: IVec3,
+    chunk: &Chunk,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip> {
+    if !morph.enabled || my_lod.step_size() == 0 {
+        return Vec::new();
+    }
+    let borders_finer = ChunkFace::ALL.iter().any(|&face| {
+        neighbor_lod_for_face(neighbor_lods, face)
+            .is_some_and(|n| n != LodLevel::Culled && my_lod.is_lower_detail_than(n))
+    });
+    if !borders_finer {
+        return Vec::new();
+    }
+    crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
+        local_positions,
+        &solid_mesh.normals,
+        &solid_mesh.indices,
+        chunk_origin,
+        CHUNK_SIZE as f32,
+        my_lod.step_size() as f32,
+        my_lod,
+        chunk.position(),
+        0, // revision assigned at commit from the dedup key
+    )
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
@@ -4445,6 +4480,17 @@ pub fn generate_chunk_mesh_surface_nets(
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
+    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let boundary_strips = extract_export_boundary_strips(
+        morph,
+        &local_positions,
+        &solid_mesh,
+        chunk_origin,
+        chunk,
+        my_lod,
+        &neighbor_lods,
+    );
 
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
@@ -4501,6 +4547,7 @@ pub fn generate_chunk_mesh_surface_nets(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        boundary_strips,
     }
 }
 
@@ -4663,6 +4710,17 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
+    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let boundary_strips = extract_export_boundary_strips(
+        morph,
+        &local_positions,
+        &solid_mesh,
+        chunk_origin,
+        chunk,
+        my_lod,
+        &neighbor_lods,
+    );
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
@@ -4721,6 +4779,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        boundary_strips,
     }
 }
 
@@ -4883,6 +4942,17 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
+    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let boundary_strips = extract_export_boundary_strips(
+        morph,
+        &local_positions,
+        &solid_mesh,
+        chunk_origin,
+        chunk,
+        my_lod,
+        &neighbor_lods,
+    );
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
@@ -4941,6 +5011,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        boundary_strips,
     }
 }
 
@@ -5103,6 +5174,17 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
+    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let boundary_strips = extract_export_boundary_strips(
+        morph,
+        &local_positions,
+        &solid_mesh,
+        chunk_origin,
+        chunk,
+        my_lod,
+        &neighbor_lods,
+    );
 
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
@@ -5161,6 +5243,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        boundary_strips,
     }
 }
 
@@ -6734,32 +6817,28 @@ mod tests {
     }
 
     #[test]
-    fn resolve_morph_face_coverage_seals_complete_unmorphs_fallback() {
+    fn resolve_morph_face_coverage_seals_if_any_vert_welds_and_keeps_welds() {
         let neighbors = NeighborLods {
             neg_x: Some(LodLevel::Lod1),
             ..Default::default()
         };
         let locals = vec![Vec3::new(0.0, 5.0, 5.0), Vec3::new(0.0, 6.0, 6.0)];
 
-        // Both NegX boundary verts welded -> face complete (sealed), targets kept.
-        let mut complete_targets = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 1.0]];
+        // Any welded vert -> face complete (sealed). Welds are KEPT: un-morphing a
+        // welded boundary vert is what released the LOD-seam spike it was pinning.
+        let one_welded = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 0.0]];
         let (complete, fallback) =
-            resolve_morph_face_coverage(&locals, &mut complete_targets, LodLevel::Lod0, &neighbors);
+            resolve_morph_face_coverage(&locals, &one_welded, LodLevel::Lod0, &neighbors);
         assert_eq!(complete, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
         assert_eq!(fallback, 0);
-        assert!(complete_targets.iter().all(|t| t[3] > 0.5));
+        assert!(one_welded[0][3] > 0.5, "welded vert must stay welded (no spike)");
 
-        // One vert missing its target -> face is fallback (keeps skirt), and the
-        // partially-welded vert is un-morphed so the retained skirt cannot tear.
-        let mut fallback_targets = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 0.0]];
+        // No welded vert on the face -> fallback (keeps skirt); nothing moved, no tear.
+        let none_welded = vec![[0.0, 5.0, 5.0, 0.0], [0.0, 6.0, 6.0, 0.0]];
         let (complete, fallback) =
-            resolve_morph_face_coverage(&locals, &mut fallback_targets, LodLevel::Lod0, &neighbors);
+            resolve_morph_face_coverage(&locals, &none_welded, LodLevel::Lod0, &neighbors);
         assert_eq!(complete, 0);
         assert_eq!(fallback, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
-        assert!(
-            fallback_targets.iter().all(|t| t[3] <= 0.5),
-            "fallback-face verts must be un-morphed so the kept skirt is not torn"
-        );
     }
 
     #[test]
@@ -7729,6 +7808,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
                         mesh_section_stats: TerrainMeshSectionStats::default(),
                         mc_transvoxel_stats: None,
                         mc_triangle_sources: None,
+                        boundary_strips: Vec::new(),
                     }
                 }
             }

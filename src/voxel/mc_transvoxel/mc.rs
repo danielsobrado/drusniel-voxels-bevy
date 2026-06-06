@@ -119,6 +119,7 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
             mesh_section_stats: TerrainMeshSectionStats::default(),
             mc_transvoxel_stats: Some(stats),
             mc_triangle_sources: triangle_sources.map(|sources| McTriangleSources { sources }),
+            boundary_strips: Vec::new(),
         },
         stats,
     }
