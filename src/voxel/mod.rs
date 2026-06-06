@@ -21,6 +21,7 @@ pub mod enclosure;
 pub mod gravity;
 pub mod hole_probe;
 pub mod materials;
+pub mod lod_boundary_strip;
 pub mod mc_transvoxel;
 pub mod mesh_invalidation;
 pub mod meshing;
