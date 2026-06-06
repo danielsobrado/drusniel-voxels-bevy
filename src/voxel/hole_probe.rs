@@ -34,7 +34,7 @@ use crate::voxel::world::{VoxelSample as BoundaryVoxelSample, VoxelWorld, WorldB
 
 pub struct TerrainHoleProbePlugin;
 
-const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 15;
+const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 16;
 
 impl Plugin for TerrainHoleProbePlugin {
     fn build(&self, app: &mut App) {
@@ -109,6 +109,7 @@ struct TerrainHoleProbeSummary {
     active_seam_faces_with_transition_coverage_gaps: u32,
     chunks_with_skipped_lod_delta_gt_one: Vec<IVec3Dump>,
     stale_or_pending_mesh_chunks: Vec<IVec3Dump>,
+    debug_unavailable_mesh_chunks: Vec<IVec3Dump>,
     top_suspect_chunks: Vec<ChunkSuspectProbe>,
 }
 
@@ -5897,7 +5898,12 @@ fn normalized_probe_summary(
 
     let stale_or_pending_mesh_chunks = render_entity_checklist
         .iter()
-        .filter(|check| check.mesh_status != LodMeshStatus::Current)
+        .filter(|check| is_stale_or_pending_mesh_status(check.mesh_status))
+        .map(|check| check.chunk_position)
+        .collect();
+    let debug_unavailable_mesh_chunks = render_entity_checklist
+        .iter()
+        .filter(|check| check.mesh_status == LodMeshStatus::DebugUnavailable)
         .map(|check| check.chunk_position)
         .collect();
     for check in render_entity_checklist {
@@ -5955,6 +5961,7 @@ fn normalized_probe_summary(
             .count() as u32,
         chunks_with_skipped_lod_delta_gt_one,
         stale_or_pending_mesh_chunks,
+        debug_unavailable_mesh_chunks,
         top_suspect_chunks,
     }
 }
@@ -6265,10 +6272,8 @@ fn lod_eval_probe(
     });
     let effective_mesh_lod_now =
         effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
-    let mesh_lod_mismatch = terrain_debug.map(|debug| {
-        current_lod != Some(debug.logical_lod_at_mesh)
-            || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
-    });
+    let mesh_lod_mismatch =
+        mesh_lod_mismatch_from_debug(current_lod, effective_mesh_lod_now, terrain_debug);
     let mesh_status = lod_mesh_status(mesh_lod_mismatch, remesh_pending);
 
     chunk?;
@@ -6300,6 +6305,21 @@ fn lod_mesh_status(mesh_lod_mismatch: Option<bool>, remesh_pending: bool) -> Lod
         Some(true) => LodMeshStatus::Stale,
         None => LodMeshStatus::DebugUnavailable,
     }
+}
+
+fn is_stale_or_pending_mesh_status(status: LodMeshStatus) -> bool {
+    matches!(status, LodMeshStatus::Stale | LodMeshStatus::RemeshPending)
+}
+
+fn mesh_lod_mismatch_from_debug(
+    current_lod: Option<LodLevel>,
+    effective_mesh_lod_now: Option<LodLevel>,
+    terrain_debug: Option<&TerrainMeshDebug>,
+) -> Option<bool> {
+    terrain_debug.map(|debug| {
+        current_lod != Some(debug.logical_lod_at_mesh)
+            || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
+    })
 }
 
 fn empty_cap_probe(world: &VoxelWorld, chunk_pos: IVec3) -> EmptyCapProbe {
@@ -6560,10 +6580,10 @@ fn terrain_mesh_debug_for_chunk(
 fn mesh_status_for_chunk(
     world: &VoxelWorld,
     chunk_pos: IVec3,
-    camera_pos: Option<Vec3>,
+    _camera_pos: Option<Vec3>,
     mesh_settings: &MeshSettings,
     lod_settings: &LodSettings,
-    water_lod_guard_chunks: &HashSet<IVec3>,
+    _water_lod_guard_chunks: &HashSet<IVec3>,
     terrain_debug: Option<&TerrainMeshDebug>,
 ) -> LodMeshStatus {
     let chunk = world.get_chunk(chunk_pos);
@@ -6571,28 +6591,8 @@ fn mesh_status_for_chunk(
     let remesh_pending = chunk.is_some_and(|chunk| chunk.is_dirty());
     let effective_mesh_lod_now =
         effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
-    let _water_shore_guarded = water_lod_guard_chunks.contains(&chunk_pos);
-    let mesh_lod_mismatch = terrain_debug.map(|debug| {
-        current_lod != Some(debug.logical_lod_at_mesh)
-            || effective_mesh_lod_now != Some(debug.effective_lod_at_mesh)
-            || camera_pos
-                .and_then(|camera_pos| {
-                    let distance = terrain_lod_distance_xz(chunk_pos, camera_pos);
-                    current_lod.map(|current_lod| {
-                        water_shore_guarded_lod(
-                            calculate_target_lod_with_hysteresis(
-                                distance,
-                                current_lod,
-                                lod_settings,
-                            ),
-                            distance,
-                            lod_settings,
-                            water_lod_guard_chunks.contains(&chunk_pos),
-                        )
-                    })
-                })
-                .is_some_and(|target_lod| current_lod != Some(target_lod))
-    });
+    let mesh_lod_mismatch =
+        mesh_lod_mismatch_from_debug(current_lod, effective_mesh_lod_now, terrain_debug);
     lod_mesh_status(mesh_lod_mismatch, remesh_pending)
 }
 
@@ -6991,6 +6991,44 @@ mod tests {
             LodMeshStatus::DebugUnavailable
         );
         assert_eq!(lod_mesh_status(None, true), LodMeshStatus::DebugUnavailable);
+    }
+
+    #[test]
+    fn promoted_effective_mesh_lod_is_not_reported_stale() {
+        let debug = TerrainMeshDebug {
+            logical_lod_at_mesh: LodLevel::Lod1,
+            effective_lod_at_mesh: LodLevel::Lod0,
+            target_mode_at_mesh: MeshMode::SurfaceNets,
+            neighbor_lods_at_mesh: NeighborLods::default(),
+            lod_delta_gt_one_face_mask: 0,
+            missing_boundary_neighbors_at_mesh: 0,
+            empty_surface_cap_at_mesh: false,
+            generated_frame: 1,
+            lod_transition_snap_stats: LodTransitionSnapStats::default(),
+            mesh_section_stats: TerrainMeshSectionStats::default(),
+            mc_transvoxel_stats: None,
+        };
+
+        let mismatch = mesh_lod_mismatch_from_debug(
+            Some(LodLevel::Lod1),
+            Some(LodLevel::Lod0),
+            Some(&debug),
+        );
+
+        assert_eq!(mismatch, Some(false));
+        assert_eq!(lod_mesh_status(mismatch, false), LodMeshStatus::Current);
+    }
+
+    #[test]
+    fn stale_or_pending_status_filter_excludes_debug_unavailable() {
+        assert!(!is_stale_or_pending_mesh_status(LodMeshStatus::Current));
+        assert!(is_stale_or_pending_mesh_status(LodMeshStatus::Stale));
+        assert!(is_stale_or_pending_mesh_status(
+            LodMeshStatus::RemeshPending
+        ));
+        assert!(!is_stale_or_pending_mesh_status(
+            LodMeshStatus::DebugUnavailable
+        ));
     }
 
     #[test]

@@ -3064,6 +3064,7 @@ fn process_lod_mesh_transaction(
     runtime_mc_stats: &mut McTransvoxelRuntimeStats,
     chunk_stats: &mut RuntimeChunkStats,
     frame: u32,
+    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
 ) -> LodMeshTransactionFrameStats {
     let mut frame_stats = LodMeshTransactionFrameStats::default();
 
@@ -3131,6 +3132,7 @@ fn process_lod_mesh_transaction(
                 runtime_mc_stats,
                 chunk_stats,
                 &mut frame_stats,
+                strip_cache,
             ) {
                 LodChunkPrepareOutcome::Prepared(commit) => {
                     transaction.prepared.insert(chunk_pos, commit);
@@ -3235,6 +3237,7 @@ fn prepare_lod_chunk_commit(
     runtime_mc_stats: &mut McTransvoxelRuntimeStats,
     chunk_stats: &mut RuntimeChunkStats,
     frame_stats: &mut LodMeshTransactionFrameStats,
+    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
 ) -> LodChunkPrepareOutcome {
     let dirty_flags = if let Some(chunk) = world.get_chunk(chunk_pos) {
         chunk.dirty_reason_flags()
@@ -3355,7 +3358,18 @@ fn prepare_lod_chunk_commit(
         mesh_section_stats,
         mc_transvoxel_stats,
         mc_triangle_sources,
+        boundary_strips,
     } = mesh_result;
+
+    // Publish (or evict) this chunk's exported boundary strips for finer neighbours to
+    // weld to. Revision = the same dedup key the commit stamps, so a consumer that
+    // checks the neighbour's `last_terrain_mesh_key` only matches a current strip.
+    let strip_revision = terrain_mesh_dedup_key(target_mode, mesh_lod_level, &neighbor_lods);
+    if boundary_strips.is_empty() {
+        strip_cache.remove(chunk_pos);
+    } else {
+        strip_cache.insert(chunk_pos, strip_revision, boundary_strips);
+    }
 
     let vertex_count = solid.positions.len() as u32;
     let triangle_count = (solid.indices.len() / 3) as u32;
@@ -3950,6 +3964,7 @@ struct MeshDirtyTimingParams<'w> {
     timing: ResMut<'w, AreaTimingRecorder>,
     gen_state: Res<'w, ChunkGenerationState>,
     lod_transaction: ResMut<'w, LodMeshTransactionState>,
+    strip_cache: ResMut<'w, crate::voxel::lod_boundary_strip::LodBoundaryStripCache>,
     queue_warning: ResMut<'w, MeshDirtyQueueWarningState>,
 }
 
@@ -4079,6 +4094,7 @@ fn mesh_dirty_chunks_system(
             &mut mc_spike.stats,
             &mut chunk_stats,
             frame.0,
+            &mut timing_params.strip_cache,
         );
         chunks_per_frame_limit = MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME;
         chunks_processed = lod_transaction_frame_stats.chunks_processed;
