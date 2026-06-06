@@ -3684,12 +3684,25 @@ fn apply_snap_or_morph(
         stats.morph_missing_target_vertex_count = stats
             .boundary_candidate_vertex_count
             .saturating_sub(stats.morph_target_vertex_count);
-        stats.snapped_face_mask = morph_welded_face_mask(
-            local_positions,
-            &solid_mesh.morph_targets,
-            my_lod,
-            neighbor_lods,
-        );
+        // Per-face coverage (all-morph-or-all-skirt): suppress the apron/vertical
+        // skirt only on faces the GPU morph welds **completely**. A face with any
+        // missing target stays as fallback and keeps its skirt — and its
+        // partially-welded verts are un-morphed so the kept skirt is not torn (a
+        // welded boundary vert flying up while its w=0 skirt vert stays behind is
+        // exactly what tore the seam). The fallback skirt is the honest interim until
+        // the vertex-exact stitch (lod_boundary_strip) replaces it.
+        let (complete_mask, fallback_mask) = if solid_mesh.morph_targets.is_empty() {
+            (0, 0)
+        } else {
+            resolve_morph_face_coverage(
+                local_positions,
+                &mut solid_mesh.morph_targets,
+                my_lod,
+                neighbor_lods,
+            )
+        };
+        stats.snapped_face_mask = complete_mask;
+        stats.fallback_face_mask = fallback_mask;
         stats
     } else {
         let stats = snap_boundary_vertices_to_lower_detail_neighbor(
@@ -3750,17 +3763,27 @@ fn transition_boundary_vertex_count(
     count
 }
 
-fn morph_welded_face_mask(
+/// Resolve per-face GPU-morph coverage for the skirt seal/fallback decision.
+///
+/// Returns `(complete_mask, fallback_mask)`:
+/// - **complete**: a LOD-transition face where *every* boundary-band vertex got a
+///   morph target (w=1). Its skirt is sealed — the GPU welds the whole edge, so a
+///   draped apron would only add a proud lip and a left-behind skirt would tear.
+/// - **fallback**: a transition face with at least one missing target. It keeps its
+///   skirt, and any of its boundary verts not also on a complete face are
+///   **un-morphed** (w←0) so the retained skirt stays attached instead of ripping.
+fn resolve_morph_face_coverage(
     local_positions: &[Vec3],
-    morph_targets: &[[f32; 4]],
+    morph_targets: &mut [[f32; 4]],
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
-) -> u8 {
+) -> (u8, u8) {
     if my_lod.step_size() == 0 || local_positions.len() != morph_targets.len() {
-        return 0;
+        return (0, 0);
     }
 
-    let mut mask = 0;
+    let mut complete = 0u8;
+    let mut fallback = 0u8;
     for face in ChunkFace::ALL {
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
@@ -3768,15 +3791,40 @@ fn morph_welded_face_mask(
         if transition_target_lod(my_lod, neighbor_lod).is_none() {
             continue;
         }
-        if local_positions
-            .iter()
-            .zip(morph_targets)
-            .any(|(local, target)| target[3] > 0.5 && in_lod_boundary_cell(*local, face, my_lod))
-        {
-            mask |= LodTransitionSnapStats::face_mask(face);
+        let mut any_candidate = false;
+        let mut all_welded = true;
+        for (local, target) in local_positions.iter().zip(morph_targets.iter()) {
+            if in_lod_boundary_cell(*local, face, my_lod) {
+                any_candidate = true;
+                if target[3] <= 0.5 {
+                    all_welded = false;
+                }
+            }
+        }
+        if any_candidate {
+            if all_welded {
+                complete |= LodTransitionSnapStats::face_mask(face);
+            } else {
+                fallback |= LodTransitionSnapStats::face_mask(face);
+            }
         }
     }
-    mask
+
+    if fallback != 0 {
+        let on_mask = |local: Vec3, mask: u8| -> bool {
+            ChunkFace::ALL.iter().any(|&face| {
+                mask & LodTransitionSnapStats::face_mask(face) != 0
+                    && in_lod_boundary_cell(local, face, my_lod)
+            })
+        };
+        for (local, target) in local_positions.iter().zip(morph_targets.iter_mut()) {
+            if target[3] > 0.5 && on_mask(*local, fallback) && !on_mask(*local, complete) {
+                target[3] = 0.0;
+            }
+        }
+    }
+
+    (complete, fallback)
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
@@ -6682,6 +6730,35 @@ mod tests {
         assert!(
             (target_world_y - neighbor_y).abs() <= VOXEL_SIZE * 0.75,
             "morph target must land on the generated Lod1 mesh: target=({target_world_x:.2},{target_world_y:.2},{target_world_z:.2}) neighbor_y={neighbor_y:.2}"
+        );
+    }
+
+    #[test]
+    fn resolve_morph_face_coverage_seals_complete_unmorphs_fallback() {
+        let neighbors = NeighborLods {
+            neg_x: Some(LodLevel::Lod1),
+            ..Default::default()
+        };
+        let locals = vec![Vec3::new(0.0, 5.0, 5.0), Vec3::new(0.0, 6.0, 6.0)];
+
+        // Both NegX boundary verts welded -> face complete (sealed), targets kept.
+        let mut complete_targets = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 1.0]];
+        let (complete, fallback) =
+            resolve_morph_face_coverage(&locals, &mut complete_targets, LodLevel::Lod0, &neighbors);
+        assert_eq!(complete, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
+        assert_eq!(fallback, 0);
+        assert!(complete_targets.iter().all(|t| t[3] > 0.5));
+
+        // One vert missing its target -> face is fallback (keeps skirt), and the
+        // partially-welded vert is un-morphed so the retained skirt cannot tear.
+        let mut fallback_targets = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 0.0]];
+        let (complete, fallback) =
+            resolve_morph_face_coverage(&locals, &mut fallback_targets, LodLevel::Lod0, &neighbors);
+        assert_eq!(complete, 0);
+        assert_eq!(fallback, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
+        assert!(
+            fallback_targets.iter().all(|t| t[3] <= 0.5),
+            "fallback-face verts must be un-morphed so the kept skirt is not torn"
         );
     }
 
