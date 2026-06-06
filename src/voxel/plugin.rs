@@ -700,6 +700,7 @@ impl Plugin for VoxelPlugin {
         .insert_resource(LodSettings::default())
         .insert_resource(crate::voxel::terrain_debug::TerrainDebugView::default())
         .insert_resource(crate::voxel::terrain_debug::TerrainProbeNotice::default())
+        .insert_resource(crate::voxel::lod_boundary_strip::LodBoundaryStripCache::default())
         .insert_resource(McTransvoxelSettings::load_or_default())
         .insert_resource(McTransvoxelRuntimeStats::default())
         .insert_resource(TerrainLodControl::default())

@@ -24,6 +24,7 @@
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::skirt::ChunkFace;
 use bevy::math::{IVec3, Vec2, Vec3};
+use bevy::prelude::Resource;
 use std::collections::HashMap;
 
 /// Local-position dedup resolution (1/256 voxel). Surface Nets vertices are well
@@ -184,6 +185,124 @@ pub fn extract_lod_boundary_strips(
     strips
 }
 
+// ============================================================================
+// Stage 2: consume + segment matching
+// ============================================================================
+
+/// Result of matching a fine boundary vertex onto a coarse boundary segment.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeamMatch {
+    /// World-voxel target on the coarse segment (the closest point, interpolated).
+    pub target_world: Vec3,
+    /// Coarse normal interpolated to the matched point (for Stage 5 seam normals).
+    pub target_normal: Vec3,
+    /// Seam-frame (2-D) distance from the fine vertex to the coarse segment. Used to
+    /// reject welds beyond `max_stitch_distance`.
+    pub distance: f32,
+}
+
+/// Closest point on segment `a..b` to `p`, all in seam-frame 2-D. Returns
+/// `(t, distance)` where `t∈[0,1]` parameterises the segment.
+fn closest_point_on_segment_2d(p: Vec2, a: Vec2, b: Vec2) -> (f32, f32) {
+    let ab = b - a;
+    let len_sq = ab.length_squared();
+    let t = if len_sq <= f32::EPSILON {
+        0.0
+    } else {
+        ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0)
+    };
+    (t, p.distance(a + ab * t))
+}
+
+/// Match one fine boundary vertex (given its seam-frame projection) to the closest
+/// point on the closest segment of a coarse `strip`. Returns `None` (caller falls back
+/// to a skirt) when:
+/// - the strip has no segments, or
+/// - the closest segment is farther than `max_stitch_distance`.
+///
+/// Crucially this snaps to the closest point **on a segment**, never the nearest
+/// vertex — that is what keeps cliffs from shearing and avoids collapsing several fine
+/// verts onto one coarse vertex. (Multi-chain / fold ambiguity rejection and the
+/// stitch geometry itself are Stage 4.)
+pub fn match_fine_vertex_to_coarse(
+    fine_proj: Vec2,
+    strip: &LodBoundaryStrip,
+    max_stitch_distance: f32,
+) -> Option<SeamMatch> {
+    let mut best: Option<SeamMatch> = None;
+    for &[ia, ib] in &strip.segments {
+        let (va, vb) = (
+            strip.vertices.get(ia as usize)?,
+            strip.vertices.get(ib as usize)?,
+        );
+        let (t, distance) = closest_point_on_segment_2d(fine_proj, va.proj, vb.proj);
+        if best.map(|m| distance < m.distance).unwrap_or(true) {
+            best = Some(SeamMatch {
+                target_world: va.world.lerp(vb.world, t),
+                target_normal: va.normal.lerp(vb.normal, t).normalize_or_zero(),
+                distance,
+            });
+        }
+    }
+    best.filter(|m| m.distance <= max_stitch_distance.max(0.0))
+}
+
+/// Per-chunk strips plus the revision they were exported at.
+#[derive(Clone, Debug, Default)]
+struct CachedChunkStrips {
+    revision: u64,
+    strips: Vec<LodBoundaryStrip>,
+}
+
+/// Process-wide, **non-blocking** store of exported boundary strips, keyed by chunk
+/// position. A chunk publishes its strips when its main-surface mesh commits; a finer
+/// neighbour reads the coarse strip if present and revision-valid, and otherwise falls
+/// back to a skirt — it never waits for the coarse chunk to (re)mesh. This is the
+/// cross-chunk hand-off the review flagged as load-bearing; keeping it a plain lookup
+/// (no dependency edge into the mesher) is what keeps the mesh queue from cascading.
+#[derive(Resource, Default)]
+pub struct LodBoundaryStripCache {
+    chunks: HashMap<IVec3, CachedChunkStrips>,
+}
+
+impl LodBoundaryStripCache {
+    /// Publish (replace) the strips for `chunk_pos` at `revision`.
+    pub fn insert(&mut self, chunk_pos: IVec3, revision: u64, strips: Vec<LodBoundaryStrip>) {
+        self.chunks
+            .insert(chunk_pos, CachedChunkStrips { revision, strips });
+    }
+
+    /// Drop a chunk's strips (e.g. on unload), so stale boundaries are never matched.
+    pub fn remove(&mut self, chunk_pos: IVec3) {
+        self.chunks.remove(&chunk_pos);
+    }
+
+    /// Look up `chunk_pos`'s strip for `face`. When `expected_revision` is `Some`, a
+    /// mismatched revision is treated as stale and returns `None` (skirt fallback).
+    pub fn strip_for_face(
+        &self,
+        chunk_pos: IVec3,
+        face: ChunkFace,
+        expected_revision: Option<u64>,
+    ) -> Option<&LodBoundaryStrip> {
+        let cached = self.chunks.get(&chunk_pos)?;
+        if let Some(rev) = expected_revision {
+            if cached.revision != rev {
+                return None;
+            }
+        }
+        cached.strips.iter().find(|s| s.face == face)
+    }
+
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +382,68 @@ mod tests {
             strips.iter().all(|s| is_xz_face(s.face)),
             "no Y-face strips in this pass"
         );
+    }
+
+    /// A flat coarse NegX seam segment along z at world x=16, y=0.
+    fn flat_negx_strip() -> LodBoundaryStrip {
+        let v = |z: f32| StripVertex {
+            local: Vec3::new(0.0, 0.0, z),
+            world: Vec3::new(16.0, 0.0, z),
+            normal: Vec3::new(-1.0, 0.0, 0.0),
+            proj: Vec2::new(z, 0.0),
+        };
+        LodBoundaryStrip {
+            face: ChunkFace::NegX,
+            lod: LodLevel::Lod1,
+            chunk_pos: IVec3::new(1, 0, 0),
+            revision: 42,
+            vertices: vec![v(0.0), v(4.0)],
+            segments: vec![[0, 1]],
+        }
+    }
+
+    #[test]
+    fn match_snaps_to_closest_point_on_segment_not_vertex() {
+        let strip = flat_negx_strip();
+        // Fine vert above the seam midpoint: should snap onto the segment at z=2,
+        // not to either coarse vertex (z=0 / z=4).
+        let m = match_fine_vertex_to_coarse(Vec2::new(2.0, 0.5), &strip, 1.0).expect("match");
+        assert!((m.target_world - Vec3::new(16.0, 0.0, 2.0)).length() < 1e-4);
+        assert!((m.distance - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn match_rejects_over_distance() {
+        let strip = flat_negx_strip();
+        assert!(
+            match_fine_vertex_to_coarse(Vec2::new(2.0, 5.0), &strip, 1.0).is_none(),
+            "a vert 5 voxels off the seam must fall back to skirt, not weld"
+        );
+    }
+
+    #[test]
+    fn cache_is_non_blocking_and_revision_gated() {
+        let mut cache = LodBoundaryStripCache::default();
+        let pos = IVec3::new(1, 0, 0);
+        cache.insert(pos, 42, vec![flat_negx_strip()]);
+
+        // Present + revision match -> hit.
+        assert!(cache
+            .strip_for_face(pos, ChunkFace::NegX, Some(42))
+            .is_some());
+        // Stale revision -> miss (fall back to skirt, never block).
+        assert!(cache
+            .strip_for_face(pos, ChunkFace::NegX, Some(99))
+            .is_none());
+        // Wrong face / missing chunk -> miss.
+        assert!(cache
+            .strip_for_face(pos, ChunkFace::PosX, Some(42))
+            .is_none());
+        assert!(cache
+            .strip_for_face(IVec3::new(9, 9, 9), ChunkFace::NegX, None)
+            .is_none());
+
+        cache.remove(pos);
+        assert!(cache.is_empty());
     }
 }
