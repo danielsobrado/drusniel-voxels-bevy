@@ -101,6 +101,7 @@ pub fn append_morph_targets(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     config: &TerrainMorphConfig,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> Result<(), MorphTargetError> {
     if mesh.positions.len() != local_positions.len() {
         return Err(MorphTargetError::PositionLengthMismatch {
@@ -135,15 +136,32 @@ pub fn append_morph_targets(
             if !in_boundary_cell(local, face, my_lod) {
                 continue;
             }
-            let Some(target_local) = boundary_target_local(
-                local,
-                face,
-                world,
-                chunk_origin,
-                my_lod,
-                neighbor_lod,
-                config.max_stitch_distance,
-            ) else {
+            // Stage 3: weld to the actual coarse Surface Nets SEGMENT when the
+            // neighbour's strip is available (vertex-exact, no lip/hole/spike); fall
+            // back to the 1-D coarse iso when it isn't (missing/stale/over-distance).
+            let target_local = neighbor_strips
+                .and_then(|strips| strips.for_face(face))
+                .and_then(|strip| {
+                    crate::voxel::lod_boundary_strip::coarse_segment_target_local(
+                        local,
+                        face,
+                        chunk_origin,
+                        strip,
+                        config.max_stitch_distance,
+                    )
+                })
+                .or_else(|| {
+                    boundary_target_local(
+                        local,
+                        face,
+                        world,
+                        chunk_origin,
+                        my_lod,
+                        neighbor_lod,
+                        config.max_stitch_distance,
+                    )
+                });
+            let Some(target_local) = target_local else {
                 continue;
             };
             if let Some(existing) = target_locals[index] {
@@ -258,6 +276,7 @@ mod tests {
             LodLevel::Lod0,
             &NeighborLods::default(),
             &enabled_config(),
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -292,6 +311,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &TerrainMorphConfig::default(), // disabled
+            None,
         )
         .unwrap();
 
@@ -321,6 +341,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -358,6 +379,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -389,6 +411,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -436,6 +459,7 @@ mod tests {
                 ..Default::default()
             },
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -476,6 +500,7 @@ mod tests {
                 ..Default::default()
             },
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -515,6 +540,7 @@ mod tests {
                 ..Default::default()
             },
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -552,6 +578,7 @@ mod tests {
                 ..Default::default()
             },
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -579,6 +606,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -611,6 +639,7 @@ mod tests {
                 ..Default::default()
             },
             &enabled_config(),
+            None,
         )
         .unwrap();
 
@@ -648,6 +677,7 @@ mod tests {
             LodLevel::Lod0,
             &pos_x_transition(),
             &enabled_config(),
+            None,
         )
         .unwrap();
 

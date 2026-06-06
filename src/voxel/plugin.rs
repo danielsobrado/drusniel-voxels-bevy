@@ -3220,6 +3220,59 @@ fn process_lod_mesh_transaction(
 }
 
 #[inline(never)]
+/// Look up the coarse boundary strips this chunk consumes for the vertex-exact seam
+/// weld: one per X/Z face whose neighbour is exactly one LOD coarser, revision-gated by
+/// that neighbour's `last_terrain_mesh_key`. Missing/stale/over-distance -> the face's
+/// entry stays `None` and the morph falls back to the iso target (never blocks). Delta>1
+/// is skipped (the coarse strip's LOD wouldn't match what this chunk welds to).
+fn lookup_neighbor_boundary_strips(
+    strip_cache: &crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
+    world: &VoxelWorld,
+    chunk_pos: IVec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> crate::voxel::lod_boundary_strip::NeighborBoundaryStrips {
+    use crate::voxel::lod_boundary_strip::{face_neighbor_offset, opposite_face};
+    use crate::voxel::meshing::neighbor_lod_for_face;
+    use crate::voxel::skirt::ChunkFace;
+
+    let mut strips = crate::voxel::lod_boundary_strip::NeighborBoundaryStrips::default();
+    if my_lod.step_size() == 0 {
+        return strips;
+    }
+    for face in [
+        ChunkFace::NegX,
+        ChunkFace::PosX,
+        ChunkFace::NegZ,
+        ChunkFace::PosZ,
+    ] {
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        // Exactly one level coarser (delta 1) -> the strip LOD matches the weld target.
+        if neighbor_lod.step_size() != my_lod.step_size().saturating_mul(2) {
+            continue;
+        }
+        let neighbor_pos = chunk_pos + face_neighbor_offset(face);
+        let revision = world
+            .get_chunk(neighbor_pos)
+            .and_then(|c| c.last_terrain_mesh_key());
+        let Some(strip) = strip_cache.strip_for_face(neighbor_pos, opposite_face(face), revision)
+        else {
+            continue;
+        };
+        let cloned = Some(strip.clone());
+        match face {
+            ChunkFace::NegX => strips.neg_x = cloned,
+            ChunkFace::PosX => strips.pos_x = cloned,
+            ChunkFace::NegZ => strips.neg_z = cloned,
+            ChunkFace::PosZ => strips.pos_z = cloned,
+            _ => {}
+        }
+    }
+    strips
+}
+
 fn prepare_lod_chunk_commit(
     world: &mut VoxelWorld,
     meshes: &mut Assets<Mesh>,
@@ -3331,6 +3384,13 @@ fn prepare_lod_chunk_commit(
     let mesh_lod_level =
         transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
     let mesh_start = Instant::now();
+    let neighbor_strips = lookup_neighbor_boundary_strips(
+        strip_cache,
+        world,
+        chunk_pos,
+        mesh_lod_level,
+        &neighbor_lods,
+    );
     let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
         generate_chunk_mesh_with_mode_and_forensics(
             chunk,
@@ -3342,6 +3402,7 @@ fn prepare_lod_chunk_commit(
             &ao_config.baked,
             mesh_settings.water_air_exposure_mode,
             mesh_forensics_options(bench_forensics, mc_settings),
+            Some(&neighbor_strips),
         )
     } else {
         return LodChunkPrepareOutcome::Stale;
@@ -4260,6 +4321,7 @@ fn mesh_dirty_chunks_system(
                 &ao_config.baked,
                 mesh_settings.water_air_exposure_mode,
                 mesh_forensics_options(bench_params.forensics.as_deref(), &mc_spike.settings),
+                None,
             )
         } else {
             continue;

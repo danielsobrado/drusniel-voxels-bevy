@@ -3658,6 +3658,7 @@ fn apply_snap_or_morph(
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
     morph: &TerrainMorphConfig,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> LodTransitionSnapStats {
     let bake_targets = |solid_mesh: &mut MeshData, local_positions: &[Vec3]| {
         if let Err(err) = append_morph_targets(
@@ -3669,6 +3670,7 @@ fn apply_snap_or_morph(
             my_lod,
             neighbor_lods,
             morph,
+            neighbor_strips,
         ) {
             warn!("terrain morph target generation skipped: {err:?}");
             solid_mesh.morph_targets.clear();
@@ -4324,6 +4326,7 @@ pub fn generate_chunk_mesh_surface_nets(
     skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(2048, 3072);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
@@ -4477,6 +4480,7 @@ pub fn generate_chunk_mesh_surface_nets(
         my_lod,
         &neighbor_lods,
         morph,
+        neighbor_strips,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -4562,6 +4566,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(512, 768);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
@@ -4707,6 +4712,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         my_lod,
         &neighbor_lods,
         morph,
+        neighbor_strips,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -4794,6 +4800,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(256, 384);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
@@ -4939,6 +4946,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         my_lod,
         &neighbor_lods,
         morph,
+        neighbor_strips,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -5026,6 +5034,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     skirt_config: &SkirtConfig,
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(128, 192);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
@@ -5171,6 +5180,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         my_lod,
         &neighbor_lods,
         morph,
+        neighbor_strips,
     );
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
@@ -5431,6 +5441,7 @@ mod tests {
             &SkirtConfig::default(),
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         )
     }
 
@@ -6003,6 +6014,7 @@ mod tests {
             &SkirtConfig::default(),
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
         let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
             chunk,
@@ -6012,6 +6024,7 @@ mod tests {
             &SkirtConfig::default(),
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
 
         let max_lod0_y = lod0_mesh
@@ -6067,6 +6080,7 @@ mod tests {
             &skirt_config,
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
         let reference_right = generate_chunk_mesh_surface_nets(
             lod1_chunk,
@@ -6079,6 +6093,7 @@ mod tests {
             &skirt_config,
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
         let reference_meshes = [
             (&reference_left.solid, lod0_origin),
@@ -6111,6 +6126,7 @@ mod tests {
             &skirt_config,
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
         let transition_right = generate_chunk_mesh_surface_nets_lod1(
             lod1_chunk,
@@ -6123,6 +6139,7 @@ mod tests {
             &skirt_config,
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
         let transition_meshes = [
             (&transition_left.solid, lod0_origin),
@@ -6740,6 +6757,7 @@ mod tests {
             LodLevel::Lod0,
             &neighbors,
             &morph_enabled_config(),
+            None,
         );
 
         // Snap was skipped: stats default, POSITION untouched (fine mesh kept).
@@ -6779,6 +6797,7 @@ mod tests {
             LodLevel::Lod0,
             &neighbors,
             &morph_enabled_config(),
+            None,
         );
 
         assert_eq!(stats.boundary_candidate_vertex_count, 1);
@@ -6797,6 +6816,7 @@ mod tests {
             &SkirtConfig::default(),
             &ao_config(),
             WaterAirExposureMode::ExteriorConnected,
+            None,
         );
 
         let target = mesh.morph_targets[0];
@@ -6865,6 +6885,7 @@ mod tests {
             LodLevel::Lod0,
             &neighbors,
             &morph_enabled_config(),
+            None,
         );
 
         assert_eq!(
@@ -6898,6 +6919,7 @@ mod tests {
             LodLevel::Lod0,
             &neighbors,
             &TerrainMorphConfig::default(), // disabled
+            None,
         );
 
         assert!(
@@ -7717,6 +7739,7 @@ pub fn generate_chunk_mesh_with_mode(
         ao_config,
         water_exposure_mode,
         MeshForensicsOptions::default(),
+        None,
     )
 }
 
@@ -7731,6 +7754,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
     forensics: MeshForensicsOptions,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
 ) -> ChunkMeshResult {
     match mode {
         MeshMode::Blocky => generate_chunk_mesh(chunk, world, ao_config, water_exposure_mode),
@@ -7756,6 +7780,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
                         skirt_config,
                         ao_config,
                         water_exposure_mode,
+                        neighbor_strips,
                     )
                 }
                 LodLevel::Lod1 => {
@@ -7769,6 +7794,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
                         skirt_config,
                         ao_config,
                         water_exposure_mode,
+                        neighbor_strips,
                     )
                 }
                 LodLevel::Lod2 => {
@@ -7782,6 +7808,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
                         skirt_config,
                         ao_config,
                         water_exposure_mode,
+                        neighbor_strips,
                     )
                 }
                 LodLevel::Lod3 => {
@@ -7795,6 +7822,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
                         skirt_config,
                         ao_config,
                         water_exposure_mode,
+                        neighbor_strips,
                     )
                 }
                 LodLevel::Culled => {
