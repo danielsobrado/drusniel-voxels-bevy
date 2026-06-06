@@ -303,6 +303,84 @@ impl LodBoundaryStripCache {
     }
 }
 
+/// The coarse boundary strips a chunk consumes — one per X/Z face, looked up from the
+/// cache for the strictly-coarser neighbour on that face (and `None` when the neighbour
+/// is missing, same-LOD, finer, or its strip is stale). Stage 3 welds each fine
+/// boundary vertex onto the matching coarse **segment** from these instead of the 1-D
+/// iso (the lips/holes/spike root).
+#[derive(Clone, Debug, Default)]
+pub struct NeighborBoundaryStrips {
+    pub neg_x: Option<LodBoundaryStrip>,
+    pub pos_x: Option<LodBoundaryStrip>,
+    pub neg_z: Option<LodBoundaryStrip>,
+    pub pos_z: Option<LodBoundaryStrip>,
+}
+
+impl NeighborBoundaryStrips {
+    pub fn for_face(&self, face: ChunkFace) -> Option<&LodBoundaryStrip> {
+        match face {
+            ChunkFace::NegX => self.neg_x.as_ref(),
+            ChunkFace::PosX => self.pos_x.as_ref(),
+            ChunkFace::NegZ => self.neg_z.as_ref(),
+            ChunkFace::PosZ => self.pos_z.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.neg_x.is_none() && self.pos_x.is_none() && self.neg_z.is_none() && self.pos_z.is_none()
+    }
+}
+
+/// World-voxel direction from a chunk to its neighbour across `face`.
+pub fn face_neighbor_offset(face: ChunkFace) -> IVec3 {
+    match face {
+        ChunkFace::NegX => IVec3::new(-1, 0, 0),
+        ChunkFace::PosX => IVec3::new(1, 0, 0),
+        ChunkFace::NegZ => IVec3::new(0, 0, -1),
+        ChunkFace::PosZ => IVec3::new(0, 0, 1),
+        ChunkFace::NegY => IVec3::new(0, -1, 0),
+        ChunkFace::PosY => IVec3::new(0, 1, 0),
+    }
+}
+
+/// The neighbour's face that shares this chunk's `face` plane (its opposite).
+pub fn opposite_face(face: ChunkFace) -> ChunkFace {
+    match face {
+        ChunkFace::NegX => ChunkFace::PosX,
+        ChunkFace::PosX => ChunkFace::NegX,
+        ChunkFace::NegZ => ChunkFace::PosZ,
+        ChunkFace::PosZ => ChunkFace::NegZ,
+        ChunkFace::NegY => ChunkFace::PosY,
+        ChunkFace::PosY => ChunkFace::NegY,
+    }
+}
+
+/// Weld target for a fine boundary vertex: the closest point on the matching coarse
+/// **segment** of `strip`, expressed in this chunk's local coordinates. `None` (caller
+/// keeps the iso/skirt fallback) when no segment is within `max_stitch_distance`.
+///
+/// Both sides share the plane, so the coarse target's world position converts to local
+/// simply as `target_world - chunk_origin`; the face-normal axis already lands on the
+/// boundary plane because the coarse strip verts live on it.
+pub fn coarse_segment_target_local(
+    fine_local: Vec3,
+    face: ChunkFace,
+    chunk_origin: IVec3,
+    strip: &LodBoundaryStrip,
+    max_stitch_distance: f32,
+) -> Option<Vec3> {
+    let origin = chunk_origin.as_vec3();
+    let fine_world = origin + fine_local;
+    let matched = match_fine_vertex_to_coarse(
+        project_to_seam_frame(face, fine_world),
+        strip,
+        max_stitch_distance,
+    )?;
+    let target = matched.target_world - origin;
+    target.is_finite().then_some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +497,45 @@ mod tests {
             match_fine_vertex_to_coarse(Vec2::new(2.0, 5.0), &strip, 1.0).is_none(),
             "a vert 5 voxels off the seam must fall back to skirt, not weld"
         );
+    }
+
+    #[test]
+    fn coarse_segment_target_welds_fine_vert_onto_coarse_segment() {
+        // Coarse NegX strip at world x=16, z in [0,4], y=0. A fine chunk at origin 0
+        // shares that plane on its PosX face; a fine boundary vert above the seam
+        // midpoint should weld DOWN onto the segment (y 0.5 -> 0) at z=2.
+        let strip = flat_negx_strip();
+        let target = coarse_segment_target_local(
+            Vec3::new(16.0, 0.5, 2.0),
+            ChunkFace::PosX,
+            IVec3::ZERO,
+            &strip,
+            1.0,
+        )
+        .expect("segment target");
+        assert!((target - Vec3::new(16.0, 0.0, 2.0)).length() < 1e-4);
+
+        // Too far off the seam -> no weld (caller keeps iso/skirt fallback).
+        assert!(coarse_segment_target_local(
+            Vec3::new(16.0, 9.0, 2.0),
+            ChunkFace::PosX,
+            IVec3::ZERO,
+            &strip,
+            1.0
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn neighbor_strips_for_face_and_opposite() {
+        let mut n = NeighborBoundaryStrips::default();
+        assert!(n.is_empty());
+        n.pos_x = Some(flat_negx_strip());
+        assert!(!n.is_empty());
+        assert!(n.for_face(ChunkFace::PosX).is_some());
+        assert!(n.for_face(ChunkFace::NegZ).is_none());
+        assert_eq!(opposite_face(ChunkFace::PosX), ChunkFace::NegX);
+        assert_eq!(face_neighbor_offset(ChunkFace::PosX), IVec3::new(1, 0, 0));
     }
 
     #[test]
