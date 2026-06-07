@@ -7,7 +7,7 @@
 //! - [`meshing`] - Surface Nets mesh generation for smooth terrain
 //! - [`terrain`] - Procedural terrain generation with noise abstractions
 //! - [`plugin`] - Bevy plugin integration
-//! - [`persistence`] - World save/load functionality
+//! - [`io::persistence`] - World save/load functionality
 //! - [`gravity`] - Voxel gravity simulation
 //! - [`skirt`] - LOD boundary skirts for seamless transitions
 //! - [`baked_ao`] - Baked ambient occlusion for voxel lighting
@@ -17,9 +17,10 @@
 
 pub mod baked_ao;
 pub mod chunk;
+pub mod diagnostics;
 pub mod enclosure;
 pub mod gravity;
-pub mod hole_probe;
+pub mod io;
 pub mod lod;
 pub mod lod_boundary_strip;
 pub mod materials;
@@ -29,16 +30,32 @@ pub mod mesh_invalidation;
 pub mod meshing;
 pub mod meshing_lod;
 pub mod meshing_types;
-pub mod model_io;
 pub mod occlusion;
 pub mod octree;
-pub mod persistence;
 pub mod plugin;
 pub(crate) mod runtime;
 pub mod skirt;
 pub mod terrain;
-pub mod terrain_debug;
-pub mod terrain_iso_band;
 pub mod types;
 pub mod visibility;
 pub mod world;
+
+pub mod hole_probe {
+    pub use super::diagnostics::hole_probe::*;
+}
+
+pub mod model_io {
+    pub use super::io::model_io::*;
+}
+
+pub mod persistence {
+    pub use super::io::persistence::*;
+}
+
+pub mod terrain_debug {
+    pub use super::diagnostics::terrain_debug::*;
+}
+
+pub mod terrain_iso_band {
+    pub use super::diagnostics::terrain_iso_band::*;
+}
