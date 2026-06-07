@@ -4,6 +4,10 @@ use super::{
     coarse_aligned_lod_sample_base_with_stride, compute_vertex_material_weights,
     scale_vertex_from_center, sdf_gradient_normal_at_local, smoothed_terrain_sdf_at_world_pos,
 };
+use crate::constants::{
+    LOD0_PADDED_SIZE, LOD1_GRID_VOLUME, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_GRID_VOLUME,
+    LOD2_PADDED_SIZE, LOD2_STEP_SIZE, LOD3_GRID_VOLUME, LOD3_PADDED_SIZE, LOD3_STEP_SIZE,
+};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::{IVec3, Vec3};
 use ndshape::ConstShape;
@@ -26,46 +30,46 @@ pub fn build_mc_sdf_values(
                 super::SMOOTH_TERRAIN_SDF_LOD0,
                 super::BaseSdfTransitionMode::Coarsen,
             );
-            (super::LOD0_PADDED_SIZE as usize, sdf.to_vec(), step)
+            (LOD0_PADDED_SIZE as usize, sdf.to_vec(), step)
         }
         LodLevel::Lod1 => {
-            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD1_GRID_VOLUME }>(
+            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ LOD1_GRID_VOLUME }>(
                 chunk,
                 world,
-                super::LOD1_PADDED_SIZE,
-                super::LOD1_STEP_SIZE as i32,
+                LOD1_PADDED_SIZE,
+                LOD1_STEP_SIZE as i32,
                 super::LodShape1::linearize,
                 LodLevel::Lod1,
                 neighbor_lods,
                 super::coarse_terrain_sdf_smooth_enabled(),
             );
-            (super::LOD1_PADDED_SIZE as usize, sdf.to_vec(), step)
+            (LOD1_PADDED_SIZE as usize, sdf.to_vec(), step)
         }
         LodLevel::Lod2 => {
-            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD2_GRID_VOLUME }>(
+            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ LOD2_GRID_VOLUME }>(
                 chunk,
                 world,
-                super::LOD2_PADDED_SIZE,
-                super::LOD2_STEP_SIZE as i32,
+                LOD2_PADDED_SIZE,
+                LOD2_STEP_SIZE as i32,
                 super::LodShape2::linearize,
                 LodLevel::Lod2,
                 neighbor_lods,
                 super::coarse_terrain_sdf_smooth_enabled(),
             );
-            (super::LOD2_PADDED_SIZE as usize, sdf.to_vec(), step)
+            (LOD2_PADDED_SIZE as usize, sdf.to_vec(), step)
         }
         LodLevel::Lod3 => {
-            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ super::LOD3_GRID_VOLUME }>(
+            let sdf = super::generate_low_lod_sdf_with_smoothing::<{ LOD3_GRID_VOLUME }>(
                 chunk,
                 world,
-                super::LOD3_PADDED_SIZE,
-                super::LOD3_STEP_SIZE as i32,
+                LOD3_PADDED_SIZE,
+                LOD3_STEP_SIZE as i32,
                 super::LodShape3::linearize,
                 LodLevel::Lod3,
                 neighbor_lods,
                 super::coarse_terrain_sdf_smooth_enabled(),
             );
-            (super::LOD3_PADDED_SIZE as usize, sdf.to_vec(), step)
+            (LOD3_PADDED_SIZE as usize, sdf.to_vec(), step)
         }
         LodLevel::Culled => (0, Vec::new(), step),
     }

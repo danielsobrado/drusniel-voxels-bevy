@@ -1,4 +1,13 @@
-use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use bevy::log::debug;
+
+use crate::constants::{
+    BEACH_HEIGHT_OFFSET, TREE_HEIGHT_VARIANCE, TREE_LEAF_CHECK_RADIUS, TREE_LEAF_RADIUS,
+    TREE_MIN_HEIGHT, TREE_SPAWN_THRESHOLD, WATER_LEVEL,
+};
+
+use super::{NoiseGenerator, TerrainGenerator};
 
 static TREE_SPAWN_LOGS: AtomicUsize = AtomicUsize::new(0);
 

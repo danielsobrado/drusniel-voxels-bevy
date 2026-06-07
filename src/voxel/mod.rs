@@ -34,6 +34,7 @@ pub mod occlusion;
 pub mod octree;
 pub mod persistence;
 pub mod plugin;
+pub(crate) mod runtime;
 pub mod skirt;
 pub mod terrain;
 pub mod terrain_debug;

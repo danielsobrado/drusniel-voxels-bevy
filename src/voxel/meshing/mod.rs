@@ -6,53 +6,76 @@
 //!
 //! Both modes support ambient occlusion and proper chunk boundary handling.
 
+use crate::constants::VOXEL_SIZE;
+
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::constants::{
-    ATLAS_COLUMNS,
-    ATLAS_ROWS,
-    CHUNK_BOUNDARY_SCALE,
-    CHUNK_SIZE,
-    CHUNK_SIZE_I32,
-    LOD0_GRID_VOLUME,
-    // LOD grid configurations
-    LOD0_PADDED_SIZE,
-    LOD0_STEP_SIZE,
-    LOD1_GRID_VOLUME,
-    LOD1_PADDED_SIZE,
-    LOD1_STEP_SIZE,
-    LOD2_GRID_VOLUME,
-    LOD2_PADDED_SIZE,
-    LOD2_STEP_SIZE,
-    LOD3_GRID_VOLUME,
-    LOD3_PADDED_SIZE,
-    LOD3_STEP_SIZE,
-    PADDED_CHUNK_SIZE_U32,
-    UV_PADDING,
-    VOXEL_SIZE,
+    ATLAS_COLUMNS, ATLAS_ROWS, CHUNK_BOUNDARY_SCALE, CHUNK_SIZE, CHUNK_SIZE_I32, LOD0_GRID_VOLUME,
+    LOD0_PADDED_SIZE, LOD0_STEP_SIZE, LOD1_GRID_VOLUME, LOD1_PADDED_SIZE, LOD1_STEP_SIZE,
+    LOD2_GRID_VOLUME, LOD2_PADDED_SIZE, LOD2_STEP_SIZE, LOD3_GRID_VOLUME, LOD3_PADDED_SIZE,
+    LOD3_STEP_SIZE, PADDED_CHUNK_SIZE_U32, UV_PADDING,
 };
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::rendering::ao_config::BakedAoConfig;
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::baked_ao::compute_surface_nets_ao;
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::chunk::{Chunk, LodLevel};
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::materials::MaterialId;
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::meshing_lod::append_morph_targets;
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::skirt::{
     ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
     generate_skirts_with_sealed_faces,
 };
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::types::{Voxel, VoxelType};
+#[cfg(test)]
+#[allow(unused_imports)]
 use crate::voxel::world::{VoxelSample, VoxelWorld};
+#[cfg(test)]
+#[allow(unused_imports)]
 use bevy::asset::RenderAssetUsages;
+#[cfg(test)]
+#[allow(unused_imports)]
 use bevy::ecs::query::QueryItem;
+#[cfg(test)]
+#[allow(unused_imports)]
 use bevy::prelude::*;
+#[cfg(test)]
+#[allow(unused_imports)]
 use bevy::render::extract_component::ExtractComponent;
+#[cfg(test)]
+#[allow(unused_imports)]
 use bevy_mesh::{Indices, PrimitiveTopology};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::OnceLock;
-
-// Surface nets imports for smooth meshing
+#[cfg(test)]
+#[allow(unused_imports)]
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+#[cfg(test)]
+#[allow(unused_imports)]
 use ndshape::{ConstShape, ConstShape3u32};
+#[cfg(test)]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(test)]
+#[allow(unused_imports)]
+use std::sync::OnceLock;
 
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;

@@ -1,4 +1,12 @@
-use super::*;
+use crate::constants::{
+    BEACH_HEIGHT_OFFSET, BIOME_CLAY_DETAIL_THRESHOLD, BIOME_CLAY_MAX, BIOME_CLAY_MIN,
+    BIOME_ROCKY_DETAIL_THRESHOLD, BIOME_ROCKY_THRESHOLD, BIOME_SANDY_THRESHOLD,
+    TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
+};
+use crate::voxel::terrain::water::ShorelineKind;
+use crate::voxel::types::VoxelType;
+
+use super::{NoiseGenerator, TerrainGenerator};
 
 // Biome Types
 // =============================================================================

@@ -1,4 +1,13 @@
-use super::*;
+use super::{
+    material_weight_index, neighbor_lod_for_face, terrain_meshing_material_at,
+    terrain_meshing_material_in_chunk, terrain_meshing_voxel_at, terrain_meshing_voxel_in_chunk,
+};
+use crate::constants::CHUNK_SIZE;
+use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::skirt::{ChunkFace, NeighborLods};
+use crate::voxel::types::VoxelType;
+use crate::voxel::world::VoxelWorld;
+use bevy::prelude::{IVec3, UVec3, Vec3};
 
 /// Computes material weights for a vertex based on neighboring voxels.
 pub(crate) fn compute_vertex_material_weights(

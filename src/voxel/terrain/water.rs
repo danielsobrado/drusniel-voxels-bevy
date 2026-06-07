@@ -1,4 +1,12 @@
-use super::*;
+use crate::constants::{
+    CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WATER_LEVEL,
+};
+use crate::terrain::generation::config::BasinConfig;
+
+use super::{
+    NoiseGenerator, TerrainGenerator, default_world_edge_distance, lerp_f32, smoothstep,
+    stronger_water_metadata,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GeneratedWaterBodyKind {

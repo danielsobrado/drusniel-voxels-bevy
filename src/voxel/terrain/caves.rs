@@ -1,4 +1,8 @@
-use super::*;
+use crate::constants::{
+    CAVE_MAX_Y, CAVE_MIN_Y, CAVE_SURFACE_OFFSET, MOUNTAIN_THRESHOLD, TERRAIN_CAVE_FREQUENCY,
+};
+
+use super::{NoiseGenerator, TerrainGenerator};
 
 impl<N: NoiseGenerator> TerrainGenerator<N> {
     /// Checks if a position should be a cave.

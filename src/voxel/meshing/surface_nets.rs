@@ -1,4 +1,26 @@
-use super::*;
+use super::{
+    ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, PaddedChunkShape,
+    SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
+    apply_snap_or_morph, compute_vertex_material_weights,
+    compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
+    generate_sdf, generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
+    pad_morph_targets_identity, sanitize_position, scale_vertex_from_center,
+    sdf_gradient_normal_at_local, skirt_depth_for_lod, terrain_morph_config,
+};
+use crate::constants::{
+    CHUNK_SIZE, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_PADDED_SIZE, LOD2_STEP_SIZE,
+    LOD3_PADDED_SIZE, LOD3_STEP_SIZE, VOXEL_SIZE,
+};
+use crate::rendering::ao_config::BakedAoConfig;
+use crate::voxel::baked_ao::compute_surface_nets_ao;
+use crate::voxel::chunk::{Chunk, LodLevel};
+use crate::voxel::skirt::{
+    NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts_with_sealed_faces,
+};
+use crate::voxel::types::Voxel;
+use crate::voxel::world::{VoxelSample, VoxelWorld};
+use bevy::prelude::{IVec3, Vec3};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 
 /// Generate mesh using Surface Nets algorithm for smooth terrain.
 pub fn generate_chunk_mesh_surface_nets(

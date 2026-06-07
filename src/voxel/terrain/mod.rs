@@ -8,41 +8,17 @@
 //! - Tree placement and generation
 //! - Dungeon structure generation
 
-use crate::constants::MIN_BREAKABLE_Y;
 use crate::constants::{
     BEACH_HEIGHT_OFFSET,
     // Bedrock
     BEDROCK_DEPTH,
-    BIOME_CLAY_DETAIL_THRESHOLD,
-    BIOME_CLAY_MAX,
-    BIOME_CLAY_MIN,
-    BIOME_ROCKY_DETAIL_THRESHOLD,
-    BIOME_ROCKY_THRESHOLD,
-    // Biomes
-    BIOME_SANDY_THRESHOLD,
-    CAVE_MAX_Y,
-    // Caves
-    CAVE_MIN_Y,
-    CAVE_SURFACE_OFFSET,
     CHUNK_SIZE_I32,
     DEFAULT_WORLD_CHUNKS_X,
     DEFAULT_WORLD_CHUNKS_Z,
-    MOUNTAIN_THRESHOLD,
-    // Terrain generation (fallbacks for biomes/caves/trees)
-    TERRAIN_BIOME_FREQUENCY,
-    TERRAIN_CAVE_FREQUENCY,
-    TREE_HEIGHT_VARIANCE,
-    TREE_LEAF_CHECK_RADIUS,
-    TREE_LEAF_RADIUS,
-    TREE_MIN_HEIGHT,
-    // Trees
-    TREE_SPAWN_THRESHOLD,
     WATER_LEVEL,
 };
-use crate::terrain::generation::config::{BasinConfig, TerrainConfig};
+use crate::terrain::generation::config::TerrainConfig;
 use crate::voxel::types::VoxelType;
-use bevy::log::debug;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod biome;
 mod caves;
@@ -55,7 +31,6 @@ pub use biome::Biome;
 pub use noise::{NoiseGenerator, ValueNoise, hash_position, hash_position_seeded};
 pub use water::{GeneratedWaterBodyKind, WaterGenerationMetadata};
 
-use water::ShorelineKind;
 #[cfg(test)]
 use water::{CLIFF_MIN_HEIGHT_ABOVE_WATER, EDGE_OCEAN_START_DISTANCE};
 
@@ -221,11 +196,12 @@ fn stronger_water_metadata(
 mod tests {
     use super::*;
     use crate::constants::{
-        CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z,
-        MIN_BREAKABLE_Y,
+        BIOME_CLAY_DETAIL_THRESHOLD, CAVE_SURFACE_OFFSET, CHUNK_SIZE_I32,
+        DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z, MIN_BREAKABLE_Y,
     };
 
     use crate::terrain::generation::config::TerrainConfig;
+    use crate::voxel::terrain::water::ShorelineKind;
 
     struct BiomeCoverageNoise;
 

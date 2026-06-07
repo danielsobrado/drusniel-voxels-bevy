@@ -1,4 +1,18 @@
-use super::*;
+use super::{
+    ChunkMeshResult, Face, LodTransitionSnapStats, MeshData, TerrainMeshSectionStats,
+    WATER_EDGE_SURFACE_SUPPRESSION_MARGIN, WATER_SHORELINE_EXTENSION, WaterAirExposureMode,
+    WaterExposureCache, WaterMeshingStats,
+};
+use crate::constants::{
+    ATLAS_COLUMNS, ATLAS_ROWS, CHUNK_SIZE, CHUNK_SIZE_I32, UV_PADDING, VOXEL_SIZE,
+};
+use crate::rendering::ao_config::BakedAoConfig;
+use crate::voxel::chunk::Chunk;
+use crate::voxel::materials::MaterialId;
+use crate::voxel::types::{Voxel, VoxelType};
+use crate::voxel::world::{VoxelSample, VoxelWorld};
+use bevy::prelude::{IVec3, UVec3};
+use std::collections::{HashSet, VecDeque};
 
 // =============================================================================
 // Greedy Meshing Types and Implementation

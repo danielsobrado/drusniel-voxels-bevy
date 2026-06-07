@@ -1,4 +1,9 @@
-use super::*;
+use crate::constants::{MIN_BREAKABLE_Y, WATER_LEVEL};
+
+use super::{
+    NoiseGenerator, TerrainGenerator, WaterGenerationMetadata, soften_height_cap, smoothstep,
+    smoothstep_range,
+};
 
 pub(super) const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;
 pub(super) const BASE_TERRAIN_ELEVATION: f32 = MIN_NORMAL_TERRAIN_SURFACE_Y as f32;
