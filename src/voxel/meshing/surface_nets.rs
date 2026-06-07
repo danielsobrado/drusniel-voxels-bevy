@@ -1,7 +1,7 @@
 use super::{
     ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, PaddedChunkShape,
     SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
-    apply_snap_or_morph, compute_vertex_material_weights,
+    append_seam_stitches, apply_snap_or_morph, compute_vertex_material_weights,
     compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
     generate_sdf, generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
     pad_morph_targets_identity, sanitize_position, scale_vertex_from_center,
@@ -201,6 +201,18 @@ pub fn generate_chunk_mesh_surface_nets(
         &neighbor_lods,
     );
 
+    // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
+    // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let stitched_face_mask = append_seam_stitches(
+        &mut solid_mesh,
+        &local_positions,
+        chunk_origin,
+        chunk_center,
+        chunk,
+        my_lod,
+        neighbor_strips,
+    );
+
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
@@ -227,8 +239,9 @@ pub fn generate_chunk_mesh_surface_nets(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
-            lod_transition_snap_stats.snapped_face_mask
-                & !lod_transition_snap_stats.fallback_face_mask,
+            (lod_transition_snap_stats.snapped_face_mask
+                & !lod_transition_snap_stats.fallback_face_mask)
+                | stitched_face_mask,
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
@@ -433,6 +446,18 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         &neighbor_lods,
     );
 
+    // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
+    // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let stitched_face_mask = append_seam_stitches(
+        &mut solid_mesh,
+        &local_positions,
+        chunk_origin,
+        chunk_center,
+        chunk,
+        my_lod,
+        neighbor_strips,
+    );
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
@@ -460,8 +485,9 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
-            lod_transition_snap_stats.snapped_face_mask
-                & !lod_transition_snap_stats.fallback_face_mask,
+            (lod_transition_snap_stats.snapped_face_mask
+                & !lod_transition_snap_stats.fallback_face_mask)
+                | stitched_face_mask,
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
@@ -667,6 +693,18 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         &neighbor_lods,
     );
 
+    // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
+    // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let stitched_face_mask = append_seam_stitches(
+        &mut solid_mesh,
+        &local_positions,
+        chunk_origin,
+        chunk_center,
+        chunk,
+        my_lod,
+        neighbor_strips,
+    );
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
@@ -694,8 +732,9 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
-            lod_transition_snap_stats.snapped_face_mask
-                & !lod_transition_snap_stats.fallback_face_mask,
+            (lod_transition_snap_stats.snapped_face_mask
+                & !lod_transition_snap_stats.fallback_face_mask)
+                | stitched_face_mask,
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
@@ -901,6 +940,18 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         &neighbor_lods,
     );
 
+    // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
+    // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let stitched_face_mask = append_seam_stitches(
+        &mut solid_mesh,
+        &local_positions,
+        chunk_origin,
+        chunk_center,
+        chunk,
+        my_lod,
+        neighbor_strips,
+    );
+
     // Generate skirts for LOD boundaries
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
@@ -928,8 +979,9 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             &local_skirt_config,
             my_lod,
             &neighbor_lods,
-            lod_transition_snap_stats.snapped_face_mask
-                & !lod_transition_snap_stats.fallback_face_mask,
+            (lod_transition_snap_stats.snapped_face_mask
+                & !lod_transition_snap_stats.fallback_face_mask)
+                | stitched_face_mask,
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }

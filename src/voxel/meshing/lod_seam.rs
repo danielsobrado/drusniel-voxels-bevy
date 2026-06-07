@@ -382,6 +382,100 @@ pub(super) fn extract_export_boundary_strips(
     )
 }
 
+/// Stage 4: append watertight stitch triangles bridging this chunk's fine boundary to
+/// each strictly-coarser neighbour's boundary, and un-morph those faces' boundary verts
+/// so the main surface stays at its Surface Nets position and meets the stitch. Returns
+/// the mask of stitched faces so the caller suppresses skirts there. Must run AFTER
+/// `apply_snap_or_morph` and BEFORE skirts / `pad_morph_targets_identity` (which fills
+/// identity morph rows for the appended stitch verts).
+///
+/// This closes the cases the morph weld alone cannot: the steep-side gap (segment
+/// over-distance) and the 2:1 density T-junction. Triangulated by `stitch_seam`
+/// (monotone strip); a face whose stitch is rejected keeps its skirt.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn append_seam_stitches(
+    solid_mesh: &mut MeshData,
+    local_positions: &[Vec3],
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+    chunk: &Chunk,
+    my_lod: LodLevel,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+) -> u8 {
+    let Some(neighbor_strips) = neighbor_strips else {
+        return 0;
+    };
+    if neighbor_strips.is_empty() || my_lod.step_size() == 0 {
+        return 0;
+    }
+
+    // This chunk's own boundary (all X/Z faces), from the main surface only.
+    let fine_strips = crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
+        local_positions,
+        &solid_mesh.normals,
+        &solid_mesh.indices,
+        chunk_origin,
+        CHUNK_SIZE as f32,
+        my_lod.step_size() as f32,
+        my_lod,
+        chunk.position(),
+        0,
+    );
+    let origin = chunk_origin.as_vec3();
+    let mut stitched_mask = 0u8;
+
+    for face in [
+        ChunkFace::NegX,
+        ChunkFace::PosX,
+        ChunkFace::NegZ,
+        ChunkFace::PosZ,
+    ] {
+        let Some(coarse) = neighbor_strips.for_face(face) else {
+            continue;
+        };
+        let Some(fine) = fine_strips.iter().find(|s| s.face == face) else {
+            continue;
+        };
+        let Some(stitch) =
+            crate::voxel::lod_boundary_strip::stitch_seam(&fine.vertices, &coarse.vertices)
+        else {
+            continue;
+        };
+
+        // Append as non-indexed triangles to match the main-surface convention
+        // (per-triangle verts + barycentrics).
+        for tri in stitch.indices.chunks(3) {
+            if tri.len() < 3 {
+                continue;
+            }
+            let base = solid_mesh.positions.len() as u32;
+            for &idx in tri {
+                let local = Vec3::from_array(stitch.positions[idx as usize]) - origin;
+                solid_mesh
+                    .positions
+                    .push(scale_vertex_from_center(local, chunk_center));
+                solid_mesh.normals.push(stitch.normals[idx as usize]);
+                solid_mesh.uvs.push([1.0, 0.0]); // ao=1 (no darkening)
+                solid_mesh.colors.push([0.0, 0.0, 0.0, 1.0]); // default material (v1)
+            }
+            solid_mesh.indices.push(base);
+            solid_mesh.indices.push(base + 1);
+            solid_mesh.indices.push(base + 2);
+            solid_mesh.push_triangle_barycentrics();
+        }
+
+        // Keep the main-surface boundary at its SN position so it meets the stitch.
+        for (i, local) in local_positions.iter().enumerate() {
+            if i < solid_mesh.morph_targets.len() && in_lod_boundary_cell(*local, face, my_lod) {
+                solid_mesh.morph_targets[i][3] = 0.0;
+            }
+        }
+        stitched_mask |= 1u8 << face as u8;
+    }
+
+    stitched_mask
+}
+
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
 /// after morph baking (skirts / aprons), preserving the
 /// `morph_targets.len() == positions.len()` invariant that `into_mesh` checks before
