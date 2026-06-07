@@ -2,16 +2,16 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use super::config::NaadfConfig;
-use super::cpu_builder::NaadfBuildOptions;
-use super::dirty::NaadfDirtyChunkQueue;
-use super::extractor::{NaadfChunkExtractor, NaadfExtractionError};
-use super::layout::{
+use crate::rendering::naadf::config::NaadfConfig;
+use crate::rendering::naadf::cpu_builder::NaadfBuildOptions;
+use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
+use crate::rendering::naadf::extractor::{NaadfChunkExtractor, NaadfExtractionError};
+use crate::rendering::naadf::layout::{
     CHUNK_BOUND_FIELD_MAX, CHUNK_BOUND_OFFSET_NEG_X, CHUNK_BOUND_OFFSET_NEG_Y,
     CHUNK_BOUND_OFFSET_NEG_Z, CHUNK_BOUND_OFFSET_POS_X, CHUNK_BOUND_OFFSET_POS_Y,
     CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
 };
-use super::stats::{NaadfCacheState, NaadfStats};
+use crate::rendering::naadf::stats::{NaadfCacheState, NaadfStats};
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 

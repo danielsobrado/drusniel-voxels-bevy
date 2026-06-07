@@ -4,46 +4,46 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 
 use crate::props::billboard::BillboardMaterial;
 use crate::props::lod_material::SimpleLodMaterial;
-use crate::rendering::ao_msaa::disable_msaa_for_screen_space_ao;
-use crate::rendering::array_loader::{create_texture_array, start_loading_texture_arrays};
-use crate::rendering::atlas::load_texture_atlas;
-use crate::rendering::blocky_material::BlockyMaterial;
-use crate::rendering::building_material::{BuildingMaterial, BuildingMesh};
-use crate::rendering::capabilities::{
+use crate::rendering::assets::array_loader::{create_texture_array, start_loading_texture_arrays};
+use crate::rendering::assets::atlas::load_texture_atlas;
+use crate::rendering::camera_modes::cinematic::CinematicPlugin;
+use crate::rendering::camera_modes::photo_mode::PhotoModePlugin;
+use crate::rendering::device::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
     sync_capabilities_to_main,
 };
-use crate::rendering::cinematic::CinematicPlugin;
-use crate::rendering::god_rays::GodRayPlugin;
-use crate::rendering::gtao::GtaoPlugin;
+use crate::rendering::device::quality::{
+    RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
+    sync_render_quality_preset,
+};
+use crate::rendering::diagnostics::render_timing::install_render_timing;
+use crate::rendering::diagnostics::water_visual_probe::WaterVisualProbePlugin;
+use crate::rendering::diagnostics::weather_overlay::WeatherOverlayPlugin;
+use crate::rendering::effects::ao_msaa::disable_msaa_for_screen_space_ao;
+use crate::rendering::effects::god_rays::GodRayPlugin;
+use crate::rendering::effects::gtao::GtaoPlugin;
+use crate::rendering::effects::ssao::SsaoPlugin;
+use crate::rendering::lighting::radiance_cascades::RadianceCascadesPlugin;
+use crate::rendering::lighting::ray_tracing::{
+    RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
+    toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
+};
 use crate::rendering::materials::{
     configure_building_textures, configure_props_textures, configure_triplanar_textures,
     setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
     sync_fog_to_materials, sync_voxel_water_material_overrides, sync_weather_to_materials,
 };
-use crate::rendering::pcss::PcssPlugin;
-use crate::rendering::photo_mode::PhotoModePlugin;
-use crate::rendering::props_material::PropsMaterial;
-use crate::rendering::quality::{
-    RenderQualityPreset, apply_render_quality_preset, record_render_quality_counters,
-    sync_render_quality_preset,
-};
-use crate::rendering::radiance_cascades::RadianceCascadesPlugin;
-use crate::rendering::ray_tracing::{
-    RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
-    toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
-};
-use crate::rendering::render_timing::install_render_timing;
-use crate::rendering::shadow_budget::ShadowBudgetPlugin;
-use crate::rendering::ssao::SsaoPlugin;
-use crate::rendering::triplanar_material::TriplanarMaterial;
+use crate::rendering::materials::blocky::BlockyMaterial;
+use crate::rendering::materials::building::{BuildingMaterial, BuildingMesh};
+use crate::rendering::materials::props::PropsMaterial;
+use crate::rendering::materials::triplanar::TriplanarMaterial;
+use crate::rendering::shadows::pcss::PcssPlugin;
+use crate::rendering::shadows::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::water::EnhancedWaterPlugin;
-use crate::rendering::water_displacement::WaterDisplacementPlugin;
-use crate::rendering::water_reflection::WaterReflectionPlugin;
-use crate::rendering::water_reflection_compositor::WaterReflectionCompositorPlugin;
-use crate::rendering::water_visual_probe::WaterVisualProbePlugin;
-use crate::rendering::weather_overlay::WeatherOverlayPlugin;
-use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishPlugin;
+use crate::rendering::water::displacement::WaterDisplacementPlugin;
+use crate::rendering::water::finish::WitchcraftWaterFinishPlugin;
+use crate::rendering::water::reflection::WaterReflectionPlugin;
+use crate::rendering::water::reflection_compositor::WaterReflectionCompositorPlugin;
 
 pub struct RenderingPlugin;
 

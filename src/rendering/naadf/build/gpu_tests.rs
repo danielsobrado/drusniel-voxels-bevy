@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn debug_trace_shader_imports_ray_trace_module() {
-        let source = include_str!("../../../assets/shaders/naadf/debug_trace_rays.wgsl");
+        let source = include_str!("../../../../assets/shaders/naadf/debug_trace_rays.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(source, "shaders/naadf/debug_trace_rays.wgsl");
 
         assert!(shader.imports().any(|import| {

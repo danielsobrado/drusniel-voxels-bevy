@@ -1,22 +1,62 @@
-pub mod cache;
+pub mod build;
+pub mod data;
+pub mod render;
+
+pub mod cache {
+    pub use super::data::cache::*;
+}
 pub mod config;
-pub mod cpu_builder;
-pub mod cpu_trace;
-pub mod debug;
-pub mod dirty;
-pub mod entities;
-pub mod extractor;
-pub mod froxel;
-pub mod gpu_buffers;
-pub mod gpu_tests;
-pub mod layout;
-pub mod local_lights;
-pub mod pipeline;
-pub mod prepare;
-pub mod preview;
-pub mod stats;
-pub mod streaming;
-pub mod systems;
+pub mod cpu_builder {
+    pub use super::build::cpu_builder::*;
+}
+pub mod cpu_trace {
+    pub use super::build::cpu_trace::*;
+}
+pub mod debug {
+    pub use super::render::debug::*;
+}
+pub mod dirty {
+    pub use super::data::dirty::*;
+}
+pub mod entities {
+    pub use super::data::entities::*;
+}
+pub mod extractor {
+    pub use super::build::extractor::*;
+}
+pub mod froxel {
+    pub use super::render::froxel::*;
+}
+pub mod gpu_buffers {
+    pub use super::build::gpu_buffers::*;
+}
+pub mod gpu_tests {
+    pub use super::build::gpu_tests::*;
+}
+pub mod layout {
+    pub use super::data::layout::*;
+}
+pub mod local_lights {
+    pub use super::render::local_lights::*;
+}
+pub mod pipeline {
+    pub use super::render::pipeline::*;
+}
+pub mod prepare {
+    pub use super::build::prepare::*;
+}
+pub mod preview {
+    pub use super::render::preview::*;
+}
+pub mod stats {
+    pub use super::data::stats::*;
+}
+pub mod streaming {
+    pub use super::data::streaming::*;
+}
+pub mod systems {
+    pub use super::render::systems::*;
+}
 
 use bevy::asset::load_internal_asset;
 use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};

@@ -428,7 +428,7 @@ impl ViewNode for CompositorNode {
 mod tests {
     #[test]
     fn compositor_shader_scrubs_disabled_reflection_alpha() {
-        let shader = include_str!("../../assets/shaders/water_reflection_compositor.wgsl");
+        let shader = include_str!("../../../assets/shaders/water_reflection_compositor.wgsl");
 
         assert!(shader.contains("return vec4<f32>(base_scene.rgb, 1.0);"));
         assert!(!shader.contains("return base_scene;"));
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn compositor_queues_hdr_and_sdr_pipelines() {
-        let source = include_str!("water_reflection_compositor.rs");
+        let source = include_str!("reflection_compositor.rs");
 
         assert!(source.contains("hdr_pipeline_id"));
         assert!(source.contains("sdr_pipeline_id"));

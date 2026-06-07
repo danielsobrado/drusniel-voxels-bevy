@@ -1932,7 +1932,7 @@ mod tests {
 
     #[test]
     fn radiance_shader_uses_bevy_reversed_z_and_flipped_ndc_y() {
-        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+        let shader = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(shader.contains("fn is_sky_depth"));
         assert!(shader.contains("return depth <= 0.001"));
@@ -1944,7 +1944,7 @@ mod tests {
 
     #[test]
     fn radiance_shader_scrubs_final_alpha() {
-        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+        let shader = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(!shader.contains("return scene;"));
         assert!(!shader.contains("scene.a"));
@@ -2014,7 +2014,7 @@ mod tests {
     #[cfg(feature = "naadf")]
     #[test]
     fn radiance_shader_routes_sun_visibility_to_naadf_world_trace() {
-        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+        let shader = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(shader.contains("fn soft_shadow_backend"));
         assert!(shader.contains("use_naadf_for_query(NAADF_QUERY_SUN_VISIBILITY)"));
@@ -2026,7 +2026,7 @@ mod tests {
     #[cfg(feature = "naadf")]
     #[test]
     fn radiance_shader_routes_phase5_queries_to_naadf_world_trace() {
-        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+        let shader = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(shader.contains("const NAADF_QUERY_CONTACT_SHADOW: u32 = 8u"));
         assert!(shader.contains("fn contact_shadow_backend"));
@@ -2042,7 +2042,7 @@ mod tests {
     #[cfg(feature = "naadf")]
     #[test]
     fn radiance_shader_routes_gi_secondary_to_naadf_world_trace() {
-        let shader = include_str!("../../assets/shaders/radiance_cascades.wgsl");
+        let shader = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(shader.contains("fn trace_naadf_gi"));
         assert!(shader.contains("trace_naadf_world("));

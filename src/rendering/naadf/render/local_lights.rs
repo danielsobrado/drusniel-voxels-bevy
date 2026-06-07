@@ -5,8 +5,8 @@ use bevy::render::{
     renderer::{RenderDevice, RenderQueue},
 };
 
-use super::preview::NaadfPreviewSettings;
-use super::stats::NaadfRenderStatsBridge;
+use crate::rendering::naadf::preview::NaadfPreviewSettings;
+use crate::rendering::naadf::stats::NaadfRenderStatsBridge;
 
 pub const NAADF_LOCAL_LIGHT_MAX_RECORDS: usize = 64;
 pub const NAADF_LOCAL_LIGHT_RECORD_BYTES: u64 = 48;

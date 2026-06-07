@@ -19,17 +19,17 @@ use crate::atmosphere::{FogQuality, FogQualityTier, FogUniforms};
 use crate::rendering::array_loader::BlockyTextureArray;
 use crate::rendering::water_reflection::WaterReflectionMaskTexture;
 
-use super::config::NaadfDenoiseQuality;
-use super::gpu_buffers::{
+use crate::rendering::naadf::config::NaadfDenoiseQuality;
+use crate::rendering::naadf::gpu_buffers::{
     ExtractedNaadfEntityGpuUploads, ExtractedNaadfGpuUploads, NaadfEntityGpuBuffers,
     NaadfGpuBuffers,
 };
-use super::local_lights::{ExtractedNaadfLocalLights, NaadfLocalLightGpuBuffers};
-use super::preview::{
+use crate::rendering::naadf::local_lights::{ExtractedNaadfLocalLights, NaadfLocalLightGpuBuffers};
+use crate::rendering::naadf::preview::{
     NaadfMainView, NaadfPathBCompositorMode, NaadfPreviewCompositeMode, NaadfPreviewPipelineState,
     NaadfPreviewSettings,
 };
-use super::stats::NaadfRenderStatsBridge;
+use crate::rendering::naadf::stats::NaadfRenderStatsBridge;
 
 pub const NAADF_DEBUG_TRACE_RAYS_SHADER_PATH: &str = "shaders/naadf/debug_trace_rays.wgsl";
 pub const NAADF_DEBUG_TRACE_WORKGROUP_SIZE: u32 = 64;
@@ -57,7 +57,7 @@ pub const NAADF_PREVIEW_FULLSCREEN_COMPOSITE_SHADER_PATH: &str =
     "shaders/naadf/preview_fullscreen_composite.wgsl";
 pub const NAADF_PATH_B_OWNERSHIP_SHADER_PATH: &str = "shaders/naadf/path_b_ownership.wgsl";
 pub const NAADF_BUILD_BLOCKS_WORKGROUP_SIZE: u32 = 64;
-pub const NAADF_BUILD_BLOCKS_PER_CHUNK: u32 = super::layout::BLOCKS_PER_CHUNK;
+pub const NAADF_BUILD_BLOCKS_PER_CHUNK: u32 = crate::rendering::naadf::layout::BLOCKS_PER_CHUNK;
 pub const NAADF_BUILD_CHUNKS_WORKGROUP_SIZE: u32 = 64;
 pub const NAADF_PREVIEW_WORKGROUP_SIZE: u32 = 8;
 
@@ -507,20 +507,20 @@ pub fn init_naadf_preview_build_pipelines(
     pipeline_cache: Res<PipelineCache>,
 ) {
     let empty_group_layout = BindGroupLayoutDescriptor::new("naadf_empty_group_layout", &[]);
-    let build_blocks_entries = bind_layout_entries(super::layout::NAADF_BUILD_BLOCKS_LAYOUT);
+    let build_blocks_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BLOCKS_LAYOUT);
     let build_blocks_layout =
         BindGroupLayoutDescriptor::new("naadf_build_blocks_layout", &build_blocks_entries);
-    let build_bounds_entries = bind_layout_entries(super::layout::NAADF_BUILD_BOUNDS_LAYOUT);
+    let build_bounds_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BOUNDS_LAYOUT);
     let build_bounds_layout =
         BindGroupLayoutDescriptor::new("naadf_build_bounds_layout", &build_bounds_entries);
-    let build_mips_entries = bind_layout_entries(super::layout::NAADF_BUILD_MIPS_LAYOUT);
+    let build_mips_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_MIPS_LAYOUT);
     let build_mips_layout =
         BindGroupLayoutDescriptor::new("naadf_build_mips_layout", &build_mips_entries);
-    let build_chunks_entries = bind_layout_entries(super::layout::NAADF_BUILD_CHUNKS_LAYOUT);
+    let build_chunks_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_CHUNKS_LAYOUT);
     let build_chunks_layout =
         BindGroupLayoutDescriptor::new("naadf_build_chunks_layout", &build_chunks_entries);
     let build_chunk_bounds_entries =
-        bind_layout_entries(super::layout::NAADF_BUILD_CHUNK_BOUNDS_LAYOUT);
+        bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_CHUNK_BOUNDS_LAYOUT);
     let build_chunk_bounds_layout = BindGroupLayoutDescriptor::new(
         "naadf_build_chunk_bounds_layout",
         &build_chunk_bounds_entries,
@@ -832,17 +832,17 @@ fn storage_buffer_entry(binding: u32, read_only: bool) -> BindGroupLayoutEntry {
     storage_buffer_entry_for_stage(binding, read_only, ShaderStages::COMPUTE)
 }
 
-fn bind_layout_entries(specs: &[super::layout::NaadfBindEntrySpec]) -> Vec<BindGroupLayoutEntry> {
+fn bind_layout_entries(specs: &[crate::rendering::naadf::layout::NaadfBindEntrySpec]) -> Vec<BindGroupLayoutEntry> {
     specs
         .iter()
         .map(|spec| match spec.kind {
-            super::layout::NaadfBindEntryKind::StorageRead => {
+            crate::rendering::naadf::layout::NaadfBindEntryKind::StorageRead => {
                 storage_buffer_entry(spec.binding, true)
             }
-            super::layout::NaadfBindEntryKind::StorageReadWrite => {
+            crate::rendering::naadf::layout::NaadfBindEntryKind::StorageReadWrite => {
                 storage_buffer_entry(spec.binding, false)
             }
-            super::layout::NaadfBindEntryKind::Uniform => uniform_buffer_entry(spec.binding),
+            crate::rendering::naadf::layout::NaadfBindEntryKind::Uniform => uniform_buffer_entry(spec.binding),
         })
         .collect()
 }
@@ -1043,12 +1043,12 @@ impl ViewNode for NaadfPreviewBuildNode {
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let gpu_config = world
-            .get_resource::<super::gpu_buffers::ExtractedNaadfGpuConfig>()
+            .get_resource::<crate::rendering::naadf::gpu_buffers::ExtractedNaadfGpuConfig>()
             .cloned()
             .unwrap_or_default();
         let gpu_builder_enabled = gpu_config.prefer_gpu_builder;
         let gpu_builds = world
-            .get_resource::<super::prepare::ExtractedNaadfGpuBuilds>()
+            .get_resource::<crate::rendering::naadf::prepare::ExtractedNaadfGpuBuilds>()
             .cloned()
             .unwrap_or_default();
         let needs_gpu_build = gpu_builder_enabled && gpu_builds.has_work();
@@ -1703,7 +1703,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                     1,
                 );
                 if let Some(bridge) =
-                    world.get_resource::<super::prepare::NaadfGpuBuildDispatchBridge>()
+                    world.get_resource::<crate::rendering::naadf::prepare::NaadfGpuBuildDispatchBridge>()
                 {
                     bridge.publish(gpu_builds.generation, &gpu_builds.chunk_positions);
                 }
@@ -1776,7 +1776,7 @@ impl ViewNode for NaadfPreviewBuildNode {
                 0,
                 &allocation.stats_readback_buffer,
                 0,
-                super::gpu_buffers::NAADF_STATS_BUFFER_BYTES,
+                crate::rendering::naadf::gpu_buffers::NAADF_STATS_BUFFER_BYTES,
             );
         }
         let gi_rays = if preview_settings.bounce_count > 0 {

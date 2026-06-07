@@ -2,8 +2,8 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashSet, VecDeque};
 
-use super::config::NaadfConfig;
-use super::streaming::{
+use crate::rendering::naadf::config::NaadfConfig;
+use crate::rendering::naadf::streaming::{
     vertical_stream_radius_chunks, visible_loaded_region_targets, world_position_to_chunk,
 };
 use crate::camera::controller::PlayerCamera;

@@ -10,10 +10,10 @@ use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::view::ExtractedView;
 use std::borrow::Cow;
 
-use super::config::NaadfConfig;
-use super::gpu_buffers::{ExtractedNaadfGpuUploads, NaadfGpuBuffers};
-use super::pipeline::NAADF_FROXEL_SUN_MASK_SHADER_HANDLE;
-use super::stats::NaadfStats;
+use crate::rendering::naadf::config::NaadfConfig;
+use crate::rendering::naadf::gpu_buffers::{ExtractedNaadfGpuUploads, NaadfGpuBuffers};
+use crate::rendering::naadf::pipeline::NAADF_FROXEL_SUN_MASK_SHADER_HANDLE;
+use crate::rendering::naadf::stats::NaadfStats;
 use crate::environment::Sun;
 use crate::rendering::god_rays::GodRayFroxelParams;
 

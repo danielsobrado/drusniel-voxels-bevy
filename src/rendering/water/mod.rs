@@ -486,3 +486,7 @@ fn set_noble_shader_defs(shader: &mut Shader, toggles: WaterShaderToggles) {
         shader.shader_defs.push("USE_NOBLE_PARALLAX".into());
     }
 }
+pub mod displacement;
+pub mod finish;
+pub mod reflection;
+pub mod reflection_compositor;

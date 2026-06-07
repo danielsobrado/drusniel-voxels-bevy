@@ -1320,3 +1320,7 @@ fn blocky_weather_debug_flags() -> u32 {
         _ => 0,
     }
 }
+pub mod blocky;
+pub mod building;
+pub mod props;
+pub mod triplanar;

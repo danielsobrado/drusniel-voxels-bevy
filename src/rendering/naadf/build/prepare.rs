@@ -3,11 +3,11 @@ use bevy::render::MainWorld;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use super::cache::NaadfCache;
-use super::config::NaadfConfig;
-use super::dirty::NaadfDirtyChunkQueue;
-use super::gpu_buffers::{NaadfGpuChunkTable, NaadfGpuUploadQueue};
-use super::stats::NaadfStats;
+use crate::rendering::naadf::cache::NaadfCache;
+use crate::rendering::naadf::config::NaadfConfig;
+use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
+use crate::rendering::naadf::gpu_buffers::{NaadfGpuChunkTable, NaadfGpuUploadQueue};
+use crate::rendering::naadf::stats::NaadfStats;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NaadfUploadBudget {
@@ -341,7 +341,7 @@ mod tests {
         let stats = sync_gpu_build_queue_stats_for_config(
             &NaadfConfig {
                 enabled: true,
-                gpu: super::super::config::NaadfGpuConfig {
+                gpu: crate::rendering::naadf::config::NaadfGpuConfig {
                     prefer_gpu_builder: true,
                     ..default()
                 },
@@ -364,7 +364,7 @@ mod tests {
         let stats = sync_gpu_build_queue_stats_for_config(
             &NaadfConfig {
                 enabled: true,
-                debug: super::super::config::NaadfDebugConfig {
+                debug: crate::rendering::naadf::config::NaadfDebugConfig {
                     force_gpu_builder: true,
                     ..default()
                 },

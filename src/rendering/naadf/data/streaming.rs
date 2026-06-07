@@ -2,11 +2,11 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use super::cache::NaadfCache;
-use super::config::NaadfConfig;
-use super::dirty::NaadfDirtyChunkQueue;
-use super::gpu_buffers::NaadfGpuChunkTable;
-use super::stats::NaadfStats;
+use crate::rendering::naadf::cache::NaadfCache;
+use crate::rendering::naadf::config::NaadfConfig;
+use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
+use crate::rendering::naadf::gpu_buffers::NaadfGpuChunkTable;
+use crate::rendering::naadf::stats::NaadfStats;
 use crate::camera::controller::PlayerCamera;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;

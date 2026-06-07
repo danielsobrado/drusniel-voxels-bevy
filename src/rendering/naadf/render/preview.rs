@@ -3,11 +3,11 @@ use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponent;
 use bevy::render::render_graph::RenderLabel;
 
-use super::config::{
+use crate::rendering::naadf::config::{
     NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
     NaadfPreviewCompositeModeConfig,
 };
-use super::stats::{NaadfCacheState, NaadfStats};
+use crate::rendering::naadf::stats::{NaadfCacheState, NaadfStats};
 use crate::camera::controller::PlayerCamera;
 use crate::rendering::ray_tracing::{ExperimentalRenderMode, RayTracingSettings};
 
@@ -337,7 +337,7 @@ mod tests {
         let mut state = NaadfPreviewPipelineState::default();
         let config = NaadfConfig {
             enabled: true,
-            path_b: super::super::config::NaadfPathBConfig {
+            path_b: crate::rendering::naadf::config::NaadfPathBConfig {
                 compositor_mode: NaadfPathBCompositorModeConfig::HybridFarTerrain,
                 foundation_200_210_verified: false,
                 ..default()
@@ -360,7 +360,7 @@ mod tests {
     fn path_b_runtime_gate_requires_cache_and_gpu_upload_quiescence() {
         let config = NaadfConfig {
             enabled: true,
-            path_b: super::super::config::NaadfPathBConfig {
+            path_b: crate::rendering::naadf::config::NaadfPathBConfig {
                 compositor_mode: NaadfPathBCompositorModeConfig::HybridFarTerrain,
                 foundation_200_210_verified: true,
                 ..default()
@@ -445,7 +445,7 @@ mod tests {
     fn preview_settings_apply_config_with_clamps() {
         let mut settings = NaadfPreviewSettings::default();
         let config = NaadfConfig {
-            preview: super::super::config::NaadfPreviewConfig {
+            preview: crate::rendering::naadf::config::NaadfPreviewConfig {
                 max_ray_steps: 0,
                 bounce_count: 12,
                 accumulation_enabled: true,
@@ -468,7 +468,7 @@ mod tests {
                 composite_mode: NaadfPreviewCompositeModeConfig::PictureInPicture,
                 history_resolution_scale: 2.0,
             },
-            path_b: super::super::config::NaadfPathBConfig {
+            path_b: crate::rendering::naadf::config::NaadfPathBConfig {
                 compositor_mode: NaadfPathBCompositorModeConfig::DepthAudit,
                 depth_epsilon: -1.0,
                 enable_temporal: true,

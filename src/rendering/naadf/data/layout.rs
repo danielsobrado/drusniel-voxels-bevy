@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn wgsl_constants_match_rust_layout() {
-        let common = include_str!("../../../assets/shaders/naadf/common.wgsl");
+        let common = include_str!("../../../../assets/shaders/naadf/common.wgsl");
 
         assert_eq!(
             wgsl_u32_const(common, "NAADF_VOXELS_PER_BLOCK_AXIS"),
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn wgsl_layout_imports_common_shader() {
-        let layout = include_str!("../../../assets/shaders/naadf/layout.wgsl");
+        let layout = include_str!("../../../../assets/shaders/naadf/layout.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(layout, "shaders/naadf/layout.wgsl");
 
         assert!(shader.imports().any(|import| {
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn wgsl_ray_trace_imports_layout_and_uses_aadf_skip_records() {
-        let ray_trace = include_str!("../../../assets/shaders/naadf/ray_trace.wgsl");
+        let ray_trace = include_str!("../../../../assets/shaders/naadf/ray_trace.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(ray_trace, "shaders/naadf/ray_trace.wgsl");
 
         assert!(shader.imports().any(|import| {
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn wgsl_world_trace_declares_chunk_lookup_and_boundary_helpers() {
-        let world_trace = include_str!("../../../assets/shaders/naadf/world_trace.wgsl");
+        let world_trace = include_str!("../../../../assets/shaders/naadf/world_trace.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(world_trace, "shaders/naadf/world_trace.wgsl");
 
         assert!(shader.imports().any(|import| {
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn wgsl_block_builder_imports_layout_and_uses_raw_voxels() {
-        let build_blocks = include_str!("../../../assets/shaders/naadf/build_blocks.wgsl");
+        let build_blocks = include_str!("../../../../assets/shaders/naadf/build_blocks.wgsl");
         let shader =
             bevy_shader::Shader::from_wgsl(build_blocks, "shaders/naadf/build_blocks.wgsl");
 
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn wgsl_bounds_builder_writes_directional_bounds() {
-        let build_bounds = include_str!("../../../assets/shaders/naadf/build_bounds.wgsl");
+        let build_bounds = include_str!("../../../../assets/shaders/naadf/build_bounds.wgsl");
         let shader =
             bevy_shader::Shader::from_wgsl(build_bounds, "shaders/naadf/build_bounds.wgsl");
 
@@ -755,7 +755,7 @@ mod tests {
 
     #[test]
     fn wgsl_mip_builder_reduces_base_level_to_root() {
-        let build_mips = include_str!("../../../assets/shaders/naadf/build_mips.wgsl");
+        let build_mips = include_str!("../../../../assets/shaders/naadf/build_mips.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(build_mips, "shaders/naadf/build_mips.wgsl");
 
         assert!(shader.imports().any(|import| {
@@ -776,7 +776,7 @@ mod tests {
 
     #[test]
     fn wgsl_chunk_builder_writes_chunk_nodes_from_block_records() {
-        let build_chunks = include_str!("../../../assets/shaders/naadf/build_chunks.wgsl");
+        let build_chunks = include_str!("../../../../assets/shaders/naadf/build_chunks.wgsl");
         let shader =
             bevy_shader::Shader::from_wgsl(build_chunks, "shaders/naadf/build_chunks.wgsl");
 
@@ -800,7 +800,7 @@ mod tests {
     #[test]
     fn wgsl_chunk_bounds_builder_writes_chunk_skip_word() {
         let build_chunk_bounds =
-            include_str!("../../../assets/shaders/naadf/build_chunk_bounds.wgsl");
+            include_str!("../../../../assets/shaders/naadf/build_chunk_bounds.wgsl");
         let _shader = bevy_shader::Shader::from_wgsl(
             build_chunk_bounds,
             "shaders/naadf/build_chunk_bounds.wgsl",
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn wgsl_lighting_queries_import_ray_trace_for_sun_visibility() {
-        let lighting = include_str!("../../../assets/shaders/naadf/lighting_queries.wgsl");
+        let lighting = include_str!("../../../../assets/shaders/naadf/lighting_queries.wgsl");
         let shader =
             bevy_shader::Shader::from_wgsl(lighting, "shaders/naadf/lighting_queries.wgsl");
 
@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     fn wgsl_radiance_shader_routes_probe_rays_through_backend_abstraction() {
-        let radiance = include_str!("../../../assets/shaders/radiance_cascades.wgsl");
+        let radiance = include_str!("../../../../assets/shaders/radiance_cascades.wgsl");
 
         assert!(radiance.contains("voxel_backend: u32"));
         assert!(radiance.contains("voxel_backend_query_mask: u32"));
@@ -871,7 +871,7 @@ mod tests {
 
     #[test]
     fn naadf_bench_counters_publish_radiance_backend_state() {
-        let systems = include_str!("systems.rs");
+        let systems = include_str!("../render/systems.rs");
 
         assert!(systems.contains("naadf.radiance_backend_available"));
         assert!(systems.contains("naadf.radiance_query_mask"));
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn wgsl_froxel_sun_mask_traces_one_visibility_ray_per_froxel() {
-        let froxel = include_str!("../../../assets/shaders/naadf/froxel_sun_mask.wgsl");
+        let froxel = include_str!("../../../../assets/shaders/naadf/froxel_sun_mask.wgsl");
         let shader = bevy_shader::Shader::from_wgsl(froxel, "shaders/naadf/froxel_sun_mask.wgsl");
 
         assert!(shader.imports().any(|import| {
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn wgsl_debug_trace_rays_has_ray_count_guard() {
-        let debug_trace = include_str!("../../../assets/shaders/naadf/debug_trace_rays.wgsl");
+        let debug_trace = include_str!("../../../../assets/shaders/naadf/debug_trace_rays.wgsl");
 
         assert!(debug_trace.contains("ray_count"));
         assert!(debug_trace.contains("if index >= naadf_debug_trace_params.ray_count"));
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn wgsl_debug_visualize_declares_ray_step_heatmap() {
-        let debug_visualize = include_str!("../../../assets/shaders/naadf/debug_visualize.wgsl");
+        let debug_visualize = include_str!("../../../../assets/shaders/naadf/debug_visualize.wgsl");
 
         assert!(debug_visualize.contains("@compute"));
         assert!(debug_visualize.contains("naadf_ray_step_heatmap_inputs"));
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn wgsl_first_hit_declares_preview_material_path() {
-        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
+        let first_hit = include_str!("../../../../assets/shaders/naadf/first_hit.wgsl");
 
         assert!(first_hit.contains("#import \"shaders/naadf/ray_trace.wgsl\""));
         assert!(first_hit.contains("#import \"shaders/naadf/world_trace.wgsl\""));
@@ -960,7 +960,7 @@ mod tests {
 
     #[test]
     fn wgsl_path_b_first_hit_is_terrain_only() {
-        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit_path_b_terrain.wgsl");
+        let first_hit = include_str!("../../../../assets/shaders/naadf/first_hit_path_b_terrain.wgsl");
 
         assert!(first_hit.contains("trace_naadf_world_lod"));
         assert!(first_hit.contains("textureSampleLevel"));
@@ -975,7 +975,7 @@ mod tests {
 
     #[test]
     fn wgsl_entity_volume_record_matches_rust_pack_order() {
-        let first_hit = include_str!("../../../assets/shaders/naadf/first_hit.wgsl");
+        let first_hit = include_str!("../../../../assets/shaders/naadf/first_hit.wgsl");
         let fields = wgsl_struct_fields(first_hit, "NaadfEntityVolumeRecord");
 
         assert_eq!(
@@ -1009,7 +1009,7 @@ mod tests {
 
     #[test]
     fn wgsl_preview_lighting_uses_first_hit_shading() {
-        let preview_lighting = include_str!("../../../assets/shaders/naadf/preview_lighting.wgsl");
+        let preview_lighting = include_str!("../../../../assets/shaders/naadf/preview_lighting.wgsl");
 
         assert!(preview_lighting.contains("shade_naadf_preview"));
         assert!(preview_lighting.contains("naadf_preview_shaded_color"));
@@ -1018,7 +1018,7 @@ mod tests {
 
     #[test]
     fn wgsl_preview_composite_declares_modes() {
-        let composite = include_str!("../../../assets/shaders/naadf/preview_composite.wgsl");
+        let composite = include_str!("../../../../assets/shaders/naadf/preview_composite.wgsl");
 
         assert!(composite.contains("NAADF_PREVIEW_FULLSCREEN"));
         assert!(composite.contains("NAADF_PREVIEW_SPLIT_VIEW"));
@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     fn wgsl_preview_fullscreen_composite_declares_fragment_modes() {
         let composite =
-            include_str!("../../../assets/shaders/naadf/preview_fullscreen_composite.wgsl");
+            include_str!("../../../../assets/shaders/naadf/preview_fullscreen_composite.wgsl");
 
         assert!(composite.contains("@fragment"));
         assert!(composite.contains("naadf_scene_color"));
@@ -1048,7 +1048,7 @@ mod tests {
 
     #[test]
     fn wgsl_denoise_declares_edge_aware_compute_pass() {
-        let denoise = include_str!("../../../assets/shaders/naadf/denoise.wgsl");
+        let denoise = include_str!("../../../../assets/shaders/naadf/denoise.wgsl");
 
         assert!(denoise.contains("@compute"));
         assert!(denoise.contains("fn naadf_denoise"));
@@ -1060,7 +1060,7 @@ mod tests {
 
     #[test]
     fn wgsl_temporal_accumulation_declares_blend_and_reset() {
-        let temporal = include_str!("../../../assets/shaders/naadf/temporal_accumulation.wgsl");
+        let temporal = include_str!("../../../../assets/shaders/naadf/temporal_accumulation.wgsl");
 
         assert!(temporal.contains("NaadfTemporalAccumulationParams"));
         assert!(temporal.contains("reset_history"));
@@ -1084,7 +1084,7 @@ mod tests {
 
     #[test]
     fn wgsl_path_b_ownership_declares_decision_counters() {
-        let ownership = include_str!("../../../assets/shaders/naadf/path_b_ownership.wgsl");
+        let ownership = include_str!("../../../../assets/shaders/naadf/path_b_ownership.wgsl");
 
         assert!(ownership.contains("fn naadf_path_b_ownership"));
         assert!(ownership.contains("path_b_depth_rejects"));
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn wgsl_spatial_resampling_declares_edge_aware_helpers() {
-        let spatial = include_str!("../../../assets/shaders/naadf/spatial_resampling.wgsl");
+        let spatial = include_str!("../../../../assets/shaders/naadf/spatial_resampling.wgsl");
 
         assert!(spatial.contains("NaadfSpatialResamplingParams"));
         assert!(spatial.contains("fn naadf_spatial_weight"));
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn wgsl_gi_trace_declares_preview_compute_pass() {
-        let gi = include_str!("../../../assets/shaders/naadf/gi_trace.wgsl");
+        let gi = include_str!("../../../../assets/shaders/naadf/gi_trace.wgsl");
 
         assert!(gi.contains("@compute"));
         assert!(gi.contains("fn naadf_gi_trace"));
@@ -1131,7 +1131,7 @@ mod tests {
 
     #[test]
     fn wgsl_path_trace_declares_reference_compute_pass() {
-        let path_trace = include_str!("../../../assets/shaders/naadf/path_trace.wgsl");
+        let path_trace = include_str!("../../../../assets/shaders/naadf/path_trace.wgsl");
 
         assert!(path_trace.contains("@compute"));
         assert!(path_trace.contains("fn naadf_path_trace_reference"));
