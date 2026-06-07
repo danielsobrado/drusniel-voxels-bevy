@@ -318,7 +318,24 @@ proved the chain *worked* during a churn bench but was inert in practice:
 - Downgraded the per-frame "mesh dirty queue backed up" and "Waiting for mesh cache"
   spam to `debug!`.
 
+### Stage 4 — stitch geometry (landed)
+
+`stitch_seam` (`lod_boundary_strip.rs`) zips this chunk's fine boundary polyline to the
+coarser neighbour's on the shared seam plane (sort by along-seam axis, **monotone strip —
+never a fan**), producing watertight transition triangles. `append_seam_stitches`
+(`meshing/lod_seam.rs`) appends them to the solid mesh, un-morphs those faces' boundary
+verts so the main surface meets the stitch, and seals their skirts; wired into all 4 SN
+meshers. This closes the two cases the morph weld alone could not — the **steep-side gap**
+(segment over-distance) and the **2:1 density T-junction**. User-confirmed: artifacts
+reduced further. Bench (live-lod) mesh-dirty p99 ridge/jump/forest 52.8/58.5/59.9 vs
+baseline 65.4/59.5/62.8 — **perf-neutral** (stitch replaces skirts on sealed faces).
+
+Still remaining after Stage 4: **delta>1 peaks** (consume feeds delta-1 strips only),
+faces whose stitch validation rejects (keep skirt), the **v1 default stitch material**
+(shade can mismatch), and **Stage 5 seam normals** (dark welds).
+
 ### Commits
 
-`bdff606` (Stage 3 infra), `9a07f24` (Stage 3 threading), plus the consume-on-all-paths
-+ dirty-propagation + counters change (this section).
+`bdff606` (Stage 3 infra), `9a07f24` (Stage 3 threading), `e145380` (consume-on-all-paths
++ dirty-propagation + counters), `fb3f798` (Stage 4 stitch core), `da50e51` (Stage 4
+stitch wiring).
