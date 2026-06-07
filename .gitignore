@@ -73,3 +73,5 @@ assets/models/vegetation/grass_bushes/ultimate_stylized_nature/*.png
 debug/*.png
 docs/lod/image/*.png
 *.patch
+pkg/mod/cache/
+pkg/sumdb/

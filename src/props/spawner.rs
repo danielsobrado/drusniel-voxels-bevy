@@ -109,7 +109,7 @@ pub fn spawn_props_on_terrain(
     if mesh_cache.enabled && !mesh_cache.is_ready() {
         // Log progress occasionally
         if frame.0 % 60 == 0 {
-            info!(
+            debug!(
                 "Waiting for mesh cache: {} pending GLTFs, {} cached",
                 mesh_cache.pending_gltfs.len(),
                 mesh_cache.meshes.len()

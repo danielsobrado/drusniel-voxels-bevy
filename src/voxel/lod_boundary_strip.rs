@@ -26,6 +26,30 @@ use crate::voxel::skirt::ChunkFace;
 use bevy::math::{IVec3, Vec2, Vec3};
 use bevy::prelude::Resource;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Running diagnostics for the vertex-exact seam consume, so a run can show whether the
+/// publish -> lookup -> segment-weld chain is actually firing (and where it breaks).
+pub static STRIPS_PUBLISHED: AtomicU64 = AtomicU64::new(0);
+pub static STRIP_LOOKUPS_HIT: AtomicU64 = AtomicU64::new(0);
+pub static SEGMENT_TARGETS_USED: AtomicU64 = AtomicU64::new(0);
+pub static ISO_TARGETS_USED: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+pub fn bump(counter: &AtomicU64) {
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Log the consume-chain counters (call at build-complete / periodically).
+pub fn log_strip_diag(context: &str) {
+    bevy::log::info!(
+        "STRIP DIAG [{context}]: published={} lookups_hit={} segment_targets={} iso_targets={}",
+        STRIPS_PUBLISHED.load(Ordering::Relaxed),
+        STRIP_LOOKUPS_HIT.load(Ordering::Relaxed),
+        SEGMENT_TARGETS_USED.load(Ordering::Relaxed),
+        ISO_TARGETS_USED.load(Ordering::Relaxed),
+    );
+}
 
 /// Local-position dedup resolution (1/256 voxel). Surface Nets vertices are well
 /// inside a voxel, so this merges per-triangle duplicates without collapsing distinct
@@ -275,6 +299,13 @@ impl LodBoundaryStripCache {
     /// Drop a chunk's strips (e.g. on unload), so stale boundaries are never matched.
     pub fn remove(&mut self, chunk_pos: IVec3) {
         self.chunks.remove(&chunk_pos);
+    }
+
+    /// Revision of the currently-published strips for `chunk_pos`, or `None` if it has
+    /// none. Used to detect when a re-mesh actually changed the strip so finer
+    /// neighbours can be dirtied for re-consume (the convergence trigger).
+    pub fn revision_for(&self, chunk_pos: IVec3) -> Option<u64> {
+        self.chunks.get(&chunk_pos).map(|c| c.revision)
     }
 
     /// Look up `chunk_pos`'s strip for `face`. When `expected_revision` is `Some`, a

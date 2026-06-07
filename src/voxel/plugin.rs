@@ -2162,6 +2162,11 @@ fn poll_chunk_generation_tasks(
     // Check if generation is complete
     if gen_state.chunks_completed >= gen_state.total_chunks {
         gen_state.is_complete = true;
+        info!(
+            "Terrain mesh build COMPLETE: {} chunks meshed",
+            gen_state.chunks_completed
+        );
+        crate::voxel::lod_boundary_strip::log_strip_diag("build complete");
 
         if let Some(start_time) = gen_state.start_time {
             gen_state.world_stats.log_summary(start_time.elapsed());
@@ -2343,6 +2348,10 @@ fn mesh_dirty_chunks_system(
     let frame = &timing_params.frame;
     let timing = &mut timing_params.timing;
     let generation_complete = timing_params.gen_state.is_complete;
+    // Periodic vertex-exact-seam consume counters (~every 5s at 60fps).
+    if frame.0 % 300 == 0 {
+        crate::voxel::lod_boundary_strip::log_strip_diag("periodic");
+    }
     let mesh_dirty_total_start = timing.enabled.then(Instant::now);
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
@@ -2374,7 +2383,7 @@ fn mesh_dirty_chunks_system(
             .queue_warning
             .should_warn(timing_params.time.elapsed_secs())
     {
-        warn!(
+        debug!(
             "mesh dirty queue backed up: {} queued (per-frame visit cap {})",
             dirty_chunks_queued, MAX_DIRTY_CHUNKS_VISITED_PER_FRAME,
         );
@@ -2589,9 +2598,17 @@ fn mesh_dirty_chunks_system(
         let mesh_lod_level =
             transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
 
-        // Step 1: Generate mesh data using immutable borrow (with timing)
+        // Step 1: Generate mesh data using immutable borrow (with timing).
+        // Vertex-exact seam: consume the coarse neighbour strips, then publish ours.
+        let neighbor_strips = crate::voxel::mesh_commit::lookup_neighbor_boundary_strips(
+            &timing_params.strip_cache,
+            &world,
+            chunk_pos,
+            mesh_lod_level,
+            &neighbor_lods,
+        );
         let mesh_start = Instant::now();
-        let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        let mut mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_for_request(MeshRequest {
                 chunk,
                 world: &world,
@@ -2606,7 +2623,7 @@ fn mesh_dirty_chunks_system(
                     bench_params.forensics.as_deref(),
                     &mc_spike.settings,
                 ),
-                neighbor_strips: None,
+                neighbor_strips: Some(&neighbor_strips),
                 mc_settings: Some(&*mc_spike.settings),
             })
         } else {
@@ -2614,6 +2631,15 @@ fn mesh_dirty_chunks_system(
         };
         let mesh_elapsed = mesh_start.elapsed();
         mesh_dirty_generate_us += mesh_elapsed.as_micros() as u64;
+        crate::voxel::mesh_commit::publish_chunk_boundary_strips(
+            &mut timing_params.strip_cache,
+            &mut world,
+            chunk_pos,
+            mesh_lod_level,
+            target_mode,
+            &neighbor_lods,
+            std::mem::take(&mut mesh_result.boundary_strips),
+        );
 
         // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;

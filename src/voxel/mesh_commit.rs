@@ -610,7 +610,7 @@ pub(crate) fn process_lod_mesh_transaction(
 /// that neighbour's `last_terrain_mesh_key`. Missing/stale/over-distance -> the face's
 /// entry stays `None` and the morph falls back to the iso target (never blocks). Delta>1
 /// is skipped (the coarse strip's LOD wouldn't match what this chunk welds to).
-fn lookup_neighbor_boundary_strips(
+pub(crate) fn lookup_neighbor_boundary_strips(
     strip_cache: &crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
     world: &VoxelWorld,
     chunk_pos: IVec3,
@@ -646,6 +646,9 @@ fn lookup_neighbor_boundary_strips(
         else {
             continue;
         };
+        crate::voxel::lod_boundary_strip::bump(
+            &crate::voxel::lod_boundary_strip::STRIP_LOOKUPS_HIT,
+        );
         let cloned = Some(strip.clone());
         match face {
             ChunkFace::NegX => strips.neg_x = cloned,
@@ -656,6 +659,73 @@ fn lookup_neighbor_boundary_strips(
         }
     }
     strips
+}
+
+/// Convergence trigger: when a chunk's exported boundary strip changes, dirty its
+/// delta-1 **finer** neighbours so they re-mesh next frame and weld to the new coarse
+/// boundary. Without this the fine side never re-consumes after the coarse side
+/// re-meshes (the strip publish/commit revision only lines up across frames, not within
+/// one transaction). Bounded to one hop: consuming a strip changes a chunk's morph
+/// targets, not its pre-morph boundary, so a re-consume does not re-change its own strip.
+fn dirty_finer_neighbors_for_strip(
+    world: &mut VoxelWorld,
+    chunk_pos: IVec3,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) {
+    use crate::voxel::chunk::MeshDirtyReason;
+    use crate::voxel::lod_boundary_strip::face_neighbor_offset;
+    use crate::voxel::meshing::neighbor_lod_for_face;
+    use crate::voxel::skirt::ChunkFace;
+
+    if my_lod.step_size() == 0 {
+        return;
+    }
+    for face in [
+        ChunkFace::NegX,
+        ChunkFace::PosX,
+        ChunkFace::NegZ,
+        ChunkFace::PosZ,
+    ] {
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue;
+        };
+        // Neighbour exactly one level FINER (it consumes our strip): its step == ours/2.
+        if neighbor_lod.step_size().saturating_mul(2) != my_lod.step_size() {
+            continue;
+        }
+        let neighbor_pos = chunk_pos + face_neighbor_offset(face);
+        if let Some(mut neighbor) = world.get_chunk_mut(neighbor_pos) {
+            neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
+        }
+    }
+}
+
+/// Publish (or evict) a chunk's exported boundary strips for finer neighbours to weld
+/// to, and — when the strip actually changed — dirty the delta-1 finer neighbours so
+/// they re-mesh and consume it. Called from EVERY mesh path (transaction, regular dirty,
+/// generation) so a coarse strip exists regardless of how the chunk was meshed.
+pub(crate) fn publish_chunk_boundary_strips(
+    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
+    world: &mut VoxelWorld,
+    chunk_pos: IVec3,
+    mesh_lod_level: LodLevel,
+    target_mode: MeshMode,
+    neighbor_lods: &NeighborLods,
+    boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
+) {
+    let strip_revision = terrain_mesh_dedup_key(target_mode, mesh_lod_level, neighbor_lods);
+    let previous_revision = strip_cache.revision_for(chunk_pos);
+    let new_revision = (!boundary_strips.is_empty()).then_some(strip_revision);
+    if boundary_strips.is_empty() {
+        strip_cache.remove(chunk_pos);
+    } else {
+        crate::voxel::lod_boundary_strip::bump(&crate::voxel::lod_boundary_strip::STRIPS_PUBLISHED);
+        strip_cache.insert(chunk_pos, strip_revision, boundary_strips);
+    }
+    if previous_revision != new_revision {
+        dirty_finer_neighbors_for_strip(world, chunk_pos, mesh_lod_level, neighbor_lods);
+    }
 }
 
 fn prepare_lod_chunk_commit(
@@ -812,12 +882,15 @@ fn prepare_lod_chunk_commit(
     // Publish (or evict) this chunk's exported boundary strips for finer neighbours to
     // weld to. Revision = the same dedup key the commit stamps, so a consumer that
     // checks the neighbour's `last_terrain_mesh_key` only matches a current strip.
-    let strip_revision = terrain_mesh_dedup_key(target_mode, mesh_lod_level, &neighbor_lods);
-    if boundary_strips.is_empty() {
-        strip_cache.remove(chunk_pos);
-    } else {
-        strip_cache.insert(chunk_pos, strip_revision, boundary_strips);
-    }
+    publish_chunk_boundary_strips(
+        strip_cache,
+        world,
+        chunk_pos,
+        mesh_lod_level,
+        target_mode,
+        &neighbor_lods,
+        boundary_strips,
+    );
 
     let vertex_count = solid.positions.len() as u32;
     let triangle_count = (solid.indices.len() / 3) as u32;

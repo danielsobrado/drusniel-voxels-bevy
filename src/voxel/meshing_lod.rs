@@ -139,7 +139,7 @@ pub fn append_morph_targets(
             // Stage 3: weld to the actual coarse Surface Nets SEGMENT when the
             // neighbour's strip is available (vertex-exact, no lip/hole/spike); fall
             // back to the 1-D coarse iso when it isn't (missing/stale/over-distance).
-            let target_local = neighbor_strips
+            let segment_target = neighbor_strips
                 .and_then(|strips| strips.for_face(face))
                 .and_then(|strip| {
                     crate::voxel::lod_boundary_strip::coarse_segment_target_local(
@@ -149,18 +149,29 @@ pub fn append_morph_targets(
                         strip,
                         config.max_stitch_distance,
                     )
-                })
-                .or_else(|| {
-                    boundary_target_local(
-                        local,
-                        face,
-                        world,
-                        chunk_origin,
-                        my_lod,
-                        neighbor_lod,
-                        config.max_stitch_distance,
-                    )
                 });
+            let target_local = if let Some(t) = segment_target {
+                crate::voxel::lod_boundary_strip::bump(
+                    &crate::voxel::lod_boundary_strip::SEGMENT_TARGETS_USED,
+                );
+                Some(t)
+            } else {
+                let iso = boundary_target_local(
+                    local,
+                    face,
+                    world,
+                    chunk_origin,
+                    my_lod,
+                    neighbor_lod,
+                    config.max_stitch_distance,
+                );
+                if iso.is_some() {
+                    crate::voxel::lod_boundary_strip::bump(
+                        &crate::voxel::lod_boundary_strip::ISO_TARGETS_USED,
+                    );
+                }
+                iso
+            };
             let Some(target_local) = target_local else {
                 continue;
             };
