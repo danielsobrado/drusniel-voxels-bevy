@@ -412,6 +412,117 @@ pub fn coarse_segment_target_local(
     target.is_finite().then_some(target)
 }
 
+// ============================================================================
+// Stage 4: stitch geometry (watertight transition triangles)
+// ============================================================================
+
+/// A render-only transition surface bridging a fine boundary polyline to a coarser one
+/// on a shared seam plane. World-space positions/normals + triangle indices.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SeamStitch {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+}
+
+impl SeamStitch {
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+    pub fn triangle_count(&self) -> usize {
+        self.indices.len() / 3
+    }
+}
+
+/// Triangulate the transition between a **fine** boundary polyline and a **coarser** one
+/// that share a seam plane (the 2:1-ish density bridge). Both are projected to the seam
+/// frame; we sort by the along-seam axis (`proj.x`) and **zip** them into a triangle
+/// strip, so the fine edges and coarse edge become one watertight surface — no gap (the
+/// steep-side hole) and no T-junction (the density crack). This is the review's "stitch
+/// geometry" (Mode B): it bridges the *original* fine chain to the *actual* coarse
+/// segment, so it does not depend on the morph weld succeeding.
+///
+/// Returns `None` when either side has < 2 vertices or their along-seam spans do not
+/// overlap meaningfully — the caller then keeps the skirt fallback. (Monotone strip;
+/// never a blind fan.)
+pub fn stitch_seam(fine: &[StripVertex], coarse: &[StripVertex]) -> Option<SeamStitch> {
+    if fine.len() < 2 || coarse.len() < 2 {
+        return None;
+    }
+
+    let mut f: Vec<&StripVertex> = fine.iter().collect();
+    let mut c: Vec<&StripVertex> = coarse.iter().collect();
+    let along = |v: &&StripVertex| v.proj.x;
+    f.sort_by(|a, b| along(a).total_cmp(&along(b)));
+    c.sort_by(|a, b| along(a).total_cmp(&along(b)));
+
+    // Spans must overlap, else this is not a shared seam (e.g. partial neighbour).
+    let f_span = (along(&f[0]), along(&f[f.len() - 1]));
+    let c_span = (along(&c[0]), along(&c[c.len() - 1]));
+    if f_span.1 < c_span.0 || c_span.1 < f_span.0 {
+        return None;
+    }
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(f.len() + c.len());
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(f.len() + c.len());
+    for v in &f {
+        positions.push(v.world.to_array());
+        normals.push(v.normal.to_array());
+    }
+    let coarse_off = positions.len() as u32;
+    for v in &c {
+        positions.push(v.world.to_array());
+        normals.push(v.normal.to_array());
+    }
+
+    let mut indices: Vec<u32> = Vec::new();
+    // Orient each triangle so its geometric normal agrees with the vertex normals (so
+    // the stitch faces the same way as the terrain — no backface-culled invisible strip).
+    let mut emit = |a: u32, b: u32, cc: u32| {
+        let pa = Vec3::from_array(positions[a as usize]);
+        let pb = Vec3::from_array(positions[b as usize]);
+        let pc = Vec3::from_array(positions[cc as usize]);
+        let geo = (pb - pa).cross(pc - pa);
+        let avg = Vec3::from_array(normals[a as usize])
+            + Vec3::from_array(normals[b as usize])
+            + Vec3::from_array(normals[cc as usize]);
+        if geo.dot(avg) >= 0.0 {
+            indices.extend_from_slice(&[a, b, cc]);
+        } else {
+            indices.extend_from_slice(&[a, cc, b]);
+        }
+    };
+
+    let (mut i, mut j) = (0usize, 0usize);
+    while i + 1 < f.len() || j + 1 < c.len() {
+        let advance_fine = if i + 1 >= f.len() {
+            false
+        } else if j + 1 >= c.len() {
+            true
+        } else {
+            along(&f[i + 1]) <= along(&c[j + 1])
+        };
+        let fi = i as u32;
+        let cj = coarse_off + j as u32;
+        if advance_fine {
+            emit(fi, cj, fi + 1);
+            i += 1;
+        } else {
+            emit(fi, cj, cj + 1);
+            j += 1;
+        }
+    }
+
+    if indices.is_empty() {
+        return None;
+    }
+    Some(SeamStitch {
+        positions,
+        normals,
+        indices,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,6 +678,38 @@ mod tests {
         assert!(n.for_face(ChunkFace::NegZ).is_none());
         assert_eq!(opposite_face(ChunkFace::PosX), ChunkFace::NegX);
         assert_eq!(face_neighbor_offset(ChunkFace::PosX), IVec3::new(1, 0, 0));
+    }
+
+    #[test]
+    fn stitch_seam_zips_fine_chain_to_coarse_segment() {
+        let sv = |z: f32, y: f32| StripVertex {
+            local: Vec3::new(0.0, y, z),
+            world: Vec3::new(16.0, y, z),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            proj: Vec2::new(z, y),
+        };
+        // 3 fine verts (z=0,1,2) bridged to 2 coarse verts (z=0,2): a 2:1 density gap.
+        let fine = vec![sv(0.0, 0.0), sv(1.0, 0.0), sv(2.0, 0.0)];
+        let coarse = vec![sv(0.0, 0.0), sv(2.0, 0.0)];
+        let stitch = stitch_seam(&fine, &coarse).expect("stitch");
+        assert_eq!(stitch.positions.len(), 5, "all fine + coarse verts kept");
+        assert_eq!(stitch.triangle_count(), 3, "3+2 polyline zips to 3 triangles");
+        // Every index in range.
+        assert!(stitch.indices.iter().all(|&i| (i as usize) < stitch.positions.len()));
+    }
+
+    #[test]
+    fn stitch_seam_rejects_non_overlapping_spans() {
+        let sv = |z: f32| StripVertex {
+            local: Vec3::new(0.0, 0.0, z),
+            world: Vec3::new(16.0, 0.0, z),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            proj: Vec2::new(z, 0.0),
+        };
+        let fine = vec![sv(0.0), sv(1.0)];
+        let coarse = vec![sv(5.0), sv(6.0)];
+        assert!(stitch_seam(&fine, &coarse).is_none(), "disjoint spans -> skirt fallback");
+        assert!(stitch_seam(&fine, &[sv(0.0)]).is_none(), "coarse < 2 verts -> None");
     }
 
     #[test]
