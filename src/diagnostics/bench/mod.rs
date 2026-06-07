@@ -1,3 +1,8 @@
+pub mod cli;
+pub mod config;
+pub mod plugin;
+pub mod scene;
+
 use crate::atmosphere::{FogQuality, FogQualityTier};
 use crate::camera::controller::{CameraMode, PlayerCamera};
 use crate::environment::AtmosphereSettings;

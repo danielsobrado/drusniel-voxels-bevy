@@ -269,8 +269,8 @@ pub(crate) struct MultiplayerResources<'w> {
 #[derive(SystemParam)]
 pub struct PreviewResources<'w> {
     pub image: Option<Res<'w, BlockPreviewImage>>,
-    pub triplanar_image: Option<Res<'w, crate::menu::preview_3d::TriplanarPreviewImage>>,
-    pub preview_material: Option<Res<'w, crate::menu::preview_3d::BlockPreviewMaterial>>,
+    pub triplanar_image: Option<Res<'w, preview_3d::TriplanarPreviewImage>>,
+    pub preview_material: Option<Res<'w, preview_3d::BlockPreviewMaterial>>,
     pub triplanar_material:
         Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
     pub mapping: Option<Res<'w, crate::rendering::array_loader::AtlasMapping>>,

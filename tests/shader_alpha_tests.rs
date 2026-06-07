@@ -118,7 +118,7 @@ fn alpha_mask_vegetation_discards_instead_of_writing_translucent_scene_alpha() {
 
 #[test]
 fn depth_dependent_passes_have_depth_before_weather_overlay() {
-    let weather_overlay = include_str!("../src/rendering/weather_overlay.rs");
+    let weather_overlay = include_str!("../src/rendering/diagnostics/weather_overlay.rs");
     let compact_weather = weather_overlay
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -151,7 +151,7 @@ fn god_rays_clamps_dynamic_sample_count_before_division() {
 #[test]
 fn god_rays_accept_naadf_froxel_visibility_modulation() {
     let god_rays = include_str!("../assets/shaders/god_rays.wgsl");
-    let rust = include_str!("../src/rendering/god_rays.rs");
+    let rust = include_str!("../src/rendering/effects/god_rays.rs");
 
     assert!(god_rays.contains("var<storage, read> naadf_froxel_mask"));
     assert!(god_rays.contains("fn naadf_froxel_column_visibility"));
@@ -163,7 +163,7 @@ fn god_rays_accept_naadf_froxel_visibility_modulation() {
 
 #[test]
 fn naadf_froxel_fog_integration_is_not_a_flat_scalar() {
-    let fog = include_str!("../src/atmosphere/fog.rs");
+    let fog = include_str!("../src/world/environment/atmosphere/fog.rs");
 
     assert_not_contains(
         fog,
@@ -175,8 +175,8 @@ fn naadf_froxel_fog_integration_is_not_a_flat_scalar() {
 
 #[test]
 fn terrain_materials_participate_in_depth_prepass() {
-    let triplanar = include_str!("../src/rendering/triplanar_material.rs");
-    let blocky = include_str!("../src/rendering/blocky_material.rs");
+    let triplanar = include_str!("../src/rendering/materials/triplanar.rs");
+    let blocky = include_str!("../src/rendering/materials/blocky.rs");
     let compact_triplanar = triplanar.split_whitespace().collect::<Vec<_>>().join(" ");
     let compact_blocky = blocky.split_whitespace().collect::<Vec<_>>().join(" ");
 
@@ -238,7 +238,7 @@ fn triplanar_normal_lod_uses_camera_distance() {
 
 #[test]
 fn gtao_is_registered_as_a_real_post_process_node() {
-    let gtao = include_str!("../src/rendering/gtao.rs");
+    let gtao = include_str!("../src/rendering/effects/gtao.rs");
     let gtao_shader = include_str!("../assets/shaders/gtao_main.wgsl");
     let compact = gtao.split_whitespace().collect::<Vec<_>>().join(" ");
 
@@ -283,8 +283,8 @@ fn gtao_is_registered_as_a_real_post_process_node() {
 
 #[test]
 fn internal_shader_handles_are_unique_for_water_and_god_rays() {
-    let water = include_str!("../src/rendering/water.rs");
-    let god_rays = include_str!("../src/rendering/god_rays.rs");
+    let water = include_str!("../src/rendering/water/mod.rs");
+    let god_rays = include_str!("../src/rendering/effects/god_rays.rs");
 
     let noble_gerstner_uuid = water
         .lines()
@@ -305,7 +305,7 @@ fn internal_shader_handles_are_unique_for_water_and_god_rays() {
 
 #[test]
 fn pcss_is_not_advertised_as_active_without_shader_integration() {
-    let pcss = include_str!("../src/rendering/pcss.rs");
+    let pcss = include_str!("../src/rendering/shadows/pcss.rs");
     let pcss_config = include_str!("../assets/config/pcss.yaml");
 
     assert!(
@@ -381,7 +381,7 @@ fn inactive_sdf_and_stochastic_probe_prototypes_are_not_shipped_as_shaders() {
 fn inactive_vegetation_and_water_foam_prototypes_are_not_shipped_as_shaders() {
     let grass = include_str!("../assets/shaders/grass.wgsl");
     let water_fragment = include_str!("../assets/shaders/water_fragment.wgsl");
-    let water = include_str!("../src/rendering/water.rs");
+    let water = include_str!("../src/rendering/water/mod.rs");
 
     assert!(
         grass.contains("fn simple_wrap_lighting"),
@@ -431,7 +431,7 @@ fn inactive_weather_particle_classifier_is_not_shipped_as_shader() {
 
 #[test]
 fn disabled_foliage_prepass_shaders_are_not_registered_or_shipped() {
-    let grass_material = include_str!("../src/vegetation/grass_material.rs");
+    let grass_material = include_str!("../src/world/environment/vegetation/grass_material.rs");
     let billboard_material = include_str!("../src/props/billboard.rs");
 
     assert!(
@@ -457,7 +457,7 @@ fn disabled_foliage_prepass_shaders_are_not_registered_or_shipped() {
 
 #[test]
 fn inactive_legacy_water_and_sdf_volume_shaders_are_not_shipped() {
-    let water = include_str!("../src/rendering/water.rs");
+    let water = include_str!("../src/rendering/water/mod.rs");
     let water_fragment = include_str!("../assets/shaders/water_fragment.wgsl");
     let radiance = include_str!("../assets/shaders/radiance_cascades.wgsl");
 

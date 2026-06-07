@@ -1,3 +1,10 @@
+pub mod handlers;
+pub mod plugin;
+pub mod protocol;
+pub mod queue;
+pub mod snapshot;
+pub mod validation;
+
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};

@@ -280,7 +280,6 @@ impl Default for PropPersistenceConfig {
 mod tests {
     use super::*;
     use crate::props::PropType;
-    use std::env::temp_dir;
 
     #[test]
     fn test_chunk_file_path() {

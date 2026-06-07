@@ -202,7 +202,7 @@ fn chunk_to_data_and_back() {
 fn chunk_data_serializable() {
     let data = ChunkData {
         voxels: vec![VoxelType::Air; CHUNK_VOLUME],
-        material_ids: vec![voxel_builder::voxel::materials::MaterialId::AIR; CHUNK_VOLUME],
+        material_overrides: Vec::new(),
         position: IVec3::new(10, 20, 30),
         face_visibility: FaceVisibility::default(),
     };
@@ -215,7 +215,7 @@ fn chunk_data_serializable() {
 
     assert_eq!(restored.position, data.position);
     assert_eq!(restored.voxels.len(), data.voxels.len());
-    assert_eq!(restored.material_ids.len(), data.material_ids.len());
+    assert_eq!(restored.material_overrides.len(), data.material_overrides.len());
 }
 
 #[test]

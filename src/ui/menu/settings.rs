@@ -30,7 +30,7 @@ use super::ui::{ACTIVE_BG, BUTTON_BG, INACTIVE_BG, INPUT_ACTIVE_BG, INPUT_INACTI
 // ============================================================================
 
 /// Spawns the settings dialog as a child of the menu root.
-use crate::menu::preview_3d::{BlockPreviewImage, TriplanarPreviewImage};
+use super::preview_3d::{BlockPreviewImage, TriplanarPreviewImage};
 
 // ...
 
@@ -1200,7 +1200,7 @@ fn spawn_textures_tab(
     preview_image: &Res<BlockPreviewImage>,
     triplanar_preview_image: &Res<TriplanarPreviewImage>,
 ) {
-    use crate::menu::types::TexturesTabContent;
+    use super::types::TexturesTabContent;
 
     let atlas_texture = asset_server.load("textures/atlas.png");
 
@@ -1594,7 +1594,7 @@ fn spawn_atlas_tile_button(
     tile_index: u32,
     font: &Handle<Font>,
 ) {
-    use crate::menu::types::AtlasTileButton;
+    use super::types::AtlasTileButton;
 
     let tile_size = 64.0; // Display size
     let row = tile_index / 4;
@@ -1666,7 +1666,7 @@ fn spawn_layer_button(
     layer: ActiveTextureLayer,
     atlas_texture: &Handle<Image>,
 ) {
-    use crate::menu::types::{LayerTilePreview, TextureLayerButton};
+    use super::types::{LayerTilePreview, TextureLayerButton};
 
     parent
         .spawn(Node {

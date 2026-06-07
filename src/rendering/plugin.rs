@@ -175,7 +175,11 @@ mod tests {
     fn rendering_plugin_installs_radiance_cascades_path_a_pass() {
         let source = include_str!("plugin.rs");
 
-        assert!(source.contains("use crate::rendering::radiance_cascades::RadianceCascadesPlugin"));
+        assert!(
+            source.contains(
+                "use crate::rendering::lighting::radiance_cascades::RadianceCascadesPlugin"
+            )
+        );
         assert!(source.contains(".add_plugins(RadianceCascadesPlugin)"));
     }
 }

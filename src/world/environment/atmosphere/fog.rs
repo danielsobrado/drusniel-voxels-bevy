@@ -1,4 +1,4 @@
-use crate::atmosphere::config::{
+use super::config::{
     DustAnimationConfig, FogColorModifiers, FogConfig, FogFalloffMode, FogPreset, FogQuality,
     FogQualityTier,
 };

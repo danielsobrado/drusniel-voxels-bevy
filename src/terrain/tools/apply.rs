@@ -1,7 +1,7 @@
 use super::preview::TerrainRaycastHit;
 use super::types::{TerrainTool, TerrainToolState};
 use crate::voxel::types::{Voxel, VoxelType};
-use crate::voxel::world::{VoxelEditResult, VoxelWorld};
+use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
 
 /// System that applies terrain tools when mouse is clicked

@@ -6,7 +6,7 @@
 //! - Delete mode: Toggle with Delete key in edit mode to remove blocks
 
 use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
-use crate::interaction::targeting::TargetedBlock;
+use super::targeting::TargetedBlock;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};

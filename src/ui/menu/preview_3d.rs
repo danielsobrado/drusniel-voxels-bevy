@@ -13,7 +13,7 @@ use crate::rendering::array_loader::AtlasMapping;
 use crate::rendering::atlas::TextureAtlas;
 use crate::rendering::triplanar_material::TriplanarMaterialHandle;
 
-use crate::menu::types::ActiveTextureLayer;
+use super::types::ActiveTextureLayer;
 
 // Layer 1 for Blocky, Layer 2 for Triplanar (Layer 0 is Main World)
 // pub const BLOCK_PREVIEW_LAYER: RenderLayers = RenderLayers::layer(1);

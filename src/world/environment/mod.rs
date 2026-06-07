@@ -7,9 +7,10 @@ use bevy_water::{
     GlobalWaveState, ImageUtilsPlugin, WaterSettings, water::material::WaterMaterialPlugin,
 };
 
-use crate::atmosphere::AtmosphereConfig;
 use crate::constants::WATER_LEVEL;
 use crate::rendering::capabilities::GraphicsCapabilities;
+
+use self::atmosphere::AtmosphereConfig;
 
 pub const DEFAULT_SUN_ILLUMINANCE: f32 = 5_000.0;
 
@@ -137,7 +138,7 @@ impl Plugin for AtmospherePlugin {
     fn build(&self, app: &mut App) {
         // Check if native atmosphere will be used (loaded separately, but we can check the config)
         let native_atmosphere_enabled =
-            crate::atmosphere::atmosphere_integration::load_atmosphere_config()
+            atmosphere::atmosphere_integration::load_atmosphere_config()
                 .map(|c| c.enabled)
                 .unwrap_or(false);
 
@@ -429,3 +430,6 @@ fn adjust_shadows_for_integrated_gpu(
         .build();
     }
 }
+pub mod atmosphere;
+pub mod vegetation;
+pub mod weather;

@@ -7,8 +7,8 @@
 
 use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
 use crate::interaction::TargetedProp;
-use crate::interaction::editing::{DeleteMode, DragState, EditMode};
-use crate::interaction::targeting::TargetedBlock;
+use super::editing::{DeleteMode, DragState, EditMode};
+use super::targeting::TargetedBlock;
 use crate::network::NetworkSession;
 use crate::performance::{
     AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
