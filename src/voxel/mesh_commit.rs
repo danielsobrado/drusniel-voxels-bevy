@@ -696,7 +696,12 @@ fn dirty_finer_neighbors_for_strip(
         }
         let neighbor_pos = chunk_pos + face_neighbor_offset(face);
         if let Some(mut neighbor) = world.get_chunk_mut(neighbor_pos) {
-            neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
+            // Skip if already dirty: during active LOD churn the finer neighbour is
+            // re-meshing (and re-consuming) on its own, so re-dirtying it only piles on
+            // redundant re-meshes. At rest it is clean, so this still drives convergence.
+            if !neighbor.is_dirty() {
+                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
+            }
         }
     }
 }

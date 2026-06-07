@@ -242,3 +242,83 @@ Current status: **unit/check verified, not yet live/bench verified**. Expected
 live result is that the large `main_surface` wall/slab at the moving LOD seam
 disappears. If smaller cracks or shark teeth remain after this, diagnose them as
 morph-target/coarse-proxy issues only after confirming the base wall is gone.
+
+## 2026-06-07 Vertex-exact seam weld + consume-on-all-paths (the big improvement)
+
+This is the fix that visibly knocked down lips, holes, and spikes (user-confirmed:
+"decreased a lot"). It replaces the 1-D iso morph target with the **real coarse Surface
+Nets boundary geometry**, and — crucially — makes the consume actually run.
+
+### Architecture (vertex-exact, Stages 1–3, `lod_boundary_strip.rs`)
+
+- **Stage 1 — export.** Each chunk extracts its **main-surface boundary strip** per
+  X/Z face (deduped vertices + open-edge segments), *before* skirts, in world voxel
+  coords. Gated: only a chunk that borders a strictly **finer** neighbour extracts
+  (the finer side is the consumer), so the O(triangles) walk is skipped elsewhere.
+- **Stage 2 — match.** `match_fine_vertex_to_coarse` welds a fine boundary vertex to
+  the **closest point on the matching coarse *segment*** (not the nearest vertex — that
+  shears cliffs/collapses verts), rejecting over-distance. `LodBoundaryStripCache` is a
+  non-blocking, revision-gated cross-chunk store (finer side never waits).
+- **Stage 3 — consume.** `append_morph_targets` welds to the coarse segment
+  (`coarse_segment_target_local`) when the neighbour strip is present, else falls back
+  to the 1-D iso. The fine chunk looks up its delta-1 coarser neighbours'
+  strips in `prepare`/the dirty loop and threads them through the SN meshers.
+
+### The consistency bug that made Stage 3 look like a no-op
+
+After Stage 3 landed, **nothing changed visually**. Instrumentation
+(`STRIP DIAG` counters: `published / lookups_hit / segment_targets / iso_targets`)
+proved the chain *worked* during a churn bench but was inert in practice:
+
+- **Publish + consume ran ONLY in the `lod_churn_only` transaction.** The regular
+  dirty loop (which meshes newly-generated chunks and most re-meshes) and never
+  published or consumed → on a settled scene almost every seam used the 1-D iso.
+- Counts at the time: `segment_targets ≈ 2,151` vs `iso_targets ≈ 21,371` (**~10%
+  segment**), `published = 39`, `lookups_hit = 23`. So ~90% of welds were the old iso —
+  hence "looks the same".
+- There was also **no convergence trigger**: nothing re-meshed the fine side after the
+  coarse side published, so even when a strip became available the fine chunk kept its
+  stale iso mesh.
+
+### Fix
+
+1. **Publish + consume on every mesh path.** Extracted
+   `publish_chunk_boundary_strips` + made `lookup_neighbor_boundary_strips` shared, and
+   called both around the generate in **both** the LOD transaction *and* the regular
+   dirty loop (`mesh_dirty_chunks_system`). (`poll_chunk_generation_tasks` only polls
+   async voxel data and marks chunks dirty; their meshing flows through the regular
+   loop, so it's covered.)
+2. **Convergence trigger.** `dirty_finer_neighbors_for_strip`: when a chunk's exported
+   strip *changes*, dirty its delta-1 **finer** neighbours (`NeighborLod`) so they
+   re-mesh next frame and weld to the new coarse boundary. Bounded to one hop
+   (consuming a strip changes morph targets, not the pre-morph boundary).
+
+### Result (live, at rest, no movement)
+
+`published = 121`, `lookups_hit = 70`, `segment_targets ≈ 7,995` vs
+`iso_targets ≈ 9,303` → **~46% of welds now use the real coarse segment** (up from
+~10%), and counts plateau at rest (no re-mesh storm). Visually: lips/holes/spikes
+**decreased a lot**.
+
+### Remaining (still iso-fallback)
+
+- **Peak tops** — big **delta>1** LOD jumps; consume only handles delta-1, so these
+  fall back to iso.
+- **Steep sides** — coarse target beyond `max_stitch_distance` → iso, plus the **2:1
+  density T-junction** the weld can't close (boundary verts coincide but the fine side
+  has 2× edges). That's **Stage 4** (stitch geometry: bridge the original fine chain to
+  the coarse segment, monotone-strip triangulation, skirt fallback on invalid).
+- Dark welds where normals aren't recomputed → **Stage 5**.
+
+### Diagnostics / observability added
+
+- `STRIP DIAG` counters (`lod_boundary_strip::log_strip_diag`) logged at build-complete
+  and every ~300 frames; one-line publish/consume health.
+- Build-complete marker (`Terrain mesh build COMPLETE: N chunks`).
+- Downgraded the per-frame "mesh dirty queue backed up" and "Waiting for mesh cache"
+  spam to `debug!`.
+
+### Commits
+
+`bdff606` (Stage 3 infra), `9a07f24` (Stage 3 threading), plus the consume-on-all-paths
++ dirty-propagation + counters change (this section).
