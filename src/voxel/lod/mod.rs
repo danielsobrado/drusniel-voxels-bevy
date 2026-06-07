@@ -1,5 +1,8 @@
 //! Terrain LOD policy and effective mesh LOD resolution.
 
+pub mod boundary_strip;
+pub mod skirt;
+
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;

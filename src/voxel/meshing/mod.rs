@@ -81,8 +81,12 @@ const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
 mod blocky;
+pub mod baked_ao;
+pub mod commit;
 mod data;
+pub mod invalidation;
 mod lod_seam;
+pub mod lod;
 mod material_weights;
 pub(crate) mod mc_support;
 mod pipeline;
@@ -90,6 +94,7 @@ mod sdf;
 mod surface_nets;
 #[cfg(test)]
 mod tests;
+pub mod types;
 mod water;
 
 pub use blocky::get_blocky_material_index;

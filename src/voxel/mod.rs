@@ -1,44 +1,95 @@
 //! Voxel engine core module.
 //!
 //! This module provides the core voxel functionality including:
-//! - [`chunk`] - Chunk data structure and operations
-//! - [`types`] - Voxel type definitions and traits
-//! - [`world`] - World coordinate system and chunk management
+//! - [`core::chunk`] - Chunk data structure and operations
+//! - [`core::types`] - Voxel type definitions and traits
+//! - [`core::world`] - World coordinate system and chunk management
 //! - [`meshing`] - Surface Nets mesh generation for smooth terrain
 //! - [`terrain`] - Procedural terrain generation with noise abstractions
 //! - [`plugin`] - Bevy plugin integration
 //! - [`io::persistence`] - World save/load functionality
-//! - [`gravity`] - Voxel gravity simulation
-//! - [`skirt`] - LOD boundary skirts for seamless transitions
-//! - [`baked_ao`] - Baked ambient occlusion for voxel lighting
-//! - [`visibility`] - Face visibility computation for occlusion culling
-//! - [`occlusion`] - Runtime BFS occlusion culling
-//! - [`octree`] - Hierarchical octree for frustum culling
+//! - [`simulation::gravity`] - Voxel gravity simulation
+//! - [`lod::skirt`] - LOD boundary skirts for seamless transitions
+//! - [`meshing::baked_ao`] - Baked ambient occlusion for voxel lighting
+//! - [`culling::visibility`] - Face visibility computation for occlusion culling
+//! - [`culling::occlusion`] - Runtime BFS occlusion culling
+//! - [`culling::octree`] - Hierarchical octree for frustum culling
 
-pub mod baked_ao;
-pub mod chunk;
+pub mod core;
+pub mod culling;
 pub mod diagnostics;
-pub mod enclosure;
-pub mod gravity;
 pub mod io;
 pub mod lod;
-pub mod lod_boundary_strip;
-pub mod materials;
 pub mod mc_transvoxel;
-pub mod mesh_commit;
-pub mod mesh_invalidation;
 pub mod meshing;
-pub mod meshing_lod;
-pub mod meshing_types;
-pub mod occlusion;
-pub mod octree;
 pub mod plugin;
 pub(crate) mod runtime;
-pub mod skirt;
+pub mod simulation;
 pub mod terrain;
-pub mod types;
-pub mod visibility;
-pub mod world;
+
+pub mod baked_ao {
+    pub use super::meshing::baked_ao::*;
+}
+
+pub mod chunk {
+    pub use super::core::chunk::*;
+}
+
+pub mod enclosure {
+    pub use super::culling::enclosure::*;
+}
+
+pub mod gravity {
+    pub use super::simulation::gravity::*;
+}
+
+pub mod lod_boundary_strip {
+    pub use super::lod::boundary_strip::*;
+}
+
+pub mod materials {
+    pub use super::core::materials::*;
+}
+
+pub mod mesh_commit {
+    pub(crate) use super::meshing::commit::*;
+}
+
+pub mod mesh_invalidation {
+    pub use super::meshing::invalidation::*;
+}
+
+pub mod meshing_lod {
+    pub use super::meshing::lod::*;
+}
+
+pub mod meshing_types {
+    pub use super::meshing::types::*;
+}
+
+pub mod occlusion {
+    pub use super::culling::occlusion::*;
+}
+
+pub mod octree {
+    pub use super::culling::octree::*;
+}
+
+pub mod skirt {
+    pub use super::lod::skirt::*;
+}
+
+pub mod types {
+    pub use super::core::types::*;
+}
+
+pub mod visibility {
+    pub use super::culling::visibility::*;
+}
+
+pub mod world {
+    pub use super::core::world::*;
+}
 
 pub mod hole_probe {
     pub use super::diagnostics::hole_probe::*;

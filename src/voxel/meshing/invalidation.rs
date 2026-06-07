@@ -3,7 +3,7 @@
 //! Neighbor chunks are marked only when the edit lies within the halo band on
 //! every axis that the neighbor offset moves along (AND across axes, not OR).
 
-use crate::constants::{CHUNK_SIZE_I32, CHUNK_SIZE_U32};
+use crate::constants::CHUNK_SIZE_I32;
 use bevy::prelude::{IVec3, UVec3};
 
 /// Voxels within this distance of a chunk face can affect that face's padded halo.
@@ -53,6 +53,7 @@ pub fn mesh_invalidation_neighbor_offsets(local: UVec3) -> impl Iterator<Item = 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::CHUNK_SIZE_U32;
     use bevy::prelude::UVec3;
     use std::collections::HashSet;
 
