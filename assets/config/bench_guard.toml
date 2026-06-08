@@ -780,6 +780,14 @@ max_face_offset_voxels = 0.10
 max_longest_unmatched_edge_voxels = 0.05
 max_unmatched_transition_edges = 0
 max_unmatched_regular_edges_on_delta1_seams = 0
+max_strip_incompatible_faces = 0
+max_strip_missing_faces_after_stable_frames = 0
+max_strip_topology_unsupported_stitched_faces = 0
+max_strip_fine_to_coarse_distance_voxels = 0.35
+max_strip_coarse_to_fine_distance_voxels = 0.35
+max_strip_endpoint_distance_voxels = 0.50
+min_strip_span_overlap_ratio = 0.95
+max_strip_crossing_count = 0
 
 [[check]]
 name = "lod_seam_audit_partial_morph_counter"

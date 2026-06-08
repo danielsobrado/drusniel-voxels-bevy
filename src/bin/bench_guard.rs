@@ -50,6 +50,14 @@ struct LodSeamAuditConfig {
     max_longest_unmatched_edge_voxels: f32,
     max_unmatched_transition_edges: u32,
     max_unmatched_regular_edges_on_delta1_seams: u32,
+    max_strip_incompatible_faces: u32,
+    max_strip_missing_faces_after_stable_frames: u32,
+    max_strip_topology_unsupported_stitched_faces: u32,
+    max_strip_fine_to_coarse_distance_voxels: f32,
+    max_strip_coarse_to_fine_distance_voxels: f32,
+    max_strip_endpoint_distance_voxels: f32,
+    min_strip_span_overlap_ratio: f32,
+    max_strip_crossing_count: u32,
 }
 
 impl Default for LodSeamAuditConfig {
@@ -67,6 +75,14 @@ impl Default for LodSeamAuditConfig {
             max_longest_unmatched_edge_voxels: 0.05,
             max_unmatched_transition_edges: 0,
             max_unmatched_regular_edges_on_delta1_seams: 0,
+            max_strip_incompatible_faces: 0,
+            max_strip_missing_faces_after_stable_frames: 0,
+            max_strip_topology_unsupported_stitched_faces: 0,
+            max_strip_fine_to_coarse_distance_voxels: 0.35,
+            max_strip_coarse_to_fine_distance_voxels: 0.35,
+            max_strip_endpoint_distance_voxels: 0.50,
+            min_strip_span_overlap_ratio: 0.95,
+            max_strip_crossing_count: 0,
         }
     }
 }
@@ -89,14 +105,24 @@ struct SeamAuditSummary {
     max_lip_height_voxels: f32,
     max_face_offset_voxels: f32,
     max_longest_unmatched_edge_voxels: f32,
+    strip_incompatible_faces: u32,
+    strip_missing_faces: u32,
+    strip_topology_unsupported_faces: u32,
+    max_strip_fine_to_coarse_distance: f32,
+    max_strip_coarse_to_fine_distance: f32,
+    max_strip_endpoint_distance: f32,
+    min_strip_span_overlap_ratio: f32,
 }
 
 #[derive(Debug, Deserialize)]
 struct SeamAuditFaceRecord {
     final_mode: String,
+    strip_overlap_status: String,
+    strip_compatible: bool,
     unmatched_transition_edges: u16,
     unmatched_regular_edges: u16,
     samples_without_render_coverage: u16,
+    strip_crossing_count: u16,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -708,6 +734,40 @@ fn evaluate_lod_seam_audit(
         .map(|face| face.unmatched_regular_edges as u32)
         .max()
         .unwrap_or(0);
+    let max_strip_crossings = dump
+        .faces
+        .iter()
+        .map(|face| face.strip_crossing_count as u32)
+        .max()
+        .unwrap_or(0);
+    let strip_incompatible_stitched = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            !face.strip_compatible
+                && (face.final_mode == "StitchGeometry" || face.final_mode == "GpuMorphOnly")
+        })
+        .count() as u32;
+    let strip_missing_faces = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            (face.strip_overlap_status == "MissingFineStrip"
+                || face.strip_overlap_status == "MissingCoarseStrip")
+                && face.final_mode != "SkirtFallback"
+        })
+        .count() as u32;
+    let strip_topology_unsupported_stitched = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            (face.strip_overlap_status == "UnsupportedTopology"
+                || face.strip_overlap_status == "FineMultiComponent"
+                || face.strip_overlap_status == "CoarseMultiComponent"
+                || face.strip_overlap_status == "ComponentMismatch")
+                && (face.final_mode == "StitchGeometry" || face.final_mode == "GpuMorphOnly")
+        })
+        .count() as u32;
 
     vec![
         seam_audit_check(
@@ -782,6 +842,54 @@ fn evaluate_lod_seam_audit(
             max_regular_edges as f64,
             config.max_unmatched_regular_edges_on_delta1_seams as f64,
         ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_incompatible_faces",
+            strip_incompatible_stitched as f64,
+            config.max_strip_incompatible_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_missing_faces",
+            strip_missing_faces as f64,
+            config.max_strip_missing_faces_after_stable_frames as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_topology_unsupported_faces",
+            strip_topology_unsupported_stitched as f64,
+            config.max_strip_topology_unsupported_stitched_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_fine_to_coarse_distance",
+            s.max_strip_fine_to_coarse_distance as f64,
+            config.max_strip_fine_to_coarse_distance_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_coarse_to_fine_distance",
+            s.max_strip_coarse_to_fine_distance as f64,
+            config.max_strip_coarse_to_fine_distance_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_endpoint_distance",
+            s.max_strip_endpoint_distance as f64,
+            config.max_strip_endpoint_distance_voxels as f64,
+        ),
+        seam_audit_min_check(
+            &summary.scene,
+            "min_strip_span_overlap_ratio",
+            s.min_strip_span_overlap_ratio as f64,
+            config.min_strip_span_overlap_ratio as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_crossing_count",
+            max_strip_crossings as f64,
+            config.max_strip_crossing_count as f64,
+        ),
     ]
 }
 
@@ -796,6 +904,21 @@ fn seam_audit_check(scene: &str, metric: &str, value: f64, max: f64) -> CheckRes
         metric: format!("lod_seam_audit:{metric}"),
         value: Some(value),
         threshold: format!("<= {max}"),
+        status,
+    }
+}
+
+fn seam_audit_min_check(scene: &str, metric: &str, value: f64, min: f64) -> CheckResult {
+    let status = if value < min {
+        Status::Fail
+    } else {
+        Status::Pass
+    };
+    CheckResult {
+        checkpoint: scene.to_string(),
+        metric: format!("lod_seam_audit:{metric}"),
+        value: Some(value),
+        threshold: format!(">= {min}"),
         status,
     }
 }

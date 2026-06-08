@@ -17,6 +17,10 @@ use crate::voxel::meshing::{
     SeamFaceAudit, SeamFaceMode, SeamStripStatus, XZ_FACES, barycentric_section,
     coarse_lod_iso_height_for_column, neighbor_lod_for_face, transition_target_lod,
 };
+use crate::voxel::lod_boundary_strip::{
+    LodBoundaryStrip, StripOverlapConfig, StripOverlapStatus, StripVertex,
+    audit_projected_strip_overlap, project_to_seam_frame,
+};
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 
@@ -71,6 +75,15 @@ pub struct SeamAuditFaceRecord {
     pub unmatched_transition_edges: u16,
     pub unmatched_regular_edges: u16,
     pub possible_terrace_samples: u16,
+    pub strip_overlap_status: String,
+    pub strip_compatible: bool,
+    pub strip_max_fine_to_coarse_distance: f32,
+    pub strip_max_coarse_to_fine_distance: f32,
+    pub strip_max_endpoint_distance: f32,
+    pub strip_span_overlap_ratio: f32,
+    pub strip_unmatched_fine_segments: u16,
+    pub strip_unmatched_coarse_segments: u16,
+    pub strip_crossing_count: u16,
 }
 
 #[derive(Serialize, Default)]
@@ -85,6 +98,13 @@ pub struct SeamAuditSummary {
     pub max_lip_height_voxels: f32,
     pub max_face_offset_voxels: f32,
     pub max_longest_unmatched_edge_voxels: f32,
+    pub strip_incompatible_faces: u32,
+    pub strip_missing_faces: u32,
+    pub strip_topology_unsupported_faces: u32,
+    pub max_strip_fine_to_coarse_distance: f32,
+    pub max_strip_coarse_to_fine_distance: f32,
+    pub max_strip_endpoint_distance: f32,
+    pub min_strip_span_overlap_ratio: f32,
 }
 
 #[derive(Serialize)]
@@ -141,6 +161,7 @@ pub fn build_seam_audit_dump(
 ) -> SeamAuditDump {
     let mut faces = Vec::new();
     let mut summary = SeamAuditSummary::default();
+    summary.min_strip_span_overlap_ratio = 1.0;
 
     for chunk_pos in world.chunk_positions().collect::<Vec<_>>() {
         let Some(entity) = world.get_chunk(chunk_pos).and_then(|c| c.mesh_entity()) else {
@@ -184,6 +205,16 @@ pub fn build_seam_audit_dump(
                 *face,
                 &mut audit,
             );
+            enhance_audit_with_strip_overlap(
+                world,
+                terrain_entities,
+                meshes,
+                chunk_pos,
+                *face,
+                debug.effective_lod_at_mesh,
+                neighbor_lod,
+                &mut audit,
+            );
 
             summary.active_seam_faces += 1;
             if audit.is_partial_morph_uncovered() {
@@ -206,6 +237,36 @@ pub fn build_seam_audit_dump(
             summary.max_longest_unmatched_edge_voxels = summary
                 .max_longest_unmatched_edge_voxels
                 .max(audit.longest_unmatched_edge_voxels);
+            summary.max_strip_fine_to_coarse_distance = summary
+                .max_strip_fine_to_coarse_distance
+                .max(audit.strip_max_fine_to_coarse_distance);
+            summary.max_strip_coarse_to_fine_distance = summary
+                .max_strip_coarse_to_fine_distance
+                .max(audit.strip_max_coarse_to_fine_distance);
+            summary.max_strip_endpoint_distance = summary
+                .max_strip_endpoint_distance
+                .max(audit.strip_max_endpoint_distance);
+            summary.min_strip_span_overlap_ratio = summary
+                .min_strip_span_overlap_ratio
+                .min(audit.strip_span_overlap_ratio);
+            if !audit.strip_compatible {
+                summary.strip_incompatible_faces += 1;
+            }
+            if matches!(
+                audit.strip_overlap_status,
+                StripOverlapStatus::MissingFineStrip | StripOverlapStatus::MissingCoarseStrip
+            ) {
+                summary.strip_missing_faces += 1;
+            }
+            if matches!(
+                audit.strip_overlap_status,
+                StripOverlapStatus::UnsupportedTopology
+                    | StripOverlapStatus::FineMultiComponent
+                    | StripOverlapStatus::CoarseMultiComponent
+                    | StripOverlapStatus::ComponentMismatch
+            ) {
+                summary.strip_topology_unsupported_faces += 1;
+            }
 
             faces.push(face_record(
                 chunk_pos,
@@ -314,6 +375,42 @@ fn enhance_audit_with_edge_leak(
     audit.longest_unmatched_edge_voxels = leak.longest_unmatched_edge_voxels;
     audit.unmatched_transition_edges = leak.unmatched_transition_edges;
     audit.unmatched_regular_edges = leak.unmatched_regular_edges;
+}
+
+fn enhance_audit_with_strip_overlap(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+    fine_lod: LodLevel,
+    coarse_lod: LodLevel,
+    audit: &mut SeamFaceAudit,
+) {
+    let fine_strip = extract_main_surface_strip_for_face(world, terrain_entities, meshes, chunk_pos, face, fine_lod);
+    let neighbor_pos = chunk_pos + face.direction();
+    let coarse_strip = extract_main_surface_strip_for_face(
+        world,
+        terrain_entities,
+        meshes,
+        neighbor_pos,
+        opposite_face(face),
+        coarse_lod,
+    );
+    let result = audit_projected_strip_overlap(
+        fine_strip.as_ref(),
+        coarse_strip.as_ref(),
+        StripOverlapConfig::default(),
+    );
+    audit.strip_overlap_status = result.status;
+    audit.strip_compatible = result.compatible;
+    audit.strip_max_fine_to_coarse_distance = result.max_fine_to_coarse_distance;
+    audit.strip_max_coarse_to_fine_distance = result.max_coarse_to_fine_distance;
+    audit.strip_max_endpoint_distance = result.max_endpoint_distance;
+    audit.strip_span_overlap_ratio = result.span_overlap_ratio;
+    audit.strip_unmatched_fine_segments = result.unmatched_fine_segments;
+    audit.strip_unmatched_coarse_segments = result.unmatched_coarse_segments;
+    audit.strip_crossing_count = result.crossing_count;
 }
 
 struct EdgeLeakResult {
@@ -587,6 +684,139 @@ fn world_edge_key(p0: Vec3, p1: Vec3, face: ChunkFace) -> WorldEdgeKey {
     WorldEdgeKey { a, b, face }
 }
 
+fn opposite_face(face: ChunkFace) -> ChunkFace {
+    match face {
+        ChunkFace::NegX => ChunkFace::PosX,
+        ChunkFace::PosX => ChunkFace::NegX,
+        ChunkFace::NegZ => ChunkFace::PosZ,
+        ChunkFace::PosZ => ChunkFace::NegZ,
+        ChunkFace::NegY => ChunkFace::PosY,
+        ChunkFace::PosY => ChunkFace::NegY,
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct StripQuantizedPos {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct StripEdgeKey {
+    a: StripQuantizedPos,
+    b: StripQuantizedPos,
+}
+
+fn extract_main_surface_strip_for_face(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    meshes: &Assets<Mesh>,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+    lod: LodLevel,
+) -> Option<LodBoundaryStrip> {
+    let entity = world.get_chunk(chunk_pos).and_then(|chunk| chunk.mesh_entity())?;
+    let Ok((_, mesh3d, transform, _, _, ..)) = terrain_entities.get(entity) else {
+        return None;
+    };
+    let mesh3d = mesh3d?;
+    let mesh = meshes.get(&mesh3d.0)?;
+    let positions = mesh_attribute_positions(mesh);
+    let indices = mesh_triangle_indices(mesh);
+    let barycentrics = mesh_attribute_uv1(mesh);
+    if positions.is_empty() || indices.is_empty() {
+        return None;
+    }
+    let translation = transform
+        .map(|t| t.translation)
+        .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
+
+    let mut vertex_index: HashMap<StripQuantizedPos, u32> = HashMap::new();
+    let mut vertices: Vec<StripVertex> = Vec::new();
+    let mut edge_counts: HashMap<StripEdgeKey, u32> = HashMap::new();
+
+    for tri_start in (0..indices.len()).step_by(3) {
+        let i0 = indices[tri_start] as usize;
+        if triangle_section(&barycentrics, i0) != MeshSectionClass::MainSurface {
+            continue;
+        }
+        for (a, b) in [
+            (indices[tri_start], indices[tri_start + 1]),
+            (indices[tri_start + 1], indices[tri_start + 2]),
+            (indices[tri_start + 2], indices[tri_start]),
+        ] {
+            let pa = positions[a as usize] + translation;
+            let pb = positions[b as usize] + translation;
+            if !edge_on_chunk_face(pa, pb, chunk_pos, face) {
+                continue;
+            }
+            let qa = StripQuantizedPos {
+                x: (pa.x * EDGE_QUANTIZE_SCALE).round() as i32,
+                y: (pa.y * EDGE_QUANTIZE_SCALE).round() as i32,
+                z: (pa.z * EDGE_QUANTIZE_SCALE).round() as i32,
+            };
+            let qb = StripQuantizedPos {
+                x: (pb.x * EDGE_QUANTIZE_SCALE).round() as i32,
+                y: (pb.y * EDGE_QUANTIZE_SCALE).round() as i32,
+                z: (pb.z * EDGE_QUANTIZE_SCALE).round() as i32,
+            };
+            let ia = *vertex_index.entry(qa).or_insert_with(|| {
+                let idx = vertices.len() as u32;
+                vertices.push(StripVertex {
+                    local: pa - translation,
+                    world: pa,
+                    normal: Vec3::ZERO,
+                    proj: project_to_seam_frame(face, pa),
+                });
+                idx
+            });
+            let ib = *vertex_index.entry(qb).or_insert_with(|| {
+                let idx = vertices.len() as u32;
+                vertices.push(StripVertex {
+                    local: pb - translation,
+                    world: pb,
+                    normal: Vec3::ZERO,
+                    proj: project_to_seam_frame(face, pb),
+                });
+                idx
+            });
+            if ia == ib {
+                continue;
+            }
+            let (ea, eb) = if (qa.x, qa.y, qa.z) <= (qb.x, qb.y, qb.z) {
+                (qa, qb)
+            } else {
+                (qb, qa)
+            };
+            *edge_counts.entry(StripEdgeKey { a: ea, b: eb }).or_insert(0) += 1;
+        }
+    }
+
+    let mut segments = Vec::new();
+    for (key, count) in edge_counts {
+        if count != 1 {
+            continue;
+        }
+        let ia = vertex_index.get(&key.a).copied();
+        let ib = vertex_index.get(&key.b).copied();
+        if let (Some(a), Some(b)) = (ia, ib) {
+            segments.push([a, b]);
+        }
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    Some(LodBoundaryStrip {
+        face,
+        lod,
+        chunk_pos,
+        revision: 0,
+        vertices,
+        segments,
+    })
+}
+
 fn highest_render_mesh_hit_at(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
@@ -737,6 +967,15 @@ fn face_record(
         unmatched_transition_edges: audit.unmatched_transition_edges,
         unmatched_regular_edges: audit.unmatched_regular_edges,
         possible_terrace_samples: audit.possible_terrace_samples,
+        strip_overlap_status: strip_overlap_status_name(audit.strip_overlap_status),
+        strip_compatible: audit.strip_compatible,
+        strip_max_fine_to_coarse_distance: audit.strip_max_fine_to_coarse_distance,
+        strip_max_coarse_to_fine_distance: audit.strip_max_coarse_to_fine_distance,
+        strip_max_endpoint_distance: audit.strip_max_endpoint_distance,
+        strip_span_overlap_ratio: audit.strip_span_overlap_ratio,
+        strip_unmatched_fine_segments: audit.strip_unmatched_fine_segments,
+        strip_unmatched_coarse_segments: audit.strip_unmatched_coarse_segments,
+        strip_crossing_count: audit.strip_crossing_count,
     }
 }
 
@@ -781,6 +1020,16 @@ pub fn record_seam_audit_counters(
         frame,
         "Counter Seam Audit: LOD Delta GT One Faces",
         summary.lod_delta_gt_one_faces as f64,
+    );
+    timing.record_count(
+        frame,
+        "Counter Seam Audit: Strip Incompatible Faces",
+        summary.strip_incompatible_faces as f64,
+    );
+    timing.record_count(
+        frame,
+        "Counter Seam Audit: Strip Missing Faces",
+        summary.strip_missing_faces as f64,
     );
 }
 
@@ -827,6 +1076,27 @@ fn strip_status_name(status: SeamStripStatus) -> String {
         SeamStripStatus::StaleRevision => "StaleRevision".to_string(),
         SeamStripStatus::HitCurrentRevision => "HitCurrentRevision".to_string(),
     }
+}
+
+fn strip_overlap_status_name(status: StripOverlapStatus) -> String {
+    match status {
+        StripOverlapStatus::NotEvaluated => "NotEvaluated",
+        StripOverlapStatus::Compatible => "Compatible",
+        StripOverlapStatus::MissingFineStrip => "MissingFineStrip",
+        StripOverlapStatus::MissingCoarseStrip => "MissingCoarseStrip",
+        StripOverlapStatus::EmptyFineStrip => "EmptyFineStrip",
+        StripOverlapStatus::EmptyCoarseStrip => "EmptyCoarseStrip",
+        StripOverlapStatus::ComponentMismatch => "ComponentMismatch",
+        StripOverlapStatus::FineMultiComponent => "FineMultiComponent",
+        StripOverlapStatus::CoarseMultiComponent => "CoarseMultiComponent",
+        StripOverlapStatus::SpanMismatch => "SpanMismatch",
+        StripOverlapStatus::DirectedDistanceExceeded => "DirectedDistanceExceeded",
+        StripOverlapStatus::EndpointDistanceExceeded => "EndpointDistanceExceeded",
+        StripOverlapStatus::CrossingOrFoldDetected => "CrossingOrFoldDetected",
+        StripOverlapStatus::DegenerateSegment => "DegenerateSegment",
+        StripOverlapStatus::UnsupportedTopology => "UnsupportedTopology",
+    }
+    .to_string()
 }
 
 #[cfg(test)]

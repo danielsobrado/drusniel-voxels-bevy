@@ -5,7 +5,9 @@
 
 use super::{LodTransitionSnapStats, neighbor_lod_for_face, transition_target_lod};
 use crate::voxel::chunk::LodLevel;
-use crate::voxel::lod_boundary_strip::{LodBoundaryStrip, LodBoundaryStripCache, NeighborBoundaryStrips};
+use crate::voxel::lod_boundary_strip::{
+    LodBoundaryStrip, LodBoundaryStripCache, NeighborBoundaryStrips, StripOverlapStatus,
+};
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::IVec3;
@@ -95,6 +97,15 @@ pub struct SeamFaceAudit {
     pub unmatched_transition_edges: u16,
     pub unmatched_regular_edges: u16,
     pub possible_terrace_samples: u16,
+    pub strip_overlap_status: StripOverlapStatus,
+    pub strip_compatible: bool,
+    pub strip_max_fine_to_coarse_distance: f32,
+    pub strip_max_coarse_to_fine_distance: f32,
+    pub strip_max_endpoint_distance: f32,
+    pub strip_span_overlap_ratio: f32,
+    pub strip_unmatched_fine_segments: u16,
+    pub strip_unmatched_coarse_segments: u16,
+    pub strip_crossing_count: u16,
 }
 
 impl Default for SeamFaceAudit {
@@ -122,6 +133,15 @@ impl Default for SeamFaceAudit {
             unmatched_transition_edges: 0,
             unmatched_regular_edges: 0,
             possible_terrace_samples: 0,
+            strip_overlap_status: StripOverlapStatus::NotEvaluated,
+            strip_compatible: false,
+            strip_max_fine_to_coarse_distance: 0.0,
+            strip_max_coarse_to_fine_distance: 0.0,
+            strip_max_endpoint_distance: 0.0,
+            strip_span_overlap_ratio: 0.0,
+            strip_unmatched_fine_segments: 0,
+            strip_unmatched_coarse_segments: 0,
+            strip_crossing_count: 0,
         }
     }
 }
@@ -377,6 +397,15 @@ pub fn assemble_seam_face_audit(
             unmatched_transition_edges: 0,
             unmatched_regular_edges: 0,
             possible_terrace_samples: 0,
+            strip_overlap_status: StripOverlapStatus::NotEvaluated,
+            strip_compatible: false,
+            strip_max_fine_to_coarse_distance: 0.0,
+            strip_max_coarse_to_fine_distance: 0.0,
+            strip_max_endpoint_distance: 0.0,
+            strip_span_overlap_ratio: 0.0,
+            strip_unmatched_fine_segments: 0,
+            strip_unmatched_coarse_segments: 0,
+            strip_crossing_count: 0,
         };
     }
 
