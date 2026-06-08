@@ -1,0 +1,64 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = false
+lod_seam_hard_case_fixture = true
+world_cache_path = "bench-runs/cache/lod-seam-hard-cases-world.bin"
+
+# Sculpted fixture origins (see lod_seam_hard_case_fixture.rs):
+# - cave-mouth: X seam cave at ~(272,64,272)
+# - overhang: Z seam ledge at ~(288,72,256)
+# - dual-sheet: two pockets on one face at ~(304,60,288)
+# - near-tangent cliff: ~(256,80,304)
+# - multi-component hint: ~(320,68,272)
+
+[[checkpoint]]
+name = "cave-mouth-lod0-lod1-x"
+position = [268.0, 70.0, 276.0]
+look_at = [280.0, 66.0, 276.0]
+time_of_day = 0.42
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "overhang-lod0-lod1-z"
+position = [292.0, 78.0, 252.0]
+look_at = [292.0, 74.0, 268.0]
+time_of_day = 0.45
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "dual-sheet-cave-face"
+position = [306.0, 66.0, 292.0]
+look_at = [312.0, 64.0, 292.0]
+time_of_day = 0.35
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "near-tangent-cliff-boundary"
+position = [260.0, 86.0, 308.0]
+look_at = [268.0, 82.0, 312.0]
+time_of_day = 0.5
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "multi-component-mismatch"
+position = [322.0, 74.0, 276.0]
+look_at = [326.0, 70.0, 276.0]
+time_of_day = 0.4
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }

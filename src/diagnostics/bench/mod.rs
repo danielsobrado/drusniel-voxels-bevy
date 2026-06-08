@@ -31,6 +31,9 @@ use crate::rendering::ray_tracing::{
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
+use crate::voxel::diagnostics::seam_audit_pass::{
+    TerrainSeamAuditRequest, TerrainSeamAuditRequests,
+};
 use crate::voxel::hole_probe::{TerrainHoleProbeRequest, TerrainHoleProbeRequests};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::persistence::{self, WorldPersistence};
@@ -388,6 +391,8 @@ struct BenchState {
     gameplay_dig_rejected_crust: u32,
     gameplay_dig_failed: bool,
     hole_probe_requested: bool,
+    seam_audit_requested: bool,
+    seam_audit_drain_frames_left: u32,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
@@ -525,6 +530,9 @@ struct BenchScene {
     world_cache_path: Option<PathBuf>,
     #[serde(default)]
     world_cache_regenerate: bool,
+    /// When true, apply deterministic LOD seam hard-case voxel sculpts after world load.
+    #[serde(default)]
+    lod_seam_hard_case_fixture: bool,
     #[serde(default)]
     skip_props: bool,
     #[serde(default = "default_freeze_terrain_lod_after_ready")]
@@ -557,6 +565,8 @@ struct BenchCheckpoint {
     gameplay: Option<BenchGameplay>,
     inventory_ui: Option<BenchInventoryUi>,
     hole_probe: Option<BenchHoleProbe>,
+    #[serde(default)]
+    seam_audit: Option<BenchSeamAudit>,
     /// Diagnostic: force terrain debug overlays (Alt+F7 wireframe / Alt+F8
     /// normals) on for this checkpoint so seam artifacts can be classified
     /// deterministically from a bench screenshot.
@@ -615,6 +625,12 @@ struct ScreenshotPoint {
     frame: u32,
     #[serde(default)]
     inventory_category: Option<InventoryCategory>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchSeamAudit {
+    #[serde(default)]
+    frame: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1095,6 +1111,8 @@ impl Plugin for BenchPlugin {
                 gameplay_dig_rejected_crust: 0,
                 gameplay_dig_failed: false,
                 hole_probe_requested: false,
+                seam_audit_requested: false,
+                seam_audit_drain_frames_left: 0,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
@@ -1114,7 +1132,9 @@ impl Plugin for BenchPlugin {
             .init_resource::<InventoryUiState>()
             .init_resource::<ActionState>()
             .init_resource::<TargetedBlock>()
+            .init_resource::<LodSeamHardCaseFixtureApplied>()
             .add_systems(Startup, setup_bench_environment)
+            .add_systems(Update, apply_lod_seam_hard_case_fixture_once)
             .add_systems(
                 PreUpdate,
                 (
@@ -1134,6 +1154,27 @@ impl Plugin for BenchPlugin {
                     .chain(),
             );
     }
+}
+
+#[derive(Resource, Default)]
+struct LodSeamHardCaseFixtureApplied(bool);
+
+fn apply_lod_seam_hard_case_fixture_once(
+    scene: Res<BenchSceneResource>,
+    mut world: ResMut<VoxelWorld>,
+    mut applied: ResMut<LodSeamHardCaseFixtureApplied>,
+) {
+    if applied.0 || !scene.0.lod_seam_hard_case_fixture {
+        return;
+    }
+    if world.chunk_positions().next().is_none() {
+        return;
+    }
+    crate::voxel::diagnostics::lod_seam_hard_case_fixture::apply_lod_seam_hard_case_fixture(
+        &mut world,
+    );
+    applied.0 = true;
+    info!("Applied LOD seam hard-case voxel fixture");
 }
 
 fn setup_bench_environment(
@@ -2424,6 +2465,8 @@ fn run_bench_state_machine(
             state.gameplay_dig_rejected_crust = 0;
             state.gameplay_dig_failed = false;
             state.hole_probe_requested = false;
+            state.seam_audit_requested = false;
+            state.seam_audit_drain_frames_left = 0;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
@@ -2780,6 +2823,13 @@ fn run_bench_state_machine(
         }
         BenchPhase::Hold => {
             if state.hold_frames_left == 0 {
+                if state.seam_audit_requested && state.seam_audit_drain_frames_left == 0 {
+                    state.seam_audit_drain_frames_left = 2;
+                }
+                if state.seam_audit_drain_frames_left > 0 {
+                    state.seam_audit_drain_frames_left -= 1;
+                    return;
+                }
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
                 let ray_probe = camera.single().ok().map(|(transform, _)| {
                     bench_center_ray_probe(transform, &world, &chunk_stats, &scene.render_toggles)
@@ -2944,6 +2994,19 @@ fn run_bench_state_machine(
                             .push(request);
                     });
                 }
+                if let Some(request) = checkpoint_seam_audit_request(
+                    &config,
+                    checkpoint,
+                    state.hold_elapsed_frames,
+                    state.run_index,
+                    &mut state.seam_audit_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainSeamAuditRequests>()
+                            .push(request);
+                    });
+                }
                 apply_inventory_ui_screenshot_category(
                     checkpoint,
                     state.hold_elapsed_frames,
@@ -2977,6 +3040,25 @@ fn run_bench_state_machine(
                             .push(request);
                     });
                     state.screenshot_wait_left = state.screenshot_wait_left.max(1);
+                    return;
+                }
+            }
+            if screenshots_ready && !state.seam_audit_requested {
+                let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                if let Some(request) = checkpoint_seam_audit_request(
+                    &config,
+                    checkpoint,
+                    checkpoint.hold_frames,
+                    state.run_index,
+                    &mut state.seam_audit_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainSeamAuditRequests>()
+                            .push(request);
+                    });
+                    state.seam_audit_drain_frames_left = state.seam_audit_drain_frames_left.max(2);
+                    state.screenshot_wait_left = state.screenshot_wait_left.max(2);
                     return;
                 }
             }
@@ -3058,6 +3140,36 @@ fn apply_inventory_ui_screenshot_category(
 
     control.open = true;
     control.category = category;
+}
+
+fn checkpoint_seam_audit_request(
+    config: &BenchConfig,
+    checkpoint: &BenchCheckpoint,
+    hold_elapsed_frames: u32,
+    run_index: u32,
+    requested: &mut bool,
+) -> Option<TerrainSeamAuditRequest> {
+    let Some(audit) = checkpoint.seam_audit.as_ref() else {
+        return None;
+    };
+    let trigger_frame = if audit.frame == 0 {
+        checkpoint.hold_frames.saturating_sub(1)
+    } else {
+        audit.frame
+    };
+    if *requested || hold_elapsed_frames < trigger_frame {
+        return None;
+    }
+    *requested = true;
+    Some(TerrainSeamAuditRequest {
+        trigger: format!(
+            "bench:{}:run{}:frame{}",
+            checkpoint.name, run_index, hold_elapsed_frames
+        ),
+        output_dir: config.output_dir.clone(),
+        checkpoint_name: checkpoint.name.clone(),
+        run_index,
+    })
 }
 
 fn checkpoint_hole_probe_request(
@@ -4628,6 +4740,7 @@ hold_frames = 30
             startup_trace: StartupTraceConfig::default(),
             render_toggles: BenchRenderToggles::default(),
             forensics: None,
+            lod_seam_hard_case_fixture: false,
             checkpoints: Vec::new(),
         };
         let mut world = VoxelWorld::new(IVec3::ONE);

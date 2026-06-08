@@ -842,7 +842,7 @@ pub(super) struct UVec3Dump {
     pub(super) z: u32,
 }
 
-pub(super) type TerrainEntityQuery<'w, 's> = Query<
+pub type TerrainEntityQuery<'w, 's> = Query<
     'w,
     's,
     (
@@ -860,6 +860,7 @@ pub(super) type TerrainEntityQuery<'w, 's> = Query<
         Option<&'static ChunkCollider>,
         Option<&'static Collider>,
         Option<&'static RigidBody>,
+        Option<&'static crate::voxel::meshing::TerrainSeamStripDebug>,
     ),
 >;
 

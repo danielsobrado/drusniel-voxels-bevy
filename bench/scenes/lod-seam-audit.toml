@@ -1,0 +1,60 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = false
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[[checkpoint]]
+name = "slope-seam"
+position = [256.0, 82.0, 220.0]
+look_at = [282.0, 64.0, 250.0]
+time_of_day = 0.42
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run", end_position = [320.0, 82.0, 284.0], end_look_at = [344.0, 64.0, 304.0], look_sway_degrees = 10.0 }
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "cliff-seam"
+position = [292.0, 96.0, 248.0]
+look_at = [318.0, 70.0, 272.0]
+time_of_day = 0.55
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+motion = { kind = "look_sweep", end_look_at = [340.0, 68.0, 292.0], look_sway_degrees = 18.0 }
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "cave-mouth-seam"
+position = [248.0, 78.0, 300.0]
+look_at = [268.0, 62.0, 318.0]
+time_of_day = 0.35
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "water-edge-seam"
+position = [256.0, 86.0, 220.0]
+look_at = [284.0, 64.0, 250.0]
+time_of_day = 0.72
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run_jump_look", end_position = [320.0, 86.0, 284.0], end_look_at = [348.0, 64.0, 312.0], jump_height = 8.0, bob_amplitude = 0.12, look_sway_degrees = 16.0 }
+seam_audit = { frame = 179 }
+
+[[checkpoint]]
+name = "forest-lod-churn"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run_look_sweep", end_position = [264.0, 88.0, 277.0], end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
+seam_audit = { frame = 179 }

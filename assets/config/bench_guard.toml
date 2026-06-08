@@ -766,3 +766,71 @@ area = "Counter Water Triangles Removed Sealed"
 field = "avg_ms"
 exists = true
 unit = "count"
+
+[lod_seam_audit]
+max_active_seam_faces_with_open_edges = 0
+max_active_seam_faces_with_transition_coverage_gaps = 0
+max_samples_without_render_coverage = 0
+max_possible_terrace_samples = 0
+max_partial_morph_uncovered_faces = 0
+max_stale_strip_faces_after_stable_frames = 0
+max_lod_delta_gt_one_faces = 0
+max_lip_height_voxels = 0.20
+max_face_offset_voxels = 0.10
+max_longest_unmatched_edge_voxels = 0.05
+max_unmatched_transition_edges = 0
+max_unmatched_regular_edges_on_delta1_seams = 0
+max_strip_incompatible_faces = 0
+max_strip_missing_faces_after_stable_frames = 0
+max_strip_topology_unsupported_stitched_faces = 0
+max_stitch_safe_bad_component_faces = 0
+max_strip_fine_to_coarse_distance_voxels = 0.35
+max_strip_coarse_to_fine_distance_voxels = 0.35
+max_strip_endpoint_distance_voxels = 0.50
+min_strip_span_overlap_ratio = 0.95
+max_strip_crossing_count = 0
+
+[[check]]
+name = "lod_seam_audit_partial_morph_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Partial Morph Uncovered Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_audit_open_edges_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Open Edge Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_audit_coverage_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Samples Without Render Coverage"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_hard_cases_open_edges"
+scene = "lod-seam-hard-cases.toml"
+checkpoint = "cave-mouth-lod0-lod1-x"
+area = "Counter Seam Audit: Open Edge Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_hard_cases_bad_components"
+scene = "lod-seam-hard-cases.toml"
+checkpoint = "multi-component-mismatch"
+area = "Counter Seam Audit: Strip Incompatible Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"

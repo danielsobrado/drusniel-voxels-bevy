@@ -25,6 +25,7 @@ use crate::voxel::chunk::LodLevel;
 use crate::voxel::skirt::ChunkFace;
 use bevy::math::{IVec3, Vec2, Vec3};
 use bevy::prelude::Resource;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -86,7 +87,102 @@ pub struct LodBoundaryStrip {
 
 impl LodBoundaryStrip {
     pub fn has_single_connected_component(&self) -> bool {
-        boundary_component_count(&self.segments, self.vertices.len()) == 1
+        self.component_count() == 1
+    }
+
+    pub fn component_count(&self) -> usize {
+        boundary_component_count(&self.segments, self.vertices.len())
+    }
+}
+
+/// Oracle-oriented projected strip geometry (positions only, no normals/world).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompactProjectedStrip {
+    pub face: ChunkFace,
+    pub lod: LodLevel,
+    pub chunk_pos: IVec3,
+    pub revision: u64,
+    pub vertices: Vec<Vec2>,
+    pub segments: Vec<[u16; 2]>,
+}
+
+impl CompactProjectedStrip {
+    pub fn from_lod_boundary_strip(strip: &LodBoundaryStrip) -> Self {
+        Self {
+            face: strip.face,
+            lod: strip.lod,
+            chunk_pos: strip.chunk_pos,
+            revision: strip.revision,
+            vertices: strip.vertices.iter().map(|vertex| vertex.proj).collect(),
+            segments: strip
+                .segments
+                .iter()
+                .map(|&[a, b]| [a as u16, b as u16])
+                .collect(),
+        }
+    }
+}
+
+/// This chunk's own mesh-time boundary strips (not neighbour-consumed strips).
+#[derive(Clone, Debug, Default)]
+pub struct OwnBoundaryStrips {
+    pub strips: [Option<LodBoundaryStrip>; XZ_STRIP_FACE_SLOTS],
+}
+
+pub const XZ_STRIP_FACE_SLOTS: usize = 4;
+
+impl OwnBoundaryStrips {
+    pub fn from_extracted(strips: Vec<LodBoundaryStrip>) -> Self {
+        let mut own = Self::default();
+        for strip in strips {
+            if let Some(idx) = xz_strip_face_slot(strip.face) {
+                own.strips[idx] = Some(strip);
+            }
+        }
+        own
+    }
+
+    pub fn for_face(&self, face: ChunkFace) -> Option<&LodBoundaryStrip> {
+        xz_strip_face_slot(face).and_then(|idx| self.strips[idx].as_ref())
+    }
+
+    pub fn iter_strips(&self) -> impl Iterator<Item = &LodBoundaryStrip> {
+        self.strips.iter().filter_map(|strip| strip.as_ref())
+    }
+}
+
+fn xz_strip_face_slot(face: ChunkFace) -> Option<usize> {
+    match face {
+        ChunkFace::NegX => Some(0),
+        ChunkFace::PosX => Some(1),
+        ChunkFace::NegZ => Some(2),
+        ChunkFace::PosZ => Some(3),
+        _ => None,
+    }
+}
+
+/// Rebuild a [`LodBoundaryStrip`] for overlap oracle checks from compact projected data.
+pub fn lod_boundary_strip_from_compact(compact: &CompactProjectedStrip) -> LodBoundaryStrip {
+    LodBoundaryStrip {
+        face: compact.face,
+        lod: compact.lod,
+        chunk_pos: compact.chunk_pos,
+        revision: compact.revision,
+        vertices: compact
+            .vertices
+            .iter()
+            .map(|&proj| StripVertex {
+                local: Vec3::ZERO,
+                world: Vec3::ZERO,
+                normal: Vec3::ZERO,
+                proj,
+            })
+            .collect(),
+        segments: compact
+            .segments
+            .iter()
+            .map(|&[a, b]| [a as u32, b as u32])
+            .collect(),
     }
 }
 
@@ -600,6 +696,475 @@ pub fn stitch_boundary_strips(
     stitch_seam(&fine.vertices, &coarse.vertices)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripOracleComparison {
+    pub equivalent: bool,
+    pub fine_segment_count: usize,
+    pub coarse_segment_count: usize,
+    pub fine_component_count: usize,
+    pub coarse_component_count: usize,
+    pub max_projected_segment_distance: f32,
+}
+
+/// Debug/bench oracle: compare a fine consumer strip against the coarse source strip.
+pub fn compare_projected_strips(
+    fine: &LodBoundaryStrip,
+    coarse: &LodBoundaryStrip,
+    epsilon: f32,
+) -> StripOracleComparison {
+    let fine_segment_count = fine.segments.len();
+    let coarse_segment_count = coarse.segments.len();
+    let fine_component_count = fine.component_count();
+    let coarse_component_count = coarse.component_count();
+    let mut max_projected_segment_distance = 0.0f32;
+
+    if fine_segment_count == coarse_segment_count {
+        for (fine_seg, coarse_seg) in fine.segments.iter().zip(coarse.segments.iter()) {
+            let fa = fine.vertices.get(fine_seg[0] as usize);
+            let fb = fine.vertices.get(fine_seg[1] as usize);
+            let ca = coarse.vertices.get(coarse_seg[0] as usize);
+            let cb = coarse.vertices.get(coarse_seg[1] as usize);
+            if let (Some(fa), Some(fb), Some(ca), Some(cb)) = (fa, fb, ca, cb) {
+                let d0 = fa.proj.distance(ca.proj);
+                let d1 = fb.proj.distance(cb.proj);
+                max_projected_segment_distance =
+                    max_projected_segment_distance.max(d0.max(d1));
+            }
+        }
+    }
+
+    let equivalent = fine_segment_count == coarse_segment_count
+        && fine_component_count == coarse_component_count
+        && max_projected_segment_distance <= epsilon.max(0.0);
+
+    StripOracleComparison {
+        equivalent,
+        fine_segment_count,
+        coarse_segment_count,
+        fine_component_count,
+        coarse_component_count,
+        max_projected_segment_distance,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StripOverlapStatus {
+    #[default]
+    NotEvaluated,
+    Compatible,
+    MissingFineStrip,
+    MissingCoarseStrip,
+    EmptyFineStrip,
+    EmptyCoarseStrip,
+    ComponentMismatch,
+    FineMultiComponent,
+    CoarseMultiComponent,
+    SpanMismatch,
+    DirectedDistanceExceeded,
+    EndpointDistanceExceeded,
+    CrossingOrFoldDetected,
+    DegenerateSegment,
+    UnsupportedTopology,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripOverlapConfig {
+    pub max_directed_distance_voxels: f32,
+    pub max_endpoint_distance_voxels: f32,
+    pub min_span_overlap_ratio: f32,
+    pub min_segment_length_voxels: f32,
+    pub segment_sample_spacing_voxels: f32,
+    pub max_unmatched_fine_segments: u16,
+    pub max_unmatched_coarse_segments: u16,
+    pub max_crossings: u16,
+}
+
+impl Default for StripOverlapConfig {
+    fn default() -> Self {
+        Self {
+            max_directed_distance_voxels: 0.35,
+            max_endpoint_distance_voxels: 0.50,
+            min_span_overlap_ratio: 0.95,
+            min_segment_length_voxels: 0.02,
+            segment_sample_spacing_voxels: 0.25,
+            max_unmatched_fine_segments: 0,
+            max_unmatched_coarse_segments: 0,
+            max_crossings: 0,
+        }
+    }
+}
+
+pub const LOD_SEAM_AUDIT_CONFIG_PATH: &str = "assets/config/lod_seam_audit.yaml";
+
+#[derive(Deserialize)]
+struct StripOverlapConfigFile {
+    lod_seam_audit: LodSeamAuditConfigSection,
+}
+
+#[derive(Deserialize)]
+struct LodSeamAuditConfigSection {
+    strip_overlap: StripOverlapConfigRaw,
+}
+
+#[derive(Deserialize)]
+struct StripOverlapConfigRaw {
+    #[serde(default = "default_max_directed_distance_voxels")]
+    max_directed_distance_voxels: f32,
+    #[serde(default = "default_max_endpoint_distance_voxels")]
+    max_endpoint_distance_voxels: f32,
+    #[serde(default = "default_min_span_overlap_ratio")]
+    min_span_overlap_ratio: f32,
+    #[serde(default = "default_min_segment_length_voxels")]
+    min_segment_length_voxels: f32,
+    #[serde(default = "default_segment_sample_spacing_voxels")]
+    segment_sample_spacing_voxels: f32,
+    #[serde(default)]
+    max_unmatched_fine_segments: u16,
+    #[serde(default)]
+    max_unmatched_coarse_segments: u16,
+    #[serde(default)]
+    max_crossings: u16,
+}
+
+fn default_max_directed_distance_voxels() -> f32 {
+    0.35
+}
+
+fn default_max_endpoint_distance_voxels() -> f32 {
+    0.50
+}
+
+fn default_min_span_overlap_ratio() -> f32 {
+    0.95
+}
+
+fn default_min_segment_length_voxels() -> f32 {
+    0.02
+}
+
+fn default_segment_sample_spacing_voxels() -> f32 {
+    0.25
+}
+
+impl From<StripOverlapConfigRaw> for StripOverlapConfig {
+    fn from(raw: StripOverlapConfigRaw) -> Self {
+        Self {
+            max_directed_distance_voxels: raw.max_directed_distance_voxels,
+            max_endpoint_distance_voxels: raw.max_endpoint_distance_voxels,
+            min_span_overlap_ratio: raw.min_span_overlap_ratio,
+            min_segment_length_voxels: raw.min_segment_length_voxels,
+            segment_sample_spacing_voxels: raw.segment_sample_spacing_voxels,
+            max_unmatched_fine_segments: raw.max_unmatched_fine_segments,
+            max_unmatched_coarse_segments: raw.max_unmatched_coarse_segments,
+            max_crossings: raw.max_crossings,
+        }
+    }
+}
+
+impl StripOverlapConfig {
+    pub fn load_or_default() -> Self {
+        match crate::config::loader::load_config::<StripOverlapConfigFile, _>(
+            LOD_SEAM_AUDIT_CONFIG_PATH,
+        )
+        {
+            Ok(file) => file.lod_seam_audit.strip_overlap.into(),
+            Err(err) => {
+                bevy::log::warn!(
+                    "failed to load {LOD_SEAM_AUDIT_CONFIG_PATH}: {err}; using strip overlap defaults"
+                );
+                Self::default()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StripOverlapAudit {
+    pub status: StripOverlapStatus,
+    pub compatible: bool,
+    pub fine_segment_count: u16,
+    pub coarse_segment_count: u16,
+    pub fine_component_count: u8,
+    pub coarse_component_count: u8,
+    pub fine_span_min: f32,
+    pub fine_span_max: f32,
+    pub coarse_span_min: f32,
+    pub coarse_span_max: f32,
+    pub overlap_span_min: f32,
+    pub overlap_span_max: f32,
+    pub span_overlap_ratio: f32,
+    pub max_fine_to_coarse_distance: f32,
+    pub max_coarse_to_fine_distance: f32,
+    pub max_endpoint_distance: f32,
+    pub unmatched_fine_segments: u16,
+    pub unmatched_coarse_segments: u16,
+    pub degenerate_segments: u16,
+    pub crossing_count: u16,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProjectedSegment {
+    a: Vec2,
+    b: Vec2,
+    length: f32,
+    span_min: f32,
+    span_max: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DirectedDistanceResult {
+    max_distance: f32,
+    unmatched_segments: u16,
+}
+
+pub fn audit_projected_strip_overlap(
+    fine: Option<&LodBoundaryStrip>,
+    coarse: Option<&LodBoundaryStrip>,
+    config: StripOverlapConfig,
+) -> StripOverlapAudit {
+    let mut audit = StripOverlapAudit::default();
+    let Some(fine) = fine else {
+        audit.status = StripOverlapStatus::MissingFineStrip;
+        return audit;
+    };
+    let Some(coarse) = coarse else {
+        audit.status = StripOverlapStatus::MissingCoarseStrip;
+        return audit;
+    };
+
+    audit.fine_segment_count = fine.segments.len().min(u16::MAX as usize) as u16;
+    audit.coarse_segment_count = coarse.segments.len().min(u16::MAX as usize) as u16;
+    audit.fine_component_count = fine.component_count().min(u8::MAX as usize) as u8;
+    audit.coarse_component_count = coarse.component_count().min(u8::MAX as usize) as u8;
+
+    if fine.segments.is_empty() {
+        audit.status = StripOverlapStatus::EmptyFineStrip;
+        return audit;
+    }
+    if coarse.segments.is_empty() {
+        audit.status = StripOverlapStatus::EmptyCoarseStrip;
+        return audit;
+    }
+    if audit.fine_component_count > 1 {
+        audit.status = StripOverlapStatus::FineMultiComponent;
+        return audit;
+    }
+    if audit.coarse_component_count > 1 {
+        audit.status = StripOverlapStatus::CoarseMultiComponent;
+        return audit;
+    }
+    if audit.fine_component_count != audit.coarse_component_count {
+        audit.status = StripOverlapStatus::ComponentMismatch;
+        return audit;
+    }
+
+    let fine_segments = match projected_segments(fine, config.min_segment_length_voxels, &mut audit) {
+        Some(s) => s,
+        None => return audit,
+    };
+    let coarse_segments = match projected_segments(coarse, config.min_segment_length_voxels, &mut audit) {
+        Some(s) => s,
+        None => return audit,
+    };
+
+    let Some((fine_span_min, fine_span_max)) = strip_span(&fine_segments) else {
+        audit.status = StripOverlapStatus::EmptyFineStrip;
+        return audit;
+    };
+    let Some((coarse_span_min, coarse_span_max)) = strip_span(&coarse_segments) else {
+        audit.status = StripOverlapStatus::EmptyCoarseStrip;
+        return audit;
+    };
+    audit.fine_span_min = fine_span_min;
+    audit.fine_span_max = fine_span_max;
+    audit.coarse_span_min = coarse_span_min;
+    audit.coarse_span_max = coarse_span_max;
+    audit.overlap_span_min = fine_span_min.max(coarse_span_min);
+    audit.overlap_span_max = fine_span_max.min(coarse_span_max);
+    let overlap_len = (audit.overlap_span_max - audit.overlap_span_min).max(0.0);
+    let denom = (fine_span_max - fine_span_min).max(coarse_span_max - coarse_span_min);
+    audit.span_overlap_ratio = if denom <= f32::EPSILON { 1.0 } else { overlap_len / denom };
+    if audit.span_overlap_ratio < config.min_span_overlap_ratio {
+        audit.status = StripOverlapStatus::SpanMismatch;
+        return audit;
+    }
+
+    let fine_to_coarse = directed_segment_set_distance(
+        &fine_segments,
+        &coarse_segments,
+        config.segment_sample_spacing_voxels,
+        config.max_directed_distance_voxels,
+    );
+    let coarse_to_fine = directed_segment_set_distance(
+        &coarse_segments,
+        &fine_segments,
+        config.segment_sample_spacing_voxels,
+        config.max_directed_distance_voxels,
+    );
+    audit.max_fine_to_coarse_distance = fine_to_coarse.max_distance;
+    audit.max_coarse_to_fine_distance = coarse_to_fine.max_distance;
+    audit.unmatched_fine_segments = fine_to_coarse.unmatched_segments;
+    audit.unmatched_coarse_segments = coarse_to_fine.unmatched_segments;
+
+    audit.max_endpoint_distance = endpoint_distance_max(&fine_segments, &coarse_segments)
+        .max(endpoint_distance_max(&coarse_segments, &fine_segments));
+    audit.crossing_count = segment_crossing_count(&fine_segments, &coarse_segments, 1e-4);
+
+    if audit.max_fine_to_coarse_distance > config.max_directed_distance_voxels
+        || audit.max_coarse_to_fine_distance > config.max_directed_distance_voxels
+        || audit.unmatched_fine_segments > config.max_unmatched_fine_segments
+        || audit.unmatched_coarse_segments > config.max_unmatched_coarse_segments
+    {
+        audit.status = StripOverlapStatus::DirectedDistanceExceeded;
+        return audit;
+    }
+    if audit.max_endpoint_distance > config.max_endpoint_distance_voxels {
+        audit.status = StripOverlapStatus::EndpointDistanceExceeded;
+        return audit;
+    }
+    if audit.crossing_count > config.max_crossings {
+        audit.status = StripOverlapStatus::CrossingOrFoldDetected;
+        return audit;
+    }
+
+    audit.status = StripOverlapStatus::Compatible;
+    audit.compatible = true;
+    audit
+}
+
+fn projected_segments(
+    strip: &LodBoundaryStrip,
+    min_segment_length: f32,
+    audit: &mut StripOverlapAudit,
+) -> Option<Vec<ProjectedSegment>> {
+    let mut out = Vec::with_capacity(strip.segments.len());
+    for segment in &strip.segments {
+        let (Some(a), Some(b)) = (
+            strip.vertices.get(segment[0] as usize),
+            strip.vertices.get(segment[1] as usize),
+        ) else {
+            audit.status = StripOverlapStatus::UnsupportedTopology;
+            return None;
+        };
+        if !a.proj.is_finite() || !b.proj.is_finite() {
+            audit.status = StripOverlapStatus::UnsupportedTopology;
+            return None;
+        }
+        let length = a.proj.distance(b.proj);
+        if length <= min_segment_length {
+            audit.degenerate_segments = audit.degenerate_segments.saturating_add(1);
+            audit.status = StripOverlapStatus::DegenerateSegment;
+            return None;
+        }
+        out.push(ProjectedSegment {
+            a: a.proj,
+            b: b.proj,
+            length,
+            span_min: a.proj.x.min(b.proj.x),
+            span_max: a.proj.x.max(b.proj.x),
+        });
+    }
+    Some(out)
+}
+
+fn strip_span(segments: &[ProjectedSegment]) -> Option<(f32, f32)> {
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    for segment in segments {
+        min_x = min_x.min(segment.span_min);
+        max_x = max_x.max(segment.span_max);
+    }
+    (min_x.is_finite() && max_x.is_finite()).then_some((min_x, max_x))
+}
+
+fn directed_segment_set_distance(
+    source: &[ProjectedSegment],
+    target: &[ProjectedSegment],
+    spacing: f32,
+    threshold: f32,
+) -> DirectedDistanceResult {
+    let mut result = DirectedDistanceResult::default();
+    for segment in source {
+        let sample_count = ((segment.length / spacing.max(1e-3)).ceil() as usize).max(1);
+        let mut segment_has_match = false;
+        for i in 0..=sample_count {
+            let t = i as f32 / sample_count as f32;
+            let point = segment.a.lerp(segment.b, t);
+            let distance = closest_distance_to_segments(point, target);
+            result.max_distance = result.max_distance.max(distance);
+            if distance <= threshold {
+                segment_has_match = true;
+            }
+        }
+        if !segment_has_match {
+            result.unmatched_segments = result.unmatched_segments.saturating_add(1);
+        }
+    }
+    result
+}
+
+fn endpoint_distance_max(source: &[ProjectedSegment], target: &[ProjectedSegment]) -> f32 {
+    let mut max_distance: f32 = 0.0;
+    for segment in source {
+        max_distance = max_distance.max(closest_distance_to_segments(segment.a, target));
+        max_distance = max_distance.max(closest_distance_to_segments(segment.b, target));
+    }
+    max_distance
+}
+
+fn closest_distance_to_segments(point: Vec2, segments: &[ProjectedSegment]) -> f32 {
+    let mut best = f32::INFINITY;
+    for segment in segments {
+        let (_, distance) = closest_point_on_segment_2d(point, segment.a, segment.b);
+        best = best.min(distance);
+    }
+    if best.is_finite() { best } else { f32::INFINITY }
+}
+
+fn segment_crossing_count(
+    a_segments: &[ProjectedSegment],
+    b_segments: &[ProjectedSegment],
+    epsilon: f32,
+) -> u16 {
+    let mut count = 0u16;
+    for a in a_segments {
+        for b in b_segments {
+            if segments_intersect_strict(a.a, a.b, b.a, b.b, epsilon) {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    count
+}
+
+fn segments_intersect_strict(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2, epsilon: f32) -> bool {
+    if points_close(a0, b0, epsilon)
+        || points_close(a0, b1, epsilon)
+        || points_close(a1, b0, epsilon)
+        || points_close(a1, b1, epsilon)
+    {
+        return false;
+    }
+    let o1 = orient(a0, a1, b0);
+    let o2 = orient(a0, a1, b1);
+    let o3 = orient(b0, b1, a0);
+    let o4 = orient(b0, b1, a1);
+    if o1.abs() <= epsilon || o2.abs() <= epsilon || o3.abs() <= epsilon || o4.abs() <= epsilon {
+        return false;
+    }
+    (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+}
+
+#[inline]
+fn orient(a: Vec2, b: Vec2, c: Vec2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+#[inline]
+fn points_close(a: Vec2, b: Vec2, epsilon: f32) -> bool {
+    a.distance_squared(b) <= epsilon * epsilon
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,5 +1462,118 @@ mod tests {
 
         cache.remove(pos);
         assert!(cache.is_empty());
+    }
+
+    fn line_strip(points: &[(f32, f32)], segments: &[[u32; 2]]) -> LodBoundaryStrip {
+        LodBoundaryStrip {
+            face: ChunkFace::PosX,
+            lod: LodLevel::Lod0,
+            chunk_pos: IVec3::ZERO,
+            revision: 1,
+            vertices: points
+                .iter()
+                .map(|(x, y)| StripVertex {
+                    local: Vec3::ZERO,
+                    world: Vec3::ZERO,
+                    normal: Vec3::Y,
+                    proj: Vec2::new(*x, *y),
+                })
+                .collect(),
+            segments: segments.to_vec(),
+        }
+    }
+
+    #[test]
+    fn overlap_oracle_accepts_different_segment_counts_when_geometrically_compatible() {
+        let fine = line_strip(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)], &[[0, 1], [1, 2]]);
+        let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::Compatible);
+        assert!(audit.compatible);
+    }
+
+    #[test]
+    fn overlap_oracle_rejects_span_mismatch() {
+        let fine = line_strip(&[(0.0, 0.0), (10.0, 0.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.0, 0.0), (7.0, 0.0)], &[[0, 1]]);
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::SpanMismatch);
+    }
+
+    #[test]
+    fn overlap_oracle_rejects_directed_distance_exceeded() {
+        let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.0, 0.6), (2.0, 0.6)], &[[0, 1]]);
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::DirectedDistanceExceeded);
+    }
+
+    #[test]
+    fn compact_projected_strip_round_trip_preserves_oracle_result() {
+        let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let expected =
+            audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let fine_compact = CompactProjectedStrip::from_lod_boundary_strip(&fine);
+        let coarse_compact = CompactProjectedStrip::from_lod_boundary_strip(&coarse);
+        let fine_round = lod_boundary_strip_from_compact(&fine_compact);
+        let coarse_round = lod_boundary_strip_from_compact(&coarse_compact);
+        let actual = audit_projected_strip_overlap(
+            Some(&fine_round),
+            Some(&coarse_round),
+            StripOverlapConfig::default(),
+        );
+        assert_eq!(actual.status, expected.status);
+        assert_eq!(actual.compatible, expected.compatible);
+    }
+
+    #[test]
+    fn overlap_oracle_detects_crossing_segments() {
+        let fine = line_strip(&[(0.0, 0.0), (2.0, 2.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.0, 2.0), (2.0, 0.0)], &[[0, 1]]);
+        let mut config = StripOverlapConfig::default();
+        // Crossing diagonals meet at the center but endpoints are far from the opposite
+        // segment; relax distance thresholds so crossing detection is the failing signal.
+        config.max_directed_distance_voxels = 2.0;
+        config.max_endpoint_distance_voxels = 2.0;
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), config);
+        assert_eq!(audit.status, StripOverlapStatus::CrossingOrFoldDetected);
+        assert!(audit.crossing_count > 0);
+    }
+
+    #[test]
+    fn overlap_oracle_reports_missing_fine_strip() {
+        let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let audit = audit_projected_strip_overlap(None, Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::MissingFineStrip);
+    }
+
+    #[test]
+    fn overlap_oracle_reports_fine_multi_component() {
+        let fine = line_strip(&[(0.0, 0.0), (1.0, 0.0), (4.0, 0.0), (5.0, 0.0)], &[[0, 1], [2, 3]]);
+        let coarse = line_strip(&[(0.0, 0.0), (5.0, 0.0)], &[[0, 1]]);
+        let audit =
+            audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::FineMultiComponent);
+    }
+
+    #[test]
+    fn overlap_oracle_rejects_endpoint_distance_exceeded() {
+        let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.4, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let mut config = StripOverlapConfig::default();
+        config.max_directed_distance_voxels = 1.0;
+        config.max_endpoint_distance_voxels = 0.2;
+        config.min_span_overlap_ratio = 0.5;
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), config);
+        assert_eq!(audit.status, StripOverlapStatus::EndpointDistanceExceeded);
+    }
+
+    #[test]
+    fn strip_overlap_config_loads_from_lod_seam_audit_yaml() {
+        let config = StripOverlapConfig::load_or_default();
+        assert!((config.max_directed_distance_voxels - 0.35).abs() < f32::EPSILON);
+        assert!((config.max_endpoint_distance_voxels - 0.50).abs() < f32::EPSILON);
+        assert!((config.min_span_overlap_ratio - 0.95).abs() < f32::EPSILON);
     }
 }

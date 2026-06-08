@@ -86,6 +86,7 @@ pub mod commit;
 mod data;
 pub mod invalidation;
 mod lod_seam;
+pub mod seam_audit;
 pub mod lod;
 mod material_weights;
 pub(crate) mod mc_support;
@@ -106,6 +107,11 @@ pub(crate) use lod_seam::{
     transition_target_lod, xz_face_coarse_target_local,
 };
 pub use pipeline::*;
+pub use seam_audit::{
+    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
+    XZ_FACE_COUNT, XZ_FACES, assemble_seam_face_audit, classify_final_mode,
+    resolve_strip_status_per_face, strip_reject_reason_from_overlap_status, xz_face_index,
+};
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use sdf::{
     coarse_lod_iso_height_for_column, count_missing_in_bounds_boundary_neighbors,

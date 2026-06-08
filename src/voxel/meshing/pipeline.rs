@@ -62,6 +62,7 @@ pub struct MeshRequest<'a> {
     pub water_exposure_mode: WaterAirExposureMode,
     pub forensics: MeshForensicsOptions,
     pub neighbor_strips: Option<&'a crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    pub strip_status: Option<&'a [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT]>,
     pub mc_settings: Option<&'a crate::voxel::mc_transvoxel::McTransvoxelSettings>,
     pub timing_enabled: bool,
 }
@@ -176,12 +177,16 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
         water_exposure_mode,
         forensics,
         neighbor_strips,
+        strip_status: None,
         mc_settings: loaded_mc_settings.as_ref(),
         timing_enabled: false,
     })
 }
 
 fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
+    let default_strip_status =
+        [super::seam_audit::SeamStripStatus::NotNeeded; super::seam_audit::XZ_FACE_COUNT];
+    let strip_status = request.strip_status.unwrap_or(&default_strip_status);
     match request.mesh_lod {
         LodLevel::Lod0 => generate_chunk_mesh_surface_nets(
             request.chunk,
@@ -192,6 +197,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            strip_status,
             request.timing_enabled,
         ),
         LodLevel::Lod1 => generate_chunk_mesh_surface_nets_lod1(
@@ -203,6 +209,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            strip_status,
             request.timing_enabled,
         ),
         LodLevel::Lod2 => generate_chunk_mesh_surface_nets_lod2(
@@ -214,6 +221,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            strip_status,
             request.timing_enabled,
         ),
         LodLevel::Lod3 => generate_chunk_mesh_surface_nets_lod3(
@@ -225,6 +233,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            strip_status,
             request.timing_enabled,
         ),
         LodLevel::Culled => empty_mesh_result(),
@@ -242,6 +251,8 @@ fn empty_mesh_result() -> ChunkMeshResult {
         mc_triangle_sources: None,
         generation_timing: MeshGenerationTimingStats::default(),
         boundary_strips: Vec::new(),
+        seam_face_audit: [super::seam_audit::SeamFaceAudit::default(); super::seam_audit::XZ_FACE_COUNT],
+        seam_strip_debug: super::TerrainSeamStripDebug::default(),
     }
 }
 

@@ -368,6 +368,13 @@ pub(crate) fn mesh_dirty_chunks_system(
             mesh_lod_level,
             &neighbor_lods,
         );
+        let strip_status = crate::voxel::meshing::seam_audit::resolve_strip_status_per_face(
+            &timing_params.strip_cache,
+            &world,
+            chunk_pos,
+            mesh_lod_level,
+            &neighbor_lods,
+        );
         let mesh_start = Instant::now();
         let mut mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_for_request(MeshRequest {
@@ -385,6 +392,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                     &mc_spike.settings,
                 ),
                 neighbor_strips: Some(&neighbor_strips),
+                strip_status: Some(&strip_status),
                 mc_settings: Some(&*mc_spike.settings),
                 timing_enabled: timing.enabled,
             })
@@ -507,7 +515,9 @@ pub(crate) fn mesh_dirty_chunks_system(
                 lod_transition_snap_stats: mesh_result.lod_transition_snap_stats,
                 mesh_section_stats: mesh_result.mesh_section_stats,
                 mc_transvoxel_stats: mesh_result.mc_transvoxel_stats,
+                seam_face_audit: mesh_result.seam_face_audit,
             };
+            let seam_strip_debug = mesh_result.seam_strip_debug.clone();
             let mc_triangle_sources = mesh_result.mc_triangle_sources.clone();
 
             // Track meshing statistics
@@ -547,6 +557,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                         MeshMaterial3d(blocky_mat.handle.clone()),
                                         chunk_mesh,
                                         terrain_mesh_debug,
+                                        seam_strip_debug.clone(),
                                     ))
                                     .remove::<MeshMaterial3d<
                                         crate::rendering::triplanar_material::TriplanarMaterial,
@@ -561,6 +572,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                     MeshMaterial3d(triplanar_handle),
                                     chunk_mesh,
                                     terrain_mesh_debug,
+                                    seam_strip_debug.clone(),
                                 ))
                                 .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
                         }
@@ -619,6 +631,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                     ),
                                     chunk_mesh,
                                     terrain_mesh_debug,
+                                    seam_strip_debug.clone(),
                                     terrain_layers,
                                 ))
                                 .id()
@@ -634,6 +647,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                 ),
                                 chunk_mesh,
                                 terrain_mesh_debug,
+                                seam_strip_debug,
                                 terrain_layers,
                             ))
                             .id(),

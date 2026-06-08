@@ -475,6 +475,8 @@ pub(super) fn generate_blocky_chunk_mesh(
         mc_triangle_sources: None,
         generation_timing: MeshGenerationTimingStats::default(),
         boundary_strips: Vec::new(),
+        seam_face_audit: [super::seam_audit::SeamFaceAudit::default(); super::seam_audit::XZ_FACE_COUNT],
+        seam_strip_debug: super::TerrainSeamStripDebug::default(),
     }
 }
 

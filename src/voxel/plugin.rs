@@ -32,6 +32,7 @@ use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
     toggle_enclosure_culling, update_enclosure_state,
 };
+use crate::voxel::diagnostics::seam_audit_pass::SeamAuditPassPlugin;
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 #[allow(unused_imports)]
 pub(crate) use crate::voxel::lod::{
@@ -106,6 +107,7 @@ impl Plugin for VoxelPlugin {
             ExtractComponentPlugin::<WaterMesh>::default(),
             ExtractComponentPlugin::<WaterMeshDetail>::default(),
             TerrainHoleProbePlugin,
+            SeamAuditPassPlugin,
         ));
 
         let size_chunks = IVec3::new(

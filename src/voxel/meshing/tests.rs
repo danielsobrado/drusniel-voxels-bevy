@@ -2,6 +2,10 @@ use super::*;
 use crate::constants::{CHUNK_VOLUME, WATER_LEVEL};
 use crate::rendering::ao_config::BakedAoConfig;
 
+fn default_strip_status() -> [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT] {
+    [super::seam_audit::SeamStripStatus::NotNeeded; super::seam_audit::XZ_FACE_COUNT]
+}
+
 fn ao_config() -> BakedAoConfig {
     BakedAoConfig {
         enabled: false,
@@ -175,6 +179,7 @@ fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     )
 }
@@ -742,6 +747,7 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
     let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
@@ -753,6 +759,7 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
 
@@ -810,6 +817,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
     let reference_right = generate_chunk_mesh_surface_nets(
@@ -824,6 +832,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
     let reference_meshes = [
@@ -857,6 +866,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
     let transition_right = generate_chunk_mesh_surface_nets_lod1(
@@ -871,6 +881,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
     let transition_meshes = [
@@ -1446,7 +1457,7 @@ fn apply_snap_or_morph_enabled_skips_snap_and_bakes_targets() {
         ..Default::default()
     };
 
-    let stats = apply_snap_or_morph(
+    let (stats, _) = apply_snap_or_morph(
         &mut mesh,
         &mut local_positions,
         world.get_chunk(chunk_pos).unwrap(),
@@ -1486,7 +1497,7 @@ fn fractional_morph_target_lands_on_lod1_neighbor_mesh() {
         ..Default::default()
     };
 
-    let stats = apply_snap_or_morph(
+    let (stats, _) = apply_snap_or_morph(
         &mut mesh,
         &mut local_positions,
         world.get_chunk(lod0_chunk_pos).unwrap(),
@@ -1516,6 +1527,7 @@ fn fractional_morph_target_lands_on_lod1_neighbor_mesh() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        &default_strip_status(),
         false,
     );
 
@@ -1547,10 +1559,12 @@ fn resolve_morph_face_coverage_seals_if_any_vert_welds_and_keeps_welds() {
     // Any welded vert -> face complete (sealed). Welds are KEPT: un-morphing a
     // welded boundary vert is what released the LOD-seam spike it was pinning.
     let one_welded = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 0.0]];
-    let (complete, fallback) =
+    let (complete, fallback, counts) =
         resolve_morph_face_coverage(&locals, &one_welded, LodLevel::Lod0, &neighbors);
     assert_eq!(complete, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
     assert_eq!(fallback, 0);
+    assert_eq!(counts.candidate[0], 2);
+    assert_eq!(counts.welded[0], 1);
     assert!(
         one_welded[0][3] > 0.5,
         "welded vert must stay welded (no spike)"
@@ -1558,10 +1572,76 @@ fn resolve_morph_face_coverage_seals_if_any_vert_welds_and_keeps_welds() {
 
     // No welded vert on the face -> fallback (keeps skirt); nothing moved, no tear.
     let none_welded = vec![[0.0, 5.0, 5.0, 0.0], [0.0, 6.0, 6.0, 0.0]];
-    let (complete, fallback) =
+    let (complete, fallback, counts) =
         resolve_morph_face_coverage(&locals, &none_welded, LodLevel::Lod0, &neighbors);
     assert_eq!(complete, 0);
     assert_eq!(fallback, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
+    assert_eq!(counts.candidate[0], 2);
+    assert_eq!(counts.welded[0], 0);
+}
+
+#[test]
+fn partial_morph_without_stitch_or_skirt_is_invalid_unsafe_topology() {
+    use super::seam_audit::{SeamFaceMode, SeamFaceModeInput, SeamStripStatus, classify_final_mode};
+
+    let mode = classify_final_mode(SeamFaceModeInput {
+        fine_components: 1,
+        coarse_components: 1,
+        face: ChunkFace::PosX,
+        fine_lod: LodLevel::Lod0,
+        neighbor_lod: Some(LodLevel::Lod1),
+        lod_delta_gt_one: false,
+        strip_status: SeamStripStatus::MissingStrip,
+        morph_candidate_count: 18,
+        morph_welded_count: 11,
+        stitch_triangle_count: 0,
+        skirt_triangle_count: 0,
+        sealed_by_mask: true,
+        stitched: false,
+        vertical_skirt_on_face: false,
+    });
+    assert_eq!(mode, SeamFaceMode::InvalidUnsafeTopology);
+}
+
+#[test]
+fn strip_oracle_rejects_mismatched_segment_count() {
+    use crate::voxel::lod_boundary_strip::{
+        LodBoundaryStrip, StripVertex, compare_projected_strips,
+    };
+
+    let make_strip = |segments: Vec<[u32; 2]>| LodBoundaryStrip {
+        face: ChunkFace::PosX,
+        lod: LodLevel::Lod1,
+        chunk_pos: IVec3::new(1, 0, 0),
+        revision: 42,
+        vertices: vec![
+            StripVertex {
+                local: Vec3::new(16.0, 4.0, 2.0),
+                world: Vec3::new(32.0, 4.0, 2.0),
+                normal: Vec3::Y,
+                proj: Vec2::new(2.0, 4.0),
+            },
+            StripVertex {
+                local: Vec3::new(16.0, 4.0, 6.0),
+                world: Vec3::new(32.0, 4.0, 6.0),
+                normal: Vec3::Y,
+                proj: Vec2::new(6.0, 4.0),
+            },
+        ],
+        segments,
+    };
+
+    let coarse = make_strip(vec![[0, 1]]);
+    let fine = make_strip(vec![[0, 1], [0, 1]]);
+    let mismatch = compare_projected_strips(&fine, &coarse, 0.05);
+    assert!(!mismatch.equivalent);
+    assert_ne!(mismatch.fine_segment_count, mismatch.coarse_segment_count);
+
+    let matching_fine = make_strip(vec![[0, 1]]);
+    let matching_coarse = make_strip(vec![[0, 1]]);
+    let hit = compare_projected_strips(&matching_fine, &matching_coarse, 0.05);
+    assert!(hit.equivalent);
+    assert_eq!(hit.max_projected_segment_distance, 0.0);
 }
 
 #[test]
@@ -1578,7 +1658,7 @@ fn apply_snap_or_morph_enabled_does_not_seal_when_bake_fails() {
         ..Default::default()
     };
 
-    let stats = apply_snap_or_morph(
+    let (stats, _) = apply_snap_or_morph(
         &mut mesh,
         &mut local_positions,
         world.get_chunk(chunk_pos).unwrap(),
@@ -1612,7 +1692,7 @@ fn apply_snap_or_morph_disabled_snaps_and_leaves_targets_empty() {
         ..Default::default()
     };
 
-    let stats = apply_snap_or_morph(
+    let (stats, _) = apply_snap_or_morph(
         &mut mesh,
         &mut local_positions,
         world.get_chunk(chunk_pos).unwrap(),
@@ -2361,6 +2441,7 @@ fn barycentric_uv_section_tags_round_trip() {
     mesh.wireframe_lod_index = 2;
     mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_MAIN);
     mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_VERTICAL_SKIRT);
+    mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_TRANSITION_APRON);
 
     assert_eq!(barycentric_lod_index(mesh.barycentric_uvs[0]), 2);
     assert_eq!(
@@ -2370,6 +2451,10 @@ fn barycentric_uv_section_tags_round_trip() {
     assert_eq!(
         barycentric_section(mesh.barycentric_uvs[3]),
         TERRAIN_MESH_SECTION_VERTICAL_SKIRT
+    );
+    assert_eq!(
+        barycentric_section(mesh.barycentric_uvs[6]),
+        TERRAIN_MESH_SECTION_TRANSITION_APRON
     );
     assert!((barycentric_u(mesh.barycentric_uvs[0]) - 1.0).abs() < f32::EPSILON);
 }

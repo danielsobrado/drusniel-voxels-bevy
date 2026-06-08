@@ -1,6 +1,7 @@
 use super::{
-    LodTransitionSnapStats, MeshData, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
-    sdf_gradient_normal_at_local,
+    LodTransitionSnapStats, MeshData, TERRAIN_MESH_SECTION_TRANSITION_APRON,
+    coarse_lod_iso_height_for_column, neighbor_lod_for_face, sdf_gradient_normal_at_local,
+    seam_audit::{MorphFaceCounts, SeamStitchResult, XZ_FACE_COUNT, XZ_FACES, xz_face_index},
 };
 use crate::constants::{CHUNK_BOUNDARY_SCALE, CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -210,7 +211,7 @@ pub(super) fn apply_snap_or_morph(
     neighbor_lods: &NeighborLods,
     morph: &TerrainMorphConfig,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-) -> LodTransitionSnapStats {
+) -> (LodTransitionSnapStats, MorphFaceCounts) {
     let bake_targets = |solid_mesh: &mut MeshData, local_positions: &[Vec3]| {
         if let Err(err) = append_morph_targets(
             solid_mesh,
@@ -250,19 +251,20 @@ pub(super) fn apply_snap_or_morph(
         // welded boundary vert flying up while its w=0 skirt vert stays behind is
         // exactly what tore the seam). The fallback skirt is the honest interim until
         // the vertex-exact stitch (lod_boundary_strip) replaces it.
-        let (complete_mask, fallback_mask) = if solid_mesh.morph_targets.is_empty() {
-            (0, 0)
+        let (complete_mask, fallback_mask, _morph_counts) = if solid_mesh.morph_targets.is_empty() {
+            (0, 0, MorphFaceCounts::default())
         } else {
-            resolve_morph_face_coverage(
+            let (complete, fallback, counts) = resolve_morph_face_coverage(
                 local_positions,
                 &solid_mesh.morph_targets,
                 my_lod,
                 neighbor_lods,
-            )
+            );
+            (complete, fallback, counts)
         };
         stats.snapped_face_mask = complete_mask;
         stats.fallback_face_mask = fallback_mask;
-        stats
+        (stats, _morph_counts)
     } else {
         let stats = snap_boundary_vertices_to_lower_detail_neighbor(
             solid_mesh,
@@ -278,8 +280,75 @@ pub(super) fn apply_snap_or_morph(
             // cpu_snap_when_morph_enabled: snap AND publish targets (~= snapped pos).
             bake_targets(solid_mesh, local_positions);
         }
-        stats
+        let morph_counts = if morph.enabled && !solid_mesh.morph_targets.is_empty() {
+            morph_face_counts_for_cpu_snap(local_positions, &solid_mesh.morph_targets, my_lod, neighbor_lods)
+        } else {
+            MorphFaceCounts::default()
+        };
+        (stats, morph_counts)
     }
+}
+
+pub(super) fn extract_own_boundary_strips(
+    local_positions: &[Vec3],
+    solid_mesh: &MeshData,
+    chunk_origin: IVec3,
+    chunk: &Chunk,
+    my_lod: LodLevel,
+) -> crate::voxel::lod_boundary_strip::OwnBoundaryStrips {
+    crate::voxel::lod_boundary_strip::OwnBoundaryStrips::from_extracted(
+        crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
+            local_positions,
+            &solid_mesh.normals,
+            &solid_mesh.indices,
+            chunk_origin,
+            CHUNK_SIZE as f32,
+            my_lod.step_size() as f32,
+            my_lod,
+            chunk.position(),
+            0,
+        ),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_surface_nets_seam_face_audit(
+    chunk: &Chunk,
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    own_strips: &crate::voxel::lod_boundary_strip::OwnBoundaryStrips,
+    snap_stats: &LodTransitionSnapStats,
+    morph_counts: &MorphFaceCounts,
+    stitch: &SeamStitchResult,
+    skirt_stats: &crate::voxel::skirt::SkirtGenerationStats,
+    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    strip_status: &[super::seam_audit::SeamStripStatus; XZ_FACE_COUNT],
+) -> (
+    [super::seam_audit::SeamFaceAudit; XZ_FACE_COUNT],
+    super::TerrainSeamStripDebug,
+) {
+    use super::lod_delta_gt_one_face_mask;
+    use super::seam_audit::{SkirtFaceCounts, assemble_seam_face_audit, terrain_seam_strip_debug_from_own_strips};
+
+    let fine_strips: Vec<_> = own_strips.iter_strips().cloned().collect();
+    let seam_strip_debug = terrain_seam_strip_debug_from_own_strips(&fine_strips);
+    let skirt_counts = SkirtFaceCounts {
+        triangle_counts: skirt_stats.per_face_triangle_counts,
+    };
+    let audits = assemble_seam_face_audit(
+        chunk.position(),
+        my_lod,
+        neighbor_lods,
+        snap_stats,
+        morph_counts,
+        stitch,
+        &skirt_counts,
+        strip_status,
+        neighbor_strips,
+        &fine_strips,
+        lod_delta_gt_one_face_mask(my_lod, neighbor_lods),
+    );
+    (audits, seam_strip_debug)
 }
 
 pub(super) fn in_lod_boundary_cell(local: Vec3, face: ChunkFace, my_lod: LodLevel) -> bool {
@@ -342,13 +411,14 @@ pub(super) fn resolve_morph_face_coverage(
     morph_targets: &[[f32; 4]],
     my_lod: LodLevel,
     neighbor_lods: &NeighborLods,
-) -> (u8, u8) {
+) -> (u8, u8, MorphFaceCounts) {
     if my_lod.step_size() == 0 || local_positions.len() != morph_targets.len() {
-        return (0, 0);
+        return (0, 0, MorphFaceCounts::default());
     }
 
     let mut complete = 0u8;
     let mut fallback = 0u8;
+    let mut counts = MorphFaceCounts::default();
     for face in ChunkFace::ALL {
         let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
             continue;
@@ -356,26 +426,42 @@ pub(super) fn resolve_morph_face_coverage(
         if transition_target_lod(my_lod, neighbor_lod).is_none() {
             continue;
         }
-        let mut any_candidate = false;
-        let mut any_welded = false;
+        let mut candidate_count = 0u16;
+        let mut welded_count = 0u16;
         for (local, target) in local_positions.iter().zip(morph_targets.iter()) {
             if in_lod_boundary_cell(*local, face, my_lod) {
-                any_candidate = true;
+                candidate_count = candidate_count.saturating_add(1);
                 if target[3] > 0.5 {
-                    any_welded = true;
+                    welded_count = welded_count.saturating_add(1);
                 }
             }
         }
-        if any_candidate {
-            if any_welded {
+        if candidate_count > 0 {
+            if welded_count > 0 {
                 complete |= LodTransitionSnapStats::face_mask(face);
             } else {
                 fallback |= LodTransitionSnapStats::face_mask(face);
             }
+            if let Some(idx) = xz_face_index(face) {
+                counts.candidate[idx] = candidate_count;
+                counts.welded[idx] = welded_count;
+            }
         }
     }
 
-    (complete, fallback)
+    (complete, fallback, counts)
+}
+
+pub(super) fn morph_face_counts_for_cpu_snap(
+    local_positions: &[Vec3],
+    morph_targets: &[[f32; 4]],
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+) -> MorphFaceCounts {
+    if morph_targets.is_empty() {
+        return MorphFaceCounts::default();
+    }
+    resolve_morph_face_coverage(local_positions, morph_targets, my_lod, neighbor_lods).2
 }
 
 /// Extract the main-surface boundary strips this chunk exports for a finer neighbour
@@ -385,12 +471,9 @@ pub(super) fn resolve_morph_face_coverage(
 /// called with the **main surface only** (before skirts are appended).
 pub(super) fn extract_export_boundary_strips(
     morph: &TerrainMorphConfig,
-    local_positions: &[Vec3],
-    solid_mesh: &MeshData,
-    chunk_origin: IVec3,
-    chunk: &Chunk,
-    my_lod: LodLevel,
+    own_strips: &crate::voxel::lod_boundary_strip::OwnBoundaryStrips,
     neighbor_lods: &NeighborLods,
+    my_lod: LodLevel,
 ) -> Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip> {
     if !morph.enabled || my_lod.step_size() == 0 {
         return Vec::new();
@@ -402,17 +485,7 @@ pub(super) fn extract_export_boundary_strips(
     if !borders_finer {
         return Vec::new();
     }
-    crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
-        local_positions,
-        &solid_mesh.normals,
-        &solid_mesh.indices,
-        chunk_origin,
-        CHUNK_SIZE as f32,
-        my_lod.step_size() as f32,
-        my_lod,
-        chunk.position(),
-        0, // revision assigned at commit from the dedup key
-    )
+    own_strips.iter_strips().cloned().collect()
 }
 
 /// Stage 4: append watertight stitch triangles bridging this chunk's fine boundary to
@@ -431,48 +504,36 @@ pub(super) fn append_seam_stitches(
     local_positions: &[Vec3],
     chunk_origin: IVec3,
     chunk_center: Vec3,
-    chunk: &Chunk,
     my_lod: LodLevel,
+    own_strips: &crate::voxel::lod_boundary_strip::OwnBoundaryStrips,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-) -> u8 {
+) -> SeamStitchResult {
+    let mut result = SeamStitchResult::default();
     let Some(neighbor_strips) = neighbor_strips else {
-        return 0;
+        return result;
     };
     if neighbor_strips.is_empty() || my_lod.step_size() == 0 {
-        return 0;
+        return result;
     }
 
-    // This chunk's own boundary (all X/Z faces), from the main surface only.
-    let fine_strips = crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
-        local_positions,
-        &solid_mesh.normals,
-        &solid_mesh.indices,
-        chunk_origin,
-        CHUNK_SIZE as f32,
-        my_lod.step_size() as f32,
-        my_lod,
-        chunk.position(),
-        0,
-    );
     let origin = chunk_origin.as_vec3();
-    let mut stitched_mask = 0u8;
 
-    for face in [
-        ChunkFace::NegX,
-        ChunkFace::PosX,
-        ChunkFace::NegZ,
-        ChunkFace::PosZ,
-    ] {
+    for face in XZ_FACES {
         let Some(coarse) = neighbor_strips.for_face(face) else {
             continue;
         };
-        let Some(fine) = fine_strips.iter().find(|s| s.face == face) else {
+        let Some(fine) = own_strips.for_face(face) else {
             continue;
         };
         let Some(stitch) = crate::voxel::lod_boundary_strip::stitch_boundary_strips(fine, coarse)
         else {
             continue;
         };
+
+        let tri_count = (stitch.indices.len() / 3) as u16;
+        if let Some(idx) = xz_face_index(face) {
+            result.triangle_counts[idx] = tri_count;
+        }
 
         // Append as non-indexed triangles to match the main-surface convention
         // (per-triangle verts + barycentrics).
@@ -493,7 +554,8 @@ pub(super) fn append_seam_stitches(
             solid_mesh.indices.push(base);
             solid_mesh.indices.push(base + 1);
             solid_mesh.indices.push(base + 2);
-            solid_mesh.push_triangle_barycentrics();
+            solid_mesh
+                .push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_TRANSITION_APRON);
         }
 
         // Keep the main-surface boundary at its SN position so it meets the stitch.
@@ -502,10 +564,10 @@ pub(super) fn append_seam_stitches(
                 solid_mesh.morph_targets[i][3] = 0.0;
             }
         }
-        stitched_mask |= 1u8 << face as u8;
+        result.stitched_face_mask |= 1u8 << face as u8;
     }
 
-    stitched_mask
+    result
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended

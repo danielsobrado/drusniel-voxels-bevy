@@ -31,6 +31,142 @@ struct GuardConfig {
     checks: Vec<GuardCheck>,
     #[serde(default)]
     naadf: Option<NaadfGuardConfig>,
+    #[serde(default)]
+    lod_seam_audit: Option<LodSeamAuditConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(default)]
+struct LodSeamAuditConfig {
+    max_active_seam_faces_with_open_edges: u32,
+    max_active_seam_faces_with_transition_coverage_gaps: u32,
+    max_samples_without_render_coverage: u32,
+    max_possible_terrace_samples: u32,
+    max_partial_morph_uncovered_faces: u32,
+    max_stale_strip_faces_after_stable_frames: u32,
+    max_lod_delta_gt_one_faces: u32,
+    max_lip_height_voxels: f32,
+    max_face_offset_voxels: f32,
+    max_longest_unmatched_edge_voxels: f32,
+    max_unmatched_transition_edges: u32,
+    max_unmatched_regular_edges_on_delta1_seams: u32,
+    max_strip_incompatible_faces: u32,
+    max_strip_missing_faces_after_stable_frames: u32,
+    max_strip_topology_unsupported_stitched_faces: u32,
+    max_stitch_safe_bad_component_faces: u32,
+    max_strip_fine_to_coarse_distance_voxels: f32,
+    max_strip_coarse_to_fine_distance_voxels: f32,
+    max_strip_endpoint_distance_voxels: f32,
+    min_strip_span_overlap_ratio: f32,
+    max_strip_crossing_count: u32,
+}
+
+impl Default for LodSeamAuditConfig {
+    fn default() -> Self {
+        Self {
+            max_active_seam_faces_with_open_edges: 0,
+            max_active_seam_faces_with_transition_coverage_gaps: 0,
+            max_samples_without_render_coverage: 0,
+            max_possible_terrace_samples: 0,
+            max_partial_morph_uncovered_faces: 0,
+            max_stale_strip_faces_after_stable_frames: 0,
+            max_lod_delta_gt_one_faces: 0,
+            max_lip_height_voxels: 0.20,
+            max_face_offset_voxels: 0.10,
+            max_longest_unmatched_edge_voxels: 0.05,
+            max_unmatched_transition_edges: 0,
+            max_unmatched_regular_edges_on_delta1_seams: 0,
+            max_strip_incompatible_faces: 0,
+            max_strip_missing_faces_after_stable_frames: 0,
+            max_strip_topology_unsupported_stitched_faces: 0,
+            max_stitch_safe_bad_component_faces: 0,
+            max_strip_fine_to_coarse_distance_voxels: 0.35,
+            max_strip_coarse_to_fine_distance_voxels: 0.35,
+            max_strip_endpoint_distance_voxels: 0.50,
+            min_strip_span_overlap_ratio: 0.95,
+            max_strip_crossing_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SeamAuditDump {
+    #[serde(default)]
+    schema_version: u32,
+    summary: SeamAuditSummary,
+    faces: Vec<SeamAuditFaceRecord>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SeamAuditSummary {
+    active_seam_faces: u32,
+    partial_morph_uncovered_faces: u32,
+    open_edge_faces: u32,
+    samples_without_render_coverage: u32,
+    possible_terrace_samples: u32,
+    stale_strip_faces: u32,
+    lod_delta_gt_one_faces: u32,
+    max_lip_height_voxels: f32,
+    max_face_offset_voxels: f32,
+    max_longest_unmatched_edge_voxels: f32,
+    strip_incompatible_faces: u32,
+    strip_missing_faces: u32,
+    strip_topology_unsupported_faces: u32,
+    max_strip_fine_to_coarse_distance: f32,
+    max_strip_coarse_to_fine_distance: f32,
+    max_strip_endpoint_distance: f32,
+    #[serde(default)]
+    max_strip_fine_to_coarse_distance_stitch_safe: f32,
+    #[serde(default)]
+    max_strip_coarse_to_fine_distance_stitch_safe: f32,
+    #[serde(default)]
+    max_strip_endpoint_distance_stitch_safe: f32,
+    min_strip_span_overlap_ratio: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeamAuditFaceRecord {
+    final_mode: String,
+    #[serde(default)]
+    fine_components: u8,
+    #[serde(default)]
+    coarse_components: u8,
+    strip_overlap_status: String,
+    strip_compatible: bool,
+    strip_max_fine_to_coarse_distance: f32,
+    strip_max_coarse_to_fine_distance: f32,
+    strip_max_endpoint_distance: f32,
+    strip_span_overlap_ratio: f32,
+    unmatched_transition_edges: u16,
+    unmatched_regular_edges: u16,
+    samples_without_render_coverage: u16,
+    strip_crossing_count: u16,
+}
+
+fn claims_stitch_safe_seam(final_mode: &str) -> bool {
+    final_mode == "StitchGeometry" || final_mode == "GpuMorphOnly"
+}
+
+fn strip_span_overlap_ratio_is_meaningful(status: &str) -> bool {
+    matches!(
+        status,
+        "Compatible"
+            | "SpanMismatch"
+            | "DirectedDistanceExceeded"
+            | "EndpointDistanceExceeded"
+            | "CrossingOrFoldDetected"
+    )
+}
+
+fn max_strip_distance_from_stitch_safe_faces(
+    faces: &[SeamAuditFaceRecord],
+    pick: impl Fn(&SeamAuditFaceRecord) -> f32,
+) -> f64 {
+    faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| pick(face) as f64)
+        .fold(0.0, f64::max)
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -428,6 +564,11 @@ fn run() -> Result<bool, String> {
     for check in &regression_checks {
         results.push(evaluate_naadf_frame_regression(check, &summaries));
     }
+    if let Some(lod_audit) = config.lod_seam_audit.as_ref() {
+        for (path, summary) in &summaries {
+            results.extend(evaluate_lod_seam_audit(lod_audit, path, summary));
+        }
+    }
 
     println!("Config: {}", args.config.display());
     println!(
@@ -583,6 +724,291 @@ fn evaluate_naadf_frame_regression(
         metric,
         value: Some(regression_percent),
         threshold,
+        status,
+    }
+}
+
+fn evaluate_lod_seam_audit(
+    config: &LodSeamAuditConfig,
+    summary_path: &Path,
+    summary: &BenchSummary,
+) -> Vec<CheckResult> {
+    let audit_path = summary_path
+        .parent()
+        .map(|dir| dir.join("seam-audit.json"));
+    let Some(audit_path) = audit_path else {
+        return vec![CheckResult {
+            checkpoint: summary.scene.clone(),
+            metric: "lod_seam_audit (seam-audit.json)".to_string(),
+            value: None,
+            threshold: "file must exist".to_string(),
+            status: Status::Missing,
+        }];
+    };
+    let Ok(dump) = read_json::<SeamAuditDump>(&audit_path) else {
+        return vec![CheckResult {
+            checkpoint: summary.scene.clone(),
+            metric: "lod_seam_audit (seam-audit.json)".to_string(),
+            value: None,
+            threshold: format!("read {}", audit_path.display()),
+            status: Status::Missing,
+        }];
+    };
+
+    let s = dump.summary;
+    let coverage_gaps = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            face.samples_without_render_coverage > 0
+                && face.final_mode != "DeltaTooLarge"
+                && face.final_mode != "SameLod"
+        })
+        .count() as u32;
+    let max_transition_edges = dump
+        .faces
+        .iter()
+        .map(|face| face.unmatched_transition_edges as u32)
+        .max()
+        .unwrap_or(0);
+    let max_regular_edges = dump
+        .faces
+        .iter()
+        .filter(|face| face.final_mode == "InvalidUnsafeTopology" || face.final_mode == "SkirtFallback")
+        .map(|face| face.unmatched_regular_edges as u32)
+        .max()
+        .unwrap_or(0);
+    let max_strip_crossings = dump
+        .faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| face.strip_crossing_count as u32)
+        .max()
+        .unwrap_or(0);
+    let min_strip_span_overlap_ratio = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            claims_stitch_safe_seam(&face.final_mode)
+                && strip_span_overlap_ratio_is_meaningful(&face.strip_overlap_status)
+        })
+        .map(|face| face.strip_span_overlap_ratio as f64)
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(1.0);
+    let max_strip_fine_to_coarse = if dump.schema_version >= 2 {
+        s.max_strip_fine_to_coarse_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_fine_to_coarse_distance
+        })
+    };
+    let max_strip_coarse_to_fine = if dump.schema_version >= 2 {
+        s.max_strip_coarse_to_fine_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_coarse_to_fine_distance
+        })
+    };
+    let max_strip_endpoint_distance = if dump.schema_version >= 2 {
+        s.max_strip_endpoint_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_endpoint_distance
+        })
+    };
+    let strip_incompatible_stitched = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            !face.strip_compatible
+                && (face.final_mode == "StitchGeometry" || face.final_mode == "GpuMorphOnly")
+        })
+        .count() as u32;
+    let strip_missing_faces = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            (face.strip_overlap_status == "MissingFineStrip"
+                || face.strip_overlap_status == "MissingCoarseStrip")
+                && face.final_mode != "SkirtFallback"
+        })
+        .count() as u32;
+    let strip_topology_unsupported_stitched = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            (face.strip_overlap_status == "UnsupportedTopology"
+                || face.strip_overlap_status == "FineMultiComponent"
+                || face.strip_overlap_status == "CoarseMultiComponent"
+                || face.strip_overlap_status == "ComponentMismatch")
+                && (face.final_mode == "StitchGeometry" || face.final_mode == "GpuMorphOnly")
+        })
+        .count() as u32;
+    let stitch_safe_bad_component_faces = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            claims_stitch_safe_seam(&face.final_mode)
+                && (face.fine_components > 1 || face.coarse_components > 1)
+        })
+        .count() as u32;
+
+    vec![
+        seam_audit_check(
+            &summary.scene,
+            "open_edge_faces",
+            s.open_edge_faces as f64,
+            config.max_active_seam_faces_with_open_edges as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "coverage_gaps",
+            coverage_gaps as f64,
+            config.max_active_seam_faces_with_transition_coverage_gaps as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "samples_without_render_coverage",
+            s.samples_without_render_coverage as f64,
+            config.max_samples_without_render_coverage as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "possible_terrace_samples",
+            s.possible_terrace_samples as f64,
+            config.max_possible_terrace_samples as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "partial_morph_uncovered_faces",
+            s.partial_morph_uncovered_faces as f64,
+            config.max_partial_morph_uncovered_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "stale_strip_faces",
+            s.stale_strip_faces as f64,
+            config.max_stale_strip_faces_after_stable_frames as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "lod_delta_gt_one_faces",
+            s.lod_delta_gt_one_faces as f64,
+            config.max_lod_delta_gt_one_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_lip_height_voxels",
+            s.max_lip_height_voxels as f64,
+            config.max_lip_height_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_face_offset_voxels",
+            s.max_face_offset_voxels as f64,
+            config.max_face_offset_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_longest_unmatched_edge_voxels",
+            s.max_longest_unmatched_edge_voxels as f64,
+            config.max_longest_unmatched_edge_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_unmatched_transition_edges",
+            max_transition_edges as f64,
+            config.max_unmatched_transition_edges as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_unmatched_regular_edges_on_delta1_seams",
+            max_regular_edges as f64,
+            config.max_unmatched_regular_edges_on_delta1_seams as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_incompatible_faces",
+            strip_incompatible_stitched as f64,
+            config.max_strip_incompatible_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_missing_faces",
+            strip_missing_faces as f64,
+            config.max_strip_missing_faces_after_stable_frames as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "strip_topology_unsupported_faces",
+            strip_topology_unsupported_stitched as f64,
+            config.max_strip_topology_unsupported_stitched_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "stitch_safe_bad_component_faces",
+            stitch_safe_bad_component_faces as f64,
+            config.max_stitch_safe_bad_component_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_fine_to_coarse_distance",
+            max_strip_fine_to_coarse,
+            config.max_strip_fine_to_coarse_distance_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_coarse_to_fine_distance",
+            max_strip_coarse_to_fine,
+            config.max_strip_coarse_to_fine_distance_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_endpoint_distance",
+            max_strip_endpoint_distance,
+            config.max_strip_endpoint_distance_voxels as f64,
+        ),
+        seam_audit_min_check(
+            &summary.scene,
+            "min_strip_span_overlap_ratio",
+            min_strip_span_overlap_ratio,
+            config.min_strip_span_overlap_ratio as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_strip_crossing_count",
+            max_strip_crossings as f64,
+            config.max_strip_crossing_count as f64,
+        ),
+    ]
+}
+
+fn seam_audit_check(scene: &str, metric: &str, value: f64, max: f64) -> CheckResult {
+    let status = if value > max {
+        Status::Fail
+    } else {
+        Status::Pass
+    };
+    CheckResult {
+        checkpoint: scene.to_string(),
+        metric: format!("lod_seam_audit:{metric}"),
+        value: Some(value),
+        threshold: format!("<= {max}"),
+        status,
+    }
+}
+
+fn seam_audit_min_check(scene: &str, metric: &str, value: f64, min: f64) -> CheckResult {
+    let status = if value < min {
+        Status::Fail
+    } else {
+        Status::Pass
+    };
+    CheckResult {
+        checkpoint: scene.to_string(),
+        metric: format!("lod_seam_audit:{metric}"),
+        value: Some(value),
+        threshold: format!(">= {min}"),
         status,
     }
 }
@@ -986,6 +1412,14 @@ mod tests {
 
         assert_eq!(result.status, Status::Fail);
         assert!((result.value.unwrap() - 12.0).abs() <= 1e-9);
+    }
+
+    #[test]
+    fn strip_guard_policy_ignores_fallback_faces_for_span_ratio() {
+        assert!(!claims_stitch_safe_seam("SkirtFallback"));
+        assert!(!strip_span_overlap_ratio_is_meaningful("MissingCoarseStrip"));
+        assert!(claims_stitch_safe_seam("StitchGeometry"));
+        assert!(strip_span_overlap_ratio_is_meaningful("DirectedDistanceExceeded"));
     }
 
     fn summary_with_frame(scene: &str, checkpoint: &str, avg_ms: f64, p99_ms: f64) -> BenchSummary {
