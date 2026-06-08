@@ -89,6 +89,8 @@ impl Default for LodSeamAuditConfig {
 
 #[derive(Debug, Deserialize)]
 struct SeamAuditDump {
+    #[serde(default)]
+    schema_version: u32,
     summary: SeamAuditSummary,
     faces: Vec<SeamAuditFaceRecord>,
 }
@@ -111,6 +113,12 @@ struct SeamAuditSummary {
     max_strip_fine_to_coarse_distance: f32,
     max_strip_coarse_to_fine_distance: f32,
     max_strip_endpoint_distance: f32,
+    #[serde(default)]
+    max_strip_fine_to_coarse_distance_stitch_safe: f32,
+    #[serde(default)]
+    max_strip_coarse_to_fine_distance_stitch_safe: f32,
+    #[serde(default)]
+    max_strip_endpoint_distance_stitch_safe: f32,
     min_strip_span_overlap_ratio: f32,
 }
 
@@ -142,6 +150,17 @@ fn strip_span_overlap_ratio_is_meaningful(status: &str) -> bool {
             | "EndpointDistanceExceeded"
             | "CrossingOrFoldDetected"
     )
+}
+
+fn max_strip_distance_from_stitch_safe_faces(
+    faces: &[SeamAuditFaceRecord],
+    pick: impl Fn(&SeamAuditFaceRecord) -> f32,
+) -> f64 {
+    faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| pick(face) as f64)
+        .fold(0.0, f64::max)
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -770,24 +789,27 @@ fn evaluate_lod_seam_audit(
         .map(|face| face.strip_span_overlap_ratio as f64)
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or(1.0);
-    let max_strip_fine_to_coarse = dump
-        .faces
-        .iter()
-        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
-        .map(|face| face.strip_max_fine_to_coarse_distance as f64)
-        .fold(0.0, f64::max);
-    let max_strip_coarse_to_fine = dump
-        .faces
-        .iter()
-        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
-        .map(|face| face.strip_max_coarse_to_fine_distance as f64)
-        .fold(0.0, f64::max);
-    let max_strip_endpoint_distance = dump
-        .faces
-        .iter()
-        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
-        .map(|face| face.strip_max_endpoint_distance as f64)
-        .fold(0.0, f64::max);
+    let max_strip_fine_to_coarse = if dump.schema_version >= 2 {
+        s.max_strip_fine_to_coarse_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_fine_to_coarse_distance
+        })
+    };
+    let max_strip_coarse_to_fine = if dump.schema_version >= 2 {
+        s.max_strip_coarse_to_fine_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_coarse_to_fine_distance
+        })
+    };
+    let max_strip_endpoint_distance = if dump.schema_version >= 2 {
+        s.max_strip_endpoint_distance_stitch_safe as f64
+    } else {
+        max_strip_distance_from_stitch_safe_faces(&dump.faces, |face| {
+            face.strip_max_endpoint_distance
+        })
+    };
     let strip_incompatible_stitched = dump
         .faces
         .iter()

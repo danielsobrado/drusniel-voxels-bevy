@@ -175,6 +175,12 @@ impl SeamFaceAudit {
     }
 }
 
+impl SeamFaceMode {
+    pub fn claims_stitch_safe_seam(self) -> bool {
+        matches!(self, SeamFaceMode::StitchGeometry | SeamFaceMode::GpuMorphOnly)
+    }
+}
+
 pub struct SeamFaceModeInput {
     pub face: ChunkFace,
     pub fine_lod: LodLevel,

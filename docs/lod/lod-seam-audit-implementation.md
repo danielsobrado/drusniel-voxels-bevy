@@ -206,7 +206,27 @@ The runtime oracle reconstructs strips from final mesh section 0. This is useful
 
 Strip compatibility failures should fail CI only for final modes that claim a sealed/stitch-safe seam (`StitchGeometry`, `GpuMorphOnly`). `SkirtFallback` and `StaleStripFallback` should record the oracle reason but should not fail span/distance compatibility thresholds through raw summary extrema.
 
-`bench_guard` computes min span overlap and max strip distances from face records filtered by `claims_stitch_safe_seam(...)`, and only includes span ratios when the overlap status is geometrically meaningful.
+`bench_guard` computes min span overlap and max strip distances from face records filtered by `claims_stitch_safe_seam(...)`, and only includes span ratios when the overlap status is geometrically meaningful. It does **not** use the summary block extrema for those threshold checks.
+
+### Summary extrema semantics
+
+`seam-audit.json` → `summary` still aggregates some strip metrics as **raw observed extrema** across every active seam face:
+
+- `max_strip_fine_to_coarse_distance`
+- `max_strip_coarse_to_fine_distance`
+- `max_strip_endpoint_distance`
+
+Those values can look high on `SkirtFallback` / `StaleStripFallback` faces where strips are missing or topology is ambiguous. That is expected diagnostic signal, not a guard failure by itself.
+
+Stitch-safe compatibility distances are also written to `summary`:
+
+- `max_strip_fine_to_coarse_distance_stitch_safe`
+- `max_strip_coarse_to_fine_distance_stitch_safe`
+- `max_strip_endpoint_distance_stitch_safe`
+
+Use those fields (not the raw maxima) for dashboards and threshold checks. `bench_guard` reads them when `schema_version >= 2` and falls back to face-record aggregation on older dumps.
+
+`min_strip_span_overlap_ratio` in `summary` already excludes missing/multi-component/early-return overlap statuses.
 
 ### 2.6 JSON and Summary Extensions
 
@@ -222,7 +242,14 @@ Strip compatibility failures should fail CI only for final modes that claim a se
 - `strip_unmatched_coarse_segments`
 - `strip_crossing_count`
 
-Summary includes aggregate strip metrics (counts/extrema/min overlap ratio).
+Summary strip distance fields:
+
+- raw observed: `max_strip_fine_to_coarse_distance`, `max_strip_coarse_to_fine_distance`, `max_strip_endpoint_distance`
+- stitch-safe: `max_strip_fine_to_coarse_distance_stitch_safe`, `max_strip_coarse_to_fine_distance_stitch_safe`, `max_strip_endpoint_distance_stitch_safe`
+
+Summary also includes counts and policy-filtered `min_strip_span_overlap_ratio`. See **Summary extrema semantics** above.
+
+`seam-audit.json` `schema_version` is `2` once stitch-safe summary distance fields are present.
 
 ### 2.7 Guard Extensions for Oracle
 

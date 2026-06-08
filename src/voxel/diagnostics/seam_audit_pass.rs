@@ -24,7 +24,7 @@ use crate::voxel::lod_boundary_strip::{
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 
-pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 1;
+pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 2;
 pub const SEAM_COVERAGE_GRID_U: u32 = 17;
 pub const SEAM_COVERAGE_GRID_V: u32 = 17;
 const LIP_HEIGHT_FAIL_VOXELS: f32 = 0.20;
@@ -101,9 +101,19 @@ pub struct SeamAuditSummary {
     pub strip_incompatible_faces: u32,
     pub strip_missing_faces: u32,
     pub strip_topology_unsupported_faces: u32,
+    /// Raw observed maximum across all active seam faces (includes fallback faces).
     pub max_strip_fine_to_coarse_distance: f32,
+    /// Raw observed maximum across all active seam faces (includes fallback faces).
     pub max_strip_coarse_to_fine_distance: f32,
+    /// Raw observed maximum across all active seam faces (includes fallback faces).
     pub max_strip_endpoint_distance: f32,
+    /// Maximum directed fine→coarse distance on stitch-safe faces only.
+    pub max_strip_fine_to_coarse_distance_stitch_safe: f32,
+    /// Maximum directed coarse→fine distance on stitch-safe faces only.
+    pub max_strip_coarse_to_fine_distance_stitch_safe: f32,
+    /// Maximum endpoint distance on stitch-safe faces only.
+    pub max_strip_endpoint_distance_stitch_safe: f32,
+    /// Minimum span overlap ratio where the oracle status is geometrically meaningful.
     pub min_strip_span_overlap_ratio: f32,
 }
 
@@ -237,15 +247,7 @@ pub fn build_seam_audit_dump(
             summary.max_longest_unmatched_edge_voxels = summary
                 .max_longest_unmatched_edge_voxels
                 .max(audit.longest_unmatched_edge_voxels);
-            summary.max_strip_fine_to_coarse_distance = summary
-                .max_strip_fine_to_coarse_distance
-                .max(audit.strip_max_fine_to_coarse_distance);
-            summary.max_strip_coarse_to_fine_distance = summary
-                .max_strip_coarse_to_fine_distance
-                .max(audit.strip_max_coarse_to_fine_distance);
-            summary.max_strip_endpoint_distance = summary
-                .max_strip_endpoint_distance
-                .max(audit.strip_max_endpoint_distance);
+            update_strip_distance_summary(&mut summary, &audit);
             if strip_span_overlap_ratio_counts_for_summary(audit.strip_overlap_status) {
                 summary.min_strip_span_overlap_ratio = summary
                     .min_strip_span_overlap_ratio
@@ -684,6 +686,29 @@ fn ordered_world_edge(a: QuantizedWorldPos, b: QuantizedWorldPos) -> (QuantizedW
 fn world_edge_key(p0: Vec3, p1: Vec3, face: ChunkFace) -> WorldEdgeKey {
     let (a, b) = ordered_world_edge(quantize_world_pos(p0), quantize_world_pos(p1));
     WorldEdgeKey { a, b, face }
+}
+
+fn update_strip_distance_summary(summary: &mut SeamAuditSummary, audit: &SeamFaceAudit) {
+    summary.max_strip_fine_to_coarse_distance = summary
+        .max_strip_fine_to_coarse_distance
+        .max(audit.strip_max_fine_to_coarse_distance);
+    summary.max_strip_coarse_to_fine_distance = summary
+        .max_strip_coarse_to_fine_distance
+        .max(audit.strip_max_coarse_to_fine_distance);
+    summary.max_strip_endpoint_distance = summary
+        .max_strip_endpoint_distance
+        .max(audit.strip_max_endpoint_distance);
+    if audit.final_mode.claims_stitch_safe_seam() {
+        summary.max_strip_fine_to_coarse_distance_stitch_safe = summary
+            .max_strip_fine_to_coarse_distance_stitch_safe
+            .max(audit.strip_max_fine_to_coarse_distance);
+        summary.max_strip_coarse_to_fine_distance_stitch_safe = summary
+            .max_strip_coarse_to_fine_distance_stitch_safe
+            .max(audit.strip_max_coarse_to_fine_distance);
+        summary.max_strip_endpoint_distance_stitch_safe = summary
+            .max_strip_endpoint_distance_stitch_safe
+            .max(audit.strip_max_endpoint_distance);
+    }
 }
 
 fn strip_span_overlap_ratio_counts_for_summary(status: StripOverlapStatus) -> bool {
@@ -1201,6 +1226,31 @@ mod tests {
         ));
         assert!(!edge_on_chunk_face(in_band, in_band, chunk_pos, ChunkFace::PosX));
         assert!(edge_on_chunk_face(on_plane, on_plane, chunk_pos, ChunkFace::PosX));
+    }
+
+    #[test]
+    fn strip_distance_summary_tracks_raw_and_stitch_safe_extrema_separately() {
+        let mut summary = SeamAuditSummary::default();
+        let mut fallback = SeamFaceAudit::default();
+        fallback.final_mode = SeamFaceMode::SkirtFallback;
+        fallback.strip_max_fine_to_coarse_distance = 2.5;
+        fallback.strip_max_coarse_to_fine_distance = 1.5;
+        fallback.strip_max_endpoint_distance = 3.0;
+        update_strip_distance_summary(&mut summary, &fallback);
+
+        let mut stitched = SeamFaceAudit::default();
+        stitched.final_mode = SeamFaceMode::StitchGeometry;
+        stitched.strip_max_fine_to_coarse_distance = 0.2;
+        stitched.strip_max_coarse_to_fine_distance = 0.1;
+        stitched.strip_max_endpoint_distance = 0.3;
+        update_strip_distance_summary(&mut summary, &stitched);
+
+        assert_eq!(summary.max_strip_fine_to_coarse_distance, 2.5);
+        assert_eq!(summary.max_strip_coarse_to_fine_distance, 1.5);
+        assert_eq!(summary.max_strip_endpoint_distance, 3.0);
+        assert_eq!(summary.max_strip_fine_to_coarse_distance_stitch_safe, 0.2);
+        assert_eq!(summary.max_strip_coarse_to_fine_distance_stitch_safe, 0.1);
+        assert_eq!(summary.max_strip_endpoint_distance_stitch_safe, 0.3);
     }
 
     #[test]
