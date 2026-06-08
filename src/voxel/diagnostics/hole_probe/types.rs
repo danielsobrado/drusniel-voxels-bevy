@@ -842,7 +842,7 @@ pub(super) struct UVec3Dump {
     pub(super) z: u32,
 }
 
-pub(super) type TerrainEntityQuery<'w, 's> = Query<
+pub type TerrainEntityQuery<'w, 's> = Query<
     'w,
     's,
     (

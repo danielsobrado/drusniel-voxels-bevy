@@ -86,7 +86,11 @@ pub struct LodBoundaryStrip {
 
 impl LodBoundaryStrip {
     pub fn has_single_connected_component(&self) -> bool {
-        boundary_component_count(&self.segments, self.vertices.len()) == 1
+        self.component_count() == 1
+    }
+
+    pub fn component_count(&self) -> usize {
+        boundary_component_count(&self.segments, self.vertices.len())
     }
 }
 
@@ -598,6 +602,57 @@ pub fn stitch_boundary_strips(
     }
 
     stitch_seam(&fine.vertices, &coarse.vertices)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripOracleComparison {
+    pub equivalent: bool,
+    pub fine_segment_count: usize,
+    pub coarse_segment_count: usize,
+    pub fine_component_count: usize,
+    pub coarse_component_count: usize,
+    pub max_projected_segment_distance: f32,
+}
+
+/// Debug/bench oracle: compare a fine consumer strip against the coarse source strip.
+pub fn compare_projected_strips(
+    fine: &LodBoundaryStrip,
+    coarse: &LodBoundaryStrip,
+    epsilon: f32,
+) -> StripOracleComparison {
+    let fine_segment_count = fine.segments.len();
+    let coarse_segment_count = coarse.segments.len();
+    let fine_component_count = fine.component_count();
+    let coarse_component_count = coarse.component_count();
+    let mut max_projected_segment_distance = 0.0f32;
+
+    if fine_segment_count == coarse_segment_count {
+        for (fine_seg, coarse_seg) in fine.segments.iter().zip(coarse.segments.iter()) {
+            let fa = fine.vertices.get(fine_seg[0] as usize);
+            let fb = fine.vertices.get(fine_seg[1] as usize);
+            let ca = coarse.vertices.get(coarse_seg[0] as usize);
+            let cb = coarse.vertices.get(coarse_seg[1] as usize);
+            if let (Some(fa), Some(fb), Some(ca), Some(cb)) = (fa, fb, ca, cb) {
+                let d0 = fa.proj.distance(ca.proj);
+                let d1 = fb.proj.distance(cb.proj);
+                max_projected_segment_distance =
+                    max_projected_segment_distance.max(d0.max(d1));
+            }
+        }
+    }
+
+    let equivalent = fine_segment_count == coarse_segment_count
+        && fine_component_count == coarse_component_count
+        && max_projected_segment_distance <= epsilon.max(0.0);
+
+    StripOracleComparison {
+        equivalent,
+        fine_segment_count,
+        coarse_segment_count,
+        fine_component_count,
+        coarse_component_count,
+        max_projected_segment_distance,
+    }
 }
 
 #[cfg(test)]

@@ -31,6 +31,71 @@ struct GuardConfig {
     checks: Vec<GuardCheck>,
     #[serde(default)]
     naadf: Option<NaadfGuardConfig>,
+    #[serde(default)]
+    lod_seam_audit: Option<LodSeamAuditConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(default)]
+struct LodSeamAuditConfig {
+    max_active_seam_faces_with_open_edges: u32,
+    max_active_seam_faces_with_transition_coverage_gaps: u32,
+    max_samples_without_render_coverage: u32,
+    max_possible_terrace_samples: u32,
+    max_partial_morph_uncovered_faces: u32,
+    max_stale_strip_faces_after_stable_frames: u32,
+    max_lod_delta_gt_one_faces: u32,
+    max_lip_height_voxels: f32,
+    max_face_offset_voxels: f32,
+    max_longest_unmatched_edge_voxels: f32,
+    max_unmatched_transition_edges: u32,
+    max_unmatched_regular_edges_on_delta1_seams: u32,
+}
+
+impl Default for LodSeamAuditConfig {
+    fn default() -> Self {
+        Self {
+            max_active_seam_faces_with_open_edges: 0,
+            max_active_seam_faces_with_transition_coverage_gaps: 0,
+            max_samples_without_render_coverage: 0,
+            max_possible_terrace_samples: 0,
+            max_partial_morph_uncovered_faces: 0,
+            max_stale_strip_faces_after_stable_frames: 0,
+            max_lod_delta_gt_one_faces: 0,
+            max_lip_height_voxels: 0.20,
+            max_face_offset_voxels: 0.10,
+            max_longest_unmatched_edge_voxels: 0.05,
+            max_unmatched_transition_edges: 0,
+            max_unmatched_regular_edges_on_delta1_seams: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SeamAuditDump {
+    summary: SeamAuditSummary,
+    faces: Vec<SeamAuditFaceRecord>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SeamAuditSummary {
+    active_seam_faces: u32,
+    partial_morph_uncovered_faces: u32,
+    open_edge_faces: u32,
+    samples_without_render_coverage: u32,
+    possible_terrace_samples: u32,
+    stale_strip_faces: u32,
+    lod_delta_gt_one_faces: u32,
+    max_lip_height_voxels: f32,
+    max_longest_unmatched_edge_voxels: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeamAuditFaceRecord {
+    final_mode: String,
+    unmatched_transition_edges: u16,
+    unmatched_regular_edges: u16,
+    samples_without_render_coverage: u16,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -428,6 +493,11 @@ fn run() -> Result<bool, String> {
     for check in &regression_checks {
         results.push(evaluate_naadf_frame_regression(check, &summaries));
     }
+    if let Some(lod_audit) = config.lod_seam_audit.as_ref() {
+        for (path, summary) in &summaries {
+            results.extend(evaluate_lod_seam_audit(lod_audit, path, summary));
+        }
+    }
 
     println!("Config: {}", args.config.display());
     println!(
@@ -583,6 +653,142 @@ fn evaluate_naadf_frame_regression(
         metric,
         value: Some(regression_percent),
         threshold,
+        status,
+    }
+}
+
+fn evaluate_lod_seam_audit(
+    config: &LodSeamAuditConfig,
+    summary_path: &Path,
+    summary: &BenchSummary,
+) -> Vec<CheckResult> {
+    let audit_path = summary_path
+        .parent()
+        .map(|dir| dir.join("seam-audit.json"));
+    let Some(audit_path) = audit_path else {
+        return vec![CheckResult {
+            checkpoint: summary.scene.clone(),
+            metric: "lod_seam_audit (seam-audit.json)".to_string(),
+            value: None,
+            threshold: "file must exist".to_string(),
+            status: Status::Missing,
+        }];
+    };
+    let Ok(dump) = read_json::<SeamAuditDump>(&audit_path) else {
+        return vec![CheckResult {
+            checkpoint: summary.scene.clone(),
+            metric: "lod_seam_audit (seam-audit.json)".to_string(),
+            value: None,
+            threshold: format!("read {}", audit_path.display()),
+            status: Status::Missing,
+        }];
+    };
+
+    let s = dump.summary;
+    let coverage_gaps = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            face.samples_without_render_coverage > 0
+                && face.final_mode != "DeltaTooLarge"
+                && face.final_mode != "SameLod"
+        })
+        .count() as u32;
+    let max_transition_edges = dump
+        .faces
+        .iter()
+        .map(|face| face.unmatched_transition_edges as u32)
+        .max()
+        .unwrap_or(0);
+    let max_regular_edges = dump
+        .faces
+        .iter()
+        .filter(|face| face.final_mode == "InvalidUnsafeTopology" || face.final_mode == "SkirtFallback")
+        .map(|face| face.unmatched_regular_edges as u32)
+        .max()
+        .unwrap_or(0);
+
+    vec![
+        seam_audit_check(
+            &summary.scene,
+            "open_edge_faces",
+            s.open_edge_faces as f64,
+            config.max_active_seam_faces_with_open_edges as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "coverage_gaps",
+            coverage_gaps as f64,
+            config.max_active_seam_faces_with_transition_coverage_gaps as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "samples_without_render_coverage",
+            s.samples_without_render_coverage as f64,
+            config.max_samples_without_render_coverage as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "possible_terrace_samples",
+            s.possible_terrace_samples as f64,
+            config.max_possible_terrace_samples as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "partial_morph_uncovered_faces",
+            s.partial_morph_uncovered_faces as f64,
+            config.max_partial_morph_uncovered_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "stale_strip_faces",
+            s.stale_strip_faces as f64,
+            config.max_stale_strip_faces_after_stable_frames as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "lod_delta_gt_one_faces",
+            s.lod_delta_gt_one_faces as f64,
+            config.max_lod_delta_gt_one_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_lip_height_voxels",
+            s.max_lip_height_voxels as f64,
+            config.max_lip_height_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_longest_unmatched_edge_voxels",
+            s.max_longest_unmatched_edge_voxels as f64,
+            config.max_longest_unmatched_edge_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_unmatched_transition_edges",
+            max_transition_edges as f64,
+            config.max_unmatched_transition_edges as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_unmatched_regular_edges_on_delta1_seams",
+            max_regular_edges as f64,
+            config.max_unmatched_regular_edges_on_delta1_seams as f64,
+        ),
+    ]
+}
+
+fn seam_audit_check(scene: &str, metric: &str, value: f64, max: f64) -> CheckResult {
+    let status = if value > max {
+        Status::Fail
+    } else {
+        Status::Pass
+    };
+    CheckResult {
+        checkpoint: scene.to_string(),
+        metric: format!("lod_seam_audit:{metric}"),
+        value: Some(value),
+        threshold: format!("<= {max}"),
         status,
     }
 }

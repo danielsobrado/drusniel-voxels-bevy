@@ -31,6 +31,9 @@ use crate::rendering::ray_tracing::{
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::rendering::water_reflection::WaterReflectionConfig;
 use crate::runtime_commands::{FrontendRenderFeatureFlag, set_render_feature_flag};
+use crate::voxel::diagnostics::seam_audit_pass::{
+    TerrainSeamAuditRequest, TerrainSeamAuditRequests,
+};
 use crate::voxel::hole_probe::{TerrainHoleProbeRequest, TerrainHoleProbeRequests};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::persistence::{self, WorldPersistence};
@@ -388,6 +391,7 @@ struct BenchState {
     gameplay_dig_rejected_crust: u32,
     gameplay_dig_failed: bool,
     hole_probe_requested: bool,
+    seam_audit_requested: bool,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
@@ -557,6 +561,8 @@ struct BenchCheckpoint {
     gameplay: Option<BenchGameplay>,
     inventory_ui: Option<BenchInventoryUi>,
     hole_probe: Option<BenchHoleProbe>,
+    #[serde(default)]
+    seam_audit: Option<BenchSeamAudit>,
     /// Diagnostic: force terrain debug overlays (Alt+F7 wireframe / Alt+F8
     /// normals) on for this checkpoint so seam artifacts can be classified
     /// deterministically from a bench screenshot.
@@ -615,6 +621,12 @@ struct ScreenshotPoint {
     frame: u32,
     #[serde(default)]
     inventory_category: Option<InventoryCategory>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct BenchSeamAudit {
+    #[serde(default)]
+    frame: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1095,6 +1107,7 @@ impl Plugin for BenchPlugin {
                 gameplay_dig_rejected_crust: 0,
                 gameplay_dig_failed: false,
                 hole_probe_requested: false,
+                seam_audit_requested: false,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
@@ -2424,6 +2437,7 @@ fn run_bench_state_machine(
             state.gameplay_dig_rejected_crust = 0;
             state.gameplay_dig_failed = false;
             state.hole_probe_requested = false;
+            state.seam_audit_requested = false;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
@@ -2944,6 +2958,19 @@ fn run_bench_state_machine(
                             .push(request);
                     });
                 }
+                if let Some(request) = checkpoint_seam_audit_request(
+                    &config,
+                    checkpoint,
+                    state.hold_elapsed_frames,
+                    state.run_index,
+                    &mut state.seam_audit_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainSeamAuditRequests>()
+                            .push(request);
+                    });
+                }
                 apply_inventory_ui_screenshot_category(
                     checkpoint,
                     state.hold_elapsed_frames,
@@ -3058,6 +3085,36 @@ fn apply_inventory_ui_screenshot_category(
 
     control.open = true;
     control.category = category;
+}
+
+fn checkpoint_seam_audit_request(
+    config: &BenchConfig,
+    checkpoint: &BenchCheckpoint,
+    hold_elapsed_frames: u32,
+    run_index: u32,
+    requested: &mut bool,
+) -> Option<TerrainSeamAuditRequest> {
+    let Some(audit) = checkpoint.seam_audit.as_ref() else {
+        return None;
+    };
+    let trigger_frame = if audit.frame == 0 {
+        checkpoint.hold_frames.saturating_sub(1)
+    } else {
+        audit.frame
+    };
+    if *requested || hold_elapsed_frames < trigger_frame {
+        return None;
+    }
+    *requested = true;
+    Some(TerrainSeamAuditRequest {
+        trigger: format!(
+            "bench:{}:run{}:frame{}",
+            checkpoint.name, run_index, hold_elapsed_frames
+        ),
+        output_dir: config.output_dir.clone(),
+        checkpoint_name: checkpoint.name.clone(),
+        run_index,
+    })
 }
 
 fn checkpoint_hole_probe_request(

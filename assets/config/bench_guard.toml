@@ -766,3 +766,44 @@ area = "Counter Water Triangles Removed Sealed"
 field = "avg_ms"
 exists = true
 unit = "count"
+
+[lod_seam_audit]
+max_active_seam_faces_with_open_edges = 0
+max_active_seam_faces_with_transition_coverage_gaps = 0
+max_samples_without_render_coverage = 0
+max_possible_terrace_samples = 0
+max_partial_morph_uncovered_faces = 0
+max_stale_strip_faces_after_stable_frames = 0
+max_lod_delta_gt_one_faces = 0
+max_lip_height_voxels = 0.20
+max_face_offset_voxels = 0.10
+max_longest_unmatched_edge_voxels = 0.05
+max_unmatched_transition_edges = 0
+max_unmatched_regular_edges_on_delta1_seams = 0
+
+[[check]]
+name = "lod_seam_audit_partial_morph_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Partial Morph Uncovered Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_audit_open_edges_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Open Edge Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_audit_coverage_counter"
+scene = "lod-seam-audit.toml"
+checkpoint = "slope-seam"
+area = "Counter Seam Audit: Samples Without Render Coverage"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"

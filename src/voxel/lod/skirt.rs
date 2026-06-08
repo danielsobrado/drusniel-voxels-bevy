@@ -277,6 +277,8 @@ impl Default for SkirtConfig {
 pub struct SkirtGenerationStats {
     pub transition_apron_index_count: u32,
     pub vertical_skirt_index_count: u32,
+    /// Triangle count per X/Z face (NegX, PosX, NegZ, PosZ).
+    pub per_face_triangle_counts: [u16; 4],
 }
 
 /// Neighbor LOD information for adaptive skirts.
@@ -618,6 +620,7 @@ fn generate_skirts_with_masks(
             );
             push_boundary_quad_indices(indices, edge.face, base_idx);
             stats.transition_apron_index_count += 6;
+            record_face_triangles(&mut stats, edge.face, 2);
             (apron0, apron1)
         } else {
             (top0, top1)
@@ -662,9 +665,25 @@ fn generate_skirts_with_masks(
         );
         push_boundary_quad_indices(indices, edge.face, vertical_idx);
         stats.vertical_skirt_index_count += 6;
+        record_face_triangles(&mut stats, edge.face, 2);
     }
 
     stats
+}
+
+#[inline]
+fn record_face_triangles(stats: &mut SkirtGenerationStats, face: ChunkFace, triangles: u16) {
+    let idx = match face {
+        ChunkFace::NegX => Some(0),
+        ChunkFace::PosX => Some(1),
+        ChunkFace::NegZ => Some(2),
+        ChunkFace::PosZ => Some(3),
+        _ => None,
+    };
+    if let Some(idx) = idx {
+        stats.per_face_triangle_counts[idx] =
+            stats.per_face_triangle_counts[idx].saturating_add(triangles);
+    }
 }
 
 #[inline]

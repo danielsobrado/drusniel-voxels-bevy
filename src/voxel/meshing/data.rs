@@ -72,6 +72,9 @@ pub struct TerrainMeshDebug {
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
+    /// Per-face X/Z seam audit (NegX, PosX, NegZ, PosZ). Filled at mesh time; render
+    /// probe fields updated by the bench seam-audit pass.
+    pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -493,4 +496,5 @@ pub struct ChunkMeshResult {
     /// strictly finer neighbour. Extracted before skirts; published to
     /// `LodBoundaryStripCache` at commit.
     pub boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
+    pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
 }

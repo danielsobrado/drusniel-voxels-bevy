@@ -48,6 +48,8 @@ use rays::*;
 use types::*;
 use visual::*;
 
+pub use types::TerrainEntityQuery;
+
 pub struct TerrainHoleProbePlugin;
 
 const TERRAIN_HOLE_PROBE_SCHEMA_VERSION: u32 = 16;
@@ -545,6 +547,8 @@ mod tests {
             lod_transition_snap_stats: LodTransitionSnapStats::default(),
             mesh_section_stats: TerrainMeshSectionStats::default(),
             mc_transvoxel_stats: None,
+            seam_face_audit: [crate::voxel::meshing::SeamFaceAudit::default();
+                crate::voxel::meshing::XZ_FACE_COUNT],
         };
 
         let mismatch =

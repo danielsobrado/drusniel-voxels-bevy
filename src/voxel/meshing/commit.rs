@@ -855,6 +855,13 @@ fn prepare_lod_chunk_commit(
         mesh_lod_level,
         &neighbor_lods,
     );
+    let strip_status = super::seam_audit::resolve_strip_status_per_face(
+        strip_cache,
+        world,
+        chunk_pos,
+        mesh_lod_level,
+        &neighbor_lods,
+    );
     let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
         generate_chunk_mesh_for_request(MeshRequest {
             chunk,
@@ -868,6 +875,7 @@ fn prepare_lod_chunk_commit(
             water_exposure_mode: mesh_settings.water_air_exposure_mode,
             forensics: mesh_forensics_options(bench_forensics, mc_settings),
             neighbor_strips: Some(&neighbor_strips),
+            strip_status: Some(&strip_status),
             mc_settings: Some(mc_settings),
             timing_enabled,
         })
@@ -888,6 +896,7 @@ fn prepare_lod_chunk_commit(
         mc_triangle_sources,
         generation_timing,
         boundary_strips,
+        seam_face_audit,
     } = mesh_result;
     frame_stats.mesh_generation_timing.add(generation_timing);
 
@@ -945,6 +954,7 @@ fn prepare_lod_chunk_commit(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats,
+        seam_face_audit,
     };
 
     LodChunkPrepareOutcome::Prepared(PreparedLodChunkCommit {
@@ -1006,6 +1016,8 @@ impl PreparedLodChunkCommit {
                 lod_transition_snap_stats: Default::default(),
                 mesh_section_stats: Default::default(),
                 mc_transvoxel_stats: None,
+                seam_face_audit: [super::seam_audit::SeamFaceAudit::default();
+                    super::seam_audit::XZ_FACE_COUNT],
             },
             solid_mesh_handle: None,
             vertex_count: 0,
