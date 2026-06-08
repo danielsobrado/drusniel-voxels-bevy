@@ -1557,15 +1557,21 @@ fn append_area_timing_table(
         ));
     }
 
-    if let Some(frame_total) = timing_recorder.frame_total_summary() {
+    let mut append_summary_row = |label: &str, summary: &crate::performance::AreaTimingSummary| {
         text_content.push_str(&format!(
             "{:<20} {:>6.2} {:>7.2} {:>7.2} {:>6.1}\n",
-            "Frame total",
-            frame_total.avg_ms,
-            frame_total.max_ms,
-            frame_total.p99_ms,
-            frame_total.calls_per_frame,
+            label, summary.avg_ms, summary.max_ms, summary.p99_ms, summary.calls_per_frame,
         ));
+    };
+
+    if let Some(frame_total) = timing_recorder.frame_total_summary() {
+        append_summary_row("Frame wall", &frame_total);
+    }
+    if let Some(tracked_total) = timing_recorder.tracked_area_total_summary() {
+        append_summary_row("Tracked areas", &tracked_total);
+    }
+    if let Some(untracked_wall) = timing_recorder.untracked_wall_time_summary() {
+        append_summary_row("Untracked wall", &untracked_wall);
     }
 }
 

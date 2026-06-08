@@ -1,6 +1,7 @@
 use super::{
-    ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshForensicsOptions, TerrainMeshSectionStats,
-    WaterAirExposureMode, WaterMeshingStats, generate_blocky_chunk_mesh,
+    ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshForensicsOptions,
+    MeshGenerationTimingStats, TerrainMeshSectionStats, WaterAirExposureMode, WaterMeshingStats,
+    generate_blocky_chunk_mesh,
     generate_chunk_mesh_surface_nets, generate_chunk_mesh_surface_nets_lod1,
     generate_chunk_mesh_surface_nets_lod2, generate_chunk_mesh_surface_nets_lod3,
 };
@@ -62,6 +63,7 @@ pub struct MeshRequest<'a> {
     pub forensics: MeshForensicsOptions,
     pub neighbor_strips: Option<&'a crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
     pub mc_settings: Option<&'a crate::voxel::mc_transvoxel::McTransvoxelSettings>,
+    pub timing_enabled: bool,
 }
 
 pub trait TerrainMesher {
@@ -175,6 +177,7 @@ pub fn generate_chunk_mesh_with_mode_and_forensics(
         forensics,
         neighbor_strips,
         mc_settings: loaded_mc_settings.as_ref(),
+        timing_enabled: false,
     })
 }
 
@@ -189,6 +192,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            request.timing_enabled,
         ),
         LodLevel::Lod1 => generate_chunk_mesh_surface_nets_lod1(
             request.chunk,
@@ -199,6 +203,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            request.timing_enabled,
         ),
         LodLevel::Lod2 => generate_chunk_mesh_surface_nets_lod2(
             request.chunk,
@@ -209,6 +214,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            request.timing_enabled,
         ),
         LodLevel::Lod3 => generate_chunk_mesh_surface_nets_lod3(
             request.chunk,
@@ -219,6 +225,7 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
             request.ao_config,
             request.water_exposure_mode,
             request.neighbor_strips,
+            request.timing_enabled,
         ),
         LodLevel::Culled => empty_mesh_result(),
     }
@@ -233,6 +240,7 @@ fn empty_mesh_result() -> ChunkMeshResult {
         mesh_section_stats: TerrainMeshSectionStats::default(),
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing: MeshGenerationTimingStats::default(),
         boundary_strips: Vec::new(),
     }
 }

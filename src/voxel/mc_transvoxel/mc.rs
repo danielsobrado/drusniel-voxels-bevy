@@ -3,7 +3,8 @@ use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::meshing::mc_support;
 use crate::voxel::meshing::{
     ChunkMeshResult, McTransitionForensicsMode, McTriangleSource, McTriangleSources, MeshData,
-    MeshForensicsOptions, TerrainMeshSectionStats, WaterAirExposureMode, generate_water_mesh,
+    MeshForensicsOptions, MeshGenerationTimingStats, TerrainMeshSectionStats,
+    WaterAirExposureMode, generate_water_mesh,
 };
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::world::VoxelWorld;
@@ -119,6 +120,7 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
             mesh_section_stats: TerrainMeshSectionStats::default(),
             mc_transvoxel_stats: Some(stats),
             mc_triangle_sources: triangle_sources.map(|sources| McTriangleSources { sources }),
+            generation_timing: MeshGenerationTimingStats::default(),
             boundary_strips: Vec::new(),
         },
         stats,

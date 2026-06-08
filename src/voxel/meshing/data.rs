@@ -302,6 +302,31 @@ pub struct WaterMeshingStats {
     pub exposure_outside_world_rejected: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MeshGenerationTimingStats {
+    pub sdf_us: u64,
+    pub surface_nets_us: u64,
+    pub emit_surface_us: u64,
+    pub lod_seam_us: u64,
+    pub boundary_strip_us: u64,
+    pub seam_stitch_us: u64,
+    pub skirt_us: u64,
+    pub water_us: u64,
+}
+
+impl MeshGenerationTimingStats {
+    pub fn add(&mut self, other: Self) {
+        self.sdf_us = self.sdf_us.saturating_add(other.sdf_us);
+        self.surface_nets_us = self.surface_nets_us.saturating_add(other.surface_nets_us);
+        self.emit_surface_us = self.emit_surface_us.saturating_add(other.emit_surface_us);
+        self.lod_seam_us = self.lod_seam_us.saturating_add(other.lod_seam_us);
+        self.boundary_strip_us = self.boundary_strip_us.saturating_add(other.boundary_strip_us);
+        self.seam_stitch_us = self.seam_stitch_us.saturating_add(other.seam_stitch_us);
+        self.skirt_us = self.skirt_us.saturating_add(other.skirt_us);
+        self.water_us = self.water_us.saturating_add(other.water_us);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct WaterExposureCache {
     mode: WaterAirExposureMode,
@@ -458,6 +483,7 @@ pub struct ChunkMeshResult {
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
     pub mc_triangle_sources: Option<McTriangleSources>,
+    pub generation_timing: MeshGenerationTimingStats,
     /// Main-surface boundary strips this chunk exports for a finer neighbour to weld to
     /// (vertex-exact seam, Stage 2). Empty unless morph is on and the chunk borders a
     /// strictly finer neighbour. Extracted before skirts; published to
