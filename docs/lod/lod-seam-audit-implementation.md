@@ -194,6 +194,20 @@ using `audit_projected_strip_overlap(...)`.
 
 This keeps the oracle in audit/bench path (not hot meshing path), so production behavior is not changed by oracle decisions.
 
+Runtime oracle strips are geometry-only: projected positions are used for overlap checks, and `StripVertex.normal` is set to zero during runtime re-extraction.
+
+### Runtime extraction caveat
+
+The runtime oracle reconstructs strips from final mesh section 0. This is useful for bench/debug, but it must use the same boundary-band logic as mesh-time strip extraction. Exact face-plane filtering can miss valid Surface Nets boundary vertices inside the outer LOD cell band.
+
+`extract_main_surface_strip_for_face(...)` therefore uses `world_pos_in_face_band(...)` with `lod.step_size()` instead of exact face-plane epsilon matching.
+
+### Guard policy caveat
+
+Strip compatibility failures should fail CI only for final modes that claim a sealed/stitch-safe seam (`StitchGeometry`, `GpuMorphOnly`). `SkirtFallback` and `StaleStripFallback` should record the oracle reason but should not fail span/distance compatibility thresholds through raw summary extrema.
+
+`bench_guard` computes min span overlap and max strip distances from face records filtered by `claims_stitch_safe_seam(...)`, and only includes span ratios when the overlap status is geometrically meaningful.
+
 ### 2.6 JSON and Summary Extensions
 
 `seam-audit.json` face records now include strip-compatibility fields:

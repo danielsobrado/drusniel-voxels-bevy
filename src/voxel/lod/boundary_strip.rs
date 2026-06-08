@@ -1333,6 +1333,36 @@ mod tests {
     }
 
     #[test]
+    fn overlap_oracle_detects_crossing_segments() {
+        let fine = line_strip(&[(0.0, 0.0), (2.0, 2.0)], &[[0, 1]]);
+        let coarse = line_strip(&[(0.0, 2.0), (2.0, 0.0)], &[[0, 1]]);
+        let mut config = StripOverlapConfig::default();
+        // Crossing diagonals meet at the center but endpoints are far from the opposite
+        // segment; relax distance thresholds so crossing detection is the failing signal.
+        config.max_directed_distance_voxels = 2.0;
+        config.max_endpoint_distance_voxels = 2.0;
+        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), config);
+        assert_eq!(audit.status, StripOverlapStatus::CrossingOrFoldDetected);
+        assert!(audit.crossing_count > 0);
+    }
+
+    #[test]
+    fn overlap_oracle_reports_missing_fine_strip() {
+        let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
+        let audit = audit_projected_strip_overlap(None, Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::MissingFineStrip);
+    }
+
+    #[test]
+    fn overlap_oracle_reports_fine_multi_component() {
+        let fine = line_strip(&[(0.0, 0.0), (1.0, 0.0), (4.0, 0.0), (5.0, 0.0)], &[[0, 1], [2, 3]]);
+        let coarse = line_strip(&[(0.0, 0.0), (5.0, 0.0)], &[[0, 1]]);
+        let audit =
+            audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        assert_eq!(audit.status, StripOverlapStatus::FineMultiComponent);
+    }
+
+    #[test]
     fn overlap_oracle_rejects_endpoint_distance_exceeded() {
         let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
         let coarse = line_strip(&[(0.4, 0.0), (2.0, 0.0)], &[[0, 1]]);

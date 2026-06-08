@@ -246,9 +246,11 @@ pub fn build_seam_audit_dump(
             summary.max_strip_endpoint_distance = summary
                 .max_strip_endpoint_distance
                 .max(audit.strip_max_endpoint_distance);
-            summary.min_strip_span_overlap_ratio = summary
-                .min_strip_span_overlap_ratio
-                .min(audit.strip_span_overlap_ratio);
+            if strip_span_overlap_ratio_counts_for_summary(audit.strip_overlap_status) {
+                summary.min_strip_span_overlap_ratio = summary
+                    .min_strip_span_overlap_ratio
+                    .min(audit.strip_span_overlap_ratio);
+            }
             if !audit.strip_compatible {
                 summary.strip_incompatible_faces += 1;
             }
@@ -684,6 +686,31 @@ fn world_edge_key(p0: Vec3, p1: Vec3, face: ChunkFace) -> WorldEdgeKey {
     WorldEdgeKey { a, b, face }
 }
 
+fn strip_span_overlap_ratio_counts_for_summary(status: StripOverlapStatus) -> bool {
+    matches!(
+        status,
+        StripOverlapStatus::Compatible
+            | StripOverlapStatus::SpanMismatch
+            | StripOverlapStatus::DirectedDistanceExceeded
+            | StripOverlapStatus::EndpointDistanceExceeded
+            | StripOverlapStatus::CrossingOrFoldDetected
+    )
+}
+
+fn world_pos_in_face_band(world_pos: Vec3, chunk_pos: IVec3, face: ChunkFace, lod: LodLevel) -> bool {
+    let origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
+    let local = world_pos - origin;
+    let band = lod.step_size().max(1) as f32;
+    let size = CHUNK_SIZE_I32 as f32;
+    match face {
+        ChunkFace::NegX => local.x <= band,
+        ChunkFace::PosX => local.x >= size - band,
+        ChunkFace::NegZ => local.z <= band,
+        ChunkFace::PosZ => local.z >= size - band,
+        _ => false,
+    }
+}
+
 fn opposite_face(face: ChunkFace) -> ChunkFace {
     match face {
         ChunkFace::NegX => ChunkFace::PosX,
@@ -748,7 +775,9 @@ fn extract_main_surface_strip_for_face(
         ] {
             let pa = positions[a as usize] + translation;
             let pb = positions[b as usize] + translation;
-            if !edge_on_chunk_face(pa, pb, chunk_pos, face) {
+            if !world_pos_in_face_band(pa, chunk_pos, face, lod)
+                || !world_pos_in_face_band(pb, chunk_pos, face, lod)
+            {
                 continue;
             }
             let qa = StripQuantizedPos {
@@ -1155,6 +1184,33 @@ mod tests {
             offset < 1e-4,
             "face offset should measure seam-plane distance, got {offset}"
         );
+    }
+
+    #[test]
+    fn world_pos_in_face_band_accepts_vertices_inside_lod_band_not_on_face_plane() {
+        let chunk_pos = IVec3::new(16, 0, 0);
+        let origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
+        let band = LodLevel::Lod0.step_size().max(1) as f32;
+        let in_band = origin + Vec3::new(CHUNK_SIZE_I32 as f32 - band + 0.25, 4.0, 8.0);
+        let on_plane = origin + Vec3::new(CHUNK_SIZE_I32 as f32, 4.0, 8.0);
+        assert!(world_pos_in_face_band(
+            in_band,
+            chunk_pos,
+            ChunkFace::PosX,
+            LodLevel::Lod0
+        ));
+        assert!(!edge_on_chunk_face(in_band, in_band, chunk_pos, ChunkFace::PosX));
+        assert!(edge_on_chunk_face(on_plane, on_plane, chunk_pos, ChunkFace::PosX));
+    }
+
+    #[test]
+    fn strip_span_ratio_summary_ignores_missing_strip_status() {
+        assert!(!strip_span_overlap_ratio_counts_for_summary(
+            StripOverlapStatus::MissingCoarseStrip
+        ));
+        assert!(strip_span_overlap_ratio_counts_for_summary(
+            StripOverlapStatus::SpanMismatch
+        ));
     }
 
     #[test]

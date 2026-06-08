@@ -119,10 +119,29 @@ struct SeamAuditFaceRecord {
     final_mode: String,
     strip_overlap_status: String,
     strip_compatible: bool,
+    strip_max_fine_to_coarse_distance: f32,
+    strip_max_coarse_to_fine_distance: f32,
+    strip_max_endpoint_distance: f32,
+    strip_span_overlap_ratio: f32,
     unmatched_transition_edges: u16,
     unmatched_regular_edges: u16,
     samples_without_render_coverage: u16,
     strip_crossing_count: u16,
+}
+
+fn claims_stitch_safe_seam(final_mode: &str) -> bool {
+    final_mode == "StitchGeometry" || final_mode == "GpuMorphOnly"
+}
+
+fn strip_span_overlap_ratio_is_meaningful(status: &str) -> bool {
+    matches!(
+        status,
+        "Compatible"
+            | "SpanMismatch"
+            | "DirectedDistanceExceeded"
+            | "EndpointDistanceExceeded"
+            | "CrossingOrFoldDetected"
+    )
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -737,9 +756,38 @@ fn evaluate_lod_seam_audit(
     let max_strip_crossings = dump
         .faces
         .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
         .map(|face| face.strip_crossing_count as u32)
         .max()
         .unwrap_or(0);
+    let min_strip_span_overlap_ratio = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            claims_stitch_safe_seam(&face.final_mode)
+                && strip_span_overlap_ratio_is_meaningful(&face.strip_overlap_status)
+        })
+        .map(|face| face.strip_span_overlap_ratio as f64)
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(1.0);
+    let max_strip_fine_to_coarse = dump
+        .faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| face.strip_max_fine_to_coarse_distance as f64)
+        .fold(0.0, f64::max);
+    let max_strip_coarse_to_fine = dump
+        .faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| face.strip_max_coarse_to_fine_distance as f64)
+        .fold(0.0, f64::max);
+    let max_strip_endpoint_distance = dump
+        .faces
+        .iter()
+        .filter(|face| claims_stitch_safe_seam(&face.final_mode))
+        .map(|face| face.strip_max_endpoint_distance as f64)
+        .fold(0.0, f64::max);
     let strip_incompatible_stitched = dump
         .faces
         .iter()
@@ -863,25 +911,25 @@ fn evaluate_lod_seam_audit(
         seam_audit_check(
             &summary.scene,
             "max_strip_fine_to_coarse_distance",
-            s.max_strip_fine_to_coarse_distance as f64,
+            max_strip_fine_to_coarse,
             config.max_strip_fine_to_coarse_distance_voxels as f64,
         ),
         seam_audit_check(
             &summary.scene,
             "max_strip_coarse_to_fine_distance",
-            s.max_strip_coarse_to_fine_distance as f64,
+            max_strip_coarse_to_fine,
             config.max_strip_coarse_to_fine_distance_voxels as f64,
         ),
         seam_audit_check(
             &summary.scene,
             "max_strip_endpoint_distance",
-            s.max_strip_endpoint_distance as f64,
+            max_strip_endpoint_distance,
             config.max_strip_endpoint_distance_voxels as f64,
         ),
         seam_audit_min_check(
             &summary.scene,
             "min_strip_span_overlap_ratio",
-            s.min_strip_span_overlap_ratio as f64,
+            min_strip_span_overlap_ratio,
             config.min_strip_span_overlap_ratio as f64,
         ),
         seam_audit_check(
@@ -1322,6 +1370,14 @@ mod tests {
 
         assert_eq!(result.status, Status::Fail);
         assert!((result.value.unwrap() - 12.0).abs() <= 1e-9);
+    }
+
+    #[test]
+    fn strip_guard_policy_ignores_fallback_faces_for_span_ratio() {
+        assert!(!claims_stitch_safe_seam("SkirtFallback"));
+        assert!(!strip_span_overlap_ratio_is_meaningful("MissingCoarseStrip"));
+        assert!(claims_stitch_safe_seam("StitchGeometry"));
+        assert!(strip_span_overlap_ratio_is_meaningful("DirectedDistanceExceeded"));
     }
 
     fn summary_with_frame(scene: &str, checkpoint: &str, avg_ms: f64, p99_ms: f64) -> BenchSummary {
