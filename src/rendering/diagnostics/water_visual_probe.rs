@@ -337,8 +337,9 @@ fn dump_water_visual_probe(
     cheap_materials: Res<Assets<StandardMaterial>>,
     mut env_probe_dumped: Local<bool>,
 ) {
-    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let hotkey_triggered = shift_held && keys.just_pressed(KeyCode::F10);
+    // Alt+F11 (moved off Shift+F10: Shift descends the fly camera mid-capture).
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let hotkey_triggered = alt_held && keys.just_pressed(KeyCode::F11);
     let env_triggered = env_flag("VOXEL_WATER_VISUAL_PROBE_ONCE") && !*env_probe_dumped;
     if !hotkey_triggered && !env_triggered {
         return;

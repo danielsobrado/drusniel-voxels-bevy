@@ -1099,10 +1099,30 @@ fn fly_movement(
     if keys.pressed(KeyCode::KeyD) {
         velocity += right;
     }
-    if keys.pressed(KeyCode::Space) {
+    // Don't apply vertical fly movement while a function key is held: Shift (descend)
+    // and Space double as parts of debug chords (Shift+F9 probe, Alt+Shift+F9, etc.),
+    // and nudging the camera mid-capture is the reported conflict. Holding an F-key
+    // means "debug", not "fly".
+    let fkey_held = [
+        KeyCode::F1,
+        KeyCode::F2,
+        KeyCode::F3,
+        KeyCode::F4,
+        KeyCode::F5,
+        KeyCode::F6,
+        KeyCode::F7,
+        KeyCode::F8,
+        KeyCode::F9,
+        KeyCode::F10,
+        KeyCode::F11,
+        KeyCode::F12,
+    ]
+    .iter()
+    .any(|key| keys.pressed(*key));
+    if keys.pressed(KeyCode::Space) && !fkey_held {
         velocity += Vec3::Y;
     }
-    if keys.pressed(KeyCode::ShiftLeft) {
+    if keys.pressed(KeyCode::ShiftLeft) && !fkey_held {
         velocity -= Vec3::Y;
     }
 

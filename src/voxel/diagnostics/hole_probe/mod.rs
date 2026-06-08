@@ -98,8 +98,10 @@ fn dump_terrain_hole_probe(
     mut timing: ResMut<AreaTimingRecorder>,
     mut probe_notice: ResMut<crate::voxel::terrain_debug::TerrainProbeNotice>,
 ) {
-    let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let keyboard_requested = shift_held && keys.just_pressed(KeyCode::F9);
+    // Alt+F10 (moved off Shift+F9: Shift descends the fly camera, nudging the view
+    // mid-probe). Alt+F9 is taken by the iso-band overlay, so this uses Alt+F10.
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let keyboard_requested = alt_held && keys.just_pressed(KeyCode::F10);
     let scripted_request = (!keyboard_requested)
         .then(|| requests.pending.pop())
         .flatten();

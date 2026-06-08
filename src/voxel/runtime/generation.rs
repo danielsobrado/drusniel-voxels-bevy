@@ -826,15 +826,13 @@ pub(crate) fn poll_chunk_generation_tasks(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
-    lod_control: Res<TerrainLodControl>,
+    _lod_control: Res<TerrainLodControl>,
 ) {
-    // While LOD is frozen for inspection (Alt+F6), hold the scene completely
-    // static: don't insert newly generated chunks (which would pop in at fresh
-    // distance-based LODs and look like the LOD "refreshing"). Async tasks keep
-    // running and are consumed once LOD is unfrozen.
-    if lod_control.freeze_lod {
-        return;
-    }
+    // NOTE: LOD freeze (Alt+F6) does NOT halt chunk insertion. Freeze only pauses LOD
+    // *reassignment* (enforced via `freeze_lod` in the LOD-update system), so already
+    // loaded chunks keep their LOD while you inspect, while newly generated chunks still
+    // pop in. Halting insertion here made freeze look like loading was permanently stuck
+    // (the "always frozen" symptom), especially in bench mode where LOD auto-freezes.
     // Skip until actual generation work has been queued.
     if !should_poll_chunk_generation_tasks(&gen_state) {
         return;

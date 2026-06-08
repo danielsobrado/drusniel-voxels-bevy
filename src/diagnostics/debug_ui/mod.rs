@@ -604,7 +604,9 @@ fn toggle_sun_shadows(
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if !shift_held && keys.just_pressed(KeyCode::F10) {
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    // Alt+F10 is the terrain hole-probe dump; don't also toggle sun shadows.
+    if !shift_held && !alt_held && keys.just_pressed(KeyCode::F10) {
         for mut light in sun_query.iter_mut() {
             light.shadows_enabled = !light.shadows_enabled;
             info!(
@@ -814,12 +816,17 @@ fn toggle_scene_visibility(
     let mut water_changed = false;
     let mut grass_changed = false;
 
-    if keys.just_pressed(KeyCode::F6) {
+    // Ignore these while Alt is held: Alt+F6 is the LOD-freeze toggle and Alt+F7 is the
+    // terrain wireframe overlay. Without this guard, those debug combos also flip
+    // water/grass visibility (the reported Alt+F6 = water-toggle collision).
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+
+    if !alt_held && keys.just_pressed(KeyCode::F6) {
         toggles.show_water = !toggles.show_water;
         water_changed = true;
     }
 
-    if keys.just_pressed(KeyCode::F7) {
+    if !alt_held && keys.just_pressed(KeyCode::F7) {
         toggles.show_grass = !toggles.show_grass;
         grass_changed = true;
     }
