@@ -297,7 +297,17 @@ pub(super) fn extract_own_boundary_strips(
     my_lod: LodLevel,
 ) -> crate::voxel::lod_boundary_strip::OwnBoundaryStrips {
     crate::voxel::lod_boundary_strip::OwnBoundaryStrips::from_extracted(
-        fine_boundary_strips_for_audit(local_positions, solid_mesh, chunk_origin, chunk, my_lod),
+        crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
+            local_positions,
+            &solid_mesh.normals,
+            &solid_mesh.indices,
+            chunk_origin,
+            CHUNK_SIZE as f32,
+            my_lod.step_size() as f32,
+            my_lod,
+            chunk.position(),
+            0,
+        ),
     )
 }
 
@@ -558,26 +568,6 @@ pub(super) fn append_seam_stitches(
     }
 
     result
-}
-
-pub(super) fn fine_boundary_strips_for_audit(
-    local_positions: &[Vec3],
-    solid_mesh: &MeshData,
-    chunk_origin: IVec3,
-    chunk: &Chunk,
-    my_lod: LodLevel,
-) -> Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip> {
-    crate::voxel::lod_boundary_strip::extract_lod_boundary_strips(
-        local_positions,
-        &solid_mesh.normals,
-        &solid_mesh.indices,
-        chunk_origin,
-        CHUNK_SIZE as f32,
-        my_lod.step_size() as f32,
-        my_lod,
-        chunk.position(),
-        0,
-    )
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended

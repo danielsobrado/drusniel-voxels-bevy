@@ -1360,6 +1360,7 @@ fn apply_prepared_lod_chunk_commit(
                             ),
                             chunk_mesh,
                             terrain_mesh_debug,
+                            seam_strip_debug.clone(),
                             terrain_layers,
                         ))
                         .id()
@@ -1375,6 +1376,7 @@ fn apply_prepared_lod_chunk_commit(
                         ),
                         chunk_mesh,
                         terrain_mesh_debug,
+                        seam_strip_debug.clone(),
                         terrain_layers,
                     ))
                     .id(),
