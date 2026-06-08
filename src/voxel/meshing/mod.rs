@@ -108,8 +108,9 @@ pub(crate) use lod_seam::{
 };
 pub use pipeline::*;
 pub use seam_audit::{
-    SeamFaceAudit, SeamFaceMode, SeamStripStatus, XZ_FACE_COUNT, XZ_FACES, assemble_seam_face_audit,
-    classify_final_mode, resolve_strip_status_per_face,
+    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
+    XZ_FACE_COUNT, XZ_FACES, assemble_seam_face_audit, classify_final_mode,
+    resolve_strip_status_per_face, strip_reject_reason_from_overlap_status, xz_face_index,
 };
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use sdf::{

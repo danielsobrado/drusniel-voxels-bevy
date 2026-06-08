@@ -3,7 +3,8 @@ use super::{
     PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
     append_seam_stitches, apply_snap_or_morph, build_surface_nets_seam_face_audit,
     compute_vertex_material_weights, compute_vertex_material_weights_lod_transition_aware,
-    extract_export_boundary_strips, generate_sdf, generate_sdf_lod1, generate_sdf_lod2,
+    extract_export_boundary_strips, extract_own_boundary_strips, generate_sdf, generate_sdf_lod1,
+    generate_sdf_lod2,
     generate_sdf_lod3, generate_water_mesh, pad_morph_targets_identity,
     recompute_morphed_seam_normals, scale_vertex_from_center, sdf_gradient_normal_at_local,
     skirt_depth_for_lod, terrain_morph_config,
@@ -243,18 +244,17 @@ pub fn generate_chunk_mesh_surface_nets(
     generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
-    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
-    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let boundary_strips = extract_export_boundary_strips(
-        morph,
+    let own_boundary_strips = extract_own_boundary_strips(
         &local_positions,
         &solid_mesh,
         chunk_origin,
         chunk,
         my_lod,
-        &neighbor_lods,
     );
+    let boundary_strips =
+        extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
@@ -265,8 +265,8 @@ pub fn generate_chunk_mesh_surface_nets(
         &local_positions,
         chunk_origin,
         chunk_center,
-        chunk,
         my_lod,
+        &own_boundary_strips,
         neighbor_strips,
     );
     generation_timing.seam_stitch_us += elapsed_us(start);
@@ -307,13 +307,11 @@ pub fn generate_chunk_mesh_surface_nets(
     }
     generation_timing.skirt_us += elapsed_us(start);
 
-    let seam_face_audit = build_surface_nets_seam_face_audit(
+    let (seam_face_audit, seam_strip_debug) = build_surface_nets_seam_face_audit(
         chunk,
-        chunk_origin,
         my_lod,
         &neighbor_lods,
-        &local_positions,
-        &solid_mesh,
+        &own_boundary_strips,
         &lod_transition_snap_stats,
         &morph_counts,
         &stitch_result,
@@ -356,6 +354,7 @@ pub fn generate_chunk_mesh_surface_nets(
         generation_timing,
         boundary_strips,
         seam_face_audit,
+        seam_strip_debug,
     }
 }
 
@@ -526,18 +525,17 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
-    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
-    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let boundary_strips = extract_export_boundary_strips(
-        morph,
+    let own_boundary_strips = extract_own_boundary_strips(
         &local_positions,
         &solid_mesh,
         chunk_origin,
         chunk,
         my_lod,
-        &neighbor_lods,
     );
+    let boundary_strips =
+        extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
@@ -548,8 +546,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         &local_positions,
         chunk_origin,
         chunk_center,
-        chunk,
         my_lod,
+        &own_boundary_strips,
         neighbor_strips,
     );
     generation_timing.seam_stitch_us += elapsed_us(start);
@@ -591,13 +589,11 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     }
     generation_timing.skirt_us += elapsed_us(start);
 
-    let seam_face_audit = build_surface_nets_seam_face_audit(
+    let (seam_face_audit, seam_strip_debug) = build_surface_nets_seam_face_audit(
         chunk,
-        chunk_origin,
         my_lod,
         &neighbor_lods,
-        &local_positions,
-        &solid_mesh,
+        &own_boundary_strips,
         &lod_transition_snap_stats,
         &morph_counts,
         &stitch_result,
@@ -641,6 +637,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         generation_timing,
         boundary_strips,
         seam_face_audit,
+        seam_strip_debug,
     }
 }
 
@@ -811,18 +808,17 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
-    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
-    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let boundary_strips = extract_export_boundary_strips(
-        morph,
+    let own_boundary_strips = extract_own_boundary_strips(
         &local_positions,
         &solid_mesh,
         chunk_origin,
         chunk,
         my_lod,
-        &neighbor_lods,
     );
+    let boundary_strips =
+        extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
@@ -833,8 +829,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         &local_positions,
         chunk_origin,
         chunk_center,
-        chunk,
         my_lod,
+        &own_boundary_strips,
         neighbor_strips,
     );
     generation_timing.seam_stitch_us += elapsed_us(start);
@@ -876,13 +872,11 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     }
     generation_timing.skirt_us += elapsed_us(start);
 
-    let seam_face_audit = build_surface_nets_seam_face_audit(
+    let (seam_face_audit, seam_strip_debug) = build_surface_nets_seam_face_audit(
         chunk,
-        chunk_origin,
         my_lod,
         &neighbor_lods,
-        &local_positions,
-        &solid_mesh,
+        &own_boundary_strips,
         &lod_transition_snap_stats,
         &morph_counts,
         &stitch_result,
@@ -926,6 +920,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         generation_timing,
         boundary_strips,
         seam_face_audit,
+        seam_strip_debug,
     }
 }
 
@@ -1096,18 +1091,17 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
-    // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
-    // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let boundary_strips = extract_export_boundary_strips(
-        morph,
+    let own_boundary_strips = extract_own_boundary_strips(
         &local_positions,
         &solid_mesh,
         chunk_origin,
         chunk,
         my_lod,
-        &neighbor_lods,
     );
+    let boundary_strips =
+        extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
@@ -1118,8 +1112,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         &local_positions,
         chunk_origin,
         chunk_center,
-        chunk,
         my_lod,
+        &own_boundary_strips,
         neighbor_strips,
     );
     generation_timing.seam_stitch_us += elapsed_us(start);
@@ -1161,13 +1155,11 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     }
     generation_timing.skirt_us += elapsed_us(start);
 
-    let seam_face_audit = build_surface_nets_seam_face_audit(
+    let (seam_face_audit, seam_strip_debug) = build_surface_nets_seam_face_audit(
         chunk,
-        chunk_origin,
         my_lod,
         &neighbor_lods,
-        &local_positions,
-        &solid_mesh,
+        &own_boundary_strips,
         &lod_transition_snap_stats,
         &morph_counts,
         &stitch_result,
@@ -1211,5 +1203,6 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         generation_timing,
         boundary_strips,
         seam_face_audit,
+        seam_strip_debug,
     }
 }

@@ -53,6 +53,7 @@ struct LodSeamAuditConfig {
     max_strip_incompatible_faces: u32,
     max_strip_missing_faces_after_stable_frames: u32,
     max_strip_topology_unsupported_stitched_faces: u32,
+    max_stitch_safe_bad_component_faces: u32,
     max_strip_fine_to_coarse_distance_voxels: f32,
     max_strip_coarse_to_fine_distance_voxels: f32,
     max_strip_endpoint_distance_voxels: f32,
@@ -78,6 +79,7 @@ impl Default for LodSeamAuditConfig {
             max_strip_incompatible_faces: 0,
             max_strip_missing_faces_after_stable_frames: 0,
             max_strip_topology_unsupported_stitched_faces: 0,
+            max_stitch_safe_bad_component_faces: 0,
             max_strip_fine_to_coarse_distance_voxels: 0.35,
             max_strip_coarse_to_fine_distance_voxels: 0.35,
             max_strip_endpoint_distance_voxels: 0.50,
@@ -125,6 +127,10 @@ struct SeamAuditSummary {
 #[derive(Debug, Deserialize)]
 struct SeamAuditFaceRecord {
     final_mode: String,
+    #[serde(default)]
+    fine_components: u8,
+    #[serde(default)]
+    coarse_components: u8,
     strip_overlap_status: String,
     strip_compatible: bool,
     strip_max_fine_to_coarse_distance: f32,
@@ -838,6 +844,14 @@ fn evaluate_lod_seam_audit(
                 && (face.final_mode == "StitchGeometry" || face.final_mode == "GpuMorphOnly")
         })
         .count() as u32;
+    let stitch_safe_bad_component_faces = dump
+        .faces
+        .iter()
+        .filter(|face| {
+            claims_stitch_safe_seam(&face.final_mode)
+                && (face.fine_components > 1 || face.coarse_components > 1)
+        })
+        .count() as u32;
 
     vec![
         seam_audit_check(
@@ -929,6 +943,12 @@ fn evaluate_lod_seam_audit(
             "strip_topology_unsupported_faces",
             strip_topology_unsupported_stitched as f64,
             config.max_strip_topology_unsupported_stitched_faces as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "stitch_safe_bad_component_faces",
+            stitch_safe_bad_component_faces as f64,
+            config.max_stitch_safe_bad_component_faces as f64,
         ),
         seam_audit_check(
             &summary.scene,

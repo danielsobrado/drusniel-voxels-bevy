@@ -124,6 +124,7 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
             boundary_strips: Vec::new(),
             seam_face_audit: [crate::voxel::meshing::seam_audit::SeamFaceAudit::default();
                 crate::voxel::meshing::seam_audit::XZ_FACE_COUNT],
+            seam_strip_debug: crate::voxel::meshing::TerrainSeamStripDebug::default(),
         },
         stats,
     }

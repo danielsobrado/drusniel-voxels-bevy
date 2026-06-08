@@ -31,6 +31,7 @@ use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings
 use crate::voxel::meshing::{
     ChunkMesh, ChunkMeshResult, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions,
     MeshGenerationTimingStats, MeshMode, MeshRequest, MeshSettings, TerrainMeshDebug,
+    TerrainSeamStripDebug,
     WaterBodyKind, WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_for_request,
     lod_delta_gt_one_face_mask,
@@ -115,6 +116,7 @@ pub(crate) struct PreparedLodChunkCommit {
     lod_level: LodLevel,
     terrain_quality: TerrainMaterialQuality,
     terrain_mesh_debug: TerrainMeshDebug,
+    seam_strip_debug: TerrainSeamStripDebug,
     solid_mesh_handle: Option<Handle<Mesh>>,
     vertex_count: u32,
     triangle_count: u32,
@@ -897,6 +899,7 @@ fn prepare_lod_chunk_commit(
         generation_timing,
         boundary_strips,
         seam_face_audit,
+        seam_strip_debug,
     } = mesh_result;
     frame_stats.mesh_generation_timing.add(generation_timing);
 
@@ -963,6 +966,7 @@ fn prepare_lod_chunk_commit(
         lod_level,
         terrain_quality,
         terrain_mesh_debug,
+        seam_strip_debug,
         solid_mesh_handle,
         vertex_count,
         triangle_count,
@@ -1019,6 +1023,7 @@ impl PreparedLodChunkCommit {
                 seam_face_audit: [super::seam_audit::SeamFaceAudit::default();
                     super::seam_audit::XZ_FACE_COUNT],
             },
+            seam_strip_debug: TerrainSeamStripDebug::default(),
             solid_mesh_handle: None,
             vertex_count: 0,
             triangle_count: 0,
@@ -1218,6 +1223,7 @@ fn apply_prepared_lod_chunk_commit(
         lod_level,
         terrain_quality,
         terrain_mesh_debug,
+        seam_strip_debug,
         solid_mesh_handle,
         vertex_count,
         triangle_count,
@@ -1278,6 +1284,7 @@ fn apply_prepared_lod_chunk_commit(
                                 MeshMaterial3d(blocky_mat.handle.clone()),
                                 chunk_mesh,
                                 terrain_mesh_debug,
+                                seam_strip_debug.clone(),
                             ))
                             .remove::<MeshMaterial3d<
                                 crate::rendering::triplanar_material::TriplanarMaterial,
@@ -1292,6 +1299,7 @@ fn apply_prepared_lod_chunk_commit(
                             MeshMaterial3d(triplanar_material.handle_for_quality(terrain_quality)),
                             chunk_mesh,
                             terrain_mesh_debug,
+                            seam_strip_debug.clone(),
                         ))
                         .remove::<MeshMaterial3d<
                             crate::rendering::blocky_material::BlockyMaterial,

@@ -783,6 +783,7 @@ max_unmatched_regular_edges_on_delta1_seams = 0
 max_strip_incompatible_faces = 0
 max_strip_missing_faces_after_stable_frames = 0
 max_strip_topology_unsupported_stitched_faces = 0
+max_stitch_safe_bad_component_faces = 0
 max_strip_fine_to_coarse_distance_voxels = 0.35
 max_strip_coarse_to_fine_distance_voxels = 0.35
 max_strip_endpoint_distance_voxels = 0.50
@@ -812,6 +813,24 @@ name = "lod_seam_audit_coverage_counter"
 scene = "lod-seam-audit.toml"
 checkpoint = "slope-seam"
 area = "Counter Seam Audit: Samples Without Render Coverage"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_hard_cases_open_edges"
+scene = "lod-seam-hard-cases.toml"
+checkpoint = "cave-mouth-lod0-lod1-x"
+area = "Counter Seam Audit: Open Edge Faces"
+field = "avg_ms"
+fail_gt = 0.0
+unit = "count"
+
+[[check]]
+name = "lod_seam_hard_cases_bad_components"
+scene = "lod-seam-hard-cases.toml"
+checkpoint = "multi-component-mismatch"
+area = "Counter Seam Audit: Strip Incompatible Faces"
 field = "avg_ms"
 fail_gt = 0.0
 unit = "count"

@@ -47,6 +47,28 @@ pub enum SeamFaceMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SeamStripRejectReason {
+    #[default]
+    None,
+    MissingStrip,
+    StaleStrip,
+    MultiComponentStrip,
+    SpanMismatch,
+    DirectedDistanceExceeded,
+    EndpointDistanceExceeded,
+    CrossingOrFoldDetected,
+    UnsupportedTopology,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SeamStripOverlapSource {
+    #[default]
+    NotEvaluated,
+    MeshTime,
+    RuntimeReextract,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SeamStripStatus {
     #[default]
     NotNeeded,
@@ -106,6 +128,8 @@ pub struct SeamFaceAudit {
     pub strip_unmatched_fine_segments: u16,
     pub strip_unmatched_coarse_segments: u16,
     pub strip_crossing_count: u16,
+    pub strip_reject_reason: SeamStripRejectReason,
+    pub strip_overlap_source: SeamStripOverlapSource,
 }
 
 impl Default for SeamFaceAudit {
@@ -142,6 +166,8 @@ impl Default for SeamFaceAudit {
             strip_unmatched_fine_segments: 0,
             strip_unmatched_coarse_segments: 0,
             strip_crossing_count: 0,
+            strip_reject_reason: SeamStripRejectReason::None,
+            strip_overlap_source: SeamStripOverlapSource::NotEvaluated,
         }
     }
 }
@@ -194,6 +220,8 @@ pub struct SeamFaceModeInput {
     pub sealed_by_mask: bool,
     pub stitched: bool,
     pub vertical_skirt_on_face: bool,
+    pub fine_components: u8,
+    pub coarse_components: u8,
 }
 
 pub fn classify_final_mode(input: SeamFaceModeInput) -> SeamFaceMode {
@@ -233,8 +261,26 @@ pub fn classify_final_mode(input: SeamFaceModeInput) -> SeamFaceMode {
         return SeamFaceMode::InvalidUnsafeTopology;
     }
 
-    if transition && !has_stitch && !has_skirt && !has_full_morph && input.morph_welded_count == 0
-    {
+    if transition && !has_stitch && !has_skirt && !has_full_morph && input.morph_welded_count == 0 {
+        if input.fine_components > 0 || input.coarse_components > 0 {
+            return SeamFaceMode::InvalidUnsafeTopology;
+        }
+        return SeamFaceMode::NoTransition;
+    }
+
+    let needs_strip_topology_check = transition
+        && (input.fine_components > 0
+            || input.coarse_components > 0
+            || has_stitch
+            || has_full_morph
+            || has_partial_morph);
+    if needs_strip_topology_check && (input.fine_components != 1 || input.coarse_components != 1) {
+        if input.strip_status == SeamStripStatus::StaleRevision {
+            return SeamFaceMode::StaleStripFallback;
+        }
+        if has_skirt {
+            return SeamFaceMode::SkirtFallback;
+        }
         return SeamFaceMode::InvalidUnsafeTopology;
     }
 
@@ -271,6 +317,20 @@ pub fn classify_final_mode(input: SeamFaceModeInput) -> SeamFaceMode {
 
 pub fn boundary_component_count_for_strip(strip: &LodBoundaryStrip) -> u8 {
     strip.component_count().min(255) as u8
+}
+
+pub fn terrain_seam_strip_debug_from_own_strips(
+    strips: &[LodBoundaryStrip],
+) -> crate::voxel::meshing::TerrainSeamStripDebug {
+    use crate::voxel::lod_boundary_strip::CompactProjectedStrip;
+    let mut debug = crate::voxel::meshing::TerrainSeamStripDebug::default();
+    for strip in strips {
+        let Some(idx) = xz_face_index(strip.face) else {
+            continue;
+        };
+        debug.strips[idx] = Some(CompactProjectedStrip::from_lod_boundary_strip(strip));
+    }
+    debug
 }
 
 pub fn resolve_strip_status_per_face(
@@ -360,7 +420,38 @@ pub fn assemble_seam_face_audit(
 
         let candidate = morph_counts.candidate[idx];
         let welded = morph_counts.welded[idx];
-        let mode = classify_final_mode(SeamFaceModeInput {
+        let fine_components = fine_strip
+            .map(boundary_component_count_for_strip)
+            .unwrap_or(0);
+        let coarse_components = coarse_strip
+            .map(boundary_component_count_for_strip)
+            .unwrap_or(0);
+        let stitch_triangles = stitch.triangle_counts[idx];
+        let skirt_triangles = skirt_counts.triangle_counts[idx];
+        let transition = transition_target_lod(my_lod, neighbor_lod.unwrap_or(LodLevel::Culled))
+            .is_some();
+        let needs_strip_topology_check = transition
+            && (fine_components > 0
+                || coarse_components > 0
+                || stitch_triangles > 0
+                || candidate > 0
+                || welded > 0);
+
+        let mut strip_reject_reason = SeamStripRejectReason::None;
+        if needs_strip_topology_check {
+            if matches!(
+                strip_status[idx],
+                SeamStripStatus::MissingStrip | SeamStripStatus::MissingNeighborChunk
+            ) {
+                strip_reject_reason = SeamStripRejectReason::MissingStrip;
+            } else if strip_status[idx] == SeamStripStatus::StaleRevision {
+                strip_reject_reason = SeamStripRejectReason::StaleStrip;
+            } else if fine_components != 1 || coarse_components != 1 {
+                strip_reject_reason = SeamStripRejectReason::MultiComponentStrip;
+            }
+        }
+
+        let mut mode = classify_final_mode(SeamFaceModeInput {
             face: *face,
             fine_lod: my_lod,
             neighbor_lod,
@@ -369,12 +460,26 @@ pub fn assemble_seam_face_audit(
             strip_status: strip_status[idx],
             morph_candidate_count: candidate,
             morph_welded_count: welded,
-            stitch_triangle_count: stitch.triangle_counts[idx],
-            skirt_triangle_count: skirt_counts.triangle_counts[idx],
+            stitch_triangle_count: stitch_triangles,
+            skirt_triangle_count: skirt_triangles,
             sealed_by_mask: sealed,
             stitched: stitch.stitched_face_mask & LodTransitionSnapStats::face_mask(*face) != 0,
-            vertical_skirt_on_face: vertical_skirt && stitch.triangle_counts[idx] > 0,
+            vertical_skirt_on_face: vertical_skirt && stitch_triangles > 0,
+            fine_components,
+            coarse_components,
         });
+
+        if mode.claims_stitch_safe_seam()
+            && strip_reject_reason != SeamStripRejectReason::None
+        {
+            mode = if skirt_triangles > 0 {
+                SeamFaceMode::SkirtFallback
+            } else if strip_status[idx] == SeamStripStatus::StaleRevision {
+                SeamFaceMode::StaleStripFallback
+            } else {
+                SeamFaceMode::InvalidUnsafeTopology
+            };
+        }
 
         audits[idx] = SeamFaceAudit {
             face: *face,
@@ -386,14 +491,10 @@ pub fn assemble_seam_face_audit(
             morph_candidate_count: candidate,
             morph_welded_count: welded,
             morph_missing_count: candidate.saturating_sub(welded),
-            stitch_triangle_count: stitch.triangle_counts[idx],
-            skirt_triangle_count: skirt_counts.triangle_counts[idx],
-            fine_components: fine_strip
-                .map(boundary_component_count_for_strip)
-                .unwrap_or(0),
-            coarse_components: coarse_strip
-                .map(boundary_component_count_for_strip)
-                .unwrap_or(0),
+            stitch_triangle_count: stitch_triangles,
+            skirt_triangle_count: skirt_triangles,
+            fine_components,
+            coarse_components,
             sealed_by_mask: sealed,
             samples_total: 0,
             samples_without_render_coverage: 0,
@@ -412,8 +513,79 @@ pub fn assemble_seam_face_audit(
             strip_unmatched_fine_segments: 0,
             strip_unmatched_coarse_segments: 0,
             strip_crossing_count: 0,
+            strip_reject_reason,
+            strip_overlap_source: SeamStripOverlapSource::NotEvaluated,
         };
     }
 
     audits
+}
+
+pub fn strip_reject_reason_from_overlap_status(status: StripOverlapStatus) -> SeamStripRejectReason {
+    match status {
+        StripOverlapStatus::SpanMismatch => SeamStripRejectReason::SpanMismatch,
+        StripOverlapStatus::DirectedDistanceExceeded => {
+            SeamStripRejectReason::DirectedDistanceExceeded
+        }
+        StripOverlapStatus::EndpointDistanceExceeded => SeamStripRejectReason::EndpointDistanceExceeded,
+        StripOverlapStatus::CrossingOrFoldDetected => SeamStripRejectReason::CrossingOrFoldDetected,
+        StripOverlapStatus::UnsupportedTopology
+        | StripOverlapStatus::FineMultiComponent
+        | StripOverlapStatus::CoarseMultiComponent
+        | StripOverlapStatus::ComponentMismatch => SeamStripRejectReason::UnsupportedTopology,
+        StripOverlapStatus::MissingFineStrip | StripOverlapStatus::MissingCoarseStrip => {
+            SeamStripRejectReason::MissingStrip
+        }
+        _ => SeamStripRejectReason::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voxel::chunk::LodLevel;
+    use crate::voxel::skirt::ChunkFace;
+
+    #[test]
+    fn classify_final_mode_rejects_stitch_safe_on_multi_component_strip() {
+        let mode = classify_final_mode(SeamFaceModeInput {
+            face: ChunkFace::PosX,
+            fine_lod: LodLevel::Lod0,
+            neighbor_lod: Some(LodLevel::Lod1),
+            lod_delta_gt_one: false,
+            strip_status: SeamStripStatus::HitCurrentRevision,
+            morph_candidate_count: 4,
+            morph_welded_count: 4,
+            stitch_triangle_count: 0,
+            skirt_triangle_count: 6,
+            sealed_by_mask: true,
+            stitched: false,
+            vertical_skirt_on_face: false,
+            fine_components: 2,
+            coarse_components: 1,
+        });
+        assert_eq!(mode, SeamFaceMode::SkirtFallback);
+        assert!(!mode.claims_stitch_safe_seam());
+    }
+
+    #[test]
+    fn classify_final_mode_ignores_empty_component_counts_without_strip_need() {
+        let mode = classify_final_mode(SeamFaceModeInput {
+            face: ChunkFace::PosX,
+            fine_lod: LodLevel::Lod0,
+            neighbor_lod: Some(LodLevel::Lod1),
+            lod_delta_gt_one: false,
+            strip_status: SeamStripStatus::NotNeeded,
+            morph_candidate_count: 0,
+            morph_welded_count: 0,
+            stitch_triangle_count: 0,
+            skirt_triangle_count: 0,
+            sealed_by_mask: false,
+            stitched: false,
+            vertical_skirt_on_face: false,
+            fine_components: 0,
+            coarse_components: 0,
+        });
+        assert_ne!(mode, SeamFaceMode::InvalidUnsafeTopology);
+    }
 }

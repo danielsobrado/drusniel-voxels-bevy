@@ -1585,6 +1585,8 @@ fn partial_morph_without_stitch_or_skirt_is_invalid_unsafe_topology() {
     use super::seam_audit::{SeamFaceMode, SeamFaceModeInput, SeamStripStatus, classify_final_mode};
 
     let mode = classify_final_mode(SeamFaceModeInput {
+        fine_components: 1,
+        coarse_components: 1,
         face: ChunkFace::PosX,
         fine_lod: LodLevel::Lod0,
         neighbor_lod: Some(LodLevel::Lod1),

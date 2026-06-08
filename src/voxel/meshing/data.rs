@@ -77,6 +77,14 @@ pub struct TerrainMeshDebug {
     pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
 }
 
+/// Mesh-time projected boundary strips for seam overlap oracle (sibling to [`TerrainMeshDebug`]).
+#[derive(Component, Clone, Debug, Default)]
+pub struct TerrainSeamStripDebug {
+    /// One main-surface strip per X/Z face extracted at mesh time (this chunk's boundary).
+    pub strips: [Option<crate::voxel::lod_boundary_strip::CompactProjectedStrip>;
+        super::seam_audit::XZ_FACE_COUNT],
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum McTransitionForensicsMode {
     #[default]
@@ -497,4 +505,5 @@ pub struct ChunkMeshResult {
     /// `LodBoundaryStripCache` at commit.
     pub boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
     pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
+    pub seam_strip_debug: TerrainSeamStripDebug,
 }

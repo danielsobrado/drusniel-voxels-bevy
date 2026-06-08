@@ -1,0 +1,10 @@
+lod_seam_audit:
+  strip_overlap:
+    max_directed_distance_voxels: 0.35
+    max_endpoint_distance_voxels: 0.50
+    min_span_overlap_ratio: 0.95
+    min_segment_length_voxels: 0.02
+    segment_sample_spacing_voxels: 0.25
+    max_unmatched_fine_segments: 0
+    max_unmatched_coarse_segments: 0
+    max_crossings: 0

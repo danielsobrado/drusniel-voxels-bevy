@@ -38,11 +38,16 @@ Core concepts:
 - `SeamFaceMode` classifies final seam behavior (`StitchGeometry`, `GpuMorphOnly`, `SkirtFallback`, `InvalidUnsafeTopology`, etc).
 - `SeamStripStatus` tracks strip availability and staleness (`HitCurrentRevision`, `MissingStrip`, `StaleRevision`, ...).
 - `SeamFaceAudit` stores per-face counts and probe metrics.
+- `SeamStripRejectReason` records why strip topology blocked stitch-safe modes (`MultiComponentStrip`, `MissingStrip`, `StaleStrip`, distance/span/crossing reasons from the runtime oracle).
+- `TerrainSeamStripDebug` caches mesh-time own-boundary strips (sibling to `TerrainMeshDebug`; not `NeighborBoundaryStrips`).
 
-Important detector at this stage:
+Important detectors:
 
 - **Partial morph unsafe topology**:
   - If `0 < morph_welded < morph_candidate` and no stitch and no skirt, mode becomes `InvalidUnsafeTopology`.
+- **Multi-component strip gate** (transition-scoped):
+  - When a real LOD transition exists and the face has or needs strip data, `fine_components != 1` or `coarse_components != 1` blocks `StitchGeometry` / `GpuMorphOnly` (→ `SkirtFallback`, `StaleStripFallback`, or `InvalidUnsafeTopology` with `strip_reject_reason`).
+  - Empty faces (`fine_components == 0` with no strip need) are not flagged.
 
 ### 1.3 Runtime Seam Probe Pass (Bench/Debug)
 
@@ -177,24 +182,28 @@ File:
 - unmatched segment counts
 - crossing count
 
-### 2.5 Runtime Oracle Wiring
+### 2.5 Strip Oracle Wiring (Mesh-Time First)
 
-File:
+Files:
 
 - `src/voxel/diagnostics/seam_audit_pass.rs`
+- `src/voxel/meshing/data.rs` (`TerrainSeamStripDebug`)
+- `src/voxel/lod/boundary_strip.rs` (`CompactProjectedStrip`, `OwnBoundaryStrips`)
 
-Added `enhance_audit_with_strip_overlap(...)`.
+`enhance_audit_with_strip_overlap(...)` compares fine vs coarse neighbour strips using `audit_projected_strip_overlap(...)`.
 
-Current implementation extracts seam strips from **main-surface mesh section** at runtime and compares:
+**Primary input (schema v3):** mesh-time strips cached on each terrain entity as `TerrainSeamStripDebug` — one compact projected strip per X/Z face for **this chunk's own boundary export**. This is separate from `NeighborBoundaryStrips`, which holds coarse neighbour strips consumed by a fine chunk during stitching.
 
-- fine face strip
-- coarse neighbor opposite-face strip
+Oracle pairing at audit time (fine chunk, face `F`):
 
-using `audit_projected_strip_overlap(...)`.
+- **Fine strip:** `TerrainSeamStripDebug.strips[face_idx]`
+- **Coarse strip:** neighbour entity `strips[opposite_face_idx]`
 
-This keeps the oracle in audit/bench path (not hot meshing path), so production behavior is not changed by oracle decisions.
+Each face record exports `strip_overlap_source`: `"mesh_time"` when both cached strips are present, else `"runtime_reextract"`.
 
-Runtime oracle strips are geometry-only: projected positions are used for overlap checks, and `StripVertex.normal` is set to zero during runtime re-extraction.
+**Fallback:** when either entity lacks `TerrainSeamStripDebug` for the paired face, the pass re-extracts from main-surface mesh section 0 at runtime (geometry-only; `StripVertex.normal` zeroed).
+
+Strip overlap classification thresholds load from `assets/config/lod_seam_audit.yaml` via `StripOverlapConfig::load_or_default()` (`StripOverlapSettings` resource in `SeamAuditPassPlugin`). CI guard thresholds remain in `assets/config/bench_guard.toml` `[lod_seam_audit]` and are independent of oracle tuning.
 
 ### Runtime extraction caveat
 
@@ -233,6 +242,9 @@ Use those fields (not the raw maxima) for dashboards and threshold checks. `benc
 `seam-audit.json` face records now include strip-compatibility fields:
 
 - `strip_overlap_status`
+- `strip_overlap_source` (`mesh_time` | `runtime_reextract`)
+- `strip_reject_reason`
+- `fine_components` / `coarse_components`
 - `strip_compatible`
 - `strip_max_fine_to_coarse_distance`
 - `strip_max_coarse_to_fine_distance`
@@ -249,7 +261,7 @@ Summary strip distance fields:
 
 Summary also includes counts and policy-filtered `min_strip_span_overlap_ratio`. See **Summary extrema semantics** above.
 
-`seam-audit.json` `schema_version` is `2` once stitch-safe summary distance fields are present.
+`seam-audit.json` `schema_version` is `3` (mesh-time strip source, component counts, `strip_reject_reason`). Version `2` added stitch-safe summary distance fields.
 
 ### 2.7 Guard Extensions for Oracle
 
@@ -267,8 +279,11 @@ Added seam-oracle thresholds such as:
 - max endpoint distance
 - min span overlap ratio
 - max crossing count
+- `max_stitch_safe_bad_component_faces` (stitch-safe modes with multi-component mesh-time strips)
 
 Guard logic evaluates these from `seam-audit.json`.
+
+Hard-case bench scene: `bench/scenes/lod-seam-hard-cases.toml` with sculpted voxel fixture (`lod_seam_hard_case_fixture = true`, cache `bench-runs/cache/lod-seam-hard-cases-world.bin`).
 
 ### 2.8 New Unit Coverage
 
@@ -283,16 +298,15 @@ In `src/voxel/lod/boundary_strip.rs`, tests cover:
 
 ## 3) Operational Notes
 
-- This oracle is audit-only in current form.
-- Meshing still decides stitch/fallback as before.
-- Guard enforces whether those decisions are acceptable.
-- This separation is intentional: it allows oracle hardening without destabilizing runtime meshing decisions.
+- Strip overlap distance/span checks remain audit-only; they do not change meshing.
+- Mesh-time **multi-component gate** does downgrade stitch-safe `final_mode` at classification time when strip topology is unsafe.
+- Guard enforces whether stitch-safe decisions and oracle compatibility are acceptable.
+- Own strips (`TerrainSeamStripDebug`) and neighbour-consumed strips (`NeighborBoundaryStrips`) must not be conflated.
 
 ---
 
 ## 4) Suggested Next Iterations
 
-1. Add config loading for `StripOverlapConfig` from asset config instead of defaults.
-2. Add explicit multi-component fallback policy checks tied to `final_mode`.
-3. Consider projected-strip debug caching from mesh-time extraction to avoid runtime re-extraction variability.
-4. Expand integration scenes focused on caves/overhangs/multi-sheet seam cases.
+1. Expand hard-case fixture coverage and per-checkpoint expected `final_mode` / `strip_reject_reason` assertions.
+2. Tune `assets/config/lod_seam_audit.yaml` thresholds from hard-case bench evidence.
+3. Optional: reduce `CompactProjectedStrip` memory (quantized coords) if strip debug becomes hot in production builds.

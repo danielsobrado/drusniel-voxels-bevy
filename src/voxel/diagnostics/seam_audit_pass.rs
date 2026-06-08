@@ -14,17 +14,19 @@ use crate::performance::AreaTimingRecorder;
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::hole_probe::TerrainEntityQuery;
 use crate::voxel::meshing::{
-    SeamFaceAudit, SeamFaceMode, SeamStripStatus, XZ_FACES, barycentric_section,
-    coarse_lod_iso_height_for_column, neighbor_lod_for_face, transition_target_lod,
+    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
+    XZ_FACES, barycentric_section, coarse_lod_iso_height_for_column,
+    neighbor_lod_for_face, strip_reject_reason_from_overlap_status, transition_target_lod,
+    xz_face_index,
 };
 use crate::voxel::lod_boundary_strip::{
     LodBoundaryStrip, StripOverlapConfig, StripOverlapStatus, StripVertex,
-    audit_projected_strip_overlap, project_to_seam_frame,
+    audit_projected_strip_overlap, lod_boundary_strip_from_compact, project_to_seam_frame,
 };
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 
-pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 2;
+pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 3;
 pub const SEAM_COVERAGE_GRID_U: u32 = 17;
 pub const SEAM_COVERAGE_GRID_V: u32 = 17;
 const LIP_HEIGHT_FAIL_VOXELS: f32 = 0.20;
@@ -84,6 +86,8 @@ pub struct SeamAuditFaceRecord {
     pub strip_unmatched_fine_segments: u16,
     pub strip_unmatched_coarse_segments: u16,
     pub strip_crossing_count: u16,
+    pub strip_reject_reason: String,
+    pub strip_overlap_source: String,
 }
 
 #[derive(Serialize, Default)]
@@ -127,11 +131,21 @@ pub struct SeamAuditDump {
     pub faces: Vec<SeamAuditFaceRecord>,
 }
 
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct StripOverlapSettings(pub StripOverlapConfig);
+
+impl Default for StripOverlapSettings {
+    fn default() -> Self {
+        Self(StripOverlapConfig::load_or_default())
+    }
+}
+
 pub struct SeamAuditPassPlugin;
 
 impl Plugin for SeamAuditPassPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TerrainSeamAuditRequests>()
+            .init_resource::<StripOverlapSettings>()
             .add_systems(Update, run_pending_seam_audit_pass);
     }
 }
@@ -141,6 +155,7 @@ fn run_pending_seam_audit_pass(
     world: Res<VoxelWorld>,
     terrain_entities: TerrainEntityQuery,
     meshes: Res<Assets<Mesh>>,
+    strip_overlap: Res<StripOverlapSettings>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
@@ -154,6 +169,7 @@ fn run_pending_seam_audit_pass(
         &world,
         &terrain_entities,
         &meshes,
+        strip_overlap.0,
     );
     record_seam_audit_counters(frame.0, &mut timing, &dump.summary);
     if let Err(err) = write_seam_audit_dump(&request.output_dir, &dump) {
@@ -168,6 +184,7 @@ pub fn build_seam_audit_dump(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
     meshes: &Assets<Mesh>,
+    strip_overlap_config: StripOverlapConfig,
 ) -> SeamAuditDump {
     let mut faces = Vec::new();
     let mut summary = SeamAuditSummary::default();
@@ -223,6 +240,7 @@ pub fn build_seam_audit_dump(
                 *face,
                 debug.effective_lod_at_mesh,
                 neighbor_lod,
+                strip_overlap_config,
                 &mut audit,
             );
 
@@ -389,22 +407,38 @@ fn enhance_audit_with_strip_overlap(
     face: ChunkFace,
     fine_lod: LodLevel,
     coarse_lod: LodLevel,
+    strip_overlap_config: StripOverlapConfig,
     audit: &mut SeamFaceAudit,
 ) {
-    let fine_strip = extract_main_surface_strip_for_face(world, terrain_entities, meshes, chunk_pos, face, fine_lod);
-    let neighbor_pos = chunk_pos + face.direction();
-    let coarse_strip = extract_main_surface_strip_for_face(
-        world,
-        terrain_entities,
-        meshes,
-        neighbor_pos,
-        opposite_face(face),
-        coarse_lod,
-    );
+    let (fine_strip, coarse_strip, overlap_source) =
+        mesh_time_strips_for_overlap(world, terrain_entities, chunk_pos, face).map_or_else(
+            || {
+                let fine = extract_main_surface_strip_for_face(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    chunk_pos,
+                    face,
+                    fine_lod,
+                );
+                let neighbor_pos = chunk_pos + face.direction();
+                let coarse = extract_main_surface_strip_for_face(
+                    world,
+                    terrain_entities,
+                    meshes,
+                    neighbor_pos,
+                    opposite_face(face),
+                    coarse_lod,
+                );
+                (fine, coarse, SeamStripOverlapSource::RuntimeReextract)
+            },
+            |(fine, coarse)| (Some(fine), Some(coarse), SeamStripOverlapSource::MeshTime),
+        );
+
     let result = audit_projected_strip_overlap(
         fine_strip.as_ref(),
         coarse_strip.as_ref(),
-        StripOverlapConfig::default(),
+        strip_overlap_config,
     );
     audit.strip_overlap_status = result.status;
     audit.strip_compatible = result.compatible;
@@ -415,6 +449,49 @@ fn enhance_audit_with_strip_overlap(
     audit.strip_unmatched_fine_segments = result.unmatched_fine_segments;
     audit.strip_unmatched_coarse_segments = result.unmatched_coarse_segments;
     audit.strip_crossing_count = result.crossing_count;
+    audit.strip_overlap_source = overlap_source;
+    let overlap_reason = strip_reject_reason_from_overlap_status(result.status);
+    if audit.strip_reject_reason == SeamStripRejectReason::None {
+        audit.strip_reject_reason = overlap_reason;
+    } else if overlap_reason != SeamStripRejectReason::None
+        && !matches!(
+            audit.strip_reject_reason,
+            SeamStripRejectReason::MissingStrip
+                | SeamStripRejectReason::StaleStrip
+                | SeamStripRejectReason::MultiComponentStrip
+        )
+    {
+        audit.strip_reject_reason = overlap_reason;
+    }
+}
+
+fn mesh_time_strips_for_overlap(
+    world: &VoxelWorld,
+    terrain_entities: &TerrainEntityQuery,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+) -> Option<(LodBoundaryStrip, LodBoundaryStrip)> {
+    let face_idx = xz_face_index(face)?;
+    let fine_entity = world.get_chunk(chunk_pos)?.mesh_entity()?;
+    let neighbor_pos = chunk_pos + face.direction();
+    let coarse_entity = world.get_chunk(neighbor_pos)?.mesh_entity()?;
+    let Ok((_, _, _, _, _, _, _, _, _, _, _, _, _, _, fine_debug)) =
+        terrain_entities.get(fine_entity)
+    else {
+        return None;
+    };
+    let Ok((_, _, _, _, _, _, _, _, _, _, _, _, _, _, coarse_debug)) =
+        terrain_entities.get(coarse_entity)
+    else {
+        return None;
+    };
+    let fine_compact = fine_debug.as_ref()?.strips[face_idx].as_ref()?;
+    let coarse_face_idx = xz_face_index(opposite_face(face))?;
+    let coarse_compact = coarse_debug.as_ref()?.strips[coarse_face_idx].as_ref()?;
+    Some((
+        lod_boundary_strip_from_compact(fine_compact),
+        lod_boundary_strip_from_compact(coarse_compact),
+    ))
 }
 
 struct EdgeLeakResult {
@@ -1030,6 +1107,8 @@ fn face_record(
         strip_unmatched_fine_segments: audit.strip_unmatched_fine_segments,
         strip_unmatched_coarse_segments: audit.strip_unmatched_coarse_segments,
         strip_crossing_count: audit.strip_crossing_count,
+        strip_reject_reason: strip_reject_reason_name(audit.strip_reject_reason),
+        strip_overlap_source: strip_overlap_source_name(audit.strip_overlap_source),
     }
 }
 
@@ -1129,6 +1208,30 @@ fn strip_status_name(status: SeamStripStatus) -> String {
         SeamStripStatus::MissingStrip => "MissingStrip".to_string(),
         SeamStripStatus::StaleRevision => "StaleRevision".to_string(),
         SeamStripStatus::HitCurrentRevision => "HitCurrentRevision".to_string(),
+    }
+}
+
+fn strip_reject_reason_name(reason: SeamStripRejectReason) -> String {
+    match reason {
+        SeamStripRejectReason::None => "None".to_string(),
+        SeamStripRejectReason::MissingStrip => "MissingStrip".to_string(),
+        SeamStripRejectReason::StaleStrip => "StaleStrip".to_string(),
+        SeamStripRejectReason::MultiComponentStrip => "MultiComponentStrip".to_string(),
+        SeamStripRejectReason::SpanMismatch => "SpanMismatch".to_string(),
+        SeamStripRejectReason::DirectedDistanceExceeded => {
+            "DirectedDistanceExceeded".to_string()
+        }
+        SeamStripRejectReason::EndpointDistanceExceeded => "EndpointDistanceExceeded".to_string(),
+        SeamStripRejectReason::CrossingOrFoldDetected => "CrossingOrFoldDetected".to_string(),
+        SeamStripRejectReason::UnsupportedTopology => "UnsupportedTopology".to_string(),
+    }
+}
+
+fn strip_overlap_source_name(source: SeamStripOverlapSource) -> String {
+    match source {
+        SeamStripOverlapSource::NotEvaluated => "not_evaluated".to_string(),
+        SeamStripOverlapSource::MeshTime => "mesh_time".to_string(),
+        SeamStripOverlapSource::RuntimeReextract => "runtime_reextract".to_string(),
     }
 }
 

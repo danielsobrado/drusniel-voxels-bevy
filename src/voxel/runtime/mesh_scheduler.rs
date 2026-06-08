@@ -517,6 +517,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                 mc_transvoxel_stats: mesh_result.mc_transvoxel_stats,
                 seam_face_audit: mesh_result.seam_face_audit,
             };
+            let seam_strip_debug = mesh_result.seam_strip_debug.clone();
             let mc_triangle_sources = mesh_result.mc_triangle_sources.clone();
 
             // Track meshing statistics
@@ -556,6 +557,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                         MeshMaterial3d(blocky_mat.handle.clone()),
                                         chunk_mesh,
                                         terrain_mesh_debug,
+                                        seam_strip_debug.clone(),
                                     ))
                                     .remove::<MeshMaterial3d<
                                         crate::rendering::triplanar_material::TriplanarMaterial,
@@ -570,6 +572,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                     MeshMaterial3d(triplanar_handle),
                                     chunk_mesh,
                                     terrain_mesh_debug,
+                                    seam_strip_debug.clone(),
                                 ))
                                 .remove::<MeshMaterial3d<crate::rendering::blocky_material::BlockyMaterial>>();
                         }
@@ -628,6 +631,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                     ),
                                     chunk_mesh,
                                     terrain_mesh_debug,
+                                    seam_strip_debug.clone(),
                                     terrain_layers,
                                 ))
                                 .id()
@@ -643,6 +647,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                                 ),
                                 chunk_mesh,
                                 terrain_mesh_debug,
+                                seam_strip_debug,
                                 terrain_layers,
                             ))
                             .id(),

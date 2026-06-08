@@ -530,6 +530,9 @@ struct BenchScene {
     world_cache_path: Option<PathBuf>,
     #[serde(default)]
     world_cache_regenerate: bool,
+    /// When true, apply deterministic LOD seam hard-case voxel sculpts after world load.
+    #[serde(default)]
+    lod_seam_hard_case_fixture: bool,
     #[serde(default)]
     skip_props: bool,
     #[serde(default = "default_freeze_terrain_lod_after_ready")]
@@ -1129,7 +1132,9 @@ impl Plugin for BenchPlugin {
             .init_resource::<InventoryUiState>()
             .init_resource::<ActionState>()
             .init_resource::<TargetedBlock>()
+            .init_resource::<LodSeamHardCaseFixtureApplied>()
             .add_systems(Startup, setup_bench_environment)
+            .add_systems(Update, apply_lod_seam_hard_case_fixture_once)
             .add_systems(
                 PreUpdate,
                 (
@@ -1149,6 +1154,27 @@ impl Plugin for BenchPlugin {
                     .chain(),
             );
     }
+}
+
+#[derive(Resource, Default)]
+struct LodSeamHardCaseFixtureApplied(bool);
+
+fn apply_lod_seam_hard_case_fixture_once(
+    scene: Res<BenchSceneResource>,
+    mut world: ResMut<VoxelWorld>,
+    mut applied: ResMut<LodSeamHardCaseFixtureApplied>,
+) {
+    if applied.0 || !scene.0.lod_seam_hard_case_fixture {
+        return;
+    }
+    if world.chunk_positions().next().is_none() {
+        return;
+    }
+    crate::voxel::diagnostics::lod_seam_hard_case_fixture::apply_lod_seam_hard_case_fixture(
+        &mut world,
+    );
+    applied.0 = true;
+    info!("Applied LOD seam hard-case voxel fixture");
 }
 
 fn setup_bench_environment(
@@ -4714,6 +4740,7 @@ hold_frames = 30
             startup_trace: StartupTraceConfig::default(),
             render_toggles: BenchRenderToggles::default(),
             forensics: None,
+            lod_seam_hard_case_fixture: false,
             checkpoints: Vec::new(),
         };
         let mut world = VoxelWorld::new(IVec3::ONE);
