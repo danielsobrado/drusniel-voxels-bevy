@@ -230,27 +230,34 @@ impl AreaTimingRecorder {
     }
 
     pub fn frame_total_summary(&self) -> Option<AreaTimingSummary> {
-        let mut samples: Vec<u64> = self
+        let samples: Vec<u64> = self
             .history
             .iter()
             .filter_map(|frame| frame.frame_total_us)
             .collect();
-        if samples.is_empty() {
-            return None;
-        }
+        summarize_us_samples("__frame_total", samples, 1.0)
+    }
 
-        let total_us = samples.iter().sum::<u64>();
-        samples.sort_unstable();
-        let max_us = samples.last().copied().unwrap_or(0);
-        let p99_us = percentile_us(&samples, 0.99);
-        Some(AreaTimingSummary {
-            area: "__frame_total".to_string(),
-            avg_ms: total_us as f64 / samples.len() as f64 / 1000.0,
-            max_ms: max_us as f64 / 1000.0,
-            p99_ms: p99_us as f64 / 1000.0,
-            calls_per_frame: 1.0,
-            unit: "ms",
-        })
+    pub fn tracked_area_total_summary(&self) -> Option<AreaTimingSummary> {
+        let samples: Vec<u64> = self
+            .history
+            .iter()
+            .map(|frame| frame.areas.values().map(|sample| sample.total_us).sum())
+            .collect();
+        summarize_us_samples("__tracked_area_total", samples, 1.0)
+    }
+
+    pub fn untracked_wall_time_summary(&self) -> Option<AreaTimingSummary> {
+        let samples: Vec<u64> = self
+            .history
+            .iter()
+            .filter_map(|frame| {
+                let frame_total = frame.frame_total_us?;
+                let tracked_total: u64 = frame.areas.values().map(|sample| sample.total_us).sum();
+                Some(frame_total.saturating_sub(tracked_total))
+            })
+            .collect();
+        summarize_us_samples("__untracked_wall_time", samples, 1.0)
     }
 
     pub fn latest_counter_value(&self, area: &str) -> Option<f64> {
@@ -304,6 +311,29 @@ impl AreaTimingRecorder {
             self.history.pop_front();
         }
     }
+}
+
+fn summarize_us_samples(
+    area: impl Into<String>,
+    mut samples: Vec<u64>,
+    calls_per_frame: f64,
+) -> Option<AreaTimingSummary> {
+    if samples.is_empty() {
+        return None;
+    }
+
+    let total_us = samples.iter().sum::<u64>();
+    samples.sort_unstable();
+    let max_us = samples.last().copied().unwrap_or(0);
+    let p99_us = percentile_us(&samples, 0.99);
+    Some(AreaTimingSummary {
+        area: area.into(),
+        avg_ms: total_us as f64 / samples.len() as f64 / 1000.0,
+        max_ms: max_us as f64 / 1000.0,
+        p99_ms: p99_us as f64 / 1000.0,
+        calls_per_frame,
+        unit: "ms",
+    })
 }
 
 fn percentile_us(sorted_samples: &[u64], percentile: f64) -> u64 {
@@ -473,6 +503,12 @@ pub fn write_area_timing_csv(
         unit: "ms",
     });
     write_csv_row(&mut file, &frame_total)?;
+    if let Some(tracked_total) = recorder.tracked_area_total_summary() {
+        write_csv_row(&mut file, &tracked_total)?;
+    }
+    if let Some(untracked_wall) = recorder.untracked_wall_time_summary() {
+        write_csv_row(&mut file, &untracked_wall)?;
+    }
     for summary in recorder.rolling_summaries() {
         write_csv_row(&mut file, &summary)?;
     }

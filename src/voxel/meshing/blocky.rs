@@ -1,5 +1,6 @@
 use super::{
-    ChunkMeshResult, Face, LodTransitionSnapStats, MeshData, TerrainMeshSectionStats,
+    ChunkMeshResult, Face, LodTransitionSnapStats, MeshData, MeshGenerationTimingStats,
+    TerrainMeshSectionStats,
     WATER_EDGE_SURFACE_SUPPRESSION_MARGIN, WATER_SHORELINE_EXTENSION, WaterAirExposureMode,
     WaterExposureCache, WaterMeshingStats,
 };
@@ -472,6 +473,7 @@ pub(super) fn generate_blocky_chunk_mesh(
         mesh_section_stats: TerrainMeshSectionStats::default(),
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing: MeshGenerationTimingStats::default(),
         boundary_strips: Vec::new(),
     }
 }

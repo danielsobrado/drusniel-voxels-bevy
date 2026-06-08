@@ -1,7 +1,7 @@
 use super::{
-    ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, PaddedChunkShape,
-    SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode, append_seam_stitches,
-    apply_snap_or_morph, compute_vertex_material_weights,
+    ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, MeshGenerationTimingStats,
+    PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
+    append_seam_stitches, apply_snap_or_morph, compute_vertex_material_weights,
     compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
     generate_sdf, generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
     pad_morph_targets_identity, recompute_morphed_seam_normals, scale_vertex_from_center,
@@ -22,6 +22,13 @@ use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::{IVec3, Vec3};
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use std::time::Instant;
+
+fn elapsed_us(start: Option<Instant>) -> u64 {
+    start
+        .map(|start| start.elapsed().as_micros() as u64)
+        .unwrap_or(0)
+}
 
 fn surface_nets_triangle_positions(
     buffer: &SurfaceNetsBuffer,
@@ -72,10 +79,12 @@ pub fn generate_chunk_mesh_surface_nets(
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    timing_enabled: bool,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(2048, 3072);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
+    let mut generation_timing = MeshGenerationTimingStats::default();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let chunk_origin_vec = chunk_origin.as_vec3();
 
@@ -99,6 +108,7 @@ pub fn generate_chunk_mesh_surface_nets(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate SDF from voxel data
+    let start = timing_enabled.then(Instant::now);
     let sdf = generate_sdf(
         chunk,
         world,
@@ -106,12 +116,14 @@ pub fn generate_chunk_mesh_surface_nets(
         &neighbor_lods,
         SMOOTH_TERRAIN_SDF_LOD0,
     );
+    generation_timing.sdf_us += elapsed_us(start);
 
     // Run surface nets on the SDF
     // Extract the full padded region [0,0,0] to [17,17,17)
     // Including the padding lets the mesh extend half a voxel past each edge,
     // so neighboring chunks meet without leaving a one-voxel gap.
     let mut buffer = SurfaceNetsBuffer::default();
+    let start = timing_enabled.then(Instant::now);
     surface_nets(
         &sdf,
         &PaddedChunkShape {},
@@ -119,6 +131,7 @@ pub fn generate_chunk_mesh_surface_nets(
         [17; 3], // End at 17 (include positive padding)
         &mut buffer,
     );
+    generation_timing.surface_nets_us += elapsed_us(start);
 
     let low_cost_transition_shading = my_lod == LodLevel::Lod0
         && [
@@ -135,6 +148,7 @@ pub fn generate_chunk_mesh_surface_nets(
 
     // Convert surface nets output to MeshData
     // Use per-triangle vertices to ensure consistent material indices (no interpolation artifacts)
+    let start = timing_enabled.then(Instant::now);
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
             let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
@@ -208,8 +222,10 @@ pub fn generate_chunk_mesh_surface_nets(
             solid_mesh.push_triangle_barycentrics();
         }
     }
+    generation_timing.emit_surface_us += elapsed_us(start);
 
     let morph = terrain_morph_config();
+    let start = timing_enabled.then(Instant::now);
     let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
@@ -222,10 +238,12 @@ pub fn generate_chunk_mesh_surface_nets(
         morph,
         neighbor_strips,
     );
+    generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
     // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let start = timing_enabled.then(Instant::now);
     let boundary_strips = extract_export_boundary_strips(
         morph,
         &local_positions,
@@ -235,9 +253,11 @@ pub fn generate_chunk_mesh_surface_nets(
         my_lod,
         &neighbor_lods,
     );
+    generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
     // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let start = timing_enabled.then(Instant::now);
     let stitched_face_mask = append_seam_stitches(
         &mut solid_mesh,
         &local_positions,
@@ -247,7 +267,9 @@ pub fn generate_chunk_mesh_surface_nets(
         my_lod,
         neighbor_strips,
     );
+    generation_timing.seam_stitch_us += elapsed_us(start);
 
+    let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
@@ -280,6 +302,7 @@ pub fn generate_chunk_mesh_surface_nets(
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
+    generation_timing.skirt_us += elapsed_us(start);
 
     // Generate water mesh using the extracted helper
     // Skirts/aprons appended after morph baking get identity targets so
@@ -292,6 +315,7 @@ pub fn generate_chunk_mesh_surface_nets(
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
+    let start = timing_enabled.then(Instant::now);
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -299,6 +323,7 @@ pub fn generate_chunk_mesh_surface_nets(
         chunk_origin,
         water_exposure_mode,
     );
+    generation_timing.water_us += elapsed_us(start);
 
     ChunkMeshResult {
         solid: solid_mesh,
@@ -308,6 +333,7 @@ pub fn generate_chunk_mesh_surface_nets(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing,
         boundary_strips,
     }
 }
@@ -324,10 +350,12 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    timing_enabled: bool,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(512, 768);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
+    let mut generation_timing = MeshGenerationTimingStats::default();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
     // Step size for LOD1 - each grid cell covers 2 voxels
@@ -337,10 +365,13 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (10x10x10 grid)
+    let start = timing_enabled.then(Instant::now);
     let sdf = generate_sdf_lod1(chunk, world, &neighbor_lods);
+    generation_timing.sdf_us += elapsed_us(start);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
+    let start = timing_enabled.then(Instant::now);
     surface_nets(
         &sdf,
         &LodShape1 {},
@@ -348,8 +379,10 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         [(LOD1_PADDED_SIZE - 1) as u32; 3], // [9, 9, 9]
         &mut buffer,
     );
+    generation_timing.surface_nets_us += elapsed_us(start);
 
     // Convert surface nets output to MeshData with vertex scaling
+    let start = timing_enabled.then(Instant::now);
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
             let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
@@ -452,8 +485,10 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
             solid_mesh.push_triangle_barycentrics();
         }
     }
+    generation_timing.emit_surface_us += elapsed_us(start);
 
     let morph = terrain_morph_config();
+    let start = timing_enabled.then(Instant::now);
     let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
@@ -466,10 +501,12 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         morph,
         neighbor_strips,
     );
+    generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
     // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let start = timing_enabled.then(Instant::now);
     let boundary_strips = extract_export_boundary_strips(
         morph,
         &local_positions,
@@ -479,9 +516,11 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         my_lod,
         &neighbor_lods,
     );
+    generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
     // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let start = timing_enabled.then(Instant::now);
     let stitched_face_mask = append_seam_stitches(
         &mut solid_mesh,
         &local_positions,
@@ -491,8 +530,10 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         my_lod,
         neighbor_strips,
     );
+    generation_timing.seam_stitch_us += elapsed_us(start);
 
     // Generate skirts for LOD boundaries
+    let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
@@ -525,6 +566,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
+    generation_timing.skirt_us += elapsed_us(start);
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
@@ -538,6 +580,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
+    let start = timing_enabled.then(Instant::now);
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -545,6 +588,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         chunk_origin,
         water_exposure_mode,
     );
+    generation_timing.water_us += elapsed_us(start);
 
     ChunkMeshResult {
         solid: solid_mesh,
@@ -554,6 +598,7 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing,
         boundary_strips,
     }
 }
@@ -570,10 +615,12 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    timing_enabled: bool,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(256, 384);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
+    let mut generation_timing = MeshGenerationTimingStats::default();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
     // Step size for LOD2 - each grid cell covers 4 voxels
@@ -583,10 +630,13 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (6x6x6 grid)
+    let start = timing_enabled.then(Instant::now);
     let sdf = generate_sdf_lod2(chunk, world, &neighbor_lods);
+    generation_timing.sdf_us += elapsed_us(start);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
+    let start = timing_enabled.then(Instant::now);
     surface_nets(
         &sdf,
         &LodShape2 {},
@@ -594,8 +644,10 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         [(LOD2_PADDED_SIZE - 1) as u32; 3],
         &mut buffer,
     );
+    generation_timing.surface_nets_us += elapsed_us(start);
 
     // Convert surface nets output to MeshData with vertex scaling
+    let start = timing_enabled.then(Instant::now);
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
             let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
@@ -698,8 +750,10 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
             solid_mesh.push_triangle_barycentrics();
         }
     }
+    generation_timing.emit_surface_us += elapsed_us(start);
 
     let morph = terrain_morph_config();
+    let start = timing_enabled.then(Instant::now);
     let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
@@ -712,10 +766,12 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         morph,
         neighbor_strips,
     );
+    generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
     // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let start = timing_enabled.then(Instant::now);
     let boundary_strips = extract_export_boundary_strips(
         morph,
         &local_positions,
@@ -725,9 +781,11 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         my_lod,
         &neighbor_lods,
     );
+    generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
     // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let start = timing_enabled.then(Instant::now);
     let stitched_face_mask = append_seam_stitches(
         &mut solid_mesh,
         &local_positions,
@@ -737,8 +795,10 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         my_lod,
         neighbor_strips,
     );
+    generation_timing.seam_stitch_us += elapsed_us(start);
 
     // Generate skirts for LOD boundaries
+    let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
@@ -771,6 +831,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
+    generation_timing.skirt_us += elapsed_us(start);
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
@@ -784,6 +845,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
+    let start = timing_enabled.then(Instant::now);
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -791,6 +853,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         chunk_origin,
         water_exposure_mode,
     );
+    generation_timing.water_us += elapsed_us(start);
 
     ChunkMeshResult {
         solid: solid_mesh,
@@ -800,6 +863,7 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing,
         boundary_strips,
     }
 }
@@ -816,10 +880,12 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     _ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
     neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
+    timing_enabled: bool,
 ) -> ChunkMeshResult {
     let mut solid_mesh = MeshData::with_capacity(128, 192);
     solid_mesh.wireframe_lod_index = my_lod.wireframe_lod_index();
     let mut local_positions: Vec<Vec3> = Vec::new();
+    let mut generation_timing = MeshGenerationTimingStats::default();
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
 
     // Step size for LOD3 - each grid cell covers 8 voxels
@@ -829,10 +895,13 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
     // Generate downsampled SDF (4x4x4 grid)
+    let start = timing_enabled.then(Instant::now);
     let sdf = generate_sdf_lod3(chunk, world, &neighbor_lods);
+    generation_timing.sdf_us += elapsed_us(start);
 
     // Run surface nets on the smaller SDF grid
     let mut buffer = SurfaceNetsBuffer::default();
+    let start = timing_enabled.then(Instant::now);
     surface_nets(
         &sdf,
         &LodShape3 {},
@@ -840,8 +909,10 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         [(LOD3_PADDED_SIZE - 1) as u32; 3],
         &mut buffer,
     );
+    generation_timing.surface_nets_us += elapsed_us(start);
 
     // Convert surface nets output to MeshData with vertex scaling
+    let start = timing_enabled.then(Instant::now);
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
             let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
@@ -944,8 +1015,10 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
             solid_mesh.push_triangle_barycentrics();
         }
     }
+    generation_timing.emit_surface_us += elapsed_us(start);
 
     let morph = terrain_morph_config();
+    let start = timing_enabled.then(Instant::now);
     let lod_transition_snap_stats = apply_snap_or_morph(
         &mut solid_mesh,
         &mut local_positions,
@@ -958,10 +1031,12 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         morph,
         neighbor_strips,
     );
+    generation_timing.lod_seam_us += elapsed_us(start);
 
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Export boundary strips from the MAIN SURFACE (before skirts) for a finer
     // neighbour to weld to. Gated/no-op unless morph is on and a finer neighbour borders.
+    let start = timing_enabled.then(Instant::now);
     let boundary_strips = extract_export_boundary_strips(
         morph,
         &local_positions,
@@ -971,9 +1046,11 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         my_lod,
         &neighbor_lods,
     );
+    generation_timing.boundary_strip_us += elapsed_us(start);
 
     // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
     // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
+    let start = timing_enabled.then(Instant::now);
     let stitched_face_mask = append_seam_stitches(
         &mut solid_mesh,
         &local_positions,
@@ -983,8 +1060,10 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         my_lod,
         neighbor_strips,
     );
+    generation_timing.seam_stitch_us += elapsed_us(start);
 
     // Generate skirts for LOD boundaries
+    let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
         let boundary_edges = extract_boundary_edges(
@@ -1017,6 +1096,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         );
         mesh_section_stats.add_skirt_stats(skirt_stats);
     }
+    generation_timing.skirt_us += elapsed_us(start);
 
     // Generate water mesh at full resolution (water is usually flat, so LOD doesn't help much)
     // For consistency, we could also LOD water, but it's typically minimal geometry
@@ -1030,6 +1110,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
+    let start = timing_enabled.then(Instant::now);
     let (water_mesh, water_stats) = generate_water_mesh(
         chunk,
         world,
@@ -1037,6 +1118,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         chunk_origin,
         water_exposure_mode,
     );
+    generation_timing.water_us += elapsed_us(start);
 
     ChunkMeshResult {
         solid: solid_mesh,
@@ -1046,6 +1128,7 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         mesh_section_stats,
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
+        generation_timing,
         boundary_strips,
     }
 }

@@ -30,8 +30,8 @@ use crate::voxel::lod::{
 use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
 use crate::voxel::meshing::{
     ChunkMesh, ChunkMeshResult, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions,
-    MeshMode, MeshRequest, MeshSettings, TerrainMeshDebug, WaterBodyKind, WaterMesh,
-    WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
+    MeshGenerationTimingStats, MeshMode, MeshRequest, MeshSettings, TerrainMeshDebug,
+    WaterBodyKind, WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_for_request,
     lod_delta_gt_one_face_mask,
 };
@@ -190,6 +190,7 @@ pub(crate) struct LodMeshTransactionFrameStats {
     pub(crate) terrain_mesh_lod_seam_repairs: u32,
     pub(crate) mesh_dirty_generate_us: u64,
     pub(crate) mesh_dirty_apply_us: u64,
+    pub(crate) mesh_generation_timing: MeshGenerationTimingStats,
     pub(crate) abort_reason: Option<LodMeshTransactionAbortReason>,
 }
 
@@ -450,6 +451,7 @@ pub(crate) fn process_lod_mesh_transaction(
     chunk_stats: &mut RuntimeChunkStats,
     frame: u32,
     strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
+    timing_enabled: bool,
 ) -> LodMeshTransactionFrameStats {
     let mut frame_stats = LodMeshTransactionFrameStats::default();
 
@@ -518,6 +520,7 @@ pub(crate) fn process_lod_mesh_transaction(
                 chunk_stats,
                 &mut frame_stats,
                 strip_cache,
+                timing_enabled,
             ) {
                 LodChunkPrepareOutcome::Prepared(commit) => {
                     transaction.prepared.insert(chunk_pos, commit);
@@ -751,6 +754,7 @@ fn prepare_lod_chunk_commit(
     chunk_stats: &mut RuntimeChunkStats,
     frame_stats: &mut LodMeshTransactionFrameStats,
     strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
+    timing_enabled: bool,
 ) -> LodChunkPrepareOutcome {
     let dirty_flags = if let Some(chunk) = world.get_chunk(chunk_pos) {
         chunk.dirty_reason_flags()
@@ -865,6 +869,7 @@ fn prepare_lod_chunk_commit(
             forensics: mesh_forensics_options(bench_forensics, mc_settings),
             neighbor_strips: Some(&neighbor_strips),
             mc_settings: Some(mc_settings),
+            timing_enabled,
         })
     } else {
         return LodChunkPrepareOutcome::Stale;
@@ -881,8 +886,10 @@ fn prepare_lod_chunk_commit(
         mesh_section_stats,
         mc_transvoxel_stats,
         mc_triangle_sources,
+        generation_timing,
         boundary_strips,
     } = mesh_result;
+    frame_stats.mesh_generation_timing.add(generation_timing);
 
     // Publish (or evict) this chunk's exported boundary strips for finer neighbours to
     // weld to. Revision = the same dedup key the commit stamps, so a consumer that

@@ -175,6 +175,7 @@ fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     )
 }
 
@@ -741,6 +742,7 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
     let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
         chunk,
@@ -751,6 +753,7 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
 
     let max_lod0_y = lod0_mesh
@@ -807,6 +810,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
     let reference_right = generate_chunk_mesh_surface_nets(
         lod1_chunk,
@@ -820,6 +824,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
     let reference_meshes = [
         (&reference_left.solid, lod0_origin),
@@ -852,6 +857,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
     let transition_right = generate_chunk_mesh_surface_nets_lod1(
         lod1_chunk,
@@ -865,6 +871,7 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
     let transition_meshes = [
         (&transition_left.solid, lod0_origin),
@@ -1509,6 +1516,7 @@ fn fractional_morph_target_lands_on_lod1_neighbor_mesh() {
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
         None,
+        false,
     );
 
     let target = mesh.morph_targets[0];

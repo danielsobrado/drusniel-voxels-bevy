@@ -171,6 +171,7 @@ pub(crate) fn mesh_dirty_chunks_system(
     let mut chunks_processed = 0usize;
     let mut mesh_dirty_generate_us = 0u64;
     let mut mesh_dirty_apply_us = 0u64;
+    let mut mesh_generation_timing = MeshGenerationTimingStats::default();
     let lod_churn_only = reason_counts.generation == 0
         && reason_counts.terrain_mutation == 0
         && (reason_counts.lod > 0
@@ -204,6 +205,7 @@ pub(crate) fn mesh_dirty_chunks_system(
             &mut chunk_stats,
             frame.0,
             &mut timing_params.strip_cache,
+            timing.enabled,
         );
         chunks_per_frame_limit = MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME;
         chunks_processed = lod_transaction_frame_stats.chunks_processed;
@@ -211,6 +213,7 @@ pub(crate) fn mesh_dirty_chunks_system(
         chunks_skipped = lod_transaction_frame_stats.chunks_skipped;
         mesh_dirty_generate_us = lod_transaction_frame_stats.mesh_dirty_generate_us;
         mesh_dirty_apply_us = lod_transaction_frame_stats.mesh_dirty_apply_us;
+        mesh_generation_timing = lod_transaction_frame_stats.mesh_generation_timing;
         dirty_chunks.clear();
     } else if timing_params.lod_transaction.active.is_some() {
         if let Some(transaction) = timing_params.lod_transaction.active.take() {
@@ -383,12 +386,14 @@ pub(crate) fn mesh_dirty_chunks_system(
                 ),
                 neighbor_strips: Some(&neighbor_strips),
                 mc_settings: Some(&*mc_spike.settings),
+                timing_enabled: timing.enabled,
             })
         } else {
             continue;
         };
         let mesh_elapsed = mesh_start.elapsed();
         mesh_dirty_generate_us += mesh_elapsed.as_micros() as u64;
+        mesh_generation_timing.add(mesh_result.generation_timing);
         crate::voxel::mesh_commit::publish_chunk_boundary_strips(
             &mut timing_params.strip_cache,
             &mut world,
@@ -803,6 +808,38 @@ pub(crate) fn mesh_dirty_chunks_system(
     timing.record_area(frame.0, "Mesh Dirty Generate CPU", mesh_dirty_generate_us);
     timing.record_area(frame.0, "Mesh Dirty Apply CPU", mesh_dirty_apply_us);
     timing.record_area(frame.0, "Mesh Dirty Stats CPU", mesh_dirty_stats_us);
+    timing.record_area(frame.0, "SN SDF CPU", mesh_generation_timing.sdf_us);
+    timing.record_area(
+        frame.0,
+        "SN Extract CPU",
+        mesh_generation_timing.surface_nets_us,
+    );
+    timing.record_area(
+        frame.0,
+        "SN Emit CPU",
+        mesh_generation_timing.emit_surface_us,
+    );
+    timing.record_area(
+        frame.0,
+        "LOD Seam CPU",
+        mesh_generation_timing.lod_seam_us,
+    );
+    timing.record_area(
+        frame.0,
+        "LOD Strip Export CPU",
+        mesh_generation_timing.boundary_strip_us,
+    );
+    timing.record_area(
+        frame.0,
+        "LOD Stitch CPU",
+        mesh_generation_timing.seam_stitch_us,
+    );
+    timing.record_area(frame.0, "Skirt CPU", mesh_generation_timing.skirt_us);
+    timing.record_area(
+        frame.0,
+        "Terrain Water Mesh CPU",
+        mesh_generation_timing.water_us,
+    );
     timing.record_count(
         frame.0,
         "Mesh Dirty Chunks Queued",

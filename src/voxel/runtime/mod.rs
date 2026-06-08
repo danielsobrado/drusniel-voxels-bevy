@@ -71,8 +71,9 @@ use crate::voxel::mesh_commit::{
 use crate::voxel::meshing::{
     count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_for_request,
-    lod_delta_gt_one_face_mask, ChunkMesh, McTriangleSources, MeshMode, MeshRequest, MeshSettings,
-    TerrainMeshDebug, WaterBodyId, WaterBodyKind, WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
+    lod_delta_gt_one_face_mask, ChunkMesh, McTriangleSources, MeshGenerationTimingStats, MeshMode,
+    MeshRequest, MeshSettings, TerrainMeshDebug, WaterBodyId, WaterBodyKind,
+    WaterBodyMaterialMode, WaterMesh, WaterMeshDetail,
 };
 use crate::voxel::occlusion::{update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks};
 use crate::voxel::octree::ChunkOctree;

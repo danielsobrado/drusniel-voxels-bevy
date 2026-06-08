@@ -179,6 +179,14 @@ pub(crate) fn update_chunk_lod_system(
     mut last_chunk_count: Local<Option<usize>>,
     mut stationary_lod_scans_remaining: Local<u8>,
 ) {
+    let timing_enabled = timing.enabled;
+    let mut lod_guard_us = 0u64;
+    let mut lod_desired_us = 0u64;
+    let mut lod_coherence_us = 0u64;
+    let mut lod_max_one_us = 0u64;
+    let mut lod_candidates_us = 0u64;
+    let mut lod_commit_us = 0u64;
+    let mut lod_halo_dirty_us = 0u64;
     let _timer = area_timer(&mut timing, frame.0, "LOD Update");
     lod_transitions.repeated_chunks_this_frame = 0;
     if lod_control.freeze_lod {
@@ -264,10 +272,13 @@ pub(crate) fn update_chunk_lod_system(
     *last_camera_pos = Some(camera_pos);
     *last_chunk_count = Some(chunk_count);
 
+    let start = timing_enabled.then(Instant::now);
     let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
+    lod_guard_us += elapsed_us(start);
     let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
 
     // Pass 1 â€” compute each chunk's hysteresis/water-guarded desired LOD.
+    let start = timing_enabled.then(Instant::now);
     let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
     let mut chunk_state: HashMap<IVec3, (LodLevel, f32)> = HashMap::new();
     for (chunk_pos, chunk) in world.chunk_entries() {
@@ -284,6 +295,7 @@ pub(crate) fn update_chunk_lod_system(
         desired.insert(*chunk_pos, target_lod);
         chunk_state.insert(*chunk_pos, (current_lod, distance));
     }
+    lod_desired_us += elapsed_us(start);
 
     // Pass 2 â€” LOD coherence. A chunk that is coarser than every loaded
     // face-neighbour is an isolated LOD island, and an island carries up to six
@@ -297,6 +309,7 @@ pub(crate) fn update_chunk_lod_system(
         IVec3::new(0, 0, 1),
         IVec3::new(0, 0, -1),
     ];
+    let start = timing_enabled.then(Instant::now);
     for _ in 0..LOD_COHERENCE_PASSES {
         let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
         for (chunk_pos, &lod) in &desired {
@@ -333,7 +346,9 @@ pub(crate) fn update_chunk_lod_system(
             desired.insert(pos, lod);
         }
     }
+    lod_coherence_us += elapsed_us(start);
 
+    let start = timing_enabled.then(Instant::now);
     let forced_by_max_one = if mc_spike.settings.enabled
         && mc_spike.settings.lod_delta_policy == McTransvoxelLodDeltaPolicy::MaxOne
     {
@@ -341,9 +356,11 @@ pub(crate) fn update_chunk_lod_system(
     } else {
         HashSet::new()
     };
+    lod_max_one_us += elapsed_us(start);
 
     // Pass 3 â€” turn coherent desired LODs into change candidates.
     // 5th tuple element flags max_one-forced changes for prioritized handling.
+    let start = timing_enabled.then(Instant::now);
     let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32, bool)> = Vec::new();
     for (chunk_pos, &target_lod) in &desired {
         let Some(&(current_lod, distance)) = chunk_state.get(chunk_pos) else {
@@ -390,10 +407,12 @@ pub(crate) fn update_chunk_lod_system(
             })
             .then_with(|| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
     });
+    lod_candidates_us += elapsed_us(start);
 
     let lod_candidate_count = lod_candidates.len();
     let mut lod_changed: Vec<IVec3> = Vec::new();
     let mut voluntary_count = 0usize;
+    let start = timing_enabled.then(Instant::now);
     for (chunk_pos, _current_lod, target_lod, _distance, is_forced) in lod_candidates {
         // Voluntary changes throttled by MAX_LOD_CHANGES_PER_UPDATE to keep mesh
         // load smooth. Forced max_one changes are not optional â€” capping them
@@ -420,6 +439,7 @@ pub(crate) fn update_chunk_lod_system(
         }
         lod_changed.push(chunk_pos);
     }
+    lod_commit_us += elapsed_us(start);
 
     lod_transitions.changes_this_second += lod_changed.len() as u32;
     refresh_lod_change_rate(now, &mut lod_transitions);
@@ -430,9 +450,11 @@ pub(crate) fn update_chunk_lod_system(
     } else {
         *stationary_lod_scans_remaining = 0;
     }
+    let start = timing_enabled.then(Instant::now);
     for chunk_pos in &lod_changed {
         mark_chunk_lod_halo_dirty(&mut world, *chunk_pos);
     }
+    lod_halo_dirty_us += elapsed_us(start);
 
     if !lod_transitions.last_change_frame.is_empty() && frame.0 % 600 == 0 {
         lod_transitions
@@ -446,6 +468,13 @@ pub(crate) fn update_chunk_lod_system(
     let repeated_chunks_this_frame = lod_transitions.repeated_chunks_this_frame;
     let changes_per_second = lod_transitions.changes_per_second;
     drop(_timer);
+    timing.record_area(frame.0, "LOD Guard CPU", lod_guard_us);
+    timing.record_area(frame.0, "LOD Desired CPU", lod_desired_us);
+    timing.record_area(frame.0, "LOD Coherence CPU", lod_coherence_us);
+    timing.record_area(frame.0, "LOD MaxOne CPU", lod_max_one_us);
+    timing.record_area(frame.0, "LOD Candidates CPU", lod_candidates_us);
+    timing.record_area(frame.0, "LOD Commit CPU", lod_commit_us);
+    timing.record_area(frame.0, "LOD Halo Dirty CPU", lod_halo_dirty_us);
     timing.record_count(
         frame.0,
         "Water Shore Terrain LOD Guard Chunks",
@@ -474,6 +503,12 @@ fn record_lod_counters(
         changes_per_second as f64,
     );
     timing.record_count(frame, "Terrain LOD Repeated Chunks", repeated_chunks as f64);
+}
+
+fn elapsed_us(start: Option<Instant>) -> u64 {
+    start
+        .map(|start| start.elapsed().as_micros() as u64)
+        .unwrap_or(0)
 }
 
 fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionState) {
