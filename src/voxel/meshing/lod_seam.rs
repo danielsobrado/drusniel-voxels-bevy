@@ -136,10 +136,9 @@ pub(crate) fn coarse_lattice_y_face_target(
     )
 }
 
-/// Process-level GPU geomorph gate (v1). Read once from `VOXELS_TERRAIN_MORPH`
-/// (`1` / `true` enables) and cached; default **off**. The v1 toggle is an env var,
-/// not YAML, to avoid per-chunk file IO on the SN path — see decision D3 in
-/// `docs/lod/gpu-terrain-geomorph-plan.md`.
+/// Process-level GPU geomorph gate. Read once from `VOXELS_TERRAIN_MORPH`
+/// (`0` / `false` disables) and cached; default is enabled. The toggle is an env var,
+/// not YAML, to avoid per-chunk file IO on the Surface Nets path.
 pub(crate) fn terrain_morph_config() -> &'static TerrainMorphConfig {
     static CACHE: OnceLock<TerrainMorphConfig> = OnceLock::new();
     CACHE.get_or_init(|| {
@@ -390,8 +389,8 @@ pub(super) fn extract_export_boundary_strips(
 /// identity morph rows for the appended stitch verts).
 ///
 /// This closes the cases the morph weld alone cannot: the steep-side gap (segment
-/// over-distance) and the 2:1 density T-junction. Triangulated by `stitch_seam`
-/// (monotone strip); a face whose stitch is rejected keeps its skirt.
+/// over-distance) and the 2:1 density T-junction. Triangulated only for
+/// single-component strips; ambiguous multi-chain faces keep their skirt.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn append_seam_stitches(
     solid_mesh: &mut MeshData,
@@ -436,8 +435,7 @@ pub(super) fn append_seam_stitches(
         let Some(fine) = fine_strips.iter().find(|s| s.face == face) else {
             continue;
         };
-        let Some(stitch) =
-            crate::voxel::lod_boundary_strip::stitch_seam(&fine.vertices, &coarse.vertices)
+        let Some(stitch) = crate::voxel::lod_boundary_strip::stitch_boundary_strips(fine, coarse)
         else {
             continue;
         };

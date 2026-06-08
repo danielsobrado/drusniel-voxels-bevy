@@ -160,6 +160,28 @@ pub fn extract_boundary_edges(
     chunk_size: f32,
     boundary_band: f32,
 ) -> Vec<BoundaryEdge> {
+    if local_positions.len() != positions.len()
+        || local_positions.len() != normals.len()
+        || local_positions.len() != material_weights.len()
+    {
+        debug_assert_eq!(
+            local_positions.len(),
+            positions.len(),
+            "skirt extraction requires one render position per local position"
+        );
+        debug_assert_eq!(
+            local_positions.len(),
+            normals.len(),
+            "skirt extraction requires one normal per local position"
+        );
+        debug_assert_eq!(
+            local_positions.len(),
+            material_weights.len(),
+            "skirt extraction requires one material-weight row per local position"
+        );
+        return Vec::new();
+    }
+
     let mut boundary_edges: Vec<BoundaryEdge> = Vec::new();
     let mut edge_indices: HashMap<EdgeKey, usize> = HashMap::new();
     let mut edge_counts: Vec<u8> = Vec::new();
@@ -200,14 +222,12 @@ pub fn extract_boundary_edges(
                     continue;
                 }
 
-                let v0_pos = Vec3::from_array(positions.get(i0).copied().unwrap_or([0.0; 3]));
-                let v1_pos = Vec3::from_array(positions.get(i1).copied().unwrap_or([0.0; 3]));
-                let v0_normal =
-                    Vec3::from_array(normals.get(i0).copied().unwrap_or([0.0, 1.0, 0.0]));
-                let v1_normal =
-                    Vec3::from_array(normals.get(i1).copied().unwrap_or([0.0, 1.0, 0.0]));
-                let v0_weights = *material_weights.get(i0).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
-                let v1_weights = *material_weights.get(i1).unwrap_or(&[0.0, 0.0, 0.0, 1.0]);
+                let v0_pos = Vec3::from_array(positions[i0]);
+                let v1_pos = Vec3::from_array(positions[i1]);
+                let v0_normal = Vec3::from_array(normals[i0]);
+                let v1_normal = Vec3::from_array(normals[i1]);
+                let v0_weights = material_weights[i0];
+                let v1_weights = material_weights[i1];
 
                 let edge_index = boundary_edges.len();
                 boundary_edges.push(BoundaryEdge {

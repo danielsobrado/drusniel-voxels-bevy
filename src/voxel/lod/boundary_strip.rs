@@ -84,6 +84,54 @@ pub struct LodBoundaryStrip {
     pub segments: Vec<[u32; 2]>,
 }
 
+impl LodBoundaryStrip {
+    pub fn has_single_connected_component(&self) -> bool {
+        boundary_component_count(&self.segments, self.vertices.len()) == 1
+    }
+}
+
+fn boundary_component_count(segments: &[[u32; 2]], vertex_count: usize) -> usize {
+    if vertex_count < 2 || segments.is_empty() {
+        return 0;
+    }
+
+    let mut adjacency = vec![Vec::new(); vertex_count];
+    for &[a, b] in segments {
+        let (a, b) = (a as usize, b as usize);
+        if a >= vertex_count || b >= vertex_count || a == b {
+            debug_assert!(
+                false,
+                "invalid LOD boundary segment [{a}, {b}] for {vertex_count} vertices"
+            );
+            continue;
+        }
+        adjacency[a].push(b);
+        adjacency[b].push(a);
+    }
+
+    let mut seen = vec![false; vertex_count];
+    let mut components = 0;
+    for start in 0..vertex_count {
+        if seen[start] || adjacency[start].is_empty() {
+            continue;
+        }
+
+        components += 1;
+        let mut stack = vec![start];
+        seen[start] = true;
+        while let Some(vertex) = stack.pop() {
+            for &neighbor in &adjacency[vertex] {
+                if !seen[neighbor] {
+                    seen[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+    }
+
+    components
+}
+
 /// Only X/Z faces are stitched in this pass.
 pub fn is_xz_face(face: ChunkFace) -> bool {
     matches!(
@@ -139,6 +187,15 @@ pub fn extract_lod_boundary_strips(
     chunk_pos: IVec3,
     revision: u64,
 ) -> Vec<LodBoundaryStrip> {
+    if local_positions.len() != normals.len() {
+        debug_assert_eq!(
+            local_positions.len(),
+            normals.len(),
+            "LOD boundary extraction requires one normal per main-surface vertex"
+        );
+        return Vec::new();
+    }
+
     let origin = chunk_origin.as_vec3();
     let mut strips = Vec::new();
 
@@ -150,7 +207,14 @@ pub fn extract_lod_boundary_strips(
         let mut vert_index: HashMap<[i32; 3], u32> = HashMap::new();
         let mut vertices: Vec<StripVertex> = Vec::new();
         let mut intern = |i: usize| -> Option<u32> {
-            let local = *local_positions.get(i)?;
+            let Some(&local) = local_positions.get(i) else {
+                debug_assert!(
+                    false,
+                    "LOD boundary extraction index {i} is outside {} local positions",
+                    local_positions.len()
+                );
+                return None;
+            };
             if !local_on_face(local, face, chunk_size, boundary_band) {
                 return None;
             }
@@ -163,7 +227,7 @@ pub fn extract_lod_boundary_strips(
             vertices.push(StripVertex {
                 local,
                 world,
-                normal: Vec3::from_array(normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0])),
+                normal: Vec3::from_array(normals[i]),
                 proj: project_to_seam_frame(face, world),
             });
             vert_index.insert(key, idx);
@@ -523,6 +587,19 @@ pub fn stitch_seam(fine: &[StripVertex], coarse: &[StripVertex]) -> Option<SeamS
     })
 }
 
+/// Stitch two extracted strips only when both sides are one connected seam chain.
+/// Multi-component strips are ambiguous after sorting and keep the skirt fallback.
+pub fn stitch_boundary_strips(
+    fine: &LodBoundaryStrip,
+    coarse: &LodBoundaryStrip,
+) -> Option<SeamStitch> {
+    if !fine.has_single_connected_component() || !coarse.has_single_connected_component() {
+        return None;
+    }
+
+    stitch_seam(&fine.vertices, &coarse.vertices)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,14 +735,16 @@ mod tests {
         assert!((target - Vec3::new(16.0, 0.0, 2.0)).length() < 1e-4);
 
         // Too far off the seam -> no weld (caller keeps iso/skirt fallback).
-        assert!(coarse_segment_target_local(
-            Vec3::new(16.0, 9.0, 2.0),
-            ChunkFace::PosX,
-            IVec3::ZERO,
-            &strip,
-            1.0
-        )
-        .is_none());
+        assert!(
+            coarse_segment_target_local(
+                Vec3::new(16.0, 9.0, 2.0),
+                ChunkFace::PosX,
+                IVec3::ZERO,
+                &strip,
+                1.0
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -693,9 +772,77 @@ mod tests {
         let coarse = vec![sv(0.0, 0.0), sv(2.0, 0.0)];
         let stitch = stitch_seam(&fine, &coarse).expect("stitch");
         assert_eq!(stitch.positions.len(), 5, "all fine + coarse verts kept");
-        assert_eq!(stitch.triangle_count(), 3, "3+2 polyline zips to 3 triangles");
+        assert_eq!(
+            stitch.triangle_count(),
+            3,
+            "3+2 polyline zips to 3 triangles"
+        );
         // Every index in range.
-        assert!(stitch.indices.iter().all(|&i| (i as usize) < stitch.positions.len()));
+        assert!(
+            stitch
+                .indices
+                .iter()
+                .all(|&i| (i as usize) < stitch.positions.len())
+        );
+    }
+
+    #[test]
+    fn stitch_boundary_strips_accepts_single_component_uneven_lengths() {
+        let sv = |z: f32, y: f32| StripVertex {
+            local: Vec3::new(0.0, y, z),
+            world: Vec3::new(16.0, y, z),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            proj: Vec2::new(z, y),
+        };
+        let strip = |vertices: Vec<StripVertex>, segments: Vec<[u32; 2]>| LodBoundaryStrip {
+            face: ChunkFace::NegX,
+            lod: LodLevel::Lod0,
+            chunk_pos: IVec3::ZERO,
+            revision: 1,
+            vertices,
+            segments,
+        };
+
+        let fine = strip(
+            vec![sv(0.0, 0.0), sv(0.5, 0.0), sv(1.0, 0.0), sv(2.0, 0.0)],
+            vec![[0, 1], [1, 2], [2, 3]],
+        );
+        let coarse = strip(vec![sv(0.0, 0.0), sv(2.0, 0.0)], vec![[0, 1]]);
+
+        let stitch = stitch_boundary_strips(&fine, &coarse).expect("single component stitch");
+        assert_eq!(stitch.positions.len(), 6);
+        assert_eq!(stitch.triangle_count(), 4);
+        assert!(
+            stitch
+                .indices
+                .iter()
+                .all(|&i| (i as usize) < stitch.positions.len())
+        );
+    }
+
+    #[test]
+    fn stitch_boundary_strips_rejects_multiple_components() {
+        let sv = |z: f32| StripVertex {
+            local: Vec3::new(0.0, 0.0, z),
+            world: Vec3::new(16.0, 0.0, z),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            proj: Vec2::new(z, 0.0),
+        };
+        let fine = LodBoundaryStrip {
+            face: ChunkFace::NegX,
+            lod: LodLevel::Lod0,
+            chunk_pos: IVec3::ZERO,
+            revision: 1,
+            vertices: vec![sv(0.0), sv(1.0), sv(4.0), sv(5.0)],
+            segments: vec![[0, 1], [2, 3]],
+        };
+        let coarse = flat_negx_strip();
+
+        assert_eq!(
+            boundary_component_count(&fine.segments, fine.vertices.len()),
+            2
+        );
+        assert!(stitch_boundary_strips(&fine, &coarse).is_none());
     }
 
     #[test]
@@ -708,8 +855,14 @@ mod tests {
         };
         let fine = vec![sv(0.0), sv(1.0)];
         let coarse = vec![sv(5.0), sv(6.0)];
-        assert!(stitch_seam(&fine, &coarse).is_none(), "disjoint spans -> skirt fallback");
-        assert!(stitch_seam(&fine, &[sv(0.0)]).is_none(), "coarse < 2 verts -> None");
+        assert!(
+            stitch_seam(&fine, &coarse).is_none(),
+            "disjoint spans -> skirt fallback"
+        );
+        assert!(
+            stitch_seam(&fine, &[sv(0.0)]).is_none(),
+            "coarse < 2 verts -> None"
+        );
     }
 
     #[test]
@@ -719,20 +872,28 @@ mod tests {
         cache.insert(pos, 42, vec![flat_negx_strip()]);
 
         // Present + revision match -> hit.
-        assert!(cache
-            .strip_for_face(pos, ChunkFace::NegX, Some(42))
-            .is_some());
+        assert!(
+            cache
+                .strip_for_face(pos, ChunkFace::NegX, Some(42))
+                .is_some()
+        );
         // Stale revision -> miss (fall back to skirt, never block).
-        assert!(cache
-            .strip_for_face(pos, ChunkFace::NegX, Some(99))
-            .is_none());
+        assert!(
+            cache
+                .strip_for_face(pos, ChunkFace::NegX, Some(99))
+                .is_none()
+        );
         // Wrong face / missing chunk -> miss.
-        assert!(cache
-            .strip_for_face(pos, ChunkFace::PosX, Some(42))
-            .is_none());
-        assert!(cache
-            .strip_for_face(IVec3::new(9, 9, 9), ChunkFace::NegX, None)
-            .is_none());
+        assert!(
+            cache
+                .strip_for_face(pos, ChunkFace::PosX, Some(42))
+                .is_none()
+        );
+        assert!(
+            cache
+                .strip_for_face(IVec3::new(9, 9, 9), ChunkFace::NegX, None)
+                .is_none()
+        );
 
         cache.remove(pos);
         assert!(cache.is_empty());

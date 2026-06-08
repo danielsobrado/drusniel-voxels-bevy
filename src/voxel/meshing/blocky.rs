@@ -3,9 +3,7 @@ use super::{
     WATER_EDGE_SURFACE_SUPPRESSION_MARGIN, WATER_SHORELINE_EXTENSION, WaterAirExposureMode,
     WaterExposureCache, WaterMeshingStats,
 };
-use crate::constants::{
-    ATLAS_COLUMNS, ATLAS_ROWS, CHUNK_SIZE, CHUNK_SIZE_I32, UV_PADDING, VOXEL_SIZE,
-};
+use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
@@ -329,7 +327,7 @@ pub(super) fn get_greedy_quad_ao(
     // For greedy quads, we sample AO at the corner voxels and use the vertex index
     // that corresponds to that corner's position within the face.
     //
-    // The vertex order for each face (matching add_face_with_ao):
+    // The vertex order for each face (matching add_greedy_quad):
     // Top:    v0(x,y+1,z+1), v1(x+1,y+1,z+1), v2(x+1,y+1,z), v3(x,y+1,z)
     // Bottom: v0(x,y,z), v1(x+1,y,z), v2(x+1,y,z+1), v3(x,y,z+1)
     // North:  v0(x+1,y,z), v1(x,y,z), v2(x,y+1,z), v3(x+1,y+1,z)
@@ -478,37 +476,6 @@ pub(super) fn generate_blocky_chunk_mesh(
     }
 }
 
-/// Legacy per-voxel face check (replaced by greedy meshing).
-#[allow(dead_code)]
-pub(super) fn check_face(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-    mesh_data: &mut MeshData,
-    voxel: VoxelType,
-    ao_config: &BakedAoConfig,
-) {
-    if is_face_visible(chunk, world, local, face) {
-        add_face_with_ao(mesh_data, chunk, world, local, face, voxel, ao_config);
-    }
-}
-
-#[allow(dead_code)]
-pub(super) fn check_water_face(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-    mesh_data: &mut MeshData,
-    voxel: VoxelType,
-) {
-    if is_water_face_visible(chunk, world, local, face) {
-        // Water doesn't need AO - use full brightness
-        add_face_no_ao(mesh_data, local, face, voxel);
-    }
-}
-
 /// Returns the face offset vector for a given face direction.
 #[inline]
 pub(super) fn face_offset(face: Face) -> IVec3 {
@@ -649,19 +616,6 @@ where
 pub(super) fn is_face_visible(chunk: &Chunk, world: &VoxelWorld, local: UVec3, face: Face) -> bool {
     is_face_visible_with(chunk, world, local, face, |neighbor| {
         neighbor.is_transparent()
-    })
-}
-
-/// Water face is visible only when neighbor is air.
-#[allow(dead_code)]
-pub(super) fn is_water_face_visible(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-) -> bool {
-    is_face_visible_with(chunk, world, local, face, |neighbor| {
-        neighbor == VoxelType::Air
     })
 }
 
@@ -890,8 +844,7 @@ pub(super) fn air_connected_to_exterior_with_stats(
     false
 }
 
-/// Emit a greedy-merged water quad. Produces the same geometry as `add_water_face`
-/// but covers `quad.size` voxels, drastically reducing triangle count for oceans.
+/// Emit a greedy-merged water quad, drastically reducing triangle count for oceans.
 #[inline]
 pub(super) fn water_surface_local_y(chunk_origin: IVec3) -> f32 {
     crate::constants::WATER_LEVEL as f32 + crate::constants::WATER_SURFACE_OFFSET
@@ -1246,22 +1199,6 @@ pub(super) fn get_face_ao(
     ao
 }
 
-/// Get the atlas index for a voxel face (supports face-specific textures).
-/// Legacy: kept for reference, replaced by material index approach in greedy meshing.
-#[allow(dead_code)]
-pub(super) fn get_face_atlas_index(voxel: VoxelType, face: Face) -> u8 {
-    match voxel {
-        VoxelType::TopSoil => {
-            match face {
-                Face::Top => 0,    // Grass top texture
-                Face::Bottom => 1, // Dirt texture
-                _ => 7,            // Grass side texture (uses slot 7)
-            }
-        }
-        _ => voxel.atlas_index(),
-    }
-}
-
 /// Map voxel/face to blocky texture array layer.
 /// Texture array layout (3 layers per material):
 ///   Grass: 0=Top, 1=Side, 2=Bottom
@@ -1326,351 +1263,7 @@ pub(super) fn material_weight_index(material_id: MaterialId, fallback_voxel: Vox
     }
 }
 
-/// Legacy per-voxel face generation with AO (replaced by add_greedy_quad).
-#[allow(dead_code)]
-pub(super) fn add_face_with_ao(
-    mesh_data: &mut MeshData,
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    local: UVec3,
-    face: Face,
-    voxel: VoxelType,
-    ao_config: &BakedAoConfig,
-) {
-    let x = local.x as f32 * VOXEL_SIZE;
-    let y = local.y as f32 * VOXEL_SIZE;
-    let z = local.z as f32 * VOXEL_SIZE;
-    let s = VOXEL_SIZE;
-
-    let (v0, v1, v2, v3, normal) = match face {
-        Face::Top => (
-            [x, y + s, z + s],
-            [x + s, y + s, z + s],
-            [x + s, y + s, z],
-            [x, y + s, z],
-            [0.0, 1.0, 0.0],
-        ),
-        Face::Bottom => (
-            [x, y, z],
-            [x + s, y, z],
-            [x + s, y, z + s],
-            [x, y, z + s],
-            [0.0, -1.0, 0.0],
-        ),
-        Face::North => (
-            [x + s, y, z],
-            [x, y, z],
-            [x, y + s, z],
-            [x + s, y + s, z],
-            [0.0, 0.0, -1.0],
-        ),
-        Face::South => (
-            [x, y, z + s],
-            [x + s, y, z + s],
-            [x + s, y + s, z + s],
-            [x, y + s, z + s],
-            [0.0, 0.0, 1.0],
-        ),
-        Face::East => (
-            [x + s, y, z + s],
-            [x + s, y, z],
-            [x + s, y + s, z],
-            [x + s, y + s, z + s],
-            [1.0, 0.0, 0.0],
-        ),
-        Face::West => (
-            [x, y, z],
-            [x, y, z + s],
-            [x, y + s, z + s],
-            [x, y + s, z],
-            [-1.0, 0.0, 0.0],
-        ),
-    };
-
-    // Calculate AO for each vertex
-    let ao = get_face_ao(chunk, world, local, face, ao_config);
-
-    let start_idx = mesh_data.positions.len() as u32;
-
-    mesh_data.positions.push(v0);
-    mesh_data.positions.push(v1);
-    mesh_data.positions.push(v2);
-    mesh_data.positions.push(v3);
-
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-
-    let material_id = terrain_meshing_material_in_chunk(chunk, world, local, voxel);
-    let material_index =
-        get_blocky_material_index_for_material(material_id, voxel, face) as f32 / 255.0;
-    // Add vertex colors for AO (grayscale) + material index in alpha
-    mesh_data.colors.push([ao[0], ao[0], ao[0], material_index]);
-    mesh_data.colors.push([ao[1], ao[1], ao[1], material_index]);
-    mesh_data.colors.push([ao[2], ao[2], ao[2], material_index]);
-    mesh_data.colors.push([ao[3], ao[3], ao[3], material_index]);
-
-    // For Texture Arrays, we use full 0..1 UVs as each layer is a complete texture
-
-    let u_min = 0.0;
-    let u_max = 1.0;
-    let v_min = 0.0;
-    let v_max = 1.0;
-
-    mesh_data.uvs.push([u_min, v_max]);
-    mesh_data.uvs.push([u_max, v_max]);
-    mesh_data.uvs.push([u_max, v_min]);
-    mesh_data.uvs.push([u_min, v_min]);
-
-    // Use flipped winding for proper AO interpolation when needed
-    // Check if we should flip the quad diagonal based on AO values
-    if !ao_config.fix_anisotropy || ao[0] + ao[2] > ao[1] + ao[3] {
-        // Normal winding
-        mesh_data.indices.push(start_idx);
-        mesh_data.indices.push(start_idx + 2);
-        mesh_data.indices.push(start_idx + 1);
-
-        mesh_data.indices.push(start_idx);
-        mesh_data.indices.push(start_idx + 3);
-        mesh_data.indices.push(start_idx + 2);
-    } else {
-        // Flipped diagonal for better AO interpolation
-        // Triangle 1: v1, v0, v3 (CCW)
-        mesh_data.indices.push(start_idx + 1);
-        mesh_data.indices.push(start_idx);
-        mesh_data.indices.push(start_idx + 3);
-
-        // Triangle 2: v1, v3, v2 (CCW)
-        mesh_data.indices.push(start_idx + 1);
-        mesh_data.indices.push(start_idx + 3);
-        mesh_data.indices.push(start_idx + 2);
-    }
-}
-
-pub(super) fn add_face_no_ao(mesh_data: &mut MeshData, local: UVec3, face: Face, voxel: VoxelType) {
-    let x = local.x as f32 * VOXEL_SIZE;
-    let y = local.y as f32 * VOXEL_SIZE;
-    let z = local.z as f32 * VOXEL_SIZE;
-    let s = VOXEL_SIZE;
-
-    // Inset water faces slightly to prevent them showing through terrain gaps
-    // The smooth terrain mesh may not perfectly align with blocky water mesh
-    // Inset removed to prevent gaps between water blocks
-    let inset = 0.0;
-
-    let (v0, v1, v2, v3, normal) = match face {
-        Face::Top => (
-            [x + inset, y + s - inset, z + s - inset],
-            [x + s - inset, y + s - inset, z + s - inset],
-            [x + s - inset, y + s - inset, z + inset],
-            [x + inset, y + s - inset, z + inset],
-            [0.0, 1.0, 0.0],
-        ),
-        Face::Bottom => (
-            [x + inset, y + inset, z + inset],
-            [x + s - inset, y + inset, z + inset],
-            [x + s - inset, y + inset, z + s - inset],
-            [x + inset, y + inset, z + s - inset],
-            [0.0, -1.0, 0.0],
-        ),
-        Face::North => (
-            [x + s - inset, y + inset, z + inset],
-            [x + inset, y + inset, z + inset],
-            [x + inset, y + s - inset, z + inset],
-            [x + s - inset, y + s - inset, z + inset],
-            [0.0, 0.0, -1.0],
-        ),
-        Face::South => (
-            [x + inset, y + inset, z + s - inset],
-            [x + s - inset, y + inset, z + s - inset],
-            [x + s - inset, y + s - inset, z + s - inset],
-            [x + inset, y + s - inset, z + s - inset],
-            [0.0, 0.0, 1.0],
-        ),
-        Face::East => (
-            [x + s - inset, y + inset, z + s - inset],
-            [x + s - inset, y + inset, z + inset],
-            [x + s - inset, y + s - inset, z + inset],
-            [x + s - inset, y + s - inset, z + s - inset],
-            [1.0, 0.0, 0.0],
-        ),
-        Face::West => (
-            [x + inset, y + inset, z + inset],
-            [x + inset, y + inset, z + s - inset],
-            [x + inset, y + s - inset, z + s - inset],
-            [x + inset, y + s - inset, z + inset],
-            [-1.0, 0.0, 0.0],
-        ),
-    };
-
-    let start_idx = mesh_data.positions.len() as u32;
-
-    mesh_data.positions.push(v0);
-    mesh_data.positions.push(v1);
-    mesh_data.positions.push(v2);
-    mesh_data.positions.push(v3);
-
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-
-    let material_index = get_blocky_material_index(voxel, face) as f32 / 255.0;
-    // Full brightness for water; keep material index in alpha for blocky shader safety.
-    mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, material_index]);
-
-    // Calculate UV coordinates from atlas position
-    let atlas_idx = voxel.atlas_index();
-    let cols = ATLAS_COLUMNS as f32;
-    let rows = ATLAS_ROWS as f32;
-    let col = (atlas_idx % ATLAS_COLUMNS as u8) as f32;
-    let row = (atlas_idx / ATLAS_COLUMNS as u8) as f32;
-
-    let u_min = col / cols + UV_PADDING;
-    let u_max = (col + 1.0) / cols - UV_PADDING;
-    let v_min = row / rows + UV_PADDING;
-    let v_max = (row + 1.0) / rows - UV_PADDING;
-
-    mesh_data.uvs.push([u_min, v_max]);
-    mesh_data.uvs.push([u_max, v_max]);
-    mesh_data.uvs.push([u_max, v_min]);
-    mesh_data.uvs.push([u_min, v_min]);
-
-    mesh_data.indices.push(start_idx);
-    mesh_data.indices.push(start_idx + 2);
-    mesh_data.indices.push(start_idx + 1);
-
-    mesh_data.indices.push(start_idx);
-    mesh_data.indices.push(start_idx + 3);
-    mesh_data.indices.push(start_idx + 2);
-}
-
-/// Add a water face with world-space UVs for proper wave calculation.
-/// Unlike solid terrain which uses atlas UVs, water needs world XZ coordinates
-/// so the wave shader can compute spatially-varying wave heights.
-#[allow(dead_code)]
-pub(super) fn add_water_face(
-    mesh_data: &mut MeshData,
-    local: UVec3,
-    face: Face,
-    chunk_origin: IVec3,
-) {
-    let x = local.x as f32 * VOXEL_SIZE;
-    let y = local.y as f32 * VOXEL_SIZE;
-    let z = local.z as f32 * VOXEL_SIZE;
-    let s = VOXEL_SIZE;
-
-    let (v0, v1, v2, v3, normal) = match face {
-        Face::Top => (
-            [x, y + s, z + s],
-            [x + s, y + s, z + s],
-            [x + s, y + s, z],
-            [x, y + s, z],
-            [0.0, 1.0, 0.0],
-        ),
-        Face::Bottom => (
-            [x, y, z],
-            [x + s, y, z],
-            [x + s, y, z + s],
-            [x, y, z + s],
-            [0.0, -1.0, 0.0],
-        ),
-        Face::North => (
-            [x + s, y, z],
-            [x, y, z],
-            [x, y + s, z],
-            [x + s, y + s, z],
-            [0.0, 0.0, -1.0],
-        ),
-        Face::South => (
-            [x, y, z + s],
-            [x + s, y, z + s],
-            [x + s, y + s, z + s],
-            [x, y + s, z + s],
-            [0.0, 0.0, 1.0],
-        ),
-        Face::East => (
-            [x + s, y, z + s],
-            [x + s, y, z],
-            [x + s, y + s, z],
-            [x + s, y + s, z + s],
-            [1.0, 0.0, 0.0],
-        ),
-        Face::West => (
-            [x, y, z],
-            [x, y, z + s],
-            [x, y + s, z + s],
-            [x, y + s, z],
-            [-1.0, 0.0, 0.0],
-        ),
-    };
-
-    let start_idx = mesh_data.positions.len() as u32;
-
-    mesh_data.positions.push(v0);
-    mesh_data.positions.push(v1);
-    mesh_data.positions.push(v2);
-    mesh_data.positions.push(v3);
-
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-    mesh_data.normals.push(normal);
-
-    // Full brightness for water (no AO needed)
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-    mesh_data.colors.push([1.0, 1.0, 1.0, 1.0]);
-
-    // Use world-space XZ coordinates for UVs so wave shader gets proper spatial variation.
-    // The wave function uses: coord_offset + (uv * coord_scale) to get wave position.
-    // With world coords as UVs and coord_scale ~6.5, we get good wave frequency.
-    let world_x = chunk_origin.x as f32 + x;
-    let world_z = chunk_origin.z as f32 + z;
-
-    // Generate UVs based on face orientation (use world XZ for horizontal faces)
-    let (uv0, uv1, uv2, uv3) = match face {
-        Face::Top | Face::Bottom => (
-            [world_x, world_z + s],
-            [world_x + s, world_z + s],
-            [world_x + s, world_z],
-            [world_x, world_z],
-        ),
-        Face::North | Face::South => (
-            [world_x, y],
-            [world_x + s, y],
-            [world_x + s, y + s],
-            [world_x, y + s],
-        ),
-        Face::East | Face::West => (
-            [world_z, y],
-            [world_z + s, y],
-            [world_z + s, y + s],
-            [world_z, y + s],
-        ),
-    };
-
-    mesh_data.uvs.push(uv0);
-    mesh_data.uvs.push(uv1);
-    mesh_data.uvs.push(uv2);
-    mesh_data.uvs.push(uv3);
-
-    mesh_data.indices.push(start_idx);
-    mesh_data.indices.push(start_idx + 2);
-    mesh_data.indices.push(start_idx + 1);
-
-    mesh_data.indices.push(start_idx);
-    mesh_data.indices.push(start_idx + 3);
-    mesh_data.indices.push(start_idx + 2);
-}
-
 /// Greedy-merged water quad with world-space UVs (for surface nets water path).
-/// Like `add_water_face` but covers `quad.size` voxels.
 pub(super) fn add_greedy_water_face_world(
     mesh_data: &mut MeshData,
     quad: &GreedyQuad,

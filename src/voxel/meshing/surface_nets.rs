@@ -1,11 +1,11 @@
 use super::{
     ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, PaddedChunkShape,
-    SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
-    append_seam_stitches, apply_snap_or_morph, compute_vertex_material_weights,
+    SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode, append_seam_stitches,
+    apply_snap_or_morph, compute_vertex_material_weights,
     compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
     generate_sdf, generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
-    pad_morph_targets_identity, sanitize_position, scale_vertex_from_center,
-    sdf_gradient_normal_at_local, skirt_depth_for_lod, terrain_morph_config,
+    pad_morph_targets_identity, scale_vertex_from_center, sdf_gradient_normal_at_local,
+    skirt_depth_for_lod, terrain_morph_config,
 };
 use crate::constants::{
     CHUNK_SIZE, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_PADDED_SIZE, LOD2_STEP_SIZE,
@@ -21,6 +21,45 @@ use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::{IVec3, Vec3};
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+
+fn surface_nets_triangle_positions(
+    buffer: &SurfaceNetsBuffer,
+    tri_idx: usize,
+) -> Option<[[f32; 3]; 3]> {
+    let Some(&i0) = buffer.indices.get(tri_idx) else {
+        debug_assert!(false, "missing Surface Nets triangle index {tri_idx}");
+        return None;
+    };
+    let Some(&i1) = buffer.indices.get(tri_idx + 1) else {
+        debug_assert!(false, "incomplete Surface Nets triangle at index {tri_idx}");
+        return None;
+    };
+    let Some(&i2) = buffer.indices.get(tri_idx + 2) else {
+        debug_assert!(false, "incomplete Surface Nets triangle at index {tri_idx}");
+        return None;
+    };
+
+    let fetch = |index: u32| -> Option<[f32; 3]> {
+        let index = index as usize;
+        let Some(position) = buffer.positions.get(index).copied() else {
+            debug_assert!(
+                false,
+                "Surface Nets triangle references missing position {index}"
+            );
+            return None;
+        };
+        if !position.iter().all(|component| component.is_finite()) {
+            debug_assert!(
+                false,
+                "Surface Nets emitted non-finite position {position:?}"
+            );
+            return None;
+        }
+        Some(position)
+    };
+
+    Some([fetch(i0)?, fetch(i1)?, fetch(i2)?])
+}
 
 /// Generate mesh using Surface Nets algorithm for smooth terrain.
 pub fn generate_chunk_mesh_surface_nets(
@@ -97,14 +136,9 @@ pub fn generate_chunk_mesh_surface_nets(
     // Use per-triangle vertices to ensure consistent material indices (no interpolation artifacts)
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
-            let i0 = buffer.indices[tri_idx] as usize;
-            let i1 = buffer.indices[tri_idx + 1] as usize;
-            let i2 = buffer.indices[tri_idx + 2] as usize;
-
-            // Get sanitized positions for this triangle
-            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
-            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
-            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+            let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
+                continue;
+            };
 
             // Calculate local positions (offset for padding)
             let local0 = Vec3::new(p0[0] - 1.0, p0[1] - 1.0, p0[2] - 1.0);
@@ -313,14 +347,9 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     // Convert surface nets output to MeshData with vertex scaling
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
-            let i0 = buffer.indices[tri_idx] as usize;
-            let i1 = buffer.indices[tri_idx + 1] as usize;
-            let i2 = buffer.indices[tri_idx + 2] as usize;
-
-            // Get sanitized positions for this triangle
-            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
-            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
-            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+            let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
+                continue;
+            };
 
             // Calculate local positions with step scaling:
             // - Subtract 1.0 to remove padding offset (grid pos 1 = chunk start)
@@ -560,14 +589,9 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     // Convert surface nets output to MeshData with vertex scaling
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
-            let i0 = buffer.indices[tri_idx] as usize;
-            let i1 = buffer.indices[tri_idx + 1] as usize;
-            let i2 = buffer.indices[tri_idx + 2] as usize;
-
-            // Get sanitized positions for this triangle
-            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
-            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
-            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+            let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
+                continue;
+            };
 
             // Calculate local positions with step scaling:
             // - Subtract 1.0 to remove padding offset (grid pos 1 = chunk start)
@@ -807,14 +831,9 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     // Convert surface nets output to MeshData with vertex scaling
     if !buffer.positions.is_empty() && !buffer.indices.is_empty() {
         for tri_idx in (0..buffer.indices.len()).step_by(3) {
-            let i0 = buffer.indices[tri_idx] as usize;
-            let i1 = buffer.indices[tri_idx + 1] as usize;
-            let i2 = buffer.indices[tri_idx + 2] as usize;
-
-            // Get sanitized positions for this triangle
-            let p0 = sanitize_position(buffer.positions.get(i0).copied().unwrap_or([0.0; 3]));
-            let p1 = sanitize_position(buffer.positions.get(i1).copied().unwrap_or([0.0; 3]));
-            let p2 = sanitize_position(buffer.positions.get(i2).copied().unwrap_or([0.0; 3]));
+            let Some([p0, p1, p2]) = surface_nets_triangle_positions(&buffer, tri_idx) else {
+                continue;
+            };
 
             // Calculate local positions with step scaling:
             // - Subtract 1.0 to remove padding offset (grid pos 1 = chunk start)

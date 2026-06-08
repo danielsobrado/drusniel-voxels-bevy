@@ -184,52 +184,6 @@ pub(crate) fn count_missing_in_bounds_boundary_neighbors(
     missing
 }
 
-/// Smooths an SDF array at interior cells by averaging with neighbors.
-///
-/// IMPORTANT: Only smooths cells that are fully interior to the chunk (positions 2-15).
-/// Boundary cells (positions 1 and 16) are left unchanged to ensure consistent
-/// vertex positions between adjacent chunks - this prevents seams/cracks.
-///
-/// # Arguments
-/// * `sdf` - The raw SDF array to smooth
-/// * `current_weight` - Weight for the current cell value (0.0-1.0)
-///
-/// The neighbor weight is `1.0 - current_weight`.
-#[allow(dead_code)]
-pub(super) fn smooth_sdf_boundaries(sdf: &[f32; 5832], current_weight: f32) -> [f32; 5832] {
-    let neighbor_weight = 1.0 - current_weight;
-    let mut smoothed = *sdf;
-
-    for i in 0..PaddedChunkShape::USIZE {
-        let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-
-        // Only smooth truly interior cells (2-15), NOT boundary cells (1 and 16).
-        // This ensures adjacent chunks calculate identical SDF values at their shared boundary,
-        // which produces identical vertex positions and eliminates seams.
-        if px >= 2 && px <= 15 && py >= 2 && py <= 15 && pz >= 2 && pz <= 15 {
-            let current = sdf[i];
-
-            let neighbors = [
-                sdf[PaddedChunkShape::linearize([px - 1, py, pz]) as usize],
-                sdf[PaddedChunkShape::linearize([px + 1, py, pz]) as usize],
-                sdf[PaddedChunkShape::linearize([px, py - 1, pz]) as usize],
-                sdf[PaddedChunkShape::linearize([px, py + 1, pz]) as usize],
-                sdf[PaddedChunkShape::linearize([px, py, pz - 1]) as usize],
-                sdf[PaddedChunkShape::linearize([px, py, pz + 1]) as usize],
-            ];
-
-            let has_sign_change = neighbors.iter().any(|&n| (n > 0.0) != (current > 0.0));
-
-            if has_sign_change {
-                let neighbor_avg: f32 = neighbors.iter().sum::<f32>() / 6.0;
-                smoothed[i] = current * current_weight + neighbor_avg * neighbor_weight;
-            }
-        }
-    }
-
-    smoothed
-}
-
 pub(crate) fn neighbor_lod_for_face(
     neighbor_lods: &NeighborLods,
     face: ChunkFace,
@@ -1121,29 +1075,4 @@ pub(super) fn skirt_depth_for_lod(lod: LodLevel) -> f32 {
         LodLevel::Lod3 => 16.0,
         LodLevel::Culled => 1.5,
     }) * VOXEL_SIZE
-}
-
-/// Sanitizes a position array, replacing NaN/infinite values with 0.0.
-#[inline]
-pub(super) fn sanitize_position(pos: [f32; 3]) -> [f32; 3] {
-    [
-        if pos[0].is_finite() { pos[0] } else { 0.0 },
-        if pos[1].is_finite() { pos[1] } else { 0.0 },
-        if pos[2].is_finite() { pos[2] } else { 0.0 },
-    ]
-}
-
-/// Extracts and normalizes a normal from the buffer, with fallback.
-pub(super) fn get_normalized_normal(normals: &[[f32; 3]], index: usize) -> [f32; 3] {
-    let n = normals.get(index).copied().unwrap_or([0.0, 1.0, 0.0]);
-    if n[0].is_finite() && n[1].is_finite() && n[2].is_finite() {
-        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-        if len > 0.001 {
-            [n[0] / len, n[1] / len, n[2] / len]
-        } else {
-            [0.0, 1.0, 0.0]
-        }
-    } else {
-        [0.0, 1.0, 0.0]
-    }
 }

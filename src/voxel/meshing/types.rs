@@ -1,9 +1,7 @@
 //! Shared types for GPU terrain geomorph (Surface Nets LOD).
 //!
-//! PR1 scope: the custom vertex attribute, the CPU-side config, and the error
-//! type used by [`crate::voxel::meshing_lod::append_morph_targets`]. The shader,
-//! material, and config-file loader land in later PRs (see
-//! `docs/lod/gpu-terrain-geomorph-plan.md`).
+//! The Surface Nets mesher writes per-vertex morph targets for LOD seam welding,
+//! and the terrain material consumes them when the runtime morph gate is enabled.
 
 use bevy_mesh::{MeshVertexAttribute, VertexFormat};
 
@@ -21,20 +19,18 @@ pub const DEFAULT_TERRAIN_MORPH_MAX_STITCH_DISTANCE: f32 = 16.0;
 
 /// CPU-side geomorph configuration.
 ///
-/// In PR1 only `enabled` is read (by `append_morph_targets`); the distance fields
-/// are shader uniforms wired in PR3. The YAML loader (`terrain_morph.yaml`) arrives
-/// in PR2 — for now `Default` is the single source of truth and keeps morph **off**.
+/// `terrain_morph_config` owns the process-level runtime defaults. `Default` stays
+/// disabled so tests and manually constructed configs are neutral unless opted in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainMorphConfig {
-    /// Master gate. When `false`, `append_morph_targets` emits identity targets
-    /// (`w == 0` everywhere) so the mesh is byte-for-byte the pre-geomorph result.
+    /// Master gate. When `false`, the mesh keeps the legacy CPU snap/skirt path.
     pub enabled: bool,
-    /// Distance at which same-chunk distance morph begins (shader uniform, PR3).
+    /// Distance at which same-chunk distance morph begins.
     pub morph_start_distance: f32,
-    /// Distance at which same-chunk distance morph completes (shader uniform, PR3).
+    /// Distance at which same-chunk distance morph completes.
     pub morph_end_distance: f32,
     /// When `true`, keep CPU snap even with morph enabled (usually wrong for seams;
-    /// see the plan's "Snap vs morph ordering"). Consumed by the pipeline in PR2.
+    /// see the plan's "Snap vs morph ordering").
     pub cpu_snap_when_morph_enabled: bool,
     /// Reject seam targets farther than this from the original fine vertex.
     pub max_stitch_distance: f32,

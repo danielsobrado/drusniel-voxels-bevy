@@ -1,9 +1,7 @@
 //! CPU morph metadata for GPU terrain geomorph (Surface Nets LOD).
 //!
-//! PR1 scope (see `docs/lod/gpu-terrain-geomorph-plan.md`): compute the per-vertex
-//! `ATTRIBUTE_MORPH_TARGET` payload for a Surface Nets chunk mesh. This module is
-//! **not yet wired into the meshing pipeline** — it is exercised by unit tests only.
-//! The pipeline hook, `into_mesh` upload, skirt rows, and shader land in PR2/PR3.
+//! Computes the per-vertex `ATTRIBUTE_MORPH_TARGET` payload consumed by the terrain
+//! material for Surface Nets LOD seam welding.
 //!
 //! Boundary morph targets reuse the **same** coarse-aligned math as
 //! `snap_boundary_vertices_to_lower_detail_neighbor`, so a seam vertex blended to

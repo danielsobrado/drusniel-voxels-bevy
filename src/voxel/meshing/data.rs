@@ -1,6 +1,4 @@
-use super::{
-    MeshMode, air_connected_to_exterior_with_stats, air_open_to_sky_with_stats,
-};
+use super::{MeshMode, air_connected_to_exterior_with_stats, air_open_to_sky_with_stats};
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
@@ -330,8 +328,8 @@ pub struct MeshData {
     pub colors: Vec<[f32; 4]>, // Vertex colors for AO (blocky) or material weights (surface nets)
     /// Per-vertex GPU geomorph target (`ATTRIBUTE_MORPH_TARGET`): `xyz` coarse-aligned
     /// local position, `w` seam weight. Filled by `meshing_lod::append_morph_targets`
-    /// (PR1) and uploaded by `into_mesh` only when its length matches `positions`
-    /// (PR2). Left empty on the blocky/water paths, which never morph.
+    /// on Surface Nets terrain and uploaded by `into_mesh` only when its length
+    /// matches `positions`. Left empty on the blocky/water paths, which never morph.
     pub morph_targets: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
 }
@@ -386,9 +384,7 @@ impl MeshData {
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
         // GPU geomorph: only upload the morph attribute when it is fully populated
         // (one row per vertex). Empty on the blocky/water paths and whenever morph
-        // is disabled, in which case the mesh is byte-identical to the legacy result.
-        // An unused extra attribute is ignored by pipelines that do not request it
-        // (the PR3 vertex shader), so this is safe to land before PR3.
+        // is disabled, in which case the mesh keeps the legacy CPU snap/skirt path.
         if self.morph_targets.len() == vertex_count {
             mesh.insert_attribute(ATTRIBUTE_MORPH_TARGET, self.morph_targets);
         }

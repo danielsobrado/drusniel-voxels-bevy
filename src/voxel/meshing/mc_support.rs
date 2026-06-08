@@ -1,8 +1,7 @@
 #![cfg_attr(not(feature = "mc_transvoxel"), allow(dead_code))]
 //! Shared SDF sampling helpers for the MC + Transvoxel spike.
 use super::{
-    coarse_aligned_lod_sample_base_with_stride, compute_vertex_material_weights,
-    scale_vertex_from_center, sdf_gradient_normal_at_local, smoothed_terrain_sdf_at_world_pos,
+    compute_vertex_material_weights, scale_vertex_from_center, sdf_gradient_normal_at_local,
 };
 use crate::constants::{
     LOD0_PADDED_SIZE, LOD1_GRID_VOLUME, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_GRID_VOLUME,
@@ -73,20 +72,6 @@ pub fn build_mc_sdf_values(
         }
         LodLevel::Culled => (0, Vec::new(), step),
     }
-}
-
-#[allow(dead_code)]
-pub fn sample_smoothed_sdf_at_padded(
-    world: &VoxelWorld,
-    chunk_origin: IVec3,
-    px: u32,
-    py: u32,
-    pz: u32,
-    step: i32,
-) -> f32 {
-    let base_world_pos =
-        coarse_aligned_lod_sample_base_with_stride(chunk_origin, px, py, pz, 1, step);
-    smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
 }
 
 pub fn vertex_material_weights(
