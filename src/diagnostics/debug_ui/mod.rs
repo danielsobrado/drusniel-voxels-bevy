@@ -522,7 +522,7 @@ fn debug_settings_ui(
             ui.label("Press Ctrl+Shift+F4 to toggle the World Inspector");
             ui.label("Press F8 to toggle AO style (V0.3 <-> Full)");
             ui.label("Press F9 to toggle SSAO/GTAO");
-            ui.label("Press Shift+F9 to dump terrain hole probe JSON");
+            ui.label("Press Alt+F10 to dump terrain hole probe JSON");
             ui.label("Press Alt+Shift+F9 to cycle water reflection debug view");
             ui.label("Press Shift+F10 to dump water visual probe JSON");
             ui.label("Press F10 to toggle Sun Shadows");

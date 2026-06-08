@@ -18,11 +18,12 @@ Keyboard and mode reference for Drusniel Voxels.
 * **Ctrl+Shift+F4**: Toggle World Inspector while the Game Tweaks window is open
 * **F5**: Toggle Mesh Mode (Blocky <-> SurfaceNets)
 * **Alt+F5**: Toggle MC+Transvoxel LOD seam spike on/off (see [MC+Transvoxel A/B](#mc-transvoxel-ab-surface-nets-vs-mc) below)
-* **F6**: Toggle Water Visibility (debug builds only)
-* **F7**: Toggle Grass Visibility (debug builds only)
+* **F6**: Toggle Water Visibility (debug builds only; ignores Alt so it does not collide with Alt+F6)
+* **Alt+F6**: Freeze / unfreeze terrain LOD for inspection. Pauses LOD **reassignment** only — already-loaded chunks keep their LOD while you move, and new chunks still load.
+* **F7**: Toggle Grass Visibility (debug builds only; ignores Alt)
 * **F8**: Toggle Terrain AO Style (V0.3 soft <-> Full baked AO)
 * **F9**: Toggle Ambient Occlusion (SSAO & GTAO)
-* **Shift+F9**: Dump terrain hole probe JSON
+* **Alt+F10**: Dump terrain hole probe JSON (moved off Shift+F9 — Shift is fly-down)
 * **Alt+Shift+F9**: Cycle water reflection debug view
 * **F10**: Toggle Sun Shadows (Cascaded Shadow Maps)
 * **Shift+F10**: Dump water visual probe JSON
@@ -72,7 +73,7 @@ Experimental Marching Cubes + Transvoxel transition cells for LOD seams. Default
 - Remeshing can take a moment after each toggle (same class of work as **F5**).
 - **Alt+F7** wireframe: yellow edges = Transvoxel transition aprons when MC is on (see [wireframe plan](../lod/wireframe-debug-plan.md)).
 - **Alt+F11** morph vectors: cyan lines show valid terrain seam morph targets from source vertex to target; red lines show invalid or oversized targets.
-- **Shift+F9** hole-probe JSON works for both modes; compare dumps before/after Alt+F5 at the same camera pose.
+- **Alt+F10** hole-probe JSON works for both modes; compare dumps before/after Alt+F5 at the same camera pose.
 - Builds without MC: `cargo run --no-default-features` — Alt+F5 logs a warning (stub mesher).
 - Benches / scripts can still force MC via YAML (`enabled: true`) or `scripts/startVoxels.ps1 -Mc` (redundant if default features already include `mc_transvoxel`).
 
@@ -84,6 +85,8 @@ Details: [`docs/lod/mc-transvoxel-plan.md`](../lod/mc-transvoxel-plan.md).
 * **Space**: Jump (Walk Mode) / Fly Up (Fly Mode)
 * **Left Shift**: Sprint (Walk Mode) / Fly Down (Fly Mode)
 * **Left Ctrl**: Turbo Speed (Fly Mode)
+
+> Fly Up/Down (Space / Left Shift) are suppressed while any function key (F1–F12) is held, so Shift-based debug chords (e.g. Shift+F10) don't nudge the camera mid-capture.
 * **Tab**: Toggle Fly/Walk Mode
 * **R**: Reset Position to Spawn
 

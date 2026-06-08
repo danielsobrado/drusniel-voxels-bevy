@@ -449,7 +449,7 @@ fn dump_terrain_hole_probe(
     let timestamp = timestamp_utc_compact();
     let trigger = request
         .map(|request| request.trigger.clone())
-        .unwrap_or_else(|| "Shift+F9".to_string());
+        .unwrap_or_else(|| "Alt+F10".to_string());
     let dump = TerrainHoleProbeDump {
         schema_version: TERRAIN_HOLE_PROBE_SCHEMA_VERSION,
         timestamp_utc: timestamp.clone(),

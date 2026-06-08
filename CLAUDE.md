@@ -53,7 +53,7 @@ Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wire
 | **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
 | **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
 | **Alt+Shift+F7** | Capture current frame. ⚠ Known bug: also fires the Alt+F7 toggle — state flips on every capture. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
-| **Shift+F9** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, lod-delta>1 faces, missing-neighbor counts). | `debug/terrain-hole-probe-<ts>.json` |
+| **Alt+F10** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, lod-delta>1 faces, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down). | `debug/terrain-hole-probe-<ts>.json` |
 | **Alt+F5** | Toggle MC+Transvoxel LOD seam spike on/off (Surface Nets terrain only). Remeshes all loaded chunks; F3 `MC+TVX: ON/OFF`. YAML `assets/config/mc_transvoxel.yaml` is startup default only. | Console log + F3 chunk stats line |
 
 ### Wireframe colour key
