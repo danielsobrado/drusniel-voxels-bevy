@@ -129,4 +129,13 @@ on a shared face. Higher overlap → the stitch/morph has a real target to match
   in-distance, single-component faces take `GpuMorphOnly` (smooth) instead of un-morph+stitch
   (lip). Start by reading the per-face inputs already computed in `seam_audit.rs` and
   thresholding on `strip_span_overlap_ratio` + `strip_max_coarse_to_fine_distance`.
+- **2026-06-08:** Attempted a runtime Fix A gate that skipped stitch for single-component
+  strips passing a relaxed span-overlap check when all face boundary verts had morph targets.
+  User visual check regressed badly with new large stepped/open-looking terrain bands, so the
+  code change was reverted. Partial hard-case run wrote
+  `bench-runs/2026-06-08T13-24-30Z/seam-audit.json`: `open_edge_faces = 0`, `max_lip_height`
+  `1.44`, modes `StitchGeometry = 17`, `GpuMorphOnly = 0`, `InvalidUnsafeTopology = 2`.
+  Do not re-try this broad gate as-is; next attempt needs a stricter per-face proof that the
+  rendered morph path actually covers the seam and should be validated visually before keeping
+  it.
 - _(append the next entry here)_
