@@ -70,16 +70,20 @@ signals we now have** (span overlap, directed distance, component count, strip p
 
 ## 3. Fix plan (ranked)
 
-### A. Route good-segment faces to `GpuMorphOnly` (primary, biggest lip win)
-For a face with a **single-component**, **in-distance**, **high-span-overlap** coarse segment,
-prefer the morph weld (pull fine boundary to the coarse height) instead of un-morph + stitch.
-This converts the well-aligned `SpanMismatch` faces (span ≥ ~0.8) from lip-stitches into smooth
-welds. Keep stitch as the fallback when the segment is over-distance or multi-component.
-- **Where:** `lod_seam.rs` `append_seam_stitches` / the seam-mode classification in
-  `seam_audit.rs` already computes the inputs (`strip_span_overlap_ratio`,
-  `strip_max_*_distance`, `*_components`). Gate un-morph on "stitch is actually needed".
-- **Verify:** mode tally shifts StitchGeometry→GpuMorphOnly; `max_lip_height` drops;
-  `open_edge_faces` stays 0.
+### A. Route good-segment faces to `GpuMorphOnly` — ❌ DEAD END (do not retry)
+Idea was: on a well-matched face, keep the morph and skip the stitch to remove the lip.
+**Tried twice (two AIs, two different gates — broad, and strict single-component + complete
+weld + ≤0.6-voxel displacement). Both regressed identically into large dark trench/band
+artifacts.**
+
+**Root cause (now understood):** the stitch is not only hiding the height-step lip — it
+triangulates the **2:1 density T-junction** (the fine boundary has ~2× the verts of the coarse
+on a delta-1 seam). The GPU morph welds the fine *vertices* onto the coarse surface but **cannot
+close the density mismatch**: the extra fine vertices sit mid-edge on the coarse side, so
+dropping the stitch reopens a T-junction crack — **regardless of how small the morph
+displacement is.** So the stitch is *structurally required* for watertightness; the lip is the
+unavoidable cost of that watertightness, not a routing choice. Leave the un-morph + stitch path
+as-is.
 
 ### B. Reduce the height step the stitch bridges (for the stitch-fallback faces)
 When a face must still stitch (over-distance), the lip is the unavoidable LOD height delta.
@@ -138,4 +142,21 @@ on a shared face. Higher overlap → the stitch/morph has a real target to match
   Do not re-try this broad gate as-is; next attempt needs a stricter per-face proof that the
   rendered morph path actually covers the seam and should be validated visually before keeping
   it.
+- **2026-06-08 (decisive):** Tried the *strict* Fix A — skip stitch + keep morph only on
+  single-component faces with a complete weld and ≤0.6-voxel max displacement (big-lip faces
+  excluded by construction). **Still regressed** into the same large dark trench/band artifacts;
+  user confirmed it matches the earlier AI's regression. **Conclusion: Fix A is a dead end.** The
+  stitch triangulates the 2:1 density T-junction; the morph can't close that, so skipping the
+  stitch reopens cracks at *any* displacement. Reverted (`lod_seam.rs` restored). **Do not retry
+  morph-vs-stitch routing.** The lip is the unavoidable cost of the watertight stitch.
+- **Where to go next (untried, lower-risk):**
+  - **Fix B (cosmetic):** soften how the stitch band *reads* without changing topology — blend
+    the stitch-band vertex normals toward the surrounding surface so the step is shaded as a
+    gradient, not a hard wall. Pure shading, cannot reopen cracks. Measure subjective only
+    (`max_lip_height` geometry won't move, and that's fine).
+  - **Fix C/D (root):** reduce the *height delta itself* — the lip exists because the coarse
+    surface sits up to ~4.6 voxels from the fine at the seam. Tighter LOD distance bands near
+    steep terrain, or a better coarse iso there, shrink the delta the stitch must bridge. Has a
+    perf cost; bench required.
+  - Or accept: seams are watertight (`open_edge_faces = 0`), avg lip 0.66 voxel.
 - _(append the next entry here)_
