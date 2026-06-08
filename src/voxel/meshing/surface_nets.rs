@@ -4,7 +4,8 @@ use super::{
     apply_snap_or_morph, compute_vertex_material_weights,
     compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
     generate_sdf, generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
-    pad_morph_targets_identity, scale_vertex_from_center, sdf_gradient_normal_at_local,
+    pad_morph_targets_identity, recompute_morphed_seam_normals, scale_vertex_from_center,
+    sdf_gradient_normal_at_local,
     skirt_depth_for_lod, terrain_morph_config,
 };
 use crate::constants::{
@@ -284,6 +285,10 @@ pub fn generate_chunk_mesh_surface_nets(
     // Skirts/aprons appended after morph baking get identity targets so
     // morph_targets stays parallel to positions (into_mesh upload invariant).
     if morph.enabled {
+        // Stage 5: recompute normals for still-welded boundary verts at their welded
+        // position, so the seam is lit by the geometry it renders on (no flat-dark
+        // welds). After the skirt, so the apron keeps its original boundary normals.
+        recompute_morphed_seam_normals(&mut solid_mesh, world, chunk_origin, chunk_center);
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
@@ -526,6 +531,10 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     // Skirts/aprons appended after morph baking get identity targets so
     // morph_targets stays parallel to positions (into_mesh upload invariant).
     if morph.enabled {
+        // Stage 5: recompute normals for still-welded boundary verts at their welded
+        // position, so the seam is lit by the geometry it renders on (no flat-dark
+        // welds). After the skirt, so the apron keeps its original boundary normals.
+        recompute_morphed_seam_normals(&mut solid_mesh, world, chunk_origin, chunk_center);
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
@@ -768,6 +777,10 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     // Skirts/aprons appended after morph baking get identity targets so
     // morph_targets stays parallel to positions (into_mesh upload invariant).
     if morph.enabled {
+        // Stage 5: recompute normals for still-welded boundary verts at their welded
+        // position, so the seam is lit by the geometry it renders on (no flat-dark
+        // welds). After the skirt, so the apron keeps its original boundary normals.
+        recompute_morphed_seam_normals(&mut solid_mesh, world, chunk_origin, chunk_center);
         pad_morph_targets_identity(&mut solid_mesh);
     }
 
@@ -1010,6 +1023,10 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     // Skirts/aprons appended after morph baking get identity targets so
     // morph_targets stays parallel to positions (into_mesh upload invariant).
     if morph.enabled {
+        // Stage 5: recompute normals for still-welded boundary verts at their welded
+        // position, so the seam is lit by the geometry it renders on (no flat-dark
+        // welds). After the skirt, so the apron keeps its original boundary normals.
+        recompute_morphed_seam_normals(&mut solid_mesh, world, chunk_origin, chunk_center);
         pad_morph_targets_identity(&mut solid_mesh);
     }
 

@@ -24,6 +24,40 @@ pub(crate) fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32;
     [scaled.x, scaled.y, scaled.z]
 }
 
+/// Inverse of [`scale_vertex_from_center`]: recover the unscaled chunk-local position
+/// from a render-space vertex (used to read back a morph target's local position).
+#[inline]
+pub(crate) fn unscale_vertex_to_local(scaled: [f32; 3], chunk_center: Vec3) -> Vec3 {
+    let scaled = Vec3::from_array(scaled);
+    let pos = (scaled - chunk_center) / CHUNK_BOUNDARY_SCALE + chunk_center;
+    pos / VOXEL_SIZE
+}
+
+/// Stage 5 — seam normals. A GPU-morph-welded boundary vert (`w = 1`) renders at its
+/// morph **target**, but its normal would otherwise stay the stale fine-position normal,
+/// so the welded geometry lights wrong (flat-dark seam welds). Recompute each still-
+/// welded vert's normal from the SDF gradient at the welded position. Verts left at
+/// `w = 0` (interior, or faces handed to the Stage-4 stitch) keep their SDF-gradient
+/// normal, which already matches where they render. Call AFTER morph + stitch + skirt
+/// (so the apron inherits the original boundary normals) and BEFORE
+/// `pad_morph_targets_identity` (so only main-surface morph rows are visited).
+pub(super) fn recompute_morphed_seam_normals(
+    mesh: &mut MeshData,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    chunk_center: Vec3,
+) {
+    let count = mesh.morph_targets.len().min(mesh.normals.len());
+    for i in 0..count {
+        let target = mesh.morph_targets[i];
+        if target[3] > 0.5 {
+            let target_local =
+                unscale_vertex_to_local([target[0], target[1], target[2]], chunk_center);
+            mesh.normals[i] = sdf_gradient_normal_at_local(world, chunk_origin, target_local);
+        }
+    }
+}
+
 pub(crate) fn snap_column_for_face(
     chunk_origin: IVec3,
     local: Vec3,
