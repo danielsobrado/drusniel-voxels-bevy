@@ -2439,6 +2439,7 @@ fn barycentric_uv_section_tags_round_trip() {
     mesh.wireframe_lod_index = 2;
     mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_MAIN);
     mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_VERTICAL_SKIRT);
+    mesh.push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_TRANSITION_APRON);
 
     assert_eq!(barycentric_lod_index(mesh.barycentric_uvs[0]), 2);
     assert_eq!(
@@ -2448,6 +2449,10 @@ fn barycentric_uv_section_tags_round_trip() {
     assert_eq!(
         barycentric_section(mesh.barycentric_uvs[3]),
         TERRAIN_MESH_SECTION_VERTICAL_SKIRT
+    );
+    assert_eq!(
+        barycentric_section(mesh.barycentric_uvs[6]),
+        TERRAIN_MESH_SECTION_TRANSITION_APRON
     );
     assert!((barycentric_u(mesh.barycentric_uvs[0]) - 1.0).abs() < f32::EPSILON);
 }

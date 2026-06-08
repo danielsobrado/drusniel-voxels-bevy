@@ -392,6 +392,7 @@ struct BenchState {
     gameplay_dig_failed: bool,
     hole_probe_requested: bool,
     seam_audit_requested: bool,
+    seam_audit_drain_frames_left: u32,
     gameplay_trace: Vec<GameplayTraceSample>,
     gameplay_failed: bool,
     checkpoints: Vec<CheckpointSummary>,
@@ -1108,6 +1109,7 @@ impl Plugin for BenchPlugin {
                 gameplay_dig_failed: false,
                 hole_probe_requested: false,
                 seam_audit_requested: false,
+                seam_audit_drain_frames_left: 0,
                 gameplay_trace: Vec::new(),
                 gameplay_failed: false,
                 checkpoints: Vec::new(),
@@ -2438,6 +2440,7 @@ fn run_bench_state_machine(
             state.gameplay_dig_failed = false;
             state.hole_probe_requested = false;
             state.seam_audit_requested = false;
+            state.seam_audit_drain_frames_left = 0;
             state.gameplay_trace.clear();
             state.gameplay_failed = false;
             state.ready_started = Some(Instant::now());
@@ -2794,6 +2797,13 @@ fn run_bench_state_machine(
         }
         BenchPhase::Hold => {
             if state.hold_frames_left == 0 {
+                if state.seam_audit_requested && state.seam_audit_drain_frames_left == 0 {
+                    state.seam_audit_drain_frames_left = 2;
+                }
+                if state.seam_audit_drain_frames_left > 0 {
+                    state.seam_audit_drain_frames_left -= 1;
+                    return;
+                }
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
                 let ray_probe = camera.single().ok().map(|(transform, _)| {
                     bench_center_ray_probe(transform, &world, &chunk_stats, &scene.render_toggles)
@@ -3004,6 +3014,25 @@ fn run_bench_state_machine(
                             .push(request);
                     });
                     state.screenshot_wait_left = state.screenshot_wait_left.max(1);
+                    return;
+                }
+            }
+            if screenshots_ready && !state.seam_audit_requested {
+                let checkpoint = &scene.checkpoints[state.checkpoint_index];
+                if let Some(request) = checkpoint_seam_audit_request(
+                    &config,
+                    checkpoint,
+                    checkpoint.hold_frames,
+                    state.run_index,
+                    &mut state.seam_audit_requested,
+                ) {
+                    commands.queue(move |world: &mut World| {
+                        world
+                            .resource_mut::<TerrainSeamAuditRequests>()
+                            .push(request);
+                    });
+                    state.seam_audit_drain_frames_left = state.seam_audit_drain_frames_left.max(2);
+                    state.screenshot_wait_left = state.screenshot_wait_left.max(2);
                     return;
                 }
             }

@@ -1,6 +1,7 @@
 use super::{
-    LodTransitionSnapStats, MeshData, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
-    sdf_gradient_normal_at_local, seam_audit::{MorphFaceCounts, SeamStitchResult, XZ_FACE_COUNT, XZ_FACES, xz_face_index},
+    LodTransitionSnapStats, MeshData, TERRAIN_MESH_SECTION_TRANSITION_APRON,
+    coarse_lod_iso_height_for_column, neighbor_lod_for_face, sdf_gradient_normal_at_local,
+    seam_audit::{MorphFaceCounts, SeamStitchResult, XZ_FACE_COUNT, XZ_FACES, xz_face_index},
 };
 use crate::constants::{CHUNK_BOUNDARY_SCALE, CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -559,7 +560,8 @@ pub(super) fn append_seam_stitches(
             solid_mesh.indices.push(base);
             solid_mesh.indices.push(base + 1);
             solid_mesh.indices.push(base + 2);
-            solid_mesh.push_triangle_barycentrics();
+            solid_mesh
+                .push_triangle_barycentrics_with_section(TERRAIN_MESH_SECTION_TRANSITION_APRON);
         }
 
         // Keep the main-surface boundary at its SN position so it meets the stitch.

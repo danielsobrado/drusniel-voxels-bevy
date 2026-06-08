@@ -25,6 +25,7 @@ pub const SEAM_COVERAGE_GRID_U: u32 = 17;
 pub const SEAM_COVERAGE_GRID_V: u32 = 17;
 const LIP_HEIGHT_FAIL_VOXELS: f32 = 0.20;
 const COVERAGE_TOLERANCE_VOXELS: f32 = 1.0;
+const EDGE_QUANTIZE_SCALE: f32 = 10000.0;
 
 #[derive(Clone, Debug)]
 pub struct TerrainSeamAuditRequest {
@@ -82,6 +83,7 @@ pub struct SeamAuditSummary {
     pub stale_strip_faces: u32,
     pub lod_delta_gt_one_faces: u32,
     pub max_lip_height_voxels: f32,
+    pub max_face_offset_voxels: f32,
     pub max_longest_unmatched_edge_voxels: f32,
 }
 
@@ -198,6 +200,9 @@ pub fn build_seam_audit_dump(
             summary.max_lip_height_voxels = summary
                 .max_lip_height_voxels
                 .max(audit.max_lip_height_voxels);
+            summary.max_face_offset_voxels = summary
+                .max_face_offset_voxels
+                .max(audit.max_face_offset_voxels);
             summary.max_longest_unmatched_edge_voxels = summary
                 .max_longest_unmatched_edge_voxels
                 .max(audit.longest_unmatched_edge_voxels);
@@ -252,7 +257,7 @@ fn enhance_audit_with_coverage(
             let face_v = normalized_grid_coord(v, SEAM_COVERAGE_GRID_V);
             let seam_point = seam_face_sample_point(source_origin, face, face_u, face_v);
             let expected_y = expected_iso_y(world, seam_point.x, seam_point.z, fine_lod, coarse_lod);
-            let (render_hit_y, _, _, section) = highest_render_mesh_hit_at(
+            let (render_hit_y, render_hit_pos, _, _, section) = highest_render_mesh_hit_at(
                 world,
                 terrain_entities,
                 meshes,
@@ -275,8 +280,10 @@ fn enhance_audit_with_coverage(
             if lip > LIP_HEIGHT_FAIL_VOXELS {
                 terrace = terrace.saturating_add(1);
             }
-            let face_offset = face_offset_delta(seam_point, face, hit_y);
-            max_offset = max_offset.max(face_offset);
+            if let Some(hit_pos) = render_hit_pos {
+                let face_offset = face_offset_delta(seam_point, face, hit_pos);
+                max_offset = max_offset.max(face_offset);
+            }
             if lip > COVERAGE_TOLERANCE_VOXELS
                 && matches!(
                     section,
@@ -392,7 +399,7 @@ fn open_seam_edges_on_face(
         return Vec::new();
     }
 
-    let mut edge_counts: HashMap<(u32, u32, u8), (u8, MeshSectionClass, f32)> = HashMap::new();
+    let mut edge_counts: HashMap<WorldEdgeKey, (u8, MeshSectionClass, f32)> = HashMap::new();
     for tri_start in (0..indices.len()).step_by(3) {
         let i0 = indices[tri_start] as usize;
         let section = triangle_section(&barycentrics, i0);
@@ -402,14 +409,13 @@ fn open_seam_edges_on_face(
             (indices[tri_start + 2], indices[tri_start]),
         ];
         for (a, b) in tri_edges {
-            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             let p0 = positions[a as usize] + translation;
             let p1 = positions[b as usize] + translation;
             if !edge_on_chunk_face(p0, p1, chunk_pos, face) {
                 continue;
             }
             let length = p0.distance(p1);
-            let key = (lo, hi, face as u8);
+            let key = world_edge_key(p0, p1, face);
             let entry = edge_counts.entry(key).or_insert((0, section, length));
             entry.0 = entry.0.saturating_add(1);
             entry.2 = entry.2.max(length);
@@ -532,13 +538,53 @@ fn expected_iso_y(
         .or(coarse)
 }
 
-fn face_offset_delta(seam_point: Vec3, face: ChunkFace, hit_y: f32) -> f32 {
-    let axis = match face {
-        ChunkFace::NegX | ChunkFace::PosX => seam_point.x,
-        ChunkFace::NegZ | ChunkFace::PosZ => seam_point.z,
+fn face_offset_delta(seam_point: Vec3, face: ChunkFace, hit_pos: Vec3) -> f32 {
+    let plane_coord = seam_plane_coordinate(seam_point, face);
+    let hit_coord = seam_plane_coordinate(hit_pos, face);
+    (hit_coord - plane_coord).abs() / VOXEL_SIZE
+}
+
+fn seam_plane_coordinate(point: Vec3, face: ChunkFace) -> f32 {
+    match face {
+        ChunkFace::NegX | ChunkFace::PosX => point.x,
+        ChunkFace::NegZ | ChunkFace::PosZ => point.z,
         _ => 0.0,
-    };
-    ((hit_y - seam_point.y).abs() + axis.abs()) / VOXEL_SIZE
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct QuantizedWorldPos {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct WorldEdgeKey {
+    a: QuantizedWorldPos,
+    b: QuantizedWorldPos,
+    face: ChunkFace,
+}
+
+fn quantize_world_pos(pos: Vec3) -> QuantizedWorldPos {
+    QuantizedWorldPos {
+        x: (pos.x * EDGE_QUANTIZE_SCALE).round() as i32,
+        y: (pos.y * EDGE_QUANTIZE_SCALE).round() as i32,
+        z: (pos.z * EDGE_QUANTIZE_SCALE).round() as i32,
+    }
+}
+
+fn ordered_world_edge(a: QuantizedWorldPos, b: QuantizedWorldPos) -> (QuantizedWorldPos, QuantizedWorldPos) {
+    if (a.x, a.y, a.z) <= (b.x, b.y, b.z) {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn world_edge_key(p0: Vec3, p1: Vec3, face: ChunkFace) -> WorldEdgeKey {
+    let (a, b) = ordered_world_edge(quantize_world_pos(p0), quantize_world_pos(p1));
+    WorldEdgeKey { a, b, face }
 }
 
 fn highest_render_mesh_hit_at(
@@ -549,8 +595,8 @@ fn highest_render_mesh_hit_at(
     world_x: f32,
     world_z: f32,
     origin_y: f32,
-) -> (Option<f32>, Option<IVec3>, Option<Entity>, Option<MeshSectionClass>) {
-    let mut best: Option<(f32, IVec3, Entity, MeshSectionClass)> = None;
+) -> (Option<f32>, Option<Vec3>, Option<IVec3>, Option<Entity>, Option<MeshSectionClass>) {
+    let mut best: Option<(f32, Vec3, IVec3, Entity, MeshSectionClass)> = None;
     for dz in -1..=1 {
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -575,23 +621,25 @@ fn highest_render_mesh_hit_at(
                 let translation = transform
                     .map(|t| t.translation)
                     .unwrap_or_else(|| VoxelWorld::chunk_to_world(chunk_pos).as_vec3());
-                let Some((hit_y, section)) =
+                let Some((hit_y, hit_pos, section)) =
                     vertical_mesh_hit(mesh, translation, world_x, world_z, origin_y)
                 else {
                     continue;
                 };
-                if best.as_ref().map_or(true, |(best_y, _, _, _)| hit_y > *best_y) {
+                if best.as_ref().map_or(true, |(best_y, _, _, _, _)| hit_y > *best_y) {
                     let hit_chunk = chunk_mesh
                         .map(|c| c.chunk_position)
                         .unwrap_or(chunk_pos);
-                    best = Some((hit_y, hit_chunk, entity_id, section));
+                    best = Some((hit_y, hit_pos, hit_chunk, entity_id, section));
                 }
             }
         }
     }
     match best {
-        Some((y, chunk, entity, section)) => (Some(y), Some(chunk), Some(entity), Some(section)),
-        None => (None, None, None, None),
+        Some((y, hit_pos, chunk, entity, section)) => {
+            (Some(y), Some(hit_pos), Some(chunk), Some(entity), Some(section))
+        }
+        None => (None, None, None, None, None),
     }
 }
 
@@ -601,11 +649,12 @@ fn vertical_mesh_hit(
     world_x: f32,
     world_z: f32,
     origin_y: f32,
-) -> Option<(f32, MeshSectionClass)> {
+) -> Option<(f32, Vec3, MeshSectionClass)> {
     let positions = mesh_attribute_positions(mesh);
     let indices = mesh_triangle_indices(mesh);
     let barycentrics = mesh_attribute_uv1(mesh);
     let mut best_y: Option<f32> = None;
+    let mut best_pos: Option<Vec3> = None;
     let mut best_section = MeshSectionClass::Unknown;
     for tri_start in (0..indices.len()).step_by(3) {
         let verts = [
@@ -613,7 +662,8 @@ fn vertical_mesh_hit(
             positions[indices[tri_start + 1] as usize] + translation,
             positions[indices[tri_start + 2] as usize] + translation,
         ];
-        if let Some(y) = vertical_ray_triangle_hit_y(world_x, world_z, origin_y, verts[0], verts[1], verts[2])
+        if let Some((y, hit_pos)) =
+            vertical_ray_triangle_hit(world_x, world_z, origin_y, verts[0], verts[1], verts[2])
         {
             if best_y.map_or(true, |best| y > best) {
                 best_y = Some(y);
@@ -621,20 +671,21 @@ fn vertical_mesh_hit(
                     &barycentrics,
                     indices[tri_start] as usize,
                 );
+                best_pos = Some(hit_pos);
             }
         }
     }
-    best_y.map(|y| (y, best_section))
+    best_y.map(|y| (y, best_pos.unwrap_or(Vec3::new(world_x, y, world_z)), best_section))
 }
 
-fn vertical_ray_triangle_hit_y(
+fn vertical_ray_triangle_hit(
     x: f32,
     z: f32,
     origin_y: f32,
     p0: Vec3,
     p1: Vec3,
     p2: Vec3,
-) -> Option<f32> {
+) -> Option<(f32, Vec3)> {
     let denom = (p1.z - p2.z) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.z - p2.z);
     if denom.abs() < 1e-5 {
         return None;
@@ -643,8 +694,12 @@ fn vertical_ray_triangle_hit_y(
     let b = ((p2.z - p0.z) * (x - p2.x) + (p0.x - p2.x) * (z - p2.z)) / denom;
     let c = 1.0 - a - b;
     if a >= -1e-4 && b >= -1e-4 && c >= -1e-4 {
-        let y = a * p0.y + b * p1.y + c * p2.y;
-        (y <= origin_y).then_some(y)
+        let hit = Vec3::new(
+            a * p0.x + b * p1.x + c * p2.x,
+            a * p0.y + b * p1.y + c * p2.y,
+            a * p0.z + b * p1.z + c * p2.z,
+        );
+        (hit.y <= origin_y).then_some((hit.y, hit))
     } else {
         None
     }
@@ -771,5 +826,72 @@ fn strip_status_name(status: SeamStripStatus) -> String {
         SeamStripStatus::MissingStrip => "MissingStrip".to_string(),
         SeamStripStatus::StaleRevision => "StaleRevision".to_string(),
         SeamStripStatus::HitCurrentRevision => "HitCurrentRevision".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_mesh::PrimitiveTopology;
+    use crate::voxel::world::VoxelWorld;
+
+    fn chunk_pos_for_pos_x_face() -> IVec3 {
+        IVec3::new(16, 0, 0)
+    }
+
+    fn pos_x_face_mesh_with_shared_world_edge() -> (Mesh, Vec3) {
+        let translation = VoxelWorld::chunk_to_world(chunk_pos_for_pos_x_face()).as_vec3();
+        let face_x = translation.x + CHUNK_SIZE_I32 as f32;
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![
+                [face_x, 0.0, 0.0],
+                [face_x, 0.0, 1.0],
+                [face_x, 1.0, 0.0],
+                [face_x, 1.0, 0.0],
+                [face_x, 0.0, 1.0],
+                [face_x, 1.0, 1.0],
+            ],
+        );
+        mesh.insert_indices(bevy_mesh::Indices::U32(vec![0, 1, 2, 3, 4, 5]));
+        (mesh, translation)
+    }
+
+    #[test]
+    fn duplicated_world_position_edges_cancel_for_edge_leak_probe() {
+        let (mesh, translation) = pos_x_face_mesh_with_shared_world_edge();
+        let open = open_seam_edges_on_face(
+            &mesh,
+            translation,
+            chunk_pos_for_pos_x_face(),
+            ChunkFace::PosX,
+        );
+        assert!(
+            open.is_empty(),
+            "shared geometric edges must cancel even with per-triangle vertex indices"
+        );
+    }
+
+    #[test]
+    fn face_offset_is_zero_on_aligned_pos_x_seam_at_nonzero_world_x() {
+        let seam_point = Vec3::new(272.0, 48.0, 128.0);
+        let hit_pos = Vec3::new(272.0, 49.5, 128.0);
+        let offset = face_offset_delta(seam_point, ChunkFace::PosX, hit_pos);
+        assert!(
+            offset < 1e-4,
+            "face offset should measure seam-plane distance, got {offset}"
+        );
+    }
+
+    #[test]
+    fn face_offset_does_not_inflate_with_large_world_coordinates() {
+        let seam_point = Vec3::new(512.0, 40.0, 300.0);
+        let hit_pos = Vec3::new(512.0, 41.0, 300.0);
+        let offset = face_offset_delta(seam_point, ChunkFace::PosZ, hit_pos);
+        assert!(offset < 1e-4, "expected near-zero offset, got {offset}");
     }
 }

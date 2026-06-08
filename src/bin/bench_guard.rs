@@ -87,6 +87,7 @@ struct SeamAuditSummary {
     stale_strip_faces: u32,
     lod_delta_gt_one_faces: u32,
     max_lip_height_voxels: f32,
+    max_face_offset_voxels: f32,
     max_longest_unmatched_edge_voxels: f32,
 }
 
@@ -756,6 +757,12 @@ fn evaluate_lod_seam_audit(
             "max_lip_height_voxels",
             s.max_lip_height_voxels as f64,
             config.max_lip_height_voxels as f64,
+        ),
+        seam_audit_check(
+            &summary.scene,
+            "max_face_offset_voxels",
+            s.max_face_offset_voxels as f64,
+            config.max_face_offset_voxels as f64,
         ),
         seam_audit_check(
             &summary.scene,
