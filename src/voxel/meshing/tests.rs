@@ -1440,6 +1440,28 @@ fn pad_morph_targets_identity_is_noop_without_targets() {
 }
 
 #[test]
+fn softened_stitch_normals_blend_toward_band_average() {
+    let stitch = crate::voxel::lod_boundary_strip::SeamStitch {
+        positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        normals: vec![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        indices: vec![0, 1, 1],
+    };
+
+    let softened = softened_stitch_normals(&stitch);
+    let average = Vec3::new(1.0, 1.0, 0.0).normalize();
+    let original_alignment = Vec3::X.dot(average);
+    let softened_alignment = Vec3::from_array(softened[0]).dot(average);
+
+    assert_eq!(softened.len(), stitch.normals.len());
+    assert!(
+        softened_alignment > original_alignment,
+        "stitch normals should move toward the surrounding stitch-band average"
+    );
+    assert!((Vec3::from_array(softened[0]).length() - 1.0).abs() <= 1.0e-5);
+    assert_eq!(stitch.positions[0], [0.0, 0.0, 0.0]);
+}
+
+#[test]
 fn apply_snap_or_morph_enabled_skips_snap_and_bakes_targets() {
     let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
     fill_steep_x_slope(&mut world);

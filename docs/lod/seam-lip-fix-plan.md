@@ -158,5 +158,14 @@ on a shared face. Higher overlap → the stitch/morph has a real target to match
     surface sits up to ~4.6 voxels from the fine at the seam. Tighter LOD distance bands near
     steep terrain, or a better coarse iso there, shrink the delta the stitch must bridge. Has a
     perf cost; bench required.
+- **2026-06-08:** Tried Fix B as a normal-only stitch-band shading change: appended stitch
+  vertices keep the same positions/indices, but their render normals are blended toward the
+  average stitch-band normal. Unit test passed. Partial hard-case run wrote
+  `bench-runs/2026-06-08T15-02-43Z/seam-audit.json`: topology unchanged from baseline
+  (`StitchGeometry = 47`, `GpuMorphOnly = 0`, `InvalidUnsafeTopology = 6`, `open_edge_faces = 0`,
+  `max_lip_height = 1.56`). This is expected because Fix B is cosmetic and does not move
+  geometry. The bench was stopped after the audit was written because it stayed in the long
+  readiness/reporting phase with stable strip counters, so no `summary.json`/guard result was
+  produced for this run.
   - Or accept: seams are watertight (`open_edge_faces = 0`), avg lip 0.66 voxel.
 - _(append the next entry here)_

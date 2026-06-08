@@ -13,6 +13,8 @@ use bevy::prelude::{IVec2, IVec3, Vec3, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+const STITCH_NORMAL_SOFTEN_BLEND: f32 = 0.65;
+
 /// Scales a vertex position outward from chunk center to close seams.
 #[inline]
 pub(crate) fn scale_vertex_from_center(local: Vec3, chunk_center: Vec3) -> [f32; 3] {
@@ -534,6 +536,7 @@ pub(super) fn append_seam_stitches(
         if let Some(idx) = xz_face_index(face) {
             result.triangle_counts[idx] = tri_count;
         }
+        let stitch_normals = softened_stitch_normals(&stitch);
 
         // Append as non-indexed triangles to match the main-surface convention
         // (per-triangle verts + barycentrics).
@@ -547,7 +550,12 @@ pub(super) fn append_seam_stitches(
                 solid_mesh
                     .positions
                     .push(scale_vertex_from_center(local, chunk_center));
-                solid_mesh.normals.push(stitch.normals[idx as usize]);
+                solid_mesh.normals.push(
+                    stitch_normals
+                        .get(idx as usize)
+                        .copied()
+                        .unwrap_or(stitch.normals[idx as usize]),
+                );
                 solid_mesh.uvs.push([1.0, 0.0]); // ao=1 (no darkening)
                 solid_mesh.colors.push([0.0, 0.0, 0.0, 1.0]); // default material (v1)
             }
@@ -568,6 +576,45 @@ pub(super) fn append_seam_stitches(
     }
 
     result
+}
+
+pub(super) fn softened_stitch_normals(
+    stitch: &crate::voxel::lod_boundary_strip::SeamStitch,
+) -> Vec<[f32; 3]> {
+    let mut average = Vec3::ZERO;
+    let mut count = 0u32;
+    for normal in stitch.normals.iter().copied() {
+        let normal = Vec3::from_array(normal);
+        if normal.is_finite() && normal.length_squared() > f32::EPSILON {
+            average += normal.normalize();
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return stitch.normals.clone();
+    }
+
+    let average = average.normalize_or_zero();
+    if average.length_squared() <= f32::EPSILON {
+        return stitch.normals.clone();
+    }
+
+    stitch
+        .normals
+        .iter()
+        .copied()
+        .map(|normal| {
+            let normal = Vec3::from_array(normal);
+            if !normal.is_finite() || normal.length_squared() <= f32::EPSILON {
+                return average.to_array();
+            }
+            normal
+                .normalize()
+                .lerp(average, STITCH_NORMAL_SOFTEN_BLEND)
+                .normalize_or_zero()
+                .to_array()
+        })
+        .collect()
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended
