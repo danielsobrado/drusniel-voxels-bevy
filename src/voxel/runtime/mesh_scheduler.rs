@@ -837,6 +837,11 @@ pub(crate) fn mesh_dirty_chunks_system(
     timing.record_area(frame.0, "Skirt CPU", mesh_generation_timing.skirt_us);
     timing.record_area(
         frame.0,
+        "LOD Morph Finalize CPU",
+        mesh_generation_timing.morph_finalize_us,
+    );
+    timing.record_area(
+        frame.0,
         "Terrain Water Mesh CPU",
         mesh_generation_timing.water_us,
     );

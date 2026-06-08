@@ -311,6 +311,7 @@ pub struct MeshGenerationTimingStats {
     pub boundary_strip_us: u64,
     pub seam_stitch_us: u64,
     pub skirt_us: u64,
+    pub morph_finalize_us: u64,
     pub water_us: u64,
 }
 
@@ -323,6 +324,9 @@ impl MeshGenerationTimingStats {
         self.boundary_strip_us = self.boundary_strip_us.saturating_add(other.boundary_strip_us);
         self.seam_stitch_us = self.seam_stitch_us.saturating_add(other.seam_stitch_us);
         self.skirt_us = self.skirt_us.saturating_add(other.skirt_us);
+        self.morph_finalize_us = self
+            .morph_finalize_us
+            .saturating_add(other.morph_finalize_us);
         self.water_us = self.water_us.saturating_add(other.water_us);
     }
 }
