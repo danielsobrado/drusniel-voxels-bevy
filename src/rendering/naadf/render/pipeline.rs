@@ -507,16 +507,20 @@ pub fn init_naadf_preview_build_pipelines(
     pipeline_cache: Res<PipelineCache>,
 ) {
     let empty_group_layout = BindGroupLayoutDescriptor::new("naadf_empty_group_layout", &[]);
-    let build_blocks_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BLOCKS_LAYOUT);
+    let build_blocks_entries =
+        bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BLOCKS_LAYOUT);
     let build_blocks_layout =
         BindGroupLayoutDescriptor::new("naadf_build_blocks_layout", &build_blocks_entries);
-    let build_bounds_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BOUNDS_LAYOUT);
+    let build_bounds_entries =
+        bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_BOUNDS_LAYOUT);
     let build_bounds_layout =
         BindGroupLayoutDescriptor::new("naadf_build_bounds_layout", &build_bounds_entries);
-    let build_mips_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_MIPS_LAYOUT);
+    let build_mips_entries =
+        bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_MIPS_LAYOUT);
     let build_mips_layout =
         BindGroupLayoutDescriptor::new("naadf_build_mips_layout", &build_mips_entries);
-    let build_chunks_entries = bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_CHUNKS_LAYOUT);
+    let build_chunks_entries =
+        bind_layout_entries(crate::rendering::naadf::layout::NAADF_BUILD_CHUNKS_LAYOUT);
     let build_chunks_layout =
         BindGroupLayoutDescriptor::new("naadf_build_chunks_layout", &build_chunks_entries);
     let build_chunk_bounds_entries =
@@ -832,7 +836,9 @@ fn storage_buffer_entry(binding: u32, read_only: bool) -> BindGroupLayoutEntry {
     storage_buffer_entry_for_stage(binding, read_only, ShaderStages::COMPUTE)
 }
 
-fn bind_layout_entries(specs: &[crate::rendering::naadf::layout::NaadfBindEntrySpec]) -> Vec<BindGroupLayoutEntry> {
+fn bind_layout_entries(
+    specs: &[crate::rendering::naadf::layout::NaadfBindEntrySpec],
+) -> Vec<BindGroupLayoutEntry> {
     specs
         .iter()
         .map(|spec| match spec.kind {
@@ -842,7 +848,9 @@ fn bind_layout_entries(specs: &[crate::rendering::naadf::layout::NaadfBindEntryS
             crate::rendering::naadf::layout::NaadfBindEntryKind::StorageReadWrite => {
                 storage_buffer_entry(spec.binding, false)
             }
-            crate::rendering::naadf::layout::NaadfBindEntryKind::Uniform => uniform_buffer_entry(spec.binding),
+            crate::rendering::naadf::layout::NaadfBindEntryKind::Uniform => {
+                uniform_buffer_entry(spec.binding)
+            }
         })
         .collect()
 }
@@ -1702,9 +1710,9 @@ impl ViewNode for NaadfPreviewBuildNode {
                     1,
                     1,
                 );
-                if let Some(bridge) =
-                    world.get_resource::<crate::rendering::naadf::prepare::NaadfGpuBuildDispatchBridge>()
-                {
+                if let Some(bridge) = world
+                    .get_resource::<crate::rendering::naadf::prepare::NaadfGpuBuildDispatchBridge>(
+                ) {
                     bridge.publish(gpu_builds.generation, &gpu_builds.chunk_positions);
                 }
             }

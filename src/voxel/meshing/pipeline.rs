@@ -1,9 +1,9 @@
 use super::{
     ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshForensicsOptions,
     MeshGenerationTimingStats, TerrainMeshSectionStats, WaterAirExposureMode, WaterMeshingStats,
-    generate_blocky_chunk_mesh,
-    generate_chunk_mesh_surface_nets, generate_chunk_mesh_surface_nets_lod1,
-    generate_chunk_mesh_surface_nets_lod2, generate_chunk_mesh_surface_nets_lod3,
+    generate_blocky_chunk_mesh, generate_chunk_mesh_surface_nets,
+    generate_chunk_mesh_surface_nets_lod1, generate_chunk_mesh_surface_nets_lod2,
+    generate_chunk_mesh_surface_nets_lod3,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -62,7 +62,8 @@ pub struct MeshRequest<'a> {
     pub water_exposure_mode: WaterAirExposureMode,
     pub forensics: MeshForensicsOptions,
     pub neighbor_strips: Option<&'a crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    pub strip_status: Option<&'a [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT]>,
+    pub strip_status:
+        Option<&'a [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT]>,
     pub mc_settings: Option<&'a crate::voxel::mc_transvoxel::McTransvoxelSettings>,
     pub timing_enabled: bool,
 }
@@ -251,7 +252,8 @@ fn empty_mesh_result() -> ChunkMeshResult {
         mc_triangle_sources: None,
         generation_timing: MeshGenerationTimingStats::default(),
         boundary_strips: Vec::new(),
-        seam_face_audit: [super::seam_audit::SeamFaceAudit::default(); super::seam_audit::XZ_FACE_COUNT],
+        seam_face_audit: [super::seam_audit::SeamFaceAudit::default();
+            super::seam_audit::XZ_FACE_COUNT],
         seam_strip_debug: super::TerrainSeamStripDebug::default(),
     }
 }

@@ -993,4 +993,3 @@ fn water_body_debug_color(mode: WaterBodyMaterialMode, kind: WaterBodyKind) -> C
         },
     }
 }
-

@@ -2,6 +2,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::naadf::config::NaadfConfig;
 use crate::rendering::naadf::cpu_builder::NaadfBuildOptions;
 use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
@@ -12,7 +13,6 @@ use crate::rendering::naadf::layout::{
     CHUNK_BOUND_OFFSET_POS_Z, NaadfChunk, NaadfNodeState, PackedDirectionalBounds5Bit,
 };
 use crate::rendering::naadf::stats::{NaadfCacheState, NaadfStats};
-use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 #[derive(Resource, Default, Debug)]

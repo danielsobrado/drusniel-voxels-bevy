@@ -203,7 +203,10 @@ impl SeamFaceAudit {
 
 impl SeamFaceMode {
     pub fn claims_stitch_safe_seam(self) -> bool {
-        matches!(self, SeamFaceMode::StitchGeometry | SeamFaceMode::GpuMorphOnly)
+        matches!(
+            self,
+            SeamFaceMode::StitchGeometry | SeamFaceMode::GpuMorphOnly
+        )
     }
 }
 
@@ -246,10 +249,10 @@ pub fn classify_final_mode(input: SeamFaceModeInput) -> SeamFaceMode {
         return SeamFaceMode::DeltaTooLarge;
     }
 
-    let has_full_morph = input.morph_candidate_count > 0
-        && input.morph_welded_count >= input.morph_candidate_count;
-    let has_partial_morph = input.morph_welded_count > 0
-        && input.morph_welded_count < input.morph_candidate_count;
+    let has_full_morph =
+        input.morph_candidate_count > 0 && input.morph_welded_count >= input.morph_candidate_count;
+    let has_partial_morph =
+        input.morph_welded_count > 0 && input.morph_welded_count < input.morph_candidate_count;
     let has_stitch = input.stitch_triangle_count > 0;
     let has_skirt = input.skirt_triangle_count > 0;
 
@@ -406,10 +409,12 @@ pub fn assemble_seam_face_audit(
     for (idx, face) in XZ_FACES.iter().enumerate() {
         let neighbor_lod = neighbor_lod_for_face(neighbor_lods, *face);
         let sealed = {
-            let snapped = snap_stats.snapped_face_mask & LodTransitionSnapStats::face_mask(*face) != 0;
+            let snapped =
+                snap_stats.snapped_face_mask & LodTransitionSnapStats::face_mask(*face) != 0;
             let fallback =
                 snap_stats.fallback_face_mask & LodTransitionSnapStats::face_mask(*face) != 0;
-            let stitched = stitch.stitched_face_mask & LodTransitionSnapStats::face_mask(*face) != 0;
+            let stitched =
+                stitch.stitched_face_mask & LodTransitionSnapStats::face_mask(*face) != 0;
             (snapped && !fallback) || stitched
         };
         let fine_strip = fine_strips.iter().find(|s| s.face == *face);
@@ -428,8 +433,8 @@ pub fn assemble_seam_face_audit(
             .unwrap_or(0);
         let stitch_triangles = stitch.triangle_counts[idx];
         let skirt_triangles = skirt_counts.triangle_counts[idx];
-        let transition = transition_target_lod(my_lod, neighbor_lod.unwrap_or(LodLevel::Culled))
-            .is_some();
+        let transition =
+            transition_target_lod(my_lod, neighbor_lod.unwrap_or(LodLevel::Culled)).is_some();
         let needs_strip_topology_check = transition
             && (fine_components > 0
                 || coarse_components > 0
@@ -469,9 +474,7 @@ pub fn assemble_seam_face_audit(
             coarse_components,
         });
 
-        if mode.claims_stitch_safe_seam()
-            && strip_reject_reason != SeamStripRejectReason::None
-        {
+        if mode.claims_stitch_safe_seam() && strip_reject_reason != SeamStripRejectReason::None {
             mode = if skirt_triangles > 0 {
                 SeamFaceMode::SkirtFallback
             } else if strip_status[idx] == SeamStripStatus::StaleRevision {
@@ -521,13 +524,17 @@ pub fn assemble_seam_face_audit(
     audits
 }
 
-pub fn strip_reject_reason_from_overlap_status(status: StripOverlapStatus) -> SeamStripRejectReason {
+pub fn strip_reject_reason_from_overlap_status(
+    status: StripOverlapStatus,
+) -> SeamStripRejectReason {
     match status {
         StripOverlapStatus::SpanMismatch => SeamStripRejectReason::SpanMismatch,
         StripOverlapStatus::DirectedDistanceExceeded => {
             SeamStripRejectReason::DirectedDistanceExceeded
         }
-        StripOverlapStatus::EndpointDistanceExceeded => SeamStripRejectReason::EndpointDistanceExceeded,
+        StripOverlapStatus::EndpointDistanceExceeded => {
+            SeamStripRejectReason::EndpointDistanceExceeded
+        }
         StripOverlapStatus::CrossingOrFoldDetected => SeamStripRejectReason::CrossingOrFoldDetected,
         StripOverlapStatus::UnsupportedTopology
         | StripOverlapStatus::FineMultiComponent

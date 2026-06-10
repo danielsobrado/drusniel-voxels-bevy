@@ -5,8 +5,8 @@
 //! - Drag mode: Click and drag blocks to move them
 //! - Delete mode: Toggle with Delete key in edit mode to remove blocks
 
-use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use super::targeting::TargetedBlock;
+use crate::interaction::palette::{PlacementPaletteState, PlacementSelection};
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld};

@@ -31,10 +31,9 @@ use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings
 use crate::voxel::meshing::{
     ChunkMesh, ChunkMeshResult, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions,
     MeshGenerationTimingStats, MeshMode, MeshRequest, MeshSettings, TerrainMeshDebug,
-    TerrainSeamStripDebug,
-    WaterBodyKind, WaterMesh, WaterMeshDetail, count_missing_in_bounds_boundary_neighbors,
-    empty_chunk_has_surface_nets_boundary_surface, generate_chunk_mesh_for_request,
-    lod_delta_gt_one_face_mask,
+    TerrainSeamStripDebug, WaterBodyKind, WaterMesh, WaterMeshDetail,
+    count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
+    generate_chunk_mesh_for_request, lod_delta_gt_one_face_mask,
 };
 use crate::voxel::plugin::{RuntimeChunkStats, WaterMaskProxy};
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};

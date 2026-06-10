@@ -1,8 +1,8 @@
 use crate::constants::{MIN_BREAKABLE_Y, WATER_LEVEL};
 
 use super::{
-    NoiseGenerator, TerrainGenerator, WaterGenerationMetadata, soften_height_cap, smoothstep,
-    smoothstep_range,
+    NoiseGenerator, TerrainGenerator, WaterGenerationMetadata, smoothstep, smoothstep_range,
+    soften_height_cap,
 };
 
 pub(super) const MIN_NORMAL_TERRAIN_SURFACE_Y: i32 = WATER_LEVEL - 4;

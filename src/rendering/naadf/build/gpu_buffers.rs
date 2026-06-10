@@ -8,14 +8,16 @@ use bevy::render::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use wgpu::DeviceType;
 
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::naadf::cache::NaadfCache;
 use crate::rendering::naadf::config::NaadfConfig;
 use crate::rendering::naadf::entities::{NaadfEntityVolumeRecord, NaadfEntityVolumeRegistry};
-use crate::rendering::naadf::layout::{BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk};
+use crate::rendering::naadf::layout::{
+    BLOCKS_PER_CHUNK, DirectionalBounds, NaadfBlock, NaadfChunk,
+};
 use crate::rendering::naadf::prepare::NaadfUploadBudget;
 use crate::rendering::naadf::stats::{NaadfRenderStatsBridge, NaadfStats};
 use crate::rendering::naadf::streaming::NaadfStreamingState;
-use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::render_timing::{RenderTimingSink, render_timing_guard};
 
 pub const NAADF_VOXEL_RECORD_BYTES: u64 = 4;
@@ -68,10 +70,12 @@ impl NaadfGpuBufferPlan {
         let voxel_records = max_chunks as u64 * crate::constants::CHUNK_VOLUME as u64;
         let raw_voxel_records = voxel_records;
         let material_records = voxel_records;
-        let mip_traversal_records = max_chunks as u64 * crate::rendering::naadf::layout::MIP_CELLS_PER_CHUNK as u64;
+        let mip_traversal_records =
+            max_chunks as u64 * crate::rendering::naadf::layout::MIP_CELLS_PER_CHUNK as u64;
         let mip_payload_records = mip_traversal_records;
         let mip_bounds_records = mip_traversal_records;
-        let block_records = max_chunks as u64 * crate::rendering::naadf::layout::BLOCKS_PER_CHUNK as u64;
+        let block_records =
+            max_chunks as u64 * crate::rendering::naadf::layout::BLOCKS_PER_CHUNK as u64;
         let chunk_records = max_chunks as u64;
         let chunk_lookup_records = max_chunks as u64;
         let voxel_buffer_bytes = voxel_records * NAADF_VOXEL_RECORD_BYTES;

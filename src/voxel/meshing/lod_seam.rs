@@ -7,7 +7,7 @@ use crate::constants::{CHUNK_BOUNDARY_SCALE, CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_S
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::meshing_lod::append_morph_targets;
 use crate::voxel::meshing_types::TerrainMorphConfig;
-use crate::voxel::skirt::{ChunkFace, NeighborLods};
+use crate::voxel::skirt::{BoundaryEdge, ChunkFace, NeighborLods, extract_boundary_edges};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::{IVec2, IVec3, Vec3, info, warn};
 use std::collections::{HashMap, HashSet};
@@ -283,7 +283,12 @@ pub(super) fn apply_snap_or_morph(
             bake_targets(solid_mesh, local_positions);
         }
         let morph_counts = if morph.enabled && !solid_mesh.morph_targets.is_empty() {
-            morph_face_counts_for_cpu_snap(local_positions, &solid_mesh.morph_targets, my_lod, neighbor_lods)
+            morph_face_counts_for_cpu_snap(
+                local_positions,
+                &solid_mesh.morph_targets,
+                my_lod,
+                neighbor_lods,
+            )
         } else {
             MorphFaceCounts::default()
         };
@@ -330,7 +335,9 @@ pub(super) fn build_surface_nets_seam_face_audit(
     super::TerrainSeamStripDebug,
 ) {
     use super::lod_delta_gt_one_face_mask;
-    use super::seam_audit::{SkirtFaceCounts, assemble_seam_face_audit, terrain_seam_strip_debug_from_own_strips};
+    use super::seam_audit::{
+        SkirtFaceCounts, assemble_seam_face_audit, terrain_seam_strip_debug_from_own_strips,
+    };
 
     let fine_strips: Vec<_> = own_strips.iter_strips().cloned().collect();
     let seam_strip_debug = terrain_seam_strip_debug_from_own_strips(&fine_strips);
@@ -615,6 +622,34 @@ pub(super) fn softened_stitch_normals(
                 .to_array()
         })
         .collect()
+}
+
+/// Boundary edges for skirt generation on the main Surface Nets mesh only.
+///
+/// [`append_seam_stitches`] appends transition-apron vertices without matching
+/// `local_positions` rows. Skirt extraction must use the pre-stitch counts from
+/// [`super::TerrainMeshSectionStats::from_main_surface`].
+pub(super) fn extract_main_surface_boundary_edges(
+    local_positions: &[Vec3],
+    solid_mesh: &MeshData,
+    main_vertex_count: usize,
+    main_index_count: usize,
+    chunk_size: f32,
+    boundary_band: f32,
+) -> Vec<BoundaryEdge> {
+    let main_vertex_count = main_vertex_count
+        .min(local_positions.len())
+        .min(solid_mesh.positions.len());
+    let main_index_count = main_index_count.min(solid_mesh.indices.len());
+    extract_boundary_edges(
+        local_positions,
+        &solid_mesh.positions[..main_vertex_count],
+        &solid_mesh.normals[..main_vertex_count],
+        &solid_mesh.indices[..main_index_count],
+        &solid_mesh.colors[..main_vertex_count],
+        chunk_size,
+        boundary_band,
+    )
 }
 
 /// Extend `morph_targets` with identity rows (`[pos, 0]`) for any vertices appended

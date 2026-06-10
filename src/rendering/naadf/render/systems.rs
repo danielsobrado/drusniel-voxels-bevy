@@ -1,12 +1,12 @@
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 
+use crate::performance::AreaTimingRecorder;
 use crate::rendering::naadf::cache::NaadfCache;
 use crate::rendering::naadf::config::NaadfConfig;
 use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
 use crate::rendering::naadf::preview::NaadfPreviewPipelineState;
 use crate::rendering::naadf::stats::{NaadfCacheState, NaadfRenderStatsBridge, NaadfStats};
-use crate::performance::AreaTimingRecorder;
 use crate::rendering::radiance_cascades::{
     NAADF_QUERY_CONTACT_SHADOW, NAADF_QUERY_GI_SECONDARY, NAADF_QUERY_SUN_VISIBILITY,
     NAADF_QUERY_TERRAIN_AO, RadianceCascadesConfig, SdfVolumeState,

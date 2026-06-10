@@ -2,7 +2,8 @@ use super::*;
 use crate::constants::{CHUNK_VOLUME, WATER_LEVEL};
 use crate::rendering::ao_config::BakedAoConfig;
 
-fn default_strip_status() -> [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT] {
+fn default_strip_status() -> [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT]
+{
     [super::seam_audit::SeamStripStatus::NotNeeded; super::seam_audit::XZ_FACE_COUNT]
 }
 
@@ -1604,7 +1605,9 @@ fn resolve_morph_face_coverage_seals_if_any_vert_welds_and_keeps_welds() {
 
 #[test]
 fn partial_morph_without_stitch_or_skirt_is_invalid_unsafe_topology() {
-    use super::seam_audit::{SeamFaceMode, SeamFaceModeInput, SeamStripStatus, classify_final_mode};
+    use super::seam_audit::{
+        SeamFaceMode, SeamFaceModeInput, SeamStripStatus, classify_final_mode,
+    };
 
     let mode = classify_final_mode(SeamFaceModeInput {
         fine_components: 1,

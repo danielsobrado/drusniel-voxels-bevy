@@ -1,8 +1,8 @@
 //! Deterministic voxel sculpts for LOD seam hard-case bench checkpoints.
 
-use bevy::prelude::IVec3;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
+use bevy::prelude::IVec3;
 
 const CHUNK_VOXELS: i32 = 16;
 

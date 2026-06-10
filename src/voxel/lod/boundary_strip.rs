@@ -727,8 +727,7 @@ pub fn compare_projected_strips(
             if let (Some(fa), Some(fb), Some(ca), Some(cb)) = (fa, fb, ca, cb) {
                 let d0 = fa.proj.distance(ca.proj);
                 let d1 = fb.proj.distance(cb.proj);
-                max_projected_segment_distance =
-                    max_projected_segment_distance.max(d0.max(d1));
+                max_projected_segment_distance = max_projected_segment_distance.max(d0.max(d1));
             }
         }
     }
@@ -865,8 +864,7 @@ impl StripOverlapConfig {
     pub fn load_or_default() -> Self {
         match crate::config::loader::load_config::<StripOverlapConfigFile, _>(
             LOD_SEAM_AUDIT_CONFIG_PATH,
-        )
-        {
+        ) {
             Ok(file) => file.lod_seam_audit.strip_overlap.into(),
             Err(err) => {
                 bevy::log::warn!(
@@ -958,14 +956,16 @@ pub fn audit_projected_strip_overlap(
         return audit;
     }
 
-    let fine_segments = match projected_segments(fine, config.min_segment_length_voxels, &mut audit) {
+    let fine_segments = match projected_segments(fine, config.min_segment_length_voxels, &mut audit)
+    {
         Some(s) => s,
         None => return audit,
     };
-    let coarse_segments = match projected_segments(coarse, config.min_segment_length_voxels, &mut audit) {
-        Some(s) => s,
-        None => return audit,
-    };
+    let coarse_segments =
+        match projected_segments(coarse, config.min_segment_length_voxels, &mut audit) {
+            Some(s) => s,
+            None => return audit,
+        };
 
     let Some((fine_span_min, fine_span_max)) = strip_span(&fine_segments) else {
         audit.status = StripOverlapStatus::EmptyFineStrip;
@@ -983,7 +983,11 @@ pub fn audit_projected_strip_overlap(
     audit.overlap_span_max = fine_span_max.min(coarse_span_max);
     let overlap_len = (audit.overlap_span_max - audit.overlap_span_min).max(0.0);
     let denom = (fine_span_max - fine_span_min).max(coarse_span_max - coarse_span_min);
-    audit.span_overlap_ratio = if denom <= f32::EPSILON { 1.0 } else { overlap_len / denom };
+    audit.span_overlap_ratio = if denom <= f32::EPSILON {
+        1.0
+    } else {
+        overlap_len / denom
+    };
     if audit.span_overlap_ratio < config.min_span_overlap_ratio {
         audit.status = StripOverlapStatus::SpanMismatch;
         return audit;
@@ -1118,7 +1122,11 @@ fn closest_distance_to_segments(point: Vec2, segments: &[ProjectedSegment]) -> f
         let (_, distance) = closest_point_on_segment_2d(point, segment.a, segment.b);
         best = best.min(distance);
     }
-    if best.is_finite() { best } else { f32::INFINITY }
+    if best.is_finite() {
+        best
+    } else {
+        f32::INFINITY
+    }
 }
 
 fn segment_crossing_count(
@@ -1487,7 +1495,11 @@ mod tests {
     fn overlap_oracle_accepts_different_segment_counts_when_geometrically_compatible() {
         let fine = line_strip(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)], &[[0, 1], [1, 2]]);
         let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
-        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let audit = audit_projected_strip_overlap(
+            Some(&fine),
+            Some(&coarse),
+            StripOverlapConfig::default(),
+        );
         assert_eq!(audit.status, StripOverlapStatus::Compatible);
         assert!(audit.compatible);
     }
@@ -1496,7 +1508,11 @@ mod tests {
     fn overlap_oracle_rejects_span_mismatch() {
         let fine = line_strip(&[(0.0, 0.0), (10.0, 0.0)], &[[0, 1]]);
         let coarse = line_strip(&[(0.0, 0.0), (7.0, 0.0)], &[[0, 1]]);
-        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let audit = audit_projected_strip_overlap(
+            Some(&fine),
+            Some(&coarse),
+            StripOverlapConfig::default(),
+        );
         assert_eq!(audit.status, StripOverlapStatus::SpanMismatch);
     }
 
@@ -1504,7 +1520,11 @@ mod tests {
     fn overlap_oracle_rejects_directed_distance_exceeded() {
         let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
         let coarse = line_strip(&[(0.0, 0.6), (2.0, 0.6)], &[[0, 1]]);
-        let audit = audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let audit = audit_projected_strip_overlap(
+            Some(&fine),
+            Some(&coarse),
+            StripOverlapConfig::default(),
+        );
         assert_eq!(audit.status, StripOverlapStatus::DirectedDistanceExceeded);
     }
 
@@ -1512,8 +1532,11 @@ mod tests {
     fn compact_projected_strip_round_trip_preserves_oracle_result() {
         let fine = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
         let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
-        let expected =
-            audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let expected = audit_projected_strip_overlap(
+            Some(&fine),
+            Some(&coarse),
+            StripOverlapConfig::default(),
+        );
         let fine_compact = CompactProjectedStrip::from_lod_boundary_strip(&fine);
         let coarse_compact = CompactProjectedStrip::from_lod_boundary_strip(&coarse);
         let fine_round = lod_boundary_strip_from_compact(&fine_compact);
@@ -1544,16 +1567,23 @@ mod tests {
     #[test]
     fn overlap_oracle_reports_missing_fine_strip() {
         let coarse = line_strip(&[(0.0, 0.0), (2.0, 0.0)], &[[0, 1]]);
-        let audit = audit_projected_strip_overlap(None, Some(&coarse), StripOverlapConfig::default());
+        let audit =
+            audit_projected_strip_overlap(None, Some(&coarse), StripOverlapConfig::default());
         assert_eq!(audit.status, StripOverlapStatus::MissingFineStrip);
     }
 
     #[test]
     fn overlap_oracle_reports_fine_multi_component() {
-        let fine = line_strip(&[(0.0, 0.0), (1.0, 0.0), (4.0, 0.0), (5.0, 0.0)], &[[0, 1], [2, 3]]);
+        let fine = line_strip(
+            &[(0.0, 0.0), (1.0, 0.0), (4.0, 0.0), (5.0, 0.0)],
+            &[[0, 1], [2, 3]],
+        );
         let coarse = line_strip(&[(0.0, 0.0), (5.0, 0.0)], &[[0, 1]]);
-        let audit =
-            audit_projected_strip_overlap(Some(&fine), Some(&coarse), StripOverlapConfig::default());
+        let audit = audit_projected_strip_overlap(
+            Some(&fine),
+            Some(&coarse),
+            StripOverlapConfig::default(),
+        );
         assert_eq!(audit.status, StripOverlapStatus::FineMultiComponent);
     }
 

@@ -36,17 +36,25 @@ pub fn mesh_invalidation_touches_neighbor(local: UVec3, neighbor_offset: IVec3) 
 
 /// Face-adjacent chunk offsets (6). Used when an entire chunk boundary becomes
 /// available to neighbors (async generation), not for single-voxel edits.
-pub const CHUNK_FACE_NEIGHBOR_OFFSETS: [IVec3; 6] =
-    [IVec3::NEG_X, IVec3::X, IVec3::NEG_Y, IVec3::Y, IVec3::NEG_Z, IVec3::Z];
+pub const CHUNK_FACE_NEIGHBOR_OFFSETS: [IVec3; 6] = [
+    IVec3::NEG_X,
+    IVec3::X,
+    IVec3::NEG_Y,
+    IVec3::Y,
+    IVec3::NEG_Z,
+    IVec3::Z,
+];
 
 /// Iterates chunk-coordinate offsets (excluding zero) that need remeshing after
 /// a voxel change at `local`.
 pub fn mesh_invalidation_neighbor_offsets(local: UVec3) -> impl Iterator<Item = IVec3> {
     (-1..=1).flat_map(move |dz| {
-        (-1..=1).flat_map(move |dy| (-1..=1).filter_map(move |dx| {
-            let offset = IVec3::new(dx, dy, dz);
-            mesh_invalidation_touches_neighbor(local, offset).then_some(offset)
-        }))
+        (-1..=1).flat_map(move |dy| {
+            (-1..=1).filter_map(move |dx| {
+                let offset = IVec3::new(dx, dy, dz);
+                mesh_invalidation_touches_neighbor(local, offset).then_some(offset)
+            })
+        })
     })
 }
 

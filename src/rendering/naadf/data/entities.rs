@@ -2,8 +2,8 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::rendering::naadf::stats::NaadfStats;
 use crate::performance::{AreaTimingRecorder, area_timer};
+use crate::rendering::naadf::stats::NaadfStats;
 use crate::rendering::voxel_ray_backend::VoxelRayHit;
 
 #[derive(Component, Clone, Debug, PartialEq)]

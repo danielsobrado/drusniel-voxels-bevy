@@ -1,10 +1,10 @@
 use crate::constants::{BEDROCK_DEPTH, CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WORLD_KILL_Y};
 use crate::terrain::generation::config::terrain_config_fingerprint;
 use crate::voxel::chunk::{Chunk, MeshDirtyReason};
-use crate::voxel::mesh_invalidation::{
-    mesh_invalidation_neighbor_offsets, CHUNK_FACE_NEIGHBOR_OFFSETS,
-};
 use crate::voxel::materials::{MaterialId, MaterialReplaceSummary};
+use crate::voxel::mesh_invalidation::{
+    CHUNK_FACE_NEIGHBOR_OFFSETS, mesh_invalidation_neighbor_offsets,
+};
 use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
@@ -498,10 +498,7 @@ impl VoxelWorld {
         drop(chunk);
 
         for offset in mesh_invalidation_neighbor_offsets(local_pos) {
-            self.mark_chunk_dirty_with_reason(
-                chunk_pos + offset,
-                MeshDirtyReason::TerrainMutation,
-            );
+            self.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::TerrainMutation);
         }
         VoxelEditResult::Applied
     }

@@ -467,9 +467,9 @@ pub(super) fn sample_neighbor_chunks(
                 let water_entity = chunk.and_then(|chunk| chunk.water_mesh_entity());
                 let terrain_debug = mesh_entity
                     .and_then(|entity| terrain_entities.get(entity).ok())
-                    .and_then(|(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _, _, _)| {
-                        terrain_debug
-                    });
+                    .and_then(
+                        |(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _, _, _)| terrain_debug,
+                    );
 
                 chunks.push(ChunkProbe {
                     chunk_position: chunk_pos.into(),

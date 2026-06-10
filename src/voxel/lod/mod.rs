@@ -1065,5 +1065,4 @@ mod tests {
             Some(LodLevel::Lod0)
         );
     }
-
 }

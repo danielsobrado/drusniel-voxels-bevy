@@ -2,13 +2,13 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::camera::controller::PlayerCamera;
+use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::naadf::cache::NaadfCache;
 use crate::rendering::naadf::config::NaadfConfig;
 use crate::rendering::naadf::dirty::NaadfDirtyChunkQueue;
 use crate::rendering::naadf::gpu_buffers::NaadfGpuChunkTable;
 use crate::rendering::naadf::stats::NaadfStats;
-use crate::camera::controller::PlayerCamera;
-use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::world::VoxelWorld;
 
 pub(crate) const MIN_VERTICAL_STREAM_RADIUS_CHUNKS: i32 = 2;

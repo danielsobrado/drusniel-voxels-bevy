@@ -215,7 +215,10 @@ fn chunk_data_serializable() {
 
     assert_eq!(restored.position, data.position);
     assert_eq!(restored.voxels.len(), data.voxels.len());
-    assert_eq!(restored.material_overrides.len(), data.material_overrides.len());
+    assert_eq!(
+        restored.material_overrides.len(),
+        data.material_overrides.len()
+    );
 }
 
 #[test]

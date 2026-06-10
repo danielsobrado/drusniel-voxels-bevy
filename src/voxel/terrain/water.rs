@@ -1,6 +1,4 @@
-use crate::constants::{
-    CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WATER_LEVEL,
-};
+use crate::constants::{CHUNK_SIZE_I32, MIN_BREAKABLE_Y, WATER_LEVEL};
 use crate::terrain::generation::config::BasinConfig;
 
 use super::{

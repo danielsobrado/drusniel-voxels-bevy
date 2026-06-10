@@ -1,15 +1,15 @@
+use super::seam_audit::{SeamStripStatus, XZ_FACE_COUNT};
 use super::{
     ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, MeshGenerationTimingStats,
     PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
     append_seam_stitches, apply_snap_or_morph, build_surface_nets_seam_face_audit,
     compute_vertex_material_weights, compute_vertex_material_weights_lod_transition_aware,
-    extract_export_boundary_strips, extract_own_boundary_strips, generate_sdf, generate_sdf_lod1,
-    generate_sdf_lod2,
+    extract_export_boundary_strips, extract_main_surface_boundary_edges,
+    extract_own_boundary_strips, generate_sdf, generate_sdf_lod1, generate_sdf_lod2,
     generate_sdf_lod3, generate_water_mesh, pad_morph_targets_identity,
     recompute_morphed_seam_normals, scale_vertex_from_center, sdf_gradient_normal_at_local,
     skirt_depth_for_lod, terrain_morph_config,
 };
-use super::seam_audit::{SeamStripStatus, XZ_FACE_COUNT};
 use crate::constants::{
     CHUNK_SIZE, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_PADDED_SIZE, LOD2_STEP_SIZE,
     LOD3_PADDED_SIZE, LOD3_STEP_SIZE, VOXEL_SIZE,
@@ -17,9 +17,7 @@ use crate::constants::{
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
-use crate::voxel::skirt::{
-    NeighborLods, SkirtConfig, extract_boundary_edges, generate_skirts_with_sealed_faces,
-};
+use crate::voxel::skirt::{NeighborLods, SkirtConfig, generate_skirts_with_sealed_faces};
 use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::{IVec3, Vec3};
@@ -246,13 +244,8 @@ pub fn generate_chunk_mesh_surface_nets(
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let own_boundary_strips = extract_own_boundary_strips(
-        &local_positions,
-        &solid_mesh,
-        chunk_origin,
-        chunk,
-        my_lod,
-    );
+    let own_boundary_strips =
+        extract_own_boundary_strips(&local_positions, &solid_mesh, chunk_origin, chunk, my_lod);
     let boundary_strips =
         extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
@@ -275,12 +268,11 @@ pub fn generate_chunk_mesh_surface_nets(
     let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
-        let boundary_edges = extract_boundary_edges(
+        let boundary_edges = extract_main_surface_boundary_edges(
             &local_positions,
-            &solid_mesh.positions,
-            &solid_mesh.normals,
-            &solid_mesh.indices,
-            &solid_mesh.colors,
+            &solid_mesh,
+            mesh_section_stats.main_surface_vertex_count as usize,
+            mesh_section_stats.main_surface_index_count as usize,
             CHUNK_SIZE as f32,
             boundary_band,
         );
@@ -527,13 +519,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let own_boundary_strips = extract_own_boundary_strips(
-        &local_positions,
-        &solid_mesh,
-        chunk_origin,
-        chunk,
-        my_lod,
-    );
+    let own_boundary_strips =
+        extract_own_boundary_strips(&local_positions, &solid_mesh, chunk_origin, chunk, my_lod);
     let boundary_strips =
         extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
@@ -557,12 +544,11 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
-        let boundary_edges = extract_boundary_edges(
+        let boundary_edges = extract_main_surface_boundary_edges(
             &local_positions,
-            &solid_mesh.positions,
-            &solid_mesh.normals,
-            &solid_mesh.indices,
-            &solid_mesh.colors,
+            &solid_mesh,
+            mesh_section_stats.main_surface_vertex_count as usize,
+            mesh_section_stats.main_surface_index_count as usize,
             CHUNK_SIZE as f32,
             boundary_band,
         );
@@ -810,13 +796,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let own_boundary_strips = extract_own_boundary_strips(
-        &local_positions,
-        &solid_mesh,
-        chunk_origin,
-        chunk,
-        my_lod,
-    );
+    let own_boundary_strips =
+        extract_own_boundary_strips(&local_positions, &solid_mesh, chunk_origin, chunk, my_lod);
     let boundary_strips =
         extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
@@ -840,12 +821,11 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
-        let boundary_edges = extract_boundary_edges(
+        let boundary_edges = extract_main_surface_boundary_edges(
             &local_positions,
-            &solid_mesh.positions,
-            &solid_mesh.normals,
-            &solid_mesh.indices,
-            &solid_mesh.colors,
+            &solid_mesh,
+            mesh_section_stats.main_surface_vertex_count as usize,
+            mesh_section_stats.main_surface_index_count as usize,
             CHUNK_SIZE as f32,
             boundary_band,
         );
@@ -1093,13 +1073,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
     // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
     let start = timing_enabled.then(Instant::now);
-    let own_boundary_strips = extract_own_boundary_strips(
-        &local_positions,
-        &solid_mesh,
-        chunk_origin,
-        chunk,
-        my_lod,
-    );
+    let own_boundary_strips =
+        extract_own_boundary_strips(&local_positions, &solid_mesh, chunk_origin, chunk, my_lod);
     let boundary_strips =
         extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
     generation_timing.boundary_strip_us += elapsed_us(start);
@@ -1123,12 +1098,11 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     let start = timing_enabled.then(Instant::now);
     if !solid_mesh.indices.is_empty() {
         let boundary_band = my_lod.step_size() as f32;
-        let boundary_edges = extract_boundary_edges(
+        let boundary_edges = extract_main_surface_boundary_edges(
             &local_positions,
-            &solid_mesh.positions,
-            &solid_mesh.normals,
-            &solid_mesh.indices,
-            &solid_mesh.colors,
+            &solid_mesh,
+            mesh_section_stats.main_surface_vertex_count as usize,
+            mesh_section_stats.main_surface_index_count as usize,
             CHUNK_SIZE as f32,
             boundary_band,
         );

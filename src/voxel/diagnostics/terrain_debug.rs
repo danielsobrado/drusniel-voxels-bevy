@@ -3,12 +3,12 @@
 use crate::camera::controller::PlayerCamera;
 use crate::rendering::triplanar_material::{TerrainMaterialQuality, TriplanarMaterial};
 use crate::voxel::chunk::LodLevel;
-use crate::voxel::meshing::{terrain_morph_config, ChunkMesh, MeshSettings};
+use crate::voxel::meshing::{ChunkMesh, MeshSettings, terrain_morph_config};
 use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
 use crate::voxel::plugin::LodSettings;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

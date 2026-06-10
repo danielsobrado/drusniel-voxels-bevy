@@ -733,9 +733,7 @@ fn evaluate_lod_seam_audit(
     summary_path: &Path,
     summary: &BenchSummary,
 ) -> Vec<CheckResult> {
-    let audit_path = summary_path
-        .parent()
-        .map(|dir| dir.join("seam-audit.json"));
+    let audit_path = summary_path.parent().map(|dir| dir.join("seam-audit.json"));
     let Some(audit_path) = audit_path else {
         return vec![CheckResult {
             checkpoint: summary.scene.clone(),
@@ -774,7 +772,9 @@ fn evaluate_lod_seam_audit(
     let max_regular_edges = dump
         .faces
         .iter()
-        .filter(|face| face.final_mode == "InvalidUnsafeTopology" || face.final_mode == "SkirtFallback")
+        .filter(|face| {
+            face.final_mode == "InvalidUnsafeTopology" || face.final_mode == "SkirtFallback"
+        })
         .map(|face| face.unmatched_regular_edges as u32)
         .max()
         .unwrap_or(0);
@@ -1417,9 +1417,13 @@ mod tests {
     #[test]
     fn strip_guard_policy_ignores_fallback_faces_for_span_ratio() {
         assert!(!claims_stitch_safe_seam("SkirtFallback"));
-        assert!(!strip_span_overlap_ratio_is_meaningful("MissingCoarseStrip"));
+        assert!(!strip_span_overlap_ratio_is_meaningful(
+            "MissingCoarseStrip"
+        ));
         assert!(claims_stitch_safe_seam("StitchGeometry"));
-        assert!(strip_span_overlap_ratio_is_meaningful("DirectedDistanceExceeded"));
+        assert!(strip_span_overlap_ratio_is_meaningful(
+            "DirectedDistanceExceeded"
+        ));
     }
 
     fn summary_with_frame(scene: &str, checkpoint: &str, avg_ms: f64, p99_ms: f64) -> BenchSummary {

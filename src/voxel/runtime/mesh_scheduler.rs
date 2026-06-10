@@ -833,11 +833,7 @@ pub(crate) fn mesh_dirty_chunks_system(
         "SN Emit CPU",
         mesh_generation_timing.emit_surface_us,
     );
-    timing.record_area(
-        frame.0,
-        "LOD Seam CPU",
-        mesh_generation_timing.lod_seam_us,
-    );
+    timing.record_area(frame.0, "LOD Seam CPU", mesh_generation_timing.lod_seam_us);
     timing.record_area(
         frame.0,
         "LOD Strip Export CPU",
@@ -1327,4 +1323,3 @@ pub(crate) fn update_terrain_material_lod(
         chunk_mesh.material_quality = target_quality;
     }
 }
-

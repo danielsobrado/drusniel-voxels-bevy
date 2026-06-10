@@ -960,7 +960,8 @@ mod tests {
 
     #[test]
     fn wgsl_path_b_first_hit_is_terrain_only() {
-        let first_hit = include_str!("../../../../assets/shaders/naadf/first_hit_path_b_terrain.wgsl");
+        let first_hit =
+            include_str!("../../../../assets/shaders/naadf/first_hit_path_b_terrain.wgsl");
 
         assert!(first_hit.contains("trace_naadf_world_lod"));
         assert!(first_hit.contains("textureSampleLevel"));
@@ -1009,7 +1010,8 @@ mod tests {
 
     #[test]
     fn wgsl_preview_lighting_uses_first_hit_shading() {
-        let preview_lighting = include_str!("../../../../assets/shaders/naadf/preview_lighting.wgsl");
+        let preview_lighting =
+            include_str!("../../../../assets/shaders/naadf/preview_lighting.wgsl");
 
         assert!(preview_lighting.contains("shade_naadf_preview"));
         assert!(preview_lighting.contains("naadf_preview_shaded_color"));

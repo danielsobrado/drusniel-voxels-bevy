@@ -5,10 +5,10 @@
 //! - G key for detailed block logging
 //! - Various toggle keys for specific debug information
 
-use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
-use crate::interaction::TargetedProp;
 use super::editing::{DeleteMode, DragState, EditMode};
 use super::targeting::TargetedBlock;
+use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
+use crate::interaction::TargetedProp;
 use crate::network::NetworkSession;
 use crate::performance::{
     AreaTimingCapture, AreaTimingRecorder, dump_area_timing_csv, start_area_trace, stop_area_trace,
@@ -450,9 +450,7 @@ pub fn toggle_mc_transvoxel_spike(
 
     #[cfg(not(feature = "mc_transvoxel"))]
     {
-        log::warn!(
-            "MC+Transvoxel runtime toggle ignored: rebuild with --features mc_transvoxel"
-        );
+        log::warn!("MC+Transvoxel runtime toggle ignored: rebuild with --features mc_transvoxel");
         return;
     }
 
@@ -517,7 +515,11 @@ pub fn toggle_freeze_terrain_lod(
     lod_control.freeze_lod = !lod_control.freeze_lod;
     info!(
         "Terrain LOD updates: {} (Alt+F6). {}",
-        if lod_control.freeze_lod { "FROZEN" } else { "LIVE" },
+        if lod_control.freeze_lod {
+            "FROZEN"
+        } else {
+            "LIVE"
+        },
         if lod_control.freeze_lod {
             "Fly to the seam and inspect; LODs will not shift."
         } else {

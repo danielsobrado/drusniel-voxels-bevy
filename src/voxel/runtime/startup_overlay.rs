@@ -667,4 +667,3 @@ pub(crate) fn world_startup_snapshot(
         complete: true,
     }
 }
-

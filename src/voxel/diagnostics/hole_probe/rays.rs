@@ -161,12 +161,13 @@ pub(super) fn cast_down_ray(
             let chunk_position = entity_probe
                 .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)| chunk_mesh)
                 .map(|chunk_mesh| chunk_mesh.chunk_position.into());
-            let has_chunk_mesh =
-                entity_probe.is_some_and(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)| {
-                    chunk_mesh.is_some()
-                });
+            let has_chunk_mesh = entity_probe.is_some_and(
+                |(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)| chunk_mesh.is_some(),
+            );
             let has_chunk_collider = entity_probe.is_some_and(
-                |(_, _, _, _, _, _, _, _, _, _, _, chunk_collider, _, _, _)| chunk_collider.is_some(),
+                |(_, _, _, _, _, _, _, _, _, _, _, chunk_collider, _, _, _)| {
+                    chunk_collider.is_some()
+                },
             );
             let has_collider =
                 entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, collider, _, _)| {

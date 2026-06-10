@@ -332,7 +332,9 @@ impl MeshGenerationTimingStats {
         self.surface_nets_us = self.surface_nets_us.saturating_add(other.surface_nets_us);
         self.emit_surface_us = self.emit_surface_us.saturating_add(other.emit_surface_us);
         self.lod_seam_us = self.lod_seam_us.saturating_add(other.lod_seam_us);
-        self.boundary_strip_us = self.boundary_strip_us.saturating_add(other.boundary_strip_us);
+        self.boundary_strip_us = self
+            .boundary_strip_us
+            .saturating_add(other.boundary_strip_us);
         self.seam_stitch_us = self.seam_stitch_us.saturating_add(other.seam_stitch_us);
         self.skirt_us = self.skirt_us.saturating_add(other.skirt_us);
         self.morph_finalize_us = self

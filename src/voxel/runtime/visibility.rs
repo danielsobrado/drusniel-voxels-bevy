@@ -524,4 +524,3 @@ fn refresh_lod_change_rate(now: f32, lod_transitions: &mut TerrainLodTransitionS
     lod_transitions.changes_this_second = 0;
     lod_transitions.last_change_second = now;
 }
-

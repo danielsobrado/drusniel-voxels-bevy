@@ -2,8 +2,7 @@ use bevy::render::settings::{Backends, WgpuLimits};
 
 use crate::diagnostics::bench::BenchConfig;
 use crate::shared::constants::{
-    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE,
-    MIN_TEXTURES_PER_STAGE,
+    FALLBACK_BIND_GROUPS, FALLBACK_STORAGE_TEXTURES, MIN_SAMPLERS_PER_STAGE, MIN_TEXTURES_PER_STAGE,
 };
 
 /// Pre-flight GPU detection to query actual device limits before Bevy initializes.

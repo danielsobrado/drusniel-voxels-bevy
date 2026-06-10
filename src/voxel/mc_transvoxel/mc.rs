@@ -3,8 +3,8 @@ use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::meshing::mc_support;
 use crate::voxel::meshing::{
     ChunkMeshResult, McTransitionForensicsMode, McTriangleSource, McTriangleSources, MeshData,
-    MeshForensicsOptions, MeshGenerationTimingStats, TerrainMeshSectionStats,
-    WaterAirExposureMode, generate_water_mesh,
+    MeshForensicsOptions, MeshGenerationTimingStats, TerrainMeshSectionStats, WaterAirExposureMode,
+    generate_water_mesh,
 };
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::world::VoxelWorld;

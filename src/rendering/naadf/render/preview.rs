@@ -3,12 +3,12 @@ use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponent;
 use bevy::render::render_graph::RenderLabel;
 
+use crate::camera::controller::PlayerCamera;
 use crate::rendering::naadf::config::{
     NaadfConfig, NaadfDenoiseQuality, NaadfPathBCompositorModeConfig,
     NaadfPreviewCompositeModeConfig,
 };
 use crate::rendering::naadf::stats::{NaadfCacheState, NaadfStats};
-use crate::camera::controller::PlayerCamera;
 use crate::rendering::ray_tracing::{ExperimentalRenderMode, RayTracingSettings};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]

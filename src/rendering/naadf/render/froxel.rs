@@ -10,12 +10,12 @@ use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::view::ExtractedView;
 use std::borrow::Cow;
 
+use crate::environment::Sun;
+use crate::rendering::god_rays::GodRayFroxelParams;
 use crate::rendering::naadf::config::NaadfConfig;
 use crate::rendering::naadf::gpu_buffers::{ExtractedNaadfGpuUploads, NaadfGpuBuffers};
 use crate::rendering::naadf::pipeline::NAADF_FROXEL_SUN_MASK_SHADER_HANDLE;
 use crate::rendering::naadf::stats::NaadfStats;
-use crate::environment::Sun;
-use crate::rendering::god_rays::GodRayFroxelParams;
 
 pub const NAADF_FROXEL_SUN_MASK_WORKGROUP_SIZE: u32 = 64;
 

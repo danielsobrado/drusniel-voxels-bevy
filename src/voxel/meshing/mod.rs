@@ -80,18 +80,18 @@ use std::sync::OnceLock;
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
-mod blocky;
 pub mod baked_ao;
+mod blocky;
 pub mod commit;
 mod data;
 pub mod invalidation;
-mod lod_seam;
-pub mod seam_audit;
 pub mod lod;
+mod lod_seam;
 mod material_weights;
 pub(crate) mod mc_support;
 mod pipeline;
 mod sdf;
+pub mod seam_audit;
 mod surface_nets;
 #[cfg(test)]
 mod tests;
@@ -107,15 +107,15 @@ pub(crate) use lod_seam::{
     transition_target_lod, xz_face_coarse_target_local,
 };
 pub use pipeline::*;
-pub use seam_audit::{
-    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
-    XZ_FACE_COUNT, XZ_FACES, assemble_seam_face_audit, classify_final_mode,
-    resolve_strip_status_per_face, strip_reject_reason_from_overlap_status, xz_face_index,
-};
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use sdf::{
     coarse_lod_iso_height_for_column, count_missing_in_bounds_boundary_neighbors,
     empty_chunk_has_surface_nets_boundary_surface, neighbor_lod_for_face,
+};
+pub use seam_audit::{
+    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
+    XZ_FACE_COUNT, XZ_FACES, assemble_seam_face_audit, classify_final_mode,
+    resolve_strip_status_per_face, strip_reject_reason_from_overlap_status, xz_face_index,
 };
 pub use surface_nets::{
     generate_chunk_mesh_surface_nets, generate_chunk_mesh_surface_nets_lod1,

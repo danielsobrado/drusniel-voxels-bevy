@@ -196,8 +196,8 @@ fn stronger_water_metadata(
 mod tests {
     use super::*;
     use crate::constants::{
-        BIOME_CLAY_DETAIL_THRESHOLD, CAVE_SURFACE_OFFSET, CHUNK_SIZE_I32,
-        DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z, MIN_BREAKABLE_Y,
+        BIOME_CLAY_DETAIL_THRESHOLD, CAVE_SURFACE_OFFSET, CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X,
+        DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z, MIN_BREAKABLE_Y,
     };
 
     use crate::terrain::generation::config::TerrainConfig;

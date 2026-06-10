@@ -13,15 +13,14 @@ use crate::constants::{CHUNK_SIZE_I32, VOXEL_SIZE};
 use crate::performance::AreaTimingRecorder;
 use crate::voxel::chunk::LodLevel;
 use crate::voxel::hole_probe::TerrainEntityQuery;
-use crate::voxel::meshing::{
-    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
-    XZ_FACES, barycentric_section, coarse_lod_iso_height_for_column,
-    neighbor_lod_for_face, strip_reject_reason_from_overlap_status, transition_target_lod,
-    xz_face_index,
-};
 use crate::voxel::lod_boundary_strip::{
     LodBoundaryStrip, StripOverlapConfig, StripOverlapStatus, StripVertex,
     audit_projected_strip_overlap, lod_boundary_strip_from_compact, project_to_seam_frame,
+};
+use crate::voxel::meshing::{
+    SeamFaceAudit, SeamFaceMode, SeamStripOverlapSource, SeamStripRejectReason, SeamStripStatus,
+    XZ_FACES, barycentric_section, coarse_lod_iso_height_for_column, neighbor_lod_for_face,
+    strip_reject_reason_from_overlap_status, transition_target_lod, xz_face_index,
 };
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
@@ -199,7 +198,8 @@ pub fn build_seam_audit_dump(
         };
 
         for (face_idx, face) in XZ_FACES.iter().enumerate() {
-            let Some(neighbor_lod) = neighbor_lod_for_face(&debug.neighbor_lods_at_mesh, *face) else {
+            let Some(neighbor_lod) = neighbor_lod_for_face(&debug.neighbor_lods_at_mesh, *face)
+            else {
                 continue;
             };
             if !neighbor_lod.is_lower_detail_than(debug.effective_lod_at_mesh) {
@@ -339,7 +339,8 @@ fn enhance_audit_with_coverage(
             let face_u = normalized_grid_coord(u, SEAM_COVERAGE_GRID_U);
             let face_v = normalized_grid_coord(v, SEAM_COVERAGE_GRID_V);
             let seam_point = seam_face_sample_point(source_origin, face, face_u, face_v);
-            let expected_y = expected_iso_y(world, seam_point.x, seam_point.z, fine_lod, coarse_lod);
+            let expected_y =
+                expected_iso_y(world, seam_point.x, seam_point.z, fine_lod, coarse_lod);
             let (render_hit_y, render_hit_pos, _, _, section) = highest_render_mesh_hit_at(
                 world,
                 terrain_entities,
@@ -530,16 +531,19 @@ fn edge_leak_probe_for_face(
     let open_edges = open_seam_edges_on_face(mesh, translation, chunk_pos, face);
     for edge in open_edges {
         let length_voxels = edge.length / VOXEL_SIZE;
-        result.longest_unmatched_edge_voxels = result.longest_unmatched_edge_voxels.max(length_voxels);
+        result.longest_unmatched_edge_voxels =
+            result.longest_unmatched_edge_voxels.max(length_voxels);
         match edge.section {
             MeshSectionClass::MainSurface => {
                 result.unmatched_regular_edges = result.unmatched_regular_edges.saturating_add(1);
             }
             MeshSectionClass::TransitionGeometry | MeshSectionClass::HorizontalSkirt => {
-                result.unmatched_transition_edges = result.unmatched_transition_edges.saturating_add(1);
+                result.unmatched_transition_edges =
+                    result.unmatched_transition_edges.saturating_add(1);
             }
             MeshSectionClass::VerticalSkirt => {
-                result.unmatched_transition_edges = result.unmatched_transition_edges.saturating_add(1);
+                result.unmatched_transition_edges =
+                    result.unmatched_transition_edges.saturating_add(1);
             }
             MeshSectionClass::Unknown => {
                 result.unmatched_regular_edges = result.unmatched_regular_edges.saturating_add(1);
@@ -609,10 +613,9 @@ fn open_seam_edges_on_face(
 
 fn mesh_attribute_positions(mesh: &Mesh) -> Vec<Vec3> {
     match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-        Some(VertexAttributeValues::Float32x3(values)) => values
-            .iter()
-            .map(|p| Vec3::from_array(*p))
-            .collect(),
+        Some(VertexAttributeValues::Float32x3(values)) => {
+            values.iter().map(|p| Vec3::from_array(*p)).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -752,7 +755,10 @@ fn quantize_world_pos(pos: Vec3) -> QuantizedWorldPos {
     }
 }
 
-fn ordered_world_edge(a: QuantizedWorldPos, b: QuantizedWorldPos) -> (QuantizedWorldPos, QuantizedWorldPos) {
+fn ordered_world_edge(
+    a: QuantizedWorldPos,
+    b: QuantizedWorldPos,
+) -> (QuantizedWorldPos, QuantizedWorldPos) {
     if (a.x, a.y, a.z) <= (b.x, b.y, b.z) {
         (a, b)
     } else {
@@ -799,7 +805,12 @@ fn strip_span_overlap_ratio_counts_for_summary(status: StripOverlapStatus) -> bo
     )
 }
 
-fn world_pos_in_face_band(world_pos: Vec3, chunk_pos: IVec3, face: ChunkFace, lod: LodLevel) -> bool {
+fn world_pos_in_face_band(
+    world_pos: Vec3,
+    chunk_pos: IVec3,
+    face: ChunkFace,
+    lod: LodLevel,
+) -> bool {
     let origin = VoxelWorld::chunk_to_world(chunk_pos).as_vec3();
     let local = world_pos - origin;
     let band = lod.step_size().max(1) as f32;
@@ -845,7 +856,9 @@ fn extract_main_surface_strip_for_face(
     face: ChunkFace,
     lod: LodLevel,
 ) -> Option<LodBoundaryStrip> {
-    let entity = world.get_chunk(chunk_pos).and_then(|chunk| chunk.mesh_entity())?;
+    let entity = world
+        .get_chunk(chunk_pos)
+        .and_then(|chunk| chunk.mesh_entity())?;
     let Ok((_, mesh3d, transform, _, _, ..)) = terrain_entities.get(entity) else {
         return None;
     };
@@ -920,7 +933,9 @@ fn extract_main_surface_strip_for_face(
             } else {
                 (qb, qa)
             };
-            *edge_counts.entry(StripEdgeKey { a: ea, b: eb }).or_insert(0) += 1;
+            *edge_counts
+                .entry(StripEdgeKey { a: ea, b: eb })
+                .or_insert(0) += 1;
         }
     }
 
@@ -956,7 +971,13 @@ fn highest_render_mesh_hit_at(
     world_x: f32,
     world_z: f32,
     origin_y: f32,
-) -> (Option<f32>, Option<Vec3>, Option<IVec3>, Option<Entity>, Option<MeshSectionClass>) {
+) -> (
+    Option<f32>,
+    Option<Vec3>,
+    Option<IVec3>,
+    Option<Entity>,
+    Option<MeshSectionClass>,
+) {
     let mut best: Option<(f32, Vec3, IVec3, Entity, MeshSectionClass)> = None;
     for dz in -1..=1 {
         for dy in -1..=1 {
@@ -987,19 +1008,24 @@ fn highest_render_mesh_hit_at(
                 else {
                     continue;
                 };
-                if best.as_ref().map_or(true, |(best_y, _, _, _, _)| hit_y > *best_y) {
-                    let hit_chunk = chunk_mesh
-                        .map(|c| c.chunk_position)
-                        .unwrap_or(chunk_pos);
+                if best
+                    .as_ref()
+                    .map_or(true, |(best_y, _, _, _, _)| hit_y > *best_y)
+                {
+                    let hit_chunk = chunk_mesh.map(|c| c.chunk_position).unwrap_or(chunk_pos);
                     best = Some((hit_y, hit_pos, hit_chunk, entity_id, section));
                 }
             }
         }
     }
     match best {
-        Some((y, hit_pos, chunk, entity, section)) => {
-            (Some(y), Some(hit_pos), Some(chunk), Some(entity), Some(section))
-        }
+        Some((y, hit_pos, chunk, entity, section)) => (
+            Some(y),
+            Some(hit_pos),
+            Some(chunk),
+            Some(entity),
+            Some(section),
+        ),
         None => (None, None, None, None, None),
     }
 }
@@ -1028,15 +1054,18 @@ fn vertical_mesh_hit(
         {
             if best_y.map_or(true, |best| y > best) {
                 best_y = Some(y);
-                best_section = triangle_section(
-                    &barycentrics,
-                    indices[tri_start] as usize,
-                );
+                best_section = triangle_section(&barycentrics, indices[tri_start] as usize);
                 best_pos = Some(hit_pos);
             }
         }
     }
-    best_y.map(|y| (y, best_pos.unwrap_or(Vec3::new(world_x, y, world_z)), best_section))
+    best_y.map(|y| {
+        (
+            y,
+            best_pos.unwrap_or(Vec3::new(world_x, y, world_z)),
+            best_section,
+        )
+    })
 }
 
 fn vertical_ray_triangle_hit(
@@ -1218,9 +1247,7 @@ fn strip_reject_reason_name(reason: SeamStripRejectReason) -> String {
         SeamStripRejectReason::StaleStrip => "StaleStrip".to_string(),
         SeamStripRejectReason::MultiComponentStrip => "MultiComponentStrip".to_string(),
         SeamStripRejectReason::SpanMismatch => "SpanMismatch".to_string(),
-        SeamStripRejectReason::DirectedDistanceExceeded => {
-            "DirectedDistanceExceeded".to_string()
-        }
+        SeamStripRejectReason::DirectedDistanceExceeded => "DirectedDistanceExceeded".to_string(),
         SeamStripRejectReason::EndpointDistanceExceeded => "EndpointDistanceExceeded".to_string(),
         SeamStripRejectReason::CrossingOrFoldDetected => "CrossingOrFoldDetected".to_string(),
         SeamStripRejectReason::UnsupportedTopology => "UnsupportedTopology".to_string(),
@@ -1259,8 +1286,8 @@ fn strip_overlap_status_name(status: StripOverlapStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_mesh::PrimitiveTopology;
     use crate::voxel::world::VoxelWorld;
+    use bevy_mesh::PrimitiveTopology;
 
     fn chunk_pos_for_pos_x_face() -> IVec3 {
         IVec3::new(16, 0, 0)
@@ -1327,8 +1354,18 @@ mod tests {
             ChunkFace::PosX,
             LodLevel::Lod0
         ));
-        assert!(!edge_on_chunk_face(in_band, in_band, chunk_pos, ChunkFace::PosX));
-        assert!(edge_on_chunk_face(on_plane, on_plane, chunk_pos, ChunkFace::PosX));
+        assert!(!edge_on_chunk_face(
+            in_band,
+            in_band,
+            chunk_pos,
+            ChunkFace::PosX
+        ));
+        assert!(edge_on_chunk_face(
+            on_plane,
+            on_plane,
+            chunk_pos,
+            ChunkFace::PosX
+        ));
     }
 
     #[test]

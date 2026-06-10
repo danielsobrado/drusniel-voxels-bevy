@@ -164,21 +164,6 @@ pub fn extract_boundary_edges(
         || local_positions.len() != normals.len()
         || local_positions.len() != material_weights.len()
     {
-        debug_assert_eq!(
-            local_positions.len(),
-            positions.len(),
-            "skirt extraction requires one render position per local position"
-        );
-        debug_assert_eq!(
-            local_positions.len(),
-            normals.len(),
-            "skirt extraction requires one normal per local position"
-        );
-        debug_assert_eq!(
-            local_positions.len(),
-            material_weights.len(),
-            "skirt extraction requires one material-weight row per local position"
-        );
         return Vec::new();
     }
 

@@ -538,7 +538,10 @@ struct GeneratedTree {
     leaf_center_y: i32,
 }
 
-pub(crate) fn generate_chunk_async(chunk_pos: IVec3, generator: &TerrainGenerator) -> (Chunk, ChunkStats) {
+pub(crate) fn generate_chunk_async(
+    chunk_pos: IVec3,
+    generator: &TerrainGenerator,
+) -> (Chunk, ChunkStats) {
     let chunk_world_x = chunk_pos.x * CHUNK_SIZE_I32;
     let chunk_world_z = chunk_pos.z * CHUNK_SIZE_I32;
     let chunk_world_y = chunk_pos.y * CHUNK_SIZE_I32;
@@ -1003,4 +1006,3 @@ pub(crate) fn assign_initial_lods_for_loaded_world(
         }
     }
 }
-
