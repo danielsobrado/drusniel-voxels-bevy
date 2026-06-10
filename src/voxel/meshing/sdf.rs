@@ -249,6 +249,82 @@ pub(super) fn lod_transition_step(
     lod_transition_step_for_padded_size(my_lod, neighbor_lods, px, py, pz, LOD0_PADDED_SIZE)
 }
 
+/// Outward-apron band test for the *coarse* side of an LOD transition.
+///
+/// Returns `Some(depth)` when cell `(px, py, pz)` lies in the outer boundary band
+/// (outer two padded planes) of a face whose neighbour is *finer* (lower LOD
+/// index) than `my_lod`. `depth` is how far in from the outermost padded plane the
+/// cell sits (0 = outermost), used to grade the apron bias. Mirrors the face/band
+/// table in [`lod_transition_step_for_padded_size`] but keyed on a finer (not
+/// merely differing) neighbour. Because it only fires toward finer neighbours, two
+/// equal-LOD coarse chunks never apply it, so it introduces no new coarse-coarse
+/// seam.
+pub(super) fn apron_band_depth_for_finer_neighbor(
+    my_lod: LodLevel,
+    neighbor_lods: &NeighborLods,
+    px: u32,
+    py: u32,
+    pz: u32,
+    padded_size: u32,
+) -> Option<u8> {
+    let my_index = my_lod.lod_index()?;
+    let outer = padded_size.saturating_sub(1);
+    let mut best: Option<u8> = None;
+    for (face, depth) in [
+        (ChunkFace::NegX, px),
+        (ChunkFace::PosX, outer.saturating_sub(px)),
+        (ChunkFace::NegY, py),
+        (ChunkFace::PosY, outer.saturating_sub(py)),
+        (ChunkFace::NegZ, pz),
+        (ChunkFace::PosZ, outer.saturating_sub(pz)),
+    ] {
+        if depth > 1 {
+            continue; // only the outer two planes form the apron band
+        }
+        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
+            continue; // unloaded neighbour: no apron (nothing to overlap yet)
+        };
+        let Some(neighbor_index) = neighbor_lod.lod_index() else {
+            continue; // Culled / no LOD index
+        };
+        if neighbor_index < my_index {
+            let depth = depth as u8;
+            best = Some(best.map_or(depth, |b| b.min(depth)));
+        }
+    }
+    best
+}
+
+/// Coarse-LOD outward seam apron (env `VOXELS_COARSE_LOD_APRON`).
+///
+/// When enabled, a coarse chunk inflates its boundary band toward any *finer*
+/// neighbour (subtracts a small iso bias) so the coarse surface bulges outward and
+/// overlaps the finer surface, covering the LOD seam crack/lip. The fine-side
+/// stitch is untouched. **Off by default** for a clean A/B baseline; returns the
+/// bias magnitude (0.0 when disabled). Magnitude overridable via
+/// `VOXELS_COARSE_LOD_APRON_BIAS` (default 0.3, clamped to [0, 1]). Read once and
+/// cached so there is no per-chunk env IO on the meshing hot path.
+pub(super) fn coarse_lod_apron_bias() -> f32 {
+    static CACHE: OnceLock<f32> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let enabled = std::env::var("VOXELS_COARSE_LOD_APRON")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !enabled {
+            return 0.0;
+        }
+        let bias = std::env::var("VOXELS_COARSE_LOD_APRON_BIAS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.3)
+            .clamp(0.0, 1.0);
+        info!(
+            "Coarse-LOD seam apron: ENABLED (VOXELS_COARSE_LOD_APRON=1) — coarse boundary inflates toward finer neighbours, bias {bias}"
+        );
+        bias
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BaseSdfTransitionMode {
     Uniform,
@@ -282,6 +358,9 @@ pub(super) fn generate_low_lod_sdf<const N: usize>(
         neighbor_lods,
         coarse_terrain_sdf_smooth_enabled(),
         surface_nets_base_sdf_transition_mode(),
+        // Surface Nets coarse path: inflate the boundary band toward finer
+        // neighbours (seam apron). 0.0 unless VOXELS_COARSE_LOD_APRON is set.
+        coarse_lod_apron_bias(),
     )
 }
 
@@ -305,6 +384,10 @@ pub(super) fn generate_low_lod_sdf_with_smoothing<const N: usize>(
         neighbor_lods,
         smooth_coarse,
         BaseSdfTransitionMode::Coarsen,
+        // MC/Transvoxel consumer (mc_support.rs) and unit tests: no apron. MC's
+        // case index is sign-sensitive, so the seam apron stays off here until
+        // validated separately.
+        0.0,
     )
 }
 
@@ -318,6 +401,7 @@ pub(super) fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: u
     neighbor_lods: &NeighborLods,
     smooth_coarse: bool,
     transition_mode: BaseSdfTransitionMode,
+    apron_bias: f32,
 ) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
@@ -357,6 +441,30 @@ pub(super) fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: u
                     // Legacy coarse field for A/B baselines.
                     smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
                 };
+
+                // Seam apron: on a coarse chunk, inflate the boundary band toward
+                // any *finer* neighbour so the coarse iso-surface bulges outward
+                // and overlaps the finer surface, covering the LOD seam crack/lip.
+                // This is a deliberate, graded outward push — NOT sign-preserving:
+                // it intentionally flips near-surface air cells negative to move
+                // the surface out. Clamp only the solid floor so we never exceed
+                // -1. Fires only toward finer neighbours, so two equal-LOD coarse
+                // chunks never apply it (no new coarse-coarse seam).
+                if apron_bias > 0.0 {
+                    if let Some(depth) = apron_band_depth_for_finer_neighbor(
+                        my_lod,
+                        neighbor_lods,
+                        x,
+                        y,
+                        z,
+                        padded_size,
+                    ) {
+                        // Full bias on the outermost plane, half one cell in, so
+                        // the apron is a graded ramp rather than an internal cliff.
+                        let falloff = if depth == 0 { 1.0 } else { 0.5 };
+                        sdf[idx] = (sdf[idx] - apron_bias * falloff).max(-1.0);
+                    }
+                }
             }
         }
     }

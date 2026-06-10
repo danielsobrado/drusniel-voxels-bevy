@@ -250,6 +250,8 @@ Use those fields (not the raw maxima) for dashboards and threshold checks. `benc
 - `strip_max_coarse_to_fine_distance`
 - `strip_max_endpoint_distance`
 - `strip_span_overlap_ratio`
+- `strip_fine_span_min` / `strip_fine_span_max`
+- `strip_coarse_span_min` / `strip_coarse_span_max`
 - `strip_unmatched_fine_segments`
 - `strip_unmatched_coarse_segments`
 - `strip_crossing_count`
@@ -261,7 +263,9 @@ Summary strip distance fields:
 
 Summary also includes counts and policy-filtered `min_strip_span_overlap_ratio`. See **Summary extrema semantics** above.
 
-`seam-audit.json` `schema_version` is `3` (mesh-time strip source, component counts, `strip_reject_reason`). Version `2` added stitch-safe summary distance fields.
+`seam-audit.json` `schema_version` is `4` (projected fine/coarse span endpoints for
+SpanMismatch diagnosis). Version `3` added mesh-time strip source, component counts, and
+`strip_reject_reason`. Version `2` added stitch-safe summary distance fields.
 
 ### 2.7 Guard Extensions for Oracle
 

@@ -125,7 +125,16 @@ pub fn run() {
                     } else {
                         "Voxel Builder".to_string()
                     },
-                    resolution: if editor_native_viewport {
+                    resolution: if std::env::var("VOXELS_BENCH_TINY_WINDOW")
+                        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    {
+                        // Software-render bench escape hatch (WSL/llvmpipe): a tiny
+                        // window makes per-frame rasterisation near-free so the
+                        // frame-budgeted gen/meshing pipeline can advance and reach
+                        // the seam-audit checkpoint. Off by default; window size does
+                        // not affect terrain geometry or the seam audit.
+                        WindowResolution::new(80, 60)
+                    } else if editor_native_viewport {
                         WindowResolution::new(1280, 720)
                     } else {
                         WindowResolution::new(1920, 1080)

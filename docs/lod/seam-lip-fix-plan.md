@@ -97,6 +97,19 @@ weld/stitch cleanly. Investigate whether these are real LOD-delta-1 neighbours w
 stale/missing at mesh time, or genuinely a 4-voxel coarse displacement. Cross-check
 `strip_overlap_source` (`mesh_time` vs `runtime_reextract`) and `strip_status`.
 
+**2026-06-08 result:** this is not a stale-strip/consume-coverage bug for the over-distance
+faces. In `bench-runs/2026-06-08T15-02-43Z/seam-audit.json`, all 9
+`DirectedDistanceExceeded` faces use `strip_overlap_source = mesh_time` and
+`strip_status = HitCurrentRevision`; `stale_strip_faces = 0` and `lod_delta_gt_one_faces = 0`.
+That means the 4.6-voxel case is a real current L0->L1 coarse/fine boundary mismatch, not a
+late runtime re-extraction artifact.
+
+The `MissingStrip` bucket is separate: 30 faces are `NoTransition / MissingFineStrip`, and 5
+faces are `InvalidUnsafeTopology / MissingCoarseStrip`. Those 5 invalid faces have a fine
+runtime-reextracted chain but no coarse chain to stitch to, so there is no safe stitch target to
+recover in consume without changing the source geometry/extraction coverage. Treat this as
+evidence for Fix D/root surface alignment rather than retrying routing gates.
+
 ### D. Span alignment in boundary extraction (the `SpanMismatch` root)
 Avg span overlap 0.72 means fine/coarse boundary polylines don't cover the same seam extent.
 Check `extract_lod_boundary_strips` band/clipping so both sides report the same along-seam span
@@ -167,5 +180,90 @@ on a shared face. Higher overlap → the stitch/morph has a real target to match
   geometry. The bench was stopped after the audit was written because it stayed in the long
   readiness/reporting phase with stable strip counters, so no `summary.json`/guard result was
   produced for this run.
+- **2026-06-08:** User reported Fix B regressed visually in the same way as the Fix A attempt.
+  Reverted the stitch-normal blend and restored stitch vertices to use their original generated
+  normals. Treat normal-only stitch-band blending as a dead end unless a future pass can prove it
+  does not create the dark trench/band artifact.
+- **2026-06-08:** Completed Fix C investigation against
+  `bench-runs/2026-06-08T15-02-43Z/seam-audit.json`. Findings:
+  `DirectedDistanceExceeded = 9`, and all 9 are current mesh-time strips
+  (`strip_overlap_source = mesh_time`, `strip_status = HitCurrentRevision`), with
+  `stale_strip_faces = 0` and `lod_delta_gt_one_faces = 0`. The remaining `MissingStrip` cases
+  split into `30 NoTransition / MissingFineStrip` and `5 InvalidUnsafeTopology /
+  MissingCoarseStrip`. Conclusion: C rules out stale consume coverage as the root cause of the
+  large lip; continue with Fix D/root coarse-fine surface alignment.
   - Or accept: seams are watertight (`open_edge_faces = 0`), avg lip 0.66 voxel.
+- **2026-06-10: Fix E — coarse-side iso apron (No Man's Sky over-polygonization, coarse-only
+  variant).** New, untried lever that is *orthogonal* to the dead-end Fix A/B: it touches only the
+  **coarse** field, never the fine stitch/normals, so it should not reproduce the dark trench/band
+  regression. On a coarse chunk, the boundary band facing a *finer* neighbour gets a small outward
+  iso bias (subtract ε from the SDF), inflating the coarse iso-surface so it bulges outward and
+  **overlaps** the finer surface — a terrain-shaped overlap apron that covers the seam crack/lip.
+  The watertight stitch on the fine side is left exactly as-is.
+  - **Why coarse-only, and what it does/does not fix:** seams are already watertight
+    (`open_edge_faces = 0`); the artifact is a *visual* height-step lip. The apron covers that step
+    with an overlap instead of removing it, so success here is **coverage + visual**, not the
+    fine-side `max_lip_height_voxels` metric (which is measured on the fine stitch we don't touch
+    and will likely not move — do not read "lip unchanged" as failure).
+  - **Implementation (Stage 1, landed, env-gated OFF by default):**
+    - `apron_band_depth_for_finer_neighbor(...)` in `sdf.rs` — mirrors
+      `lod_transition_step_for_padded_size` but fires when the neighbour's `lod_index()` is lower
+      (finer). Returns band depth (0 = outermost plane) for a graded ramp.
+    - `coarse_lod_apron_bias()` in `sdf.rs` — env gate `VOXELS_COARSE_LOD_APRON=1` (default off),
+      magnitude `VOXELS_COARSE_LOD_APRON_BIAS` (default 0.3, clamped [0,1]); cached `OnceLock`,
+      mirrors `coarse_terrain_sdf_smooth_enabled` / `terrain_morph_config`.
+    - `generate_low_lod_sdf_with_smoothing_and_transition_mode(...)` gained an `apron_bias` arg.
+      Applied as a **clamped subtract** (NOT `preserve_sdf_sign` — the apron deliberately flips
+      near-surface air cells negative to push the surface out; floor-clamped at -1). Falloff: full
+      ε on the outermost plane, ε/2 one cell in.
+    - **SN coarse path passes the configured bias; MC/Transvoxel path
+      (`generate_low_lod_sdf_with_smoothing`, consumed by `mc_support.rs`) and the unit tests pass
+      `0.0`** — MC's case index is sign-sensitive, so the apron stays off there until validated
+      separately.
+  - **Invariant:** apron only fires toward a finer neighbour, so two equal-LOD coarse chunks never
+    apply it → no new coarse↔coarse seam. Deterministic from world occupancy + neighbour LOD.
+  - **Known Stage-1 edge case:** triple-junction corner cells shared by a finer-neighbour face and
+    a coarse-neighbour face get the apron on both → a possible hairline mismatch at that shared
+    edge. Accept for Stage 1; if it shows in the audit/visual, restrict the band to face interiors.
+  - **Not yet built (gated by Stage-1 measurement):** Stage 2 = push apron-band coarse verts under
+    by δ + tag `TERRAIN_MESH_SECTION_TRANSITION_APRON` if Z-fighting is visible. Stage 3 = widen
+    the coarse extraction band (touches compile-time `ConstShape` sizes) if ε-in-band can't reach a
+    tall lip.
+  - **How to measure (run on the normal Windows/dev setup — this WSL box lacks `libudev` +
+    `sccache` and cannot compile):**
+    1. A/B: `cargo run --release -- --bench bench/scenes/lod-seam-hard-cases.toml` with
+       `VOXELS_COARSE_LOD_APRON=0` then `=1`.
+    2. Win conditions: `open_edge_faces` stays 0, `InvalidUnsafeTopology` does not rise, coverage
+       probe shows no see-through gap on coarse-side delta-1 faces; visually the lip reads as a
+       covered overlap with **no** dark trench/band (the Fix A/B regression signature).
+    3. Perf: also run `visual-regression-live-lod.toml`; compare `summary.json` + `bench_guard`.
+- **2026-06-10: Fix E measured (A/B on hard-case fixture) — NET REGRESSION, leave gated OFF.**
+  Ran the deterministic A/B under WSL software rendering (Mesa lavapipe + an env-gated 80×60
+  bench window, `VOXELS_BENCH_TINY_WINDOW`, since 1920×1080 llvmpipe stalls the frame-budgeted
+  gen). **Baseline reproduced the documented `13-24-30Z` run exactly** (StitchGeometry=17,
+  InvalidUnsafeTopology=2, `max_lip=1.4437`, `open_edge_faces=0`) → the rig is deterministic, so
+  the apron deltas below are real, not llvmpipe noise.
+
+  | metric | OFF (baseline) | apron 0.1 | apron 0.3 |
+  |---|---|---|---|
+  | `open_edge_faces` | 0 | **0** | **1** ❌ |
+  | `max_lip_height_voxels` | 1.44 | **4.31** ❌ | **4.95** ❌ |
+  | `min_strip_span_overlap_ratio` | 0.30 | 0.54 ✅ | 0.54 ✅ |
+  | modes (stitch/invalid/no-transition) | 17/2/10 | 25/1/3 | 25/1/3 |
+
+  **Mechanism (confirmed from per-face data):** the apron-on top-lip faces (lip ~4.95) are all
+  `new=True` Lod1→**Lod2** `pos_x` faces absent from the baseline audit. Inflating the coarse
+  (Lod2) boundary outward **manufactures new Lod1↔Lod2 stitch transitions**, and the still-active
+  stitch bridges their large height steps → big lips. So the coarse apron fights the stitch the
+  same way the Fix A/B levers did: moving boundary geometry while the stitch is live makes the lip
+  worse. Bias is nearly irrelevant (0.1 ≈ 0.3 in mode tally and lip); 0.1 stays watertight, 0.3
+  tears one edge. The only win — span overlap 0.30→0.54 — does not offset the lip/tear regression.
+  **Conclusion:** Fix E joins A/B as a characterized dead end *as implemented*. Code stays in,
+  gated OFF by default (`VOXELS_COARSE_LOD_APRON` unset → bias 0.0). Untried refinement if
+  revisited: forbid the apron from *creating* new transitions (apply only where a delta-1
+  transition already exists, or clamp the bulge so it can't extend the coarse mesh into a new
+  Lod1↔Lod2 overlap) — but that is speculative and not pursued here.
+  - Rig artifacts (not committed): `bench-runs/apron-ab/{test-tiny(off),on,on-010}`. WSL Vulkan via
+    locally-extracted lavapipe in `~/vklocal` (no sudo); see also the `VOXELS_BENCH_TINY_WINDOW`
+    env knob added to `src/app/mod.rs` for software-render benching.
 - _(append the next entry here)_
