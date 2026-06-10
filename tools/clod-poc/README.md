@@ -25,11 +25,31 @@ attribute weights, that `['LockBorder']` locks topological borders, and the worl
 formula `error_world = result_error * simplifyScale`. Asserts locked border vertices
 survive verbatim. (Exit criteria for §2.)
 
+## Current LOD model and crack invariants
+
+This PoC builds a configured page quadtree, not a general meshlet DAG. LOD0 pages are
+welded from chunk meshes, each parent merges `2x2` children, hierarchy depth comes from
+`quadtree_levels`, and simplification targets `target_ratio_per_level: 0.5`.
+
+Crack prevention relies on two invariants:
+
+- Builder invariant: before simplifying a parent, weld the child meshes and lock the
+  parent's outer topological boundary. Old child borders are internal and must already
+  have welded away; the new parent border survives simplification verbatim.
+- Runtime invariant: selection is a consistent monotonic cut of the hierarchy. At any
+  point, either a group renders or one of its ancestors/descendants renders, but never
+  both and never neither.
+
+Under those rules, any cut across the built quadtree levels should be watertight. The
+optional 2:1 restriction in the viewer is for visual density gradients, not crack
+prevention. Validation currently checks same-level border matches plus builder
+locking/welding; it does not yet run an explicit cross-level adjacency sweep.
+
 ## Phase 1 — headless page builder
 
 ```bash
-npm run build-pages        # 4x4 LOD0 pages, all quadtree levels
-npm run build-pages 8      # 8x8 (one complete LOD3 node — the real Phase 3 input)
+npm run build-pages        # 4x4 LOD0 pages, quick informational run (tops out at LOD2)
+npm run build-pages 8      # 8x8, one complete LOD3 node — the formal Phase 3 gate input
 ```
 
 Prints per-level tris / avg `error_world` / low-benefit rate / build ms, the A2 cross-page
@@ -72,7 +92,7 @@ limit, not a CLOD one; the engine's mesher handles caves).
 | `terrain.ts` | synthetic global field + per-chunk Surface Nets (stands in for the engine mesher) |
 | `source_mesh.ts` | LOD0 page = welded chunk meshes (no re-extraction, I2) |
 | `weld.ts` | spatial-hash weld; attribute conflict = `DirtyInput` hard fail |
-| `lock.ts` | parent outer-footprint lock detection by quantized position |
+| `lock.ts` | parent outer-border lock detection by open topological boundary |
 | `simplify.ts` | **sole** meshoptimizer boundary; never `simplify_sloppy` |
 | `quadtree.ts` | merge → weld → lock → simplify → error accumulation |
 | `validate.ts` | border-chain + degenerate hard-fail assertions |

@@ -90,20 +90,37 @@ async function main() {
   // ---- Phase 3 acceptance gate verdict (plan §5) ----
   const maxNodeMs = Math.max(...result.stats.map((s) => s.buildMs));
   const verdict = (ok: boolean) => (ok ? "PASS" : "FAIL");
+  // A4 targets the deepest LOD. A world only reaches it when it is large enough to merge
+  // up to the configured max level (LOD3 needs an 8x8 world). Smaller worlds top out lower,
+  // so their verdict is informational only — the formal gate runs on LOD3-capable worlds.
+  const topLevel = levels[levels.length - 1];
+  const maxLod = cfg.page.quadtree_levels - 1;
+  const isGateRun = topLevel >= maxLod;
   const a1 = true; // reached here => every watertightness assertion (weld + no-internal-border) held
   const a2 = checks > 0; // border chains matched at gate tolerances
   const a4 = perAreaReduction <= 0.15;
   const a5 = totalMs < 30_000 && maxNodeMs < 250; // seconds total, tens of ms per node
   const a6 = lowRate < 0.1;
-  console.log("\n=== Phase 3 acceptance gate (§5) ===");
+  console.log(isGateRun ? "\n=== Phase 3 acceptance gate (§5) ===" : "\n=== Acceptance metrics (informational) ===");
   console.log(`A1 watertight (no holes/lips; weld + border asserts): ${verdict(a1)}`);
   console.log(`A2 no dark seams (matched border attrs):              ${verdict(a2)}  (${checks} pairs)`);
   console.log(`A3 density scars acceptable:                          VISUAL — inspect in viewer (npm run dev)`);
-  console.log(`A4 triangle reduction (LOD3 <= ~15% of LOD0):         ${verdict(a4)}  (${(perAreaReduction * 100).toFixed(1)}%)`);
+  console.log(
+    `A4 triangle reduction (LOD${topLevel} <= ~15% of LOD0):         ` +
+      `${isGateRun ? verdict(a4) : "INFO"}  (${(perAreaReduction * 100).toFixed(1)}%)`,
+  );
   console.log(`A5 build cost (seconds total, tens of ms / node):     ${verdict(a5)}  (total ${(totalMs / 1000).toFixed(1)}s, max node ${maxNodeMs.toFixed(0)}ms)`);
   console.log(`A6 low-benefit rate (< 10% at levels 1-2):           ${verdict(a6)}  (${(lowRate * 100).toFixed(1)}%)`);
   const measured = a1 && a2 && a4 && a5 && a6;
+  if (!isGateRun) {
+    console.log(
+      `\nMEASURED CRITERIA: INFO  (${world}x${world} world tops out at LOD${topLevel}; ` +
+        `the formal gate needs an LOD${maxLod}-capable world — run \`build-pages 8\`)`,
+    );
+    return;
+  }
   console.log(`\nMEASURED CRITERIA: ${verdict(measured)}  (A3 remains a visual judgement)`);
+  if (!measured) process.exitCode = 1; // fail the command so CI/automation catches it
 }
 
 main().catch((e) => {

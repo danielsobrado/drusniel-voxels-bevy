@@ -109,7 +109,7 @@ async function main() {
     showBounds: false,
     colorByLod: true,
     bubble: false,
-    bubbleRadius: 48,
+    bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
     tintBubble: true,
   };
   let selState: SelectionState = { split: new Set() };
