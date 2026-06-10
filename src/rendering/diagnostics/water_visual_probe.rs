@@ -337,6 +337,8 @@ fn dump_water_visual_probe(
     cheap_materials: Res<Assets<StandardMaterial>>,
     mut env_probe_dumped: Local<bool>,
 ) {
+    // Shift+F10. The fly camera no longer descends while a function key is held (see
+    // the camera controller), so this no longer nudges the view mid-capture.
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let hotkey_triggered = shift_held && keys.just_pressed(KeyCode::F10);
     let env_triggered = env_flag("VOXEL_WATER_VISUAL_PROBE_ONCE") && !*env_probe_dumped;
