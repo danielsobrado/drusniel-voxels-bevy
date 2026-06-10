@@ -1,0 +1,13 @@
+[package]
+name = "clod-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 4 Rust port of the CLOD pages builder (standalone, no Bevy)."
+
+[dependencies]
+meshopt = "0.6"
+bytemuck = { version = "1.20", features = ["derive"] }
+
+[[bin]]
+name = "clod_spike"
+path = "src/spike.rs"
