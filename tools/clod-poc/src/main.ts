@@ -39,9 +39,12 @@ async function main() {
   const cfg = parseConfig(configText);
   await initSimplifier();
 
-  const WORLD = 4; // 4x4 LOD0 pages -> levels 0..2, a meaningful cut without a long build
-  info.textContent = "building quadtree…";
-  await new Promise((r) => setTimeout(r, 0));
+  // World size via ?world= (2/4/8). 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
+  // inspection but takes a few seconds and briefly freezes the tab while it builds.
+  const requested = Number(new URLSearchParams(location.search).get("world"));
+  const WORLD = [2, 4, 8].includes(requested) ? requested : 4;
+  info.textContent = `building ${WORLD}x${WORLD} world…${WORLD >= 8 ? " (~8s, tab will freeze)" : ""}`;
+  await new Promise((r) => setTimeout(r, 16));
   const result = buildWorld(WORLD, WORLD, cfg);
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
 
@@ -165,6 +168,12 @@ async function main() {
   updateSelection();
 
   const gui = new GUI();
+  gui
+    .add({ world: String(WORLD) }, "world", ["2", "4", "8"])
+    .name("world size (reloads)")
+    .onChange((w: string) => {
+      location.search = `?world=${w}`;
+    });
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
   gui.add(state, "enforce21").name("2:1 constraint").onChange(updateSelection);
   gui.add(state, "freeze").name("freeze selection");

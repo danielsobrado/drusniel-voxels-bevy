@@ -57,10 +57,11 @@ drawn as its raw chunks instead of the welded page mesh. With "tint bubble red" 
 edge must be **invisible** (raw chunks === welded LOD0) — toggle the bubble and nothing
 should change; with tint ON you see which pages it owns. The overlay shows the live cut
 (nodes per level, tris rendered, forced splits). Move the camera and watch near pages
-refine to LOD0 while far pages stay coarse.
+refine to LOD0 while far pages stay coarse. The **world size** selector (or `?world=8`)
+loads the full LOD0→LOD3 8×8 world (~8s build): get close to one corner, then toggle the
+2:1 constraint to see large neighbor LOD deltas appear and get bounded.
 
-Not yet built: forced neighbor LOD delta 2–3 sweep (needs an 8×8 in-browser build),
-floating per-node error labels + locked-border highlight, and an explicit carved cave
+Not yet built: floating per-node error labels + locked-border highlight, and an explicit carved cave
 tunnel (single-vertex Surface Nets can't split two sheets in one cell — a PoC mesher
 limit, not a CLOD one; the engine's mesher handles caves).
 
