@@ -1,6 +1,7 @@
-# Props Virtual Geometry — Execution Plan
+# Opaque Static Prop Meshlet Pilot — Execution Plan
 
-> Created: 2026-06-10 · Status: Planning (review incorporated 2026-06-10)  
+> **Former title:** Props Virtual Geometry. Reframed 2026-06-10: this is a **narrow Bevy meshlet pilot**, not a project-wide props migration.  
+> Created: 2026-06-10 · Status: Planning (external review incorporated 2026-06-10)  
 > Scope: `src/props/`, `src/rendering/materials/props.rs`, `assets/shaders/props.wgsl`,  
 > `assets/shaders/instanced_prop.wgsl`, `assets/config/`, `bench/scenes/forest/`,  
 > `bench/scenes/visual/visual-regression-performance100.toml`  
@@ -15,19 +16,37 @@ distance LOD (shadow cull, billboard swap, view-distance hide) and staged mesh d
 is not yet wired to runtime swaps. There is **no** `MeshletMesh3d` or Bevy virtual geometry in
 the project.
 
-This plan adds **Nanite-style cluster LOD** for props by adopting Bevy's experimental meshlet
-renderer (`bevy::pbr::experimental::meshlet`) where it fits, while preserving the existing
-instancing and billboard tiers for cases meshlets do not cover well.
+This plan adds **Bevy experimental meshlet rendering** (cluster LOD / visibility-buffer path —
+*not* a custom Nanite implementation) for a **small opaque static subset** of props, while
+**leaving instancing, billboards, and alpha vegetation paths untouched**.
 
-**Primary win target:** keep dense forest/rock fields visually stable at long view distances
-without exploding draw/instance counts or relying solely on hard pop-off LOD.
+**Primary win target:** hero rocks, ruins, cliffs, village buildings, and other **static opaque
+high-triangle** assets where triangle count and overdraw dominate — **not** mass forest foliage
+where count, alpha, wind, and instancing already win.
 
 **Explicit non-goal:** replace terrain rendering. CLOD terrain pages keep their own meshlet
 decision in [`clod-execution-plan.md`](clod-execution-plan.md).
 
-**Review verdict (2026-06-10):** Approve with corrections incorporated below. Phase 0 spike is
-low-risk; explicit fallback to `decimation.rs` runtime LOD (§10) ensures a prop LOD improvement
-path even if meshlets do not pan out.
+**Review verdict (2026-06-10):** **Approve only as a tightly-scoped meshlet pilot** on Vulkan +
+Metal with automatic fallback to today's prop stack. **Reject as a global prop strategy** without
+the scope limits below. Cheaper near-term win: wire `decimation.rs` runtime LOD (§11) **before or
+in parallel** with meshlet work for mid-distance props.
+
+```text
+Virtual geometry helps when the bottleneck is too many visible triangles.
+Instancing / billboards / culling help when the bottleneck is too many repeated objects.
+```
+
+### Hybrid prop lanes (do not collapse into one path)
+
+| Lane | Asset examples | Path |
+|------|----------------|------|
+| **Mass foliage** | Grass, flowers, bushes, normal trees | Instancing, patch/subcluster culling, wind shader, billboards/impostors — **not meshlets in v1** |
+| **Static dense-asset** | Large rocks, cliffs, ruins, towers, village walls | **Meshlet pilot candidates** (opaque, static, indexed `{POSITION, NORMAL, UV_0}`) |
+| **Small repeated props** | Barrels, crates, fences, lamps | Instancing, batching, classic/decimation LOD — **not meshlets first** |
+
+Special-case: **hero trees** (trunk/opaque only) may enter the pilot individually; **forest tree
+fields stay instanced + billboard**.
 
 ---
 
@@ -41,7 +60,8 @@ Cross-referenced against the codebase 2026-06-10. All claims verified unless not
 | Mesh asset | Plain `Mesh` cached from GLTF | `src/props/instancing.rs` (`PropMeshCache`) |
 | Material | Custom `PropsMaterial`, forward-only | `src/rendering/materials/props.rs` |
 | Instancing shader | `instanced_prop.wgsl`: 4×4 model matrix `@location(4–7)`, optional tint `@location(8)` via `#ifdef PROP_INSTANCE_TINT`; **UV-based sampling** | `assets/shaders/instanced_prop.wgsl` |
-| Non-instanced material shader | `props.wgsl`: **triplanar** sampling (used by `Material` impl, not the instanced draw path) | `assets/shaders/props.wgsl` |
+| Non-instanced material shader | `props.wgsl`: **triplanar** + **vertex-colour-weighted** sampling (not instanced draw path) | `assets/shaders/props.wgsl` |
+| Meshlet mesh input | Bevy `MeshletMesh::from_mesh` expects **indexed triangle list** + **`{POSITION, NORMAL, UV_0}` only** | upstream Bevy 0.18 docs — current prop/instanced paths are richer |
 | Shadow LOD | `PROP_SHADOW_CULL_DISTANCE = 64 m`, hysteresis `8 m`, scaled by `RenderQualityPreset::prop_shadow_distance_scale()`; group-level shadow LOD also in `instanced_render.rs` | `src/props/lod_material.rs`, `instanced_render.rs` |
 | Billboard LOD | `BILLBOARD_SWITCH_DISTANCE = 180 m` (trees) | `src/props/billboard.rs` |
 | View-distance cull | Base `PROP_VIEW_DISTANCE_BASE = 280 m` with per-type multipliers: Trees `1.2×`, Rocks `0.85×`, Bushes `0.6×`, Flowers `0.25×` | `src/props/constants.rs`, `mod.rs` |
@@ -86,6 +106,25 @@ N3. Editor viewport parity in Phase 0–3 (game binary + bench first).
 N4. Merging virtual geometry with NAADF voxel preview or terrain CLOD pages.
 N5. Replacing billboard LOD for trees in v1 — billboards remain the coarsest tier.
 N6. Runtime toggling of `enabled` via hot reload in v1 — startup + quality-preset only.
+N7. Meshlets for **all props**, mass forest vegetation, or alpha-masked foliage in v1.
+N8. Treating DX12 as a supported meshlet backend until Bevy docs drop the Vulkan/Metal-only note.
+```
+
+### Asset routing (pilot gate)
+
+```mermaid
+flowchart LR
+    A[Candidate prop asset] --> B{Opaque, static,\nnon-instanced,\nindexed triangle list,\nPOSITION+NORMAL+UV0 only?}
+    B -- No --> C[Keep current path\ninstancing / billboard / classic mesh]
+    B -- Yes --> D[Offline meshlet conversion]
+    D --> E[Store classic Mesh + MeshletMesh]
+    E --> F{Runtime: Vulkan or Metal,\nrequired wgpu features,\nMSAA off for meshlet camera?}
+    F -- No --> C
+    F -- Yes --> G[MeshletMesh3d + meshlet-compatible material]
+    G --> H[Benchmark vs current Drusniel stack]
+    H --> I{Clear win + kill criteria pass?}
+    I -- No --> C
+    I -- Yes --> J[Expand only to similar assets]
 ```
 
 ---
@@ -102,7 +141,7 @@ I4. Instanced-prop and meshlet-prop paths must be mutually exclusive per prop *i
     drawing the same placement (z-fighting). One owner per rendered instance.
 I5. Billboard LOD remains the final coarse tier for eligible foliage until a meshlet impostor path exists.
 I6. Bench before/after claims require release benches and summary.json comparison (AGENTS.md).
-I7. Do not delete decimation.rs — it is the explicit fallback (§10) if meshlets are blocked.
+I7. Do not delete decimation.rs — it is the explicit fallback (§11) if meshlets are blocked.
 ```
 
 ---
@@ -125,8 +164,24 @@ Shader import:      bevy_pbr::meshlet_visibility_buffer_resolve::resolve_vertex_
 PropsMaterial:      implements NONE of the meshlet Material methods today
 ```
 
-If any required trait method returns `ShaderRef::Default` or is unimplemented, verify at Phase 0
-whether Bevy rejects the material or silently falls back — document the actual behavior.
+Phase 0 must produce a **Material trait compatibility report** (required methods, shader linkage,
+opaque-only rules, whether `Default`/missing hooks reject or silently fall back) — not only a note
+in this doc.
+
+### Platform support (Bevy 0.18.1 baseline)
+
+| Backend | Pilot status | Notes |
+|---------|--------------|-------|
+| **Vulkan** | Primary target | Required `wgpu` features documented on Vulkan |
+| **Metal** | Secondary target | Explicit runtime feature checks (MSL version caveats) |
+| **DX12** | **Out of scope** until Bevy meshlet docs no longer say Vulkan/Metal only | Do not block pilot on DX12 |
+| **WebGPU** | Out of scope | Keep classic instancing / billboard paths |
+
+**MSAA:** Bevy meshlets are **incompatible with MSAA**. Any camera rendering meshlet props must
+document and accept this constraint.
+
+**Upstream churn:** meshlet code on Bevy `main` is still moving (e.g. material-prep optimisations
+and shader-import fixes in June 2026). Phase 0 must record migration risk when bumping Bevy.
 
 ---
 
@@ -148,11 +203,12 @@ virtual_geometry:
     max_baked_asset_mb_per_prop: 8    # disk cache per prop type
     max_total_vram_mb_meshlets: 256   # runtime cap; tune per platform in Phase 0
   tiers:
-    # prop_id glob → render path
-    hero:      meshlet              # high-poly unique assets
-    tree:      meshlet_then_billboard
-    rock:      meshlet
-    bush:      instanced             # keep instancing until meshlet wins measured
+    # prop_id glob → render path (pilot: meshlet lane is narrow)
+    hero:      meshlet              # unique high-poly opaque assets
+    tree:      instanced            # forest fields: instancing + billboard; hero trunks opt-in by id
+    rock:      meshlet              # static dense rocks / cliffs
+    building:  meshlet              # static opaque village structures
+    bush:      instanced
     flower:    instanced
     default:   instanced
   quality_preset_overrides:
@@ -206,9 +262,24 @@ distance multipliers. Phase 3 routing must apply both: a meshlet-tier tree still
 
 ---
 
-## 3. Phase 0 — Feasibility spike (timebox: 2 days)
+## 3. Phase −1 — Asset audit (timebox: half day, before code)
 
-Goal: prove one real prop can render through Bevy meshlets without forking the whole material stack.
+Goal: classify props so meshlet work does not chase the wrong assets.
+
+- [ ] Tag every prop type: **instanced foliage**, **alpha-masked**, **opaque unique**, **dense hero**.
+- [ ] Exclude from pilot any asset using **vertex colours**, **alpha cutout/blend**, **runtime-generated
+  geometry**, or vertex layout beyond `{POSITION, NORMAL, UV_0}`.
+- [ ] Produce a **pilot asset list** (expected count in representative village + rock scenes, not
+  forest instance counts).
+
+Exit: written allowlist; everything else stays on current paths unchanged.
+
+---
+
+## 4. Phase 0 — Feasibility spike (timebox: 2 days)
+
+Goal: prove one **allowlisted** hero prop renders through Bevy meshlets; validate material API,
+ECS cost, and render-graph ordering **before** extending `PropsMaterial`.
 
 - [ ] Enable Bevy features on a **spike branch only** first:
   ```toml
@@ -224,9 +295,19 @@ Goal: prove one real prop can render through Bevy meshlets without forking the w
     binary format. Use Bevy's format if available; do not invent `.meshlet.ron` if binary is required.
 - [ ] Render baked asset with `MeshletMesh3d` + **Bevy `StandardMaterial`** (not `PropsMaterial` yet).
   - Document visual delta vs current **UV-based instanced** output.
-- [ ] Test backends: **Metal** (primary dev OS), **Vulkan**, and **DX12** (CI/Windows).
+- [ ] Test backends: **Metal** (primary dev OS) and **Vulkan** (primary Linux/CI).
   - Metal requires `BUFFER_BINDING_ARRAY` + compute; verify on target macOS hardware.
-- [ ] Run `visual-regression-performance100.toml` with spike prop in an isolated subscene.
+  - **DX12:** document feature probe only; **not** a pilot pass/fail gate (see Platform support).
+- [ ] **ECS micro-benchmark:** isolate meshlet **per-entity** overhead (transform extraction,
+  visibility, render queue) vs instanced baseline at 1k / 3k / 5k placements — before committing
+  to the v1 one-entity-per-instance model.
+- [ ] **Material trait report** (deliverable): each required `Material` meshlet hook, shader import
+  pattern (`MESHLET_MESH_MATERIAL_PASS`, `resolve_vertex_output`), opaque-only constraints,
+  reject-vs-fallback behaviour. Reference: `water_fragment.wgsl` pattern only — not proof props work.
+- [ ] **Render-graph cross-check:** meshlet visibility pass vs `PropInstancingPlugin` phases
+  (`Opaque3d`, shadows, prepass, reflection layer) — document ordering risks for SSAO/water/shadows.
+- [ ] Run `visual-regression-performance100.toml` with spike prop in an isolated **village/rock**
+  subscene (not forest instance storm).
   - Capture `Render Instancing Queue Draws`, `Render Instancing Queue Instances`, frame time rows.
   - Count meshlet-tier ECS entities in the forest subscene.
 - [ ] Document render graph interaction: meshlet visibility pass vs custom instancing phases.
@@ -236,22 +317,25 @@ Goal: prove one real prop can render through Bevy meshlets without forking the w
 | Criterion | Target |
 |-----------|--------|
 | Bake time (hero mesh) | < 60 s offline on dev hardware |
-| Backend validation | No errors on Metal + Vulkan; DX12 documented |
+| Backend validation | No errors on Metal + Vulkan; DX12 probe documented, not gating |
+| ECS micro-bench | Recorded vs instancing at 1k/3k/5k; note if entity model is blocked |
+| Material trait report | Published; Path A/B decision unblocked |
+| Render-graph cross-check | Shadow/prepass/reflection risks listed |
 | Frame time (near camera, single prop type) | ≤ 5% **mean** regression vs instanced baseline |
 | Frame time P99 | ≤ 10% regression (report both; `summary.json` has both) |
 | Meshlet-tier entity count (forest subscene) | Recorded; note if > 3k within view |
 | Compile time delta | Recorded (dev + release) |
 | Blockers documented | material API, alpha cutout, shadows, prepass, reflection layers, render graph order |
 
-- [ ] **Path A/B decision input:** Phase 0 findings choose Phase 2 material path (see §5).
+- [ ] **Path A/B/C decision input:** Phase 0 findings choose Phase 2 material path (see §6).
 
 **If spike fails** (material incompatibility, unstable meshlet feature on 0.18, Metal unsupported,
 or regression without visual win): stop and record findings; fall back to activating staged
-`decimation.rs` runtime LOD (see §10) before investing in custom cluster rendering.
+`decimation.rs` runtime LOD (see §11) before investing in custom cluster rendering.
 
 ---
 
-## 4. Phase 1 — Offline bake pipeline
+## 5. Phase 1 — Offline bake pipeline
 
 Goal: extend prop load path to produce meshlet assets alongside today's `Mesh` cache.
 
@@ -274,9 +358,11 @@ Goal: extend prop load path to produce meshlet assets alongside today's `Mesh` c
 
 ---
 
-## 5. Phase 2 — Material bridge
+## 6. Phase 2 — Material bridge
 
-Goal: meshlet entities shade with prop-consistent lighting and textures.
+Goal: meshlet entities shade with prop-consistent lighting and textures via a **dedicated
+meshlet-compatible material** — do not assume the current `PropsMaterial` / instanced stack ports
+unchanged (vertex colours, triplanar, instance matrix rows are out of meshlet v1 scope).
 
 Bevy meshlet materials require these `Material` trait methods (none implemented on `PropsMaterial` today):
 
@@ -289,15 +375,15 @@ meshlet_mesh_deferred_fragment_shader()
 Fragment shaders use `resolve_vertex_output(frag_coord)` behind `MESHLET_MESH_MATERIAL_PASS`
 (see `water_fragment.wgsl` for the import pattern).
 
-**Path decision:** Phase 0 spike result chooses Path A or B before Phase 2 implementation starts.
+**Path decision:** Phase 0 material report chooses implementation before Phase 2 starts.
 
-- [ ] **Path A (preferred if Phase 0 confirms trait compatibility):** extend `PropsMaterial`.
-  - New asset: `assets/shaders/props_meshlet.wgsl`
-  - Port **UV-based** sampling from `instanced_prop.wgsl` (not triplanar `props.wgsl`).
-  - Use `resolve_vertex_output` for vertex inputs.
-  - Implement all three meshlet `Material` trait shader methods.
-- [ ] **Path B (interim if Path A blocked):** per-prop `StandardMaterial` textures for meshlet tier.
-  - Accept visual parity loss; bench document delta vs instanced reference.
+- [ ] **Path A (default for pilot):** new minimal `PropsMeshletMaterial` + `props_meshlet.wgsl`.
+  - **UV-based** sampling aligned with `instanced_prop.wgsl` near-field look (not triplanar `props.wgsl`).
+  - No vertex-colour-weighted shading in v1 unless bake pipeline strips/replaces colours.
+  - Use `resolve_vertex_output` for vertex inputs; implement all three meshlet `Material` hooks.
+- [ ] **Path B (spike / interim):** `StandardMaterial` on allowlisted hero props only.
+  - Accept visual parity loss; bench documents delta vs instanced reference.
+- [ ] **Path C (defer):** extend full `PropsMaterial` only after Path A proves parity on allowlist.
 - [ ] Alpha modes:
   - v1: **opaque meshlet props only**
   - cutout / blended props stay on `PropInstancingPlugin` until meshlet alpha path is verified
@@ -307,7 +393,7 @@ Fragment shaders use `resolve_vertex_output(frag_coord)` behind `MESHLET_MESH_MA
 
 ---
 
-## 6. Phase 3 — Runtime spawn and despawn routing
+## 7. Phase 3 — Runtime spawn and despawn routing
 
 Goal: wire virtual geometry into the existing spawn pipeline without breaking instancing.
 
@@ -337,15 +423,15 @@ Goal: wire virtual geometry into the existing spawn pipeline without breaking in
   - Do not leave orphan meshlet entities when instanced groups are torn down.
 - [ ] Ensure **I4**: instanced groups exclude instances assigned to meshlet tier.
 - [ ] Bypass (do not delete) `decimation.rs` runtime swap for meshlet-tier types — meshlet DAG
-  supersedes discrete LOD1/LOD2 when enabled; decimation remains fallback (§10).
+  supersedes discrete LOD1/LOD2 when enabled; decimation remains fallback (§11).
 - [ ] Keep `update_instanced_prop_lod`, billboard, and shadow LOD systems; meshlet path uses
   renderer cluster LOD instead of CPU mesh swap.
-- [ ] **Exit criteria:** forest scene shows meshlet-tier trees/rocks with instanced-tier
-  flowers/bushes unchanged; despawn leaves no stale meshlet entities.
+- [ ] **Exit criteria:** village/rock pilot scene shows meshlet-tier hero assets only; forest
+  trees/flowers/bushes remain instanced + billboard unchanged; despawn leaves no stale meshlet entities.
 
 ---
 
-## 7. Phase 4 — Shadows, prepass, reflections
+## 8. Phase 4 — Shadows, prepass, reflections
 
 Goal: meshlet props participate in the same lighting ecosystem as instanced props.
 
@@ -360,11 +446,11 @@ Goal: meshlet props participate in the same lighting ecosystem as instanced prop
 
 ---
 
-## 8. Phase 5 — Quality presets and rollout
+## 9. Phase 5 — Quality presets and rollout
 
 - [ ] Add `virtual_geometry` block to `RenderQualityPreset` handling in `src/rendering/device/quality.rs`.
 - [ ] Default: `enabled: false` globally until Phase 6 gate passes.
-- [ ] `High`: enable meshlet tier for hero + tree + rock per config.
+- [ ] `High`: enable meshlet tier for allowlisted hero + rock + building per config (not mass trees).
 - [ ] `Performance100`: enable with relaxed `error_threshold_px` (cheaper clusters far away).
 - [ ] `enabled` is read at startup / quality-preset change only in v1 — not hot-reloadable mid-session.
 - [ ] Bench toggle: `disable_prop_virtual_geometry` for A/B (mirror `disable_instanced_props` pattern).
@@ -376,7 +462,7 @@ Goal: meshlet props participate in the same lighting ecosystem as instanced prop
 
 ---
 
-## 9. Phase 6 — Bench gates and profiling
+## 10. Phase 6 — Bench gates and profiling
 
 Required scenes (release, before merge):
 
@@ -416,9 +502,25 @@ rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 - VRAM meshlet footprint ≤ budgets.max_total_vram_mb_meshlets on integrated-GPU test machine.
 ```
 
+**Kill criteria (stop pilot, ship decimation-only path):**
+
+```text
+- No meaningful GPU win on allowlisted hero-prop / village-rock scenes vs current stack.
+- ECS micro-bench shows per-entity meshlet cost worse than instancing at target placement counts.
+- Material trait report blocks Path A and Path B parity is unacceptable.
+- Backend/feature gating fails on primary ship targets (Vulkan/Metal) or MSAA conflict is unacceptable.
+- Asset-pipeline complexity (bake time, disk, VRAM) exceeds budgets without visual win.
+```
+
+Compare against the **current Drusniel prop stack**, not an artificial baseline. Use Bevy's
+meshlet stress examples (`many meshlet materials`, per-entity draw overhead) as secondary signal only.
+
 ---
 
-## 10. Fallback — staged decimation (if meshlets blocked)
+## 11. Fallback — staged decimation (parallel / if meshlets blocked)
+
+**Recommended before or in parallel with meshlet Phases 1–3:** wire existing `decimation.rs`
+runtime mesh-handle swap for the 50–180 m band — smaller engineering step than meshlet integration.
 
 If Bevy 0.18 meshlets remain too experimental for production:
 
@@ -433,14 +535,16 @@ This fallback is **cheaper but not Nanite-class**; document it explicitly in rel
 
 ---
 
-## 11. Risks and mitigations
+## 12. Risks and mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Bevy meshlet API unstable across 0.18→0.19 | integration churn | feature-gated module; thin adapter; pinned API surface (§ Bevy meshlet API) |
 | `PropsMaterial` missing meshlet trait methods | material rejected or silent fallback | Phase 0 spike; implement all three methods |
 | UV instanced vs triplanar `props.wgsl` mismatch | wrong visual target | Phase 2 ports `instanced_prop.wgsl`, not `props.wgsl` |
-| Per-entity meshlet cost for 3k–5k+ instances | CPU/memory/ECS overhead | keep bushes/flowers instanced; quantify in Phase 0 |
+| Per-entity meshlet cost for 3k–5k+ instances | CPU/memory/ECS overhead | **do not meshletize forests**; ECS micro-bench in Phase 0; kill if blocked |
+| Vertex-colour / rich vertex layout | structural meshlet incompatibility | asset audit; separate simplified meshlet asset class |
+| Scope creep into instanced foliage | breaks best existing path | hybrid lanes table; allowlist gate |
 | Metal backend meshlet support | broken on primary dev OS | Phase 0 Metal test; `BUFFER_BINDING_ARRAY` + compute check |
 | Bevy meshlet + custom render phases | pass ordering conflicts | document render graph in Phase 0 |
 | Per-type view distances vs tier routing | wrong visibility/despawn | Phase 3 applies both tier and `PROP_VIEW_DISTANCE_*_MULT` |
@@ -452,7 +556,7 @@ This fallback is **cheaper but not Nanite-class**; document it explicitly in rel
 
 ---
 
-## 12. Deferred (explicitly not v1)
+## 13. Deferred (explicitly not v1)
 
 ```text
 - Meshlet + GPU instancing in one draw (per-transform cluster culling).
@@ -467,22 +571,38 @@ This fallback is **cheaper but not Nanite-class**; document it explicitly in rel
 
 ---
 
-## 13. Task checklist (rollup)
+## 14. Reviewer checklist
+
+- [ ] Scope limited to **static, opaque, non-instanced hero props** — not all props.
+- [ ] Pilot assets meet meshlet input limits: **indexed triangle list**, **`{POSITION, NORMAL, UV_0}`** where required.
+- [ ] **Separate meshlet material path** (`PropsMeshletMaterial` or `StandardMaterial` spike) — not unmodified `PropsMaterial`.
+- [ ] **Instanced vegetation / billboard / alpha-mask** pipeline untouched in phase one.
+- [ ] Runtime enablement gated to **Vulkan / Metal** with feature checks and automatic fallback.
+- [ ] **MSAA** implication documented for meshlet cameras.
+- [ ] Benchmarks compare vs **current Drusniel stack** with explicit **kill criteria**.
+- [ ] **DX12** out of scope until Bevy meshlet docs change.
+- [ ] **Decimation runtime LOD** tracked as cheaper parallel path (§11).
+
+---
+
+## 15. Task checklist (rollup)
 
 ```text
-Phase 0  [ ] Cargo meshlet spike  [ ] compile time  [ ] Metal/Vulkan/DX12  [ ] bake example
-         [ ] asset format verified  [ ] entity count  [ ] render graph note  [ ] Path A/B input
+Phase −1 [ ] asset audit  [ ] pilot allowlist  [ ] exclude vertex-colour / alpha props
+Phase 0  [ ] Cargo meshlet spike  [ ] compile time  [ ] Metal/Vulkan  [ ] bake example
+         [ ] ECS micro-bench  [ ] material trait report  [ ] render-graph cross-check
+         [ ] asset format verified  [ ] Path A/B/C input
 Phase 1  [ ] PropMeshletCache  [ ] offline bake  [ ] cache hash  [ ] disk/VRAM budgets
 Phase 2  [ ] props_meshlet.wgsl (UV-based)  [ ] Material trait meshlet methods  [ ] opaque only
 Phase 3  [ ] render_path.rs  [ ] spawner + despawn  [ ] I4 exclusivity  [ ] view-distance routing
 Phase 4  [ ] shadows  [ ] prepass depth  [ ] reflection layer per entity
 Phase 5  [ ] quality presets  [ ] bench toggle  [ ] feature flag  [ ] startup-only enable
-Phase 6  [ ] performance100 A/B  [ ] forest A/B  [ ] bench_guard  [ ] VRAM gate  [ ] PR metrics
+Phase 6  [ ] performance100 A/B  [ ] village/rock pilot A/B  [ ] bench_guard  [ ] kill criteria  [ ] VRAM gate
 ```
 
 ---
 
-## 14. References
+## 16. References
 
 - Bevy virtual geometry overview: [Virtual Geometry in Bevy 0.14](https://jms55.github.io/posts/2024-06-09-virtual-geometry-bevy-0-14/) (API concepts still apply; verify against 0.18.1)
 - `MeshletMesh3d`: `bevy::pbr::experimental::meshlet::MeshletMesh3d` (requires `meshlet` feature)
@@ -491,3 +611,12 @@ Phase 6  [ ] performance100 A/B  [ ] forest A/B  [ ] bench_guard  [ ] VRAM gate 
 - Current LOD review: `docs/lod/lod-implementation-and-review.md` § Props LOD Pipeline
 - Prop reflection layers: `docs/implementation/prop-reflection-layers.md`
 - Profiling workflow: `docs/reference/profiling.md`, `AGENTS.md` § Profiling
+
+---
+
+## 17. Status log
+
+| date | change |
+|------|--------|
+| 2026-06-10 | Plan created; Bevy meshlet pilot scoped to props. |
+| 2026-06-10 | External review: reframed as opaque static meshlet pilot; hybrid lanes; asset audit; ECS/material/render-graph Phase 0 gates; decimation parallel path; kill criteria; reviewer checklist. |
