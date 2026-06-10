@@ -7,13 +7,38 @@
 > `src/rendering/naadf/data/stats.rs`, `src/rendering/naadf/render/debug.rs`,
 > `src/rendering/lighting/radiance_cascades.rs`, `tests/naadf_hdda_cpu.rs` (new)  
 > Owner: rendering / NAADF  
-> Prerequisite: [`naadf-voxel-traversal-unification.md`](naadf-voxel-traversal-unification.md) Phase 0–1 (dense DDA oracle + `VoxelGridRayStepper`)  
-> Contract: [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md)  
-> References: NanoVDB `math/HDDA.h` (span-stepping model), OpenVDB sparse-tree layout (concept only — **do not import OpenVDB runtime**)
+> Prerequisite (**required**): [`naadf-voxel-traversal-unification.md`](naadf-voxel-traversal-unification.md) Plan A Phase 0–1 — dense Amanatides DDA CPU/GPU parity + `VoxelGridRayStepper`  
+> Contract (shared with Plan A): [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md)  
+> References: NanoVDB `math/HDDA.h` (span-stepping model), OpenVDB sparse-tree layout (concept only — **do not import OpenVDB runtime**)  
+> **Plan B** (acceleration) — paired with Plan A; **do not merge into one doc**
+
+## Plan pairing (keep separate)
+
+```text
+Plan A: NAADF Voxel Traversal Unification
+  Purpose: correctness contract
+  Scope:   dense Amanatides DDA, tMax/tDelta semantics, tie rules, CPU/GPU parity
+
+Plan B: NAADF HDDA Execution Plan  (this doc)
+  Purpose: acceleration
+  Scope:   chunk/block/voxel span stepping, conservative skips, HDDA compare mode
+  Depends: Plan A Phase 0–1
+```
+
+**Gates (non-negotiable):**
+
+```text
+Do not implement HDDA until dense Amanatides CPU/GPU parity passes.
+Dense DDA remains the oracle forever, even after HDDA ships.
+```
+
+Amanatides = foundation / oracle. HDDA = optimization built on that foundation.
+
+---
 
 ## Verdict
 
-Implement HDDA **inside the existing NAADF path**, not as a new renderer. Drusniel already has NAADF feature flags, CPU cache, GPU buffers, WGSL traversal with directional skips, debug ray comparison (`debug_trace_rays.wgsl`), sun/AO/contact-shadow query helpers, and Radiance Cascades backend routing.
+Implement HDDA **inside the existing NAADF path**, not as a new renderer. Drusniel already has NAADF feature flags, CPU cache, GPU buffers, WGSL production traversal (`trace_naadf` — a per-voxel loop with directional-bound skip jumps, **not** formal HDDA yet), a debug ray harness (`debug_trace_rays.wgsl`, today wired only to `trace_naadf`), sun/AO/contact-shadow query helpers, and Radiance Cascades backend routing.
 
 HDDA upgrades this:
 
@@ -36,7 +61,7 @@ target:             explicit chunk → block → voxel hierarchical DDA with spa
 
 ```text
 I1.  VoxelWorld stays authoritative. NAADF is a derived read-only traversal cache.
-I2.  Dense DDA is the correctness oracle until HDDA earns production per query type.
+I2.  Dense Amanatides DDA is the correctness oracle forever — HDDA must match it per query type before earning production.
 I3.  HDDA hit/material/world_voxel must match dense DDA; distance within ε; steps ≤ dense on sparse scenes.
 I4.  Directional-bound skips are conservative — never jump over a known solid voxel.
 I5.  Per-ray traversal state only. No mutable proxy.last_ray_id on GPU.
@@ -63,10 +88,10 @@ Visible terrain stays mesh-rendered. NAADF is the voxel acceleration structure f
 | Block grid | `VOXELS_PER_BLOCK_AXIS` = **4** → 4³ blocks × 4³ voxels/block | 64 blocks per chunk |
 | Node states | `NaadfNodeState`: `UniformEmpty`, `UniformFull`, `Children` | WGSL fast-path for uniform-full chunk entry |
 | Directional bounds | `PackedDirectionalBounds2Bit` (block/voxel), `PackedDirectionalBounds5Bit` (chunk) | Built on CPU/GPU (`build_bounds.wgsl`, `build_blocks.wgsl`) |
-| CPU production trace | `cpu_trace.rs` → `trace_with_skip` | SafeBox exit + chunk/block/voxel skip |
-| CPU dense oracle | `cpu_trace.rs` → `trace_with_dda` (`#[cfg(test)]`) | Equivalence tests vs skip already exist |
-| WGSL production trace | `ray_trace.wgsl` → `trace_naadf` | Voxel loop + directional skip + uniform-empty chunk skip |
-| Debug harness | `debug_trace_rays.wgsl` + `NAADF_DEBUG_TRACE_RAYS_SHADER_PATH` | Single-path `trace_naadf` today |
+| CPU production trace | `src/rendering/naadf/build/cpu_trace.rs` → `trace_with_skip` | SafeBox exit + chunk/block/voxel skip |
+| CPU dense oracle | `src/rendering/naadf/build/cpu_trace.rs` → `trace_with_dda` (`#[cfg(test)]`) | Equivalence tests vs skip already exist; **keep both** — HDDA is added beside them |
+| WGSL production trace | `assets/shaders/naadf/ray_trace.wgsl` → `trace_naadf` | Per-voxel loop + directional-bound skip jumps (not formal HDDA) |
+| Debug harness | `assets/shaders/naadf/debug_trace_rays.wgsl` + `NAADF_DEBUG_TRACE_RAYS_SHADER_PATH` | Imports/calls `trace_naadf` only today — compare mode must add Dense/HDDA/Compare dispatch |
 | Sun visibility | `config.use_for_sun_visibility` (default **off**), `naadf_sun_visibility_world` in WGSL | Ready for gated HDDA swap |
 | Fixtures | `tests/fixtures/naadf/*.ron` | empty, full, single voxel, wall_x/y/z, tunnel, staircase, bedrock_floor, boundary |
 | Ray-step stats | `NaadfStats.gpu_avg_ray_steps_last_frame`, heatmap in `debug.rs` | Extend, do not duplicate |
@@ -103,16 +128,16 @@ No superchunk directory in v1 unless profiling shows chunk-slot lookup dominates
 Goal: HDDA for **NAADF ray queries only**.
 
 - [ ] **P0.1** Add `docs/plans/naadf-hdda-execution-plan.md` to PR template / agent context (this doc).
-- [ ] **P0.2** Document in `naadf/config.rs` that `traversal.mode` is experimental until Phase 9 bench gate passes.
-- [ ] **P0.3** Confirm prerequisite: `VoxelGridRayStepper` from traversal-unification plan exists or land Phase 0–1 of that plan first.
+- [ ] **P0.2** Add `NaadfTraversalConfig` to `src/rendering/naadf/config.rs` (`NaadfConfig` has no `traversal` section today); default `mode: dense` and mark experimental until Phase 9 bench gate passes.
+- [ ] **P0.3** **Blocker:** Plan A Phase 0–1 complete — dense Amanatides CPU/GPU parity green, `VoxelGridRayStepper` landed. Do not open HDDA PRs until this passes.
 
-Exit criteria: no meshing/LOD files in HDDA PR diffs.
+Exit criteria: no meshing/LOD files in HDDA PR diffs; Plan A prerequisite verified in PR description.
 
 ---
 
 ## 4. Phase 1 — CPU HDDA reference (timebox: 4–6 days)
 
-Goal: explicit hierarchical marcher beside existing `trace_with_skip`, proven against dense oracle.
+Goal: explicit hierarchical marcher **beside** existing `trace_with_skip` and test-only `trace_with_dda` (add HDDA; do not replace either), proven against the dense oracle.
 
 ### 4.1 New files
 
@@ -259,7 +284,7 @@ Exit criteria: WGSL builds; no change to default `trace_naadf` call sites.
 
 ## 7. Phase 4 — GPU parity harness (timebox: 3–4 days)
 
-Extend existing debug compute path — **do not build a new test system**.
+Extend existing debug compute path — **do not build a new test system**. `debug_trace_rays.wgsl` currently imports and calls only `trace_naadf`; this phase must branch on mode.
 
 ```text
 DebugTraceMode::Dense
@@ -299,7 +324,25 @@ Exit criteria: compare mode green in CI (`--features naadf`).
 
 ## 8. Phase 5 — Debug UI, config, heatmap (timebox: 2 days)
 
-Add to NAADF YAML (`assets/config/naadf.yaml` or equivalent):
+Add a real config struct — `NaadfConfig` has no traversal section today:
+
+```rust
+// src/rendering/naadf/config.rs
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NaadfTraversalConfig {
+    #[serde(default = "default_traversal_dense")]
+    pub mode: NaadfTraversalMode, // dense | hdda | compare
+    #[serde(default)]
+    pub hdda_use_directional_bounds: bool,
+    #[serde(default = "default_hdda_max_chunk_steps")]
+    pub hdda_max_chunk_steps: u32,
+    // ...
+}
+
+// NaadfConfig: #[serde(default)] pub traversal: NaadfTraversalConfig,
+```
+
+Wire YAML (`assets/config/naadf.yaml` or equivalent):
 
 ```yaml
 naadf:
@@ -311,7 +354,7 @@ naadf:
     hdda_max_voxel_steps: 4096
 ```
 
-F3 / stats (extend `NaadfStats`, do not duplicate heatmap):
+F3 / stats (extend existing `NaadfStats` ray-step fields in `src/rendering/naadf/data/stats.rs`; do not duplicate heatmap):
 
 ```text
 naadf.hdda_rays
@@ -500,14 +543,14 @@ Terrain HDDA and dynamic proxy overlay stay **separate buffers and traversal pas
 | PR8 | 8 | Radiance Cascades GI | High |
 | PR9 | 9 | Bench guard thresholds | Low |
 
-**Do not replace dense DDA early. Dense is the oracle. HDDA earns each query type.**
+**Do not replace dense Amanatides DDA. Dense is the oracle forever. HDDA earns each query type by proving parity.**
 
 ---
 
 ## 18. Related docs
 
-- [`naadf-voxel-traversal-unification.md`](naadf-voxel-traversal-unification.md) — dense DDA contract (prerequisite)
-- [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — semantics runbook
+- [`naadf-voxel-traversal-unification.md`](naadf-voxel-traversal-unification.md) — Plan A (correctness); **required prerequisite** — dense Amanatides CPU/GPU parity before any HDDA work
+- [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — shared traversal contract (both plans)
 - [`docs/rendering/naadf-completion-jira-plan.md`](../rendering/naadf-completion-jira-plan.md) — broader NAADF roadmap
 - [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md) — mesh seams (orthogonal)
 
@@ -518,3 +561,5 @@ Terrain HDDA and dynamic proxy overlay stay **separate buffers and traversal pas
 | date | change |
 |------|--------|
 | 2026-06-10 | Plan created. Scoped to NAADF HDDA inside existing path; 9 phases + bench gate. |
+| 2026-06-10 | Review edits: fixed `cpu_trace.rs` paths, clarified `trace_naadf` ≠ formal HDDA, `NaadfTraversalConfig` in Phase 5, compare-mode prerequisite on `debug_trace_rays.wgsl`. |
+| 2026-06-10 | Plan A/B pairing: separate docs, Amanatides oracle gate; dense DDA oracle forever. |

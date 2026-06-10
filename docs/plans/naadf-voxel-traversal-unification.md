@@ -7,7 +7,34 @@
 > `src/rendering/naadf/data/stats.rs`, `tests/naadf_cpu_layout.rs`, `tests/naadf_gpu_layout.rs`  
 > Owner: rendering / NAADF  
 > Contract (semantics, not sequencing): [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md)  
-> Source paper: Amanatides & Woo, *A Fast Voxel Traversal Algorithm for Ray Tracing* (1987)
+> Source paper: Amanatides & Woo, *A Fast Voxel Traversal Algorithm for Ray Tracing* (1987)  
+> **Plan A** (correctness) — paired with [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md) **Plan B** (acceleration); shared contract: [`naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md)
+
+## Plan pairing (keep separate)
+
+```text
+Plan A: NAADF Voxel Traversal Unification  (this doc)
+  Purpose: correctness contract
+  Scope:   dense Amanatides DDA, tMax/tDelta semantics, tie rules, CPU/GPU parity
+
+Plan B: NAADF HDDA Execution Plan
+  Purpose: acceleration
+  Scope:   chunk/block/voxel span stepping, conservative skips, HDDA compare mode
+  Depends: Plan A Phase 0–1
+```
+
+**Do not merge these plans.** Amanatides dense DDA is the foundation and oracle; HDDA is
+optimization built on that foundation. Merging risks mixing correctness work with optimization
+work and breaking the oracle.
+
+**Gates for Plan B:**
+
+```text
+Do not implement HDDA until dense Amanatides CPU/GPU parity passes.
+Dense DDA remains the oracle forever, even after HDDA ships.
+```
+
+---
 
 Unify Drusniel voxel ray walking around one Amanatides/Woo-style grid DDA contract shared by
 CPU current-SDF, CPU NAADF, entity-volume overlays, and WGSL NAADF paths. Harden parity tests,
@@ -18,9 +45,10 @@ accelerates queries (sun visibility, AO, contact shadows, fog shafts, editor pic
 preview parity). Mesh seams still need transition/stitch geometry — see
 [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md).
 
-**HDDA is a follow-on plan**, not in scope here. Land dense DDA parity first (Phase 0–1), then
-see [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md) for hierarchical NAADF stepping.
-Do not start HDDA until dense DDA parity is proven.
+**HDDA (Plan B) is out of scope here.** Land dense Amanatides DDA CPU/GPU parity first
+(Phase 0–1), then hand off to [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md).
+Do not implement HDDA until that parity passes. Dense DDA remains the oracle forever, even
+after HDDA ships.
 
 ---
 
@@ -281,7 +309,7 @@ indirect GI on this work alone.
 |------|------|-------|
 | Fixed-point / integer DDA | Editor/server determinism needed | CI golden rays, authoritative picking |
 | GPU per-ray proxy dedupe bitset | Profiling shows `proxy_tests` dominate | After P4 CPU proof |
-| HDDA / NanoVDB-style hierarchy | Empty-voxel stepping dominates after skips | [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md) |
+| HDDA / NanoVDB-style hierarchy (Plan B) | Empty-voxel stepping dominates after skips; **blocked until Plan A Phase 0–1 parity passes** | [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md) |
 | LOD seam / stitch changes | Never in this plan | `docs/lod/` track |
 
 ---
@@ -320,7 +348,8 @@ Do not merge PR5 before PR2 equivalence tests are green.
 
 ## 13. Related docs
 
-- [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — semantics and runbook
+- [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md) — Plan B (acceleration); **do not start until Plan A Phase 0–1 passes**
+- [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — shared semantics and runbook (both plans)
 - [`docs/rendering/naadf-completion-jira-plan.md`](../rendering/naadf-completion-jira-plan.md) — broader NAADF roadmap
 - [`docs/rendering/naadf-implementation-status.md`](../rendering/naadf-implementation-status.md) — landed milestones
 - [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md) — mesh seam work (orthogonal)
@@ -333,3 +362,4 @@ Do not merge PR5 before PR2 equivalence tests are green.
 | date | change |
 |------|--------|
 | 2026-06-10 | Plan created. Split from contract doc; execution phases defined. |
+| 2026-06-10 | Plan A/B pairing: separate docs, linked dependency; Amanatides oracle gate before HDDA. |
