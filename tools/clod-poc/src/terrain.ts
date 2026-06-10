@@ -12,7 +12,7 @@
 import { PageMesh } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 
-const Y_CELLS = 48; // vertical extent meshed (surface lives well inside this band)
+const Y_CELLS = 56; // vertical extent meshed (must exceed max surface height incl. cliff)
 
 /** World cell extent in X/Z. Quads referencing cells outside this are clipped, so the
  *  world's outer pages get a clean open boundary instead of dangling halo geometry. */
@@ -62,14 +62,22 @@ function fbm2(x: number, z: number): number {
 /** Terrain surface height at (x,z). */
 function surfaceHeight(x: number, z: number): number {
   const f = fbm2(x * 0.035, z * 0.035);
-  // A ridge so stress-test features cross page borders later (Phase 2/4.4).
+  // A ridge so stress-test features cross page borders (§4.4).
   const ridge = Math.abs(Math.sin(x * 0.04) + Math.cos(z * 0.05)) * 4;
-  return 16 + f * 18 + ridge;
+  // A steep cliff straddling the page border at x=128 (feature crossing a border).
+  const cliff = 9 * smooth(Math.min(1, Math.max(0, (x - 124) / 8)));
+  return 16 + f * 18 + ridge + cliff;
 }
 
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
 export function density(x: number, y: number, z: number): number {
-  return surfaceHeight(x, z) - y;
+  const base = surfaceHeight(x, z) - y;
+  // A mild overhang lip near the 4-page corner (128,128): a localized solid bulge that
+  // folds the surface back (true 3D, not a heightfield). Gaussian in y keeps the lip and
+  // the main surface >1 cell apart, so single-vertex Surface Nets stays valid.
+  const dx = x - 128, dz = z - 128;
+  const bulge = 6 * Math.exp(-(dx * dx + dz * dz) / 900) * Math.exp(-((y - 30) * (y - 30)) / 120);
+  return base + bulge;
 }
 
 function gradient(x: number, y: number, z: number): [number, number, number] {

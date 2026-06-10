@@ -11,17 +11,18 @@ import { parseConfig } from "./config.js";
 import configText from "../../../config/clod_pages.yaml?raw";
 import { initSimplifier } from "./simplify.js";
 import { buildWorld } from "./quadtree.js";
-import { ClodPageNode } from "./types.js";
+import { meshChunk } from "./terrain.js";
+import { ClodPageNode, PageMesh } from "./types.js";
 import { createTerrainMaterial } from "./material.js";
 import { selectCut, SelectionParams, SelectionState } from "./selection.js";
 
 const LOD_COLORS = [0xffffff, 0x3a6ea5, 0x49a078, 0xd98032];
 
-function toGeometry(node: ClodPageNode): THREE.BufferGeometry {
+function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(node.mesh.positions, 3));
-  g.setAttribute("normal", new THREE.BufferAttribute(node.mesh.normals, 3));
-  g.setIndex(new THREE.BufferAttribute(node.mesh.indices, 1));
+  g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+  g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }
 
@@ -62,7 +63,7 @@ async function main() {
   const views = new Map<string, NodeView>();
   for (const node of allNodes) {
     const mat = createTerrainMaterial(LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)]);
-    const mesh = new THREE.Mesh(toGeometry(node), mat);
+    const mesh = new THREE.Mesh(toGeometry(node.mesh), mat);
     mesh.visible = false;
     scene.add(mesh);
     views.set(node.id, { node, mesh, mat, fade: 0, target: 0 });
@@ -72,6 +73,31 @@ async function main() {
   const boundaryGroup = new THREE.Group();
   scene.add(boundaryGroup);
 
+  // Near-field bubble: raw per-chunk meshes for a LOD0 page, built lazily and cached.
+  // Page LOD0 = welded chunks, so with tint off the bubble edge must be invisible (§4.4).
+  const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
+  const P = cfg.page.chunks_per_page;
+  const chunkGroups = new Map<string, { group: THREE.Group; mats: THREE.ShaderMaterial[] }>();
+  const ensureChunkGroup = (node: ClodPageNode) => {
+    let entry = chunkGroups.get(node.id);
+    if (entry) return entry;
+    const [px, pz] = node.id.slice(3).split(",").map(Number);
+    const group = new THREE.Group();
+    const mats: THREE.ShaderMaterial[] = [];
+    for (let dz = 0; dz < P; dz++) {
+      for (let dx = 0; dx < P; dx++) {
+        const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
+        const mat = createTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
+        group.add(new THREE.Mesh(toGeometry(cm), mat));
+        mats.push(mat);
+      }
+    }
+    scene.add(group);
+    entry = { group, mats };
+    chunkGroups.set(node.id, entry);
+    return entry;
+  };
+
   const state = {
     thresholdPx: cfg.selection.error_threshold_px,
     enforce21: true,
@@ -79,6 +105,9 @@ async function main() {
     wireframe: false,
     showBounds: false,
     colorByLod: true,
+    bubble: false,
+    bubbleRadius: 48,
+    tintBubble: true,
   };
   let selState: SelectionState = { split: new Set() };
   const crossfadeStep = 1 / cfg.selection.crossfade_frames;
@@ -149,6 +178,13 @@ async function main() {
       (v.mat.uniforms.uColor.value as THREE.Color).set(c);
     }
   });
+  const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");
+  bubbleFolder.add(state, "bubble").name("enable (raw chunks)");
+  bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)");
+  bubbleFolder.add(state, "tintBubble").name("tint bubble red").onChange((on: boolean) => {
+    for (const { mats } of chunkGroups.values())
+      for (const m of mats) (m.uniforms.uColor.value as THREE.Color).set(on ? 0xc94b4b : 0xffffff);
+  });
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -167,6 +203,26 @@ async function main() {
       v.mesh.visible = v.fade > 0.001;
       v.mat.uniforms.uFade.value = v.fade;
       v.mat.uniforms.uDither.value = v.fade < 0.999;
+    }
+
+    // Near-field bubble: a LOD0 page within the radius is owned by its raw chunks instead.
+    // Binary per-page ownership (no overlap band) — both draw the same welded surface.
+    for (const v of views.values()) {
+      const owned =
+        state.bubble &&
+        v.node.level === 0 &&
+        v.target === 1 &&
+        Math.hypot(
+          controls.target.x - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
+          controls.target.z - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
+        ) < state.bubbleRadius;
+      if (owned) {
+        v.mesh.visible = false;
+        ensureChunkGroup(v.node).group.visible = true;
+      } else {
+        const grp = chunkGroups.get(v.node.id);
+        if (grp) grp.group.visible = false;
+      }
     }
     renderer.render(scene, camera);
   });

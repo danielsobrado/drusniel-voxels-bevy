@@ -86,7 +86,24 @@ async function main() {
     }
   }
   console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=1e-6, dot>=0.9999, mat<=1e-4). PASS`);
-  console.log("\nbuild complete — no assertion failures.");
+
+  // ---- Phase 3 acceptance gate verdict (plan §5) ----
+  const maxNodeMs = Math.max(...result.stats.map((s) => s.buildMs));
+  const verdict = (ok: boolean) => (ok ? "PASS" : "FAIL");
+  const a1 = true; // reached here => every watertightness assertion (weld + no-internal-border) held
+  const a2 = checks > 0; // border chains matched at gate tolerances
+  const a4 = perAreaReduction <= 0.15;
+  const a5 = totalMs < 30_000 && maxNodeMs < 250; // seconds total, tens of ms per node
+  const a6 = lowRate < 0.1;
+  console.log("\n=== Phase 3 acceptance gate (§5) ===");
+  console.log(`A1 watertight (no holes/lips; weld + border asserts): ${verdict(a1)}`);
+  console.log(`A2 no dark seams (matched border attrs):              ${verdict(a2)}  (${checks} pairs)`);
+  console.log(`A3 density scars acceptable:                          VISUAL — inspect in viewer (npm run dev)`);
+  console.log(`A4 triangle reduction (LOD3 <= ~15% of LOD0):         ${verdict(a4)}  (${(perAreaReduction * 100).toFixed(1)}%)`);
+  console.log(`A5 build cost (seconds total, tens of ms / node):     ${verdict(a5)}  (total ${(totalMs / 1000).toFixed(1)}s, max node ${maxNodeMs.toFixed(0)}ms)`);
+  console.log(`A6 low-benefit rate (< 10% at levels 1-2):           ${verdict(a6)}  (${(lowRate * 100).toFixed(1)}%)`);
+  const measured = a1 && a2 && a4 && a5 && a6;
+  console.log(`\nMEASURED CRITERIA: ${verdict(measured)}  (A3 remains a visual judgement)`);
 }
 
 main().catch((e) => {

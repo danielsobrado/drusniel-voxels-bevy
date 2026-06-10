@@ -32,9 +32,15 @@ npm run build-pages        # 4x4 LOD0 pages, all quadtree levels
 npm run build-pages 8      # 8x8 (one complete LOD3 node — the real Phase 3 input)
 ```
 
-Prints per-level tris / avg `error_world` / low-benefit rate / build ms, the A4 reduction
-and A6 low-benefit metrics, and the A2 cross-page border-match check. Any dirty input
+Prints per-level tris / avg `error_world` / low-benefit rate / build ms, the A2 cross-page
+border-match check, and a **Phase 3 acceptance-gate verdict** (§5: A1 watertight, A2 seams,
+A4 reduction, A5 build cost, A6 low-benefit — A3 stays a visual judgement). Any dirty input
 (weld conflict, unwelded internal border, border mismatch, degenerate) is a **hard fail**.
+
+The terrain ([terrain.ts](src/terrain.ts)) includes §4.4 stress features that cross page
+borders: a ridge, a steep cliff straddling x=128, and a true 3D overhang lip at the
+4-page corner (128,128). The 8×8 gate passes with these present — evidence A1 holds on
+non-heightfield topology.
 
 ## Phase 2 — runtime viewer
 
@@ -46,11 +52,17 @@ Builds a 4×4 world in-browser and runs the real runtime (§4): per-frame **DAG-
 selection** (screen-space error + hysteresis), the optional **2:1 restricted-quadtree
 pass**, and a **dithered screen-door crossfade** when the cut changes. lil-gui controls:
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
-colour-by-LOD. The overlay shows the live cut (nodes per level, tris rendered, forced
-splits). Move the camera and watch near pages refine to LOD0 while far pages stay coarse.
+colour-by-LOD, and a **near-field bubble** folder (§4.4): inside the radius a LOD0 page is
+drawn as its raw chunks instead of the welded page mesh. With "tint bubble red" OFF the
+edge must be **invisible** (raw chunks === welded LOD0) — toggle the bubble and nothing
+should change; with tint ON you see which pages it owns. The overlay shows the live cut
+(nodes per level, tris rendered, forced splits). Move the camera and watch near pages
+refine to LOD0 while far pages stay coarse.
 
-Not yet built from §4: the Phase 3 stress scenes / near-field bubble mask (§4.4) and
-floating per-node error labels + locked-border highlight.
+Not yet built: forced neighbor LOD delta 2–3 sweep (needs an 8×8 in-browser build),
+floating per-node error labels + locked-border highlight, and an explicit carved cave
+tunnel (single-vertex Surface Nets can't split two sheets in one cell — a PoC mesher
+limit, not a CLOD one; the engine's mesher handles caves).
 
 ## Module map (mirrors the Rust appendix §11)
 
