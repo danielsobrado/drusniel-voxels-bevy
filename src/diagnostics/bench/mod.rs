@@ -177,6 +177,10 @@ pub struct BenchRenderToggles {
     #[serde(default)]
     pub terrain_material_quality: BenchTerrainMaterialQuality,
     #[serde(default)]
+    pub terrain_hex_tiling: Option<bool>,
+    #[serde(default)]
+    pub terrain_hex_tiling_normal: Option<bool>,
+    #[serde(default)]
     pub disable_terrain_material_lod: bool,
     #[serde(default)]
     pub prop_subcluster_grid: u8,
@@ -2436,8 +2440,8 @@ fn run_bench_state_machine(
             {
                 let debug = checkpoint.terrain_debug.clone().unwrap_or_default();
                 commands.queue(move |world: &mut World| {
-                    if let Some(mut view) = world
-                        .get_resource_mut::<crate::voxel::terrain_debug::TerrainDebugView>()
+                    if let Some(mut view) =
+                        world.get_resource_mut::<crate::voxel::terrain_debug::TerrainDebugView>()
                     {
                         view.wireframe = debug.wireframe;
                         view.normals = debug.normals;

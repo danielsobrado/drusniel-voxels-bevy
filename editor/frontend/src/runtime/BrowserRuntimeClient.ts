@@ -1,5 +1,5 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag } from "../types/runtime";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag, TerrainTexturingPatch } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import type { RuntimeCommandRequest } from "./runtimeCommands";
@@ -22,6 +22,7 @@ import type {
   RuntimeFocusCameraResult,
   RuntimeLightDeleteResult,
   RuntimeLightAtmosphereMutationResult,
+  RuntimeTerrainTexturingMutationResult,
   RuntimeLightLoadResult,
   RuntimeLightMutationResult,
   RuntimeActiveMaterialResult,
@@ -256,6 +257,14 @@ export class BrowserRuntimeClient implements RuntimeClient {
     return this.execute({
       type: "runtime.updateLightAtmosphere",
       requestId: makeRequestId("runtime.updateLightAtmosphere"),
+      payload: { patch },
+    });
+  }
+
+  async updateTerrainTexturing(patch: TerrainTexturingPatch): Promise<RuntimeCommandResult<RuntimeTerrainTexturingMutationResult>> {
+    return this.execute({
+      type: "runtime.updateTerrainTexturing",
+      requestId: makeRequestId("runtime.updateTerrainTexturing"),
       payload: { patch },
     });
   }

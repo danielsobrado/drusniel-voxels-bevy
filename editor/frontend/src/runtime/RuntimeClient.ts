@@ -1,6 +1,6 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
 import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
-import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag } from "../types/runtime";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RenderFeatureFlag, TerrainTexturingPatch } from "../types/runtime";
 import type { RuntimeEventHandler } from "./runtimeEvents";
 import type {
   EditorCameraInteractionMode,
@@ -20,6 +20,7 @@ import type {
   RuntimeFocusCameraResult,
   RuntimeLightDeleteResult,
   RuntimeLightAtmosphereMutationResult,
+  RuntimeTerrainTexturingMutationResult,
   RuntimeLightLoadResult,
   RuntimeLightMutationResult,
   RuntimeActiveMaterialResult,
@@ -78,6 +79,7 @@ export interface RuntimeClient {
   readonly updateAmbientLight: (color: string, brightness: number) => Promise<RuntimeCommandResult<RuntimeAmbientLightMutationResult>>;
   readonly getLightAtmosphere: () => Promise<RuntimeCommandResult<LightAtmosphereSettings>>;
   readonly updateLightAtmosphere: (patch: LightAtmospherePatch) => Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>>;
+  readonly updateTerrainTexturing: (patch: TerrainTexturingPatch) => Promise<RuntimeCommandResult<RuntimeTerrainTexturingMutationResult>>;
   readonly importLightAtmosphereTemplate: (template: LightAtmosphereTemplate) => Promise<RuntimeCommandResult<RuntimeLightAtmosphereMutationResult>>;
   readonly exportLightAtmosphereTemplate: () => Promise<RuntimeCommandResult<LightAtmosphereTemplate>>;
   readonly setWaterReflectionDebugMode: (waterBodyId: string, mode: WaterReflectionDebugViewMode) => Promise<RuntimeCommandResult<RuntimeWaterDebugModeResult>>;

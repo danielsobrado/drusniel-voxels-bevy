@@ -18,7 +18,15 @@ import type {
   TerrainPreviewResult,
   TerrainRecipe,
 } from "../types/world";
-import type { ConsoleMessage, GraphicsCapabilities, LightAtmosphereSettings, RenderFeatureFlag, RenderTimingSample, RuntimeMetrics } from "../types/runtime";
+import type {
+  ConsoleMessage,
+  GraphicsCapabilities,
+  LightAtmosphereSettings,
+  RenderFeatureFlag,
+  RenderTimingSample,
+  RuntimeMetrics,
+  TerrainTexturingSettings,
+} from "../types/runtime";
 
 export type RuntimeConnectionState = "mock" | "connected" | "disconnected" | "stale" | "error";
 
@@ -310,6 +318,11 @@ export interface RuntimeAmbientLightMutationResult {
 export interface RuntimeLightAtmosphereMutationResult {
   readonly settings: LightAtmosphereSettings;
   readonly metrics: Pick<RuntimeMetrics, "lightingAtmosphere">;
+}
+
+export interface RuntimeTerrainTexturingMutationResult {
+  readonly settings: TerrainTexturingSettings;
+  readonly metrics: Pick<RuntimeMetrics, "terrainTexturing">;
 }
 
 export interface RuntimeWaterBodyMutationResult {

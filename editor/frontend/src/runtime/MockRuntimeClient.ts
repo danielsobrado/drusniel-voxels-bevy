@@ -1,7 +1,7 @@
 import { getMockRenderQualityReadouts, mockRuntimeMetrics, mockWaterRuntimeSnapshot } from "../mocks/mockRuntime";
 import { mockAtlasMapping, mockChunks, mockLights, mockMaterials, mockProps, mockProtectedAreas } from "../mocks/mockWorld";
 import type { EditorDiagnosticsCategory, EditorDiagnosticsState, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { LightAtmospherePatch, LightAtmosphereSettings, RuntimeMetrics, RenderFeatureFlag } from "../types/runtime";
+import type { LightAtmospherePatch, LightAtmosphereSettings, RuntimeMetrics, RenderFeatureFlag, TerrainTexturingPatch } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, LightInstance, MaterialCatalog, MaterialPatch, PropInstance, ProtectedArea, TerrainGenerationConfig, TerrainPreviewRequest, TerrainPreviewSample, TerrainRecipe, WaterBody, WaterReflectionDebugViewMode, WaterReflectionStatus } from "../types/world";
 import type { RuntimeClient } from "./RuntimeClient";
 import { createDefaultEditorCameraState } from "./defaultEditorCamera";
@@ -202,10 +202,29 @@ export class MockRuntimeClient implements RuntimeClient {
 
   async setRenderQuality(preset: RenderQualityPreset) {
     this.renderQualityPreset = preset;
+    const gatedByLowQuality =
+      this.runtimeMetrics.terrainTexturing.configured.enabled &&
+      (preset === "Low" || preset === "Performance100");
+    const terrainTexturing = {
+      ...this.runtimeMetrics.terrainTexturing,
+      gatedByLowQuality,
+      effective: {
+        enabled:
+          this.runtimeMetrics.terrainTexturing.configured.enabled &&
+          !gatedByLowQuality &&
+          !this.runtimeMetrics.terrainTexturing.gatedByIntegratedGpu,
+        normalEnabled:
+          this.runtimeMetrics.terrainTexturing.configured.normalEnabled &&
+          this.runtimeMetrics.terrainTexturing.configured.enabled &&
+          !gatedByLowQuality &&
+          !this.runtimeMetrics.terrainTexturing.gatedByIntegratedGpu,
+      },
+    };
     this.runtimeMetrics = {
       ...this.runtimeMetrics,
       renderQualityPreset: preset,
       renderQualityReadouts: getMockRenderQualityReadouts(preset),
+      terrainTexturing,
     };
     return runtimeCommandSuccess({
       preset: this.renderQualityPreset,
@@ -342,6 +361,40 @@ export class MockRuntimeClient implements RuntimeClient {
       settings: this.lightAtmosphereSettings,
       metrics: {
         lightingAtmosphere: this.runtimeMetrics.lightingAtmosphere,
+      },
+    });
+  }
+
+  async updateTerrainTexturing(patch: TerrainTexturingPatch) {
+    const current = this.runtimeMetrics.terrainTexturing;
+    const configured = {
+      enabled: patch.hexTiling?.enabled ?? current.configured.enabled,
+      normalEnabled: patch.hexTiling?.normalEnabled ?? current.configured.normalEnabled,
+    };
+    const gatedByLowQuality =
+      configured.enabled &&
+      (this.renderQualityPreset === "Low" || this.renderQualityPreset === "Performance100");
+    const terrainTexturing = {
+      configured,
+      effective: {
+        enabled: configured.enabled && !gatedByLowQuality && !current.gatedByIntegratedGpu,
+        normalEnabled:
+          configured.normalEnabled &&
+          configured.enabled &&
+          !gatedByLowQuality &&
+          !current.gatedByIntegratedGpu,
+      },
+      gatedByIntegratedGpu: current.gatedByIntegratedGpu,
+      gatedByLowQuality,
+    };
+    this.runtimeMetrics = {
+      ...this.runtimeMetrics,
+      terrainTexturing,
+    };
+    return runtimeCommandSuccess({
+      settings: terrainTexturing,
+      metrics: {
+        terrainTexturing,
       },
     });
   }

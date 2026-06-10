@@ -106,6 +106,32 @@ export interface GraphicsCapabilities {
   readonly rayTracingEnabled: boolean;
 }
 
+export interface TerrainTexturingConfiguredState {
+  readonly enabled: boolean;
+  readonly normalEnabled: boolean;
+}
+
+export interface TerrainTexturingEffectiveState {
+  readonly enabled: boolean;
+  readonly normalEnabled: boolean;
+}
+
+export interface TerrainTexturingSettings {
+  readonly configured: TerrainTexturingConfiguredState;
+  readonly effective: TerrainTexturingEffectiveState;
+  readonly gatedByIntegratedGpu: boolean;
+  readonly gatedByLowQuality: boolean;
+}
+
+export interface HexTilingPatch {
+  readonly enabled?: boolean;
+  readonly normalEnabled?: boolean;
+}
+
+export interface TerrainTexturingPatch {
+  readonly hexTiling?: HexTilingPatch;
+}
+
 export interface RenderTimingSample {
   readonly label: string;
   readonly ms: number;
@@ -128,6 +154,7 @@ export interface RuntimeMetrics {
   readonly volumetricClouds: VolumetricCloudSettings;
   readonly cinematicPhotoMode: CinematicPhotoSettings;
   readonly graphicsCapabilities: GraphicsCapabilities;
+  readonly terrainTexturing: TerrainTexturingSettings;
   readonly timingSamples: readonly RenderTimingSample[];
 }
 

@@ -28,17 +28,19 @@ use crate::rendering::lighting::ray_tracing::{
     RayTracingSettings, VoxelRayBackendNotice, setup_voxel_ray_backend_notice,
     toggle_voxel_ray_backend_key, update_voxel_ray_backend_notice,
 };
-use crate::rendering::materials::{
-    configure_building_textures, configure_props_textures, configure_triplanar_textures,
-    setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
-    sync_fog_to_materials, sync_voxel_water_material_overrides, sync_weather_to_materials,
-};
 use crate::rendering::materials::blocky::BlockyMaterial;
 use crate::rendering::materials::building::{BuildingMaterial, BuildingMesh};
 use crate::rendering::materials::props::PropsMaterial;
 use crate::rendering::materials::triplanar::TriplanarMaterial;
+use crate::rendering::materials::{
+    configure_building_textures, configure_props_textures, configure_triplanar_textures,
+    setup_building_material, setup_props_material, setup_triplanar_material, setup_water_material,
+    sync_fog_to_materials, sync_hex_tiling_to_materials, sync_voxel_water_material_overrides,
+    sync_weather_to_materials,
+};
 use crate::rendering::shadows::pcss::PcssPlugin;
 use crate::rendering::shadows::shadow_budget::ShadowBudgetPlugin;
+use crate::rendering::terrain_hex_tiling::TerrainTexturingConfig;
 use crate::rendering::water::EnhancedWaterPlugin;
 use crate::rendering::water::displacement::WaterDisplacementPlugin;
 use crate::rendering::water::finish::WitchcraftWaterFinishPlugin;
@@ -56,6 +58,7 @@ impl Plugin for RenderingPlugin {
         app.init_resource::<GraphicsCapabilities>()
             .insert_resource(RayTracingSettings::from_env_or_default())
             .init_resource::<VoxelRayBackendNotice>()
+            .insert_resource(TerrainTexturingConfig::load_or_default())
             .init_resource::<RenderQualityPreset>()
             .add_systems(
                 Update,
@@ -134,6 +137,7 @@ impl Plugin for RenderingPlugin {
                     create_texture_array,
                     sync_fog_to_materials,
                     sync_weather_to_materials,
+                    sync_hex_tiling_to_materials,
                     sync_voxel_water_material_overrides.after(bevy_water::update_materials),
                 ),
             );

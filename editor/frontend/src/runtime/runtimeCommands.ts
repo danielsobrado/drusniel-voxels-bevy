@@ -1,5 +1,5 @@
 import type { EditorDiagnosticsCategory, RenderQualityPreset, Selection, ViewportOverlayState } from "../types/editor";
-import type { LightAtmospherePatch, RenderFeatureFlag } from "../types/runtime";
+import type { LightAtmospherePatch, RenderFeatureFlag, TerrainTexturingPatch } from "../types/runtime";
 import type { BlockAtlasMap, BlockType, LightInstance, MaterialPatch, PropInstance, ProtectedArea, TerrainPreviewRequest, WaterBody, WaterReflectionDebugViewMode } from "../types/world";
 import type { EditorCameraInteractionMode, EditorCameraKind, EditorCameraPose, EditorCameraProjection, EditorCameraTemplate, LightAtmosphereTemplate, RuntimeVoxelBrushRequest } from "./runtimeSchemas";
 
@@ -25,6 +25,7 @@ export type RuntimeCommandRequestType =
   | "runtime.updateAmbientLight"
   | "runtime.getLightAtmosphere"
   | "runtime.updateLightAtmosphere"
+  | "runtime.updateTerrainTexturing"
   | "runtime.importLightAtmosphereTemplate"
   | "runtime.exportLightAtmosphereTemplate"
   | "runtime.setWaterReflectionDebugMode"
@@ -93,6 +94,7 @@ export type RuntimeSetShaderFeatureCommand = RuntimeCommandRequestBase<
 export type RuntimeUpdateAmbientLightCommand = RuntimeCommandRequestBase<"runtime.updateAmbientLight", { readonly color: string; readonly brightness: number }>;
 export type RuntimeGetLightAtmosphereCommand = RuntimeCommandRequestBase<"runtime.getLightAtmosphere", Record<string, never>>;
 export type RuntimeUpdateLightAtmosphereCommand = RuntimeCommandRequestBase<"runtime.updateLightAtmosphere", { readonly patch: LightAtmospherePatch }>;
+export type RuntimeUpdateTerrainTexturingCommand = RuntimeCommandRequestBase<"runtime.updateTerrainTexturing", { readonly patch: TerrainTexturingPatch }>;
 export type RuntimeImportLightAtmosphereTemplateCommand = RuntimeCommandRequestBase<"runtime.importLightAtmosphereTemplate", { readonly template: LightAtmosphereTemplate }>;
 export type RuntimeExportLightAtmosphereTemplateCommand = RuntimeCommandRequestBase<"runtime.exportLightAtmosphereTemplate", Record<string, never>>;
 export type RuntimeSetWaterReflectionDebugModeCommand = RuntimeCommandRequestBase<"runtime.setWaterReflectionDebugMode", { readonly waterBodyId: string; readonly mode: WaterReflectionDebugViewMode }>;
@@ -150,6 +152,7 @@ export type RuntimeCommandRequest =
   | RuntimeUpdateAmbientLightCommand
   | RuntimeGetLightAtmosphereCommand
   | RuntimeUpdateLightAtmosphereCommand
+  | RuntimeUpdateTerrainTexturingCommand
   | RuntimeImportLightAtmosphereTemplateCommand
   | RuntimeExportLightAtmosphereTemplateCommand
   | RuntimeSetWaterReflectionDebugModeCommand

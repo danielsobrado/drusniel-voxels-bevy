@@ -23,6 +23,7 @@ pub mod water;
 
 pub mod ao_config;
 pub mod plugin;
+pub mod terrain_hex_tiling;
 
 #[cfg(feature = "naadf")]
 pub mod naadf;
@@ -41,6 +42,7 @@ pub use materials::building::{
     BuildingMaterial, BuildingMaterialHandle, BuildingMaterialType, BuildingMesh,
 };
 pub use materials::props::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
+pub use terrain_hex_tiling::TerrainTexturingConfig;
 
 pub mod adaptive_gi {
     pub use super::lighting::adaptive_gi::*;

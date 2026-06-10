@@ -1,3 +1,4 @@
+use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
 use bevy::{
     pbr::{MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod},
     prelude::*,
@@ -5,7 +6,6 @@ use bevy::{
         AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     },
 };
-use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
 
@@ -51,6 +51,32 @@ pub const TRIPLANAR_DEBUG_LOD_FLAG_MASK: u32 = 0xFF << TRIPLANAR_DEBUG_LOD_FLAG_
 pub fn triplanar_weather_flags_with_debug_lod(flags: u32, lod_index: u8) -> u32 {
     (flags & !TRIPLANAR_DEBUG_LOD_FLAG_MASK)
         | ((lod_index as u32 & 0xFF) << TRIPLANAR_DEBUG_LOD_FLAG_SHIFT)
+}
+
+/// Hex-tiling uniforms for terrain albedo/normal polish (shader-only).
+#[derive(Clone, Copy, ShaderType, Debug)]
+pub struct HexTilingUniform {
+    pub enabled: u32,
+    pub normal_enabled: u32,
+    pub rotation_strength: f32,
+    pub color_border_contrast: f32,
+    pub normal_border_contrast: f32,
+    pub near_distance: f32,
+    pub mid_distance: f32,
+}
+
+impl Default for HexTilingUniform {
+    fn default() -> Self {
+        Self {
+            enabled: 0,
+            normal_enabled: 0,
+            rotation_strength: 1.0,
+            color_border_contrast: 0.55,
+            normal_border_contrast: 0.50,
+            near_distance: 96.0,
+            mid_distance: 160.0,
+        }
+    }
 }
 
 /// Volume bounds for the terrain iso-band debug overlay. `epsilon <= 0` disables the overlay.
@@ -99,6 +125,8 @@ pub struct TriplanarMaterial {
     pub uniforms: TriplanarUniforms,
 
     pub quality: TerrainMaterialQuality,
+    /// Pipeline specialization flag: compile the hex-tiling shader branch.
+    pub hex_tiling_shader_enabled: bool,
 
     // Grass textures (mat 0)
     #[texture(1)]
@@ -136,6 +164,9 @@ pub struct TriplanarMaterial {
 
     #[uniform(12)]
     pub iso_band_params: TerrainIsoBandUniforms,
+
+    #[uniform(13)]
+    pub hex_tiling: HexTilingUniform,
 }
 
 #[repr(u8)]
@@ -157,12 +188,14 @@ pub enum TerrainMaterialQuality {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct TriplanarMaterialKey {
     quality: TerrainMaterialQuality,
+    hex_tiling_shader_enabled: bool,
 }
 
 impl From<&TriplanarMaterial> for TriplanarMaterialKey {
     fn from(material: &TriplanarMaterial) -> Self {
         Self {
             quality: material.quality,
+            hex_tiling_shader_enabled: material.hex_tiling_shader_enabled,
         }
     }
 }
@@ -172,6 +205,7 @@ impl Default for TriplanarMaterial {
         Self {
             uniforms: TriplanarUniforms::default(),
             quality: TerrainMaterialQuality::FullTriplanar,
+            hex_tiling_shader_enabled: false,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -182,6 +216,7 @@ impl Default for TriplanarMaterial {
             dirt_normal: None,
             iso_band_volume: None,
             iso_band_params: TerrainIsoBandUniforms::default(),
+            hex_tiling: HexTilingUniform::default(),
         }
     }
 }
@@ -308,8 +343,35 @@ impl Material for TriplanarMaterial {
                     fragment.shader_defs.push("TERRAIN_DEBUG_FLAT_UNLIT".into());
                 }
             }
+            if _key.bind_group_data.hex_tiling_shader_enabled {
+                fragment.shader_defs.push("TERRAIN_HEX_TILING".into());
+            }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_tiling_uniform_defaults_match_config() {
+        let uniform = HexTilingUniform::default();
+        assert_eq!(uniform.enabled, 0);
+        assert_eq!(uniform.normal_enabled, 0);
+        assert_eq!(uniform.rotation_strength, 1.0);
+        assert_eq!(uniform.color_border_contrast, 0.55);
+        assert_eq!(uniform.normal_border_contrast, 0.50);
+        assert_eq!(uniform.near_distance, 96.0);
+        assert_eq!(uniform.mid_distance, 160.0);
+    }
+
+    #[test]
+    fn triplanar_shader_references_hex_tiling_module() {
+        let source = include_str!("../../../assets/shaders/triplanar_terrain.wgsl");
+        assert!(source.contains("terrain/hextile.wgsl"));
+        assert!(source.contains("terrain/surfgrad.wgsl"));
     }
 }
 

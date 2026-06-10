@@ -161,6 +161,19 @@ const setEditorDiagnosticsMode = async (
   );
 };
 
+const updateRuntimeTerrainTexturing = async (
+  ctx: EditorCommandContext,
+  patch: import("../types/runtime").TerrainTexturingPatch,
+): Promise<void> => {
+  const result = unwrapRuntime(await ctx.runtimeClient.updateTerrainTexturing(patch));
+  ctx.setState((state) => ({
+    runtimeMetrics: {
+      ...state.runtimeMetrics,
+      terrainTexturing: result.metrics.terrainTexturing,
+    },
+  }));
+};
+
 const setRuntimeRenderFeature = async (
   ctx: EditorCommandContext,
   feature: RenderFeatureFlag,
@@ -1992,6 +2005,30 @@ export const editorCommands: readonly EditorCommand[] = [
       ctx.getState().setActiveMode("debug");
       ctx.getState().setActiveTool("debug");
       ctx.toast.info("Graphics capabilities refreshed from runtime.");
+    },
+  },
+  {
+    id: "editor.rendering.toggleHexTiling",
+    title: "Toggle terrain hex tiling (albedo)",
+    description: "Toggle shader hex tiling for triplanar terrain albedo.",
+    category: "Debug",
+    keywords: ["debug", "rendering", "terrain", "hex", "tiling", "albedo"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const enabled = !ctx.getState().runtimeMetrics.terrainTexturing.configured.enabled;
+      await updateRuntimeTerrainTexturing(ctx, { hexTiling: { enabled } });
+    },
+  },
+  {
+    id: "editor.rendering.toggleHexTilingNormal",
+    title: "Toggle terrain hex tiling normals",
+    description: "Toggle surface-gradient hex tiling for triplanar terrain normal maps.",
+    category: "Debug",
+    keywords: ["debug", "rendering", "terrain", "hex", "tiling", "normal"],
+    runtimeWrite: true,
+    run: async (ctx) => {
+      const normalEnabled = !ctx.getState().runtimeMetrics.terrainTexturing.configured.normalEnabled;
+      await updateRuntimeTerrainTexturing(ctx, { hexTiling: { normalEnabled } });
     },
   },
   {

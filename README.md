@@ -11,7 +11,7 @@ See [version-history.md](docs/reference/version-history.md) for release notes an
 
 | Version | Summary | Main Image |
 | ------- | ------- | ---------- |
-| [v0.5](docs/reference/version-v0-5.md) | Current development version with water overhaul, NAADF experiments, performance work, collider benches, and the new editor. | ![v0.5 Editor Preview](docs/images/editor1.jpg) |
+| [v0.5](docs/reference/version-v0-5.md) | Current development version with water overhaul, NAADF experiments, performance work, collider benches, terrain hex-tiling (breaks up repeated texture patterns on large surfaces), and the new editor. | ![v0.5 Editor Preview](docs/images/editor1.jpg) |
 | [v0.4](docs/reference/version-v0-4.md) | Rendering stack, GI, atmosphere, terrain tools, building systems, props, and persistence. | ![v0.4 Props and Vegetation](docs/images/v0.4-props1.jpg) |
 | [v0.3](docs/reference/version-v0-3.md) | PBR materials, triplanar splatting, surface-net fixes, and smoother slope movement. | ![v0.3 Preview](docs/images/V0.3.jpg) |
 | [v0.2](docs/reference/version-v0-2.md) | Procedural grass, terrain balance, water restoration, texture assets, and rendering polish. | ![v0.2 Preview](docs/images/V0.2.jpg) |

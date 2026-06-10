@@ -9,6 +9,17 @@ export function RenderingSettingsPanel({ render }: RenderingSettingsPanelProps) 
   const metrics = useEditorStore((state) => state.runtimeMetrics);
   const pendingCommandIds = useEditorStore((state) => state.pendingCommandIds);
   const qualityPending = pendingCommandIds.some((commandId) => commandId.startsWith("editor.rendering.setQuality") || commandId.startsWith("editor.quality."));
+  const hexPending = pendingCommandIds.some((commandId) => commandId.startsWith("editor.rendering.toggleHexTiling"));
+  const terrainTexturing = metrics.terrainTexturing;
+  const hexGateHint = terrainTexturing.gatedByIntegratedGpu
+    ? "Off: integrated GPU gate"
+    : terrainTexturing.gatedByLowQuality
+      ? "Off: Low / Performance100 gate"
+      : terrainTexturing.configured.enabled && !terrainTexturing.effective.enabled
+        ? "Configured on, runtime off"
+        : terrainTexturing.effective.enabled
+          ? "Active in runtime"
+          : "Off";
 
   return (
     <section className="inspector-section" data-testid="profiler-rendering-settings">
@@ -27,6 +38,32 @@ export function RenderingSettingsPanel({ render }: RenderingSettingsPanelProps) 
           <option value="Performance100">Performance100</option>
         </select>
       </label>
+
+      <div className="inspector-section-title">Terrain hex tiling</div>
+      <label>
+        <input
+          type="checkbox"
+          data-testid="profiler-hex-tiling-albedo"
+          checked={terrainTexturing.configured.enabled}
+          disabled={hexPending}
+          onChange={() => void render("editor.rendering.toggleHexTiling")}
+        />
+        Hex tiling (albedo)
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          data-testid="profiler-hex-tiling-normal"
+          checked={terrainTexturing.configured.normalEnabled}
+          disabled={hexPending || !terrainTexturing.configured.enabled}
+          onChange={() => void render("editor.rendering.toggleHexTilingNormal")}
+        />
+        Hex tiling normals
+      </label>
+      <p className="inspector-subnote" data-testid="profiler-hex-tiling-status">
+        {hexGateHint}
+        {terrainTexturing.effective.normalEnabled ? " · normals active" : ""}
+      </p>
 
       <button type="button" className="toolbar-button" onClick={() => void render("editor.debug.openRenderTimings")}>
         Open render timing table

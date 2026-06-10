@@ -1,4 +1,5 @@
 use crate::atmosphere::FogUniforms;
+use crate::bench::BenchRenderToggles;
 use crate::constants::{
     VOXEL_WATER_CLARITY_MULT, VOXEL_WATER_EDGE_SCALE_MULT, VOXEL_WATER_WAVE_UV_SCALE,
 };
@@ -9,9 +10,14 @@ use crate::rendering::building_material::{
 };
 use crate::rendering::capabilities::GraphicsCapabilities;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
+use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::terrain_hex_tiling::{
+    TerrainTexturingConfig, effective_hex_tiling_enabled, effective_hex_tiling_normal_enabled,
+    hex_tiling_uniform_from_config,
+};
 use crate::rendering::triplanar_material::{
-    TerrainIsoBandUniforms, TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
-    TriplanarUniforms,
+    HexTilingUniform, TerrainIsoBandUniforms, TerrainMaterialQuality, TriplanarMaterial,
+    TriplanarMaterialHandle, TriplanarUniforms,
 };
 use crate::rendering::water::{WaterBodyPresetConfig, WaterConfig, WaterShaderToggles};
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
@@ -642,6 +648,7 @@ pub fn setup_triplanar_material(
                 ..Default::default()
             },
             quality: TerrainMaterialQuality::FullTriplanar,
+            hex_tiling_shader_enabled: false,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -652,6 +659,7 @@ pub fn setup_triplanar_material(
             dirt_normal: None,
             iso_band_volume: None,
             iso_band_params: TerrainIsoBandUniforms::default(),
+            hex_tiling: HexTilingUniform::default(),
         }
     } else {
         TriplanarMaterial {
@@ -665,6 +673,7 @@ pub fn setup_triplanar_material(
                 ..Default::default()
             },
             quality: TerrainMaterialQuality::FullTriplanar,
+            hex_tiling_shader_enabled: false,
             // Grass textures (for TopSoil top faces)
             grass_albedo: Some(asset_server.load("pbr/grass/albedo.png")),
             grass_normal: Some(asset_server.load("pbr/grass/normal.png")),
@@ -679,6 +688,7 @@ pub fn setup_triplanar_material(
             dirt_normal: Some(asset_server.load("pbr/dirt/normal.png")),
             iso_band_volume: None,
             iso_band_params: TerrainIsoBandUniforms::default(),
+            hex_tiling: HexTilingUniform::default(),
         }
     };
 
@@ -719,6 +729,27 @@ pub fn setup_triplanar_material(
     attach_iso_band(&mut wireframe_normals_debug_material);
     attach_iso_band(&mut flat_unlit_debug_material);
     attach_iso_band(&mut wireframe_flat_unlit_debug_material);
+
+    let hex_tiling_enabled = false;
+    for material in [
+        &mut full_material,
+        &mut cheap_material,
+        &mut single_projection_far_material,
+        &mut horizon_proxy_material,
+        &mut atlas_only_debug_material,
+        &mut wireframe_debug_material,
+        &mut normals_debug_material,
+        &mut wireframe_normals_debug_material,
+        &mut flat_unlit_debug_material,
+        &mut wireframe_flat_unlit_debug_material,
+    ] {
+        material.hex_tiling_shader_enabled = hex_tiling_enabled;
+        material.hex_tiling = hex_tiling_uniform_from_config(
+            &TerrainTexturingConfig::default(),
+            hex_tiling_enabled,
+            false,
+        );
+    }
 
     let material_handle = materials.add(full_material);
     let cheap_handle = materials.add(cheap_material);
@@ -1221,6 +1252,80 @@ pub fn sync_fog_to_materials(
             }
         }
     }
+}
+
+fn for_each_triplanar_material<F>(handles: &TriplanarMaterialHandle, mut apply: F)
+where
+    F: FnMut(&Handle<TriplanarMaterial>),
+{
+    for handle in [
+        &handles.handle,
+        &handles.cheap_handle,
+        &handles.single_projection_far_handle,
+        &handles.horizon_proxy_handle,
+        &handles.atlas_only_debug_handle,
+        &handles.wireframe_debug_handle,
+        &handles.normals_debug_handle,
+        &handles.wireframe_normals_debug_handle,
+        &handles.flat_unlit_debug_handle,
+        &handles.wireframe_flat_unlit_debug_handle,
+    ] {
+        apply(handle);
+    }
+}
+
+/// Sync hex-tiling uniforms and pipeline specialization into all triplanar materials.
+pub fn sync_hex_tiling_to_materials(
+    config: Option<Res<TerrainTexturingConfig>>,
+    capabilities: Option<Res<GraphicsCapabilities>>,
+    quality_preset: Option<Res<RenderQualityPreset>>,
+    bench_toggles: Option<Res<BenchRenderToggles>>,
+    triplanar_handles: Option<Res<TriplanarMaterialHandle>>,
+    mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
+) {
+    let _timer = area_timer(&mut timing, frame.0, "Material Sync Hex Tiling");
+    let Some(config) = config else {
+        return;
+    };
+    let Some(handles) = triplanar_handles else {
+        return;
+    };
+
+    // Only touch material assets when an input actually changed. `get_mut`
+    // dirties the asset and forces a bind-group rebuild, so an unconditional
+    // pass would do that for every terrain material every frame. Mirrors the
+    // `is_changed()` guard in `sync_weather_to_materials`.
+    let inputs_changed = config.is_changed()
+        || handles.is_changed()
+        || capabilities.as_ref().is_some_and(|res| res.is_changed())
+        || quality_preset.as_ref().is_some_and(|res| res.is_changed())
+        || bench_toggles.as_ref().is_some_and(|res| res.is_changed());
+    if !inputs_changed {
+        return;
+    }
+
+    let enabled = effective_hex_tiling_enabled(
+        &config,
+        capabilities.as_deref(),
+        quality_preset.as_deref().copied().unwrap_or_default(),
+        bench_toggles.as_deref(),
+    );
+    let normal_enabled = effective_hex_tiling_normal_enabled(
+        &config,
+        capabilities.as_deref(),
+        quality_preset.as_deref().copied().unwrap_or_default(),
+        bench_toggles.as_deref(),
+    );
+    let uniform = hex_tiling_uniform_from_config(&config, enabled, normal_enabled);
+
+    for_each_triplanar_material(&handles, |handle| {
+        if let Some(material) = triplanar_materials.get_mut(handle) {
+            material.hex_tiling_shader_enabled = enabled;
+            material.hex_tiling = uniform;
+        }
+    });
 }
 
 /// Sync the tiny weather uniform into terrain materials.

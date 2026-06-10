@@ -872,6 +872,8 @@ describe("editor command registry", () => {
     await runCommand("editor.debug.togglePhotoMode", context);
     await runCommand("editor.debug.toggleCinematicMode", context);
     await runCommand("editor.debug.toggleRayTracingFlag", context);
+    await runCommand("editor.rendering.toggleHexTiling", context);
+    await runCommand("editor.rendering.toggleHexTilingNormal", context);
 
     const state = useEditorStore.getState();
     expect(state.renderQualityPreset).toBe("Performance100");
@@ -885,6 +887,8 @@ describe("editor command registry", () => {
     expect(state.runtimeMetrics.cinematicPhotoMode.photoModeActive).toBe(true);
     expect(state.runtimeMetrics.cinematicPhotoMode.cinematicModeActive).toBe(true);
     expect(state.runtimeMetrics.graphicsCapabilities.rayTracingEnabled).toBe(true);
+    expect(state.runtimeMetrics.terrainTexturing.configured.enabled).toBe(true);
+    expect(state.runtimeMetrics.terrainTexturing.configured.normalEnabled).toBe(true);
     expect(state.commandHistory[0].commandId).toBe("editor.debug.toggleRayTracingFlag");
   });
 

@@ -1,0 +1,16 @@
+# Terrain texturing polish (shader-only; does not affect meshing or LOD seams).
+# NOTE: enabled here for local iteration. Ship default is disabled (see docs +
+# `default_config_has_hex_tiling_disabled` test) — set both flags to false before
+# committing, or re-enable via VOXEL_TERRAIN_HEX_TILING=1 instead.
+
+terrain_texturing:
+  hex_tiling:
+    enabled: true
+    normal_enabled: true
+    rotation_strength: 1.0
+    color_border_contrast: 0.55
+    normal_border_contrast: 0.50
+    near_distance: 96.0
+    mid_distance: 160.0
+    disable_on_integrated_gpu: true
+    disable_on_low_quality: true

@@ -7,6 +7,7 @@ pub use super::{
     FrontendVoxelBrushShape, FrontendWaterBodyKind, FrontendWaterBodyPatch,
     FrontendWaterReflectionDebugViewMode, GlobalLightAtmospherePreset, LightAtmospherePatch,
     LightAtmospherePresetState, LightAtmosphereSettingsPayload, LightAtmosphereTemplate,
-    LightPreset, RuntimeCommandEnvelope, RuntimeCommandResponse, RuntimeCommandResult,
+    HexTilingPatch, LightPreset, RuntimeCommandEnvelope, RuntimeCommandResponse,
+    RuntimeCommandResult, TerrainTexturingPatch,
     RuntimeCommandStatus, RuntimeWriteCommand, TerrainPreviewRequest, TerrainRecipe,
 };

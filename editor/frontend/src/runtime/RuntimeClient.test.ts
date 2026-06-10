@@ -238,6 +238,39 @@ describe("runtime clients", () => {
     });
   });
 
+  it("browser runtime client sends terrain texturing patch commands through the bridge", async () => {
+    const requests: unknown[] = [];
+    const client = new BrowserRuntimeClient({
+      executeCommand: async (request) => {
+        requests.push(request);
+        return runtimeCommandSuccess({
+          settings: {
+            configured: { enabled: true, normalEnabled: false },
+            effective: { enabled: true, normalEnabled: false },
+            gatedByIntegratedGpu: false,
+            gatedByLowQuality: false,
+          },
+          metrics: {
+            terrainTexturing: {
+              configured: { enabled: true, normalEnabled: false },
+              effective: { enabled: true, normalEnabled: false },
+              gatedByIntegratedGpu: false,
+              gatedByLowQuality: false,
+            },
+          },
+        });
+      },
+    });
+
+    const result = await client.updateTerrainTexturing({ hexTiling: { enabled: true } });
+
+    expect(result.ok).toBe(true);
+    expect(requests[0]).toMatchObject({
+      type: "runtime.updateTerrainTexturing",
+      payload: { patch: { hexTiling: { enabled: true } } },
+    });
+  });
+
   it("browser runtime client sends prop mutation commands through the bridge", async () => {
     const requests: unknown[] = [];
     const client = new BrowserRuntimeClient({

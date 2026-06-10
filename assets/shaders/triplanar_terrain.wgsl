@@ -11,6 +11,18 @@
 #import water_caustics
 #import weather_common
 
+#ifdef TERRAIN_HEX_TILING
+#import "shaders/terrain/hextile.wgsl"::{
+    hex_color_sample,
+    hex_normal_derivative,
+    hex_planar_coords,
+}
+#import "shaders/terrain/surfgrad.wgsl"::{
+    resolve_normal_from_surface_gradient,
+    surfgrad_from_triplanar_projection,
+}
+#endif
+
 struct TriplanarUniforms {
     base_color: vec4<f32>,
     tex_scale: f32,
@@ -160,6 +172,100 @@ fn sample_albedo_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec
     return col;
 }
 
+#ifdef TERRAIN_HEX_TILING
+// Fraction of the cutoff distance over which hex tiling fades back to plain
+// triplanar, so the switch isn't a hard ring around the camera.
+const HEX_BLEND_BAND_FRAC: f32 = 0.15;
+
+fn hex_albedo_weight(frag_dist: f32) -> f32 {
+    if (hex_tiling.enabled == 0u) {
+        return 0.0;
+    }
+    let band = max(hex_tiling.mid_distance * HEX_BLEND_BAND_FRAC, 1.0);
+    return 1.0 - smoothstep(hex_tiling.mid_distance - band, hex_tiling.mid_distance, frag_dist);
+}
+
+fn hex_normal_weight(frag_dist: f32) -> f32 {
+    if (hex_tiling.enabled == 0u || hex_tiling.normal_enabled == 0u) {
+        return 0.0;
+    }
+    let band = max(hex_tiling.near_distance * HEX_BLEND_BAND_FRAC, 1.0);
+    return 1.0 - smoothstep(hex_tiling.near_distance - band, hex_tiling.near_distance, frag_dist);
+}
+
+fn sample_hex_albedo_plane(world_coord: vec2<f32>, tex: texture_2d<f32>) -> vec4<f32> {
+    let st = hex_planar_coords(world_coord, uniforms.tex_scale);
+    return hex_color_sample(
+        tex,
+        tex_sampler,
+        st,
+        hex_tiling.rotation_strength,
+        hex_tiling.color_border_contrast,
+    );
+}
+
+fn sample_hex_albedo_plane_mat(world_coord: vec2<f32>, mat: i32) -> vec4<f32> {
+    if (mat == 0) {
+        return sample_hex_albedo_plane(world_coord, grass_albedo);
+    } else if (mat == 1) {
+        return sample_hex_albedo_plane(world_coord, rock_albedo);
+    } else if (mat == 2) {
+        return sample_hex_albedo_plane(world_coord, sand_albedo);
+    }
+    return sample_hex_albedo_plane(world_coord, dirt_albedo);
+}
+
+// Triplanar hex albedo path inspired by hextile-demo CommonTriplanarColor.
+fn sample_albedo_tp_hextile(world_pos: vec3<f32>, w: vec3<f32>, mat: i32) -> vec4<f32> {
+    let col_yz = sample_hex_albedo_plane_mat(world_pos.yz, mat) * w.x;
+    let col_xz = sample_hex_albedo_plane_mat(world_pos.xz, mat) * w.y;
+    let col_xy = sample_hex_albedo_plane_mat(world_pos.xy, mat) * w.z;
+    return col_yz + col_xz + col_xy;
+}
+
+fn sample_hex_normal_plane(world_coord: vec2<f32>, tex: texture_2d<f32>) -> vec2<f32> {
+    let st = hex_planar_coords(world_coord, uniforms.tex_scale);
+    return hex_normal_derivative(
+        tex,
+        tex_sampler,
+        st,
+        hex_tiling.rotation_strength,
+        hex_tiling.normal_border_contrast,
+    );
+}
+
+fn sample_hex_normal_plane_mat(world_coord: vec2<f32>, mat: i32) -> vec2<f32> {
+    if (mat == 0) {
+        return sample_hex_normal_plane(world_coord, grass_normal);
+    } else if (mat == 1) {
+        return sample_hex_normal_plane(world_coord, rock_normal);
+    } else if (mat == 2) {
+        return sample_hex_normal_plane(world_coord, sand_normal);
+    }
+    return sample_hex_normal_plane(world_coord, dirt_normal);
+}
+
+// CommonTriplanarNormal-style path via surface gradients.
+fn sample_normal_tp_hextile(
+    world_pos: vec3<f32>,
+    tp_weights: vec3<f32>,
+    base_normal: vec3<f32>,
+    mat: i32,
+) -> vec3<f32> {
+    let deriv_yz = sample_hex_normal_plane_mat(world_pos.yz, mat);
+    let deriv_xz = sample_hex_normal_plane_mat(world_pos.xz, mat);
+    let deriv_xy = sample_hex_normal_plane_mat(world_pos.xy, mat);
+    let surf_grad = surfgrad_from_triplanar_projection(
+        tp_weights,
+        deriv_yz,
+        deriv_xz,
+        deriv_xy,
+        base_normal,
+    );
+    return resolve_normal_from_surface_gradient(base_normal, surf_grad, uniforms.normal_intensity);
+}
+#endif
+
 fn sample_normal_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec3<f32>, wn: vec3<f32>, mat: i32, view_dir: vec3<f32>) -> vec3<f32> {
     var cy = uv_yz; var cz = uv_xz; var cx = uv_xy;
     
@@ -195,6 +301,32 @@ fn sample_normal_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, w: vec
     let n2 = reorient_normal(unpack_normal(nz), wn, 2);
     return normalize(n0 * w.x + n1 * w.y + n2 * w.z);
 }
+
+#ifdef TERRAIN_HEX_TILING
+// Cross-fade between plain triplanar and hex tiling over the distance band.
+// Only the band (0 < w < 1) pays for both samples; near/far paths sample one.
+fn blend_albedo_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, world_pos: vec3<f32>, w: vec3<f32>, mat: i32, view_dir: vec3<f32>, hex_w: f32) -> vec4<f32> {
+    if (hex_w >= 1.0) {
+        return sample_albedo_tp_hextile(world_pos, w, mat);
+    }
+    let plain = sample_albedo_tp(uv_yz, uv_xz, uv_xy, w, mat, view_dir);
+    if (hex_w <= 0.0) {
+        return plain;
+    }
+    return mix(plain, sample_albedo_tp_hextile(world_pos, w, mat), hex_w);
+}
+
+fn blend_normal_tp(uv_yz: vec2<f32>, uv_xz: vec2<f32>, uv_xy: vec2<f32>, world_pos: vec3<f32>, w: vec3<f32>, wn: vec3<f32>, mat: i32, view_dir: vec3<f32>, hex_w: f32) -> vec3<f32> {
+    if (hex_w >= 1.0) {
+        return sample_normal_tp_hextile(world_pos, w, wn, mat);
+    }
+    let plain = sample_normal_tp(uv_yz, uv_xz, uv_xy, w, wn, mat, view_dir);
+    if (hex_w <= 0.0) {
+        return plain;
+    }
+    return mix(plain, sample_normal_tp_hextile(world_pos, w, wn, mat), hex_w);
+}
+#endif
 
 fn get_base_material(atlas_idx: i32) -> i32 {
     if (atlas_idx == 0) { return 0; }
@@ -298,6 +430,18 @@ struct TerrainIsoBandUniforms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var iso_band_volume: texture_3d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var iso_band_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(12) var<uniform> iso_band: TerrainIsoBandUniforms;
+
+struct HexTilingUniform {
+    enabled: u32,
+    normal_enabled: u32,
+    rotation_strength: f32,
+    color_border_contrast: f32,
+    normal_border_contrast: f32,
+    near_distance: f32,
+    mid_distance: f32,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(13) var<uniform> hex_tiling: HexTilingUniform;
 
 fn sample_mesher_sdf(world_pos: vec3<f32>) -> f32 {
     let uvw = (world_pos - iso_band.world_min) * iso_band.inv_extent;
@@ -424,6 +568,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     let uv_yz = compute_uv(world_pos.yz);
     let uv_xz = compute_uv(world_pos.xz);
     let uv_xy = compute_uv(world_pos.xy);
+#ifdef TERRAIN_HEX_TILING
+    let hex_albedo_w = hex_albedo_weight(frag_dist);
+    let hex_normal_w = hex_normal_weight(frag_dist);
+#endif
 
     var albedo = vec4<f32>(0.0);
     var final_normal = vec3<f32>(0.0);
@@ -453,43 +601,83 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
 #else
     if (w_max > 0.95) {
         // Determine which single material dominates
+#ifdef TERRAIN_HEX_TILING
+        albedo = blend_albedo_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, mat_idx, view_dir, hex_albedo_w);
+#else
         albedo = sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, mat_idx, view_dir);
+#endif
         if (skip_normals) {
             final_normal = world_normal;
         } else {
+#ifdef TERRAIN_HEX_TILING
+            final_normal = blend_normal_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, world_normal, mat_idx, view_dir, hex_normal_w);
+#else
             final_normal = sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, mat_idx, view_dir);
+#endif
         }
     } else {
         // ── Blend path: sample only materials with significant weight ──
         // Material 0: Grass
         if (w.x > 0.001) {
+#ifdef TERRAIN_HEX_TILING
+            albedo += blend_albedo_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, 0, view_dir, hex_albedo_w) * w.x;
+#else
             albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 0, view_dir) * w.x;
+#endif
             if (!skip_normals) {
+#ifdef TERRAIN_HEX_TILING
+                final_normal += blend_normal_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, world_normal, 0, view_dir, hex_normal_w) * w.x;
+#else
                 final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 0, view_dir) * w.x;
+#endif
             }
         }
 
         // Material 1: Rock
         if (w.y > 0.001) {
+#ifdef TERRAIN_HEX_TILING
+            albedo += blend_albedo_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, 1, view_dir, hex_albedo_w) * w.y;
+#else
             albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 1, view_dir) * w.y;
+#endif
             if (!skip_normals) {
+#ifdef TERRAIN_HEX_TILING
+                final_normal += blend_normal_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, world_normal, 1, view_dir, hex_normal_w) * w.y;
+#else
                 final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 1, view_dir) * w.y;
+#endif
             }
         }
 
         // Material 2: Sand
         if (w.z > 0.001) {
+#ifdef TERRAIN_HEX_TILING
+            albedo += blend_albedo_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, 2, view_dir, hex_albedo_w) * w.z;
+#else
             albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 2, view_dir) * w.z;
+#endif
             if (!skip_normals) {
+#ifdef TERRAIN_HEX_TILING
+                final_normal += blend_normal_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, world_normal, 2, view_dir, hex_normal_w) * w.z;
+#else
                 final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 2, view_dir) * w.z;
+#endif
             }
         }
 
         // Material 3: Dirt
         if (w.w > 0.001) {
+#ifdef TERRAIN_HEX_TILING
+            albedo += blend_albedo_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, 3, view_dir, hex_albedo_w) * w.w;
+#else
             albedo += sample_albedo_tp(uv_yz, uv_xz, uv_xy, weights, 3, view_dir) * w.w;
+#endif
             if (!skip_normals) {
+#ifdef TERRAIN_HEX_TILING
+                final_normal += blend_normal_tp(uv_yz, uv_xz, uv_xy, world_pos, weights, world_normal, 3, view_dir, hex_normal_w) * w.w;
+#else
                 final_normal += sample_normal_tp(uv_yz, uv_xz, uv_xy, weights, world_normal, 3, view_dir) * w.w;
+#endif
             }
         }
 

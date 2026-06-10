@@ -420,6 +420,18 @@ const defaultRuntimeMetrics: RuntimeMetrics = {
     rayTracingSupported: false,
     rayTracingEnabled: false,
   },
+  terrainTexturing: {
+    configured: {
+      enabled: false,
+      normalEnabled: false,
+    },
+    effective: {
+      enabled: false,
+      normalEnabled: false,
+    },
+    gatedByIntegratedGpu: false,
+    gatedByLowQuality: false,
+  },
   timingSamples: [],
 };
 

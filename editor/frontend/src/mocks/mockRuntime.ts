@@ -133,6 +133,18 @@ export const mockRuntimeMetrics: RuntimeMetrics = {
     rayTracingSupported: false,
     rayTracingEnabled: false,
   },
+  terrainTexturing: {
+    configured: {
+      enabled: false,
+      normalEnabled: false,
+    },
+    effective: {
+      enabled: false,
+      normalEnabled: false,
+    },
+    gatedByIntegratedGpu: false,
+    gatedByLowQuality: false,
+  },
   timingSamples: [
     { label: "frame.total", ms: 16.7, category: "frame" },
     { label: "terrain.mesh.visible_chunks", ms: 2.4, category: "terrain" },

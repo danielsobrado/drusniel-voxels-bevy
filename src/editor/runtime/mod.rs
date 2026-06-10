@@ -48,6 +48,9 @@ use crate::rendering::god_rays::GodRayConfig;
 use crate::rendering::gtao::{GtaoSettings, gtao_settings_from_config};
 use crate::rendering::photo_mode::PhotoModeState;
 use crate::rendering::quality::RenderQualityPreset;
+use crate::rendering::terrain_hex_tiling::{
+    TerrainTexturingConfig, terrain_texturing_editor_payload,
+};
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::shadow_budget::ShadowBudgetConfig;
 use crate::rendering::ssao::SsaoSupported;
@@ -337,6 +340,19 @@ pub struct LightAtmosphereSettingsPayload {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HexTilingPatch {
+    pub enabled: Option<bool>,
+    pub normal_enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainTexturingPatch {
+    pub hex_tiling: Option<HexTilingPatch>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LightAtmospherePatch {
     pub cycle_enabled: Option<bool>,
     pub light_enabled: Option<bool>,
@@ -549,6 +565,8 @@ pub enum RuntimeWriteCommand {
     GetLightAtmosphere {},
     #[serde(rename = "runtime.updateLightAtmosphere")]
     UpdateLightAtmosphere { patch: LightAtmospherePatch },
+    #[serde(rename = "runtime.updateTerrainTexturing")]
+    UpdateTerrainTexturing { patch: TerrainTexturingPatch },
     #[serde(rename = "runtime.importLightAtmosphereTemplate")]
     ImportLightAtmosphereTemplate { template: Value },
     #[serde(rename = "runtime.exportLightAtmosphereTemplate")]
@@ -2209,7 +2227,8 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::AlignEditorCameraToAxes { .. }
         | RuntimeWriteCommand::AddSavedEditorCamera { .. }
         | RuntimeWriteCommand::ExportEditorCameraTemplate {}
-        | RuntimeWriteCommand::GetLightAtmosphere {}
+        |         RuntimeWriteCommand::GetLightAtmosphere {}
+        | RuntimeWriteCommand::UpdateTerrainTexturing { .. }
         | RuntimeWriteCommand::ExportLightAtmosphereTemplate {}
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }
         | RuntimeWriteCommand::SetEditorDiagnostics { .. }
@@ -2976,6 +2995,14 @@ fn execute_runtime_write_command(
         }
         RuntimeWriteCommand::UpdateLightAtmosphere { patch } => {
             match update_light_atmosphere(world, patch) {
+                Ok(data) => RuntimeCommandResult::success(data),
+                Err(message) => {
+                    RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
+                }
+            }
+        }
+        RuntimeWriteCommand::UpdateTerrainTexturing { patch } => {
+            match update_terrain_texturing(world, patch) {
                 Ok(data) => RuntimeCommandResult::success(data),
                 Err(message) => {
                     RuntimeCommandResult::failure(RuntimeCommandStatus::Failure, message)
@@ -4875,6 +4902,50 @@ pub(crate) fn set_render_feature_flag(
     }))
 }
 
+fn terrain_texturing_metrics_payload(world: &World) -> Value {
+    let preset = world
+        .get_resource::<RenderQualityPreset>()
+        .copied()
+        .unwrap_or_default();
+    let config = world
+        .get_resource::<TerrainTexturingConfig>()
+        .cloned()
+        .unwrap_or_default();
+    let capabilities = world.get_resource::<GraphicsCapabilities>();
+
+    serde_json::to_value(terrain_texturing_editor_payload(
+        &config,
+        capabilities.as_deref(),
+        preset,
+    ))
+    .unwrap_or_else(|_| json!({}))
+}
+
+fn update_terrain_texturing(
+    world: &mut World,
+    patch: TerrainTexturingPatch,
+) -> Result<Value, String> {
+    let mut config = world
+        .get_resource_mut::<TerrainTexturingConfig>()
+        .ok_or_else(|| "TerrainTexturingConfig resource is not available.".to_string())?;
+
+    if let Some(hex_tiling) = patch.hex_tiling {
+        if let Some(enabled) = hex_tiling.enabled {
+            config.hex_tiling.enabled = enabled;
+        }
+        if let Some(normal_enabled) = hex_tiling.normal_enabled {
+            config.hex_tiling.normal_enabled = normal_enabled;
+        }
+    }
+
+    Ok(json!({
+        "settings": terrain_texturing_metrics_payload(world),
+        "metrics": {
+            "terrainTexturing": terrain_texturing_metrics_payload(world),
+        },
+    }))
+}
+
 fn update_runtime_ambient_light(
     world: &mut World,
     color: &str,
@@ -5716,6 +5787,7 @@ fn runtime_metrics_payload(
         },
         "cinematicPhotoMode": render_features["cinematicPhotoMode"].clone(),
         "graphicsCapabilities": graphics_capabilities_payload(world),
+        "terrainTexturing": terrain_texturing_metrics_payload(world),
         "timingSamples": [
             { "label": "frame.total", "ms": 16.7, "category": "frame" },
             { "label": "water.reflection_probe", "ms": 0.0, "category": "water" },
@@ -6291,6 +6363,34 @@ mod tests {
                 value: Some(value)
             } if (value - 0.35).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn terrain_texturing_command_updates_runtime_metrics() {
+        let mut world = World::new();
+        world.insert_resource(TerrainTexturingConfig::default());
+        world.insert_resource(RenderQualityPreset::High);
+        world.insert_resource(GraphicsCapabilities {
+            integrated_gpu: false,
+            ..default()
+        });
+
+        let result = execute_runtime_write_command(
+            &mut world,
+            RuntimeWriteCommand::UpdateTerrainTexturing {
+                patch: TerrainTexturingPatch {
+                    hex_tiling: Some(HexTilingPatch {
+                        enabled: Some(true),
+                        normal_enabled: Some(true),
+                    }),
+                },
+            },
+        );
+
+        assert!(matches!(result, RuntimeCommandResult::Success { .. }));
+        let config = world.resource::<TerrainTexturingConfig>();
+        assert!(config.hex_tiling.enabled);
+        assert!(config.hex_tiling.normal_enabled);
     }
 
     #[test]
