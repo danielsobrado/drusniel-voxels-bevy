@@ -17,6 +17,9 @@ naadf_debug = ["naadf"]
 mc_transvoxel = ["dep:transvoxel-data"]
 
 [dependencies]
+# CLOD pages decimation (src/voxel/pages). meshopt builds the C meshoptimizer via cc on
+# first compile only. Attribute-aware simplification with vertex locks; see clod-phase5-plan.
+meshopt = "0.6"
 bevy = { version = "0.18.1", default-features = false, features = [
     "3d_bevy_render",
     "async_executor",

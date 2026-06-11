@@ -14,6 +14,18 @@
 //! (weld → lock → simplify → quadtree) and runtime selection follow in later steps, ported
 //! near-verbatim from `tools/clod-rs/src/*`.
 
+pub mod config;
 pub mod export;
+pub mod lock;
+pub mod quadtree;
+pub mod simplify;
+pub mod source_mesh;
+pub mod types;
+pub mod validate;
+pub mod weld;
 
 pub use export::{extract_main_surface_for_clod, ClodExportError, TerrainMainSurfaceExport};
+pub use types::{ClodBuildError, PageFootprint, PageMesh};
+
+#[cfg(test)]
+mod tests;
