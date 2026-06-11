@@ -10,6 +10,13 @@ export interface SelectionParams {
   thresholdPx: number;
   hysteresisMergeFactor: number;
   enforce21: boolean;
+  nearField?: {
+    enabled: boolean;
+    centerX: number;
+    centerZ: number;
+    radius: number;
+    boundaryPadding: number;
+  };
   viewportH: number;
   fovY: number; // radians (vertical)
   camPos: [number, number, number];
@@ -33,6 +40,36 @@ export interface SelectionResult {
   rendered: ClodPageNode[];
   state: SelectionState;
   forcedSplits: number; // how many nodes the 2:1 pass split
+  nearFieldForcedSplits: number; // how many nodes the near-field bubble forced to LOD0
+}
+
+function rectDistance2ToPoint(
+  minX: number,
+  minZ: number,
+  maxX: number,
+  maxZ: number,
+  x: number,
+  z: number,
+): number {
+  const dx = x < minX ? minX - x : x > maxX ? x - maxX : 0;
+  const dz = z < minZ ? minZ - z : z > maxZ ? z - maxZ : 0;
+  return dx * dx + dz * dz;
+}
+
+function nearFieldForcesSplit(node: ClodPageNode, params: SelectionParams): boolean {
+  const nf = params.nearField;
+  if (!nf?.enabled) return false;
+  const r = nf.radius + nf.boundaryPadding;
+  return (
+    rectDistance2ToPoint(
+      node.footprint.minX,
+      node.footprint.minZ,
+      node.footprint.maxX,
+      node.footprint.maxZ,
+      nf.centerX,
+      nf.centerZ,
+    ) <= r * r
+  );
 }
 
 export function selectCut(
@@ -42,6 +79,7 @@ export function selectCut(
 ): SelectionResult {
   const newSplit = new Set<string>();
   const rendered: ClodPageNode[] = [];
+  let nearFieldForcedSplits = 0;
 
   const visit = (node: ClodPageNode) => {
     const children = kids(node);
@@ -51,12 +89,14 @@ export function selectCut(
     }
     const epx = errorPx(node, params);
     const wasSplit = prev.split.has(node.id);
+    const forcedByNearField = nearFieldForcesSplit(node, params);
     // Hysteresis: split at threshold, only merge back once under threshold / mergeFactor.
     const shouldSplit = wasSplit
       ? epx > params.thresholdPx / params.hysteresisMergeFactor
       : epx > params.thresholdPx;
-    if (shouldSplit) {
+    if (forcedByNearField || shouldSplit) {
       newSplit.add(node.id);
+      if (forcedByNearField && !shouldSplit) nearFieldForcedSplits++;
       for (const c of children) visit(c);
     } else {
       rendered.push(node);
@@ -69,7 +109,7 @@ export function selectCut(
     ? enforce21(rendered, newSplit, () => forcedSplits++)
     : rendered;
 
-  return { rendered: finalRendered, state: { split: newSplit }, forcedSplits };
+  return { rendered: finalRendered, state: { split: newSplit }, forcedSplits, nearFieldForcedSplits };
 }
 
 /** Two footprints share an edge (touch on a side with overlapping perpendicular range). */

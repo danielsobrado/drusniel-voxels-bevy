@@ -15,6 +15,7 @@ import { meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import { createTerrainMaterial } from "./material.js";
 import { selectCut, SelectionParams, SelectionState } from "./selection.js";
+import { borderChain } from "./validate.js";
 
 const LOD_COLORS = [0xffffff, 0x3a6ea5, 0x49a078, 0xd98032];
 
@@ -26,12 +27,39 @@ function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   return g;
 }
 
+function computeGeometryNormals(mesh: PageMesh): Float32Array {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+  g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  g.computeVertexNormals();
+  const normals = (g.getAttribute("normal").array as Float32Array).slice();
+  g.dispose();
+  return normals;
+}
+
 interface NodeView {
   node: ClodPageNode;
   mesh: THREE.Mesh;
   mat: THREE.ShaderMaterial;
+  sourceNormals: Float32Array;
+  recomputedNormals: Float32Array;
   fade: number; // current crossfade value
   target: number; // 0 or 1
+}
+
+function sharedEdge(a: ClodPageNode, b: ClodPageNode): { axis: "x" | "z"; aPlane: number; bPlane: number } | null {
+  const fa = a.footprint, fb = b.footprint;
+  const overlapZ = fa.minZ < fb.maxZ && fb.minZ < fa.maxZ;
+  const overlapX = fa.minX < fb.maxX && fb.minX < fa.maxX;
+  if (overlapZ) {
+    if (fa.maxX === fb.minX) return { axis: "x", aPlane: fa.maxX, bPlane: fb.minX };
+    if (fb.maxX === fa.minX) return { axis: "x", aPlane: fa.minX, bPlane: fb.maxX };
+  }
+  if (overlapX) {
+    if (fa.maxZ === fb.minZ) return { axis: "z", aPlane: fa.maxZ, bPlane: fb.minZ };
+    if (fb.maxZ === fa.minZ) return { axis: "z", aPlane: fa.minZ, bPlane: fb.maxZ };
+  }
+  return null;
 }
 
 async function main() {
@@ -69,12 +97,22 @@ async function main() {
     const mesh = new THREE.Mesh(toGeometry(node.mesh), mat);
     mesh.visible = false;
     scene.add(mesh);
-    views.set(node.id, { node, mesh, mat, fade: 0, target: 0 });
+    views.set(node.id, {
+      node,
+      mesh,
+      mat,
+      sourceNormals: node.mesh.normals,
+      recomputedNormals: computeGeometryNormals(node.mesh),
+      fade: 0,
+      target: 0,
+    });
   }
 
   // page-boundary overlay (rebuilt on cut change)
   const boundaryGroup = new THREE.Group();
   scene.add(boundaryGroup);
+  const seamGroup = new THREE.Group();
+  scene.add(seamGroup);
 
   // Near-field bubble: raw per-chunk meshes for a LOD0 page, built lazily and cached.
   // Page LOD0 = welded chunks, so with tint off the bubble edge must be invisible (§4.4).
@@ -91,6 +129,7 @@ async function main() {
       for (let dx = 0; dx < P; dx++) {
         const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
         const mat = createTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
+        mat.uniforms.uNormalColor.value = state.normalColor;
         group.add(new THREE.Mesh(toGeometry(cm), mat));
         mats.push(mat);
       }
@@ -107,7 +146,10 @@ async function main() {
     freeze: false,
     wireframe: false,
     showBounds: false,
+    showSeamPoints: false,
     colorByLod: true,
+    normalColor: false,
+    recomputedNormals: false,
     bubble: false,
     bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
     tintBubble: true,
@@ -115,19 +157,50 @@ async function main() {
   let selState: SelectionState = { split: new Set() };
   const crossfadeStep = 1 / cfg.selection.crossfade_frames;
 
-  const rebuildBounds = (rendered: ClodPageNode[]) => {
+  const rebuildDebugOverlays = (rendered: ClodPageNode[]) => {
     boundaryGroup.clear();
-    if (!state.showBounds) return;
-    for (const n of rendered) {
-      const box = new THREE.Box3(
-        new THREE.Vector3(n.footprint.minX, n.bounds.center[1] - n.bounds.radius, n.footprint.minZ),
-        new THREE.Vector3(n.footprint.maxX, n.bounds.center[1] + n.bounds.radius, n.footprint.maxZ),
-      );
-      boundaryGroup.add(new THREE.Box3Helper(box, new THREE.Color(LOD_COLORS[Math.min(n.level, 3)])));
+    if (state.showBounds) {
+      for (const n of rendered) {
+        const box = new THREE.Box3(
+          new THREE.Vector3(n.footprint.minX, n.bounds.center[1] - n.bounds.radius, n.footprint.minZ),
+          new THREE.Vector3(n.footprint.maxX, n.bounds.center[1] + n.bounds.radius, n.footprint.maxZ),
+        );
+        boundaryGroup.add(new THREE.Box3Helper(box, new THREE.Color(LOD_COLORS[Math.min(n.level, 3)])));
+      }
+    }
+
+    seamGroup.clear();
+    if (!state.showSeamPoints) return;
+    const pts: number[] = [];
+    for (let i = 0; i < rendered.length; i++) {
+      for (let j = i + 1; j < rendered.length; j++) {
+        const a = rendered[i], b = rendered[j];
+        if (a.level !== b.level) continue;
+        const edge = sharedEdge(a, b);
+        if (!edge) continue;
+        const ca = borderChain(a.mesh, edge.axis, edge.aPlane, a.footprint);
+        const cb = borderChain(b.mesh, edge.axis, edge.bPlane, b.footprint);
+        for (const p of ca.positions) pts.push(p[0], p[1], p[2]);
+        for (const p of cb.positions) pts.push(p[0], p[1], p[2]);
+      }
+    }
+    if (pts.length > 0) {
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pts), 3));
+      const mat = new THREE.PointsMaterial({
+        color: 0xff2448,
+        size: 4,
+        sizeAttenuation: false,
+        depthTest: false,
+      });
+      const pointCloud = new THREE.Points(geom, mat);
+      pointCloud.renderOrder = 20;
+      seamGroup.add(pointCloud);
     }
   };
 
   let lastCutKey = "";
+  let lastDebugKey = "";
   let lastForced = 0;
 
   const updateSelection = () => {
@@ -135,11 +208,18 @@ async function main() {
       thresholdPx: state.thresholdPx,
       hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
       enforce21: state.enforce21,
+      nearField: {
+        enabled: state.bubble,
+        centerX: controls.target.x,
+        centerZ: controls.target.z,
+        radius: state.bubbleRadius,
+        boundaryPadding: cfg.page.chunks_per_page * cfg.page.chunk_size,
+      },
       viewportH: renderer.domElement.height,
       fovY: THREE.MathUtils.degToRad(camera.fov),
       camPos: [camera.position.x, camera.position.y, camera.position.z],
     };
-    const { rendered, state: ns, forcedSplits } = selectCut(result.roots, params, selState);
+    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(result.roots, params, selState);
     selState = ns;
     lastForced = forcedSplits;
 
@@ -149,7 +229,6 @@ async function main() {
     const cutKey = [...cutIds].sort().join("|");
     if (cutKey !== lastCutKey) {
       lastCutKey = cutKey;
-      rebuildBounds(rendered);
       const perLevel = new Map<number, number>();
       let tris = 0;
       for (const n of rendered) {
@@ -160,8 +239,14 @@ async function main() {
       info.textContent =
         `CLOD Pages PoC — Phase 2 runtime — ${WORLD}x${WORLD} pages\n` +
         `cut: ${rendered.length} nodes  (${levels})\n` +
-        `tris rendered: ${tris.toLocaleString()}   2:1 forced splits: ${lastForced}\n` +
+        `tris rendered: ${tris.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
+        `bubble forced splits: ${nearFieldForcedSplits}\n` +
         `threshold: ${state.thresholdPx.toFixed(2)} px   ${state.freeze ? "[FROZEN]" : ""}`;
+    }
+    const debugKey = `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}`;
+    if (debugKey !== lastDebugKey) {
+      lastDebugKey = debugKey;
+      rebuildDebugOverlays(rendered);
     }
   };
 
@@ -178,8 +263,20 @@ async function main() {
   gui.add(state, "enforce21").name("2:1 constraint").onChange(updateSelection);
   gui.add(state, "freeze").name("freeze selection");
   gui.add(state, "showBounds").name("page boundaries").onChange(updateSelection);
+  gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(updateSelection);
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
     for (const v of views.values()) v.mat.wireframe = on;
+  });
+  gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
+    for (const v of views.values()) v.mat.uniforms.uNormalColor.value = on;
+    for (const { mats } of chunkGroups.values()) for (const m of mats) m.uniforms.uNormalColor.value = on;
+  });
+  gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
+    for (const v of views.values()) {
+      const g = v.mesh.geometry as THREE.BufferGeometry;
+      g.setAttribute("normal", new THREE.BufferAttribute(on ? v.recomputedNormals : v.sourceNormals, 3));
+      g.attributes.normal.needsUpdate = true;
+    }
   });
   gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
     for (const v of views.values()) {
@@ -188,8 +285,8 @@ async function main() {
     }
   });
   const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");
-  bubbleFolder.add(state, "bubble").name("enable (raw chunks)");
-  bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)");
+  bubbleFolder.add(state, "bubble").name("enable (raw chunks)").onChange(updateSelection);
+  bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)").onChange(updateSelection);
   bubbleFolder.add(state, "tintBubble").name("tint bubble red").onChange((on: boolean) => {
     for (const { mats } of chunkGroups.values())
       for (const m of mats) (m.uniforms.uColor.value as THREE.Color).set(on ? 0xc94b4b : 0xffffff);

@@ -20,6 +20,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uLight;
   uniform float uFade;   // 0 = fully dithered out, 1 = fully visible
   uniform bool uDither;
+  uniform bool uNormalColor;
   varying vec3 vWorldNormal;
 
   // interleaved-gradient noise — cheap stable screen-door threshold
@@ -28,6 +29,10 @@ const FRAG = /* glsl */ `
   }
   void main() {
     if (uDither && ign(gl_FragCoord.xy) > uFade) discard;
+    if (uNormalColor) {
+      gl_FragColor = vec4(normalize(vWorldNormal) * 0.5 + 0.5, 1.0);
+      return;
+    }
     float d = max(dot(normalize(vWorldNormal), normalize(uLight)), 0.0);
     gl_FragColor = vec4(uColor * (0.35 + 0.65 * d), 1.0);
   }
@@ -40,6 +45,7 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uLight: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
       uFade: { value: 1 },
       uDither: { value: false },
+      uNormalColor: { value: false },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,
