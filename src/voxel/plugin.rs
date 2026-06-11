@@ -108,6 +108,7 @@ impl Plugin for VoxelPlugin {
             ExtractComponentPlugin::<WaterMeshDetail>::default(),
             TerrainHoleProbePlugin,
             SeamAuditPassPlugin,
+            crate::voxel::pages::ClodPagesPlugin,
         ));
 
         let size_chunks = IVec3::new(
