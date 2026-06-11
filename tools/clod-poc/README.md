@@ -14,6 +14,23 @@ cd tools/clod-poc
 npm install
 ```
 
+## GitHub Pages
+
+The production build is configured for the project-site URL
+`https://danielsobrado.github.io/drusniel-voxels-bevy/`.
+
+The repository workflow `.github/workflows/deploy-clod-poc-pages.yml` tests, typechecks,
+builds, and publishes only this PoC when relevant files change on `main`. Before its first
+deployment, set the repository's **Settings → Pages → Build and deployment → Source** to
+**GitHub Actions**. The workflow can also be launched manually from the Actions tab.
+
+To verify the same subpath locally:
+
+```bash
+npm run build
+npm run preview
+```
+
 ## Phase 0 — API verification spike
 
 ```bash

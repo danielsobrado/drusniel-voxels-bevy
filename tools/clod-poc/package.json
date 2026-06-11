@@ -8,6 +8,8 @@
     "spike": "tsx src/spike.ts",
     "build-pages": "tsx src/build.ts",
     "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
