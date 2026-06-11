@@ -27,11 +27,10 @@ is not "add pages next to the LOD system" — it is "**pages own the far field; 
 distance-LOD machinery (skirts/morph/seam/boundary-strips) only runs inside the near-field
 bubble**." That is the big behavioural change and the main risk surface.
 
-**Decision required from you (D1):** target end-state for the far field —
-- (a) Pages fully own LOD≥1 distance; disable per-chunk LOD1–3 extraction beyond the bubble. (Plan's intent, biggest win, biggest change.)
-- (b) Pages render *alongside* existing far chunks behind a feature flag, for A/B + bench, before removing anything. (Recommended first: lower risk, reversible.)
-
-I recommend **(b)** as the Phase 5 landing, with (a) as a follow-up once benches prove pages win.
+**DECIDED (D1): pages fully replace per-chunk LOD1–3 beyond the bubble** (end-state a).
+Rollout vehicle to get there safely: land behind a feature flag (default off), render
+side-by-side for A/B + bench, then flip the default and **remove** the far-field per-chunk
+LOD1–3 extraction once benches prove pages win. The flag is the path, not the destination.
 
 ---
 
@@ -118,7 +117,9 @@ Work:
   (`tools/clod-poc` "near-field bubble", tint-off invisible) is the visual proof this is seamless.
 - Fallback: page missing/stale → render covered chunks via existing path (I4/I5).
 - No general terrain near-field bubble exists today (only `mc_transvoxel.sandbox_radius_chunks`);
-  this is net-new. **Decision (D3):** does the bubble follow the player only, or player+camera?
+  this is net-new. **DECIDED (D3): the bubble follows player + camera** (union of two spheres),
+  so flying the free/editor camera out keeps nearby terrain live. Collider stays inside the
+  player's part of the bubble.
 
 ## 8. Step 6 — colliders
 
@@ -154,9 +155,9 @@ Step1 export (+bench) -> Step2 builder port (+golden test) -> Step3 async build+
   -> [gate: bench wins vs far chunks] -> D1-a removal of far per-chunk LOD (optional follow-up)
 ```
 
-## 12. Decisions needed before I start coding
+## 12. Decisions — RESOLVED
 
-- **D1** far-field end-state: (a) pages replace LOD1–3 / (b) flagged side-by-side first [rec].
-- **D2** module path: `src/voxel/pages/` [rec] vs `src/terrain/pages/`.
-- **D3** near-field bubble follows: player only vs player+camera.
-- **D4** land target: feature-flagged + benched, default off, until A/B proves it [rec].
+- **D1** far-field end-state: **pages replace LOD1–3** (via flagged → bench → flip → remove).
+- **D2** module path: **`src/voxel/pages/`** (default).
+- **D3** near-field bubble follows: **player + camera** (union).
+- **D4** land target: **feature-flagged, default off, benched A/B** as the path to D1.
