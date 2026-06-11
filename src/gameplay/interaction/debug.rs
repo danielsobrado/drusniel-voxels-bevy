@@ -28,7 +28,7 @@ use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
 use crate::voxel::meshing::{ChunkMesh, Face, MeshMode, MeshSettings, get_blocky_material_index};
-use crate::voxel::occlusion::OcclusionConfig;
+use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
 use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,
 };
@@ -88,6 +88,7 @@ pub struct DebugOverlayParams<'w> {
     pub lod_control: Res<'w, crate::voxel::plugin::TerrainLodControl>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
+    pub visible_chunks: Res<'w, VisibleChunks>,
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
     pub billboard_stats: Res<'w, BillboardStats>,
     pub prop_bounds_debug: Res<'w, PropBoundsDebugSettings>,
@@ -733,6 +734,7 @@ pub fn update_debug_overlay(
         &mut text_content,
         &debug.enclosure,
         &debug.occlusion_config,
+        &debug.visible_chunks,
         &debug.enclosure_stats,
     );
 
@@ -1676,6 +1678,7 @@ fn append_enclosure_status(
     text_content: &mut String,
     enclosure: &EnclosureState,
     config: &OcclusionConfig,
+    visible_chunks: &VisibleChunks,
     stats: &EnclosureOcclusionStats,
 ) {
     let mode = match enclosure.mode {
@@ -1694,6 +1697,17 @@ fn append_enclosure_status(
     text_content.push_str(&format!(
         "Culled chunks: {} / {}\n",
         stats.hidden_chunks, stats.total_chunks
+    ));
+    text_content.push_str(&format!(
+        "Occlusion BFS: {} visited, {} us, depth {}, overflow {}\n",
+        visible_chunks.last_visited_count,
+        visible_chunks.last_bfs_duration_micros,
+        visible_chunks.last_depth_budget,
+        if visible_chunks.last_overflow {
+            "YES"
+        } else {
+            "NO"
+        }
     ));
     text_content.push_str(&format!(
         "Culled props: {} / {}\n",

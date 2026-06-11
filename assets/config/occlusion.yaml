@@ -1,0 +1,9 @@
+occlusion:
+  enabled: true
+  update_interval_secs: 0.1
+  depth_margin_chunks: 2
+  max_visited_chunks: 8000
+  frustum_dilation_chunks: 1
+  enclosure:
+    sky_probe_chunks: 8
+    hysteresis_secs: 0.5

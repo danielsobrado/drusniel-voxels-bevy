@@ -42,8 +42,7 @@ use crate::rendering::water::WaterConfig;
 use crate::rendering::water_reflection::{REFLECTION_RENDER_LAYER, WATER_MASK_RENDER_LAYER};
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{
-    EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
-    toggle_enclosure_culling, update_enclosure_state,
+    EnclosureOcclusionStats, EnclosureState, toggle_enclosure_culling, update_enclosure_state,
 };
 use crate::voxel::lod::{
     LodSettings, build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
@@ -76,7 +75,6 @@ use crate::voxel::meshing::{
 use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
-use crate::voxel::octree::ChunkOctree;
 use crate::voxel::persistence::{self, WorldPersistence};
 use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::terrain::{Biome, TerrainGenerator, WaterGenerationMetadata};
@@ -149,7 +147,6 @@ pub use stats::RuntimeChunkStats;
 pub use visibility::apply_visibility_culling_system;
 pub(crate) use visibility::{
     adjust_lod_for_integrated_gpu, update_chunk_face_visibility_system, update_chunk_lod_system,
-    update_octree_system,
 };
 pub use water_bodies::{WaterBodyInfo, WaterBodyRegistry};
 pub(crate) use water_bodies::{

@@ -34,7 +34,7 @@ const FRAG = /* glsl */ `
   uniform sampler2D uTerrainTexture1;
   uniform sampler2D uTerrainTexture2;
   uniform sampler2D uTerrainTexture3;
-  uniform float uTextureScale;
+  uniform vec4 uTextureScales;
   uniform vec2 uTextureRange0;
   uniform vec2 uTextureRange1;
   uniform vec2 uTextureRange2;
@@ -52,13 +52,14 @@ const FRAG = /* glsl */ `
   float centerDistance(float height, vec2 range) {
     return abs(height - (range.x + range.y) * 0.5);
   }
-  vec3 sampleTerrainTexture(vec2 uv, float height) {
-    vec3 t0 = texture2D(uTerrainTexture0, uv).rgb;
+  vec3 sampleTerrainTexture(vec3 worldPos) {
+    float height = worldPos.y;
+    vec3 t0 = texture2D(uTerrainTexture0, worldPos.xz * uTextureScales.x).rgb;
     if (uTerrainTextureCount <= 1) return t0;
 
-    vec3 t1 = texture2D(uTerrainTexture1, uv).rgb;
-    vec3 t2 = texture2D(uTerrainTexture2, uv).rgb;
-    vec3 t3 = texture2D(uTerrainTexture3, uv).rgb;
+    vec3 t1 = texture2D(uTerrainTexture1, worldPos.xz * uTextureScales.y).rgb;
+    vec3 t2 = texture2D(uTerrainTexture2, worldPos.xz * uTextureScales.z).rgb;
+    vec3 t3 = texture2D(uTerrainTexture3, worldPos.xz * uTextureScales.w).rgb;
 
     float w0 = rangeWeight(height, uTextureRange0);
     float w1 = uTerrainTextureCount > 1 ? rangeWeight(height, uTextureRange1) : 0.0;
@@ -97,7 +98,7 @@ const FRAG = /* glsl */ `
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 baseColor = uColor;
     if (uUseTexture) {
-      vec3 tex = sampleTerrainTexture(vWorldPos.xz * uTextureScale, vWorldPos.y);
+      vec3 tex = sampleTerrainTexture(vWorldPos);
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
     }
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
@@ -127,7 +128,7 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uTerrainTexture1: { value: null },
       uTerrainTexture2: { value: null },
       uTerrainTexture3: { value: null },
-      uTextureScale: { value: 1 / 64 },
+      uTextureScales: { value: new THREE.Vector4(1 / 64, 1 / 64, 1 / 64, 1 / 64) },
       uTextureRange0: { value: new THREE.Vector2(14, 42) },
       uTextureRange1: { value: new THREE.Vector2(42, 70) },
       uTextureRange2: { value: new THREE.Vector2(70, 94) },

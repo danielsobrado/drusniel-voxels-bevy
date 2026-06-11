@@ -23,7 +23,7 @@ use crate::constants::{
     PROP_VIEW_DISTANCE_TREE_MULT,
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
-use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
+use crate::voxel::enclosure::{EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::ProtectedAreaRegistry;
@@ -110,13 +110,9 @@ impl Plugin for PropsPlugin {
             // Culling system
             .add_systems(
                 Update,
-                update_prop_chunk_visibility.after(spawner::spawn_props_on_terrain),
-            )
-            .add_systems(
-                Update,
-                apply_prop_visibility_from_chunks
-                    .after(crate::voxel::plugin::apply_visibility_culling_system)
-                    .after(update_prop_chunk_visibility),
+                update_prop_chunk_visibility
+                    .after(spawner::spawn_props_on_terrain)
+                    .after(crate::voxel::plugin::apply_visibility_culling_system),
             )
             // Billboard LOD systems
             .add_systems(
@@ -915,36 +911,53 @@ fn handle_clear_prop_cache(
 /// Size of a "prop chunk" for culling purposes (matches persistence chunk size).
 const PROP_CHUNK_SIZE_CULL: f32 = 64.0;
 
-/// Update prop visibility based on camera distance.
-/// Props beyond their type's view distance are hidden to reduce draw calls.
+/// Update prop visibility based on camera distance and, while enclosed,
+/// terrain occlusion. Sole owner of prop and instanced-group `Visibility`.
 fn update_prop_chunk_visibility(
     time: Res<Time>,
     config: Res<PropViewDistanceConfig>,
+    enclosure: Res<EnclosureState>,
+    occlusion_config: Res<OcclusionConfig>,
+    visible_chunks: Res<VisibleChunks>,
     mut cull_state: ResMut<PropChunkCullState>,
+    mut stats: ResMut<EnclosureOcclusionStats>,
     persistence_state: Res<PropPersistenceState>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut prop_query: Query<(
-        &Prop,
-        &GlobalTransform,
-        &mut Visibility,
-        &persistence::PersistedProp,
+    mut visibility_queries: ParamSet<(
+        Query<(
+            &Prop,
+            &GlobalTransform,
+            &PropChunkOwner,
+            &mut Visibility,
+            &persistence::PersistedProp,
+            Option<&instanced_render::PropVisualRefs>,
+        )>,
+        Query<(Entity, &mut Visibility), With<instanced_render::InstancedPropGroup>>,
     )>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    mut was_occlusion_active: Local<bool>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Prop Culling");
+    let occlusion_active = occlusion_config.is_active(enclosure.mode);
+    // Re-evaluate immediately when occlusion toggles so props are not left in
+    // the previous mode's state for a full throttle interval.
+    let occlusion_toggled = occlusion_active != *was_occlusion_active;
+
     // Throttle updates
     cull_state.update_timer += time.delta_secs();
-    if cull_state.update_timer < config.update_interval {
+    if !occlusion_toggled && cull_state.update_timer < config.update_interval {
         return;
     }
     cull_state.update_timer = 0.0;
 
-    // Get camera position
+    // Get camera position (commit the toggle only once an update actually
+    // runs, so a missing camera retries the transition next frame)
     let camera_pos = match camera_query.iter().next() {
         Some(transform) => transform.translation(),
         None => return,
     };
+    *was_occlusion_active = occlusion_active;
     let camera_pos_2d = Vec2::new(camera_pos.x, camera_pos.z);
 
     // Calculate current camera chunk
@@ -987,8 +1000,13 @@ fn update_prop_chunk_visibility(
     // Now update individual prop visibility based on their type-specific distances
     let mut visible_count = 0usize;
     let mut culled_count = 0usize;
+    let mut hidden_props = 0usize;
+    let mut total_props = 0usize;
+    let mut visible_groups = HashSet::new();
 
-    for (prop, transform, mut visibility, persisted) in prop_query.iter_mut() {
+    for (prop, transform, owner, mut visibility, persisted, refs) in
+        visibility_queries.p0().iter_mut()
+    {
         let prop_pos = transform.translation();
         let prop_pos_2d = Vec2::new(prop_pos.x, prop_pos.z);
         let dist = camera_pos_2d.distance(prop_pos_2d);
@@ -1009,7 +1027,8 @@ fn update_prop_chunk_visibility(
             view_dist
         };
 
-        let should_be_visible = chunk_visible && dist <= threshold;
+        let terrain_visible = !occlusion_active || visible_chunks.is_visible(owner.0);
+        let should_be_visible = chunk_visible && dist <= threshold && terrain_visible;
 
         if should_be_visible {
             if *visibility == Visibility::Hidden {
@@ -1022,93 +1041,48 @@ fn update_prop_chunk_visibility(
             }
             culled_count += 1;
         }
+
+        if occlusion_active {
+            total_props += 1;
+            if terrain_visible {
+                if let Some(refs) = refs {
+                    visible_groups.extend(refs.refs.iter().map(|visual| visual.group));
+                }
+            } else {
+                hidden_props += 1;
+            }
+        }
     }
+
+    // Instanced group meshes follow occlusion only: a group renders while any
+    // prop referencing it sits in a BFS-visible chunk.
+    if occlusion_active {
+        for (entity, mut group_visibility) in visibility_queries.p1().iter_mut() {
+            let target = if visible_groups.contains(&entity) {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *group_visibility != target {
+                *group_visibility = target;
+            }
+        }
+    } else if occlusion_toggled {
+        for (_, mut group_visibility) in visibility_queries.p1().iter_mut() {
+            if *group_visibility == Visibility::Hidden {
+                *group_visibility = Visibility::Inherited;
+            }
+        }
+    }
+
+    stats.hidden_props = hidden_props;
+    stats.total_props = total_props;
 
     // Update state
     cull_state.visible_chunks = new_visible_chunks;
     cull_state.last_camera_chunk = camera_chunk;
     cull_state.visible_count = visible_count;
     cull_state.culled_count = culled_count;
-}
-
-fn apply_prop_visibility_from_chunks(
-    enclosure: Res<EnclosureState>,
-    config: Res<OcclusionConfig>,
-    visible_chunks: Res<VisibleChunks>,
-    mut stats: ResMut<EnclosureOcclusionStats>,
-    mut visibility_queries: ParamSet<(
-        Query<
-            (
-                &PropChunkOwner,
-                &mut Visibility,
-                Option<&instanced_render::PropVisualRefs>,
-            ),
-            With<Prop>,
-        >,
-        Query<(Entity, &mut Visibility), With<instanced_render::InstancedPropGroup>>,
-    )>,
-    mut was_enclosed: Local<bool>,
-) {
-    if enclosure.mode != EnclosureMode::Enclosed || !config.enabled {
-        if *was_enclosed {
-            let mut groups_to_reset = HashSet::new();
-            for (_, mut visibility, refs) in &mut visibility_queries.p0() {
-                if *visibility == Visibility::Hidden {
-                    *visibility = Visibility::Inherited;
-                }
-                if let Some(refs) = refs {
-                    for visual in &refs.refs {
-                        groups_to_reset.insert(visual.group);
-                    }
-                }
-            }
-            for (entity, mut group_visibility) in &mut visibility_queries.p1() {
-                if groups_to_reset.contains(&entity) && *group_visibility == Visibility::Hidden {
-                    *group_visibility = Visibility::Inherited;
-                }
-            }
-            stats.hidden_props = 0;
-            stats.total_props = 0;
-            *was_enclosed = false;
-        }
-        return;
-    }
-
-    *was_enclosed = true;
-    stats.hidden_props = 0;
-    stats.total_props = 0;
-    let mut visible_groups = HashSet::new();
-
-    for (owner, mut visibility, refs) in &mut visibility_queries.p0() {
-        let is_visible = visible_chunks.is_visible(owner.0);
-        let target = if is_visible {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        if *visibility != target {
-            *visibility = target;
-        }
-        if is_visible {
-            if let Some(refs) = refs {
-                visible_groups.extend(refs.refs.iter().map(|visual| visual.group));
-            }
-        } else {
-            stats.hidden_props += 1;
-        }
-        stats.total_props += 1;
-    }
-
-    for (entity, mut visibility) in &mut visibility_queries.p1() {
-        let target = if visible_groups.contains(&entity) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        if *visibility != target {
-            *visibility = target;
-        }
-    }
 }
 
 // Helper functions for regeneration

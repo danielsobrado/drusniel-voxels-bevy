@@ -34,6 +34,31 @@ const DEFAULT_TEXTURE_RANGES = [
   [70, 94],
   [94, 118],
 ] as const;
+const DEMO_TEXTURE_BASE_URL =
+  "https://raw.githubusercontent.com/danielsobrado/drusniel-voxels-bevy/main/tools/clod-poc/textures/";
+const demoTextureUrl = (file: string) => `${DEMO_TEXTURE_BASE_URL}${file}`;
+const BUILTIN_TERRAIN_TEXTURES = [
+  { id: "earth-1", label: "Earth 1", url: demoTextureUrl("earth-1.jpg") },
+  { id: "earth-2", label: "Earth 2", url: demoTextureUrl("earth-2.jpg") },
+  { id: "grass-1", label: "Grass 1", url: demoTextureUrl("grass-1.jpg") },
+  { id: "grass-2", label: "Grass 2", url: demoTextureUrl("grass-2.jpg") },
+  { id: "cobblestone-1", label: "Cobblestone 1", url: demoTextureUrl("cobblestone-1.jpg") },
+  { id: "cobblestone-2", label: "Cobblestone 2", url: demoTextureUrl("cobblestone-2.jpg") },
+  { id: "bedrock-1", label: "Bedrock 1", url: demoTextureUrl("bedrock-1.jpg") },
+  { id: "bedrock-2", label: "Bedrock 2", url: demoTextureUrl("bedrock-2.jpg") },
+  { id: "sand-1", label: "Sand 1", url: demoTextureUrl("sand-1.jpg") },
+  { id: "sand-2", label: "Sand 2", url: demoTextureUrl("sand-2.jpg") },
+  { id: "terracotta-1", label: "Terracotta 1", url: demoTextureUrl("terracotta-1.jpg") },
+  { id: "terracotta-2", label: "Terracotta 2", url: demoTextureUrl("terracotta-2.jpg") },
+  { id: "water-1", label: "Water 1", url: demoTextureUrl("water-1.jpg") },
+  { id: "water-2", label: "Water 2", url: demoTextureUrl("water-2.jpg") },
+  { id: "oak-bark-1", label: "Oak bark 1", url: demoTextureUrl("oak-bark-1.jpg") },
+  { id: "oak-bark-2", label: "Oak bark 2", url: demoTextureUrl("oak-bark-2.jpg") },
+  { id: "oak-leaf-1", label: "Oak leaf 1", url: demoTextureUrl("oak-leaf-1.jpg") },
+  { id: "oak-leaf-2", label: "Oak leaf 2", url: demoTextureUrl("oak-leaf-2.jpg") },
+  { id: "snow-1", label: "Snow 1", url: demoTextureUrl("snow-1.jpg") },
+  { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
+] as const;
 const SUN_DIRECTION = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
 const SUN_BASE_COLOR = new THREE.Color(0.95, 0.86, 0.68);
 const SKY_LIGHT_BASE_COLOR = new THREE.Color(0.42, 0.48, 0.58);
@@ -135,6 +160,8 @@ interface TextureSlot {
   texture: THREE.Texture | null;
   name: string;
   previewUrl: string | null;
+  selectedId: string;
+  scale: number;
   heightMin: number;
   heightMax: number;
 }
@@ -414,6 +441,8 @@ async function main() {
     texture: null,
     name: "empty",
     previewUrl: null,
+    selectedId: "",
+    scale: 1 / 64,
     heightMin: 0,
     heightMax: 0,
   }));
@@ -427,13 +456,18 @@ async function main() {
   };
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
-    const enabled = state.useTexture && activeTerrainSlots.length > 0;
+    const enabled = activeTerrainSlots.length > 0;
     const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
     const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
     const apply = (mat: THREE.ShaderMaterial) => {
       mat.uniforms.uUseTexture.value = enabled;
       mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
-      mat.uniforms.uTextureScale.value = state.textureScale;
+      mat.uniforms.uTextureScales.value.set(
+        activeTerrainSlots[0]?.scale ?? 1 / 64,
+        activeTerrainSlots[1]?.scale ?? 1 / 64,
+        activeTerrainSlots[2]?.scale ?? 1 / 64,
+        activeTerrainSlots[3]?.scale ?? 1 / 64,
+      );
       for (let i = 0; i < textureUniforms.length; i++) {
         const slot = activeTerrainSlots[i];
         mat.uniforms[textureUniforms[i]].value = slot?.texture ?? null;
@@ -498,9 +532,14 @@ async function main() {
         rebuildActiveTerrainSlots();
         const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
         const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
-        mat.uniforms.uUseTexture.value = state.useTexture && activeTerrainSlots.length > 0;
+        mat.uniforms.uUseTexture.value = activeTerrainSlots.length > 0;
         mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
-        mat.uniforms.uTextureScale.value = state.textureScale;
+        mat.uniforms.uTextureScales.value.set(
+          activeTerrainSlots[0]?.scale ?? 1 / 64,
+          activeTerrainSlots[1]?.scale ?? 1 / 64,
+          activeTerrainSlots[2]?.scale ?? 1 / 64,
+          activeTerrainSlots[3]?.scale ?? 1 / 64,
+        );
         for (let ti = 0; ti < textureUniforms.length; ti++) {
           const slot = activeTerrainSlots[ti];
           mat.uniforms[textureUniforms[ti]].value = slot?.texture ?? null;
@@ -532,8 +571,6 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
-    useTexture: false,
-    textureScale: 1 / 64,
     loadedTextureFiles: "none",
     sunAzimuthDeg: 128,
     sunElevationDeg: 55,
@@ -796,8 +833,6 @@ async function main() {
   let pendingTextureLoad: number | "all" | null = null;
   const slotCards: HTMLElement[] = [];
   let loadedTextureController: { updateDisplay: () => unknown } | null = null;
-  let useTextureController: { updateDisplay: () => unknown } | null = null;
-  let textureScaleController: { updateDisplay: () => unknown } | null = null;
   let syncTextureModalControls = () => {};
 
   const updateLoadedTextureDisplay = () => {
@@ -823,30 +858,45 @@ async function main() {
   const updateTextureSlotPreviews = () => {
     for (let i = 0; i < textureSlots.length; i++) updateTextureSlotPreview(i);
   };
+  const textureOptionHtml = [
+    `<option value="">None</option>`,
+    ...BUILTIN_TERRAIN_TEXTURES.map((texture) => `<option value="${texture.id}">${texture.label}</option>`),
+    `<option value="custom">Custom file...</option>`,
+  ].join("");
   const refreshTextureState = () => {
     updateLoadedTextureDisplay();
     updateTextureSlotPreviews();
-    useTextureController?.updateDisplay();
-    textureScaleController?.updateDisplay();
     syncTextureModalControls();
     applyTerrainTextures();
   };
   const setTextureSlot = (index: number, texture: THREE.Texture, name: string, previewUrl: string) => {
     const old = textureSlots[index];
     old.texture?.dispose();
-    if (old.previewUrl) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = { ...old, texture, name, previewUrl };
+    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    textureSlots[index] = { ...old, texture, name, previewUrl, selectedId: "custom" };
+  };
+  const setBuiltinTextureSlot = (index: number, texture: THREE.Texture, name: string, previewUrl: string, selectedId: string) => {
+    const old = textureSlots[index];
+    old.texture?.dispose();
+    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    textureSlots[index] = { ...old, texture, name, previewUrl, selectedId };
   };
   const clearTextureSlot = (index: number) => {
     const old = textureSlots[index];
     old.texture?.dispose();
-    if (old.previewUrl) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = { ...old, texture: null, name: "empty", previewUrl: null };
+    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    textureSlots[index] = { ...old, texture: null, name: "empty", previewUrl: null, selectedId: "" };
   };
   const clearAllTextures = () => {
     for (let i = 0; i < textureSlots.length; i++) clearTextureSlot(i);
-    state.useTexture = false;
     refreshTextureState();
+  };
+  const configureTerrainTexture = (texture: THREE.Texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.needsUpdate = true;
   };
   const textureActions = {
     loadTexture: () => {
@@ -856,17 +906,27 @@ async function main() {
     },
     clearTexture: clearAllTextures,
   };
+  const loadTerrainTextureUrl = (url: string): Promise<THREE.Texture | null> =>
+    new Promise((resolve) => {
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin("anonymous");
+      loader.load(
+        url,
+        (texture) => {
+          configureTerrainTexture(texture);
+          resolve(texture);
+        },
+        undefined,
+        () => resolve(null),
+      );
+    });
   const loadTerrainTexture = (file: File): Promise<{ texture: THREE.Texture; previewUrl: string } | null> =>
     new Promise((resolve) => {
       const url = URL.createObjectURL(file);
       new THREE.TextureLoader().load(
         url,
         (texture) => {
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-          texture.needsUpdate = true;
+          configureTerrainTexture(texture);
           resolve({ texture, previewUrl: url });
         },
         undefined,
@@ -889,9 +949,6 @@ async function main() {
       if (result) setTextureSlot(pendingTextureLoad, result.texture, files[0].name, result.previewUrl);
     }
     pendingTextureLoad = null;
-    if (textureSlots.some((slot) => slot.texture)) {
-      state.useTexture = true;
-    }
     refreshTextureState();
     textureInput.value = "";
   });
@@ -907,18 +964,55 @@ async function main() {
       </header>
       <div class="texture-panel-body">
         <div class="texture-slot-grid"></div>
-        <div class="texture-controls">
-          <label><span>Enable texture</span><input data-texture-enabled type="checkbox" /></label>
-          <label><span>Texture scale <output data-texture-scale-value></output></span><input data-texture-scale type="range" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" /></label>
-        </div>
         <div class="texture-actions">
-          <button type="button" data-texture-load-all>Load all</button>
+          <button type="button" data-texture-load-all>Load custom set</button>
           <button type="button" data-texture-clear>Clear</button>
         </div>
       </div>
     </section>
   `;
   document.body.appendChild(textureModal);
+  const texturePanel = textureModal.querySelector<HTMLElement>(".texture-panel")!;
+  const texturePanelHeader = texturePanel.querySelector<HTMLElement>("header")!;
+  let texturePanelDrag:
+    | {
+        pointerId: number;
+        offsetX: number;
+        offsetY: number;
+      }
+    | null = null;
+  const clampTexturePanelPosition = (left: number, top: number) => {
+    const rect = texturePanel.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+    const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+    texturePanel.style.left = `${THREE.MathUtils.clamp(left, 8, maxLeft)}px`;
+    texturePanel.style.top = `${THREE.MathUtils.clamp(top, 8, maxTop)}px`;
+    texturePanel.style.transform = "none";
+  };
+  texturePanelHeader.addEventListener("pointerdown", (event) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const rect = texturePanel.getBoundingClientRect();
+    texturePanelDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    texturePanelHeader.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  texturePanelHeader.addEventListener("pointermove", (event) => {
+    if (!texturePanelDrag || texturePanelDrag.pointerId !== event.pointerId) return;
+    clampTexturePanelPosition(event.clientX - texturePanelDrag.offsetX, event.clientY - texturePanelDrag.offsetY);
+  });
+  const stopTexturePanelDrag = (event: PointerEvent) => {
+    if (!texturePanelDrag || texturePanelDrag.pointerId !== event.pointerId) return;
+    texturePanelDrag = null;
+    if (texturePanelHeader.hasPointerCapture(event.pointerId)) {
+      texturePanelHeader.releasePointerCapture(event.pointerId);
+    }
+  };
+  texturePanelHeader.addEventListener("pointerup", stopTexturePanelDrag);
+  texturePanelHeader.addEventListener("pointercancel", stopTexturePanelDrag);
   const slotGrid = textureModal.querySelector<HTMLElement>(".texture-slot-grid")!;
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
     const card = document.createElement("article");
@@ -926,6 +1020,8 @@ async function main() {
     card.innerHTML = `
       <button class="texture-preview" type="button">${TERRAIN_TEXTURE_BANDS[i]}</button>
       <span class="texture-slot-name">empty</span>
+      <label class="texture-slot-select"><span>Use Demo Texture</span><select data-slot-texture="${i}">${textureOptionHtml}</select></label>
+      <label class="texture-slot-param">Scale <input data-slot-scale="${i}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[i].scale}" /></label>
       <label class="texture-slot-param">Low <input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
       <label class="texture-slot-param">High <input data-slot-high="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMax}" /></label>
     `;
@@ -937,36 +1033,59 @@ async function main() {
     slotCards.push(card);
     slotGrid.appendChild(card);
   }
-  const enabledInput = textureModal.querySelector<HTMLInputElement>("[data-texture-enabled]")!;
-  const scaleInput = textureModal.querySelector<HTMLInputElement>("[data-texture-scale]")!;
-  const scaleValue = textureModal.querySelector<HTMLOutputElement>("[data-texture-scale-value]")!;
   syncTextureModalControls = () => {
-    enabledInput.checked = state.useTexture;
-    scaleInput.value = String(state.textureScale);
-    scaleValue.value = state.textureScale.toFixed(4);
     for (let i = 0; i < textureSlots.length; i++) {
       const low = textureModal.querySelector<HTMLInputElement>(`[data-slot-low="${i}"]`);
       const high = textureModal.querySelector<HTMLInputElement>(`[data-slot-high="${i}"]`);
+      const scale = textureModal.querySelector<HTMLInputElement>(`[data-slot-scale="${i}"]`);
+      const select = textureModal.querySelector<HTMLSelectElement>(`[data-slot-texture="${i}"]`);
       if (low) low.value = String(textureSlots[i].heightMin);
       if (high) high.value = String(textureSlots[i].heightMax);
+      if (scale) scale.value = String(textureSlots[i].scale);
+      if (select) select.value = textureSlots[i].selectedId;
     }
   };
-  enabledInput.addEventListener("change", () => {
-    state.useTexture = enabledInput.checked;
-    refreshTextureState();
-  });
-  scaleInput.addEventListener("input", () => {
-    state.textureScale = Number(scaleInput.value);
-    scaleValue.value = state.textureScale.toFixed(4);
-    refreshTextureState();
-  });
   for (let i = 0; i < textureSlots.length; i++) {
+    textureModal.querySelector<HTMLSelectElement>(`[data-slot-texture="${i}"]`)!.addEventListener("change", async (event) => {
+      const select = event.target as HTMLSelectElement;
+      const selectedId = select.value;
+      if (selectedId === "") {
+        clearTextureSlot(i);
+        refreshTextureState();
+        return;
+      }
+      if (selectedId === "custom") {
+        pendingTextureLoad = i;
+        textureInput.multiple = false;
+        textureInput.click();
+        syncTextureModalControls();
+        return;
+      }
+      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === selectedId);
+      if (!builtin) return;
+      const previousName = textureSlots[i].name;
+      textureSlots[i].name = "loading...";
+      updateTextureSlotPreview(i);
+      const texture = await loadTerrainTextureUrl(builtin.url);
+      if (!texture) {
+        textureSlots[i].name = previousName;
+        select.value = textureSlots[i].selectedId;
+        refreshTextureState();
+        return;
+      }
+      setBuiltinTextureSlot(i, texture, builtin.label, builtin.url, builtin.id);
+      refreshTextureState();
+    });
     textureModal.querySelector<HTMLInputElement>(`[data-slot-low="${i}"]`)!.addEventListener("change", (event) => {
       textureSlots[i].heightMin = Number((event.target as HTMLInputElement).value);
       refreshTextureState();
     });
     textureModal.querySelector<HTMLInputElement>(`[data-slot-high="${i}"]`)!.addEventListener("change", (event) => {
       textureSlots[i].heightMax = Number((event.target as HTMLInputElement).value);
+      refreshTextureState();
+    });
+    textureModal.querySelector<HTMLInputElement>(`[data-slot-scale="${i}"]`)!.addEventListener("change", (event) => {
+      textureSlots[i].scale = Number((event.target as HTMLInputElement).value);
       refreshTextureState();
     });
   }
@@ -989,17 +1108,7 @@ async function main() {
   updateTextureSlotPreviews();
 
   const textureFolder = gui.addFolder("terrain texture");
-  textureFolder.add(textureActions, "loadTexture").name("load image files");
-  useTextureController = textureFolder.add(state, "useTexture").name("enable texture").onChange((on: boolean) => {
-    state.useTexture = on;
-    syncTextureModalControls();
-    applyTerrainTextures();
-  });
-  textureScaleController = textureFolder.add(state, "textureScale", 1 / 512, 1 / 8, 1 / 512).name("texture scale").onChange((scale: number) => {
-    state.textureScale = scale;
-    syncTextureModalControls();
-    applyTerrainTextures();
-  });
+  textureFolder.add(textureActions, "loadTexture").name("texture slots");
   loadedTextureController = textureFolder.add(state, "loadedTextureFiles").name("loaded").disable();
   textureFolder.add(textureActions, "clearTexture").name("clear texture");
   const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");

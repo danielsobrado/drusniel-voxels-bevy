@@ -56,26 +56,30 @@
       #build-progress-bar::-moz-progress-bar { background: linear-gradient(90deg, #55a9ff, #8ce6b5); }
       #texture-modal[hidden] { display: none; }
       #texture-modal {
-        position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+        position: fixed; inset: 0; z-index: 40;
         background: rgba(9, 11, 14, 0.72); color: #d8dde4;
         font: 12px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
       }
       .texture-panel {
+        position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
         width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
-        overflow: auto; background: #171a1f; border: 1px solid #3a414c;
+        overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+        background: #171a1f; border: 1px solid #3a414c;
         box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
       }
       .texture-panel header {
         display: flex; align-items: center; justify-content: space-between;
         padding: 12px 14px; border-bottom: 1px solid #303640;
+        cursor: move; user-select: none;
       }
+      .texture-panel header button { cursor: pointer; }
       .texture-panel h2 { margin: 0; font-size: 14px; font-weight: 650; }
       .texture-panel button {
         border: 1px solid #48515f; background: #252b33; color: #e8edf3;
         min-height: 28px; padding: 4px 9px; cursor: pointer;
       }
       .texture-panel button:hover { background: #303842; }
-      .texture-panel-body { padding: 14px; }
+      .texture-panel-body { padding: 14px; overflow-x: hidden; }
       .texture-slot-grid {
         display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
       }
@@ -91,6 +95,14 @@
         overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
         color: #dce3ea;
       }
+      .texture-slot-select {
+        display: grid; gap: 3px; color: #aeb8c4;
+      }
+      .texture-slot-select select {
+        width: 100%; min-width: 0; box-sizing: border-box;
+        background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
+        font: inherit;
+      }
       .texture-slot-param {
         display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 6px;
         color: #aeb8c4;
@@ -99,17 +111,11 @@
         width: 100%; min-width: 0; box-sizing: border-box;
         background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
       }
-      .texture-controls {
-        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px;
-        margin-top: 14px;
-      }
-      .texture-controls label { display: grid; gap: 4px; color: #b9c1ca; }
-      .texture-controls input[type="range"] { width: 100%; }
       .texture-actions {
         display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
       }
       @media (max-width: 560px) {
-        .texture-slot-grid, .texture-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .texture-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
     </style>
   </head>

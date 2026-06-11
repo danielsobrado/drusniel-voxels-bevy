@@ -48,14 +48,24 @@ pub(crate) fn adjust_lod_for_integrated_gpu(
 pub(crate) fn update_chunk_face_visibility_system(
     mut world: ResMut<VoxelWorld>,
     config: Res<OcclusionConfig>,
+    time: Res<Time>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
+    mut scan_accum: Local<f32>,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Face Visibility");
-    // Skip when occlusion culling is disabled â€” results are not consumed
+    // Skip only when the master switch is disabled; enclosure detection consumes these masks.
     if !config.enabled {
         return;
     }
+
+    // The masks are only consumed by the throttled enclosure/BFS systems, so
+    // scan for dirty chunks at the same cadence instead of every frame.
+    *scan_accum += time.delta_secs();
+    if *scan_accum < config.update_interval {
+        return;
+    }
+    *scan_accum = 0.0;
 
     // Collect positions of chunks needing visibility update
     let dirty_positions: Vec<IVec3> = world
@@ -75,43 +85,16 @@ pub(crate) fn update_chunk_face_visibility_system(
     }
 }
 
-/// Rebuilds the chunk octree when chunks have been added or removed.
-///
-/// The octree enables O(log N) frustum culling instead of checking every chunk.
-pub(crate) fn update_octree_system(
-    world: Res<VoxelWorld>,
-    mut octree: ResMut<ChunkOctree>,
-    gen_state: Res<ChunkGenerationState>,
-    config: Res<OcclusionConfig>,
-    frame: Res<FrameCount>,
-    mut timing: ResMut<AreaTimingRecorder>,
-) {
-    let _timer = area_timer(&mut timing, frame.0, "Octree Rebuild");
-    // Skip when occlusion culling is disabled â€” octree is only used by culling
-    if !config.enabled {
-        return;
-    }
-
-    // Don't rebuild during initial world generation
-    if !gen_state.is_complete {
-        return;
-    }
-
-    // Build octree if dirty or not yet built
-    if octree.is_dirty() || !octree.is_built() {
-        octree.build(&world);
-    }
-}
-
 /// Applies enclosure-only visibility culling to terrain chunk meshes.
 pub fn apply_visibility_culling_system(
     config: Res<OcclusionConfig>,
+    enclosure: Res<EnclosureState>,
     visible_chunks: Res<VisibleChunks>,
     mut stats: ResMut<EnclosureOcclusionStats>,
     mut chunk_meshes: Query<(&ChunkMesh, &mut Visibility)>,
     mut was_enabled: Local<bool>,
 ) {
-    if !config.enabled {
+    if !config.is_active(enclosure.mode) {
         if *was_enabled {
             for (_, mut visibility) in &mut chunk_meshes {
                 if *visibility == Visibility::Hidden {
@@ -161,7 +144,6 @@ pub fn apply_visibility_culling_system(
 /// Throttled to every 0.25s. Stationary scans run only while new chunks arrive
 /// or prior LOD work is still draining, so chunks can converge after loading
 /// without paying a permanent full-world scan cost.
-
 pub(crate) fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,

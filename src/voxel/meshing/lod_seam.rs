@@ -281,7 +281,12 @@ pub(super) fn apply_snap_or_morph(
             bake_targets(solid_mesh, local_positions);
         }
         let morph_counts = if morph.enabled && !solid_mesh.morph_targets.is_empty() {
-            morph_face_counts_for_cpu_snap(local_positions, &solid_mesh.morph_targets, my_lod, neighbor_lods)
+            morph_face_counts_for_cpu_snap(
+                local_positions,
+                &solid_mesh.morph_targets,
+                my_lod,
+                neighbor_lods,
+            )
         } else {
             MorphFaceCounts::default()
         };
@@ -328,7 +333,9 @@ pub(super) fn build_surface_nets_seam_face_audit(
     super::TerrainSeamStripDebug,
 ) {
     use super::lod_delta_gt_one_face_mask;
-    use super::seam_audit::{SkirtFaceCounts, assemble_seam_face_audit, terrain_seam_strip_debug_from_own_strips};
+    use super::seam_audit::{
+        SkirtFaceCounts, assemble_seam_face_audit, terrain_seam_strip_debug_from_own_strips,
+    };
 
     let fine_strips: Vec<_> = own_strips.iter_strips().cloned().collect();
     let seam_strip_debug = terrain_seam_strip_debug_from_own_strips(&fine_strips);
@@ -486,6 +493,49 @@ pub(super) fn extract_export_boundary_strips(
         return Vec::new();
     }
     own_strips.iter_strips().cloned().collect()
+}
+
+pub(super) fn extract_main_surface_boundary_edges(
+    local_positions: &[Vec3],
+    mesh: &MeshData,
+    main_surface_vertex_count: usize,
+    main_surface_index_count: usize,
+    chunk_size: f32,
+    boundary_band: f32,
+) -> Vec<crate::voxel::skirt::BoundaryEdge> {
+    debug_assert!(
+        main_surface_vertex_count <= local_positions.len()
+            && main_surface_vertex_count <= mesh.positions.len()
+            && main_surface_vertex_count <= mesh.normals.len()
+            && main_surface_vertex_count <= mesh.colors.len(),
+        "main-surface vertex count {} exceeds a parallel array (local {}, pos {}, norm {}, col {})",
+        main_surface_vertex_count,
+        local_positions.len(),
+        mesh.positions.len(),
+        mesh.normals.len(),
+        mesh.colors.len(),
+    );
+    debug_assert!(
+        main_surface_index_count <= mesh.indices.len(),
+        "main-surface index count {} exceeds mesh indices {}",
+        main_surface_index_count,
+        mesh.indices.len(),
+    );
+    let vertex_count = main_surface_vertex_count
+        .min(local_positions.len())
+        .min(mesh.positions.len())
+        .min(mesh.normals.len())
+        .min(mesh.colors.len());
+    let index_count = main_surface_index_count.min(mesh.indices.len());
+    crate::voxel::skirt::extract_boundary_edges(
+        &local_positions[..vertex_count],
+        &mesh.positions[..vertex_count],
+        &mesh.normals[..vertex_count],
+        &mesh.indices[..index_count],
+        &mesh.colors[..vertex_count],
+        chunk_size,
+        boundary_band,
+    )
 }
 
 /// Stage 4: append watertight stitch triangles bridging this chunk's fine boundary to
