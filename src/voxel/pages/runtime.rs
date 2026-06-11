@@ -33,6 +33,16 @@ pub struct ClodPagesRuntime {
     pub source_radius_chunks: i32,
 }
 
+/// Reproducible bench/run A/B: start with pages ON if `CLOD_PAGES` is set to a truthy value
+/// (`1`/`true`/`on`). Lets a scripted bench run entirely pages-on without a manual Alt+F11.
+/// `CLOD_PAGES_BUDGET` optionally overrides the per-frame source-mesh budget.
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        std::env::var(key).ok().as_deref().map(str::trim),
+        Some("1") | Some("true") | Some("on") | Some("yes")
+    )
+}
+
 impl Default for ClodPagesRuntime {
     fn default() -> Self {
         let cfg = ClodPagesConfig::load();
@@ -40,10 +50,14 @@ impl Default for ClodPagesRuntime {
         let levels = cfg.page.quadtree_levels as i32;
         // reach one top-level page footprint beyond the near-field bubble
         let source_radius_chunks = cfg.near_field.radius_chunks + p * (1 << (levels - 1).max(0));
+        let source_budget_per_frame = std::env::var("CLOD_PAGES_BUDGET")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(4);
         Self {
             cfg,
-            enabled: false,
-            source_budget_per_frame: 4,
+            enabled: env_truthy("CLOD_PAGES"),
+            source_budget_per_frame,
             source_radius_chunks,
         }
     }
@@ -97,6 +111,16 @@ pub fn mesh_lod0_export(
 
 fn cheby(a: IVec3, b: IVec3) -> i32 {
     (a.x - b.x).abs().max((a.z - b.z).abs())
+}
+
+/// Logs the initial page state once so bench output records whether the A/B ran pages-on.
+pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
+    info!(
+        "CLOD PAGES: source meshing {} at startup (CLOD_PAGES env); radius {} chunks, budget {}/frame. Alt+F11 toggles.",
+        if runtime.enabled { "ON" } else { "OFF" },
+        runtime.source_radius_chunks,
+        runtime.source_budget_per_frame
+    );
 }
 
 /// Alt+F11 toggles CLOD page source meshing on/off for A/B inspection + benching.
