@@ -9,6 +9,16 @@ mod mode;
 mod plugins;
 mod window;
 
+use bevy::asset::AssetPlugin;
+use bevy::diagnostic::{
+    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+};
+use bevy::log::LogPlugin;
+use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{RenderCreation, WgpuSettings};
+use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
+use clap::Parser;
 use crate::diagnostics::bench::{
     BenchPlugin, bench_scene_requires_gameplay, bench_scene_requires_inventory_ui,
     bench_scene_skips_props,
@@ -34,28 +44,16 @@ use crate::ui::inventory::InventoryUiPlugin;
 use crate::ui::map::MapPlugin;
 use crate::ui::menu::PauseMenuPlugin;
 use crate::voxel::plugin::VoxelPlugin;
-use crate::world::environment::AtmospherePlugin;
 use crate::world::environment::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
 use crate::world::environment::vegetation::VegetationPlugin;
 use crate::world::environment::weather::WeatherPlugin;
+use crate::world::environment::AtmospherePlugin;
 use crate::world::rules::WorldRulesPlugin;
-use bevy::asset::AssetPlugin;
-use bevy::diagnostic::{
-    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-};
-use bevy::log::LogPlugin;
-use bevy::prelude::*;
-use bevy::render::RenderPlugin;
-use bevy::render::settings::{RenderCreation, WgpuSettings};
-use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
-use clap::Parser;
 
 use self::cli::{BenchCli, BenchConfig};
 use self::gpu::{detect_gpu_limits, visual_regression_bench_uses_vulkan};
 use self::logging::load_logging_config;
-use self::mode::{
-    editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind,
-};
+use self::mode::{editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind};
 use self::plugins::run_editor_runtime;
 use self::runtime_lock::RuntimeInstanceLock;
 use self::window::asset_file_path;
@@ -127,7 +125,16 @@ pub fn run() {
                     } else {
                         "Voxel Builder".to_string()
                     },
-                    resolution: if editor_native_viewport {
+                    resolution: if std::env::var("VOXELS_BENCH_TINY_WINDOW")
+                        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    {
+                        // Software-render bench escape hatch (WSL/llvmpipe): a tiny
+                        // window makes per-frame rasterisation near-free so the
+                        // frame-budgeted gen/meshing pipeline can advance and reach
+                        // the seam-audit checkpoint. Off by default; window size does
+                        // not affect terrain geometry or the seam audit.
+                        WindowResolution::new(80, 60)
+                    } else if editor_native_viewport {
                         WindowResolution::new(1280, 720)
                     } else {
                         WindowResolution::new(1920, 1080)

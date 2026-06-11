@@ -25,7 +25,7 @@ use crate::voxel::meshing::{
 use crate::voxel::skirt::ChunkFace;
 use crate::voxel::world::VoxelWorld;
 
-pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 3;
+pub const SEAM_AUDIT_SCHEMA_VERSION: u32 = 4;
 pub const SEAM_COVERAGE_GRID_U: u32 = 17;
 pub const SEAM_COVERAGE_GRID_V: u32 = 17;
 const LIP_HEIGHT_FAIL_VOXELS: f32 = 0.20;
@@ -82,6 +82,10 @@ pub struct SeamAuditFaceRecord {
     pub strip_max_coarse_to_fine_distance: f32,
     pub strip_max_endpoint_distance: f32,
     pub strip_span_overlap_ratio: f32,
+    pub strip_fine_span_min: f32,
+    pub strip_fine_span_max: f32,
+    pub strip_coarse_span_min: f32,
+    pub strip_coarse_span_max: f32,
     pub strip_unmatched_fine_segments: u16,
     pub strip_unmatched_coarse_segments: u16,
     pub strip_crossing_count: u16,
@@ -447,6 +451,10 @@ fn enhance_audit_with_strip_overlap(
     audit.strip_max_coarse_to_fine_distance = result.max_coarse_to_fine_distance;
     audit.strip_max_endpoint_distance = result.max_endpoint_distance;
     audit.strip_span_overlap_ratio = result.span_overlap_ratio;
+    audit.strip_fine_span_min = result.fine_span_min;
+    audit.strip_fine_span_max = result.fine_span_max;
+    audit.strip_coarse_span_min = result.coarse_span_min;
+    audit.strip_coarse_span_max = result.coarse_span_max;
     audit.strip_unmatched_fine_segments = result.unmatched_fine_segments;
     audit.strip_unmatched_coarse_segments = result.unmatched_coarse_segments;
     audit.strip_crossing_count = result.crossing_count;
@@ -1133,6 +1141,10 @@ fn face_record(
         strip_max_coarse_to_fine_distance: audit.strip_max_coarse_to_fine_distance,
         strip_max_endpoint_distance: audit.strip_max_endpoint_distance,
         strip_span_overlap_ratio: audit.strip_span_overlap_ratio,
+        strip_fine_span_min: audit.strip_fine_span_min,
+        strip_fine_span_max: audit.strip_fine_span_max,
+        strip_coarse_span_min: audit.strip_coarse_span_min,
+        strip_coarse_span_max: audit.strip_coarse_span_max,
         strip_unmatched_fine_segments: audit.strip_unmatched_fine_segments,
         strip_unmatched_coarse_segments: audit.strip_unmatched_coarse_segments,
         strip_crossing_count: audit.strip_crossing_count,

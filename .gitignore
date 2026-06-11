@@ -75,3 +75,4 @@ docs/lod/image/*.png
 *.patch
 pkg/mod/cache/
 pkg/sumdb/
+tools/clod-rs/target/*/*

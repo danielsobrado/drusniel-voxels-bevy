@@ -15,11 +15,11 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
 
+use crate::constants::{DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z};
 #[cfg(test)]
 use crate::constants::{
     CHUNK_SIZE, CHUNK_SIZE_I32, WATER_FANCY_DISTANCE, WATER_FANCY_MIN_TRIANGLES, WATER_LEVEL,
 };
-use crate::constants::{DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z};
 use crate::performance::AreaTimingRecorder;
 
 #[cfg(test)]
@@ -28,11 +28,11 @@ use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 #[cfg(test)]
 use crate::voxel::chunk::{Chunk, LodLevel, MeshDirtyReason};
-use crate::voxel::diagnostics::seam_audit_pass::SeamAuditPassPlugin;
 use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, sync_occlusion_config_from_enclosure,
     toggle_enclosure_culling, update_enclosure_state,
 };
+use crate::voxel::diagnostics::seam_audit_pass::SeamAuditPassPlugin;
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 #[allow(unused_imports)]
 pub(crate) use crate::voxel::lod::{
@@ -50,7 +50,9 @@ use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings
 use crate::voxel::mesh_commit::LodMeshTransactionState;
 #[cfg(test)]
 use crate::voxel::mesh_commit::MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME;
-use crate::voxel::meshing::{ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail};
+use crate::voxel::meshing::{
+    ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterMeshDetail,
+};
 #[cfg(test)]
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::occlusion::{
@@ -67,11 +69,6 @@ pub use crate::voxel::runtime::{
     ChunkGenerationState, RuntimeChunkStats, TerrainLodControl, VoxelTerrainSet, WaterBodyInfo,
     WaterBodyRegistry, WorldConfig, apply_visibility_culling_system,
 };
-#[cfg(test)]
-use crate::voxel::runtime::{
-    MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME, TERRAIN_MATERIAL_LOD_DISTANCE,
-    TERRAIN_MATERIAL_LOD_HYSTERESIS,
-};
 pub(crate) use crate::voxel::runtime::{
     MeshDirtyQueueWarningState, PendingWorldGeneration, TerrainLodTransitionState, WaterMaskProxy,
     WorldGenerationQueue, WorldStartupLoadingFlames, WorldStartupOverlayState,
@@ -86,16 +83,22 @@ pub(crate) use crate::voxel::runtime::{
 #[cfg(test)]
 use crate::voxel::runtime::{
     MeshDirtyReasonCounts, WaterMeshBodySample, WorldStartupStage, WorldStats,
-    build_water_body_group, chunks_per_frame_limit_for_dirty_meshes, desired_water_visibility,
-    expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
-    mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
-    should_defer_runtime_chunk_stats_recompute, should_poll_chunk_generation_tasks,
-    should_recompute_runtime_chunk_stats, terrain_material_quality_for_distance,
-    water_body_edge_bit, water_body_material_mode, world_startup_background_cover_size,
-    world_startup_snapshot,
+    build_water_body_group, chunks_per_frame_limit_for_dirty_meshes,
+    desired_water_visibility, expected_world_chunk_count, generate_chunk_async,
+    initial_lod_for_chunk, mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty,
+    prioritize_dirty_chunks_for_camera, should_defer_runtime_chunk_stats_recompute,
+    should_poll_chunk_generation_tasks, should_recompute_runtime_chunk_stats,
+    terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
+    world_startup_background_cover_size, world_startup_snapshot,
+};
+#[cfg(test)]
+use crate::voxel::runtime::{
+    MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME, TERRAIN_MATERIAL_LOD_DISTANCE,
+    TERRAIN_MATERIAL_LOD_HYSTERESIS,
 };
 
 pub struct VoxelPlugin;
+
 
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
@@ -105,6 +108,7 @@ impl Plugin for VoxelPlugin {
             ExtractComponentPlugin::<WaterMeshDetail>::default(),
             TerrainHoleProbePlugin,
             SeamAuditPassPlugin,
+            crate::voxel::pages::ClodPagesPlugin,
         ));
 
         let size_chunks = IVec3::new(
@@ -254,6 +258,9 @@ fn record_voxel_edit_counters(
     );
 }
 
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +276,7 @@ mod tests {
         assert!(!state.should_warn(11.5));
         assert!(state.should_warn(12.01));
     }
+
 
     #[test]
     fn water_material_visibility_restores_renderable_body_modes() {
@@ -319,6 +327,7 @@ mod tests {
             WaterBodyMaterialMode::Fancy
         );
     }
+
 
     #[test]
     fn initial_lod_assignment_uses_distance_without_lod_dirty_reason() {
@@ -388,6 +397,7 @@ mod tests {
                 .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::NeighborLod))
         );
     }
+
 
     #[test]
     fn world_startup_snapshot_reports_generation_progress() {
@@ -642,6 +652,7 @@ mod tests {
             MAX_LOD_TRANSACTION_CHUNKS_PER_FRAME
         );
     }
+
 
     #[test]
     fn water_body_edge_masks_track_chunk_edge_cells() {

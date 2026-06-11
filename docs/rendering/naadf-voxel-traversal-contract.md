@@ -1,6 +1,7 @@
 # NAADF Voxel Traversal Contract
 
-Document status: 2026-06-07. Documentation-only runbook.
+Document status: 2026-06-07. Documentation-only runbook.  
+Execution plan (phased tasks): [`docs/plans/naadf-voxel-traversal-unification.md`](../plans/naadf-voxel-traversal-unification.md).
 
 This document describes how Drusniel should use Amanatides/Woo-style grid DDA
 for voxel ray traversal. The goal is one shared contract for CPU ray queries,

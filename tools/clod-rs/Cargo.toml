@@ -1,0 +1,23 @@
+[package]
+name = "clod-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 4 Rust port of the CLOD pages builder (standalone, no Bevy)."
+
+[dependencies]
+meshopt = "0.6"
+bytemuck = { version = "1.20", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+[lib]
+name = "clod_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "clod_spike"
+path = "src/spike.rs"
+
+[[bin]]
+name = "clod_build"
+path = "src/build.rs"

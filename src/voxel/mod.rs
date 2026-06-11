@@ -22,6 +22,7 @@ pub mod io;
 pub mod lod;
 pub mod mc_transvoxel;
 pub mod meshing;
+pub mod pages;
 pub mod plugin;
 pub(crate) mod runtime;
 pub mod simulation;
