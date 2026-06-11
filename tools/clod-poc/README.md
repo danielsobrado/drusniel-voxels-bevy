@@ -94,10 +94,12 @@ border-match check, and a **Phase 3 acceptance-gate verdict** (§5: A1 watertigh
 A4 reduction, A5 build cost, A6 low-benefit — A3 stays a visual judgement). Any dirty input
 (weld conflict, unwelded internal border, border mismatch, degenerate) is a **hard fail**.
 
-The terrain ([terrain.ts](src/terrain.ts)) includes §4.4 stress features that cross page
-borders: a ridge, a steep cliff straddling x=128, and a true 3D overhang lip at the
-4-page corner (128,128). The 8×8 gate passes with these present — evidence A1 holds on
-non-heightfield topology.
+The terrain ([terrain.ts](src/terrain.ts)) ports the runtime Bevy/Rust base-height path
+from `src/voxel/terrain/height.rs`: the same default height range, value-noise fBm,
+ridged mountains, broad massif mask, uplift, valley carve, hills, detail, and softened
+height cap. Runtime-only water-body carving, caves, trees, and biome voxel typing are
+not generated in the PoC; the page builder still gets deterministic same-resolution chunk
+meshes with borders that weld exactly.
 
 ## Phase 2 — runtime viewer
 
@@ -109,16 +111,31 @@ Builds a 4×4 world in-browser and runs the real runtime (§4): per-frame **DAG-
 selection** (screen-space error + hysteresis), the optional **2:1 restricted-quadtree
 pass**, and a **dithered screen-door crossfade** when the cut changes. lil-gui controls:
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
-colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, and a
-**near-field bubble** folder (§4.4): pages intersecting the bubble are force-split to LOD0,
-and inside the radius a LOD0 page is drawn as its raw chunks instead of the welded page
-mesh. With "tint bubble red" OFF the edge must be **invisible** (raw chunks === welded
-LOD0) — toggle the bubble and nothing should change; with tint ON you see which pages it
-owns. The overlay shows the live cut (nodes per level, tris rendered, 2:1 forced splits,
-and bubble forced splits). Move the camera and watch near pages refine to LOD0 while far
-pages stay coarse. The **world size** selector (or `?world=8`) loads the full LOD0→LOD3
-8×8 world (~8s build): get close to one corner, then toggle the 2:1 constraint to see
-large neighbor LOD deltas appear and get bounded.
+colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, a
+camera-following sky dome with tuneable sun/sky/ground illumination, and a **terrain
+texture** folder. Use "load image files" to open the texture modal. It shows four
+square slots for low→high terrain bands; click a square to load or replace that single
+texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
+has its own low/high height range, and the shader uses the range containing the current
+vertex height; gaps fall back to the nearest loaded slot. Textures are sampled in world
+X/Z with repeat wrapping, and the global "texture scale" controls tiling density. With
+`colour by LOD` enabled the page colour is applied as a light tint over the texture, so
+the image remains visible on every LOD while ownership is still readable. Turn `colour by
+LOD` off for a neutral textured terrain pass.
+
+The **near-field bubble** folder (§4.4): pages intersecting the bubble are force-split to
+LOD0, and inside the radius a LOD0 page is drawn as its raw chunks instead of the welded
+page mesh. With "tint bubble red" OFF the edge must be **invisible** (raw chunks ===
+welded LOD0) — toggle the bubble and nothing should change; with tint ON you see which
+pages it owns. The overlay shows the live cut (nodes per level, tris rendered, 2:1 forced
+splits, and bubble forced splits). Move the camera and watch near pages refine to LOD0
+while far pages stay coarse. The **world size** selector (or `?world=8`, `?world=16`,
+`?world=32`) loads larger worlds in-browser and shows a build progress panel while LOD0
+pages and parent LOD nodes are generated. With the current `quadtree_levels: 4`, 8×8 is
+the first full LOD0→LOD3 gate world; 16×16 and 32×32 keep the same max LOD but produce
+more LOD3 roots and can still freeze briefly inside individual node builds. Get close to
+one corner, then toggle the 2:1 constraint to see large neighbor LOD deltas appear and get
+bounded.
 
 Not yet built: floating per-node error labels + locked-border highlight, and an explicit carved cave
 tunnel (single-vertex Surface Nets can't split two sheets in one cell — a PoC mesher

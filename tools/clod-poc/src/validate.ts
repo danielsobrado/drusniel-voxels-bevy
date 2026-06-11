@@ -138,7 +138,7 @@ export function borderChain(
 
 /**
  * Assert two adjacent same-level pages share a matching border chain (gate A2).
- * position <= 1e-6, normal dot >= 0.9999, material delta <= 1e-4.
+ * position <= default weld epsilon, normal dot >= 0.9999, material delta <= 1e-4.
  */
 export function assertBorderMatch(a: BorderChain, b: BorderChain): void {
   const tol = DEFAULT_TOLERANCES;

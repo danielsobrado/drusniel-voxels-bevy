@@ -6,6 +6,7 @@
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
+import { materialWeights } from "./terrain.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {
@@ -81,7 +82,7 @@ export function simplifyPage(
 
   // meshopt keeps the original vertex buffer; unused vertices are simply unreferenced.
   // Compact to referenced vertices so downstream weld/lock/stats stay tight.
-  const compacted = compact(mesh, newIndices);
+  const compacted = compact(mesh, newIndices, cfg.simplify.weld_epsilon_cells);
 
   const errorWorld = resultError * simplifyScale(mesh);
   const lowBenefit = newIndices.length > cfg.simplify.abandon_ratio * inputIndices;
@@ -90,7 +91,11 @@ export function simplifyPage(
 }
 
 /** Drop unreferenced vertices and remap indices. */
-function compact(mesh: PageMesh, indices: Uint32Array): PageMesh {
+function snap(value: number, epsilon: number): number {
+  return Math.round(value / epsilon) * epsilon;
+}
+
+function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number): PageMesh {
   const remap = new Map<number, number>();
   const pos: number[] = [], nrm: number[] = [], mat: number[] = [];
   const out = new Uint32Array(indices.length);
@@ -100,12 +105,13 @@ function compact(mesh: PageMesh, indices: Uint32Array): PageMesh {
     if (ni === undefined) {
       ni = pos.length / 3;
       remap.set(old, ni);
-      pos.push(mesh.positions[old * 3], mesh.positions[old * 3 + 1], mesh.positions[old * 3 + 2]);
+      const px = snap(mesh.positions[old * 3], snapEpsilon);
+      const py = snap(mesh.positions[old * 3 + 1], snapEpsilon);
+      const pz = snap(mesh.positions[old * 3 + 2], snapEpsilon);
+      pos.push(px, py, pz);
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      mat.push(
-        mesh.materials[old * 4], mesh.materials[old * 4 + 1],
-        mesh.materials[old * 4 + 2], mesh.materials[old * 4 + 3],
-      );
+      const [m0, m1, m2, m3] = materialWeights(py, mesh.normals[old * 3 + 1]);
+      mat.push(m0, m1, m2, m3);
     }
     out[i] = ni;
   }

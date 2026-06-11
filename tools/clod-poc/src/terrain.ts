@@ -12,7 +12,30 @@
 import { PageMesh } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 
-const Y_CELLS = 56; // vertical extent meshed (must exceed max surface height incl. cliff)
+const Y_CELLS = 128; // matches DEFAULT_WORLD_CHUNKS_Y * CHUNK_SIZE in the Bevy runtime.
+const WATER_LEVEL = 18;
+const MIN_NORMAL_TERRAIN_SURFACE_Y = WATER_LEVEL - 4;
+const BASE_TERRAIN_ELEVATION = MIN_NORMAL_TERRAIN_SURFACE_Y;
+const TERRAIN_SEED = 0;
+
+const TERRAIN_CONFIG = {
+  height: { min: 14, max: 118 },
+  continent: { scale: 0.001, amplitude: 40, octaves: 2, persistence: 0.5, lacunarity: 2.0 },
+  mountains: {
+    scale: 0.008,
+    amplitude: 120,
+    octaves: 7,
+    persistence: 0.48,
+    lacunarity: 2.3,
+    ridgePower: 1.8,
+    massifScale: 0.0035,
+    massifAmplitude: 38,
+    massifThreshold: 0.38,
+    massifPower: 1.65,
+  },
+  hills: { scale: 0.025, amplitude: 25, octaves: 4, persistence: 0.5, lacunarity: 2.0 },
+  detail: { scale: 0.1, amplitude: 3, octaves: 3, persistence: 0.5, lacunarity: 2.0 },
+};
 
 /** World cell extent in X/Z. Quads referencing cells outside this are clipped, so the
  *  world's outer pages get a clean open boundary instead of dangling halo geometry. */
@@ -23,61 +46,160 @@ export interface WorldBounds {
 
 // ---- global field ---------------------------------------------------------
 
-function hash2(x: number, z: number): number {
-  let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+function hashPositionSeeded(x: number, z: number, seed = TERRAIN_SEED): number {
+  let n = (
+    Math.imul(x | 0, 374761393) +
+    Math.imul(z | 0, 668265263) +
+    Math.imul(seed | 0, 1376312589)
+  ) | 0;
+  n = Math.imul(n ^ (n >> 13), 1274126177);
+  return ((n ^ (n >> 16)) >>> 0) / 4294967295;
 }
 
 function smooth(t: number): number {
+  t = Math.min(1, Math.max(0, t));
   return t * t * (3 - 2 * t);
+}
+
+function smoothstepRange(edge0: number, edge1: number, value: number): number {
+  const denominator = edge1 - edge0;
+  if (Math.abs(denominator) <= Number.EPSILON) return value >= edge1 ? 1 : 0;
+  return smooth((value - edge0) / denominator);
 }
 
 function valueNoise2(x: number, z: number): number {
   const xi = Math.floor(x);
   const zi = Math.floor(z);
-  const xf = smooth(x - xi);
-  const zf = smooth(z - zi);
-  const a = hash2(xi, zi);
-  const b = hash2(xi + 1, zi);
-  const c = hash2(xi, zi + 1);
-  const d = hash2(xi + 1, zi + 1);
+  const xf = smooth(x - Math.floor(x));
+  const zf = smooth(z - Math.floor(z));
+  const a = hashPositionSeeded(xi, zi);
+  const b = hashPositionSeeded(xi + 1, zi);
+  const c = hashPositionSeeded(xi, zi + 1);
+  const d = hashPositionSeeded(xi + 1, zi + 1);
   return a + (b - a) * xf + (c - a) * zf + (a - b - c + d) * xf * zf;
 }
 
-function fbm2(x: number, z: number): number {
-  let sum = 0;
-  let amp = 1;
-  let freq = 1;
-  let norm = 0;
-  for (let o = 0; o < 4; o++) {
-    sum += amp * valueNoise2(x * freq, z * freq);
-    norm += amp;
-    amp *= 0.5;
-    freq *= 2;
+function fbmConfigurable(
+  x: number,
+  z: number,
+  scale: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+): number {
+  let value = 0;
+  let amplitude = 1;
+  let frequency = scale;
+  let maxValue = 0;
+  for (let i = 0; i < octaves; i++) {
+    value += amplitude * valueNoise2(x * frequency, z * frequency);
+    maxValue += amplitude;
+    amplitude *= persistence;
+    frequency *= lacunarity;
   }
-  return sum / norm;
+  return value / maxValue;
+}
+
+function ridgedNoise(x: number, z: number): number {
+  const cfg = TERRAIN_CONFIG.mountains;
+  let value = 0;
+  let amplitude = 1;
+  let frequency = cfg.scale;
+  let maxValue = 0;
+  for (let i = 0; i < cfg.octaves; i++) {
+    const sample = valueNoise2(x * frequency + i * 100, z * frequency + i * 100);
+    const centered = sample * 2 - 1;
+    const ridge = Math.pow(1 - Math.abs(centered), cfg.ridgePower);
+    value += ridge * amplitude;
+    maxValue += amplitude;
+    amplitude *= cfg.persistence;
+    frequency *= cfg.lacunarity;
+  }
+  return (value / maxValue) * cfg.amplitude;
+}
+
+function massifCellMask(x: number, z: number): number {
+  const cfg = TERRAIN_CONFIG.mountains;
+  const spacing = Math.min(384, Math.max(128, 1 / Math.max(0.001, cfg.massifScale)));
+  const cellX = Math.floor(x / spacing);
+  const cellZ = Math.floor(z / spacing);
+  let strongest = 0;
+
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = cellX + dx;
+      const cz = cellZ + dz;
+      const offsetX = hashPositionSeeded(Math.imul(cx, 43), Math.imul(cz, 59)) - 0.5;
+      const offsetZ = hashPositionSeeded(Math.imul(cx, 71), Math.imul(cz, 37)) - 0.5;
+      const heightT = 0.55 + hashPositionSeeded(Math.imul(cx, 97), Math.imul(cz, 83)) * 0.45;
+      const radiusT = hashPositionSeeded(Math.imul(cx, 113), Math.imul(cz, 131));
+      const centerX = (cx + 0.5 + offsetX * 0.55) * spacing;
+      const centerZ = (cz + 0.5 + offsetZ * 0.55) * spacing;
+      const radius = spacing * (0.42 + radiusT * 0.22);
+      const dist = Math.hypot(x - centerX, z - centerZ);
+      const falloff = Math.min(1, Math.max(0, 1 - dist / Math.max(1, radius)));
+      const mask = Math.pow(smooth(falloff), Math.max(0.25, cfg.massifPower));
+      strongest = Math.max(strongest, mask * heightT);
+    }
+  }
+  return strongest;
+}
+
+function softenHeightCap(height: number, minHeight: number, maxHeight: number): number {
+  const ceilingStart = Math.max(maxHeight - 18, minHeight);
+  const ceiling = maxHeight - 0.5;
+  if (height <= ceilingStart || ceiling <= ceilingStart) return height;
+
+  const range = ceiling - ceilingStart;
+  const excess = height - ceilingStart;
+  return ceilingStart + (range * excess) / (excess + range);
 }
 
 /** Terrain surface height at (x,z). */
 function surfaceHeight(x: number, z: number): number {
-  const f = fbm2(x * 0.035, z * 0.035);
-  // A ridge so stress-test features cross page borders (§4.4).
-  const ridge = Math.abs(Math.sin(x * 0.04) + Math.cos(z * 0.05)) * 4;
-  // A steep cliff straddling the page border at x=128 (feature crossing a border).
-  const cliff = 9 * smooth(Math.min(1, Math.max(0, (x - 124) / 8)));
-  return 16 + f * 18 + ridge + cliff;
+  const cfg = TERRAIN_CONFIG;
+  const continentNoise = fbmConfigurable(
+    x,
+    z,
+    cfg.continent.scale,
+    cfg.continent.octaves,
+    cfg.continent.persistence,
+    cfg.continent.lacunarity,
+  );
+  const continent = continentNoise * cfg.continent.amplitude * 0.55;
+
+  const mountainSignal = fbmConfigurable(x, z, cfg.mountains.scale * 0.25, 2, 0.5, 2.0);
+  const massifSignal = fbmConfigurable(x + 4096, z - 2048, cfg.mountains.massifScale, 3, 0.52, 2.0);
+  const massifMask = Math.max(
+    Math.pow(
+      smoothstepRange(cfg.mountains.massifThreshold, 1.0, massifSignal),
+      Math.max(0.25, cfg.mountains.massifPower),
+    ),
+    massifCellMask(x, z),
+  );
+  const mountainRegionBase = Math.pow(Math.min(1, Math.max(0, mountainSignal)), 1.35);
+  const mountainRegion = Math.min(1, Math.max(0, mountainRegionBase * 0.55 + massifMask * 0.8));
+  const mountains = ridgedNoise(x, z) * mountainRegion * (1 + massifMask * 0.55);
+  const mountainUplift = cfg.mountains.amplitude * 0.18 * mountainRegion + cfg.mountains.massifAmplitude * massifMask;
+
+  const valleySignal = fbmConfigurable(x + 1375, z - 911, cfg.continent.scale * 2.2, 3, 0.55, 2.0);
+  const valleyMask = smoothstepRange(0.22, 0.08, valleySignal);
+  const valleyCarve = valleyMask * 14 * (1 - mountainRegion * 0.75);
+
+  const hillNoise = fbmConfigurable(x, z, cfg.hills.scale, cfg.hills.octaves, cfg.hills.persistence, cfg.hills.lacunarity);
+  const hills = hillNoise * cfg.hills.amplitude * 0.45;
+
+  const detailNoise = fbmConfigurable(x, z, cfg.detail.scale, cfg.detail.octaves, cfg.detail.persistence, cfg.detail.lacunarity);
+  const detail = detailNoise * cfg.detail.amplitude;
+
+  const minSurface = Math.max(cfg.height.min, MIN_NORMAL_TERRAIN_SURFACE_Y);
+  const height = BASE_TERRAIN_ELEVATION + continent + mountains + mountainUplift + hills + detail - valleyCarve;
+  return Math.min(cfg.height.max - 0.5, Math.max(minSurface, softenHeightCap(height, minSurface, cfg.height.max)));
 }
 
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
 export function density(x: number, y: number, z: number): number {
-  const base = surfaceHeight(x, z) - y;
-  // A mild overhang lip near the 4-page corner (128,128): a localized solid bulge that
-  // folds the surface back (true 3D, not a heightfield). Gaussian in y keeps the lip and
-  // the main surface >1 cell apart, so single-vertex Surface Nets stays valid.
-  const dx = x - 128, dz = z - 128;
-  const bulge = 6 * Math.exp(-(dx * dx + dz * dz) / 900) * Math.exp(-((y - 30) * (y - 30)) / 120);
-  return base + bulge;
+  return surfaceHeight(x, z) - y;
 }
 
 function gradient(x: number, y: number, z: number): [number, number, number] {
@@ -94,11 +216,11 @@ function gradient(x: number, y: number, z: number): [number, number, number] {
 }
 
 /** 4 material weights from slope/height — deterministic, so they match across borders. */
-function materials(y: number, ny: number): [number, number, number, number] {
-  const slope = 1 - Math.max(0, ny); // 0 flat, 1 vertical
-  const sand = Math.max(0, 1 - Math.abs(y - 12) / 6);
-  const snow = Math.max(0, (y - 30) / 10);
-  const rock = slope;
+export function materialWeights(y: number, ny: number): [number, number, number, number] {
+  void ny;
+  const sand = Math.max(0, 1 - Math.abs(y - WATER_LEVEL) / 6);
+  const snow = Math.max(0, (y - 88) / 22);
+  const rock = Math.max(0, Math.min(1, (y - 48) / 34)) * (1 - snow);
   const grass = Math.max(0, 1 - sand - snow - rock);
   const sum = sand + snow + rock + grass || 1;
   return [grass / sum, rock / sum, sand / sum, snow / sum];
@@ -184,7 +306,7 @@ function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): numbe
   if (p === null) return null;
   const [px, py, pz] = p;
   const [nx, ny, nz] = gradient(px, py, pz);
-  const [m0, m1, m2, m3] = materials(py, ny);
+  const [m0, m1, m2, m3] = materialWeights(py, ny);
   const idx = buf.pos.length / 3;
   buf.pos.push(px, py, pz);
   buf.nrm.push(nx, ny, nz);
@@ -208,7 +330,16 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
 
   for (let i = x0; i < x1; i++) {
     for (let k = z0; k < z1; k++) {
-      for (let j = 0; j < Y_CELLS; j++) {
+      const nearbyHeights = [
+        surfaceHeight(i, k),
+        surfaceHeight(i + 1, k),
+        surfaceHeight(i - 1, k),
+        surfaceHeight(i, k + 1),
+        surfaceHeight(i, k - 1),
+      ];
+      const j0 = Math.max(0, Math.floor(Math.min(...nearbyHeights)) - 2);
+      const j1 = Math.min(Y_CELLS - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
+      for (let j = j0; j <= j1; j++) {
         emitAxis("x", i, j, k, buf, indices, world);
         emitAxis("y", i, j, k, buf, indices, world);
         emitAxis("z", i, j, k, buf, indices, world);

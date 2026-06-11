@@ -85,7 +85,7 @@ async function main() {
       }
     }
   }
-  console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=1e-6, dot>=0.9999, mat<=1e-4). PASS`);
+  console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=1e-3, dot>=0.9999, mat<=1e-4). PASS`);
 
   // ---- Phase 3 acceptance gate verdict (plan §5) ----
   const maxNodeMs = Math.max(...result.stats.map((s) => s.buildMs));

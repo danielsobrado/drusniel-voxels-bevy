@@ -36,6 +36,13 @@ export interface BuildResult {
   worldPagesZ: number;
 }
 
+export interface BuildProgress {
+  done: number;
+  total: number;
+  level: number;
+  phase: string;
+}
+
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
   const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size; // cells per node side
   return { minX: nx * span, minZ: nz * span, maxX: (nx + 1) * span, maxZ: (nz + 1) * span };
@@ -57,6 +64,26 @@ function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: n
 }
 
 const tris = (m: PageMesh) => m.indices.length / 3;
+
+function estimatedNodeCount(worldPagesX: number, worldPagesZ: number, levels: number): number {
+  let total = 0;
+  let countX = worldPagesX;
+  let countZ = worldPagesZ;
+  for (let level = 0; level < levels; level++) {
+    total += countX * countZ;
+    if (countX === 1 && countZ === 1) break;
+    countX = Math.ceil(countX / 2);
+    countZ = Math.ceil(countZ / 2);
+  }
+  return total;
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
 
 export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): BuildResult {
   const eps = cfg.simplify.weld_epsilon_cells;
@@ -156,5 +183,128 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
   }
 
   const topLevel = Math.max(...nodesByLevel.keys());
+  return { roots: nodesByLevel.get(topLevel)!, nodesByLevel, stats, worldPagesX, worldPagesZ };
+}
+
+export async function buildWorldAsync(
+  worldPagesX: number,
+  worldPagesZ: number,
+  cfg: ClodPagesConfig,
+  onProgress: (progress: BuildProgress) => void,
+): Promise<BuildResult> {
+  const eps = cfg.simplify.weld_epsilon_cells;
+  const world = {
+    cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
+    cellsZ: worldPagesZ * cfg.page.chunks_per_page * cfg.page.chunk_size,
+  };
+  const nodesByLevel = new Map<number, ClodPageNode[]>();
+  const stats: NodeBuildStat[] = [];
+  const index: Map<string, ClodPageNode>[] = [];
+  const total = estimatedNodeCount(worldPagesX, worldPagesZ, cfg.page.quadtree_levels);
+  let done = 0;
+  let lastYield = performance.now();
+
+  const tick = async (level: number, phase: string) => {
+    done++;
+    onProgress({ done, total, level, phase });
+    const now = performance.now();
+    if (now - lastYield > 33) {
+      lastYield = now;
+      await yieldToBrowser();
+    }
+  };
+
+  onProgress({ done, total, level: 0, phase: "LOD0 pages" });
+  await yieldToBrowser();
+
+  const lod0: ClodPageNode[] = [];
+  const lod0Index = new Map<string, ClodPageNode>();
+  for (let pz = 0; pz < worldPagesZ; pz++) {
+    for (let px = 0; px < worldPagesX; px++) {
+      const t0 = performance.now();
+      const src = buildLod0PageSource(px, pz, cfg, world);
+      stripDegenerateTriangles(src.mesh);
+      assertNoInternalBorders(src.mesh, src.footprint);
+      const node: ClodPageNode = {
+        id: `L0:${px},${pz}`,
+        level: 0,
+        children: [],
+        mesh: src.mesh,
+        footprint: src.footprint,
+        bounds: boundsOf(src.mesh),
+        errorWorld: 0,
+        lowBenefit: false,
+      };
+      lod0.push(node);
+      lod0Index.set(`${px},${pz}`, node);
+      stats.push({
+        id: node.id, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
+        lockedVerts: 0, errorWorld: 0, lowBenefit: false, buildMs: performance.now() - t0,
+      });
+      await tick(0, "LOD0 pages");
+    }
+  }
+  nodesByLevel.set(0, lod0);
+  index[0] = lod0Index;
+
+  let prevCountX = worldPagesX, prevCountZ = worldPagesZ;
+  for (let level = 1; level < cfg.page.quadtree_levels; level++) {
+    const countX = Math.ceil(prevCountX / 2);
+    const countZ = Math.ceil(prevCountZ / 2);
+    const levelNodes: ClodPageNode[] = [];
+    const levelIndex = new Map<string, ClodPageNode>();
+
+    for (let nz = 0; nz < countZ; nz++) {
+      for (let nx = 0; nx < countX; nx++) {
+        const t0 = performance.now();
+        const children: ClodPageNode[] = [];
+        for (let dz = 0; dz < 2; dz++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const c = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
+            if (c) children.push(c);
+          }
+        }
+        if (children.length === 0) continue;
+
+        const merged = concat(children.map((c) => c.mesh));
+        const { mesh: welded } = weldVertices(merged, eps);
+        const footprint = footprintFor(level, nx, nz, cfg);
+        const locks = buildOuterBorderLocks(welded);
+        const sim = simplifyPage(welded, locks, cfg);
+        stripDegenerateTriangles(sim.mesh);
+        assertNoInternalBorders(sim.mesh, footprint);
+
+        const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
+        const node: ClodPageNode = {
+          id: `L${level}:${nx},${nz}`,
+          level,
+          children,
+          mesh: sim.mesh,
+          footprint,
+          bounds: boundsOf(sim.mesh),
+          errorWorld,
+          lowBenefit: sim.lowBenefit,
+        };
+        levelNodes.push(node);
+        levelIndex.set(`${nx},${nz}`, node);
+        stats.push({
+          id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
+          lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
+          buildMs: performance.now() - t0,
+        });
+        await tick(level, `LOD${level} parents`);
+      }
+    }
+
+    nodesByLevel.set(level, levelNodes);
+    index[level] = levelIndex;
+    prevCountX = countX;
+    prevCountZ = countZ;
+    if (countX === 1 && countZ === 1) break;
+  }
+
+  const topLevel = Math.max(...nodesByLevel.keys());
+  onProgress({ done: total, total, level: topLevel, phase: "complete" });
+  await yieldToBrowser();
   return { roots: nodesByLevel.get(topLevel)!, nodesByLevel, stats, worldPagesX, worldPagesZ };
 }

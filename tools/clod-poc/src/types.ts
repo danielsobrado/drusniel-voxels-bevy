@@ -38,13 +38,13 @@ export interface ClodPageNode {
 }
 
 export interface BorderTolerances {
-  position: number; // 1e-6
+  position: number; // 1e-3, matching default weld epsilon
   normalDot: number; // 0.9999
   material: number; // 1e-4
 }
 
 export const DEFAULT_TOLERANCES: BorderTolerances = {
-  position: 1e-6,
+  position: 1e-3,
   normalDot: 0.9999,
   material: 1e-4,
 };
