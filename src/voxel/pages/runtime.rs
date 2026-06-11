@@ -19,6 +19,7 @@ use crate::voxel::chunk::LodLevel;
 use crate::voxel::meshing::{
     generate_chunk_mesh_for_request, MeshForensicsOptions, MeshMode, MeshRequest, WaterAirExposureMode,
 };
+use crate::voxel::runtime::ChunkGenerationState;
 use crate::voxel::skirt::{NeighborLods, SkirtConfig};
 use crate::voxel::world::VoxelWorld;
 
@@ -144,6 +145,7 @@ pub fn clod_pages_debug_toggle_system(
 /// around the camera, throttled, evicting entries that drift out of range.
 pub fn clod_pages_source_meshing_system(
     runtime: Res<ClodPagesRuntime>,
+    gen_state: Res<ChunkGenerationState>,
     world: Res<VoxelWorld>,
     skirt_config: Res<SkirtConfig>,
     ao_config: Res<AmbientOcclusionConfig>,
@@ -154,6 +156,11 @@ pub fn clod_pages_source_meshing_system(
         if !cache.exports.is_empty() {
             cache.exports.clear();
         }
+        return;
+    }
+    // Never build pages during initial world generation — let the live mesher drain its
+    // queue first (pages are a far-field feature; this also keeps startup off our critical path).
+    if !gen_state.is_complete {
         return;
     }
     let Ok(cam) = camera_query.single() else {
