@@ -35,6 +35,8 @@ const FRAG = /* glsl */ `
   uniform sampler2D uTerrainTexture2;
   uniform sampler2D uTerrainTexture3;
   uniform float uTextureScale;
+  uniform bool uTextureBlendBands;
+  uniform float uTextureBlendWidth;
   uniform vec2 uTextureRange0;
   uniform vec2 uTextureRange1;
   uniform vec2 uTextureRange2;
@@ -47,7 +49,13 @@ const FRAG = /* glsl */ `
     return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
   }
   float rangeWeight(float height, vec2 range) {
-    return step(range.x, height) * step(height, range.y);
+    if (!uTextureBlendBands) {
+      return step(range.x, height) * step(height, range.y);
+    }
+    float width = max(uTextureBlendWidth, 0.0001);
+    float aboveLow = smoothstep(range.x - width, range.x + width, height);
+    float belowHigh = 1.0 - smoothstep(range.y - width, range.y + width, height);
+    return aboveLow * belowHigh;
   }
   float centerDistance(float height, vec2 range) {
     return abs(height - (range.x + range.y) * 0.5);
@@ -128,6 +136,8 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uTerrainTexture2: { value: null },
       uTerrainTexture3: { value: null },
       uTextureScale: { value: 1 / 64 },
+      uTextureBlendBands: { value: false },
+      uTextureBlendWidth: { value: 6 },
       uTextureRange0: { value: new THREE.Vector2(14, 42) },
       uTextureRange1: { value: new THREE.Vector2(42, 70) },
       uTextureRange2: { value: new THREE.Vector2(70, 94) },
