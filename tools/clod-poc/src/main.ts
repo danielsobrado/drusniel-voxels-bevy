@@ -14,7 +14,14 @@ import { buildWorldAsync } from "./quadtree.js";
 import { meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import { createTerrainMaterial } from "./material.js";
+import {
+  DEFAULT_PLAYER_CONFIG,
+  PlayerController,
+  PlayerInteractionState,
+  type PlayerInputState,
+} from "./player_controller.js";
 import { selectCut, SelectionParams, SelectionState } from "./selection.js";
+import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
 
 const LOD_COLORS = [0xffffff, 0x3a6ea5, 0x49a078, 0xd98032];
@@ -149,6 +156,9 @@ function sharedEdge(a: ClodPageNode, b: ClodPageNode): { axis: "x" | "z"; aPlane
 
 async function main() {
   const info = document.getElementById("info")!;
+  const orbitModeButton = document.getElementById("orbit-mode") as HTMLButtonElement;
+  const playerModeButton = document.getElementById("player-mode") as HTMLButtonElement;
+  const playerModeStatus = document.getElementById("player-mode-status")!;
   const buildProgress = document.getElementById("build-progress")!;
   const buildProgressBar = document.getElementById("build-progress-bar") as HTMLProgressElement;
   const buildProgressPhase = document.getElementById("build-progress-phase")!;
@@ -198,6 +208,150 @@ async function main() {
   camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(mid, 24, mid);
+
+  const colliderPages: TerrainColliderPage[] = allNodes
+    .filter((node) => node.level === 0)
+    .map((node) => ({
+      id: node.id,
+      geometry: toGeometry(node.mesh),
+      footprint: node.footprint,
+    }));
+  const terrainColliders = new TerrainColliderSet(colliderPages);
+  for (const page of colliderPages) page.geometry.dispose();
+  const player = new PlayerController(terrainColliders, {
+    minX: 0,
+    minZ: 0,
+    maxX: worldCells,
+    maxZ: worldCells,
+  });
+  const interaction = new PlayerInteractionState();
+  const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false };
+  const playerRaycaster = new THREE.Raycaster();
+  const playerPointer = new THREE.Vector2();
+  const playerForward = new THREE.Vector3();
+  const orbitReturnTarget = new THREE.Vector3();
+  const playerClock = new THREE.Clock();
+  let playerYaw = 0;
+  let playerPitch = 0;
+  let playerPointerLocked = false;
+
+  const resetPlayerInput = () => {
+    playerInput.forward = 0;
+    playerInput.right = 0;
+    playerInput.sprint = false;
+    playerInput.jump = false;
+  };
+  const updatePlayerModeUi = () => {
+    document.body.dataset.playerMode = interaction.mode;
+    orbitModeButton.setAttribute("aria-pressed", String(interaction.mode === "orbit"));
+    playerModeButton.setAttribute("aria-pressed", String(interaction.mode !== "orbit"));
+    playerModeStatus.textContent = interaction.mode === "choosingSpawn"
+      ? "Click terrain to start"
+      : interaction.mode === "playing"
+        ? "WASD · Shift · Space · Esc"
+        : "Orbit camera";
+  };
+  const exitPlayerMode = () => {
+    if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+    playerPointerLocked = false;
+    if (interaction.mode === "playing") {
+      orbitReturnTarget.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight * 0.65);
+      controls.target.copy(orbitReturnTarget);
+      camera.position.copy(orbitReturnTarget).add(new THREE.Vector3(8, 6, 8));
+      camera.lookAt(orbitReturnTarget);
+    }
+    interaction.exitToOrbit();
+    resetPlayerInput();
+    controls.enabled = true;
+    controls.update();
+    updatePlayerModeUi();
+  };
+  const choosePlayerSpawn = () => {
+    interaction.chooseSpawn();
+    resetPlayerInput();
+    controls.enabled = false;
+    updatePlayerModeUi();
+  };
+  const startPlayerAtPointer = (event: PointerEvent) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    playerPointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    playerRaycaster.setFromCamera(playerPointer, camera);
+    const hit = terrainColliders.raycastSpawn(playerRaycaster.ray);
+    if (!hit) {
+      playerModeStatus.textContent = "No playable terrain there";
+      return;
+    }
+
+    camera.getWorldDirection(playerForward);
+    playerForward.y = 0;
+    if (playerForward.lengthSq() < 1e-8) playerForward.set(0, 0, -1);
+    else playerForward.normalize();
+    playerYaw = Math.atan2(-playerForward.x, -playerForward.z);
+    playerPitch = 0;
+    player.spawn(hit.point);
+    interaction.startPlaying();
+    controls.enabled = false;
+    updatePlayerModeUi();
+    void renderer.domElement.requestPointerLock();
+  };
+
+  orbitModeButton.addEventListener("click", exitPlayerMode);
+  playerModeButton.addEventListener("click", choosePlayerSpawn);
+  renderer.domElement.addEventListener("pointerdown", (event) => {
+    if (interaction.mode === "choosingSpawn" && event.button === 0) startPlayerAtPointer(event);
+    else if (interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== renderer.domElement) {
+      void renderer.domElement.requestPointerLock();
+    }
+  });
+  document.addEventListener("pointerlockchange", () => {
+    if (document.pointerLockElement === renderer.domElement) {
+      playerPointerLocked = true;
+    } else if (interaction.mode === "playing" && playerPointerLocked) {
+      playerPointerLocked = false;
+      exitPlayerMode();
+    }
+  });
+  document.addEventListener("pointerlockerror", () => {
+    if (interaction.mode === "playing") playerModeStatus.textContent = "Click viewport to capture mouse";
+  });
+  document.addEventListener("mousemove", (event) => {
+    if (interaction.mode !== "playing" || document.pointerLockElement !== renderer.domElement) return;
+    playerYaw -= event.movementX * 0.002;
+    playerPitch = THREE.MathUtils.clamp(playerPitch - event.movementY * 0.002, -1.5, 1.5);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.code === "Escape" && interaction.mode === "choosingSpawn") {
+      exitPlayerMode();
+      return;
+    }
+    if (event.code === "Escape" && interaction.mode === "playing" && !playerPointerLocked) {
+      exitPlayerMode();
+      return;
+    }
+    if (interaction.mode !== "playing") return;
+    if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
+      event.preventDefault();
+    }
+    if (event.code === "KeyW") playerInput.forward = 1;
+    if (event.code === "KeyS") playerInput.forward = -1;
+    if (event.code === "KeyA") playerInput.right = -1;
+    if (event.code === "KeyD") playerInput.right = 1;
+    if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = true;
+    if (event.code === "Space") playerInput.jump = true;
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.code === "KeyW" && playerInput.forward > 0) playerInput.forward = 0;
+    if (event.code === "KeyS" && playerInput.forward < 0) playerInput.forward = 0;
+    if (event.code === "KeyA" && playerInput.right < 0) playerInput.right = 0;
+    if (event.code === "KeyD" && playerInput.right > 0) playerInput.right = 0;
+    if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = false;
+    if (event.code === "Space") playerInput.jump = false;
+  });
+  window.addEventListener("blur", resetPlayerInput);
+  updatePlayerModeUi();
 
   const textureSlots: TextureSlot[] = Array.from({ length: MAX_TERRAIN_TEXTURES }, () => ({
     texture: null,
@@ -397,24 +551,29 @@ async function main() {
   let averageFps = 0;
 
   const updateInfo = () => {
+    const playerLine = interaction.mode === "playing"
+      ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
+      : `view: ${interaction.mode}`;
     info.textContent =
       `CLOD Pages PoC — Phase 2 runtime — ${WORLD}x${WORLD} pages\n` +
       `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
       `tris rendered: ${lastTriCount.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
       `bubble forced splits: ${lastNearFieldForced}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
-      `${state.freeze ? "[FROZEN]" : ""}`;
+      `${state.freeze ? "[FROZEN]" : ""}\n` +
+      playerLine;
   };
 
   const updateSelection = () => {
+    const selectionCenter = interaction.mode === "playing" ? player.position : controls.target;
     const params: SelectionParams = {
       thresholdPx: state.thresholdPx,
       hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
       enforce21: state.enforce21,
       nearField: {
         enabled: state.bubble,
-        centerX: controls.target.x,
-        centerZ: controls.target.z,
+        centerX: selectionCenter.x,
+        centerZ: selectionCenter.z,
         radius: state.bubbleRadius,
         boundaryPadding: cfg.page.chunks_per_page * cfg.page.chunk_size,
       },
@@ -743,9 +902,17 @@ async function main() {
   });
 
   renderer.setAnimationLoop(() => {
+    const playerDelta = Math.min(playerClock.getDelta(), 0.1);
     updateAverageFps();
     skyDome.position.copy(camera.position);
-    controls.update();
+    if (interaction.mode === "playing") {
+      playerForward.set(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
+      player.update(playerDelta, playerInput, playerForward);
+      camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight);
+      camera.rotation.set(playerPitch, playerYaw, 0, "YXZ");
+    } else {
+      controls.update();
+    }
     if (!state.freeze) updateSelection();
 
     // advance crossfades
@@ -765,8 +932,8 @@ async function main() {
         v.node.level === 0 &&
         v.target === 1 &&
         Math.hypot(
-          controls.target.x - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
-          controls.target.z - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
+          (interaction.mode === "playing" ? player.position.x : controls.target.x) - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
+          (interaction.mode === "playing" ? player.position.z : controls.target.z) - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
         ) < state.bubbleRadius;
       if (owned) {
         v.mesh.visible = false;

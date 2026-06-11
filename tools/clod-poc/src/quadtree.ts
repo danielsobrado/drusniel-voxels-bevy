@@ -80,7 +80,9 @@ function estimatedNodeCount(worldPagesX: number, worldPagesZ: number, levels: nu
 
 function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    if (typeof document !== "undefined" && !document.hidden && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    }
     else setTimeout(resolve, 0);
   });
 }

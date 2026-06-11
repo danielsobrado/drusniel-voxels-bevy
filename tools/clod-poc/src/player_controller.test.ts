@@ -111,6 +111,20 @@ describe("terrain collider set", () => {
     expect(walkResult.grounded).toBe(true);
     expect(steepResult.grounded).toBe(false);
   });
+
+  it("blocks horizontal movement through a wall", () => {
+    const wall = new THREE.PlaneGeometry(20, 20, 1, 1);
+    wall.translate(0, DEFAULT_PLAYER_CONFIG.capsuleHeight / 2, 0);
+    const colliders = new TerrainColliderSet([page("wall", wall)]);
+    const result = colliders.resolveCapsule(
+      new THREE.Vector3(0, 0, -0.2),
+      new THREE.Vector3(0, 0, 4),
+      DEFAULT_PLAYER_CONFIG,
+    );
+    expect(result.position.z).toBeLessThanOrEqual(-DEFAULT_PLAYER_CONFIG.capsuleRadius + 0.001);
+    expect(result.velocity.z).toBeCloseTo(0);
+    expect(result.grounded).toBe(false);
+  });
 });
 
 describe("fixed-step player controller", () => {
