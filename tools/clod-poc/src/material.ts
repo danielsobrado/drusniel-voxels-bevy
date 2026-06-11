@@ -26,6 +26,8 @@ const FRAG = /* glsl */ `
   uniform float uFade;   // 0 = fully dithered out, 1 = fully visible
   uniform bool uDither;
   uniform bool uNormalColor;
+  uniform bool uNormalDivergence;
+  uniform float uDivergenceGain;
   uniform bool uUseTexture;
   uniform int uTerrainTextureCount;
   uniform sampler2D uTerrainTexture0;
@@ -80,6 +82,12 @@ const FRAG = /* glsl */ `
   }
   void main() {
     if (uDither && ign(gl_FragCoord.xy) > uFade) discard;
+    if (uNormalDivergence) {
+      vec3 gN = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+      float div = 1.0 - abs(dot(normalize(vWorldNormal), gN));
+      gl_FragColor = vec4(vec3(div * uDivergenceGain), 1.0);
+      return;
+    }
     if (uNormalColor) {
       gl_FragColor = vec4(normalize(vWorldNormal) * 0.5 + 0.5, 1.0);
       return;
@@ -111,6 +119,8 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uFade: { value: 1 },
       uDither: { value: false },
       uNormalColor: { value: false },
+      uNormalDivergence: { value: false },
+      uDivergenceGain: { value: 8.0 },
       uUseTexture: { value: false },
       uTerrainTextureCount: { value: 0 },
       uTerrainTexture0: { value: null },

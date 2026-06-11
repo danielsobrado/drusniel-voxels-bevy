@@ -139,7 +139,19 @@ interface TextureSlot {
   heightMax: number;
 }
 
-function sharedEdge(a: ClodPageNode, b: ClodPageNode): { axis: "x" | "z"; aPlane: number; bPlane: number } | null {
+interface SharedEdge {
+  axis: "x" | "z";
+  aPlane: number;
+  bPlane: number;
+}
+
+interface CrossLodAdjacency {
+  a: ClodPageNode;
+  b: ClodPageNode;
+  edge: SharedEdge;
+}
+
+function sharedEdge(a: ClodPageNode, b: ClodPageNode): SharedEdge | null {
   const fa = a.footprint, fb = b.footprint;
   const overlapZ = fa.minZ < fb.maxZ && fb.minZ < fa.maxZ;
   const overlapX = fa.minX < fb.maxX && fb.minX < fa.maxX;
@@ -152,6 +164,51 @@ function sharedEdge(a: ClodPageNode, b: ClodPageNode): { axis: "x" | "z"; aPlane
     if (fb.maxZ === fa.minZ) return { axis: "z", aPlane: fa.minZ, bPlane: fb.maxZ };
   }
   return null;
+}
+
+function crossLodAdjacencies(rendered: ClodPageNode[]): CrossLodAdjacency[] {
+  const out: CrossLodAdjacency[] = [];
+  for (let i = 0; i < rendered.length; i++) {
+    for (let j = i + 1; j < rendered.length; j++) {
+      const a = rendered[i], b = rendered[j];
+      if (a.level === b.level) continue;
+      const edge = sharedEdge(a, b);
+      if (edge) out.push({ a, b, edge });
+    }
+  }
+  return out;
+}
+
+function appendBorderChainSegments(
+  pts: number[],
+  node: ClodPageNode,
+  axis: "x" | "z",
+  plane: number,
+  minAlong: number,
+  maxAlong: number,
+): void {
+  const free = axis === "x" ? 2 : 0;
+  const chain = borderChain(node.mesh, axis, plane, node.footprint).positions
+    .filter((p) => p[free] >= minAlong - 0.001 && p[free] <= maxAlong + 0.001);
+  for (let i = 1; i < chain.length; i++) {
+    const a = chain[i - 1], b = chain[i];
+    pts.push(a[0], a[1] + 0.12, a[2], b[0], b[1] + 0.12, b[2]);
+  }
+}
+
+function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacency): void {
+  const { a, b, edge } = adjacency;
+  if (edge.axis === "x") {
+    const minZ = Math.max(a.footprint.minZ, b.footprint.minZ);
+    const maxZ = Math.min(a.footprint.maxZ, b.footprint.maxZ);
+    appendBorderChainSegments(pts, a, edge.axis, edge.aPlane, minZ, maxZ);
+    appendBorderChainSegments(pts, b, edge.axis, edge.bPlane, minZ, maxZ);
+  } else {
+    const minX = Math.max(a.footprint.minX, b.footprint.minX);
+    const maxX = Math.min(a.footprint.maxX, b.footprint.maxX);
+    appendBorderChainSegments(pts, a, edge.axis, edge.aPlane, minX, maxX);
+    appendBorderChainSegments(pts, b, edge.axis, edge.bPlane, minX, maxX);
+  }
 }
 
 async function main() {
@@ -416,6 +473,8 @@ async function main() {
   scene.add(boundaryGroup);
   const seamGroup = new THREE.Group();
   scene.add(seamGroup);
+  const crossLodBorderGroup = new THREE.Group();
+  scene.add(crossLodBorderGroup);
 
   // Near-field bubble: raw per-chunk meshes for a LOD0 page, built lazily and cached.
   // Page LOD0 = welded chunks, so with tint off the bubble edge must be invisible (§4.4).
@@ -433,6 +492,9 @@ async function main() {
         const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
         const mat = createTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
         mat.uniforms.uNormalColor.value = state.normalColor;
+        mat.uniforms.uNormalDivergence.value = state.normalDivergence;
+        mat.uniforms.uDivergenceGain.value = state.divergenceGain;
+        mat.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
         rebuildActiveTerrainSlots();
         const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
         const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
@@ -462,9 +524,14 @@ async function main() {
     wireframe: false,
     showBounds: false,
     showSeamPoints: false,
+    showCrossLodBorders: false,
     colorByLod: true,
     normalColor: false,
+    normalDivergence: false,
+    divergenceGain: 8,
+    frontSideOnly: false,
     recomputedNormals: false,
+    forceMaxLevel: "auto",
     useTexture: false,
     textureScale: 1 / 64,
     loadedTextureFiles: "none",
@@ -480,6 +547,10 @@ async function main() {
   };
   let selState: SelectionState = { split: new Set() };
   const crossfadeStep = 1 / cfg.selection.crossfade_frames;
+  const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
+    for (const v of views.values()) fn(v.mat);
+    for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
+  };
   const applyLightingToMaterial = (mat: THREE.ShaderMaterial) => {
     const sunDirection = sunDirectionFromAngles(state.sunAzimuthDeg, state.sunElevationDeg);
     mat.uniforms.uLight.value.copy(sunDirection);
@@ -499,7 +570,7 @@ async function main() {
     for (const { mats } of chunkGroups.values()) for (const m of mats) applyLightingToMaterial(m);
   };
 
-  const rebuildDebugOverlays = (rendered: ClodPageNode[]) => {
+  const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
     if (state.showBounds) {
       for (const n of rendered) {
@@ -512,32 +583,50 @@ async function main() {
     }
 
     seamGroup.clear();
-    if (!state.showSeamPoints) return;
-    const pts: number[] = [];
-    for (let i = 0; i < rendered.length; i++) {
-      for (let j = i + 1; j < rendered.length; j++) {
-        const a = rendered[i], b = rendered[j];
-        if (a.level !== b.level) continue;
-        const edge = sharedEdge(a, b);
-        if (!edge) continue;
-        const ca = borderChain(a.mesh, edge.axis, edge.aPlane, a.footprint);
-        const cb = borderChain(b.mesh, edge.axis, edge.bPlane, b.footprint);
-        for (const p of ca.positions) pts.push(p[0], p[1], p[2]);
-        for (const p of cb.positions) pts.push(p[0], p[1], p[2]);
+    if (state.showSeamPoints) {
+      const pts: number[] = [];
+      for (let i = 0; i < rendered.length; i++) {
+        for (let j = i + 1; j < rendered.length; j++) {
+          const a = rendered[i], b = rendered[j];
+          if (a.level !== b.level) continue;
+          const edge = sharedEdge(a, b);
+          if (!edge) continue;
+          const ca = borderChain(a.mesh, edge.axis, edge.aPlane, a.footprint);
+          const cb = borderChain(b.mesh, edge.axis, edge.bPlane, b.footprint);
+          for (const p of ca.positions) pts.push(p[0], p[1], p[2]);
+          for (const p of cb.positions) pts.push(p[0], p[1], p[2]);
+        }
+      }
+      if (pts.length > 0) {
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pts), 3));
+        const mat = new THREE.PointsMaterial({
+          color: 0xff2448,
+          size: 4,
+          sizeAttenuation: false,
+          depthTest: false,
+        });
+        const pointCloud = new THREE.Points(geom, mat);
+        pointCloud.renderOrder = 20;
+        seamGroup.add(pointCloud);
       }
     }
-    if (pts.length > 0) {
+
+    crossLodBorderGroup.clear();
+    if (!state.showCrossLodBorders) return;
+    const borderPts: number[] = [];
+    for (const adjacency of xLodAdjacencies) appendCrossLodBorderSegments(borderPts, adjacency);
+    if (borderPts.length > 0) {
       const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pts), 3));
-      const mat = new THREE.PointsMaterial({
-        color: 0xff2448,
-        size: 4,
-        sizeAttenuation: false,
+      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(borderPts), 3));
+      const mat = new THREE.LineBasicMaterial({
+        color: 0x00ffff,
         depthTest: false,
+        depthWrite: false,
       });
-      const pointCloud = new THREE.Points(geom, mat);
-      pointCloud.renderOrder = 20;
-      seamGroup.add(pointCloud);
+      const lines = new THREE.LineSegments(geom, mat);
+      lines.renderOrder = 21;
+      crossLodBorderGroup.add(lines);
     }
   };
 
@@ -545,6 +634,7 @@ async function main() {
   let lastDebugKey = "";
   let lastForced = 0;
   let lastNearFieldForced = 0;
+  let lastCrossLodAdjacencyCount = 0;
   let lastRenderedCount = 0;
   let lastLevelSummary = "";
   let lastTriCount = 0;
@@ -558,9 +648,9 @@ async function main() {
       `CLOD Pages PoC — Phase 2 runtime — ${WORLD}x${WORLD} pages\n` +
       `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
       `tris rendered: ${lastTriCount.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
-      `bubble forced splits: ${lastNearFieldForced}\n` +
+      `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
-      `${state.freeze ? "[FROZEN]" : ""}\n` +
+      `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       playerLine;
   };
 
@@ -580,6 +670,7 @@ async function main() {
       viewportH: renderer.domElement.height,
       fovY: THREE.MathUtils.degToRad(camera.fov),
       camPos: [camera.position.x, camera.position.y, camera.position.z],
+      forcedMaxLevel: state.forceMaxLevel === "auto" ? null : Number(state.forceMaxLevel),
     };
     const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(result.roots, params, selState);
     selState = ns;
@@ -595,6 +686,8 @@ async function main() {
       perLevel.set(n.level, (perLevel.get(n.level) ?? 0) + 1);
       tris += n.mesh.indices.length / 3;
     }
+    const xLodAdjacencies = crossLodAdjacencies(rendered);
+    lastCrossLodAdjacencyCount = xLodAdjacencies.length;
     lastRenderedCount = rendered.length;
     lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
     lastTriCount = tris;
@@ -604,10 +697,10 @@ async function main() {
       lastCutKey = cutKey;
       updateInfo();
     }
-    const debugKey = `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}`;
+    const debugKey = `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}`;
     if (debugKey !== lastDebugKey) {
       lastDebugKey = debugKey;
-      rebuildDebugOverlays(rendered);
+      rebuildDebugOverlays(rendered, xLodAdjacencies);
     }
   };
 
@@ -641,16 +734,38 @@ async function main() {
       location.search = `?world=${w}`;
     });
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
+  gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
+    selState = { split: new Set() };
+    updateSelection();
+  });
   gui.add(state, "enforce21").name("2:1 constraint").onChange(updateSelection);
   gui.add(state, "freeze").name("freeze selection");
   gui.add(state, "showBounds").name("page boundaries").onChange(updateSelection);
   gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(updateSelection);
+  gui.add(state, "showCrossLodBorders").name("cross-LOD borders").onChange(updateSelection);
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
     for (const v of views.values()) v.mat.wireframe = on;
   });
   gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
-    for (const v of views.values()) v.mat.uniforms.uNormalColor.value = on;
-    for (const { mats } of chunkGroups.values()) for (const m of mats) m.uniforms.uNormalColor.value = on;
+    forEachTerrainMaterial((m) => {
+      m.uniforms.uNormalColor.value = on;
+    });
+  });
+  gui.add(state, "normalDivergence").name("normal divergence").onChange((on: boolean) => {
+    forEachTerrainMaterial((m) => {
+      m.uniforms.uNormalDivergence.value = on;
+    });
+  });
+  gui.add(state, "divergenceGain", 1, 32, 0.5).name("divergence gain").onChange((gain: number) => {
+    forEachTerrainMaterial((m) => {
+      m.uniforms.uDivergenceGain.value = gain;
+    });
+  });
+  gui.add(state, "frontSideOnly").name("front side only").onChange((on: boolean) => {
+    forEachTerrainMaterial((m) => {
+      m.side = on ? THREE.FrontSide : THREE.DoubleSide;
+      m.needsUpdate = true;
+    });
   });
   gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
     for (const v of views.values()) {

@@ -20,6 +20,7 @@ export interface SelectionParams {
   viewportH: number;
   fovY: number; // radians (vertical)
   camPos: [number, number, number];
+  forcedMaxLevel?: number | null;
 }
 
 export interface SelectionState {
@@ -35,6 +36,7 @@ export function errorPx(node: ClodPageNode, p: SelectionParams): number {
 }
 
 const kids = (n: ClodPageNode): ClodPageNode[] => n.children.filter((c): c is ClodPageNode => !!c);
+const missingForcedChildrenWarnings = new Set<string>();
 
 export interface SelectionResult {
   rendered: ClodPageNode[];
@@ -84,7 +86,16 @@ export function selectCut(
   const visit = (node: ClodPageNode) => {
     const children = kids(node);
     if (children.length === 0) {
+      if (params.forcedMaxLevel != null && node.level > params.forcedMaxLevel && !missingForcedChildrenWarnings.has(node.id)) {
+        console.warn(`force max level ${params.forcedMaxLevel} could not split ${node.id}; no children available`);
+        missingForcedChildrenWarnings.add(node.id);
+      }
       rendered.push(node); // LOD0 leaf — finest available
+      return;
+    }
+    if (params.forcedMaxLevel != null && node.level > params.forcedMaxLevel) {
+      newSplit.add(node.id);
+      for (const c of children) visit(c);
       return;
     }
     const epx = errorPx(node, params);
