@@ -91,15 +91,36 @@ Work:
 - Golden test: `tools/clod-rs` outputs are the reference; an in-crate test feeds the same
   exports and asserts watertight + monotone + reduction within epsilon (matches §6 already done).
 
-## 5. Step 3 — async page builds, off the frame path (I4)
+## 5. Step 3 — page builds (FINDING: how to source far-field LOD0 geometry)
 
-- Reuse `AsyncComputeTaskPool` (pattern in [`runtime/generation.rs`](../../src/voxel/runtime/generation.rs):
-  `Task<ChunkGenerationResult>`, `should_poll_*`). A `PageBuildQueue` resource spawns
-  `Task<Result<ClodPageNode, ClodBuildError>>`; a poll system commits finished page meshes.
+**Finding (corrects appendix §11.1):** commit-time capture only yields LOD0 exports for the
+near field — far chunks are meshed at LOD1–3 at runtime, so far pages have no LOD0 mesh to
+capture. AND there is **no off-thread meshing today**: meshing is main-thread in
+[`mesh_scheduler.rs`](../../src/voxel/runtime/mesh_scheduler.rs) `mesh_dirty_chunks_system`
+(`ResMut<VoxelWorld>`), and the mesher borrows the whole `&VoxelWorld`. A fully off-thread
+mesher would need a Send `VoxelRegion` snapshot + a sampler-trait refactor — large.
+
+**Chosen Approach A (feasible, exact-seam):**
+- **Source meshing on the main thread**, throttled like existing chunk meshing: for a page's
+  16 chunks, build a `MeshRequest` with `logical_lod=mesh_lod=Lod0`, **all-LOD0 neighbors**
+  (no seam/skirt transitions), default skirt/ao configs, no strips/mc; run the **exact live
+  mesher**, then `extract_main_surface_for_clod` on `result.solid`. Reusing the live mesher
+  guarantees the near/far bubble edge matches by construction (I3.1). Caching + throttling
+  keep the amortized main-thread cost bounded; far chunks are meshed-for-export only, never
+  committed as LOD0 entities.
+- **Decimation off the frame path** (the expensive part, honoring I4): hand the pure `Send`
+  exports to an `AsyncComputeTaskPool` task (pattern in
+  [`runtime/generation.rs`](../../src/voxel/runtime/generation.rs)) that runs
+  weld→lock→simplify→quadtree (`src/voxel/pages`), returning a `BuildResult`. A poll system
+  commits finished page meshes.
 - Page mesh → `Mesh` with `ATTRIBUTE_POSITION/NORMAL`, `ATTRIBUTE_COLOR` (material weights),
-  minimal UVs; **no `ATTRIBUTE_MORPH_TARGET`** (triplanar `specialize` already branches on its
-  absence — verified). Reuse `MeshMaterial3d(triplanar_material.handle_for_quality(..))`.
+  minimal UVs; **no `ATTRIBUTE_MORPH_TARGET`** (triplanar `specialize` branches on its
+  absence). Reuse `MeshMaterial3d(triplanar_material.handle_for_quality(..))`.
 - Stale page stays visible until replacement ready (I4). Missing page → fall back to chunks.
+
+**Increments:** 3a plugin + `enabled` flag (default off) + main-thread source meshing into a
+`PageExportCache`; 3b async decimation queue + commit top page entity (always visible);
+then Step 4 selection makes it a real cut. Bench after 3a (source-meshing cost) and 3b.
 
 ## 6. Step 4 — runtime selection system (port `selection.ts`)
 
