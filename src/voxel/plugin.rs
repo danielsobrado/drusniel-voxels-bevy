@@ -88,9 +88,9 @@ use crate::voxel::runtime::{
     expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
     mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
     should_defer_runtime_chunk_stats_recompute, should_poll_chunk_generation_tasks,
-    should_recompute_runtime_chunk_stats, terrain_material_quality_for_distance,
-    water_body_edge_bit, water_body_material_mode, world_startup_background_cover_size,
-    world_startup_snapshot,
+    should_force_initial_runtime_chunk_stats, should_recompute_runtime_chunk_stats,
+    terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
+    world_startup_background_cover_size, world_startup_snapshot,
 };
 
 pub struct VoxelPlugin;
@@ -447,6 +447,28 @@ mod tests {
     }
 
     #[test]
+    fn world_startup_snapshot_does_not_wait_for_idle_lod_dirty_queue() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 100,
+            is_complete: true,
+            loading_from_disk: true,
+            world_stats: WorldStats::default(),
+            start_time: None,
+        };
+        let chunk_stats = RuntimeChunkStats {
+            mesh_entities: 10,
+            dirty_chunks_queued: 300,
+            ..Default::default()
+        };
+
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
+
+        assert_eq!(snapshot.stage, WorldStartupStage::Ready);
+        assert!(snapshot.complete);
+    }
+
+    #[test]
     fn world_startup_snapshot_waits_for_overlay_before_generation() {
         let gen_state = ChunkGenerationState::default();
         let chunk_stats = RuntimeChunkStats::default();
@@ -579,6 +601,13 @@ mod tests {
         assert!(!should_defer_runtime_chunk_stats_recompute(false, 100, 4));
         assert!(!should_defer_runtime_chunk_stats_recompute(true, 4, 4));
         assert!(should_defer_runtime_chunk_stats_recompute(true, 5, 4));
+    }
+
+    #[test]
+    fn runtime_chunk_stats_force_an_initial_snapshot_for_loaded_worlds() {
+        assert!(should_force_initial_runtime_chunk_stats(0, 6144));
+        assert!(!should_force_initial_runtime_chunk_stats(6144, 6144));
+        assert!(!should_force_initial_runtime_chunk_stats(0, 0));
     }
 
     #[test]

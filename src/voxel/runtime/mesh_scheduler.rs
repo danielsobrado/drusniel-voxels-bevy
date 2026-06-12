@@ -801,14 +801,17 @@ pub(crate) fn mesh_dirty_chunks_system(
     // Keep the O(N) debug/stat snapshot off hot dirty-mesh frames while the
     // terrain queue is backed up. Per-frame mesh counters above stay current.
     let stats_recompute_due = should_recompute_runtime_chunk_stats(frame.0);
+    let initial_stats_required =
+        should_force_initial_runtime_chunk_stats(chunk_stats.total_chunks, world.chunk_count());
     let stats_recompute_blocked = stats_recompute_due
+        && !initial_stats_required
         && should_defer_runtime_chunk_stats_recompute(
             had_dirty_chunks,
             dirty_chunks_queued,
             chunks_per_frame_limit,
         );
     let stats_recompute_start = timing.enabled.then(Instant::now);
-    if stats_recompute_due && !stats_recompute_blocked {
+    if initial_stats_required || (stats_recompute_due && !stats_recompute_blocked) {
         chunk_stats.recompute_from_world(&world);
     }
     let mesh_dirty_stats_us = stats_recompute_start
@@ -1187,6 +1190,13 @@ pub(crate) fn prioritize_dirty_chunks_for_camera(
 
 pub(crate) fn should_recompute_runtime_chunk_stats(frame: u32) -> bool {
     frame % 30 == 0
+}
+
+pub(crate) fn should_force_initial_runtime_chunk_stats(
+    stats_total_chunks: u32,
+    world_chunk_count: usize,
+) -> bool {
+    stats_total_chunks == 0 && world_chunk_count > 0
 }
 
 pub(crate) fn should_defer_runtime_chunk_stats_recompute(

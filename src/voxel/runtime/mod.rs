@@ -135,8 +135,8 @@ pub(crate) use mesh_scheduler::{
     McSpikeMeshParams, MeshDirtyQueueWarningState, MeshDirtyReasonCounts,
     chunks_per_frame_limit_for_dirty_meshes, mesh_dirty_chunks_system,
     prioritize_dirty_chunks_for_camera, should_defer_runtime_chunk_stats_recompute,
-    should_recompute_runtime_chunk_stats, terrain_material_quality_for_distance,
-    update_terrain_material_lod,
+    should_force_initial_runtime_chunk_stats, should_recompute_runtime_chunk_stats,
+    terrain_material_quality_for_distance, update_terrain_material_lod,
 };
 pub(crate) use startup_overlay::{
     WorldStartupLoadingFlames, WorldStartupOverlayState, WorldStartupSetupState, WorldStartupStage,

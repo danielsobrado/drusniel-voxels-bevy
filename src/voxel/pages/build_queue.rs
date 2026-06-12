@@ -29,6 +29,8 @@ pub enum ClodPageBuildStatus {
 #[derive(Resource, Default)]
 pub struct ClodPageTree {
     pub nodes_by_level: Vec<Vec<ClodPageNode>>,
+    /// Increments only when a complete replacement tree is published.
+    pub revision: u64,
     /// Coordinates represented by `nodes_by_level`.
     pub page_coords: Vec<ClodPageCoord>,
     /// Coordinates involved in the current or most recent build attempt.
@@ -332,6 +334,7 @@ pub(crate) fn clod_pages_build_task_poll_system(
     match result {
         Ok(result) => {
             tree.nodes_by_level = result.nodes_by_level;
+            tree.revision = tree.revision.wrapping_add(1);
             tree.page_coords = pending.page_coords.clone();
             tree.build_page_coords = pending.page_coords;
             tree.status = Some(ClodPageBuildStatus::Ready);

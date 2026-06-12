@@ -1,0 +1,351 @@
+//! Phase 5 Step 3b part 2: commit completed page trees as hidden terrain mesh entities.
+
+use std::fmt;
+
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::RenderLayers;
+use bevy::light::NotShadowCaster;
+use bevy::prelude::*;
+use bevy_mesh::{Indices, PrimitiveTopology};
+
+use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
+use super::runtime::ClodPagesRuntime;
+use super::types::PageMesh;
+use crate::rendering::triplanar_material::{
+    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
+};
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClodPageMeshTag {
+    pub level: usize,
+    pub coord: (i32, i32),
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClodPageMeshBounds {
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClodPagesShowMode {
+    Top,
+    #[default]
+    Off,
+}
+
+impl fmt::Display for ClodPagesShowMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Top => write!(f, "top"),
+            Self::Off => write!(f, "off"),
+        }
+    }
+}
+
+#[derive(Resource, Debug)]
+pub struct ClodPagesShow(pub ClodPagesShowMode);
+
+impl Default for ClodPagesShow {
+    fn default() -> Self {
+        let mode = match std::env::var("CLOD_PAGES_SHOW") {
+            Ok(value) if value.trim().eq_ignore_ascii_case("top") => ClodPagesShowMode::Top,
+            Ok(value) if value.trim().eq_ignore_ascii_case("off") || value.trim().is_empty() => {
+                ClodPagesShowMode::Off
+            }
+            Ok(value) => {
+                warn!(
+                    "unknown CLOD_PAGES_SHOW value {:?}; expected top|off, using off",
+                    value
+                );
+                ClodPagesShowMode::Off
+            }
+            Err(_) => ClodPagesShowMode::Off,
+        };
+        Self(mode)
+    }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct ClodPageMeshCommitState {
+    committed_tree_revision: Option<u64>,
+    entities: Vec<Entity>,
+    mesh_handles: Vec<Handle<Mesh>>,
+    retired_mesh_handles: Vec<Handle<Mesh>>,
+}
+
+pub(crate) fn clod_page_mesh_commit_needed(
+    runtime: Res<ClodPagesRuntime>,
+    state: Res<ClodPageMeshCommitState>,
+) -> bool {
+    runtime.enabled
+        || state.committed_tree_revision.is_some()
+        || !state.entities.is_empty()
+        || !state.mesh_handles.is_empty()
+        || !state.retired_mesh_handles.is_empty()
+}
+
+pub(crate) fn clod_pages_show_startup_log_system(show: Res<ClodPagesShow>) {
+    info!("CLOD PAGES SHOW: {} (CLOD_PAGES_SHOW=top|off)", show.0);
+}
+
+fn page_mesh_y_bounds(page_mesh: &PageMesh) -> ClodPageMeshBounds {
+    let mut ys = page_mesh.positions.iter().map(|position| position[1]);
+    let Some(first) = ys.next() else {
+        return ClodPageMeshBounds::default();
+    };
+    ys.fold(
+        ClodPageMeshBounds {
+            min_y: first,
+            max_y: first,
+        },
+        |mut bounds, y| {
+            bounds.min_y = bounds.min_y.min(y);
+            bounds.max_y = bounds.max_y.max(y);
+            bounds
+        },
+    )
+}
+
+fn page_mesh_to_bevy_mesh(page_mesh: &PageMesh) -> (Mesh, ClodPageMeshBounds) {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, page_mesh.positions.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, page_mesh.normals.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, page_mesh.materials.clone());
+    mesh.insert_indices(Indices::U32(page_mesh.indices.clone()));
+    (mesh, page_mesh_y_bounds(page_mesh))
+}
+
+fn node_visibility(
+    show: ClodPagesShowMode,
+    level: usize,
+    coarsest_level: Option<usize>,
+) -> Visibility {
+    if show == ClodPagesShowMode::Top && Some(level) == coarsest_level {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
+fn remove_mesh_assets(meshes: &mut Assets<Mesh>, handles: Vec<Handle<Mesh>>) {
+    for handle in handles {
+        meshes.remove(handle.id());
+    }
+}
+
+pub(crate) fn clod_page_mesh_commit_system(
+    mut commands: Commands,
+    runtime: Res<ClodPagesRuntime>,
+    tree: Res<ClodPageTree>,
+    show: Res<ClodPagesShow>,
+    triplanar_material: Res<TriplanarMaterialHandle>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut state: ResMut<ClodPageMeshCommitState>,
+) {
+    remove_mesh_assets(&mut meshes, std::mem::take(&mut state.retired_mesh_handles));
+
+    if !runtime.enabled {
+        for entity in state.entities.drain(..) {
+            commands.entity(entity).despawn();
+        }
+        remove_mesh_assets(&mut meshes, std::mem::take(&mut state.mesh_handles));
+        state.committed_tree_revision = None;
+        return;
+    }
+
+    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
+        || state.committed_tree_revision == Some(tree.revision)
+    {
+        return;
+    }
+
+    let coarsest_level = tree
+        .nodes_by_level
+        .iter()
+        .rposition(|nodes| !nodes.is_empty());
+    let material_handle =
+        triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
+    let node_count = tree.nodes_by_level.iter().map(Vec::len).sum();
+    let mut new_entities = Vec::with_capacity(node_count);
+    let mut new_mesh_handles = Vec::with_capacity(node_count);
+
+    for nodes in &tree.nodes_by_level {
+        for node in nodes {
+            let (mesh, bounds) = page_mesh_to_bevy_mesh(&node.mesh);
+            let mesh_handle = meshes.add(mesh);
+            let entity = commands
+                .spawn((
+                    Mesh3d(mesh_handle.clone()),
+                    MeshMaterial3d::<TriplanarMaterial>(material_handle.clone()),
+                    Transform::IDENTITY,
+                    RenderLayers::default(),
+                    NotShadowCaster,
+                    node_visibility(show.0, node.level, coarsest_level),
+                    ClodPageMeshTag {
+                        level: node.level,
+                        coord: node.coord,
+                    },
+                    bounds,
+                ))
+                .id();
+            new_entities.push(entity);
+            new_mesh_handles.push(mesh_handle);
+        }
+    }
+
+    for entity in state.entities.drain(..) {
+        commands.entity(entity).despawn();
+    }
+    let mut old_mesh_handles = std::mem::take(&mut state.mesh_handles);
+    state.retired_mesh_handles.append(&mut old_mesh_handles);
+    state.entities = new_entities;
+    state.mesh_handles = new_mesh_handles;
+    state.committed_tree_revision = Some(tree.revision);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
+    use crate::voxel::pages::quadtree::ClodPageNode;
+    use crate::voxel::pages::types::PageFootprint;
+
+    fn material_handles() -> TriplanarMaterialHandle {
+        TriplanarMaterialHandle {
+            handle: default(),
+            cheap_handle: default(),
+            single_projection_far_handle: default(),
+            horizon_proxy_handle: default(),
+            atlas_only_debug_handle: default(),
+            wireframe_debug_handle: default(),
+            normals_debug_handle: default(),
+            wireframe_normals_debug_handle: default(),
+            flat_unlit_debug_handle: default(),
+            wireframe_flat_unlit_debug_handle: default(),
+        }
+    }
+
+    fn node(coord: (i32, i32)) -> ClodPageNode {
+        ClodPageNode {
+            level: 0,
+            coord,
+            footprint: PageFootprint {
+                min_x: 0.0,
+                min_z: 0.0,
+                max_x: 64.0,
+                max_z: 64.0,
+            },
+            mesh: PageMesh::default(),
+            error_world: 0.0,
+            low_benefit: false,
+        }
+    }
+
+    fn committed_tags(app: &mut App) -> Vec<ClodPageMeshTag> {
+        let world = app.world_mut();
+        let mut query = world.query::<&ClodPageMeshTag>();
+        query.iter(world).copied().collect()
+    }
+
+    #[test]
+    fn page_mesh_uses_only_the_terrain_attributes_pages_need() {
+        let page_mesh = PageMesh {
+            positions: vec![[1.0, -2.0, 3.0], [4.0, 6.0, 7.0], [8.0, 1.0, 9.0]],
+            normals: vec![[0.0, 1.0, 0.0]; 3],
+            materials: vec![[1.0, 0.0, 0.0, 0.0]; 3],
+            indices: vec![0, 1, 2],
+        };
+
+        let (mesh, bounds) = page_mesh_to_bevy_mesh(&page_mesh);
+
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_1).is_none());
+        assert!(mesh.attribute(ATTRIBUTE_MORPH_TARGET).is_none());
+        assert_eq!(bounds.min_y, -2.0);
+        assert_eq!(bounds.max_y, 6.0);
+    }
+
+    #[test]
+    fn top_mode_shows_only_the_coarsest_nonempty_level() {
+        assert_eq!(
+            node_visibility(ClodPagesShowMode::Top, 3, Some(3)),
+            Visibility::Visible
+        );
+        assert_eq!(
+            node_visibility(ClodPagesShowMode::Top, 2, Some(3)),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            node_visibility(ClodPagesShowMode::Off, 3, Some(3)),
+            Visibility::Hidden
+        );
+    }
+
+    #[test]
+    fn replacement_is_atomic_and_disable_clears_entities() {
+        let mut runtime = ClodPagesRuntime::default();
+        runtime.enabled = true;
+        let mut app = App::new();
+        app.insert_resource(runtime)
+            .insert_resource(ClodPageTree {
+                nodes_by_level: vec![vec![node((0, 0))]],
+                revision: 1,
+                page_coords: vec![(0, 0)],
+                build_page_coords: vec![(0, 0)],
+                status: Some(ClodPageBuildStatus::Ready),
+            })
+            .insert_resource(ClodPagesShow(ClodPagesShowMode::Off))
+            .insert_resource(material_handles())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<ClodPageMeshCommitState>()
+            .add_systems(
+                Update,
+                clod_page_mesh_commit_system.run_if(clod_page_mesh_commit_needed),
+            );
+
+        app.update();
+        assert_eq!(
+            committed_tags(&mut app),
+            vec![ClodPageMeshTag {
+                level: 0,
+                coord: (0, 0)
+            }]
+        );
+
+        app.world_mut().resource_mut::<ClodPageTree>().status = Some(ClodPageBuildStatus::Building);
+        app.update();
+        assert_eq!(
+            committed_tags(&mut app),
+            vec![ClodPageMeshTag {
+                level: 0,
+                coord: (0, 0)
+            }]
+        );
+
+        {
+            let mut tree = app.world_mut().resource_mut::<ClodPageTree>();
+            tree.nodes_by_level = vec![vec![node((1, 0))]];
+            tree.revision = 2;
+            tree.status = Some(ClodPageBuildStatus::Ready);
+        }
+        app.update();
+        assert_eq!(
+            committed_tags(&mut app),
+            vec![ClodPageMeshTag {
+                level: 0,
+                coord: (1, 0)
+            }]
+        );
+
+        app.world_mut().resource_mut::<ClodPagesRuntime>().enabled = false;
+        app.update();
+        assert!(committed_tags(&mut app).is_empty());
+    }
+}
