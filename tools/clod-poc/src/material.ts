@@ -6,6 +6,20 @@
 
 import * as THREE from "three";
 
+export interface TerrainColorAdjustments {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  warmth: number;
+}
+
+export const DEFAULT_TERRAIN_COLOR_ADJUSTMENTS: TerrainColorAdjustments = {
+  brightness: 1.0,
+  contrast: 1.0,
+  saturation: 1.0,
+  warmth: 0.0,
+};
+
 const VERT = /* glsl */ `
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
@@ -28,6 +42,10 @@ const FRAG = /* glsl */ `
   uniform bool uNormalColor;
   uniform bool uNormalDivergence;
   uniform float uDivergenceGain;
+  uniform float uBrightness;
+  uniform float uContrast;
+  uniform float uSaturation;
+  uniform float uWarmth;
   uniform bool uUseTexture;
   uniform int uTerrainTextureCount;
   uniform sampler2D uTerrainTexture0;
@@ -89,6 +107,19 @@ const FRAG = /* glsl */ `
     if (uTerrainTextureCount > 3 && centerDistance(height, uTextureRange3) < best) nearest = t3;
     return nearest;
   }
+  vec3 adjustColor(vec3 color) {
+    color *= uBrightness;
+
+    color = (color - 0.5) * uContrast + 0.5;
+
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    color = mix(vec3(luma), color, uSaturation);
+
+    vec3 warm = vec3(1.0 + uWarmth * 0.16, 1.0 + uWarmth * 0.05, 1.0 - uWarmth * 0.12);
+    color *= warm;
+
+    return max(color, vec3(0.0));
+  }
   void main() {
     if (uDither && ign(gl_FragCoord.xy) > uFade) discard;
     if (uNormalDivergence) {
@@ -109,6 +140,7 @@ const FRAG = /* glsl */ `
       vec3 tex = sampleTerrainTexture(vWorldPos);
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
     }
+    baseColor = adjustColor(baseColor);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
     vec3 light = hemi + uSunColor * pow(sun, 1.35);
     gl_FragColor = vec4(baseColor * light, 1.0);
@@ -130,6 +162,10 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uNormalColor: { value: false },
       uNormalDivergence: { value: false },
       uDivergenceGain: { value: 8.0 },
+      uBrightness: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness },
+      uContrast: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.contrast },
+      uSaturation: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation },
+      uWarmth: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth },
       uUseTexture: { value: false },
       uTerrainTextureCount: { value: 0 },
       uTerrainTexture0: { value: null },
@@ -149,4 +185,14 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
     side: THREE.DoubleSide,
     toneMapped: true,
   });
+}
+
+export function applyTerrainColorAdjustments(
+  material: THREE.ShaderMaterial,
+  adjustments: TerrainColorAdjustments,
+): void {
+  material.uniforms.uBrightness.value = adjustments.brightness;
+  material.uniforms.uContrast.value = adjustments.contrast;
+  material.uniforms.uSaturation.value = adjustments.saturation;
+  material.uniforms.uWarmth.value = adjustments.warmth;
 }
