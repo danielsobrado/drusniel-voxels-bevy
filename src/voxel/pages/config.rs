@@ -34,9 +34,18 @@ pub struct NearFieldCfg {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct SelectionCfg {
+    pub error_threshold_px: f32,
+    pub hysteresis_merge_factor: f32,
+    pub neighbor_level_delta_max: i32,
+    pub crossfade_frames: u32,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct ClodPagesConfig {
     pub page: PageCfg,
     pub simplify: SimplifyCfg,
+    pub selection: SelectionCfg,
     pub near_field: NearFieldCfg,
 }
 

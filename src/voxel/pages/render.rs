@@ -10,10 +10,12 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::runtime::ClodPagesRuntime;
+use super::selection::{ClodPageNodeKey, ClodPageSelectionIndex};
 use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
+use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClodPageMeshTag {
@@ -29,15 +31,15 @@ pub struct ClodPageMeshBounds {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ClodPagesShowMode {
-    Top,
     #[default]
+    Selection,
     Off,
 }
 
 impl fmt::Display for ClodPagesShowMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Top => write!(f, "top"),
+            Self::Selection => write!(f, "selection"),
             Self::Off => write!(f, "off"),
         }
     }
@@ -49,18 +51,28 @@ pub struct ClodPagesShow(pub ClodPagesShowMode);
 impl Default for ClodPagesShow {
     fn default() -> Self {
         let mode = match std::env::var("CLOD_PAGES_SHOW") {
-            Ok(value) if value.trim().eq_ignore_ascii_case("top") => ClodPagesShowMode::Top,
-            Ok(value) if value.trim().eq_ignore_ascii_case("off") || value.trim().is_empty() => {
-                ClodPagesShowMode::Off
+            Ok(value) if value.trim().eq_ignore_ascii_case("off") => ClodPagesShowMode::Off,
+            Ok(value)
+                if value.trim().is_empty()
+                    || value.trim().eq_ignore_ascii_case("selection")
+                    || value.trim().eq_ignore_ascii_case("auto") =>
+            {
+                ClodPagesShowMode::Selection
+            }
+            Ok(value) if value.trim().eq_ignore_ascii_case("top") => {
+                warn!(
+                    "CLOD_PAGES_SHOW=top is retired; using runtime selection. Set CLOD_PAGES_SHOW=off to hide pages."
+                );
+                ClodPagesShowMode::Selection
             }
             Ok(value) => {
                 warn!(
-                    "unknown CLOD_PAGES_SHOW value {:?}; expected top|off, using off",
+                    "unknown CLOD_PAGES_SHOW value {:?}; expected off, using runtime selection",
                     value
                 );
-                ClodPagesShowMode::Off
+                ClodPagesShowMode::Selection
             }
-            Err(_) => ClodPagesShowMode::Off,
+            Err(_) => ClodPagesShowMode::Selection,
         };
         Self(mode)
     }
@@ -86,7 +98,10 @@ pub(crate) fn clod_page_mesh_commit_needed(
 }
 
 pub(crate) fn clod_pages_show_startup_log_system(show: Res<ClodPagesShow>) {
-    info!("CLOD PAGES SHOW: {} (CLOD_PAGES_SHOW=top|off)", show.0);
+    info!(
+        "CLOD PAGES SHOW: {} (CLOD_PAGES_SHOW=off disables page visibility)",
+        show.0
+    );
 }
 
 fn page_mesh_y_bounds(page_mesh: &PageMesh) -> ClodPageMeshBounds {
@@ -119,18 +134,6 @@ fn page_mesh_to_bevy_mesh(page_mesh: &PageMesh) -> (Mesh, ClodPageMeshBounds) {
     (mesh, page_mesh_y_bounds(page_mesh))
 }
 
-fn node_visibility(
-    show: ClodPagesShowMode,
-    level: usize,
-    coarsest_level: Option<usize>,
-) -> Visibility {
-    if show == ClodPagesShowMode::Top && Some(level) == coarsest_level {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    }
-}
-
 fn remove_mesh_assets(meshes: &mut Assets<Mesh>, handles: Vec<Handle<Mesh>>) {
     for handle in handles {
         meshes.remove(handle.id());
@@ -141,10 +144,10 @@ pub(crate) fn clod_page_mesh_commit_system(
     mut commands: Commands,
     runtime: Res<ClodPagesRuntime>,
     tree: Res<ClodPageTree>,
-    show: Res<ClodPagesShow>,
     triplanar_material: Res<TriplanarMaterialHandle>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut state: ResMut<ClodPageMeshCommitState>,
+    mut selection_index: ResMut<ClodPageSelectionIndex>,
 ) {
     remove_mesh_assets(&mut meshes, std::mem::take(&mut state.retired_mesh_handles));
 
@@ -154,6 +157,7 @@ pub(crate) fn clod_page_mesh_commit_system(
         }
         remove_mesh_assets(&mut meshes, std::mem::take(&mut state.mesh_handles));
         state.committed_tree_revision = None;
+        selection_index.clear();
         return;
     }
 
@@ -163,20 +167,18 @@ pub(crate) fn clod_page_mesh_commit_system(
         return;
     }
 
-    let coarsest_level = tree
-        .nodes_by_level
-        .iter()
-        .rposition(|nodes| !nodes.is_empty());
     let material_handle =
         triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
     let node_count = tree.nodes_by_level.iter().map(Vec::len).sum();
     let mut new_entities = Vec::with_capacity(node_count);
     let mut new_mesh_handles = Vec::with_capacity(node_count);
+    let mut bounds_by_node = HashMap::with_capacity(node_count);
 
     for nodes in &tree.nodes_by_level {
         for node in nodes {
             let (mesh, bounds) = page_mesh_to_bevy_mesh(&node.mesh);
             let mesh_handle = meshes.add(mesh);
+            bounds_by_node.insert(ClodPageNodeKey::new(node.level, node.coord), bounds);
             let entity = commands
                 .spawn((
                     Mesh3d(mesh_handle.clone()),
@@ -184,7 +186,7 @@ pub(crate) fn clod_page_mesh_commit_system(
                     Transform::IDENTITY,
                     RenderLayers::default(),
                     NotShadowCaster,
-                    node_visibility(show.0, node.level, coarsest_level),
+                    Visibility::Hidden,
                     ClodPageMeshTag {
                         level: node.level,
                         coord: node.coord,
@@ -205,6 +207,7 @@ pub(crate) fn clod_page_mesh_commit_system(
     state.entities = new_entities;
     state.mesh_handles = new_mesh_handles;
     state.committed_tree_revision = Some(tree.revision);
+    selection_index.rebuild(&tree, &bounds_by_node);
 }
 
 #[cfg(test)]
@@ -273,22 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn top_mode_shows_only_the_coarsest_nonempty_level() {
-        assert_eq!(
-            node_visibility(ClodPagesShowMode::Top, 3, Some(3)),
-            Visibility::Visible
-        );
-        assert_eq!(
-            node_visibility(ClodPagesShowMode::Top, 2, Some(3)),
-            Visibility::Hidden
-        );
-        assert_eq!(
-            node_visibility(ClodPagesShowMode::Off, 3, Some(3)),
-            Visibility::Hidden
-        );
-    }
-
-    #[test]
     fn replacement_is_atomic_and_disable_clears_entities() {
         let mut runtime = ClodPagesRuntime::default();
         runtime.enabled = true;
@@ -305,6 +292,7 @@ mod tests {
             .insert_resource(material_handles())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<ClodPageMeshCommitState>()
+            .init_resource::<ClodPageSelectionIndex>()
             .add_systems(
                 Update,
                 clod_page_mesh_commit_system.run_if(clod_page_mesh_commit_needed),

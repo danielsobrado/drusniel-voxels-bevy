@@ -22,6 +22,7 @@ pub mod plugin;
 pub mod quadtree;
 pub mod render;
 pub mod runtime;
+mod selection;
 pub mod simplify;
 pub mod source_mesh;
 pub mod types;

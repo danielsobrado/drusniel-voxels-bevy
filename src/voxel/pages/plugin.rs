@@ -14,6 +14,9 @@ use super::runtime::{
     clod_pages_debug_toggle_system, clod_pages_source_meshing_system, clod_pages_startup_log_system,
     ClodPagesRuntime, PageExportCache,
 };
+use super::selection::{
+    clod_page_selection_system, ClodPageSelectionIndex, ClodPageSelectionState,
+};
 
 pub struct ClodPagesPlugin;
 
@@ -25,6 +28,8 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodPageTree>()
             .init_resource::<ClodPagesShow>()
             .init_resource::<ClodPageMeshCommitState>()
+            .init_resource::<ClodPageSelectionIndex>()
+            .init_resource::<ClodPageSelectionState>()
             .add_systems(
                 Startup,
                 (
@@ -53,6 +58,10 @@ impl Plugin for ClodPagesPlugin {
                 clod_page_mesh_commit_system
                     .after(clod_pages_build_task_poll_system)
                     .run_if(clod_page_mesh_commit_needed),
+            )
+            .add_systems(
+                Update,
+                clod_page_selection_system.after(clod_page_mesh_commit_system),
             );
     }
 }
