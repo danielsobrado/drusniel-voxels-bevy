@@ -16,6 +16,7 @@ use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
+use crate::voxel::meshing::{TERRAIN_MESH_SECTION_MAIN, encode_barycentric_uv};
 const PAGE_MESH_COMMITS_PER_FRAME: usize = 4;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,12 +135,18 @@ fn page_mesh_y_bounds(page_mesh: &PageMesh) -> ClodPageMeshBounds {
 }
 
 fn page_mesh_to_bevy_mesh(page_mesh: &PageMesh) -> (Mesh, ClodPageMeshBounds) {
+    let vertex_count = page_mesh.positions.len();
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD,
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, page_mesh.positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, page_mesh.normals.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[1.0, 0.0]; vertex_count]);
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        vec![encode_barycentric_uv([0.0, 0.0], TERRAIN_MESH_SECTION_MAIN, 0); vertex_count],
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, page_mesh.materials.clone());
     mesh.insert_indices(Indices::U32(page_mesh.indices.clone()));
     (mesh, page_mesh_y_bounds(page_mesh))
@@ -285,6 +292,7 @@ mod tests {
     use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
     use crate::voxel::pages::quadtree::ClodPageNode;
     use crate::voxel::pages::types::PageFootprint;
+    use bevy_mesh::VertexAttributeValues;
 
     fn material_handles() -> TriplanarMaterialHandle {
         TriplanarMaterialHandle {
@@ -337,8 +345,21 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none());
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_1).is_none());
+        assert_eq!(
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0),
+            Some(&VertexAttributeValues::Float32x2(vec![[1.0, 0.0]; 3]))
+        );
+        assert_eq!(
+            mesh.attribute(Mesh::ATTRIBUTE_UV_1),
+            Some(&VertexAttributeValues::Float32x2(vec![
+                encode_barycentric_uv(
+                    [0.0, 0.0],
+                    TERRAIN_MESH_SECTION_MAIN,
+                    0
+                );
+                3
+            ]))
+        );
         assert!(mesh.attribute(ATTRIBUTE_MORPH_TARGET).is_none());
         assert_eq!(bounds.min_y, -2.0);
         assert_eq!(bounds.max_y, 6.0);

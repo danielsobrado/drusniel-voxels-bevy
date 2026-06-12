@@ -288,6 +288,10 @@ impl Material for TriplanarMaterial {
         // be branched by pipeline, or the prepass loses an attribute it reads.
         // Untouched when the gate is off, so the default path is byte-identical.
         if morph_gate_enabled() && layout.0.contains(ATTRIBUTE_MORPH_TARGET.id) {
+            descriptor
+                .vertex
+                .shader_defs
+                .push("TERRAIN_HAS_MORPH".into());
             let is_prepass = descriptor.label.as_deref() == Some("prepass_pipeline");
             descriptor.vertex.buffers[0] = if is_prepass {
                 // prepass_io::Vertex: uv@1, uv_b@2, normal@3, color@7 (normal harmless

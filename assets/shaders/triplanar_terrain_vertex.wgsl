@@ -31,11 +31,20 @@
 #endif
 
 @vertex
-fn vertex(vertex: Vertex, @location(8) morph_target: vec4<f32>) -> VertexOutput {
+fn vertex(
+    vertex: Vertex,
+#ifdef TERRAIN_HAS_MORPH
+    @location(8) morph_target: vec4<f32>,
+#endif
+) -> VertexOutput {
     var out: VertexOutput;
 
+#ifdef TERRAIN_HAS_MORPH
     // Static seam weld in mesh-local space, before any transform.
-    let morphed_position = mix(vertex.position, morph_target.xyz, morph_target.w);
+    let local_position = mix(vertex.position, morph_target.xyz, morph_target.w);
+#else
+    let local_position = vertex.position;
+#endif
 
     let model = mesh_functions::get_world_from_local(vertex.instance_index);
 
@@ -57,7 +66,7 @@ fn vertex(vertex: Vertex, @location(8) morph_target: vec4<f32>) -> VertexOutput 
 
     let world_position = mesh_functions::mesh_position_local_to_world(
         model,
-        vec4<f32>(morphed_position, 1.0),
+        vec4<f32>(local_position, 1.0),
     );
     out.world_position = world_position;
     out.position = position_world_to_clip(world_position.xyz);
@@ -83,11 +92,10 @@ fn vertex(vertex: Vertex, @location(8) morph_target: vec4<f32>) -> VertexOutput 
 #endif
 
 #ifdef MOTION_VECTOR_PREPASS
-    // Same static weld through the previous-frame model matrix → motion vectors
-    // capture only object/camera motion, never the (frame-invariant) morph.
+    // Apply the same optional static weld through the previous-frame model matrix.
     out.previous_world_position = mesh_functions::mesh_position_local_to_world(
         mesh_functions::get_previous_world_from_local(vertex.instance_index),
-        vec4<f32>(morphed_position, 1.0),
+        vec4<f32>(local_position, 1.0),
     );
 #endif
 
