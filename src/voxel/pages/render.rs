@@ -1,5 +1,6 @@
 //! Phase 5 Step 3b part 2: commit completed page trees as hidden terrain mesh entities.
 
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
 use bevy::asset::RenderAssetUsages;
@@ -15,7 +16,7 @@ use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
-use std::collections::HashMap;
+const PAGE_MESH_COMMITS_PER_FRAME: usize = 4;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClodPageMeshTag {
@@ -84,6 +85,15 @@ pub(crate) struct ClodPageMeshCommitState {
     entities: Vec<Entity>,
     mesh_handles: Vec<Handle<Mesh>>,
     retired_mesh_handles: Vec<Handle<Mesh>>,
+    pending: Option<PendingMeshCommit>,
+}
+
+struct PendingMeshCommit {
+    tree_revision: u64,
+    remaining_nodes: VecDeque<(usize, usize)>,
+    entities: Vec<Entity>,
+    mesh_handles: Vec<Handle<Mesh>>,
+    bounds_by_node: HashMap<ClodPageNodeKey, ClodPageMeshBounds>,
 }
 
 pub(crate) fn clod_page_mesh_commit_needed(
@@ -95,6 +105,7 @@ pub(crate) fn clod_page_mesh_commit_needed(
         || !state.entities.is_empty()
         || !state.mesh_handles.is_empty()
         || !state.retired_mesh_handles.is_empty()
+        || state.pending.is_some()
 }
 
 pub(crate) fn clod_pages_show_startup_log_system(show: Res<ClodPagesShow>) {
@@ -125,13 +136,27 @@ fn page_mesh_y_bounds(page_mesh: &PageMesh) -> ClodPageMeshBounds {
 fn page_mesh_to_bevy_mesh(page_mesh: &PageMesh) -> (Mesh, ClodPageMeshBounds) {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
+        RenderAssetUsages::RENDER_WORLD,
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, page_mesh.positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, page_mesh.normals.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, page_mesh.materials.clone());
     mesh.insert_indices(Indices::U32(page_mesh.indices.clone()));
     (mesh, page_mesh_y_bounds(page_mesh))
+}
+
+fn clear_pending_commit(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    state: &mut ClodPageMeshCommitState,
+) {
+    let Some(mut pending) = state.pending.take() else {
+        return;
+    };
+    for entity in pending.entities.drain(..) {
+        commands.entity(entity).despawn();
+    }
+    remove_mesh_assets(meshes, pending.mesh_handles);
 }
 
 fn remove_mesh_assets(meshes: &mut Assets<Mesh>, handles: Vec<Handle<Mesh>>) {
@@ -152,6 +177,7 @@ pub(crate) fn clod_page_mesh_commit_system(
     remove_mesh_assets(&mut meshes, std::mem::take(&mut state.retired_mesh_handles));
 
     if !runtime.enabled {
+        clear_pending_commit(&mut commands, &mut meshes, &mut state);
         for entity in state.entities.drain(..) {
             commands.entity(entity).despawn();
         }
@@ -169,45 +195,88 @@ pub(crate) fn clod_page_mesh_commit_system(
 
     let material_handle =
         triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
-    let node_count = tree.nodes_by_level.iter().map(Vec::len).sum();
-    let mut new_entities = Vec::with_capacity(node_count);
-    let mut new_mesh_handles = Vec::with_capacity(node_count);
-    let mut bounds_by_node = HashMap::with_capacity(node_count);
-
-    for nodes in &tree.nodes_by_level {
-        for node in nodes {
-            let (mesh, bounds) = page_mesh_to_bevy_mesh(&node.mesh);
-            let mesh_handle = meshes.add(mesh);
-            bounds_by_node.insert(ClodPageNodeKey::new(node.level, node.coord), bounds);
-            let entity = commands
-                .spawn((
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d::<TriplanarMaterial>(material_handle.clone()),
-                    Transform::IDENTITY,
-                    RenderLayers::default(),
-                    NotShadowCaster,
-                    Visibility::Hidden,
-                    ClodPageMeshTag {
-                        level: node.level,
-                        coord: node.coord,
-                    },
-                    bounds,
-                ))
-                .id();
-            new_entities.push(entity);
-            new_mesh_handles.push(mesh_handle);
-        }
+    if state
+        .pending
+        .as_ref()
+        .is_none_or(|pending| pending.tree_revision != tree.revision)
+    {
+        clear_pending_commit(&mut commands, &mut meshes, &mut state);
+        let node_count = tree.nodes_by_level.iter().map(Vec::len).sum();
+        let remaining_nodes = tree
+            .nodes_by_level
+            .iter()
+            .enumerate()
+            .flat_map(|(level_index, nodes)| {
+                (0..nodes.len()).map(move |node_index| (level_index, node_index))
+            })
+            .collect();
+        state.pending = Some(PendingMeshCommit {
+            tree_revision: tree.revision,
+            remaining_nodes,
+            entities: Vec::with_capacity(node_count),
+            mesh_handles: Vec::with_capacity(node_count),
+            bounds_by_node: HashMap::with_capacity(node_count),
+        });
     }
 
+    let Some(pending) = state.pending.as_mut() else {
+        return;
+    };
+    for _ in 0..PAGE_MESH_COMMITS_PER_FRAME {
+        let Some((level_index, node_index)) = pending.remaining_nodes.pop_front() else {
+            break;
+        };
+        let Some(node) = tree
+            .nodes_by_level
+            .get(level_index)
+            .and_then(|nodes| nodes.get(node_index))
+        else {
+            clear_pending_commit(&mut commands, &mut meshes, &mut state);
+            return;
+        };
+
+        let (mesh, bounds) = page_mesh_to_bevy_mesh(&node.mesh);
+        let mesh_handle = meshes.add(mesh);
+        pending
+            .bounds_by_node
+            .insert(ClodPageNodeKey::new(node.level, node.coord), bounds);
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh_handle.clone()),
+                MeshMaterial3d::<TriplanarMaterial>(material_handle.clone()),
+                Transform::IDENTITY,
+                RenderLayers::default(),
+                NotShadowCaster,
+                Visibility::Hidden,
+                ClodPageMeshTag {
+                    level: node.level,
+                    coord: node.coord,
+                },
+                bounds,
+            ))
+            .id();
+        pending.entities.push(entity);
+        pending.mesh_handles.push(mesh_handle);
+    }
+
+    if state
+        .pending
+        .as_ref()
+        .is_some_and(|pending| !pending.remaining_nodes.is_empty())
+    {
+        return;
+    }
+
+    let pending = state.pending.take().expect("pending commit exists");
     for entity in state.entities.drain(..) {
         commands.entity(entity).despawn();
     }
     let mut old_mesh_handles = std::mem::take(&mut state.mesh_handles);
     state.retired_mesh_handles.append(&mut old_mesh_handles);
-    state.entities = new_entities;
-    state.mesh_handles = new_mesh_handles;
+    state.entities = pending.entities;
+    state.mesh_handles = pending.mesh_handles;
     state.committed_tree_revision = Some(tree.revision);
-    selection_index.rebuild(&tree, &bounds_by_node);
+    selection_index.rebuild(&tree, &pending.bounds_by_node);
 }
 
 #[cfg(test)]

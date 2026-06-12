@@ -45,7 +45,7 @@ impl Plugin for ClodPagesPlugin {
                 Update,
                 (
                     clod_pages_debug_toggle_system,
-                    clod_pages_source_meshing_system,
+                    clod_pages_source_meshing_system.after(VoxelTerrainSet::MeshDirty),
                 ),
             )
             .add_systems(

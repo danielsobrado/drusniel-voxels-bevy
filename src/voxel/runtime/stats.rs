@@ -32,6 +32,7 @@ pub struct RuntimeChunkStats {
     pub chunks_meshed_this_frame: u32,
     pub chunks_skipped_this_frame: u32,
     pub dirty_chunks_queued: u32,
+    pub generation_dirty_chunks_queued: u32,
     pub surface_nets_chunks_deferred_for_halo: u32,
 
     // LOD statistics
@@ -104,6 +105,7 @@ impl RuntimeChunkStats {
         self.chunks_meshed_this_frame = 0;
         self.chunks_skipped_this_frame = 0;
         self.dirty_chunks_queued = 0;
+        self.generation_dirty_chunks_queued = 0;
         self.surface_nets_chunks_deferred_for_halo = 0;
         self.meshing_time_us = 0;
     }

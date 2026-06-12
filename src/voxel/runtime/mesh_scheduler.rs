@@ -71,6 +71,8 @@ pub(crate) struct MeshDirtyTimingParams<'w> {
     lod_transaction: ResMut<'w, LodMeshTransactionState>,
     strip_cache: ResMut<'w, crate::voxel::lod_boundary_strip::LodBoundaryStripCache>,
     queue_warning: ResMut<'w, MeshDirtyQueueWarningState>,
+    page_runtime: Option<Res<'w, crate::voxel::pages::runtime::ClodPagesRuntime>>,
+    page_cache: Option<ResMut<'w, crate::voxel::pages::runtime::PageExportCache>>,
 }
 
 #[derive(SystemParam)]
@@ -435,6 +437,41 @@ pub(crate) fn mesh_dirty_chunks_system(
         chunk_stats.water_exposure_outside_world_rejected +=
             mesh_result.water_stats.exposure_outside_world_rejected as u64;
 
+        if let (Some(page_runtime), Some(page_cache)) = (
+            timing_params.page_runtime.as_deref(),
+            timing_params.page_cache.as_deref_mut(),
+        ) {
+            let in_page_source_band = camera_pos
+                .map(|camera_pos| {
+                    let cam_chunk = VoxelWorld::world_to_chunk(camera_pos.as_ivec3());
+                    let radius = (chunk_pos.x - cam_chunk.x)
+                        .abs()
+                        .max((chunk_pos.z - cam_chunk.z).abs());
+                    radius > page_runtime.cfg.near_field.radius_chunks
+                        && radius <= page_runtime.source_radius_chunks
+                })
+                .unwrap_or(false);
+            if page_runtime.enabled
+                && generation_complete
+                && in_page_source_band
+                && mesh_lod_level == LodLevel::Lod0
+                && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
+            {
+                match crate::voxel::pages::extract_main_surface_for_clod(
+                    &mesh_result.solid,
+                    chunk_pos,
+                    LodLevel::Lod0,
+                    0,
+                ) {
+                    Ok(export) => page_cache.insert_from_live_lod0(export),
+                    Err(error) => {
+                        page_cache.remove_export(chunk_pos);
+                        debug!("CLOD page export skipped for {:?}: {}", chunk_pos, error);
+                    }
+                }
+            }
+        }
+
         if let Some(mc_stats) = mesh_result.mc_transvoxel_stats {
             mc_spike.stats.chunks_meshed_this_frame += 1;
             mc_spike.stats.aggregated.regular_chunks_meshed = mc_spike
@@ -795,6 +832,7 @@ pub(crate) fn mesh_dirty_chunks_system(
     chunk_stats.chunks_meshed_this_frame = chunks_meshed;
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
     chunk_stats.dirty_chunks_queued = dirty_chunks_queued as u32;
+    chunk_stats.generation_dirty_chunks_queued = reason_counts.generation;
     chunk_stats.surface_nets_chunks_deferred_for_halo = surface_nets_chunks_deferred_for_halo;
     log_transition_stats_if_due(&mc_spike.settings, &mc_spike.stats, frame.0);
 
@@ -803,15 +841,17 @@ pub(crate) fn mesh_dirty_chunks_system(
     let stats_recompute_due = should_recompute_runtime_chunk_stats(frame.0);
     let initial_stats_required =
         should_force_initial_runtime_chunk_stats(chunk_stats.total_chunks, world.chunk_count());
-    let stats_recompute_blocked = stats_recompute_due
-        && !initial_stats_required
+    let stats_recompute_blocked = !initial_stats_required
+        && stats_recompute_due
         && should_defer_runtime_chunk_stats_recompute(
             had_dirty_chunks,
             dirty_chunks_queued,
             chunks_per_frame_limit,
         );
+    let should_recompute_stats =
+        initial_stats_required || (stats_recompute_due && !stats_recompute_blocked);
     let stats_recompute_start = timing.enabled.then(Instant::now);
-    if initial_stats_required || (stats_recompute_due && !stats_recompute_blocked) {
+    if should_recompute_stats {
         chunk_stats.recompute_from_world(&world);
     }
     let mesh_dirty_stats_us = stats_recompute_start

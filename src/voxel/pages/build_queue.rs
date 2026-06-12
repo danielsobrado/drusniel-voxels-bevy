@@ -1,7 +1,9 @@
 //! Phase 5 Step 3b part 1: assemble complete LOD0 page sources on the main thread and
 //! build their quadtree on the async compute pool.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -40,63 +42,60 @@ pub struct ClodPageTree {
 
 struct PendingPageSource {
     coord: ClodPageCoord,
-    chunk_positions: Vec<IVec3>,
+    exports: Vec<TerrainMainSurfaceExport>,
+    footprint: PageFootprint,
 }
 
 struct PageAssembly {
+    signature: PageInputSignature,
     page_coords: Vec<ClodPageCoord>,
     pending: VecDeque<PendingPageSource>,
+    in_flight: Vec<Task<Result<(ClodPageCoord, PageSource), ClodBuildError>>>,
     sources: Vec<(ClodPageCoord, PageSource)>,
 }
 
 struct PendingTreeBuild {
-    revision: u64,
+    signature: PageInputSignature,
     page_coords: Vec<ClodPageCoord>,
     task: Task<Result<BuildResult, ClodBuildError>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PageInputSignature {
+    page_coords: Vec<ClodPageCoord>,
+    content_revision: u64,
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct ClodPageBuildQueue {
-    observed_cache_revision: u64,
-    observed_chunk_count: usize,
-    input_revision: u64,
+    observed_signature: Option<PageInputSignature>,
     stable_frames: u32,
-    page_source_credit: usize,
-    last_attempted_pages: Vec<ClodPageCoord>,
+    last_published_signature: Option<PageInputSignature>,
     assembly: Option<PageAssembly>,
     task: Option<PendingTreeBuild>,
 }
 
 impl ClodPageBuildQueue {
     fn clear(&mut self) {
-        self.observed_cache_revision = 0;
-        self.observed_chunk_count = 0;
-        self.input_revision = self.input_revision.wrapping_add(1);
+        self.observed_signature = None;
         self.stable_frames = 0;
-        self.page_source_credit = 0;
-        self.last_attempted_pages.clear();
+        self.last_published_signature = None;
         self.assembly = None;
         self.task = None;
     }
 
-    fn inputs_changed(&mut self, cache_revision: u64, chunk_count: usize) -> bool {
-        if self.observed_cache_revision == cache_revision
-            && self.observed_chunk_count == chunk_count
-        {
+    fn observe_signature(&mut self, signature: PageInputSignature) -> bool {
+        if self.observed_signature.as_ref() == Some(&signature) {
             return false;
         }
 
-        self.observed_cache_revision = cache_revision;
-        self.observed_chunk_count = chunk_count;
-        self.input_revision = self.input_revision.wrapping_add(1);
+        self.observed_signature = Some(signature);
         self.stable_frames = 0;
-        self.page_source_credit = 0;
-        self.assembly = None;
-        self.task = None;
         true
     }
 }
 
+#[cfg(test)]
 fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> ClodPageCoord {
     (
         chunk_pos.x.div_euclid(chunks_per_page),
@@ -116,6 +115,7 @@ fn page_footprint(coord: ClodPageCoord, cfg: &ClodPagesConfig) -> PageFootprint 
     }
 }
 
+#[cfg(test)]
 fn complete_page_columns(
     chunk_positions: impl Iterator<Item = IVec3>,
     exports: &HashSet<IVec3>,
@@ -136,13 +136,55 @@ fn complete_page_columns(
     columns
 }
 
-fn complete_columns_from_cache(
-    world: &VoxelWorld,
+fn mix_export_signature(mut signature: u64, pos: IVec3, export_revision: u64) -> u64 {
+    signature = signature.wrapping_mul(1_099_511_628_211);
+    signature ^= pos.x as u32 as u64;
+    signature = signature.wrapping_mul(1_099_511_628_211);
+    signature ^= pos.y as u32 as u64;
+    signature = signature.wrapping_mul(1_099_511_628_211);
+    signature ^= pos.z as u32 as u64;
+    signature = signature.wrapping_mul(1_099_511_628_211);
+    signature ^ export_revision
+}
+
+fn page_inputs_from_cache(
     cache: &PageExportCache,
-    chunks_per_page: i32,
-) -> BTreeMap<ClodPageCoord, Vec<IVec3>> {
-    let export_keys = cache.exports.keys().copied().collect();
-    complete_page_columns(world.chunk_positions(), &export_keys, chunks_per_page)
+    cfg: &ClodPagesConfig,
+) -> Result<Option<(PageInputSignature, VecDeque<PendingPageSource>)>, ClodBuildError> {
+    if cache.complete_pages.is_empty() {
+        return Ok(None);
+    }
+
+    let mut page_coords = Vec::with_capacity(cache.complete_pages.len());
+    let mut pending = VecDeque::with_capacity(cache.complete_pages.len());
+    let mut content_revision = 14_695_981_039_346_656_037u64;
+    for (&coord, chunk_positions) in &cache.complete_pages {
+        page_coords.push(coord);
+        let mut exports = Vec::with_capacity(chunk_positions.len());
+        for &pos in chunk_positions {
+            let export = cache.exports.get(&pos).cloned().ok_or_else(|| {
+                ClodBuildError::PageIncomplete(format!(
+                    "page {:?} complete-page snapshot is missing chunk export {:?}",
+                    coord, pos
+                ))
+            })?;
+            content_revision = mix_export_signature(content_revision, pos, export.revision);
+            exports.push(export);
+        }
+        pending.push_back(PendingPageSource {
+            coord,
+            exports,
+            footprint: page_footprint(coord, cfg),
+        });
+    }
+
+    Ok(Some((
+        PageInputSignature {
+            page_coords,
+            content_revision,
+        },
+        pending,
+    )))
 }
 
 fn fail_build(tree: &mut ClodPageTree, page_coords: Vec<ClodPageCoord>, error: ClodBuildError) {
@@ -180,12 +222,24 @@ pub(crate) fn clod_pages_build_queue_system(
         return;
     }
 
-    if queue.inputs_changed(cache.revision, world.chunk_count()) {
+    let Some((signature, pending_pages)) = (match page_inputs_from_cache(&cache, &runtime.cfg) {
+        Ok(result) => result,
+        Err(error) => {
+            fail_build(&mut tree, Vec::new(), error);
+            return;
+        }
+    }) else {
+        return;
+    };
+
+    if queue.observe_signature(signature.clone()) {
         if matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Building)) {
             tree.build_page_coords.clear();
             tree.status = None;
         }
-        return;
+        if queue.task.is_none() {
+            queue.assembly = None;
+        }
     }
 
     if queue.stable_frames < BUILD_DEBOUNCE_FRAMES {
@@ -197,112 +251,80 @@ pub(crate) fn clod_pages_build_queue_system(
     }
 
     if queue.assembly.is_none() {
-        let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-        let complete = complete_columns_from_cache(&world, &cache, chunks_per_page);
-        let page_coords: Vec<ClodPageCoord> = complete.keys().copied().collect();
-        if page_coords == queue.last_attempted_pages {
+        if queue.last_published_signature.as_ref() == Some(&signature)
+            && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
+        {
             return;
         }
 
-        let pending = complete
-            .into_iter()
-            .map(|(coord, chunk_positions)| PendingPageSource {
-                coord,
-                chunk_positions,
-            })
-            .collect();
-        tree.build_page_coords = page_coords.clone();
+        let page_coords = signature.page_coords.clone();
+        tree.build_page_coords = signature.page_coords.clone();
         tree.status = Some(ClodPageBuildStatus::Building);
-        queue.page_source_credit = 0;
         queue.assembly = Some(PageAssembly {
+            signature,
             page_coords,
-            pending,
+            pending: pending_pages,
+            in_flight: Vec::new(),
             sources: Vec::new(),
         });
     }
 
-    queue.page_source_credit = queue
-        .page_source_credit
-        .saturating_add(runtime.source_budget_per_frame);
-    loop {
-        let next_page_cost = queue
-            .assembly
-            .as_ref()
-            .and_then(|assembly| assembly.pending.front())
-            .map(|page| page.chunk_positions.len().max(1));
-        let Some(next_page_cost) = next_page_cost else {
-            break;
-        };
-        if queue.page_source_credit < next_page_cost {
-            break;
+    let source_budget = runtime.source_budget_per_frame.max(1);
+    let mut source_error = None;
+    if let Some(assembly) = queue.assembly.as_mut() {
+        for _ in 0..source_budget {
+            let Some(page) = assembly.pending.pop_front() else {
+                break;
+            };
+            let cfg = runtime.cfg.clone();
+            assembly
+                .in_flight
+                .push(AsyncComputeTaskPool::get().spawn(async move {
+                    build_lod0_page_source(&page.exports, page.footprint, &cfg)
+                        .map(|source| (page.coord, source))
+                }));
         }
-        queue.page_source_credit -= next_page_cost;
 
-        let Some(page) = queue
-            .assembly
-            .as_mut()
-            .and_then(|assembly| assembly.pending.pop_front())
-        else {
-            break;
-        };
-
-        let exports: Result<Vec<TerrainMainSurfaceExport>, ClodBuildError> = page
-            .chunk_positions
-            .iter()
-            .map(|pos| {
-                cache.exports.get(pos).cloned().ok_or_else(|| {
-                    ClodBuildError::PageIncomplete(format!(
-                        "page {:?} is missing loaded chunk export {:?}",
-                        page.coord, pos
-                    ))
-                })
-            })
-            .collect();
-        let source = exports.and_then(|exports| {
-            build_lod0_page_source(
-                &exports,
-                page_footprint(page.coord, &runtime.cfg),
-                &runtime.cfg,
-            )
-        });
-
-        match source {
-            Ok(source) => queue
-                .assembly
-                .as_mut()
-                .expect("page assembly exists")
-                .sources
-                .push((page.coord, source)),
-            Err(error) => {
-                let page_coords = queue
-                    .assembly
-                    .take()
-                    .expect("page assembly exists")
-                    .page_coords;
-                queue.last_attempted_pages = page_coords;
-                fail_build(&mut tree, vec![page.coord], error);
-                return;
+        let mut still_running = Vec::with_capacity(assembly.in_flight.len());
+        for mut task in assembly.in_flight.drain(..) {
+            match block_on(poll_once(&mut task)) {
+                Some(Ok((coord, source))) => assembly.sources.push((coord, source)),
+                Some(Err(error)) => {
+                    source_error = Some(error);
+                    break;
+                }
+                None => still_running.push(task),
             }
         }
+        assembly.in_flight = still_running;
+    }
+
+    if let Some(error) = source_error {
+        let page_coords = queue
+            .assembly
+            .take()
+            .expect("page assembly exists")
+            .page_coords;
+        fail_build(&mut tree, page_coords, error);
+        return;
     }
 
     let assembly_complete = queue
         .assembly
         .as_ref()
-        .is_some_and(|assembly| assembly.pending.is_empty());
+        .is_some_and(|assembly| assembly.pending.is_empty() && assembly.in_flight.is_empty());
     if !assembly_complete {
         return;
     }
 
     let assembly = queue.assembly.take().expect("page assembly exists");
     let page_coords = assembly.page_coords;
-    queue.last_attempted_pages = page_coords.clone();
+    let signature = assembly.signature;
     let cfg = runtime.cfg.clone();
-    let revision = queue.input_revision;
     let task =
         AsyncComputeTaskPool::get().spawn(async move { build_quadtree(assembly.sources, &cfg) });
     queue.task = Some(PendingTreeBuild {
-        revision,
+        signature,
         page_coords,
         task,
     });
@@ -327,9 +349,6 @@ pub(crate) fn clod_pages_build_task_poll_system(
         return;
     };
     let pending = queue.task.take().expect("polled task exists");
-    if pending.revision != queue.input_revision {
-        return;
-    }
 
     match result {
         Ok(result) => {
@@ -338,6 +357,7 @@ pub(crate) fn clod_pages_build_task_poll_system(
             tree.page_coords = pending.page_coords.clone();
             tree.build_page_coords = pending.page_coords;
             tree.status = Some(ClodPageBuildStatus::Ready);
+            queue.last_published_signature = Some(pending.signature);
         }
         Err(error) => fail_build(&mut tree, pending.page_coords, error),
     }
@@ -404,6 +424,7 @@ mod tests {
         let cache = PageExportCache {
             exports: [(pos, empty_export(pos))].into(),
             revision: 1,
+            ..Default::default()
         };
         let export_keys = cache.exports.keys().copied().collect();
         let complete = complete_page_columns(std::iter::once(pos), &export_keys, 4);

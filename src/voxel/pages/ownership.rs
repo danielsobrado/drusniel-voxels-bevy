@@ -5,21 +5,23 @@
 //! chunks, so drawing both causes coplanar z-fighting. Binary ownership switch per
 //! chunk footprint; complementary dither fade ONLY for stale (post-edit) geometry.
 
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::render::{ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 use super::runtime::ClodPagesRuntime;
-use super::selection::{
-    ClodPageNodeKey, ClodPageSelectionIndex, NearFieldBubble, clod_near_field_bubble,
-    near_field_intersects_footprint,
-};
+#[cfg(test)]
+use super::selection::NearFieldBubble;
+use super::selection::{ClodPageNodeKey, clod_near_field_bubble, near_field_intersects_footprint};
 use super::types::PageFootprint;
 use crate::constants::CHUNK_SIZE_F32;
 use crate::gameplay::camera::controller::PlayerCamera;
 use crate::gameplay::player::Player;
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 
+#[cfg(test)]
 const FOOTPRINT_EPSILON: f32 = 0.001;
 
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -38,6 +40,7 @@ pub(crate) fn chunk_footprint(chunk_pos: IVec3) -> PageFootprint {
     }
 }
 
+#[cfg(test)]
 fn page_covers_chunk(page: PageFootprint, chunk: PageFootprint) -> bool {
     page.min_x <= chunk.min_x + FOOTPRINT_EPSILON
         && page.min_z <= chunk.min_z + FOOTPRINT_EPSILON
@@ -45,12 +48,14 @@ fn page_covers_chunk(page: PageFootprint, chunk: PageFootprint) -> bool {
         && page.max_z + FOOTPRINT_EPSILON >= chunk.max_z
 }
 
+#[cfg(test)]
 fn visible_page_covers_chunk(page_footprints: &[PageFootprint], chunk: PageFootprint) -> bool {
     page_footprints
         .iter()
         .any(|page| page_covers_chunk(*page, chunk))
 }
 
+#[cfg(test)]
 fn chunk_owned_by_page(
     chunk: PageFootprint,
     bubble: NearFieldBubble,
@@ -60,32 +65,48 @@ fn chunk_owned_by_page(
         && visible_page_covers_chunk(ready_visible_pages, chunk)
 }
 
-fn ready_visible_page_footprints(
+fn ready_visible_page_keys(
     runtime: &ClodPagesRuntime,
     show: &ClodPagesShow,
     tree: &ClodPageTree,
-    index: &ClodPageSelectionIndex,
-    page_query: &Query<(&ClodPageMeshTag, &Visibility)>,
-) -> Vec<PageFootprint> {
+    page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
+) -> HashSet<ClodPageNodeKey> {
     if !runtime.enabled
         || show.0 == ClodPagesShowMode::Off
         || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
     {
-        return Vec::new();
+        return HashSet::new();
     }
 
     page_query
         .iter()
         .filter_map(|(tag, visibility)| {
-            (*visibility == Visibility::Visible)
-                .then(|| {
-                    index
-                        .node(ClodPageNodeKey::from(tag))
-                        .map(|node| node.footprint)
-                })
-                .flatten()
+            (*visibility == Visibility::Visible).then(|| ClodPageNodeKey::from(tag))
         })
         .collect()
+}
+
+fn chunk_page_coord(chunk_pos: IVec3, chunks_per_page: i32, level: usize) -> (i32, i32) {
+    let level_scale = 1i32 << level.min(30);
+    let chunks_per_node = chunks_per_page * level_scale;
+    (
+        chunk_pos.x.div_euclid(chunks_per_node),
+        chunk_pos.z.div_euclid(chunks_per_node),
+    )
+}
+
+fn chunk_covered_by_visible_page(
+    chunk_pos: IVec3,
+    chunks_per_page: i32,
+    levels: usize,
+    ready_visible_pages: &HashSet<ClodPageNodeKey>,
+) -> bool {
+    (0..levels).any(|level| {
+        ready_visible_pages.contains(&ClodPageNodeKey::new(
+            level,
+            chunk_page_coord(chunk_pos, chunks_per_page, level),
+        ))
+    })
 }
 
 fn restore_clod_hidden_chunk(
@@ -110,10 +131,9 @@ pub(crate) fn clod_page_chunk_ownership_system(
     runtime: Res<ClodPagesRuntime>,
     show: Res<ClodPagesShow>,
     tree: Res<ClodPageTree>,
-    index: Res<ClodPageSelectionIndex>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
-    page_query: Query<(&ClodPageMeshTag, &Visibility)>,
+    page_query: Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
     mut chunk_query: Query<
         (
             Entity,
@@ -145,15 +165,24 @@ pub(crate) fn clod_page_chunk_ownership_system(
 
     let player_transform = player_query.single().ok();
     let bubble = clod_near_field_bubble(&runtime, camera_transform, player_transform);
-    let ready_pages = ready_visible_page_footprints(&runtime, &show, &tree, &index, &page_query);
+    let ready_pages = ready_visible_page_keys(&runtime, &show, &tree, &page_query);
     if ready_pages.is_empty() && !*had_owned_chunks {
         return;
     }
 
+    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
+    let level_count = tree.nodes_by_level.len();
     let mut any_owned_chunks = false;
     for (entity, chunk_mesh, mut visibility, marker) in &mut chunk_query {
         let chunk_footprint = chunk_footprint(chunk_mesh.chunk_position);
-        if chunk_owned_by_page(chunk_footprint, bubble, &ready_pages) {
+        if !near_field_intersects_footprint(chunk_footprint, bubble)
+            && chunk_covered_by_visible_page(
+                chunk_mesh.chunk_position,
+                chunks_per_page,
+                level_count,
+                &ready_pages,
+            )
+        {
             any_owned_chunks = true;
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
