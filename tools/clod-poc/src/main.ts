@@ -465,10 +465,10 @@ async function main() {
       mat.uniforms.uUseTexture.value = enabled;
       mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
       mat.uniforms.uTextureScales.value.set(
-        activeTerrainSlots[0]?.scale ?? 1 / 64,
-        activeTerrainSlots[1]?.scale ?? 1 / 64,
-        activeTerrainSlots[2]?.scale ?? 1 / 64,
-        activeTerrainSlots[3]?.scale ?? 1 / 64,
+        (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
+        (activeTerrainSlots[1]?.scale ?? 1 / 64) * state.textureScale,
+        (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
+        (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
       );
       mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
       mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
@@ -539,10 +539,10 @@ async function main() {
         mat.uniforms.uUseTexture.value = activeTerrainSlots.length > 0;
         mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
         mat.uniforms.uTextureScales.value.set(
-          activeTerrainSlots[0]?.scale ?? 1 / 64,
-          activeTerrainSlots[1]?.scale ?? 1 / 64,
-          activeTerrainSlots[2]?.scale ?? 1 / 64,
-          activeTerrainSlots[3]?.scale ?? 1 / 64,
+          (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
+          (activeTerrainSlots[1]?.scale ?? 1 / 64) * state.textureScale,
+          (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
+          (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
         );
         mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
         mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
@@ -577,6 +577,7 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
+    textureScale: 1,
     textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
@@ -1117,6 +1118,7 @@ async function main() {
 
   const textureFolder = gui.addFolder("terrain texture");
   textureFolder.add(textureActions, "loadTexture").name("texture slots");
+  textureFolder.add(state, "textureScale", 0.25, 4, 0.05).name("scale multiplier").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
   loadedTextureController = textureFolder.add(state, "loadedTextureFiles").name("loaded").disable();
