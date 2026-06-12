@@ -24,7 +24,7 @@ import { selectCut, SelectionParams, SelectionState } from "./selection.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
 
-const LOD_COLORS = [0xffffff, 0x3a6ea5, 0x49a078, 0xd98032];
+const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
 const MAX_TERRAIN_TEXTURES = 4;
 const TERRAIN_TEXTURE_BANDS = ["low", "mid low", "mid high", "high"];
@@ -59,6 +59,8 @@ const BUILTIN_TERRAIN_TEXTURES = [
   { id: "snow-1", label: "Snow 1", url: demoTextureUrl("snow-1.jpg") },
   { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
 ] as const;
+const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
+type TextureBlendMode = (typeof TEXTURE_BLEND_MODES)[number];
 const SUN_DIRECTION = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
 const SUN_BASE_COLOR = new THREE.Color(0.95, 0.86, 0.68);
 const SKY_LIGHT_BASE_COLOR = new THREE.Color(0.42, 0.48, 0.58);
@@ -468,6 +470,8 @@ async function main() {
         activeTerrainSlots[2]?.scale ?? 1 / 64,
         activeTerrainSlots[3]?.scale ?? 1 / 64,
       );
+      mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
+      mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
       for (let i = 0; i < textureUniforms.length; i++) {
         const slot = activeTerrainSlots[i];
         mat.uniforms[textureUniforms[i]].value = slot?.texture ?? null;
@@ -540,6 +544,8 @@ async function main() {
           activeTerrainSlots[2]?.scale ?? 1 / 64,
           activeTerrainSlots[3]?.scale ?? 1 / 64,
         );
+        mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
+        mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
         for (let ti = 0; ti < textureUniforms.length; ti++) {
           const slot = activeTerrainSlots[ti];
           mat.uniforms[textureUniforms[ti]].value = slot?.texture ?? null;
@@ -571,6 +577,8 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
+    textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
+    textureBlendWidth: 6,
     loadedTextureFiles: "none",
     sunAzimuthDeg: 128,
     sunElevationDeg: 55,
@@ -1109,6 +1117,8 @@ async function main() {
 
   const textureFolder = gui.addFolder("terrain texture");
   textureFolder.add(textureActions, "loadTexture").name("texture slots");
+  textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
+  textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
   loadedTextureController = textureFolder.add(state, "loadedTextureFiles").name("loaded").disable();
   textureFolder.add(textureActions, "clearTexture").name("clear texture");
   const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");

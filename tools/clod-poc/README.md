@@ -133,12 +133,14 @@ camera-following sky dome with tuneable sun/sky/ground illumination, and a **ter
 texture** folder. Use "load image files" to open the texture modal. It shows four
 square slots for low→high terrain bands; click a square to load or replace that single
 texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
-has its own low/high height range, and the shader uses the range containing the current
-vertex height; gaps fall back to the nearest loaded slot. Textures are sampled in world
-X/Z with repeat wrapping, and the global "texture scale" controls tiling density. With
-`colour by LOD` enabled the page colour is applied as a light tint over the texture, so
-the image remains visible on every LOD while ownership is still readable. Turn `colour by
-LOD` off for a neutral textured terrain pass.
+has its own low/high height range. The right-side `blend mode` control switches between
+hard bands, where the shader uses the range containing the current vertex height, and
+blend bands, where adjacent ranges crossfade across the configured `blend height`. Gaps
+fall back to the nearest loaded slot. Textures are sampled in world X/Z with repeat
+wrapping, and the global "texture scale" controls tiling density. With `colour by LOD`
+enabled the page colour is applied as a light tint over the texture, so the image remains
+visible on every LOD while ownership is still readable. Turn `colour by LOD` off for a
+neutral textured terrain pass.
 
 The **near-field bubble** folder (§4.4): pages intersecting the bubble are force-split to
 LOD0, and inside the radius a LOD0 page is drawn as its raw chunks instead of the welded
