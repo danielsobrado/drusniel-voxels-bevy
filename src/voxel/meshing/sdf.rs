@@ -706,6 +706,153 @@ pub(super) fn coarse_lod_iso_height_for_sample_column(
     crossing
 }
 
+/// Per-mesh-generation memoized smoothed-SDF field for gradient-normal sampling.
+///
+/// `sdf_gradient_normal_at_local` re-derives the smoothed terrain field through
+/// `VoxelWorld`'s chunk `HashMap` on every tap: 6 gradient taps × 8 trilinear
+/// corners × up to 28 occupancy reads ≈ 1.3k hashmap lookups per call, and one
+/// chunk mesh makes thousands of calls over the same lattice points. This cache
+/// memoizes occupancy and smoothed lattice values in flat arrays covering the
+/// chunk's padded neighbourhood, so repeated taps become array reads. Values
+/// match the uncached helpers exactly; lattice points outside the cached window
+/// fall back to the uncached path, so callers never need to range-check.
+pub(crate) struct MeshSdfCache {
+    chunk_origin: IVec3,
+    lattice_min: i32,
+    size: i32,
+    /// NaN = not yet computed.
+    occupancy: Vec<f32>,
+    /// NaN = not yet computed.
+    smoothed: Vec<f32>,
+}
+
+impl MeshSdfCache {
+    pub(crate) fn new(chunk_origin: IVec3, my_lod: LodLevel) -> Self {
+        let step = (my_lod.step_size().max(1)) as i32;
+        // Mesh verts live in [-step, CHUNK_SIZE); morph/stitch targets stay within
+        // one coarse step of the boundary; gradient taps reach ±1.5 voxels and the
+        // smoothing kernel one more. ±(step + 4) covers all of it.
+        let lattice_min = -(step + 4);
+        let lattice_max = CHUNK_SIZE_I32 + step + 4;
+        let size = lattice_max - lattice_min + 1;
+        let volume = (size * size * size) as usize;
+        Self {
+            chunk_origin,
+            lattice_min,
+            size,
+            occupancy: vec![f32::NAN; volume],
+            smoothed: vec![f32::NAN; volume],
+        }
+    }
+
+    #[inline]
+    fn index(&self, lattice: IVec3) -> Option<usize> {
+        let rel = lattice - IVec3::splat(self.lattice_min);
+        if rel.x < 0
+            || rel.y < 0
+            || rel.z < 0
+            || rel.x >= self.size
+            || rel.y >= self.size
+            || rel.z >= self.size
+        {
+            return None;
+        }
+        Some((rel.x + rel.y * self.size + rel.z * self.size * self.size) as usize)
+    }
+
+    #[inline]
+    fn occupancy_at(&mut self, world: &VoxelWorld, lattice: IVec3) -> f32 {
+        let Some(idx) = self.index(lattice) else {
+            return terrain_occupancy_sdf_at_world(world, self.chunk_origin + lattice);
+        };
+        let cached = self.occupancy[idx];
+        if !cached.is_nan() {
+            return cached;
+        }
+        let value = terrain_occupancy_sdf_at_world(world, self.chunk_origin + lattice);
+        self.occupancy[idx] = value;
+        value
+    }
+
+    /// Memoized [`smoothed_terrain_sdf_at_world_pos`] keyed on chunk-local lattice points.
+    fn smoothed_at(&mut self, world: &VoxelWorld, lattice: IVec3) -> f32 {
+        let Some(idx) = self.index(lattice) else {
+            return smoothed_terrain_sdf_at_world_pos(world, self.chunk_origin + lattice);
+        };
+        let cached = self.smoothed[idx];
+        if !cached.is_nan() {
+            return cached;
+        }
+        const W: [f32; 3] = [1.0, 2.0, 1.0];
+        const SIGN_GUARD: f32 = 1.0e-3;
+        let value = if self.occupancy_at(world, lattice) < 0.0 {
+            -1.0
+        } else {
+            let mut sum = 0.0;
+            let mut weight = 0.0;
+            for (oz, &wz) in W.iter().enumerate() {
+                for (oy, &wy) in W.iter().enumerate() {
+                    for (ox, &wx) in W.iter().enumerate() {
+                        let w = wx * wy * wz;
+                        let offset = IVec3::new(ox as i32 - 1, oy as i32 - 1, oz as i32 - 1);
+                        sum += w * self.occupancy_at(world, lattice + offset);
+                        weight += w;
+                    }
+                }
+            }
+            (sum / weight).max(SIGN_GUARD)
+        };
+        self.smoothed[idx] = value;
+        value
+    }
+
+    /// Memoized [`trilinear_smoothed_terrain_sdf_at_world_pos`] in chunk-local space.
+    fn trilinear_at(&mut self, world: &VoxelWorld, local_pos: Vec3) -> f32 {
+        let base = IVec3::new(
+            local_pos.x.floor() as i32,
+            local_pos.y.floor() as i32,
+            local_pos.z.floor() as i32,
+        );
+        let frac = (local_pos - base.as_vec3()).clamp(Vec3::ZERO, Vec3::ONE);
+        let mut corners = [0.0f32; 8];
+        for (i, corner) in corners.iter_mut().enumerate() {
+            let offset = IVec3::new((i & 1) as i32, ((i >> 1) & 1) as i32, ((i >> 2) & 1) as i32);
+            *corner = self.smoothed_at(world, base + offset);
+        }
+        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+        let x00 = lerp(corners[0], corners[1], frac.x);
+        let x10 = lerp(corners[2], corners[3], frac.x);
+        let x01 = lerp(corners[4], corners[5], frac.x);
+        let x11 = lerp(corners[6], corners[7], frac.x);
+        let y0 = lerp(x00, x10, frac.y);
+        let y1 = lerp(x01, x11, frac.y);
+        lerp(y0, y1, frac.z)
+    }
+
+    /// Cached equivalent of [`sdf_gradient_normal_at_local`].
+    pub(crate) fn gradient_normal_at_local(
+        &mut self,
+        world: &VoxelWorld,
+        local_pos: Vec3,
+    ) -> [f32; 3] {
+        let h = 0.5;
+        let gradient = Vec3::new(
+            self.trilinear_at(world, local_pos + Vec3::X * h)
+                - self.trilinear_at(world, local_pos + Vec3::NEG_X * h),
+            self.trilinear_at(world, local_pos + Vec3::Y * h)
+                - self.trilinear_at(world, local_pos + Vec3::NEG_Y * h),
+            self.trilinear_at(world, local_pos + Vec3::Z * h)
+                - self.trilinear_at(world, local_pos + Vec3::NEG_Z * h),
+        );
+        let normal = gradient.normalize_or_zero();
+        if normal.length_squared() > 0.0 {
+            normal.to_array()
+        } else {
+            [0.0, 1.0, 0.0]
+        }
+    }
+}
+
 pub(crate) fn sdf_gradient_normal_at_local(
     world: &VoxelWorld,
     chunk_origin: IVec3,

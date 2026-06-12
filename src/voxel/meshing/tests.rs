@@ -2461,3 +2461,140 @@ fn barycentric_uv_section_tags_round_trip() {
     );
     assert!((barycentric_u(mesh.barycentric_uvs[0]) - 1.0).abs() < f32::EPSILON);
 }
+
+/// Manual perf probe for the Surface Nets meshing hot path. Not a regression
+/// gate — run by hand and compare wall times across changes:
+/// `cargo test -p drusniel-voxels-bevy perf_probe_surface_nets_meshing -- --ignored --nocapture`
+#[test]
+#[ignore = "perf probe — run manually with --nocapture and compare timings"]
+fn perf_probe_surface_nets_meshing() {
+    use std::time::Instant;
+
+    let size = IVec3::new(4, 2, 4);
+    let mut world = world_with_test_chunks(size);
+    for x in 0..size.x * CHUNK_SIZE_I32 {
+        for z in 0..size.z * CHUNK_SIZE_I32 {
+            let h = (12.0
+                + 6.0 * ((x as f32) * 0.19).sin()
+                + 4.0 * ((z as f32) * 0.23).cos()
+                + 3.0 * ((x as f32) * 0.07 + (z as f32) * 0.11).sin()) as i32;
+            for y in 2..h.clamp(3, 30) {
+                let voxel = if y >= h - 1 {
+                    VoxelType::TopSoil
+                } else {
+                    VoxelType::Rock
+                };
+                world.set_voxel(IVec3::new(x, y, z), voxel);
+            }
+        }
+    }
+
+    let ao = BakedAoConfig {
+        enabled: true,
+        strength: 0.5,
+        corner_darkness: 0.6,
+        fix_anisotropy: false,
+    };
+    let skirt_config = SkirtConfig::default();
+    let chunk_pos = IVec3::new(1, 0, 1);
+    let chunk = world.get_chunk(chunk_pos).unwrap();
+
+    for lod in [
+        LodLevel::Lod0,
+        LodLevel::Lod1,
+        LodLevel::Lod2,
+        LodLevel::Lod3,
+    ] {
+        let neighbor_lods = NeighborLods {
+            neg_x: Some(lod),
+            pos_x: Some(lod),
+            neg_y: Some(lod),
+            pos_y: Some(lod),
+            neg_z: Some(lod),
+            pos_z: Some(lod),
+        };
+        let mut best_us = u64::MAX;
+        let mut last = None;
+        for _ in 0..10 {
+            let start = Instant::now();
+            let result = generate_chunk_mesh_for_request(MeshRequest {
+                chunk,
+                world: &world,
+                mode: MeshMode::SurfaceNets,
+                logical_lod: lod,
+                mesh_lod: lod,
+                neighbor_lods,
+                skirt_config: &skirt_config,
+                ao_config: &ao,
+                water_exposure_mode: WaterAirExposureMode::ExteriorConnected,
+                forensics: MeshForensicsOptions::default(),
+                neighbor_strips: None,
+                strip_status: None,
+                mc_settings: None,
+                timing_enabled: true,
+            });
+            best_us = best_us.min(start.elapsed().as_micros() as u64);
+            last = Some(result);
+        }
+        let result = last.unwrap();
+        let t = result.generation_timing;
+        println!(
+            "{lod:?}: best {best_us} us | verts {} tris {} | sdf {} sn {} emit {} seam {} strips {} stitch {} skirt {} morph {} water {} us",
+            result.solid.positions.len(),
+            result.solid.indices.len() / 3,
+            t.sdf_us,
+            t.surface_nets_us,
+            t.emit_surface_us,
+            t.lod_seam_us,
+            t.boundary_strip_us,
+            t.seam_stitch_us,
+            t.skirt_us,
+            t.morph_finalize_us,
+            t.water_us,
+        );
+    }
+}
+
+/// The memoized normal field must agree with the uncached SDF gradient path it
+/// replaced, both inside its cached window and through the out-of-window
+/// fallback.
+#[test]
+fn mesh_sdf_cache_matches_uncached_gradient_normals() {
+    let mut world = world_with_test_chunks(IVec3::new(3, 2, 3));
+    for x in 0..(3 * CHUNK_SIZE_I32) {
+        for z in 0..(3 * CHUNK_SIZE_I32) {
+            let h = 10 + ((x * 7 + z * 3) % 9);
+            for y in 2..h {
+                world.set_voxel(IVec3::new(x, y, z), VoxelType::Rock);
+            }
+        }
+    }
+
+    let chunk_origin = VoxelWorld::chunk_to_world(IVec3::new(1, 0, 1));
+    let mut cache = MeshSdfCache::new(chunk_origin, LodLevel::Lod0);
+
+    let mut probes = Vec::new();
+    for x in [-1.0f32, 0.0, 0.25, 4.5, 8.75, 15.5, 16.0, 17.0] {
+        for y in [-1.0f32, 6.25, 9.5, 11.75, 14.0, 17.0] {
+            probes.push(Vec3::new(x, y, 7.25));
+            probes.push(Vec3::new(7.5, y, x));
+        }
+    }
+    // Outside the cached window: exercises the uncached fallback.
+    probes.push(Vec3::new(-40.0, 9.0, 8.0));
+    probes.push(Vec3::new(8.0, 9.0, 60.0));
+
+    for local in probes {
+        let cached = cache.gradient_normal_at_local(&world, local);
+        let uncached = sdf_gradient_normal_at_local(&world, chunk_origin, local);
+        for axis in 0..3 {
+            assert!(
+                (cached[axis] - uncached[axis]).abs() < 1e-6,
+                "normal mismatch at {local:?}: cached {cached:?} vs uncached {uncached:?}"
+            );
+        }
+        // Memoized second read must be stable.
+        let again = cache.gradient_normal_at_local(&world, local);
+        assert_eq!(cached, again, "cache not idempotent at {local:?}");
+    }
+}

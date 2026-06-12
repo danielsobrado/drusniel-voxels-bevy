@@ -84,12 +84,16 @@ pub(super) fn compute_vertex_material_weights_lod(
     let base_y = local_pos.y.floor() as i32;
     let base_z = local_pos.z.floor() as i32;
 
-    // Sample a larger area based on step_size
-    let range = step_size as i32;
+    // Sample the 8 corners of the step-sized cell instead of scanning all
+    // step³ voxels: an equivalent dominant-material estimate at 8 lookups per
+    // vertex instead of 512 at LOD3. `span` keeps the corners inside the cell
+    // the full scan covered ([base, base + step)), and at step 2 the corners
+    // ARE the full scan, so LOD1 weights are unchanged.
+    let span = (step_size as i32 - 1).max(0);
 
-    for dz in 0..range {
-        for dy in 0..range {
-            for dx in 0..range {
+    for dz in [0, span] {
+        for dy in [0, span] {
+            for dx in [0, span] {
                 let lx = base_x + dx;
                 let ly = base_y + dy;
                 let lz = base_z + dz;

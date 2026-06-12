@@ -97,10 +97,15 @@ impl Default for TriplanarUniforms {
         Self {
             // Warm tint for natural V0.3-like terrain colors (slightly golden/peachy)
             base_color: LinearRgba::new(1.0, 0.97, 0.92, 1.0),
-            tex_scale: 2.0,
+            // One texture repeat per 64 world units, matching the CLOD PoC
+            // (uTextureScales = 1/64). The previous 2.0 tiled 32× more often and
+            // read as obvious repetition at any distance.
+            tex_scale: 64.0,
             blend_sharpness: 4.0,
             normal_intensity: 1.0,
-            parallax_scale: 0.04,
+            // Parallax depth is in UV units; rescaled with tex_scale (0.04 at
+            // tex_scale 2.0 → /32) so the world-space depth is unchanged.
+            parallax_scale: 0.00125,
             ao_strength: 0.0, // Default to V0.3 look (no baked AO)
             rain_factor: 0.0,
             wetness: 0.0,

@@ -1,6 +1,6 @@
 use super::{
-    LodTransitionSnapStats, MeshData, TERRAIN_MESH_SECTION_TRANSITION_APRON,
-    coarse_lod_iso_height_for_column, neighbor_lod_for_face, sdf_gradient_normal_at_local,
+    LodTransitionSnapStats, MeshData, MeshSdfCache, TERRAIN_MESH_SECTION_TRANSITION_APRON,
+    coarse_lod_iso_height_for_column, neighbor_lod_for_face,
     seam_audit::{MorphFaceCounts, SeamStitchResult, XZ_FACE_COUNT, XZ_FACES, xz_face_index},
 };
 use crate::constants::{CHUNK_BOUNDARY_SCALE, CHUNK_SIZE, CHUNK_SIZE_I32, VOXEL_SIZE};
@@ -45,7 +45,7 @@ pub(crate) fn unscale_vertex_to_local(scaled: [f32; 3], chunk_center: Vec3) -> V
 pub(super) fn recompute_morphed_seam_normals(
     mesh: &mut MeshData,
     world: &VoxelWorld,
-    chunk_origin: IVec3,
+    sdf_cache: &mut MeshSdfCache,
     chunk_center: Vec3,
 ) {
     let count = mesh.morph_targets.len().min(mesh.normals.len());
@@ -54,7 +54,7 @@ pub(super) fn recompute_morphed_seam_normals(
         if target[3] > 0.5 {
             let target_local =
                 unscale_vertex_to_local([target[0], target[1], target[2]], chunk_center);
-            mesh.normals[i] = sdf_gradient_normal_at_local(world, chunk_origin, target_local);
+            mesh.normals[i] = sdf_cache.gradient_normal_at_local(world, target_local);
         }
     }
 }
@@ -740,6 +740,9 @@ pub(super) fn snap_boundary_vertices_to_lower_detail_neighbor(
     }
     stats.conflicting_vertex_count = conflicting_vertices.len() as u32;
 
+    // Memoizes the smoothed-SDF taps across the snapped verts of all faces;
+    // the uncached gradient costs ~1.3k chunk-hashmap lookups per vertex.
+    let mut sdf_cache = (!face_targets.is_empty()).then(|| MeshSdfCache::new(chunk_origin, my_lod));
     for (face, targets) in face_targets {
         let mut snapped = 0usize;
         for (index, local) in targets.iter().copied() {
@@ -752,8 +755,10 @@ pub(super) fn snap_boundary_vertices_to_lower_detail_neighbor(
             // weld position, not the semantic surface sample; recomputing here
             // can sample deeper subsoil/rock and paint a dark material band
             // along LOD junctions.
-            if let Some(normal) = solid_mesh.normals.get_mut(index) {
-                *normal = sdf_gradient_normal_at_local(world, chunk_origin, local);
+            if let (Some(normal), Some(cache)) =
+                (solid_mesh.normals.get_mut(index), sdf_cache.as_mut())
+            {
+                *normal = cache.gradient_normal_at_local(world, local);
             }
             snapped += 1;
         }

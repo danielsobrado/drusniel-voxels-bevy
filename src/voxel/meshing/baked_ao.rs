@@ -90,10 +90,10 @@ where
 {
     let samples = 8;
     let mut occlusion = 0.0;
+    let (tangent, bitangent) = arbitrary_tangent_basis(normal);
 
     for i in 0..samples {
         let angle = (i as f32 / samples as f32) * std::f32::consts::TAU;
-        let (tangent, bitangent) = arbitrary_tangent_basis(normal);
         let sample_dir = (normal + tangent * angle.cos() * 0.7 + bitangent * angle.sin() * 0.7)
             .normalize_or_zero();
 
