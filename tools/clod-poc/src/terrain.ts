@@ -156,7 +156,7 @@ function softenHeightCap(height: number, minHeight: number, maxHeight: number): 
 }
 
 /** Terrain surface height at (x,z). */
-function surfaceHeight(x: number, z: number): number {
+export function surfaceHeight(x: number, z: number): number {
   const cfg = TERRAIN_CONFIG;
   const continentNoise = fbmConfigurable(
     x,
@@ -213,6 +213,11 @@ function gradient(x: number, y: number, z: number): [number, number, number] {
   const nz = -gz;
   const len = Math.hypot(nx, ny, nz) || 1;
   return [nx / len, ny / len, nz / len];
+}
+
+/** Terrain surface normal at (x,z), using the same density gradient as the mesher. */
+export function surfaceNormal(x: number, z: number): [number, number, number] {
+  return gradient(x, surfaceHeight(x, z), z);
 }
 
 /** 4 material weights from slope/height — deterministic, so they match across borders. */

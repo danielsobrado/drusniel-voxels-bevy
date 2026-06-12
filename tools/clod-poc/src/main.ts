@@ -15,6 +15,12 @@ import { meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import { createTerrainMaterial } from "./material.js";
 import {
+  DEFAULT_GRASS_SETTINGS,
+  GrassSystem,
+  type GrassLighting,
+  type GrassSettings,
+} from "./grass.js";
+import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
@@ -332,7 +338,7 @@ async function main() {
     orbitModeButton.setAttribute("aria-pressed", String(interaction.mode === "orbit"));
     playerModeButton.setAttribute("aria-pressed", String(interaction.mode !== "orbit"));
     playerModeStatus.textContent = interaction.mode === "choosingSpawn"
-      ? "Click terrain to start"
+      ? "Click the terrain to choose your starting position"
       : interaction.mode === "playing"
         ? "WASD · Shift · Space · Esc"
         : "Orbit camera";
@@ -578,7 +584,7 @@ async function main() {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     textureScale: 1,
-    textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
+    textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
     sunAzimuthDeg: 128,
@@ -590,7 +596,43 @@ async function main() {
     bubble: false,
     bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
     tintBubble: true,
+    grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
+    grassDistance: DEFAULT_GRASS_SETTINGS.distance,
+    grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
+    grassBladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
+    grassBladeHeightVariation: DEFAULT_GRASS_SETTINGS.bladeHeightVariation,
+    grassBladeWidth: DEFAULT_GRASS_SETTINGS.bladeWidth,
+    grassWindStrength: DEFAULT_GRASS_SETTINGS.windStrength,
+    grassWindSpeed: DEFAULT_GRASS_SETTINGS.windSpeed,
+    grassSlopeMinY: DEFAULT_GRASS_SETTINGS.slopeMinY,
+    grassMinHeight: DEFAULT_GRASS_SETTINGS.minHeight,
+    grassMaxHeight: DEFAULT_GRASS_SETTINGS.maxHeight,
+    grassMaxBlades: DEFAULT_GRASS_SETTINGS.maxBlades,
+    grassSeed: DEFAULT_GRASS_SETTINGS.seed,
+    grassBladeCount: 0,
   };
+  const makeGrassSettings = (): GrassSettings => ({
+    enabled: state.grassEnabled,
+    distance: state.grassDistance,
+    bladeSpacing: state.grassBladeSpacing,
+    bladeHeight: state.grassBladeHeight,
+    bladeHeightVariation: state.grassBladeHeightVariation,
+    bladeWidth: state.grassBladeWidth,
+    windStrength: state.grassWindStrength,
+    windSpeed: state.grassWindSpeed,
+    slopeMinY: state.grassSlopeMinY,
+    minHeight: state.grassMinHeight,
+    maxHeight: state.grassMaxHeight,
+    maxBlades: state.grassMaxBlades,
+    seed: state.grassSeed,
+  });
+  const currentGrassLighting = (): GrassLighting => ({
+    light: sunDirectionFromAngles(state.sunAzimuthDeg, state.sunElevationDeg),
+    sunColor: SUN_BASE_COLOR.clone().multiplyScalar(state.sunIntensity),
+    skyLight: SKY_LIGHT_BASE_COLOR.clone().multiplyScalar(state.skyIntensity),
+    groundLight: GROUND_LIGHT_BASE_COLOR.clone().multiplyScalar(state.groundIntensity),
+  });
+  let grass: GrassSystem | null = null;
   let selState: SelectionState = { split: new Set() };
   const crossfadeStep = 1 / cfg.selection.crossfade_frames;
   const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
@@ -614,7 +656,17 @@ async function main() {
     skyMat.uniforms.uHorizon.value.copy(SKY_HORIZON_BASE_COLOR).multiplyScalar(state.skyIntensity);
     for (const v of views.values()) applyLightingToMaterial(v.mat);
     for (const { mats } of chunkGroups.values()) for (const m of mats) applyLightingToMaterial(m);
+    grass?.updateLighting(currentGrassLighting());
   };
+  const grassSystem = new GrassSystem({
+    scene,
+    nodes: allNodes.filter((node) => node.level === 0),
+    worldCells,
+    settings: makeGrassSettings(),
+    lighting: currentGrassLighting(),
+  });
+  grass = grassSystem;
+  state.grassBladeCount = grassSystem.getBladeCount();
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -697,6 +749,7 @@ async function main() {
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
+      `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
       playerLine;
   };
 
@@ -833,6 +886,36 @@ async function main() {
   lightFolder.add(state, "skyIntensity", 0, 2, 0.05).name("sky fill").onChange(updateLighting);
   lightFolder.add(state, "groundIntensity", 0, 2, 0.05).name("ground fill").onChange(updateLighting);
   lightFolder.add(state, "exposure", 0.4, 2, 0.05).name("exposure").onChange(updateLighting);
+  let grassBladeCountController: { updateDisplay: () => unknown } | null = null;
+  const grassActions = {
+    rebuild: () => {
+      grassSystem.updateSettings(makeGrassSettings());
+      grassSystem.rebuild();
+      state.grassBladeCount = grassSystem.getBladeCount();
+      grassBladeCountController?.updateDisplay();
+      updateInfo();
+    },
+  };
+  const updateGrassUniforms = () => grassSystem.updateSettings(makeGrassSettings());
+  const grassFolder = gui.addFolder("grass shader");
+  grassFolder.add(state, "grassEnabled").name("enabled").onChange((enabled: boolean) => {
+    grassSystem.setEnabled(enabled);
+    updateInfo();
+  });
+  grassFolder.add(state, "grassDistance", 16, 512, 1).name("distance").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassBladeSpacing", 0.4, 6, 0.1).name("blade spacing").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeHeight", 0.2, 4, 0.05).name("blade height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeHeightVariation", 0, 1, 0.05).name("height variation").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeWidth", 0.01, 0.4, 0.01).name("blade width").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindStrength", 0, 1.5, 0.01).name("wind strength").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassSlopeMinY", 0, 1, 0.01).name("slope min Y").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMinHeight", 0, 128, 1).name("min height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMaxHeight", 0, 128, 1).name("max height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMaxBlades", 0, 100000, 1000).name("max blades").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassSeed", 0, 100000, 1).name("seed").onFinishChange(grassActions.rebuild);
+  grassBladeCountController = grassFolder.add(state, "grassBladeCount").name("blade count").disable();
+  grassFolder.add(grassActions, "rebuild").name("rebuild");
   const textureInput = document.createElement("input");
   textureInput.type = "file";
   textureInput.accept = "image/*";
@@ -1137,8 +1220,10 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  let elapsedSeconds = 0;
   renderer.setAnimationLoop(() => {
     const playerDelta = Math.min(playerClock.getDelta(), 0.1);
+    elapsedSeconds += playerDelta;
     updateAverageFps();
     skyDome.position.copy(camera.position);
     if (interaction.mode === "playing") {
@@ -1179,8 +1264,16 @@ async function main() {
         if (grp) grp.group.visible = false;
       }
     }
+    const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
+    grassSystem.update(elapsedSeconds, grassCenter);
+    const grassBladeCount = grassSystem.getBladeCount();
+    if (grassBladeCount !== state.grassBladeCount) {
+      state.grassBladeCount = grassBladeCount;
+      grassBladeCountController?.updateDisplay();
+    }
     renderer.render(scene, camera);
   });
+  window.addEventListener("beforeunload", () => grassSystem.dispose(), { once: true });
 }
 
 main().catch((e) => {

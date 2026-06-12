@@ -130,7 +130,11 @@ pass**, and a **dithered screen-door crossfade** when the cut changes. lil-gui c
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
 colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, a
 camera-following sky dome with tuneable sun/sky/ground illumination, and a **terrain
-texture** folder. Use "load image files" to open the texture modal. It shows four
+texture** folder. The **grass shader** folder controls animated instanced grass with
+deterministic placement sampled from LOD0 terrain. Grass patches are independent from
+the active CLOD cut, so selection changes do not duplicate or pop blades; this remains a
+visual-only viewer feature and is not part of CLOD validation. Use "load image files" to
+open the texture modal. It shows four
 square slots for low→high terrain bands; click a square to load or replace that single
 texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
 has its own low/high height range. The right-side `blend mode` control switches between

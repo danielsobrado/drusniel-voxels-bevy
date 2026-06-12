@@ -18,7 +18,8 @@
       }
       @media (max-width: 760px) { #info { max-width: calc(100vw - 22px); } }
       #player-mode-bar {
-        position: absolute; top: 104px; left: 8px; z-index: 12;
+        position: absolute; bottom: 20px; left: 50%; z-index: 12;
+        transform: translateX(-50%);
         display: flex; align-items: center; gap: 6px; padding: 6px;
         color: #eef3f8; background: rgba(12, 15, 19, 0.74);
         border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 4px;
@@ -34,6 +35,11 @@
         border-color: #74b8f5; color: #fff; background: #245781;
       }
       #player-mode-status { margin-left: 3px; color: #b9c7d5; white-space: nowrap; }
+      body[data-player-mode="choosingSpawn"] #player-mode-status { color: #fff2a8; }
+      @media (max-width: 560px) {
+        #player-mode-bar { bottom: 10px; width: calc(100vw - 32px); flex-wrap: wrap; justify-content: center; }
+        #player-mode-status { width: 100%; margin-left: 0; text-align: center; white-space: normal; }
+      }
       body[data-player-mode="choosingSpawn"] canvas { cursor: crosshair; }
       body[data-player-mode="playing"] canvas { cursor: none; }
       #build-progress[hidden] { display: none; }
