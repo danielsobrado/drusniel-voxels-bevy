@@ -14,6 +14,7 @@ use std::fmt;
 
 /// Clean main-surface geometry for one chunk — the only terrain input a page may consume.
 /// `local_positions` are chunk-local; `world = local + world_origin()` (one representation).
+#[derive(Clone)]
 pub struct TerrainMainSurfaceExport {
     pub local_positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,

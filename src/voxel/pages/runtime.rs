@@ -68,6 +68,7 @@ impl Default for ClodPagesRuntime {
 #[derive(Resource, Default)]
 pub struct PageExportCache {
     pub exports: HashMap<IVec3, TerrainMainSurfaceExport>,
+    pub(crate) revision: u64,
 }
 
 fn all_lod0_neighbors() -> NeighborLods {
@@ -155,6 +156,7 @@ pub fn clod_pages_source_meshing_system(
     if !runtime.enabled {
         if !cache.exports.is_empty() {
             cache.exports.clear();
+            cache.revision = cache.revision.wrapping_add(1);
         }
         return;
     }
@@ -170,7 +172,11 @@ pub fn clod_pages_source_meshing_system(
     let near = runtime.cfg.near_field.radius_chunks;
     let far = runtime.source_radius_chunks;
 
+    let previous_len = cache.exports.len();
     cache.exports.retain(|pos, _| cheby(*pos, cam_chunk) <= far);
+    if cache.exports.len() != previous_len {
+        cache.revision = cache.revision.wrapping_add(1);
+    }
 
     let mut candidates: Vec<IVec3> = world
         .chunk_positions()
@@ -184,6 +190,7 @@ pub fn clod_pages_source_meshing_system(
     for pos in candidates.into_iter().take(runtime.source_budget_per_frame) {
         if let Some(export) = mesh_lod0_export(&world, pos, &skirt_config, &ao_config.baked) {
             cache.exports.insert(pos, export);
+            cache.revision = cache.revision.wrapping_add(1);
         }
     }
 }

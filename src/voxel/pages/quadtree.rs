@@ -79,9 +79,13 @@ pub fn build_quadtree(
             let merged = concat(&children.iter().map(|c| c.mesh.clone()).collect::<Vec<_>>());
             let (welded, _) = weld_vertices(&merged, eps)?;
             let footprint = children.iter().skip(1).fold(children[0].footprint, |acc, c| union(acc, c.footprint));
-            let locks = build_outer_border_locks(&welded);
-            let sim = simplify_page(&welded, &locks, cfg);
-            let mut mesh = sim.mesh;
+            let (mut mesh, simplify_error, low_benefit) = if welded.indices.is_empty() {
+                (welded, 0.0, false)
+            } else {
+                let locks = build_outer_border_locks(&welded);
+                let sim = simplify_page(&welded, &locks, cfg);
+                (sim.mesh, sim.error_world, sim.low_benefit)
+            };
             strip_degenerate_triangles(&mut mesh);
             assert_no_internal_borders(&mesh, &footprint)?;
             let max_child = children.iter().map(|c| c.error_world).fold(0.0f32, f32::max);
@@ -91,8 +95,8 @@ pub fn build_quadtree(
                 coord: pc,
                 footprint,
                 mesh,
-                error_world: sim.error_world + max_child,
-                low_benefit: sim.low_benefit,
+                error_world: simplify_error + max_child,
+                low_benefit,
             });
         }
 

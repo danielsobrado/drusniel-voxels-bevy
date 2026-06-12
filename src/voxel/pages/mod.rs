@@ -14,6 +14,7 @@
 //! (weld → lock → simplify → quadtree) and runtime selection follow in later steps, ported
 //! near-verbatim from `tools/clod-rs/src/*`.
 
+pub mod build_queue;
 pub mod config;
 pub mod export;
 pub mod lock;
@@ -26,6 +27,7 @@ pub mod types;
 pub mod validate;
 pub mod weld;
 
+pub use build_queue::{ClodPageBuildStatus, ClodPageTree};
 pub use export::{extract_main_surface_for_clod, ClodExportError, TerrainMainSurfaceExport};
 pub use plugin::ClodPagesPlugin;
 pub use types::{ClodBuildError, PageFootprint, PageMesh};
