@@ -27,8 +27,12 @@ use crate::voxel::world::{VoxelSample, VoxelWorld};
 
 const NEAR_VISIBLE_WATER_DISTANCE: f32 = 24.0;
 
-fn env_flag(name: &str) -> bool {
-    std::env::var_os(name).is_some()
+/// Debug override read once and cached: this sits on a per-frame system, and
+/// `std::env::var_os` takes the process env lock on every call.
+fn force_reflection_active() -> bool {
+    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHE
+        .get_or_init(|| std::env::var_os("VOXEL_FORCE_WATER_REFLECTION_ACTIVE").is_some())
 }
 
 /// The render layer used exclusively by the reflection camera.
@@ -967,7 +971,7 @@ fn update_reflection_camera(
         }
     }
 
-    if env_flag("VOXEL_FORCE_WATER_REFLECTION_ACTIVE") {
+    if force_reflection_active() {
         active = true;
         sample_reflection = true;
         reason = WaterReflectionReason::Active;

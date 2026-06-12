@@ -1,10 +1,16 @@
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_U32, CHUNK_VOLUME};
 use crate::voxel::materials::MaterialId;
 use crate::voxel::skirt::ChunkFace;
-use crate::voxel::types::VoxelType;
+use crate::voxel::types::{Voxel, VoxelType};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// States for the memoized [`Chunk::contains_liquid`] cache.
+const LIQUID_UNKNOWN: u8 = 0;
+const LIQUID_NO: u8 = 1;
+const LIQUID_YES: u8 = 2;
 
 // ============================================================================
 // Face Visibility (for occlusion culling)
@@ -239,6 +245,10 @@ pub struct Chunk {
     /// `NeighborLod` and whose inputs are unchanged (no visible change, byte-
     /// identical mesh). `None` until first committed.
     last_terrain_mesh_key: Option<u64>,
+    /// Memoized "any liquid voxel" answer for [`Chunk::contains_liquid`]
+    /// (LIQUID_UNKNOWN/NO/YES). Atomic so the lazy fill works through `&Chunk`
+    /// during whole-world scans; invalidated wherever `uniformity` is.
+    contains_liquid_cache: AtomicU8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,6 +291,8 @@ impl Chunk {
             face_visibility: FaceVisibility::all_connected(),
             visibility_dirty: false,
             last_terrain_mesh_key: None,
+            // All air: definitively no liquid.
+            contains_liquid_cache: AtomicU8::new(LIQUID_NO),
         }
     }
 
@@ -300,6 +312,7 @@ impl Chunk {
             face_visibility: FaceVisibility::all_connected(),
             visibility_dirty: uniformity != ChunkUniformity::Empty,
             last_terrain_mesh_key: None,
+            contains_liquid_cache: AtomicU8::new(LIQUID_UNKNOWN),
         }
     }
 
@@ -363,6 +376,8 @@ impl Chunk {
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
+            self.contains_liquid_cache
+                .store(LIQUID_UNKNOWN, Ordering::Relaxed);
             // Invalidate face visibility since topology changed
             self.visibility_dirty = true;
         }
@@ -382,6 +397,8 @@ impl Chunk {
             self.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
             // Invalidate cached uniformity since voxel changed
             self.uniformity = ChunkUniformity::Unknown;
+            self.contains_liquid_cache
+                .store(LIQUID_UNKNOWN, Ordering::Relaxed);
             // Invalidate face visibility since topology changed
             self.visibility_dirty = true;
         }
@@ -613,6 +630,7 @@ impl Chunk {
             face_visibility: data.face_visibility,
             visibility_dirty,
             last_terrain_mesh_key: None,
+            contains_liquid_cache: AtomicU8::new(LIQUID_UNKNOWN),
         }
     }
 
@@ -662,6 +680,25 @@ impl Chunk {
     // =========================================================================
     // Uniformity Methods
     // =========================================================================
+
+    /// Whether any voxel in this chunk is liquid. Memoized: the first call
+    /// after a mutation scans the 4096 voxels once; subsequent calls are a
+    /// single atomic load. Used by the whole-world water-shore LOD guard,
+    /// which previously paid the full scan per chunk per LOD pass.
+    pub fn contains_liquid(&self) -> bool {
+        match self.contains_liquid_cache.load(Ordering::Relaxed) {
+            LIQUID_NO => false,
+            LIQUID_YES => true,
+            _ => {
+                let result = self.voxels.iter().any(|voxel| voxel.is_liquid());
+                self.contains_liquid_cache.store(
+                    if result { LIQUID_YES } else { LIQUID_NO },
+                    Ordering::Relaxed,
+                );
+                result
+            }
+        }
+    }
 
     /// Returns the cached uniformity state of this chunk.
     #[inline]

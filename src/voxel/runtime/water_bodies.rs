@@ -137,7 +137,11 @@ pub(crate) fn update_water_body_registry(
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
-    if now - *last_update < WATER_BODY_UPDATE_INTERVAL && !world.is_changed() {
+    // Interval-only throttle. The old `!world.is_changed()` bypass re-ran the
+    // full registry rebuild every frame whenever ANY system mutated VoxelWorld
+    // (generation, edits, LOD churn) — exactly the busiest frames. A ≤0.5 s
+    // stale registry is fine: it only drives water material/kind selection.
+    if now - *last_update < WATER_BODY_UPDATE_INTERVAL {
         record_water_body_counters(frame.0, &mut timing, &registry);
         return;
     }

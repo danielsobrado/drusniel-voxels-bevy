@@ -11,8 +11,8 @@ use crate::bench::{
     BenchForensicsConfig, BenchForensicsTerrainLod, BenchForensicsTerrainMesher, BenchRenderToggles,
 };
 use crate::constants::{
-    CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SIZE_I32, DEFAULT_CULL_DISTANCE,
-    DEFAULT_HIGH_DETAIL_DISTANCE, LOD_HYSTERESIS, WATER_LEVEL,
+    CHUNK_SIZE_F32, CHUNK_SIZE_I32, DEFAULT_CULL_DISTANCE, DEFAULT_HIGH_DETAIL_DISTANCE,
+    LOD_HYSTERESIS, WATER_LEVEL,
 };
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::chunk::{Chunk, ChunkUniformity, LodLevel};
@@ -21,7 +21,6 @@ use crate::voxel::meshing::{
     MeshMode, MeshSettings, empty_chunk_has_surface_nets_boundary_surface,
 };
 use crate::voxel::skirt::NeighborLods;
-use crate::voxel::types::Voxel;
 use crate::voxel::world::VoxelWorld;
 
 const TERRAIN_LOD_HYSTERESIS: f32 = LOD_HYSTERESIS * 2.0;
@@ -581,19 +580,9 @@ pub(crate) fn chunk_layer_intersects_waterline(chunk_pos: IVec3) -> bool {
 }
 
 pub(crate) fn chunk_contains_liquid(chunk: &Chunk) -> bool {
-    for z in 0..CHUNK_SIZE {
-        for y in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                if chunk
-                    .get(UVec3::new(x as u32, y as u32, z as u32))
-                    .is_liquid()
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    // Memoized on the chunk (invalidated on voxel mutation). The previous
+    // open-coded 16³ scan ran for EVERY loaded chunk on every LOD pass.
+    chunk.contains_liquid()
 }
 
 pub(crate) fn water_shore_guarded_lod(

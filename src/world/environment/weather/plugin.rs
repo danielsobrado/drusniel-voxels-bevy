@@ -91,12 +91,20 @@ fn update_weather_runtime(
         .unwrap_or(false);
     let effective_quality =
         effective_weather_quality(&config, quality.as_deref().copied(), integrated_gpu);
-    runtime.advance(
+    // `advance` reports whether the shader uniforms actually changed. Write
+    // through bypass_change_detection so an idle tick does not mark the
+    // resource changed: `sync_weather_to_materials` mutates every terrain
+    // material variant whenever WeatherRuntime reads as changed, forcing
+    // per-frame material re-prepare even with weather fully idle.
+    let changed = runtime.bypass_change_detection().advance(
         &config,
         time.delta_secs(),
         effective_quality,
         integrated_gpu,
     );
+    if changed {
+        runtime.set_changed();
+    }
 }
 
 fn record_weather_counters(

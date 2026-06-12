@@ -9,7 +9,10 @@ use crate::voxel::persistence::WorldData;
 use crate::voxel::types::VoxelType;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+// Bevy's hashbrown maps (foldhash) instead of std's SipHash: every voxel
+// sample anywhere in the engine funnels through `chunks.get(&chunk_pos)`, so
+// the per-lookup hash cost is hot.
+use bevy::platform::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
