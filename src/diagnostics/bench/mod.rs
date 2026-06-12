@@ -487,30 +487,35 @@ struct GameplayTraceSample {
 
 impl BenchReadySnapshot {
     fn is_ready_candidate(self) -> bool {
-        if self.signature.missing_chunks != 0 || self.signature.dirty_chunks != 0 {
+        if self.signature.missing_chunks != 0 {
             return false;
         }
 
+        let has_visible_mesh =
+            self.signature.mesh_entities + self.signature.water_mesh_entities > 0;
         if self.require_collider_ready {
-            return self.signature.collider_pending_entities == 0
-                && self.signature.collider_ready_entities > 0;
+            return has_visible_mesh && self.signature.collider_ready_entities > 0;
         }
 
-        self.chunks_meshed_this_frame == 0
-            && self.chunks_skipped_this_frame == 0
-            && self.signature.mesh_entities + self.signature.water_mesh_entities > 0
+        has_visible_mesh
     }
 
     fn stability_signature(self) -> BenchReadySignature {
         if !self.require_collider_ready {
-            return self.signature;
+            return BenchReadySignature {
+                missing_chunks: self.signature.missing_chunks,
+                dirty_chunks: 0,
+                mesh_entities: (self.signature.mesh_entities > 0) as u32,
+                water_mesh_entities: (self.signature.water_mesh_entities > 0) as u32,
+                ..Default::default()
+            };
         }
 
         BenchReadySignature {
             missing_chunks: self.signature.missing_chunks,
-            dirty_chunks: self.signature.dirty_chunks,
+            dirty_chunks: 0,
             collider_ready_entities: (self.signature.collider_ready_entities > 0) as u32,
-            collider_pending_entities: (self.signature.collider_pending_entities > 0) as u32,
+            collider_pending_entities: 0,
             ..Default::default()
         }
     }
@@ -4886,7 +4891,6 @@ frame = 1
 
         assert!(!snapshot.is_ready_candidate());
 
-        snapshot.signature.collider_pending_entities = 0;
         snapshot.signature.collider_ready_entities = 1;
         assert!(snapshot.is_ready_candidate());
     }
@@ -4910,6 +4914,7 @@ frame = 1
     fn gameplay_ready_snapshot_ignores_global_visual_mesh_work() {
         let snapshot = BenchReadySnapshot {
             signature: BenchReadySignature {
+                mesh_entities: 1,
                 collider_ready_entities: 4,
                 high_lod_chunks: 128,
                 low_lod_chunks: 32,
@@ -4924,7 +4929,7 @@ frame = 1
     }
 
     #[test]
-    fn visual_ready_snapshot_waits_for_global_mesh_quiescence() {
+    fn visual_ready_snapshot_ignores_background_mesh_work() {
         let snapshot = BenchReadySnapshot {
             signature: BenchReadySignature {
                 mesh_entities: 1,
@@ -4935,7 +4940,7 @@ frame = 1
             ..Default::default()
         };
 
-        assert!(!snapshot.is_ready_candidate());
+        assert!(snapshot.is_ready_candidate());
     }
 
     #[test]
@@ -4987,7 +4992,7 @@ frame = 1
         assert_eq!(first.stability_signature(), second.stability_signature());
 
         first.signature.collider_pending_entities = 1;
-        assert_ne!(first.stability_signature(), second.stability_signature());
+        assert_eq!(first.stability_signature(), second.stability_signature());
     }
 
     #[test]

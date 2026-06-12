@@ -639,11 +639,26 @@ pub(crate) fn world_startup_snapshot(
         };
     }
 
-    if chunk_stats.surface_nets_chunks_deferred_for_halo > 0
-        || chunk_stats.generation_dirty_chunks_queued > 0
-        || chunk_stats.chunks_meshed_this_frame > 0
-        || chunk_stats.chunks_skipped_this_frame > 0
+    if chunk_stats.mesh_entities == 0
+        && (chunk_stats.generation_dirty_chunks_queued > 0
+            || chunk_stats.chunks_meshed_this_frame > 0
+            || chunk_stats.chunks_skipped_this_frame > 0)
     {
+        return WorldStartupSnapshot {
+            stage: WorldStartupStage::PreparingMeshes,
+            progress: 0.98,
+            detail: format!(
+                "Building terrain meshes ({} queued, {} waiting for neighbors)",
+                chunk_stats
+                    .generation_dirty_chunks_queued
+                    .max(chunk_stats.dirty_chunks_queued),
+                chunk_stats.surface_nets_chunks_deferred_for_halo
+            ),
+            complete: false,
+        };
+    }
+
+    if chunk_stats.surface_nets_chunks_deferred_for_halo > 0 {
         return WorldStartupSnapshot {
             stage: WorldStartupStage::PreparingMeshes,
             progress: 0.98,
