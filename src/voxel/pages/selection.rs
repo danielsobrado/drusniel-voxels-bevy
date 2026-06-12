@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use super::build_queue::ClodPageTree;
+use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 use super::runtime::ClodPagesRuntime;
 use super::types::PageFootprint;
@@ -100,7 +100,7 @@ impl ClodPageSelectionIndex {
         self.revision = Some(tree.revision);
     }
 
-    fn node(&self, key: ClodPageNodeKey) -> Option<&ClodSelectionNode> {
+    pub(crate) fn node(&self, key: ClodPageNodeKey) -> Option<&ClodSelectionNode> {
         self.nodes.get(&key)
     }
 }
@@ -121,11 +121,11 @@ struct SelectionParams {
 }
 
 #[derive(Clone, Copy)]
-struct NearFieldBubble {
-    player_center: Option<Vec2>,
-    camera_center: Vec2,
-    radius: f32,
-    boundary_padding: f32,
+pub(crate) struct NearFieldBubble {
+    pub(crate) player_center: Option<Vec2>,
+    pub(crate) camera_center: Vec2,
+    pub(crate) radius: f32,
+    pub(crate) boundary_padding: f32,
 }
 
 impl NearFieldBubble {
@@ -179,7 +179,7 @@ fn error_px(node: &ClodSelectionNode, params: &SelectionParams) -> f32 {
     (node.error_world * params.viewport_h) / (2.0 * dist * (params.fov_y * 0.5).tan())
 }
 
-fn rect_distance2_to_point(footprint: PageFootprint, point: Vec2) -> f32 {
+pub(crate) fn rect_distance2_to_point(footprint: PageFootprint, point: Vec2) -> f32 {
     let dx = if point.x < footprint.min_x {
         footprint.min_x - point.x
     } else if point.x > footprint.max_x {
@@ -197,30 +197,19 @@ fn rect_distance2_to_point(footprint: PageFootprint, point: Vec2) -> f32 {
     dx * dx + dz * dz
 }
 
-fn near_field_forces_split(node: &ClodSelectionNode, bubble: NearFieldBubble) -> bool {
+pub(crate) fn near_field_intersects_footprint(
+    footprint: PageFootprint,
+    bubble: NearFieldBubble,
+) -> bool {
     let r = bubble.radius + bubble.boundary_padding;
     let r2 = r * r;
     bubble
         .centers()
-        .any(|center| rect_distance2_to_point(node.footprint, center) <= r2)
+        .any(|center| rect_distance2_to_point(footprint, center) <= r2)
 }
 
-fn footprint_inside_sphere(footprint: PageFootprint, center: Vec2, radius: f32) -> bool {
-    let r2 = radius * radius;
-    [
-        Vec2::new(footprint.min_x, footprint.min_z),
-        Vec2::new(footprint.min_x, footprint.max_z),
-        Vec2::new(footprint.max_x, footprint.min_z),
-        Vec2::new(footprint.max_x, footprint.max_z),
-    ]
-    .into_iter()
-    .all(|corner| corner.distance_squared(center) <= r2)
-}
-
-fn fully_inside_bubble(footprint: PageFootprint, bubble: NearFieldBubble) -> bool {
-    bubble
-        .centers()
-        .any(|center| footprint_inside_sphere(footprint, center, bubble.radius))
+fn near_field_forces_split(node: &ClodSelectionNode, bubble: NearFieldBubble) -> bool {
+    near_field_intersects_footprint(node.footprint, bubble)
 }
 
 fn adjacent(a: &ClodSelectionNode, b: &ClodSelectionNode) -> bool {
@@ -351,6 +340,24 @@ fn projection_fov_y(projection: &Projection) -> Option<f32> {
     }
 }
 
+pub(crate) fn clod_near_field_bubble(
+    runtime: &ClodPagesRuntime,
+    camera_transform: &Transform,
+    player_transform: Option<&Transform>,
+) -> NearFieldBubble {
+    let chunk_size = runtime.cfg.page.chunk_size as f32;
+    NearFieldBubble {
+        player_center: player_transform
+            .map(|transform| Vec2::new(transform.translation.x, transform.translation.z)),
+        camera_center: Vec2::new(
+            camera_transform.translation.x,
+            camera_transform.translation.z,
+        ),
+        radius: runtime.cfg.near_field.radius_chunks.max(0) as f32 * chunk_size,
+        boundary_padding: (runtime.cfg.page.chunks_per_page * runtime.cfg.page.chunk_size) as f32,
+    }
+}
+
 fn make_params(
     runtime: &ClodPagesRuntime,
     camera_transform: &Transform,
@@ -363,9 +370,6 @@ fn make_params(
         return None;
     }
 
-    let chunk_size = runtime.cfg.page.chunk_size as f32;
-    let radius = runtime.cfg.near_field.radius_chunks.max(0) as f32 * chunk_size;
-    let boundary_padding = (runtime.cfg.page.chunks_per_page * runtime.cfg.page.chunk_size) as f32;
     Some(SelectionParams {
         threshold_px: runtime.cfg.selection.error_threshold_px,
         hysteresis_merge_factor: runtime.cfg.selection.hysteresis_merge_factor,
@@ -373,16 +377,7 @@ fn make_params(
         viewport_h,
         fov_y,
         cam_pos: camera_transform.translation,
-        near_field: NearFieldBubble {
-            player_center: player_transform
-                .map(|transform| Vec2::new(transform.translation.x, transform.translation.z)),
-            camera_center: Vec2::new(
-                camera_transform.translation.x,
-                camera_transform.translation.z,
-            ),
-            radius,
-            boundary_padding,
-        },
+        near_field: clod_near_field_bubble(runtime, camera_transform, player_transform),
     })
 }
 
@@ -397,6 +392,7 @@ fn hide_all_pages(query: &mut Query<(&ClodPageMeshTag, &mut Visibility)>) {
 pub(crate) fn clod_page_selection_system(
     runtime: Res<ClodPagesRuntime>,
     show: Res<ClodPagesShow>,
+    tree: Res<ClodPageTree>,
     index: Res<ClodPageSelectionIndex>,
     mut state: ResMut<ClodPageSelectionState>,
     camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
@@ -404,7 +400,11 @@ pub(crate) fn clod_page_selection_system(
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut pages: Query<(&ClodPageMeshTag, &mut Visibility)>,
 ) {
-    if !runtime.enabled || show.0 == ClodPagesShowMode::Off || index.revision.is_none() {
+    if !runtime.enabled
+        || show.0 == ClodPagesShowMode::Off
+        || index.revision.is_none()
+        || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
+    {
         state.split.clear();
         hide_all_pages(&mut pages);
         return;
@@ -437,9 +437,9 @@ pub(crate) fn clod_page_selection_system(
     for (tag, mut visibility) in pages.iter_mut() {
         let key = ClodPageNodeKey::from(tag);
         let visible = rendered.contains(&key)
-            && index
-                .node(key)
-                .is_some_and(|node| !fully_inside_bubble(node.footprint, params.near_field));
+            && index.node(key).is_some_and(|node| {
+                !near_field_intersects_footprint(node.footprint, params.near_field)
+            });
         let desired = if visible {
             Visibility::Visible
         } else {
@@ -587,11 +587,8 @@ mod tests {
             node(leaf, footprint(0.0, 0.0, 32.0, 64.0), 0.0, Vec::new()),
         );
 
-        let (rendered, split) = select_cut(
-            &index,
-            &params(Vec3::new(32.0, 0.0, 32.0)),
-            &HashSet::new(),
-        );
+        let (rendered, split) =
+            select_cut(&index, &params(Vec3::new(32.0, 0.0, 32.0)), &HashSet::new());
 
         assert!(split.contains(&root));
         assert!(split.contains(&split_child));
@@ -650,8 +647,11 @@ mod tests {
 
         let mut merged_state = HashSet::new();
         for target_epx in [0.9, 0.7, 0.95] {
-            let (rendered, split) =
-                select_cut(&index, &params_for_epx(&root_node, target_epx), &merged_state);
+            let (rendered, split) = select_cut(
+                &index,
+                &params_for_epx(&root_node, target_epx),
+                &merged_state,
+            );
             assert_eq!(rendered, vec![root]);
             assert!(split.is_empty());
             merged_state = split;
@@ -659,8 +659,11 @@ mod tests {
 
         let mut split_state = HashSet::from([root]);
         for target_epx in [0.9, 0.7, 0.95] {
-            let (rendered, split) =
-                select_cut(&index, &params_for_epx(&root_node, target_epx), &split_state);
+            let (rendered, split) = select_cut(
+                &index,
+                &params_for_epx(&root_node, target_epx),
+                &split_state,
+            );
             assert_eq!(rendered, vec![child]);
             assert!(split.contains(&root));
             split_state = split;
@@ -721,7 +724,6 @@ mod tests {
             512.0
         );
         assert!(near_field_forces_split(&page, bubble));
-        assert!(!fully_inside_bubble(page.footprint, bubble));
 
         let covering_bubble = NearFieldBubble {
             player_center: None,
@@ -729,6 +731,6 @@ mod tests {
             radius: 46.0,
             boundary_padding: 0.0,
         };
-        assert!(fully_inside_bubble(page.footprint, covering_bubble));
+        assert!(near_field_forces_split(&page, covering_bubble));
     }
 }

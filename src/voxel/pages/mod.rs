@@ -18,6 +18,7 @@ pub mod build_queue;
 pub mod config;
 pub mod export;
 pub mod lock;
+mod ownership;
 pub mod plugin;
 pub mod quadtree;
 pub mod render;
@@ -30,7 +31,7 @@ pub mod validate;
 pub mod weld;
 
 pub use build_queue::{ClodPageBuildStatus, ClodPageTree};
-pub use export::{extract_main_surface_for_clod, ClodExportError, TerrainMainSurfaceExport};
+pub use export::{ClodExportError, TerrainMainSurfaceExport, extract_main_surface_for_clod};
 pub use plugin::ClodPagesPlugin;
 pub use render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 pub use types::{ClodBuildError, PageFootprint, PageMesh};

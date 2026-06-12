@@ -2,20 +2,23 @@
 
 use bevy::prelude::*;
 
+use crate::voxel::runtime::VoxelTerrainSet;
+
 use super::build_queue::{
-    clod_pages_build_queue_system, clod_pages_build_task_poll_system, ClodPageBuildQueue,
-    ClodPageTree,
+    ClodPageBuildQueue, ClodPageTree, clod_pages_build_queue_system,
+    clod_pages_build_task_poll_system,
 };
+use super::ownership::clod_page_chunk_ownership_system;
 use super::render::{
-    clod_page_mesh_commit_needed, clod_page_mesh_commit_system,
-    clod_pages_show_startup_log_system, ClodPageMeshCommitState, ClodPagesShow,
+    ClodPageMeshCommitState, ClodPagesShow, clod_page_mesh_commit_needed,
+    clod_page_mesh_commit_system, clod_pages_show_startup_log_system,
 };
 use super::runtime::{
-    clod_pages_debug_toggle_system, clod_pages_source_meshing_system, clod_pages_startup_log_system,
-    ClodPagesRuntime, PageExportCache,
+    ClodPagesRuntime, PageExportCache, clod_pages_debug_toggle_system,
+    clod_pages_source_meshing_system, clod_pages_startup_log_system,
 };
 use super::selection::{
-    clod_page_selection_system, ClodPageSelectionIndex, ClodPageSelectionState,
+    ClodPageSelectionIndex, ClodPageSelectionState, clod_page_selection_system,
 };
 
 pub struct ClodPagesPlugin;
@@ -62,6 +65,12 @@ impl Plugin for ClodPagesPlugin {
             .add_systems(
                 Update,
                 clod_page_selection_system.after(clod_page_mesh_commit_system),
+            )
+            .add_systems(
+                Update,
+                clod_page_chunk_ownership_system
+                    .after(clod_page_selection_system)
+                    .after(VoxelTerrainSet::MeshDirty),
             );
     }
 }
