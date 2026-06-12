@@ -129,8 +129,13 @@ selection** (screen-space error + hysteresis), the optional **2:1 restricted-qua
 pass**, and a **dithered screen-door crossfade** when the cut changes. lil-gui controls:
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
 colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, a
-camera-following sky dome with tuneable sun/sky/ground illumination, and a **terrain
-texture** folder. Use "load image files" to open the texture modal. It shows four
+camera-following procedural sky dome with sun disk, glow, horizon haze, and exposure
+controls, and a **terrain
+texture** folder. The **grass shader** folder controls animated instanced grass with
+deterministic placement sampled from LOD0 terrain. Grass patches are independent from
+the active CLOD cut, so selection changes do not duplicate or pop blades; this remains a
+visual-only viewer feature and is not part of CLOD validation. Use "load image files" to
+open the texture modal. It shows four
 square slots for low→high terrain bands; click a square to load or replace that single
 texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
 has its own low/high height range. The right-side `blend mode` control switches between
@@ -141,6 +146,21 @@ wrapping, and the global "texture scale" controls tiling density. With `colour b
 enabled the page colour is applied as a light tint over the texture, so the image remains
 visible on every LOD while ownership is still readable. Turn `colour by LOD` off for a
 neutral textured terrain pass.
+
+The sky/environment shader lives in a reusable module that owns the scene background and
+synchronizes sun, sky-fill, and ground-fill lighting across terrain, near-field bubble
+chunks, and grass. It is visual-only and does not participate in CLOD selection or validation.
+
+The **terrain color** folder provides brightness, contrast, saturation, and warmth controls.
+They adjust terrain albedo before lighting, without affecting the normal-colour or normal
+divergence debug modes. This makes texture and LOD readability quick to tune without
+editing texture assets; the reset action restores the current visual defaults.
+
+The **postprocess** folder controls a small manual render-target pipeline. `copy` mode
+shows the rendered scene with only copy opacity applied, while `output` mode adds final-pass
+exposure, contrast, saturation, and vignette controls. Turning the feature off, or selecting
+`off` mode, renders the scene directly. This is visual-only and does not affect CLOD
+selection or validation.
 
 The **near-field bubble** folder (§4.4): pages intersecting the bubble are force-split to
 LOD0, and inside the radius a LOD0 page is drawn as its raw chunks instead of the welded

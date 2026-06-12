@@ -13,7 +13,18 @@ import { initSimplifier } from "./simplify.js";
 import { buildWorldAsync } from "./quadtree.js";
 import { meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
-import { createTerrainMaterial } from "./material.js";
+import {
+  applyTerrainColorAdjustments,
+  createTerrainMaterial,
+  DEFAULT_TERRAIN_COLOR_ADJUSTMENTS,
+  type TerrainColorAdjustments,
+} from "./material.js";
+import {
+  DEFAULT_GRASS_SETTINGS,
+  GrassSystem,
+  type GrassLighting,
+  type GrassSettings,
+} from "./grass.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -23,6 +34,18 @@ import {
 import { selectCut, SelectionParams, SelectionState } from "./selection.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
+import {
+  DEFAULT_ENVIRONMENT_COLORS,
+  DEFAULT_ENVIRONMENT_SETTINGS,
+  SkyEnvironment,
+  type EnvironmentLighting,
+  type EnvironmentSettings,
+} from "./environment.js";
+import {
+  DEFAULT_POST_PROCESS_SETTINGS,
+  PostProcessPipeline,
+  type PostProcessSettings,
+} from "./postprocess.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
@@ -61,74 +84,6 @@ const BUILTIN_TERRAIN_TEXTURES = [
 ] as const;
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
 type TextureBlendMode = (typeof TEXTURE_BLEND_MODES)[number];
-const SUN_DIRECTION = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
-const SUN_BASE_COLOR = new THREE.Color(0.95, 0.86, 0.68);
-const SKY_LIGHT_BASE_COLOR = new THREE.Color(0.42, 0.48, 0.58);
-const GROUND_LIGHT_BASE_COLOR = new THREE.Color(0.18, 0.16, 0.13);
-const SKY_ZENITH_BASE_COLOR = new THREE.Color(0x476d9f);
-const SKY_HORIZON_BASE_COLOR = new THREE.Color(0xbfc9d2);
-
-function sunDirectionFromAngles(azimuthDeg: number, elevationDeg: number): THREE.Vector3 {
-  const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
-  const elevation = THREE.MathUtils.degToRad(elevationDeg);
-  const horizontal = Math.cos(elevation);
-  return new THREE.Vector3(
-    Math.cos(azimuth) * horizontal,
-    Math.sin(elevation),
-    Math.sin(azimuth) * horizontal,
-  ).normalize();
-}
-
-const SKY_VERT = /* glsl */ `
-  varying vec3 vDir;
-  void main() {
-    vDir = normalize(position);
-    vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    gl_Position = clip.xyww;
-  }
-`;
-
-const SKY_FRAG = /* glsl */ `
-  precision highp float;
-  uniform vec3 uSunDir;
-  uniform vec3 uZenith;
-  uniform vec3 uHorizon;
-  uniform vec3 uSunColor;
-  varying vec3 vDir;
-
-  void main() {
-    vec3 dir = normalize(vDir);
-    float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 sky = mix(uHorizon, uZenith, pow(up, 0.72));
-    float sun = max(dot(dir, normalize(uSunDir)), 0.0);
-    sky += uSunColor * pow(sun, 360.0);
-    sky += uSunColor * 0.18 * pow(sun, 18.0);
-    gl_FragColor = vec4(sky, 1.0);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
-  }
-`;
-
-function createSkyDome(radius: number): THREE.Mesh {
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uSunDir: { value: SUN_DIRECTION.clone() },
-      uZenith: { value: SKY_ZENITH_BASE_COLOR.clone() },
-      uHorizon: { value: SKY_HORIZON_BASE_COLOR.clone() },
-      uSunColor: { value: SUN_BASE_COLOR.clone() },
-    },
-    vertexShader: SKY_VERT,
-    fragmentShader: SKY_FRAG,
-    side: THREE.BackSide,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: true,
-  });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 24), material);
-  sky.frustumCulled = false;
-  sky.renderOrder = -1000;
-  return sky;
-}
 
 function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
@@ -281,14 +236,10 @@ async function main() {
   renderer.setPixelRatio(devicePixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8fb1cf);
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const skyDome = createSkyDome(Math.max(1600, worldCells * 5));
-  scene.add(skyDome);
   const mid = worldCells / 2;
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 8000);
   camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
@@ -332,7 +283,7 @@ async function main() {
     orbitModeButton.setAttribute("aria-pressed", String(interaction.mode === "orbit"));
     playerModeButton.setAttribute("aria-pressed", String(interaction.mode !== "orbit"));
     playerModeStatus.textContent = interaction.mode === "choosingSpawn"
-      ? "Click terrain to start"
+      ? "Click the terrain to choose your starting position"
       : interaction.mode === "playing"
         ? "WASD · Shift · Space · Esc"
         : "Orbit camera";
@@ -439,6 +390,110 @@ async function main() {
   window.addEventListener("blur", resetPlayerInput);
   updatePlayerModeUi();
 
+  const state = {
+    thresholdPx: cfg.selection.error_threshold_px,
+    enforce21: true,
+    freeze: false,
+    wireframe: false,
+    showBounds: false,
+    showSeamPoints: false,
+    showCrossLodBorders: false,
+    colorByLod: true,
+    normalColor: false,
+    normalDivergence: false,
+    divergenceGain: 8,
+    frontSideOnly: false,
+    recomputedNormals: false,
+    forceMaxLevel: "auto",
+    textureScale: 1,
+    textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
+    textureBlendWidth: 6,
+    loadedTextureFiles: "none",
+    terrainBrightness: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness,
+    terrainContrast: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.contrast,
+    terrainSaturation: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation,
+    terrainWarmth: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth,
+    sunAzimuthDeg: DEFAULT_ENVIRONMENT_SETTINGS.sunAzimuthDeg,
+    sunElevationDeg: DEFAULT_ENVIRONMENT_SETTINGS.sunElevationDeg,
+    sunIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunIntensity,
+    skyIntensity: DEFAULT_ENVIRONMENT_SETTINGS.skyIntensity,
+    groundIntensity: DEFAULT_ENVIRONMENT_SETTINGS.groundIntensity,
+    exposure: DEFAULT_ENVIRONMENT_SETTINGS.exposure,
+    horizonSoftness: DEFAULT_ENVIRONMENT_SETTINGS.horizonSoftness,
+    sunDiskIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunDiskIntensity,
+    sunGlowIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunGlowIntensity,
+    hazeIntensity: DEFAULT_ENVIRONMENT_SETTINGS.hazeIntensity,
+    postProcessEnabled: DEFAULT_POST_PROCESS_SETTINGS.enabled,
+    postProcessOpacity: DEFAULT_POST_PROCESS_SETTINGS.opacity,
+    postProcessExposure: DEFAULT_POST_PROCESS_SETTINGS.exposure,
+    postProcessContrast: DEFAULT_POST_PROCESS_SETTINGS.contrast,
+    postProcessSaturation: DEFAULT_POST_PROCESS_SETTINGS.saturation,
+    postProcessVignette: DEFAULT_POST_PROCESS_SETTINGS.vignette,
+    postProcessDebugMode: DEFAULT_POST_PROCESS_SETTINGS.debugMode,
+    bubble: false,
+    bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
+    tintBubble: true,
+    grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
+    grassDistance: DEFAULT_GRASS_SETTINGS.distance,
+    grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
+    grassBladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
+    grassBladeHeightVariation: DEFAULT_GRASS_SETTINGS.bladeHeightVariation,
+    grassBladeWidth: DEFAULT_GRASS_SETTINGS.bladeWidth,
+    grassWindStrength: DEFAULT_GRASS_SETTINGS.windStrength,
+    grassWindSpeed: DEFAULT_GRASS_SETTINGS.windSpeed,
+    grassSlopeMinY: DEFAULT_GRASS_SETTINGS.slopeMinY,
+    grassMinHeight: DEFAULT_GRASS_SETTINGS.minHeight,
+    grassMaxHeight: DEFAULT_GRASS_SETTINGS.maxHeight,
+    grassMaxBlades: DEFAULT_GRASS_SETTINGS.maxBlades,
+    grassSeed: DEFAULT_GRASS_SETTINGS.seed,
+    grassBladeCount: 0,
+  };
+  const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
+    brightness: state.terrainBrightness,
+    contrast: state.terrainContrast,
+    saturation: state.terrainSaturation,
+    warmth: state.terrainWarmth,
+  });
+  const currentEnvironmentSettings = (): EnvironmentSettings => ({
+    sunAzimuthDeg: state.sunAzimuthDeg,
+    sunElevationDeg: state.sunElevationDeg,
+    sunIntensity: state.sunIntensity,
+    skyIntensity: state.skyIntensity,
+    groundIntensity: state.groundIntensity,
+    exposure: state.exposure,
+    horizonSoftness: state.horizonSoftness,
+    sunDiskIntensity: state.sunDiskIntensity,
+    sunGlowIntensity: state.sunGlowIntensity,
+    hazeIntensity: state.hazeIntensity,
+  });
+  const currentPostProcessSettings = (): PostProcessSettings => ({
+    enabled: state.postProcessEnabled,
+    opacity: state.postProcessOpacity,
+    exposure: state.postProcessExposure,
+    contrast: state.postProcessContrast,
+    saturation: state.postProcessSaturation,
+    vignette: state.postProcessVignette,
+    debugMode: state.postProcessDebugMode,
+  });
+  const postProcess = new PostProcessPipeline(renderer, currentPostProcessSettings());
+  postProcess.setSize(window.innerWidth, window.innerHeight);
+  const skyEnvironment = new SkyEnvironment({
+    scene,
+    renderer,
+    radius: Math.max(1600, worldCells * 5),
+    settings: currentEnvironmentSettings(),
+    colors: DEFAULT_ENVIRONMENT_COLORS,
+  });
+  const applyLightingToMaterial = (
+    mat: THREE.ShaderMaterial,
+    lighting: EnvironmentLighting = skyEnvironment.lighting(),
+  ) => {
+    mat.uniforms.uLight.value.copy(lighting.sunDirection);
+    mat.uniforms.uSunColor.value.copy(lighting.sunColor);
+    mat.uniforms.uSkyLight.value.copy(lighting.skyLight);
+    mat.uniforms.uGroundLight.value.copy(lighting.groundLight);
+  };
+
   const textureSlots: TextureSlot[] = Array.from({ length: MAX_TERRAIN_TEXTURES }, () => ({
     texture: null,
     name: "empty",
@@ -492,6 +547,8 @@ async function main() {
   const views = new Map<string, NodeView>();
   for (const node of allNodes) {
     const mat = createTerrainMaterial(LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)]);
+    applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
+    applyLightingToMaterial(mat);
     const mesh = new THREE.Mesh(toGeometry(node.mesh), mat);
     mesh.visible = false;
     scene.add(mesh);
@@ -532,6 +589,7 @@ async function main() {
         mat.uniforms.uNormalColor.value = state.normalColor;
         mat.uniforms.uNormalDivergence.value = state.normalDivergence;
         mat.uniforms.uDivergenceGain.value = state.divergenceGain;
+        applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
         mat.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
         rebuildActiveTerrainSlots();
         const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
@@ -562,59 +620,61 @@ async function main() {
     return entry;
   };
 
-  const state = {
-    thresholdPx: cfg.selection.error_threshold_px,
-    enforce21: true,
-    freeze: false,
-    wireframe: false,
-    showBounds: false,
-    showSeamPoints: false,
-    showCrossLodBorders: false,
-    colorByLod: true,
-    normalColor: false,
-    normalDivergence: false,
-    divergenceGain: 8,
-    frontSideOnly: false,
-    recomputedNormals: false,
-    forceMaxLevel: "auto",
-    textureScale: 1,
-    textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
-    textureBlendWidth: 6,
-    loadedTextureFiles: "none",
-    sunAzimuthDeg: 128,
-    sunElevationDeg: 55,
-    sunIntensity: 1,
-    skyIntensity: 1,
-    groundIntensity: 1,
-    exposure: 1.05,
-    bubble: false,
-    bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
-    tintBubble: true,
+  const makeGrassSettings = (): GrassSettings => ({
+    enabled: state.grassEnabled,
+    distance: state.grassDistance,
+    bladeSpacing: state.grassBladeSpacing,
+    bladeHeight: state.grassBladeHeight,
+    bladeHeightVariation: state.grassBladeHeightVariation,
+    bladeWidth: state.grassBladeWidth,
+    windStrength: state.grassWindStrength,
+    windSpeed: state.grassWindSpeed,
+    slopeMinY: state.grassSlopeMinY,
+    minHeight: state.grassMinHeight,
+    maxHeight: state.grassMaxHeight,
+    maxBlades: state.grassMaxBlades,
+    seed: state.grassSeed,
+  });
+  const currentGrassLighting = (): GrassLighting => {
+    const lighting = skyEnvironment.lighting();
+    return {
+      light: lighting.sunDirection,
+      sunColor: lighting.sunColor,
+      skyLight: lighting.skyLight,
+      groundLight: lighting.groundLight,
+    };
   };
+  let grass: GrassSystem | null = null;
   let selState: SelectionState = { split: new Set() };
   const crossfadeStep = 1 / cfg.selection.crossfade_frames;
   const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
     for (const v of views.values()) fn(v.mat);
     for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
   };
-  const applyLightingToMaterial = (mat: THREE.ShaderMaterial) => {
-    const sunDirection = sunDirectionFromAngles(state.sunAzimuthDeg, state.sunElevationDeg);
-    mat.uniforms.uLight.value.copy(sunDirection);
-    mat.uniforms.uSunColor.value.copy(SUN_BASE_COLOR).multiplyScalar(state.sunIntensity);
-    mat.uniforms.uSkyLight.value.copy(SKY_LIGHT_BASE_COLOR).multiplyScalar(state.skyIntensity);
-    mat.uniforms.uGroundLight.value.copy(GROUND_LIGHT_BASE_COLOR).multiplyScalar(state.groundIntensity);
+  const applyColorAdjustmentsToTerrain = () => {
+    const adjustments = currentTerrainColorAdjustments();
+    forEachTerrainMaterial((mat) => applyTerrainColorAdjustments(mat, adjustments));
   };
   const updateLighting = () => {
-    const sunDirection = sunDirectionFromAngles(state.sunAzimuthDeg, state.sunElevationDeg);
-    renderer.toneMappingExposure = state.exposure;
-    const skyMat = skyDome.material as THREE.ShaderMaterial;
-    skyMat.uniforms.uSunDir.value.copy(sunDirection);
-    skyMat.uniforms.uSunColor.value.copy(SUN_BASE_COLOR).multiplyScalar(state.sunIntensity);
-    skyMat.uniforms.uZenith.value.copy(SKY_ZENITH_BASE_COLOR).multiplyScalar(state.skyIntensity);
-    skyMat.uniforms.uHorizon.value.copy(SKY_HORIZON_BASE_COLOR).multiplyScalar(state.skyIntensity);
-    for (const v of views.values()) applyLightingToMaterial(v.mat);
-    for (const { mats } of chunkGroups.values()) for (const m of mats) applyLightingToMaterial(m);
+    skyEnvironment.updateSettings(currentEnvironmentSettings());
+    const lighting = skyEnvironment.lighting();
+    forEachTerrainMaterial((mat) => applyLightingToMaterial(mat, lighting));
+    grass?.updateLighting({
+      light: lighting.sunDirection,
+      sunColor: lighting.sunColor,
+      skyLight: lighting.skyLight,
+      groundLight: lighting.groundLight,
+    });
   };
+  const grassSystem = new GrassSystem({
+    scene,
+    nodes: allNodes.filter((node) => node.level === 0),
+    worldCells,
+    settings: makeGrassSettings(),
+    lighting: currentGrassLighting(),
+  });
+  grass = grassSystem;
+  state.grassBladeCount = grassSystem.getBladeCount();
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -697,6 +757,7 @@ async function main() {
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
+      `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
       playerLine;
   };
 
@@ -826,13 +887,100 @@ async function main() {
       (v.mat.uniforms.uColor.value as THREE.Color).set(c);
     }
   });
-  const lightFolder = gui.addFolder("sky + light");
-  lightFolder.add(state, "sunAzimuthDeg", 0, 360, 1).name("sun azimuth").onChange(updateLighting);
-  lightFolder.add(state, "sunElevationDeg", 5, 85, 1).name("sun elevation").onChange(updateLighting);
-  lightFolder.add(state, "sunIntensity", 0, 2.5, 0.05).name("sun intensity").onChange(updateLighting);
-  lightFolder.add(state, "skyIntensity", 0, 2, 0.05).name("sky fill").onChange(updateLighting);
-  lightFolder.add(state, "groundIntensity", 0, 2, 0.05).name("ground fill").onChange(updateLighting);
-  lightFolder.add(state, "exposure", 0.4, 2, 0.05).name("exposure").onChange(updateLighting);
+  const environmentFolder = gui.addFolder("sky + environment");
+  const environmentControllers = [
+    environmentFolder.add(state, "sunAzimuthDeg", 0, 360, 1).name("sun azimuth").onChange(updateLighting),
+    environmentFolder.add(state, "sunElevationDeg", 5, 85, 1).name("sun elevation").onChange(updateLighting),
+    environmentFolder.add(state, "sunIntensity", 0, 2.5, 0.05).name("sun intensity").onChange(updateLighting),
+    environmentFolder.add(state, "skyIntensity", 0, 2, 0.05).name("sky fill").onChange(updateLighting),
+    environmentFolder.add(state, "groundIntensity", 0, 2, 0.05).name("ground fill").onChange(updateLighting),
+    environmentFolder.add(state, "exposure", 0.4, 2, 0.05).name("exposure").onChange(updateLighting),
+    environmentFolder.add(state, "horizonSoftness", 0.2, 2.5, 0.01).name("horizon softness").onChange(updateLighting),
+    environmentFolder.add(state, "sunDiskIntensity", 0, 4, 0.05).name("sun disk").onChange(updateLighting),
+    environmentFolder.add(state, "sunGlowIntensity", 0, 4, 0.05).name("sun glow").onChange(updateLighting),
+    environmentFolder.add(state, "hazeIntensity", 0, 1.5, 0.01).name("haze").onChange(updateLighting),
+  ];
+  const environmentActions = {
+    reset: () => {
+      Object.assign(state, DEFAULT_ENVIRONMENT_SETTINGS);
+      updateLighting();
+      for (const controller of environmentControllers) controller.updateDisplay();
+    },
+  };
+  environmentFolder.add(environmentActions, "reset").name("reset");
+  // TODO: Add editable sky color controls after the environment module is stable.
+  const colorFolder = gui.addFolder("terrain color");
+  const colorControllers = [
+    colorFolder.add(state, "terrainBrightness", 0.2, 2.5, 0.01).name("brightness").onChange(applyColorAdjustmentsToTerrain),
+    colorFolder.add(state, "terrainContrast", 0.2, 2.5, 0.01).name("contrast").onChange(applyColorAdjustmentsToTerrain),
+    colorFolder.add(state, "terrainSaturation", 0.0, 2.5, 0.01).name("saturation").onChange(applyColorAdjustmentsToTerrain),
+    colorFolder.add(state, "terrainWarmth", -1.0, 1.0, 0.01).name("warmth").onChange(applyColorAdjustmentsToTerrain),
+  ];
+  const colorActions = {
+    reset: () => {
+      state.terrainBrightness = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness;
+      state.terrainContrast = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.contrast;
+      state.terrainSaturation = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation;
+      state.terrainWarmth = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth;
+      applyColorAdjustmentsToTerrain();
+      for (const controller of colorControllers) controller.updateDisplay();
+    },
+  };
+  colorFolder.add(colorActions, "reset").name("reset");
+  const postFolder = gui.addFolder("postprocess");
+  const postControllers = [
+    postFolder.add(state, "postProcessEnabled").name("enabled"),
+    postFolder.add(state, "postProcessDebugMode", ["output", "copy", "off"]).name("mode"),
+    postFolder.add(state, "postProcessOpacity", 0, 1, 0.01).name("copy opacity"),
+    postFolder.add(state, "postProcessExposure", 0.25, 2.5, 0.01).name("pass exposure"),
+    postFolder.add(state, "postProcessContrast", 0.25, 2.5, 0.01).name("contrast"),
+    postFolder.add(state, "postProcessSaturation", 0, 2.5, 0.01).name("saturation"),
+    postFolder.add(state, "postProcessVignette", 0, 1.5, 0.01).name("vignette"),
+  ];
+  const postActions = {
+    reset: () => {
+      state.postProcessEnabled = DEFAULT_POST_PROCESS_SETTINGS.enabled;
+      state.postProcessOpacity = DEFAULT_POST_PROCESS_SETTINGS.opacity;
+      state.postProcessExposure = DEFAULT_POST_PROCESS_SETTINGS.exposure;
+      state.postProcessContrast = DEFAULT_POST_PROCESS_SETTINGS.contrast;
+      state.postProcessSaturation = DEFAULT_POST_PROCESS_SETTINGS.saturation;
+      state.postProcessVignette = DEFAULT_POST_PROCESS_SETTINGS.vignette;
+      state.postProcessDebugMode = DEFAULT_POST_PROCESS_SETTINGS.debugMode;
+      postProcess.updateSettings(currentPostProcessSettings());
+      for (const controller of postControllers) controller.updateDisplay();
+    },
+  };
+  postFolder.add(postActions, "reset").name("reset");
+  let grassBladeCountController: { updateDisplay: () => unknown } | null = null;
+  const grassActions = {
+    rebuild: () => {
+      grassSystem.updateSettings(makeGrassSettings());
+      grassSystem.rebuild();
+      state.grassBladeCount = grassSystem.getBladeCount();
+      grassBladeCountController?.updateDisplay();
+      updateInfo();
+    },
+  };
+  const updateGrassUniforms = () => grassSystem.updateSettings(makeGrassSettings());
+  const grassFolder = gui.addFolder("grass shader");
+  grassFolder.add(state, "grassEnabled").name("enabled").onChange((enabled: boolean) => {
+    grassSystem.setEnabled(enabled);
+    updateInfo();
+  });
+  grassFolder.add(state, "grassDistance", 16, 512, 1).name("distance").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassBladeSpacing", 0.4, 6, 0.1).name("blade spacing").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeHeight", 0.2, 4, 0.05).name("blade height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeHeightVariation", 0, 1, 0.05).name("height variation").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassBladeWidth", 0.01, 0.4, 0.01).name("blade width").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindStrength", 0, 1.5, 0.01).name("wind strength").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassSlopeMinY", 0, 1, 0.01).name("slope min Y").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMinHeight", 0, 128, 1).name("min height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMaxHeight", 0, 128, 1).name("max height").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassMaxBlades", 0, 100000, 1000).name("max blades").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassSeed", 0, 100000, 1).name("seed").onFinishChange(grassActions.rebuild);
+  grassBladeCountController = grassFolder.add(state, "grassBladeCount").name("blade count").disable();
+  grassFolder.add(grassActions, "rebuild").name("rebuild");
   const textureInput = document.createElement("input");
   textureInput.type = "file";
   textureInput.accept = "image/*";
@@ -1135,12 +1283,14 @@ async function main() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    postProcess.setSize(window.innerWidth, window.innerHeight);
   });
 
+  let elapsedSeconds = 0;
   renderer.setAnimationLoop(() => {
     const playerDelta = Math.min(playerClock.getDelta(), 0.1);
+    elapsedSeconds += playerDelta;
     updateAverageFps();
-    skyDome.position.copy(camera.position);
     if (interaction.mode === "playing") {
       playerForward.set(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
       player.update(playerDelta, playerInput, playerForward);
@@ -1149,6 +1299,7 @@ async function main() {
     } else {
       controls.update();
     }
+    skyEnvironment.updateCamera(camera);
     if (!state.freeze) updateSelection();
 
     // advance crossfades
@@ -1179,8 +1330,21 @@ async function main() {
         if (grp) grp.group.visible = false;
       }
     }
-    renderer.render(scene, camera);
+    const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
+    grassSystem.update(elapsedSeconds, grassCenter);
+    const grassBladeCount = grassSystem.getBladeCount();
+    if (grassBladeCount !== state.grassBladeCount) {
+      state.grassBladeCount = grassBladeCount;
+      grassBladeCountController?.updateDisplay();
+    }
+    postProcess.updateSettings(currentPostProcessSettings());
+    postProcess.render(scene, camera);
   });
+  window.addEventListener("beforeunload", () => {
+    grassSystem.dispose();
+    skyEnvironment.dispose();
+    postProcess.dispose();
+  }, { once: true });
 }
 
 main().catch((e) => {

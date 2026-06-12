@@ -2463,10 +2463,10 @@ fn barycentric_uv_section_tags_round_trip() {
 }
 
 /// Manual perf probe for the Surface Nets meshing hot path. Not a regression
-/// gate — run by hand and compare wall times across changes:
-/// `cargo test -p drusniel-voxels-bevy perf_probe_surface_nets_meshing -- --ignored --nocapture`
+/// gate - run by hand and compare wall times across changes:
+/// `cargo test -p voxel_builder perf_probe_surface_nets_meshing -- --ignored --nocapture`
 #[test]
-#[ignore = "perf probe — run manually with --nocapture and compare timings"]
+#[ignore = "perf probe - run manually with --nocapture and compare timings"]
 fn perf_probe_surface_nets_meshing() {
     use std::time::Instant;
 

@@ -8,10 +8,9 @@ does not.
 **Target hardware floor:** RTX 40-series minimum — no low-end/integrated-GPU
 compromises were made in the fixes.
 
-This document records the findings and the code changes applied for each. The
-perf numbers themselves are measured externally (before/after run of the perf
-probe below plus the bench scenes); this doc intentionally documents **code
-changes only**.
+This document records the findings, code changes, and targeted Surface Nets
+perf-probe results. The probe measures CPU meshing in the optimized test
+profile; release scene benches remain the authority for frame-level claims.
 
 ---
 
@@ -221,8 +220,39 @@ Performed:
 
 - `cargo check` and `cargo check --tests` pass.
 - New parity test pins the cached normal field to the uncached path.
+- `mesh_sdf_cache_matches_uncached_gradient_normals` passes after the optimized
+  implementation was pulled in commit `83712cd`.
+- `perf_probe_surface_nets_meshing` passed in three consecutive warmed runs.
 
-To be run externally (results not in this doc):
+### Targeted Surface Nets perf probe
+
+The baseline was captured immediately before commit `83712cd`; the updated
+probe was then run three times on the same machine with:
+
+```bash
+cargo test -j 1 --lib perf_probe_surface_nets_meshing -- --ignored --nocapture
+```
+
+The table compares the prior baseline with the best updated result across the
+three runs:
+
+| LOD | Baseline | Updated best | Speedup |
+|---|---:|---:|---:|
+| LOD0 | 58,779 us | 2,331 us | 25.2x |
+| LOD1 | 17,538 us | 1,338 us | 13.1x |
+| LOD2 | 5,223 us | 854 us | 6.1x |
+| LOD3 | 1,545 us | 687 us | 2.2x |
+
+Geometry output was unchanged: LOD0 produced 3,114 vertices / 1,038
+triangles, LOD1 810 / 270, LOD2 180 / 60, and LOD3 24 / 8 before and after.
+The largest measured reduction is in attribute emission, consistent with P1
+and P2 removing repeated normal and per-corner attribute work.
+
+These are targeted test-profile microbenchmark results, not release scene or
+frame-time measurements. Compilation time is excluded. A release visual bench
+is still required before making game-level frame-time or screenshot claims.
+
+Additional verification still to run:
 
 ```bash
 # Unit tests for the meshing module
@@ -239,5 +269,4 @@ cargo run --release -- --bench bench/scenes/visual/visual-regression.toml
 cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
-No performance numbers are claimed in this document; the meshing changes were
-not yet benchmarked at the time of writing.
+No frame-level performance claim is made from the targeted probe alone.
