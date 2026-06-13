@@ -331,6 +331,7 @@ async function main() {
   let playerYaw = 0;
   let playerPitch = 0;
   let playerPointerLocked = false;
+  let tabUiHold = false;
 
   // Pickaxe state: hold-to-dig cadence while playing, hover preview in orbit mode.
   const DIG_HOLD_INTERVAL_MS = 400;
@@ -352,13 +353,25 @@ async function main() {
     document.body.dataset.playerMode = interaction.mode;
     orbitModeButton.setAttribute("aria-pressed", String(interaction.mode === "orbit"));
     playerModeButton.setAttribute("aria-pressed", String(interaction.mode !== "orbit"));
-    playerModeStatus.textContent = interaction.mode === "choosingSpawn"
-      ? "Click the terrain to choose your starting position"
-      : interaction.mode === "playing"
-        ? "WASD · Shift · Space · Esc · click digs · Shift+wheel radius"
-        : "Orbit camera";
+    if (tabUiHold && interaction.mode === "playing") {
+      playerModeStatus.textContent = "Tab held — click palette · release Tab to look";
+    } else {
+      playerModeStatus.textContent = interaction.mode === "choosingSpawn"
+        ? "Click the terrain to choose your starting position"
+        : interaction.mode === "playing"
+          ? "WASD · Shift · Space · Esc · click digs · Shift+wheel radius"
+          : "Orbit camera";
+    }
+    document.body.dataset.tabUi = tabUiHold ? "true" : "false";
+    syncTerraformEditMode();
   };
+  const syncTerraformEditMode = () => {
+    if (!terraformEditCheckbox) return;
+    document.body.dataset.tfEdit = terraformEditCheckbox.checked ? "true" : "false";
+  };
+  let terraformEditCheckbox: HTMLInputElement | null = null;
   const exitPlayerMode = () => {
+    tabUiHold = false;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     playerPointerLocked = false;
     if (interaction.mode === "playing") {
@@ -371,6 +384,10 @@ async function main() {
     resetPlayerInput();
     controls.enabled = true;
     controls.update();
+    if (terraformEditCheckbox) {
+      terraformEditCheckbox.checked = true;
+      document.body.dataset.tfEdit = "true";
+    }
     updatePlayerModeUi();
   };
   const choosePlayerSpawn = () => {
@@ -401,6 +418,8 @@ async function main() {
     player.spawn(hit.point);
     interaction.startPlaying();
     controls.enabled = false;
+    editToggleInput.checked = false;
+    document.body.dataset.tfEdit = "false";
     updatePlayerModeUi();
     void renderer.domElement.requestPointerLock();
   };
@@ -449,8 +468,14 @@ async function main() {
   document.addEventListener("pointerlockchange", () => {
     if (document.pointerLockElement === renderer.domElement) {
       playerPointerLocked = true;
+      tabUiHold = false;
+      updatePlayerModeUi();
     } else if (interaction.mode === "playing" && playerPointerLocked) {
       playerPointerLocked = false;
+      if (tabUiHold) {
+        updatePlayerModeUi();
+        return;
+      }
       exitPlayerMode();
     }
   });
@@ -471,6 +496,14 @@ async function main() {
       exitPlayerMode();
       return;
     }
+    if (event.code === "Tab" && interaction.mode === "playing") {
+      event.preventDefault();
+      if (document.pointerLockElement === renderer.domElement) {
+        tabUiHold = true;
+        document.exitPointerLock();
+      }
+      return;
+    }
     if (interaction.mode !== "playing") return;
     if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
       event.preventDefault();
@@ -483,6 +516,14 @@ async function main() {
     if (event.code === "Space") playerInput.jump = true;
   });
   window.addEventListener("keyup", (event) => {
+    if (event.code === "Tab" && interaction.mode === "playing" && tabUiHold) {
+      tabUiHold = false;
+      updatePlayerModeUi();
+      if (document.pointerLockElement !== renderer.domElement) {
+        void renderer.domElement.requestPointerLock();
+      }
+      return;
+    }
     if (event.code === "KeyW" && playerInput.forward > 0) playerInput.forward = 0;
     if (event.code === "KeyS" && playerInput.forward < 0) playerInput.forward = 0;
     if (event.code === "KeyA" && playerInput.right < 0) playerInput.right = 0;
@@ -490,7 +531,13 @@ async function main() {
     if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = false;
     if (event.code === "Space") playerInput.jump = false;
   });
-  window.addEventListener("blur", resetPlayerInput);
+  window.addEventListener("blur", () => {
+    resetPlayerInput();
+    if (tabUiHold) {
+      tabUiHold = false;
+      updatePlayerModeUi();
+    }
+  });
   updatePlayerModeUi();
 
   const state = {
@@ -1726,24 +1773,43 @@ async function main() {
     updateInfo();
   });
 
-  // ---- bottom-left terraform menu (orbit mode): material + brush shape/op/size ----
+  // ---- bottom-left terraform menu: material palette + optional brush/sculpt edit ----
   // Material swatches map to terrain texture slots 0..3 (what `add` deposits paint with);
   // brush controls drive the same global state the click handlers and preview read.
   const PAINT_SWATCH_COLORS = ["#6b9b4d", "#8c8580", "#d9c78d", "#f5f7ff"];
   const terraformMenu = document.getElementById("terraform-menu")!;
+  const paletteSection = document.createElement("div");
+  paletteSection.className = "tf-palette";
+  const editToggle = document.createElement("label");
+  editToggle.className = "tf-edit-toggle";
+  editToggle.title = "Show brush and sculpt controls";
+  const editToggleInput = document.createElement("input");
+  editToggleInput.type = "checkbox";
+  editToggleInput.checked = true;
+  terraformEditCheckbox = editToggleInput;
+  editToggle.append(editToggleInput, document.createTextNode(" Edit"));
+  editToggleInput.addEventListener("change", () => {
+    document.body.dataset.tfEdit = editToggleInput.checked ? "true" : "false";
+  });
+  paletteSection.appendChild(editToggle);
+  terraformMenu.appendChild(paletteSection);
+  const editSection = document.createElement("div");
+  editSection.className = "tf-edit-section";
+  terraformMenu.appendChild(editSection);
+  document.body.dataset.tfEdit = "true";
 
-  const makeRow = (label: string) => {
+  const makeRow = (label: string, parent: HTMLElement = terraformMenu) => {
     const row = document.createElement("div");
     row.className = "tf-row";
     const tag = document.createElement("span");
     tag.className = "tf-label";
     tag.textContent = label;
     row.appendChild(tag);
-    terraformMenu.appendChild(row);
+    parent.appendChild(row);
     return row;
   };
 
-  const materialRow = makeRow("Material");
+  const materialRow = makeRow("Material", paletteSection);
   const swatchButtons: HTMLButtonElement[] = [];
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
     const btn = document.createElement("button");
@@ -1785,7 +1851,7 @@ async function main() {
   };
 
   // Brush row: size slider on the left, then op + shape toggles.
-  const brushRow = makeRow("Brush");
+  const brushRow = makeRow("Brush", editSection);
   const sizeWrap = document.createElement("div");
   sizeWrap.className = "tf-size";
   const sizeInput = document.createElement("input");
@@ -1854,7 +1920,7 @@ async function main() {
   };
 
   // sculpt sliders: how hard, how tall, how soft the edge, how fast when held
-  const sculptRow = makeRow("Sculpt");
+  const sculptRow = makeRow("Sculpt", editSection);
   sculptRow.classList.add("tf-row-sculpt");
   const syncStrength = makeSlider(
     sculptRow, "Strength", 0, 1, 0.05,
