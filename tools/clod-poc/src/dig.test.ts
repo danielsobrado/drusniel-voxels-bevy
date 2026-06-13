@@ -74,8 +74,8 @@ describe("dig edits in the density field", () => {
     expect(density(x, sy + 2, z)).toBeGreaterThan(0); // raised: now solid
 
     // deposited vertices carry a one-hot weight on the chosen slot; far field stays natural
-    expect(paintMaterialAt(x, sy, z)).toEqual([0, 0, 1, 0]);
-    expect(paintMaterialAt(x + 50, sy, z)).toEqual([0, 0, 0, 0]);
+    expect(paintMaterialAt(x, sy, z)).toBe(3);
+    expect(paintMaterialAt(x + 50, sy, z)).toBe(0);
   });
 
   it("strength scales how much an edit moves the field", () => {

@@ -112,7 +112,9 @@
       #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
       #terraform-menu {
         position: absolute; left: 8px; bottom: 8px; z-index: 12;
-        display: grid; gap: 7px; padding: 8px 9px;
+        display: grid; gap: 7px; padding: 8px 12px 8px 8px;
+        box-sizing: border-box; overflow: hidden;
+        width: max-content; max-width: min(620px, calc(100vw - 16px));
         color: #eef3f8; background: rgba(12, 15, 19, 0.74);
         border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 5px;
         font: 11px/1.3 system-ui, -apple-system, Segoe UI, sans-serif;
@@ -120,12 +122,14 @@
       }
       body[data-player-mode="choosingSpawn"] #terraform-menu { display: none; }
       body[data-player-mode="playing"] #terraform-menu { bottom: 72px; }
-      .tf-palette {
-        position: relative; padding-top: 2px; padding-right: 42px;
+      .tf-menu-header {
+        display: flex; justify-content: flex-end; align-items: center;
+        min-height: 18px; margin-bottom: -2px;
       }
+      .tf-palette { position: relative; }
       .tf-edit-toggle {
-        position: absolute; top: 0; right: 0; z-index: 1;
-        display: flex; align-items: center; gap: 3px;
+        position: static;
+        display: inline-flex; align-items: center; gap: 3px;
         font-size: 9px; color: #9fb0c0; cursor: pointer;
       }
       .tf-edit-toggle input {
@@ -141,7 +145,20 @@
         color: #8ec8ff; white-space: nowrap; font-size: 11px;
       }
       body:not([data-player-mode="playing"]) #player-mode-hint { display: none; }
-      .tf-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+      .tf-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; max-width: 100%; }
+      .tf-row-material { flex-wrap: nowrap; }
+      .tf-material-carousel {
+        display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0;
+      }
+      .tf-material-carousel:not(.tf-material-carousel-active) .tf-carousel-nav { display: none; }
+      .tf-carousel-nav {
+        flex: none; width: 22px; height: 64px; padding: 0;
+        font-size: 18px; line-height: 1;
+      }
+      .tf-carousel-nav[disabled] { opacity: 0.35; cursor: not-allowed; }
+      .tf-material-swatches {
+        display: flex; flex: 1 1 auto; gap: 6px; min-width: 0;
+      }
       .tf-label { width: 52px; color: #9fb0c0; flex: none; }
       #terraform-menu button {
         padding: 4px 8px; border: 1px solid #46515e; border-radius: 3px;
@@ -152,18 +169,22 @@
         border-color: #74b8f5; color: #fff; background: #245781;
       }
       .tf-swatch {
-        width: 68px; height: 68px; padding: 0; border-radius: 4px;
+        flex: 1 1 0; width: auto; min-width: 64px; max-width: 76px; height: 64px;
+        padding: 0; border-radius: 4px;
         background: #0b0d10 center / cover no-repeat; position: relative;
-        flex: none;
       }
-      .tf-swatch[aria-pressed="true"] { border-color: #ffd479; box-shadow: 0 0 0 2px #ffd479; }
+      .tf-swatch[aria-pressed="true"] {
+        border-color: #ffd479;
+        box-shadow: inset 0 0 0 2px #ffd479, 0 0 10px rgba(255, 212, 121, 0.28);
+      }
       .tf-swatch[disabled] { opacity: 0.32; cursor: not-allowed; }
       .tf-swatch span {
         position: absolute; left: 0; right: 0; bottom: 0; font-size: 9px; line-height: 1.25;
         background: rgba(0, 0, 0, 0.55); text-align: center; color: #e8edf3;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;
       }
-      .tf-size { display: flex; align-items: center; gap: 6px; }
+      .tf-size input[type="range"], .tf-slider input[type="range"] { max-width: 100%; }
+      .tf-size { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .tf-size input[type="range"] { width: 76px; }
       .tf-size output { width: 26px; text-align: right; color: #cdd8e3; }
       .tf-slider { display: flex; align-items: center; gap: 5px; flex: none; }
@@ -216,16 +237,23 @@
         min-height: 28px; padding: 4px 9px; cursor: pointer;
       }
       .texture-panel button:hover { background: #303842; }
-      .texture-panel-body { padding: 14px; overflow-x: hidden; }
+      .texture-panel-body { padding: 18px; overflow-x: hidden; }
+      .texture-slot-carousel {
+        display: flex; align-items: stretch; gap: 10px;
+      }
+      .texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-prev,
+      .texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-next { display: none; }
       .texture-slot-grid {
-        display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+        display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 16px;
+        flex: 1 1 auto; min-width: 0;
       }
       .texture-slot {
-        width: 100%; padding: 8px; display: grid; gap: 6px;
+        width: 100%; padding: 12px; display: grid; gap: 10px;
         background: #101318; border: 1px solid #303640;
       }
       .texture-preview {
-        aspect-ratio: 1 / 1; width: 100%; padding: 0; background: #0b0d10 center / cover no-repeat;
+        aspect-ratio: 1 / 1; width: 100%; min-height: 148px; padding: 0;
+        background: #0b0d10 center / cover no-repeat;
         display: grid; place-items: center; color: #7f8996;
       }
       .texture-slot-name {
@@ -253,7 +281,7 @@
         background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
       }
       .texture-slot-normal {
-        display: flex; gap: 6px; margin-top: 6px;
+        display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;
       }
       .texture-slot-normal button {
         font: inherit; font-size: 12px; cursor: pointer;
@@ -261,10 +289,11 @@
         border-radius: 3px; padding: 3px 6px;
       }
       .texture-normal-load { flex: 1; min-width: 0; }
+      .texture-slot-remove { flex: none; font-size: 11px; }
       .texture-actions {
-        display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
+        display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 16px;
       }
-      @media (max-width: 560px) {
+      @media (max-width: 760px) {
         .texture-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
     </style>

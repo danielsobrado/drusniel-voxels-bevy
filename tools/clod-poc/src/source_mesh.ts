@@ -23,13 +23,13 @@ export function concat(meshes: PageMesh[]): PageMesh {
   }
   const positions = new Float32Array(nv * 3);
   const normals = new Float32Array(nv * 3);
-  const materials = new Float32Array(nv * 4);
+  const materials = new Float32Array(nv);
   const indices = new Uint32Array(ni);
   let vOff = 0, iOff = 0;
   for (const m of meshes) {
     positions.set(m.positions, vOff * 3);
     normals.set(m.normals, vOff * 3);
-    materials.set(m.materials, vOff * 4);
+    materials.set(m.materials, vOff);
     for (let i = 0; i < m.indices.length; i++) indices[iOff + i] = m.indices[i] + vOff;
     vOff += m.positions.length / 3;
     iOff += m.indices.length;

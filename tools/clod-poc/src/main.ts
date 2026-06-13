@@ -29,6 +29,7 @@ import {
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
   applyTerrainColorAdjustments,
+  applyTerrainTextureUniforms,
   createTerrainMaterial,
   DEFAULT_TERRAIN_COLOR_ADJUSTMENTS,
   type TerrainColorAdjustments,
@@ -77,11 +78,20 @@ import { setButtonIcon, setIconOnlyButton } from "./ui/dom_icons.js";
 import { createClodOverlay, updateClodOverlay, type ClodOverlaySnapshot } from "./ui/overlay_panel.js";
 import { LockedBorderOverlay } from "./ui/locked_border_overlay.js";
 import { NodeLabelOverlay } from "./ui/node_labels.js";
+import {
+  materialCarouselBounds,
+  materialCarouselPageForSelection,
+  TEXTURE_MODAL_PAGE_SIZE,
+} from "./material_carousel.js";
+import {
+  emptyTextureSlotState,
+  INITIAL_TERRAIN_TEXTURE_COUNT,
+  MAX_TERRAIN_TEXTURES,
+  terrainTextureSlotLabel,
+} from "./terrain_textures.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
-const MAX_TERRAIN_TEXTURES = 4;
-const TERRAIN_TEXTURE_BANDS = ["low", "mid low", "mid high", "high"];
 const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
   { id: "grass-2", scale: 0.06, heightMin: 12, heightMax: 18 },
   { id: "earth-2", scale: 0.04, heightMin: 18, heightMax: 40 },
@@ -120,8 +130,7 @@ function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
-  // per-vertex paint slot for the terrain shader (zero = natural terrain, height-banded)
-  g.setAttribute("material", new THREE.BufferAttribute(mesh.materials, 4));
+  g.setAttribute("paintSlot", new THREE.BufferAttribute(mesh.materials, 1));
   g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }
@@ -707,22 +716,8 @@ async function main() {
     mat.uniforms.uGroundLight.value.copy(lighting.groundLight);
   };
 
-  const textureSlots: TextureSlot[] = Array.from({ length: MAX_TERRAIN_TEXTURES }, () => ({
-    texture: null,
-    normalTexture: null,
-    normalPreviewUrl: null,
-    normalBytes: null,
-    normalMimeType: null,
-    normalExtension: null,
-    name: "empty",
-    previewUrl: null,
-    selectedId: "",
-    customBytes: null,
-    customMimeType: null,
-    customExtension: null,
-    scale: 1 / 64,
-    heightMin: 0,
-    heightMax: 0,
+  const textureSlots: TextureSlot[] = Array.from({ length: INITIAL_TERRAIN_TEXTURE_COUNT }, () => ({
+    ...emptyTextureSlotState(),
   }));
   for (let i = 0; i < textureSlots.length; i++) {
     const preset = DEFAULT_TERRAIN_TEXTURE_PRESETS[i];
@@ -743,14 +738,34 @@ async function main() {
       textureSlots[i].customExtension = imported.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
     }
   }
-  let activeTerrainSlots: TextureSlot[] = [];
   // assigned when the terraform menu is built; refreshes the material swatches after textures change
   let refreshTerraformSwatches: () => void = () => {};
   let syncTerraformMenu: () => void = () => {};
-  const rebuildActiveTerrainSlots = () => {
-    activeTerrainSlots = textureSlots.filter((slot) => slot.texture !== null);
+  const rebuildActiveTerrainSlots = () => {};
+  const texturesActive = () => state.albedo && textureSlots.some((slot) => slot.texture !== null);
+  const terrainTextureUniformOptions = () => ({
+    enabled: texturesActive(),
+    triplanar: state.triplanar,
+    normalMap: state.normalMap,
+    normalIntensity: state.normalIntensity,
+    roughness: state.roughness,
+    metalness: state.metalness,
+    textureScale: state.textureScale,
+    blendBands: state.textureBlendMode === "blend bands",
+    blendWidth: state.textureBlendWidth,
+  });
+  const applyTerrainTextures = () => {
+    rebuildActiveTerrainSlots();
+    const apply = (mat: THREE.ShaderMaterial) => {
+      applyTerrainTextureUniforms(mat, textureSlots, terrainTextureUniformOptions());
+    };
+    for (const v of views.values()) apply(v.mat);
+    for (const { mats } of chunkGroups.values()) {
+      for (const m of mats) apply(m);
+    }
+    refreshTerraformSwatches();
+    syncColorByLod();
   };
-  const texturesActive = () => state.albedo && activeTerrainSlots.length > 0;
   const applyColorByLodToMaterials = (on: boolean) => {
     for (const v of views.values()) {
       (v.mat.uniforms.uColor.value as THREE.Color).set(
@@ -770,53 +785,6 @@ async function main() {
     }
     applyColorByLodToMaterials(state.colorByLod);
   };
-  const applyTerrainTextures = () => {
-    rebuildActiveTerrainSlots();
-    const enabled = state.albedo && activeTerrainSlots.length > 0;
-    const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
-    const normalUniforms = ["uTerrainNormal0", "uTerrainNormal1", "uTerrainNormal2", "uTerrainNormal3"];
-    const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
-    const apply = (mat: THREE.ShaderMaterial) => {
-      mat.uniforms.uUseTexture.value = enabled;
-      mat.uniforms.uUseTriplanar.value = state.triplanar;
-      mat.uniforms.uUseNormalMap.value = state.normalMap;
-      mat.uniforms.uNormalIntensity.value = state.normalIntensity;
-      mat.uniforms.uRoughness.value = state.roughness;
-      mat.uniforms.uMetalness.value = state.metalness;
-      mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
-      mat.uniforms.uTextureScales.value.set(
-        (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
-        (activeTerrainSlots[1]?.scale ?? 1 / 64) * state.textureScale,
-        (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
-        (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
-      );
-      mat.uniforms.uNormalMapMask.value.set(
-        activeTerrainSlots[0]?.normalTexture ? 1 : 0,
-        activeTerrainSlots[1]?.normalTexture ? 1 : 0,
-        activeTerrainSlots[2]?.normalTexture ? 1 : 0,
-        activeTerrainSlots[3]?.normalTexture ? 1 : 0,
-      );
-      mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
-      mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
-      for (let i = 0; i < textureUniforms.length; i++) {
-        const slot = activeTerrainSlots[i];
-        mat.uniforms[textureUniforms[i]].value = slot?.texture ?? null;
-        mat.uniforms[normalUniforms[i]].value = slot?.normalTexture ?? null;
-        mat.uniforms[rangeUniforms[i]].value.set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);
-      }
-    };
-    for (const v of views.values()) {
-      apply(v.mat);
-    }
-    for (const { mats } of chunkGroups.values()) {
-      for (const m of mats) {
-        apply(m);
-      }
-    }
-    refreshTerraformSwatches();
-    syncColorByLod();
-  };
-
   // One view per node; visibility/fade drive what's drawn.
   const views = new Map<string, NodeView>();
   for (const node of allNodes) {
@@ -887,35 +855,7 @@ async function main() {
         applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
         mat.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
         rebuildActiveTerrainSlots();
-        const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
-        const normalUniforms = ["uTerrainNormal0", "uTerrainNormal1", "uTerrainNormal2", "uTerrainNormal3"];
-        const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
-        mat.uniforms.uUseTexture.value = state.albedo && activeTerrainSlots.length > 0;
-        mat.uniforms.uUseNormalMap.value = state.normalMap;
-        mat.uniforms.uNormalIntensity.value = state.normalIntensity;
-        mat.uniforms.uRoughness.value = state.roughness;
-        mat.uniforms.uMetalness.value = state.metalness;
-        mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
-        mat.uniforms.uTextureScales.value.set(
-          (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
-          (activeTerrainSlots[1]?.scale ?? 1 / 64) * state.textureScale,
-          (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
-          (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
-        );
-        mat.uniforms.uNormalMapMask.value.set(
-          activeTerrainSlots[0]?.normalTexture ? 1 : 0,
-          activeTerrainSlots[1]?.normalTexture ? 1 : 0,
-          activeTerrainSlots[2]?.normalTexture ? 1 : 0,
-          activeTerrainSlots[3]?.normalTexture ? 1 : 0,
-        );
-        mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
-        mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
-        for (let ti = 0; ti < textureUniforms.length; ti++) {
-          const slot = activeTerrainSlots[ti];
-          mat.uniforms[textureUniforms[ti]].value = slot?.texture ?? null;
-          mat.uniforms[normalUniforms[ti]].value = slot?.normalTexture ?? null;
-          mat.uniforms[rangeUniforms[ti]].value.set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);
-        }
+        applyTerrainTextureUniforms(mat, textureSlots, terrainTextureUniformOptions());
         applyLightingToMaterial(mat);
         group.add(new THREE.Mesh(toGeometry(cm), mat));
         mats.push(mat);
@@ -1496,7 +1436,7 @@ async function main() {
 
   const updateLoadedTextureDisplay = () => {
     const loaded = textureSlots
-      .map((slot, index) => (slot.texture ? `${TERRAIN_TEXTURE_BANDS[index]}: ${slot.name}` : ""))
+      .map((slot, index) => (slot.texture ? `${terrainTextureSlotLabel(index)}: ${slot.name}` : ""))
       .filter(Boolean);
     state.loadedTextureFiles = loaded.length > 0 ? loaded.join(" | ") : "none";
     loadedTextureController?.updateDisplay();
@@ -1516,16 +1456,18 @@ async function main() {
       preview.style.backgroundImage = slot.previewUrl ? `url("${slot.previewUrl}")` : "";
       preview.style.setProperty("--clod-preview-icon", `url("${iconDataUrl("terrain", terrainIconForTexture(slot, index), 64)}")`);
       if (band) {
-        band.textContent = TERRAIN_TEXTURE_BANDS[index];
+        band.textContent = terrainTextureSlotLabel(index);
       } else {
-        preview.textContent = slot.previewUrl ? "" : TERRAIN_TEXTURE_BANDS[index];
+        preview.textContent = slot.previewUrl ? "" : terrainTextureSlotLabel(index);
       }
     }
     if (name) name.textContent = slot.texture ? slot.name : "empty";
     if (badge) badge.textContent = slot.texture ? "Loaded" : "Empty";
     const normalBtn = card.querySelector<HTMLElement>(".texture-normal-load");
     if (normalBtn) normalBtn.textContent = slot.normalTexture ? "Normal map ✓" : "+ Normal map";
-    card.title = `${TERRAIN_TEXTURE_BANDS[index]} height texture`;
+    card.title = `${terrainTextureSlotLabel(index)} height texture`;
+    const removeBtn = card.querySelector<HTMLButtonElement>(".texture-slot-remove");
+    if (removeBtn) removeBtn.hidden = textureSlots.length <= INITIAL_TERRAIN_TEXTURE_COUNT;
   };
   const updateTextureSlotPreviews = () => {
     for (let i = 0; i < textureSlots.length; i++) updateTextureSlotPreview(i);
@@ -1741,6 +1683,7 @@ async function main() {
     if (pendingTextureLoad === "all") {
       const loaded = await Promise.all(files.slice(0, MAX_TERRAIN_TEXTURES).map(loadTerrainTexture));
       loaded.forEach((result, index) => {
+        while (textureSlots.length <= index) addTextureSlot(false);
         if (result) setTextureSlot(
           index,
           result.texture,
@@ -1779,8 +1722,13 @@ async function main() {
         <button type="button" data-texture-close>Close</button>
       </header>
       <div class="texture-panel-body">
-        <div class="texture-slot-grid"></div>
+        <div class="texture-slot-carousel">
+          <button type="button" class="tf-carousel-nav texture-carousel-prev" aria-label="Previous materials">‹</button>
+          <div class="texture-slot-grid"></div>
+          <button type="button" class="tf-carousel-nav texture-carousel-next" aria-label="Next materials">›</button>
+        </div>
         <div class="texture-actions">
+          <button type="button" data-texture-add>+ Add material</button>
           <button type="button" data-texture-load-all>Load custom set</button>
           <button type="button" data-texture-clear>Clear</button>
         </div>
@@ -1829,44 +1777,146 @@ async function main() {
   };
   texturePanelHeader.addEventListener("pointerup", stopTexturePanelDrag);
   texturePanelHeader.addEventListener("pointercancel", stopTexturePanelDrag);
+  const slotCarousel = textureModal.querySelector<HTMLElement>(".texture-slot-carousel")!;
   const slotGrid = textureModal.querySelector<HTMLElement>(".texture-slot-grid")!;
-  for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
+  const textureCarouselPrev = textureModal.querySelector<HTMLButtonElement>(".texture-carousel-prev")!;
+  const textureCarouselNext = textureModal.querySelector<HTMLButtonElement>(".texture-carousel-next")!;
+  let textureModalPage = 0;
+  const wireTextureSlotControls = (index: number) => {
+    const card = slotCards[index];
+    if (!card) return;
+    card.querySelector<HTMLSelectElement>(`[data-slot-texture="${index}"]`)!.onchange = async (event) => {
+      const select = event.target as HTMLSelectElement;
+      const selectedId = select.value;
+      if (selectedId === "") {
+        clearTextureSlot(index);
+        refreshTextureState();
+        return;
+      }
+      if (selectedId === "custom") {
+        pendingTextureLoad = index;
+        textureInput.multiple = false;
+        textureInput.click();
+        syncTextureModalControls();
+        return;
+      }
+      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === selectedId);
+      if (!builtin) return;
+      const previousName = textureSlots[index].name;
+      textureSlots[index].name = "loading...";
+      updateTextureSlotPreview(index);
+      const texture = await loadTerrainTextureUrl(builtin.url);
+      if (!texture) {
+        textureSlots[index].name = previousName;
+        select.value = textureSlots[index].selectedId;
+        refreshTextureState();
+        return;
+      }
+      setBuiltinTextureSlot(index, texture, builtin.label, builtin.url, builtin.id);
+      refreshTextureState();
+    };
+    card.querySelector<HTMLInputElement>(`[data-slot-low="${index}"]`)!.onchange = (event) => {
+      textureSlots[index].heightMin = Number((event.target as HTMLInputElement).value);
+      refreshTextureState();
+    };
+    card.querySelector<HTMLInputElement>(`[data-slot-high="${index}"]`)!.onchange = (event) => {
+      textureSlots[index].heightMax = Number((event.target as HTMLInputElement).value);
+      refreshTextureState();
+    };
+    card.querySelector<HTMLInputElement>(`[data-slot-scale="${index}"]`)!.onchange = (event) => {
+      textureSlots[index].scale = Number((event.target as HTMLInputElement).value);
+      refreshTextureState();
+    };
+  };
+  const mountTextureSlotCard = (index: number) => {
     const card = document.createElement("article");
     card.className = "texture-slot clod-texture-slot is-empty";
-    const bandIcon = iconDataUrl("terrain", TERRAIN_BAND_ICONS[i] ?? "earth", 64);
+    const bandIcon = iconDataUrl("terrain", TERRAIN_BAND_ICONS[index] ?? "earth", 64);
     card.innerHTML = `
       <button class="texture-preview clod-texture-preview" type="button" style="--clod-preview-icon: url('${bandIcon}')">
-        <span class="clod-texture-band">${TERRAIN_TEXTURE_BANDS[i]}</span>
+        <span class="clod-texture-band">${terrainTextureSlotLabel(index)}</span>
         <span class="clod-material-badge">Empty</span>
       </button>
       <span class="texture-slot-name">empty</span>
-      <label class="texture-slot-select"><span>Built-in texture</span><select data-slot-texture="${i}">${textureOptionHtml}</select></label>
+      <label class="texture-slot-select"><span>Built-in texture</span><select data-slot-texture="${index}">${textureOptionHtml}</select></label>
       <div class="texture-slot-params">
-        <label class="texture-slot-param"><span>Scale</span><input data-slot-scale="${i}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[i].scale}" /></label>
-        <label class="texture-slot-param"><span>Low</span><input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
-        <label class="texture-slot-param"><span>High</span><input data-slot-high="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMax}" /></label>
+        <label class="texture-slot-param"><span>Scale</span><input data-slot-scale="${index}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[index].scale}" /></label>
+        <label class="texture-slot-param"><span>Low</span><input data-slot-low="${index}" type="number" min="0" max="128" step="1" value="${textureSlots[index].heightMin}" /></label>
+        <label class="texture-slot-param"><span>High</span><input data-slot-high="${index}" type="number" min="0" max="128" step="1" value="${textureSlots[index].heightMax}" /></label>
       </div>
       <div class="texture-slot-normal">
         <button class="texture-normal-load" type="button">+ Normal map</button>
         <button class="texture-normal-clear" type="button" title="clear normal map">✕</button>
+        <button class="texture-slot-remove" type="button" title="Remove material">Remove</button>
       </div>
     `;
     card.querySelector(".texture-preview")!.addEventListener("click", () => {
-      pendingTextureLoad = i;
+      pendingTextureLoad = index;
       textureInput.multiple = false;
       textureInput.click();
     });
     card.querySelector(".texture-normal-load")!.addEventListener("click", () => {
-      pendingNormalLoad = i;
+      pendingNormalLoad = index;
       normalInput.click();
     });
     card.querySelector(".texture-normal-clear")!.addEventListener("click", () => {
-      clearSlotNormal(i);
+      clearSlotNormal(index);
       refreshTextureState();
     });
-    slotCards.push(card);
+    card.querySelector(".texture-slot-remove")!.addEventListener("click", () => {
+      removeTextureSlot(index);
+    });
+    slotCards[index] = card;
     slotGrid.appendChild(card);
-  }
+    wireTextureSlotControls(index);
+    updateTextureSlotPreview(index);
+  };
+  const rebuildTextureSlotCards = () => {
+    slotGrid.replaceChildren();
+    slotCards.length = 0;
+    for (let i = 0; i < textureSlots.length; i++) mountTextureSlotCard(i);
+    syncTextureModalCarousel();
+  };
+  const syncTextureModalCarousel = () => {
+    const count = textureSlots.length;
+    const bounds = materialCarouselBounds(count, textureModalPage, TEXTURE_MODAL_PAGE_SIZE);
+    textureModalPage = bounds.page;
+    slotCarousel.classList.toggle("texture-slot-carousel-active", bounds.needsCarousel);
+    textureCarouselPrev.disabled = bounds.page <= 0;
+    textureCarouselNext.disabled = bounds.page >= bounds.maxPage;
+    for (let i = 0; i < slotCards.length; i++) {
+      const card = slotCards[i];
+      if (!card) continue;
+      card.style.display = !bounds.needsCarousel || (i >= bounds.start && i < bounds.end) ? "" : "none";
+    }
+    const addBtn = textureModal.querySelector<HTMLButtonElement>("[data-texture-add]")!;
+    addBtn.disabled = textureSlots.length >= MAX_TERRAIN_TEXTURES;
+  };
+  const addTextureSlot = (refresh = true) => {
+    if (textureSlots.length >= MAX_TERRAIN_TEXTURES) return;
+    textureSlots.push({ ...emptyTextureSlotState() });
+    mountTextureSlotCard(textureSlots.length - 1);
+    syncTextureModalCarousel();
+    if (refresh) refreshTextureState();
+  };
+  const removeTextureSlot = (index: number) => {
+    if (textureSlots.length <= INITIAL_TERRAIN_TEXTURE_COUNT) return;
+    clearTextureSlot(index);
+    textureSlots.splice(index, 1);
+    if (state.brushMaterial >= textureSlots.length) state.brushMaterial = 0;
+    rebuildTextureSlotCards();
+    refreshTextureState();
+  };
+  textureCarouselPrev.addEventListener("click", () => {
+    textureModalPage = Math.max(0, textureModalPage - 1);
+    syncTextureModalCarousel();
+  });
+  textureCarouselNext.addEventListener("click", () => {
+    const { maxPage } = materialCarouselBounds(textureSlots.length, textureModalPage, TEXTURE_MODAL_PAGE_SIZE);
+    textureModalPage = Math.min(maxPage, textureModalPage + 1);
+    syncTextureModalCarousel();
+  });
+  rebuildTextureSlotCards();
   setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-close]")!, "system", "warning", "Close");
   setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-load-all]")!, "texture", "load", "Load custom set");
   setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-clear]")!, "texture", "slot", "Clear");
@@ -1881,51 +1931,17 @@ async function main() {
       if (scale) scale.value = String(textureSlots[i].scale);
       if (select) select.value = textureSlots[i].selectedId;
     }
+    syncTextureModalCarousel();
   };
-  for (let i = 0; i < textureSlots.length; i++) {
-    textureModal.querySelector<HTMLSelectElement>(`[data-slot-texture="${i}"]`)!.addEventListener("change", async (event) => {
-      const select = event.target as HTMLSelectElement;
-      const selectedId = select.value;
-      if (selectedId === "") {
-        clearTextureSlot(i);
-        refreshTextureState();
-        return;
-      }
-      if (selectedId === "custom") {
-        pendingTextureLoad = i;
-        textureInput.multiple = false;
-        textureInput.click();
-        syncTextureModalControls();
-        return;
-      }
-      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === selectedId);
-      if (!builtin) return;
-      const previousName = textureSlots[i].name;
-      textureSlots[i].name = "loading...";
-      updateTextureSlotPreview(i);
-      const texture = await loadTerrainTextureUrl(builtin.url);
-      if (!texture) {
-        textureSlots[i].name = previousName;
-        select.value = textureSlots[i].selectedId;
-        refreshTextureState();
-        return;
-      }
-      setBuiltinTextureSlot(i, texture, builtin.label, builtin.url, builtin.id);
-      refreshTextureState();
-    });
-    textureModal.querySelector<HTMLInputElement>(`[data-slot-low="${i}"]`)!.addEventListener("change", (event) => {
-      textureSlots[i].heightMin = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    });
-    textureModal.querySelector<HTMLInputElement>(`[data-slot-high="${i}"]`)!.addEventListener("change", (event) => {
-      textureSlots[i].heightMax = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    });
-    textureModal.querySelector<HTMLInputElement>(`[data-slot-scale="${i}"]`)!.addEventListener("change", (event) => {
-      textureSlots[i].scale = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    });
-  }
+  textureModal.querySelector<HTMLElement>("[data-texture-add]")!.addEventListener("click", () => {
+    addTextureSlot();
+    textureModalPage = materialCarouselBounds(
+      textureSlots.length,
+      textureModalPage,
+      TEXTURE_MODAL_PAGE_SIZE,
+    ).maxPage;
+    syncTextureModalCarousel();
+  });
   textureModal.querySelector<HTMLElement>("[data-texture-load-all]")!.addEventListener("click", () => {
     pendingTextureLoad = "all";
     textureInput.multiple = true;
@@ -1959,6 +1975,10 @@ async function main() {
     }
   };
   if (stagedImport) {
+    while (textureSlots.length < stagedImport.manifest.textures.length) {
+      textureSlots.push({ ...emptyTextureSlotState() });
+    }
+    rebuildTextureSlotCards();
     await loadBuiltinTextureSlots(
       stagedImport.manifest.textures.filter((slot) => slot.source === "builtin").map((slot) => ({
         index: slot.index,
@@ -2071,6 +2091,8 @@ async function main() {
   // brush controls drive the same global state the click handlers and preview read.
   const PAINT_SWATCH_COLORS = ["#6b9b4d", "#8c8580", "#d9c78d", "#f5f7ff"];
   const terraformMenu = document.getElementById("terraform-menu")!;
+  const menuHeader = document.createElement("div");
+  menuHeader.className = "tf-menu-header";
   const paletteSection = document.createElement("div");
   paletteSection.className = "tf-palette";
   const editToggle = document.createElement("label");
@@ -2089,7 +2111,8 @@ async function main() {
     }
     updatePlayerModeUi();
   });
-  paletteSection.appendChild(editToggle);
+  menuHeader.appendChild(editToggle);
+  terraformMenu.appendChild(menuHeader);
   terraformMenu.appendChild(paletteSection);
   const editSection = document.createElement("div");
   editSection.className = "tf-edit-section";
@@ -2108,21 +2131,63 @@ async function main() {
   };
 
   const materialRow = makeRow("Material", paletteSection);
+  materialRow.classList.add("tf-row-material");
+  let materialSwatchPage = 0;
+  const materialCarousel = document.createElement("div");
+  materialCarousel.className = "tf-material-carousel";
+  const carouselPrev = document.createElement("button");
+  carouselPrev.type = "button";
+  carouselPrev.className = "tf-carousel-nav tf-carousel-prev";
+  carouselPrev.setAttribute("aria-label", "Previous materials");
+  carouselPrev.textContent = "‹";
+  const materialSwatches = document.createElement("div");
+  materialSwatches.className = "tf-material-swatches";
+  const carouselNext = document.createElement("button");
+  carouselNext.type = "button";
+  carouselNext.className = "tf-carousel-nav tf-carousel-next";
+  carouselNext.setAttribute("aria-label", "Next materials");
+  carouselNext.textContent = "›";
+  materialCarousel.append(carouselPrev, materialSwatches, carouselNext);
+  materialRow.appendChild(materialCarousel);
   const swatchButtons: HTMLButtonElement[] = [];
-  for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "tf-swatch";
-    const name = document.createElement("span");
-    btn.appendChild(name);
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      state.brushMaterial = i;
-      refreshTerraformSwatches();
-    });
-    swatchButtons.push(btn);
-    materialRow.appendChild(btn);
-  }
+  const ensureSwatchButton = (index: number) => {
+    while (swatchButtons.length <= index) {
+      const slotIndex = swatchButtons.length;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tf-swatch";
+      const name = document.createElement("span");
+      btn.appendChild(name);
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        state.brushMaterial = slotIndex;
+        refreshTerraformSwatches();
+      });
+      swatchButtons.push(btn);
+      materialSwatches.appendChild(btn);
+    }
+  };
+  const syncMaterialCarousel = () => {
+    const count = textureSlots.length;
+    const bounds = materialCarouselBounds(count, materialSwatchPage);
+    materialSwatchPage = bounds.page;
+    materialCarousel.classList.toggle("tf-material-carousel-active", bounds.needsCarousel);
+    carouselPrev.disabled = bounds.page <= 0;
+    carouselNext.disabled = bounds.page >= bounds.maxPage;
+    for (let i = 0; i < swatchButtons.length; i++) {
+      const visible = i < count && (!bounds.needsCarousel || (i >= bounds.start && i < bounds.end));
+      swatchButtons[i].style.display = visible ? "" : "none";
+    }
+  };
+  carouselPrev.addEventListener("click", () => {
+    materialSwatchPage = Math.max(0, materialSwatchPage - 1);
+    syncMaterialCarousel();
+  });
+  carouselNext.addEventListener("click", () => {
+    const { maxPage } = materialCarouselBounds(textureSlots.length, materialSwatchPage);
+    materialSwatchPage = Math.min(maxPage, materialSwatchPage + 1);
+    syncMaterialCarousel();
+  });
 
   const makeToggleGroup = <T extends string>(
     row: HTMLElement,
@@ -2250,19 +2315,26 @@ async function main() {
 
   refreshTerraformSwatches = () => {
     rebuildActiveTerrainSlots();
-    const active = activeTerrainSlots.length;
-    // with textures loaded, only painted slots that have a texture are selectable (else black)
-    if (active > 0 && state.brushMaterial >= active) state.brushMaterial = 0;
-    for (let i = 0; i < swatchButtons.length; i++) {
+    if (state.brushMaterial >= textureSlots.length) state.brushMaterial = 0;
+    materialSwatchPage = materialCarouselPageForSelection(
+      state.brushMaterial,
+      materialSwatchPage,
+      textureSlots.length,
+    );
+    for (let i = 0; i < textureSlots.length; i++) {
+      ensureSwatchButton(i);
       const btn = swatchButtons[i];
-      const slot = activeTerrainSlots[i];
+      const slot = textureSlots[i];
       const label = btn.firstChild as HTMLSpanElement;
-      btn.disabled = active > 0 && i >= active;
-      btn.style.backgroundImage = slot?.previewUrl ? `url("${slot.previewUrl}")` : "";
-      btn.style.backgroundColor = slot?.previewUrl ? "transparent" : PAINT_SWATCH_COLORS[i];
-      label.textContent = slot?.name && slot.name !== "empty" ? slot.name : TERRAIN_TEXTURE_BANDS[i];
+      btn.disabled = !slot.texture;
+      btn.style.backgroundImage = slot.previewUrl ? `url("${slot.previewUrl}")` : "";
+      btn.style.backgroundColor = slot.previewUrl ? "transparent" : PAINT_SWATCH_COLORS[i % PAINT_SWATCH_COLORS.length];
+      const displayName = slot.name && slot.name !== "empty" ? slot.name : terrainTextureSlotLabel(i);
+      label.textContent = displayName;
+      btn.title = displayName;
       btn.setAttribute("aria-pressed", String(state.brushMaterial === i && !btn.disabled));
     }
+    syncMaterialCarousel();
   };
   // keep the slider/op in sync if state changes elsewhere (e.g. Shift+wheel radius)
   syncTerraformMenu = () => {

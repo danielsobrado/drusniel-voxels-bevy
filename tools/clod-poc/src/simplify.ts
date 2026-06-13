@@ -44,21 +44,18 @@ export function simplifyPage(
   const inputIndices = mesh.indices.length;
   const targetIndices = Math.max(3, Math.floor(inputIndices * cfg.simplify.target_ratio_per_level));
 
-  // Interleave attributes: [n0 n1 n2 m0 m1 m2 m3] per vertex, stride 7.
-  const ATTR_STRIDE = 7;
+  // Interleave attributes: [n0 n1 n2 paintSlot] per vertex, stride 4.
+  const ATTR_STRIDE = 4;
   const attrs = new Float32Array(vc * ATTR_STRIDE);
   for (let i = 0; i < vc; i++) {
     attrs[i * ATTR_STRIDE + 0] = mesh.normals[i * 3 + 0];
     attrs[i * ATTR_STRIDE + 1] = mesh.normals[i * 3 + 1];
     attrs[i * ATTR_STRIDE + 2] = mesh.normals[i * 3 + 2];
-    attrs[i * ATTR_STRIDE + 3] = mesh.materials[i * 4 + 0];
-    attrs[i * ATTR_STRIDE + 4] = mesh.materials[i * 4 + 1];
-    attrs[i * ATTR_STRIDE + 5] = mesh.materials[i * 4 + 2];
-    attrs[i * ATTR_STRIDE + 6] = mesh.materials[i * 4 + 3];
+    attrs[i * ATTR_STRIDE + 3] = mesh.materials[i];
   }
   const wn = cfg.simplify.attribute_weights.normal;
   const wm = cfg.simplify.attribute_weights.material;
-  const attrWeights = [wn, wn, wn, wm, wm, wm, wm];
+  const attrWeights = [wn, wn, wn, wm];
 
   let result: [Uint32Array, number];
   try {
@@ -110,8 +107,7 @@ function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number): Pag
       const pz = snap(mesh.positions[old * 3 + 2], snapEpsilon);
       pos.push(px, py, pz);
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      const [m0, m1, m2, m3] = paintMaterialAt(px, py, pz);
-      mat.push(m0, m1, m2, m3);
+      mat.push(paintMaterialAt(px, py, pz));
     }
     out[i] = ni;
   }

@@ -5,7 +5,7 @@
 export interface PageMesh {
   positions: Float32Array; // xyz * vertexCount
   normals: Float32Array; // xyz * vertexCount
-  materials: Float32Array; // 4 weights * vertexCount
+  materials: Float32Array; // paint slot per vertex: 0 = natural, slot index + 1 when painted
   indices: Uint32Array;
 }
 

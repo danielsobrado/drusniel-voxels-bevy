@@ -94,7 +94,7 @@ export interface BorderChain {
   // sorted boundary vertices along a footprint edge, for neighbor matching (gate A2)
   positions: [number, number, number][];
   normals: [number, number, number][];
-  materials: [number, number, number, number][];
+  materials: number[];
 }
 
 /**
@@ -112,7 +112,7 @@ export function borderChain(
 ): BorderChain {
   const n = vertexCount(mesh);
   const open = openBoundaryVertexFlags(mesh);
-  const out: { p: [number, number, number]; nr: [number, number, number]; m: [number, number, number, number] }[] = [];
+  const out: { p: [number, number, number]; nr: [number, number, number]; m: number }[] = [];
   for (let i = 0; i < n; i++) {
     if (!open[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
@@ -127,7 +127,7 @@ export function borderChain(
     out.push({
       p: [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],
       nr: [mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]],
-      m: [mesh.materials[i * 4], mesh.materials[i * 4 + 1], mesh.materials[i * 4 + 2], mesh.materials[i * 4 + 3]],
+      m: mesh.materials[i],
     });
   }
   // sort along the free axes then Y
@@ -162,8 +162,7 @@ export function assertBorderMatch(a: BorderChain, b: BorderChain): void {
     if (dot < tol.normalDot) {
       throw new ClodBuildError("BorderNormalMismatch", `normal dot ${dot.toFixed(5)} at border vertex ${i}`);
     }
-    let md = 0;
-    for (let c = 0; c < 4; c++) md = Math.max(md, Math.abs(a.materials[i][c] - b.materials[i][c]));
+    const md = Math.abs(a.materials[i] - b.materials[i]);
     if (md > tol.material) {
       throw new ClodBuildError("BorderMaterialMismatch", `material delta ${md.toExponential(2)} at border vertex ${i}`);
     }

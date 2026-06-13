@@ -1,5 +1,6 @@
 import type { ClodPagesConfig } from "./config.js";
 import type { BrushOp, BrushShape, DigEdit } from "./terrain.js";
+import { MAX_TERRAIN_TEXTURES } from "./terrain_textures.js";
 
 export const PROJECT_SCHEMA_VERSION = 1 as const;
 const PROJECT_FILE = "project.json";
@@ -212,7 +213,7 @@ function assertSessionState(value: unknown): asserts value is ProjectSessionStat
   const brushFalloff = value.brushFalloff;
   const brushFlowMs = value.brushFlowMs;
   const grassMaxBlades = value.grassMaxBlades;
-  if (!isFiniteNumber(brushMaterial) || !Number.isInteger(brushMaterial) || brushMaterial < 0 || brushMaterial > 3 ||
+  if (!isFiniteNumber(brushMaterial) || !Number.isInteger(brushMaterial) || brushMaterial < 0 || brushMaterial >= MAX_TERRAIN_TEXTURES ||
       !isFiniteNumber(digRadius) || digRadius < 1 || digRadius > 8 ||
       !isFiniteNumber(brushHeight) || brushHeight < 1 || brushHeight > 16 ||
       !isFiniteNumber(brushStrength) || brushStrength < 0 || brushStrength > 1 ||
@@ -235,7 +236,7 @@ function assertDigEdit(value: unknown, index: number): asserts value is DigEdit 
     throw new Error(`project.json terrainEdits[${index}] has an invalid operation`);
   }
   if (value.material !== undefined &&
-      (!isFiniteNumber(value.material) || !Number.isInteger(value.material) || value.material < 0 || value.material > 3)) {
+      (!isFiniteNumber(value.material) || !Number.isInteger(value.material) || value.material < 0 || value.material >= MAX_TERRAIN_TEXTURES)) {
     throw new Error(`project.json terrainEdits[${index}] has an invalid material`);
   }
   if (value.height !== undefined && (!isFiniteNumber(value.height) || value.height <= 0 || value.height > 16)) {
@@ -283,10 +284,10 @@ export function validateProjectManifest(value: unknown): ClodProjectManifestV1 {
   assertSessionState(value.state);
   if (!Array.isArray(value.terrainEdits)) throw new Error("project.json terrainEdits must be an array");
   value.terrainEdits.forEach(assertDigEdit);
-  if (!Array.isArray(value.textures) || value.textures.length !== 4) {
-    throw new Error("project.json must contain exactly four texture slots");
+  if (!Array.isArray(value.textures) || value.textures.length < 1 || value.textures.length > MAX_TERRAIN_TEXTURES) {
+    throw new Error(`project.json must contain between 1 and ${MAX_TERRAIN_TEXTURES} texture slots`);
   }
-  value.textures.forEach(assertTextureSlot);
+  value.textures.forEach((slot, index) => assertTextureSlot(slot, index));
   if (!isRecord(value.camera) || !isVec3(value.camera.position) || !isVec3(value.camera.target)) {
     throw new Error("project.json has invalid orbit camera data");
   }

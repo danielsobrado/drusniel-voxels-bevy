@@ -216,7 +216,7 @@ export interface DigEdit {
   r: number;
   shape?: BrushShape; // default "sphere"
   op?: BrushOp; // default "remove"
-  material?: number; // add only: terrain texture slot 0..3 to paint the deposit with
+  material?: number; // add only: terrain texture slot index to paint the deposit with
   height?: number; // vertical half-extent (cells); default r (sphere becomes an ellipsoid)
   strength?: number; // 0..1 fraction of the full carve/fill applied; default 1 (hard edit)
   falloff?: number; // 0..1 edge softness: feather width as a fraction of r; default 0 (hard edge)
@@ -332,12 +332,12 @@ export function materialWeights(y: number, ny: number): [number, number, number,
 const MATERIAL_PAINT_BAND = 0.75;
 
 /**
- * Per-vertex paint override carried in the mesh `material` attribute: a one-hot weight on
- * the terrain texture slot of the last `add` edit whose brush contains this vertex, or all
- * zeros for natural terrain (which the shader renders with its height bands). Pure function
- * of position, so coincident border vertices agree and the weld holds.
+ * Per-vertex paint override carried in the mesh `paintSlot` attribute: slot index + 1 for
+ * the terrain texture slot of the last `add` edit whose brush contains this vertex, or 0 for
+ * natural terrain (which the shader renders with its height bands). Pure function of
+ * position, so coincident border vertices agree and the weld holds.
  */
-export function paintMaterialAt(x: number, y: number, z: number): [number, number, number, number] {
+export function paintMaterialAt(x: number, y: number, z: number): number {
   if (digEdits.length > 0) {
     for (let i = digEdits.length - 1; i >= 0; i--) {
       const e = digEdits[i];
@@ -347,14 +347,12 @@ export function paintMaterialAt(x: number, y: number, z: number): [number, numbe
       const dx = x - e.x, dy = y - e.y, dz = z - e.z;
       if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
       if (brushSdf(e.shape, dx, dy, dz, e.r, h) <= MATERIAL_PAINT_BAND) {
-        const slot = Math.max(0, Math.min(3, (e.material ?? 0) | 0));
-        const m: [number, number, number, number] = [0, 0, 0, 0];
-        m[slot] = 1;
-        return m;
+        const slot = Math.max(0, (e.material ?? 0) | 0);
+        return slot + 1;
       }
     }
   }
-  return [0, 0, 0, 0];
+  return 0;
 }
 
 // ---- per-chunk surface nets ----------------------------------------------
@@ -437,11 +435,11 @@ function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): numbe
   if (p === null) return null;
   const [px, py, pz] = p;
   const [nx, ny, nz] = gradient(px, py, pz);
-  const [m0, m1, m2, m3] = paintMaterialAt(px, py, pz);
+  const paint = paintMaterialAt(px, py, pz);
   const idx = buf.pos.length / 3;
   buf.pos.push(px, py, pz);
   buf.nrm.push(nx, ny, nz);
-  buf.mat.push(m0, m1, m2, m3);
+  buf.mat.push(paint);
   buf.index.set(key, idx);
   return idx;
 }

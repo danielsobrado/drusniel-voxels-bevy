@@ -6,7 +6,7 @@ import type { ClodPageNode, PageMesh } from "./types.js";
 const mesh: PageMesh = {
   positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
   normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
-  materials: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]),
+  materials: new Float32Array([1, 2, 0]),
   indices: new Uint32Array([0, 1, 2]),
 };
 
@@ -51,11 +51,11 @@ describe("all-LOD GLB export", () => {
     expect(scene.children.map((child) => child.name)).toEqual(["LOD0", "LOD1"]);
     const exportedMesh = scene.getObjectByName("L1:0,0") as THREE.Mesh;
     expect(exportedMesh.userData).toMatchObject({ pageId: "L1:0,0", lodLevel: 1, errorWorld: 0.5 });
-    expect((exportedMesh.geometry as THREE.BufferGeometry).getAttribute("material").itemSize).toBe(4);
+    expect((exportedMesh.geometry as THREE.BufferGeometry).getAttribute("paintSlot").itemSize).toBe(1);
     disposeAllLodsExportScene(scene);
   });
 
-  it("writes the custom paint attribute as _MATERIAL in binary glTF", async () => {
+  it("writes the custom paint attribute as _PAINTSLOT in binary glTF", async () => {
     const glb = await exportAllLodsToGlb(new Map([[0, [node(0, "L0:0,0")]]]));
     const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
     const jsonLength = view.getUint32(12, true);
@@ -63,7 +63,7 @@ describe("all-LOD GLB export", () => {
       meshes: { primitives: { attributes: Record<string, number> }[] }[];
       nodes: { name?: string; extras?: Record<string, unknown> }[];
     };
-    expect(json.meshes[0].primitives[0].attributes).toHaveProperty("_MATERIAL");
+    expect(json.meshes[0].primitives[0].attributes).toHaveProperty("_PAINTSLOT");
     expect(json.nodes.find((entry) => entry.name === "L0:0,0")?.extras).toMatchObject({ pageId: "L0:0,0" });
   });
 });

@@ -43,20 +43,14 @@ export function weldVertices(mesh: PageMesh, epsilon: number): WeldResult {
       remap[i] = ni;
       pos.push(px, py, pz);
       nrm.push(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
-      mat.push(
-        mesh.materials[i * 4], mesh.materials[i * 4 + 1],
-        mesh.materials[i * 4 + 2], mesh.materials[i * 4 + 3],
-      );
+      mat.push(mesh.materials[i]);
     } else {
       // conflict check against the canonical vertex
       const dot =
         mesh.normals[i * 3] * nrm[found * 3] +
         mesh.normals[i * 3 + 1] * nrm[found * 3 + 1] +
         mesh.normals[i * 3 + 2] * nrm[found * 3 + 2];
-      let matDelta = 0;
-      for (let c = 0; c < 4; c++) {
-        matDelta = Math.max(matDelta, Math.abs(mesh.materials[i * 4 + c] - mat[found * 4 + c]));
-      }
+      const matDelta = Math.abs(mesh.materials[i] - mat[found]);
       if (dot < tol.normalDot || matDelta > tol.material) {
         throw new ClodBuildError(
           "DirtyInput",
