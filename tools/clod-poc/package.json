@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "js-yaml": "^4.1.0",
     "lil-gui": "^0.19.2",
     "meshoptimizer": "0.22.0",

@@ -28,4 +28,16 @@ describe("GitHub Pages deployment contract", () => {
     expect(workflow).toContain("path: tools/clod-poc/dist");
     expect(workflow).toContain("actions/deploy-pages");
   });
+
+  it("renders exactly four accessible top-bar controls with the requested community links", () => {
+    const html = readFileSync(resolve(projectRoot, "index.html"), "utf8");
+    const toolbar = html.match(/<nav id="project-toolbar"[\s\S]*?<\/nav>/)?.[0] ?? "";
+    expect(toolbar.match(/<(?:button|a)\b/g)).toHaveLength(4);
+    expect(toolbar).toContain('aria-label="Import project"');
+    expect(toolbar).toContain('aria-label="Export project"');
+    expect(toolbar).toContain('href="https://discord.gg/JXrSfsDVF"');
+    expect(toolbar).toContain('href="https://github.com/danielsobrado/drusniel-voxels-bevy"');
+    expect(toolbar).toContain('title="Give me a start in the repo!"');
+    expect(toolbar.match(/target="_blank" rel="noopener noreferrer"/g)).toHaveLength(2);
+  });
 });

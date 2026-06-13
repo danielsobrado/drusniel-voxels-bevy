@@ -3,7 +3,15 @@
 // targeted rebuild of the dug pages and their ancestors.
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { addDigEdit, clearDigEdits, density, paintMaterialAt, surfaceHeight } from "./terrain.js";
+import {
+  addDigEdit,
+  clearDigEdits,
+  density,
+  getDigEditsSnapshot,
+  paintMaterialAt,
+  replaceDigEdits,
+  surfaceHeight,
+} from "./terrain.js";
 import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./quadtree.js";
 import { buildLod0PageSource } from "./source_mesh.js";
 import { initSimplifier } from "./simplify.js";
@@ -33,6 +41,16 @@ const cfg: ClodPagesConfig = {
 afterEach(clearDigEdits);
 
 describe("dig edits in the density field", () => {
+  it("snapshots and restores edit history defensively", () => {
+    const source = [{ x: 5, y: 6, z: 7, r: 3, op: "add" as const, shape: "cube" as const, material: 2 }];
+    replaceDigEdits(source);
+    source[0].x = 99;
+    const snapshot = getDigEditsSnapshot();
+    expect(snapshot[0].x).toBe(5);
+    snapshot[0].x = 42;
+    expect(getDigEditsSnapshot()[0].x).toBe(5);
+  });
+
   it("carves air inside the sphere and leaves the far field untouched", () => {
     const x = 5, z = 5;
     const y = surfaceHeight(x, z) - 1; // just below the surface: solid

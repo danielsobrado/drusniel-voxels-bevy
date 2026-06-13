@@ -162,6 +162,13 @@ exposure, contrast, saturation, and vignette controls. Turning the feature off, 
 `off` mode, renders the scene directly. This is visual-only and does not affect CLOD
 selection or validation.
 
+The top toolbar exports a versioned project ZIP containing `project.json`, an all-LOD
+`terrain.glb`, and any custom texture source files. Import validates and stages that archive,
+reloads at its saved world size, rebuilds terrain from the saved terraform edits, and restores
+the GUI, texture slots, grass settings, and orbit camera. Built-in demo textures remain stable
+ID references and are not duplicated in the archive. The GLB groups every page by LOD and is
+intended for geometry interchange; `project.json` is authoritative for editable round-trips.
+
 The **near-field bubble** folder (§4.4): pages intersecting the bubble are force-split to
 LOD0, and inside the radius a LOD0 page is drawn as its raw chunks instead of the welded
 page mesh. With "tint bubble red" OFF the edge must be **invisible** (raw chunks ===

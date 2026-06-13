@@ -17,7 +17,16 @@ import {
   resimplifyParent,
   type NodeIndex,
 } from "./quadtree.js";
-import { addDigEdit, type BrushOp, type BrushShape, digEditCount, DIG_INFLUENCE_MARGIN, meshChunk } from "./terrain.js";
+import {
+  addDigEdit,
+  type BrushOp,
+  type BrushShape,
+  digEditCount,
+  DIG_INFLUENCE_MARGIN,
+  getDigEditsSnapshot,
+  meshChunk,
+  replaceDigEdits,
+} from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
   applyTerrainColorAdjustments,
@@ -52,6 +61,18 @@ import {
   PostProcessPipeline,
   type PostProcessSettings,
 } from "./postprocess.js";
+import {
+  consumeStagedProjectImport,
+  createProjectArchive,
+  parseProjectArchive,
+  PROJECT_SCHEMA_VERSION,
+  stageProjectImport,
+  type ClodProjectManifestV1,
+  type ProjectArchiveContents,
+  type ProjectSessionState,
+  type ProjectTextureSlot,
+  type TextureBlendMode,
+} from "./project_archive.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
@@ -89,7 +110,6 @@ const BUILTIN_TERRAIN_TEXTURES = [
   { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
 ] as const;
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
-type TextureBlendMode = (typeof TEXTURE_BLEND_MODES)[number];
 
 function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
@@ -126,6 +146,9 @@ interface TextureSlot {
   name: string;
   previewUrl: string | null;
   selectedId: string;
+  customBytes: Uint8Array | null;
+  customMimeType: string | null;
+  customExtension: string | null;
   scale: number;
   heightMin: number;
   heightMax: number;
@@ -205,6 +228,9 @@ function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacenc
 
 async function main() {
   const info = document.getElementById("info")!;
+  const importButton = document.getElementById("project-import") as HTMLButtonElement;
+  const exportButton = document.getElementById("project-export") as HTMLButtonElement;
+  const projectImportInput = document.getElementById("project-import-input") as HTMLInputElement;
   const orbitModeButton = document.getElementById("orbit-mode") as HTMLButtonElement;
   const playerModeButton = document.getElementById("player-mode") as HTMLButtonElement;
   const playerModeStatus = document.getElementById("player-mode-status")!;
@@ -212,20 +238,40 @@ async function main() {
   const buildProgressBar = document.getElementById("build-progress-bar") as HTMLProgressElement;
   const buildProgressPhase = document.getElementById("build-progress-phase")!;
   const buildProgressPercent = document.getElementById("build-progress-percent")!;
-  const cfg = parseConfig(configText);
+  const searchParams = new URLSearchParams(location.search);
+  const importToken = searchParams.get("import");
+  let stagedImport: ProjectArchiveContents | null = null;
+  if (importToken) {
+    buildProgress.hidden = false;
+    buildProgressPhase.textContent = "loading imported project";
+    buildProgressPercent.textContent = "0%";
+    buildProgressBar.value = 0;
+    try {
+      stagedImport = await consumeStagedProjectImport(importToken);
+      if (!stagedImport) throw new Error("The staged project was not found or was already used");
+    } catch (error) {
+      info.textContent = `Project import failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      searchParams.delete("import");
+      const query = searchParams.toString();
+      history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+    }
+  }
+  const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
   await initSimplifier();
 
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
-  const requested = Number(new URLSearchParams(location.search).get("world"));
-  const WORLD = WORLD_OPTIONS.includes(requested) ? requested : 4;
+  const requested = Number(searchParams.get("world"));
+  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : 4);
+  if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
   const buildNote =
     WORLD >= 16 ? " (large build, tab will freeze longer)" :
     WORLD >= 8 ? " (~8s, tab will freeze)" :
     "";
   info.textContent = `building ${WORLD}x${WORLD} world…${buildNote}`;
   buildProgress.hidden = false;
-  buildProgressPhase.textContent = `building ${WORLD}x${WORLD}`;
+  buildProgressPhase.textContent = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
   buildProgressPercent.textContent = "0%";
   buildProgressBar.value = 0;
   await new Promise((r) => setTimeout(r, 16));
@@ -253,6 +299,12 @@ async function main() {
   camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(mid, 24, mid);
+  if (stagedImport) {
+    camera.position.fromArray(stagedImport.manifest.camera.position);
+    controls.target.fromArray(stagedImport.manifest.camera.target);
+    camera.lookAt(controls.target);
+    controls.update();
+  }
 
   const colliderPages: TerrainColliderPage[] = allNodes
     .filter((node) => node.level === 0)
@@ -504,6 +556,7 @@ async function main() {
     grassSeed: DEFAULT_GRASS_SETTINGS.seed,
     grassBladeCount: 0,
   };
+  if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
     brightness: state.terrainBrightness,
     contrast: state.terrainContrast,
@@ -555,6 +608,9 @@ async function main() {
     name: "empty",
     previewUrl: null,
     selectedId: "",
+    customBytes: null,
+    customMimeType: null,
+    customExtension: null,
     scale: 1 / 64,
     heightMin: 0,
     heightMax: 0,
@@ -562,6 +618,16 @@ async function main() {
   for (let i = 0; i < textureSlots.length; i++) {
     textureSlots[i].heightMin = DEFAULT_TEXTURE_RANGES[i][0];
     textureSlots[i].heightMax = DEFAULT_TEXTURE_RANGES[i][1];
+    const imported = stagedImport?.manifest.textures[i];
+    if (imported) {
+      textureSlots[i].name = imported.name;
+      textureSlots[i].selectedId = imported.selectedId;
+      textureSlots[i].scale = imported.scale;
+      textureSlots[i].heightMin = imported.heightMin;
+      textureSlots[i].heightMax = imported.heightMax;
+      textureSlots[i].customMimeType = imported.mimeType ?? null;
+      textureSlots[i].customExtension = imported.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
+    }
   }
   let activeTerrainSlots: TextureSlot[] = [];
   // assigned when the terraform menu is built; refreshes the material swatches after textures change
@@ -821,6 +887,7 @@ async function main() {
   let lastTriCount = 0;
   let averageFps = 0;
   let lastDigSummary = "";
+  let lastArchiveSummary = "";
 
   const updateInfo = () => {
     const playerLine = interaction.mode === "playing"
@@ -836,6 +903,7 @@ async function main() {
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}` +
       `${lastDigSummary ? `  last: ${lastDigSummary}` : ""}\n` +
+      `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
       playerLine;
   };
 
@@ -979,6 +1047,10 @@ async function main() {
         updateInfo();
       }
     }
+  };
+
+  const flushAncestors = () => {
+    while ([...pendingByLevel.values()].some((pending) => pending.size > 0)) drainAncestors();
   };
 
   // Carve a sphere where the ray hits, then pay the CLOD edit cost. The LOD0 pages
@@ -1239,23 +1311,58 @@ async function main() {
     syncTextureModalControls();
     applyTerrainTextures();
   };
-  const setTextureSlot = (index: number, texture: THREE.Texture, name: string, previewUrl: string) => {
+  const setTextureSlot = (
+    index: number,
+    texture: THREE.Texture,
+    name: string,
+    previewUrl: string,
+    customBytes: Uint8Array,
+    customMimeType: string,
+    customExtension: string,
+  ) => {
     const old = textureSlots[index];
     old.texture?.dispose();
     if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = { ...old, texture, name, previewUrl, selectedId: "custom" };
+    textureSlots[index] = {
+      ...old,
+      texture,
+      name,
+      previewUrl,
+      selectedId: "custom",
+      customBytes: customBytes.slice(),
+      customMimeType,
+      customExtension,
+    };
   };
   const setBuiltinTextureSlot = (index: number, texture: THREE.Texture, name: string, previewUrl: string, selectedId: string) => {
     const old = textureSlots[index];
     old.texture?.dispose();
     if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = { ...old, texture, name, previewUrl, selectedId };
+    textureSlots[index] = {
+      ...old,
+      texture,
+      name,
+      previewUrl,
+      selectedId,
+      customBytes: null,
+      customMimeType: null,
+      customExtension: null,
+    };
   };
   const clearTextureSlot = (index: number) => {
     const old = textureSlots[index];
     old.texture?.dispose();
     if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = { ...old, texture: null, name: "empty", previewUrl: null, selectedId: "" };
+    textureSlots[index] = {
+      ...old,
+      texture: null,
+      name: "empty",
+      previewUrl: null,
+      selectedId: "",
+      customBytes: null,
+      customMimeType: null,
+      customExtension: null,
+    };
   };
   const clearAllTextures = () => {
     for (let i = 0; i < textureSlots.length; i++) clearTextureSlot(i);
@@ -1290,14 +1397,35 @@ async function main() {
         () => resolve(null),
       );
     });
-  const loadTerrainTexture = (file: File): Promise<{ texture: THREE.Texture; previewUrl: string } | null> =>
-    new Promise((resolve) => {
+  const extensionForTexture = (name: string, mimeType: string): string => {
+    const fromName = name.match(/(\.[a-z0-9]+)$/i)?.[1]?.toLowerCase();
+    if (fromName && fromName.length <= 8) return fromName;
+    if (mimeType === "image/png") return ".png";
+    if (mimeType === "image/webp") return ".webp";
+    return ".jpg";
+  };
+  const loadTerrainTexture = async (file: File): Promise<{
+    texture: THREE.Texture;
+    previewUrl: string;
+    bytes: Uint8Array;
+    mimeType: string;
+    extension: string;
+  } | null> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
       new THREE.TextureLoader().load(
         url,
         (texture) => {
           configureTerrainTexture(texture);
-          resolve({ texture, previewUrl: url });
+          const mimeType = file.type || "application/octet-stream";
+          resolve({
+            texture,
+            previewUrl: url,
+            bytes,
+            mimeType,
+            extension: extensionForTexture(file.name, mimeType),
+          });
         },
         undefined,
         () => {
@@ -1306,17 +1434,34 @@ async function main() {
         },
       );
     });
+  };
   textureInput.addEventListener("change", async () => {
     const files = Array.from(textureInput.files ?? []);
     if (files.length === 0) return;
     if (pendingTextureLoad === "all") {
       const loaded = await Promise.all(files.slice(0, MAX_TERRAIN_TEXTURES).map(loadTerrainTexture));
       loaded.forEach((result, index) => {
-        if (result) setTextureSlot(index, result.texture, files[index].name, result.previewUrl);
+        if (result) setTextureSlot(
+          index,
+          result.texture,
+          files[index].name,
+          result.previewUrl,
+          result.bytes,
+          result.mimeType,
+          result.extension,
+        );
       });
     } else if (typeof pendingTextureLoad === "number") {
       const result = await loadTerrainTexture(files[0]);
-      if (result) setTextureSlot(pendingTextureLoad, result.texture, files[0].name, result.previewUrl);
+      if (result) setTextureSlot(
+        pendingTextureLoad,
+        result.texture,
+        files[0].name,
+        result.previewUrl,
+        result.bytes,
+        result.mimeType,
+        result.extension,
+      );
     }
     pendingTextureLoad = null;
     refreshTextureState();
@@ -1474,8 +1619,44 @@ async function main() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") textureModal.hidden = true;
   });
+  if (stagedImport) {
+    buildProgress.hidden = false;
+    buildProgressPhase.textContent = "restoring textures";
+    buildProgressPercent.textContent = "90%";
+    buildProgressBar.value = 0.9;
+    for (const imported of stagedImport.manifest.textures) {
+      if (imported.source === "builtin") {
+        const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === imported.selectedId);
+        if (!builtin) throw new Error(`Imported project references unknown texture ${imported.selectedId}`);
+        const texture = await loadTerrainTextureUrl(builtin.url);
+        if (!texture) throw new Error(`Could not load imported texture ${builtin.label}`);
+        setBuiltinTextureSlot(imported.index, texture, imported.name, builtin.url, builtin.id);
+      } else if (imported.source === "custom" && imported.customPath) {
+        const bytes = stagedImport.customTextures.get(imported.customPath);
+        if (!bytes) throw new Error(`Imported project is missing ${imported.customPath}`);
+        const mimeType = imported.mimeType ?? "application/octet-stream";
+        const previewUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType }));
+        const texture = await loadTerrainTextureUrl(previewUrl);
+        if (!texture) {
+          URL.revokeObjectURL(previewUrl);
+          throw new Error(`Could not decode imported texture ${imported.name}`);
+        }
+        setTextureSlot(
+          imported.index,
+          texture,
+          imported.name,
+          previewUrl,
+          bytes,
+          mimeType,
+          imported.customPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
+        );
+      }
+    }
+  }
   syncTextureModalControls();
   updateTextureSlotPreviews();
+  refreshTextureState();
+  buildProgress.hidden = true;
 
   const textureFolder = gui.addFolder("terrain texture");
   textureFolder.add(textureActions, "loadTexture").name("texture slots");
@@ -1624,6 +1805,223 @@ async function main() {
     syncOp();
   };
   refreshTerraformSwatches();
+
+  const currentProjectState = (): ProjectSessionState => ({
+    thresholdPx: state.thresholdPx,
+    enforce21: state.enforce21,
+    freeze: state.freeze,
+    wireframe: state.wireframe,
+    showBounds: state.showBounds,
+    showSeamPoints: state.showSeamPoints,
+    showCrossLodBorders: state.showCrossLodBorders,
+    colorByLod: state.colorByLod,
+    normalColor: state.normalColor,
+    normalDivergence: state.normalDivergence,
+    divergenceGain: state.divergenceGain,
+    frontSideOnly: state.frontSideOnly,
+    recomputedNormals: state.recomputedNormals,
+    forceMaxLevel: state.forceMaxLevel as ProjectSessionState["forceMaxLevel"],
+    textureScale: state.textureScale,
+    textureBlendMode: state.textureBlendMode,
+    textureBlendWidth: state.textureBlendWidth,
+    terrainBrightness: state.terrainBrightness,
+    terrainContrast: state.terrainContrast,
+    terrainSaturation: state.terrainSaturation,
+    terrainWarmth: state.terrainWarmth,
+    sunAzimuthDeg: state.sunAzimuthDeg,
+    sunElevationDeg: state.sunElevationDeg,
+    sunIntensity: state.sunIntensity,
+    skyIntensity: state.skyIntensity,
+    groundIntensity: state.groundIntensity,
+    exposure: state.exposure,
+    horizonSoftness: state.horizonSoftness,
+    sunDiskIntensity: state.sunDiskIntensity,
+    sunGlowIntensity: state.sunGlowIntensity,
+    hazeIntensity: state.hazeIntensity,
+    postProcessEnabled: state.postProcessEnabled,
+    postProcessOpacity: state.postProcessOpacity,
+    postProcessExposure: state.postProcessExposure,
+    postProcessContrast: state.postProcessContrast,
+    postProcessSaturation: state.postProcessSaturation,
+    postProcessVignette: state.postProcessVignette,
+    postProcessDebugMode: state.postProcessDebugMode,
+    bubble: state.bubble,
+    bubbleRadius: state.bubbleRadius,
+    tintBubble: state.tintBubble,
+    digEnabled: state.digEnabled,
+    digRadius: state.digRadius,
+    brushOp: state.brushOp,
+    brushShape: state.brushShape,
+    brushMaterial: state.brushMaterial,
+    grassEnabled: state.grassEnabled,
+    grassDistance: state.grassDistance,
+    grassBladeSpacing: state.grassBladeSpacing,
+    grassBladeHeight: state.grassBladeHeight,
+    grassBladeHeightVariation: state.grassBladeHeightVariation,
+    grassBladeWidth: state.grassBladeWidth,
+    grassWindStrength: state.grassWindStrength,
+    grassWindSpeed: state.grassWindSpeed,
+    grassSlopeMinY: state.grassSlopeMinY,
+    grassMinHeight: state.grassMinHeight,
+    grassMaxHeight: state.grassMaxHeight,
+    grassMaxBlades: state.grassMaxBlades,
+    grassSeed: state.grassSeed,
+  });
+
+  const projectTextureMetadata = (): ProjectTextureSlot[] => textureSlots.map((slot, index) => {
+    const source: ProjectTextureSlot["source"] = slot.texture === null
+      ? "empty"
+      : slot.selectedId === "custom" ? "custom" : "builtin";
+    const customPath = source === "custom" ? `textures/slot-${index}${slot.customExtension ?? ".bin"}` : undefined;
+    return {
+      index,
+      source,
+      name: source === "empty" ? "empty" : slot.name,
+      selectedId: source === "empty" ? "" : slot.selectedId,
+      scale: slot.scale,
+      heightMin: slot.heightMin,
+      heightMax: slot.heightMax,
+      ...(customPath ? { customPath, mimeType: slot.customMimeType ?? "application/octet-stream" } : {}),
+    };
+  });
+
+  const setProjectBusy = (busy: boolean, phase = "preparing", fraction = 0) => {
+    importButton.disabled = busy;
+    exportButton.disabled = busy;
+    buildProgress.hidden = !busy;
+    buildProgressPhase.textContent = phase;
+    buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
+    buildProgressBar.value = fraction;
+  };
+
+  const showProjectError = (operation: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    lastArchiveSummary = `${operation} failed: ${message}`;
+    updateInfo();
+    window.alert(`${operation} failed\n\n${message}`);
+  };
+
+  const validateArchiveTextures = async (contents: ProjectArchiveContents) => {
+    for (const slot of contents.manifest.textures) {
+      if (slot.source === "builtin" && !BUILTIN_TERRAIN_TEXTURES.some((texture) => texture.id === slot.selectedId)) {
+        throw new Error(`project.json references unknown built-in texture ${slot.selectedId}`);
+      }
+      if (slot.source !== "custom" || !slot.customPath) continue;
+      const bytes = contents.customTextures.get(slot.customPath);
+      if (!bytes) throw new Error(`The archive is missing ${slot.customPath}`);
+      const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], {
+        type: slot.mimeType ?? "application/octet-stream",
+      });
+      try {
+        const bitmap = await createImageBitmap(blob);
+        bitmap.close();
+      } catch {
+        throw new Error(`Custom texture ${slot.name} is not a decodable image`);
+      }
+    }
+  };
+
+  importButton.addEventListener("click", () => projectImportInput.click());
+  projectImportInput.addEventListener("change", async () => {
+    const file = projectImportInput.files?.[0];
+    projectImportInput.value = "";
+    if (!file) return;
+    try {
+      setProjectBusy(true, "validating project archive", 0.2);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const contents = await parseProjectArchive(new Uint8Array(await file.arrayBuffer()));
+      await validateArchiveTextures(contents);
+      setProjectBusy(true, "staging project for rebuild", 0.65);
+      const token = await stageProjectImport(contents);
+      const next = new URLSearchParams(location.search);
+      next.set("world", String(contents.manifest.worldSize));
+      next.set("import", token);
+      location.search = `?${next.toString()}`;
+    } catch (error) {
+      setProjectBusy(false);
+      showProjectError("Project import", error);
+    }
+  });
+
+  exportButton.addEventListener("click", async () => {
+    const startedAt = performance.now();
+    try {
+      setProjectBusy(true, "settling edited LODs", 0.05);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      flushAncestors();
+      setProjectBusy(true, "exporting all LOD meshes", 0.25);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const { exportAllLodsToGlb } = await import("./gltf_export.js");
+      const terrainGlb = await exportAllLodsToGlb(result.nodesByLevel);
+      setProjectBusy(true, "packing project archive", 0.8);
+      const textures = projectTextureMetadata();
+      const customTextures = new Map<string, Uint8Array>();
+      for (const texture of textures) {
+        if (texture.source !== "custom" || !texture.customPath) continue;
+        const bytes = textureSlots[texture.index].customBytes;
+        if (!bytes) throw new Error(`Custom texture slot ${texture.index} has no source bytes`);
+        customTextures.set(texture.customPath, bytes);
+      }
+      const manifest: ClodProjectManifestV1 = {
+        schemaVersion: PROJECT_SCHEMA_VERSION,
+        kind: "drusniel-clod-project",
+        exportedAt: new Date().toISOString(),
+        worldSize: WORLD,
+        config: structuredClone(cfg),
+        state: currentProjectState(),
+        terrainEdits: getDigEditsSnapshot(),
+        textures,
+        camera: {
+          position: camera.position.toArray() as [number, number, number],
+          target: controls.target.toArray() as [number, number, number],
+        },
+      };
+      const archive = await createProjectArchive(manifest, terrainGlb, customTextures);
+      setProjectBusy(true, "downloading project", 1);
+      const url = URL.createObjectURL(new Blob([new Uint8Array(archive).buffer as ArrayBuffer], { type: "application/zip" }));
+      const link = document.createElement("a");
+      const stamp = manifest.exportedAt.replace(/[:.]/g, "-");
+      link.href = url;
+      link.download = `drusniel-clod-world-${WORLD}-${stamp}.zip`;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const elapsed = performance.now() - startedAt;
+      lastArchiveSummary = `export: ${(archive.byteLength / 1048576).toFixed(1)} MiB in ${(elapsed / 1000).toFixed(2)}s`;
+      console.info(`[project export] ${lastArchiveSummary}; GLB ${(terrainGlb.byteLength / 1048576).toFixed(1)} MiB`);
+      updateInfo();
+    } catch (error) {
+      showProjectError("Project export", error);
+    } finally {
+      setProjectBusy(false);
+    }
+  });
+
+  // Imported controller values need the same side effects as interactive GUI changes.
+  forEachTerrainMaterial((material) => {
+    material.wireframe = state.wireframe;
+    material.uniforms.uNormalColor.value = state.normalColor;
+    material.uniforms.uNormalDivergence.value = state.normalDivergence;
+    material.uniforms.uDivergenceGain.value = state.divergenceGain;
+    material.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
+  });
+  for (const view of views.values()) {
+    (view.mat.uniforms.uColor.value as THREE.Color).set(
+      state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8,
+    );
+    if (state.recomputedNormals) {
+      view.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(view.recomputedNormals, 3));
+    }
+  }
+  applyColorAdjustmentsToTerrain();
+  updateLighting();
+  applyTerrainTextures();
+  grassSystem.setEnabled(state.grassEnabled);
+  grassSystem.updateSettings(makeGrassSettings());
+  updateSelection();
+  updateInfo();
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;

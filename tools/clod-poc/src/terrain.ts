@@ -228,7 +228,18 @@ export const DIG_INFLUENCE_MARGIN = 4;
 const digEdits: DigEdit[] = [];
 
 export function addDigEdit(edit: DigEdit): void {
-  digEdits.push(edit);
+  digEdits.push({ ...edit });
+}
+
+/** Return a defensive copy suitable for persistence or diagnostics. */
+export function getDigEditsSnapshot(): DigEdit[] {
+  return digEdits.map((edit) => ({ ...edit }));
+}
+
+/** Replace the runtime edit history without exposing the mutable backing array. */
+export function replaceDigEdits(edits: readonly DigEdit[]): void {
+  digEdits.length = 0;
+  for (const edit of edits) digEdits.push({ ...edit });
 }
 
 export function clearDigEdits(): void {
