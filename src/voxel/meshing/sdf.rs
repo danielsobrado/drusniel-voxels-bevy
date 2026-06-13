@@ -1,11 +1,8 @@
-use super::{
-    LodTransitionSnapStats, terrain_meshing_voxel_at, terrain_meshing_voxel_in_chunk,
-    terrain_morph_config,
-};
+use super::{LodTransitionSnapStats, terrain_meshing_voxel_at, terrain_meshing_voxel_in_chunk};
 use crate::constants::{
     CHUNK_SIZE_I32, LOD0_GRID_VOLUME, LOD0_PADDED_SIZE, LOD0_STEP_SIZE, LOD1_GRID_VOLUME,
     LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_GRID_VOLUME, LOD2_PADDED_SIZE, LOD2_STEP_SIZE,
-    LOD3_GRID_VOLUME, LOD3_PADDED_SIZE, LOD3_STEP_SIZE, PADDED_CHUNK_SIZE_U32, VOXEL_SIZE,
+    LOD3_GRID_VOLUME, LOD3_PADDED_SIZE, LOD3_STEP_SIZE, PADDED_CHUNK_SIZE_U32,
 };
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
@@ -327,16 +324,11 @@ pub(super) fn coarse_lod_apron_bias() -> f32 {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BaseSdfTransitionMode {
-    Uniform,
     Coarsen,
 }
 
 pub(super) fn surface_nets_base_sdf_transition_mode() -> BaseSdfTransitionMode {
-    if terrain_morph_config().enabled {
-        BaseSdfTransitionMode::Uniform
-    } else {
-        BaseSdfTransitionMode::Coarsen
-    }
+    BaseSdfTransitionMode::Coarsen
 }
 
 pub(super) fn generate_low_lod_sdf<const N: usize>(
@@ -1193,7 +1185,7 @@ pub(super) fn coarse_terrain_sdf_smooth_enabled() -> bool {
 ///
 /// When `smooth` is set, cells get a world-space blurred SDF to remove terracing
 /// (see `smoothed_sdf_from_block`). With GPU morph active, the base mesh stays
-/// uniformly fine and coarse alignment is isolated to `ATTRIBUTE_MORPH_TARGET`.
+/// uniformly fine and coarse alignment is handled by the live LOD seam path.
 pub(super) fn generate_sdf(
     chunk: &Chunk,
     world: &VoxelWorld,
@@ -1320,14 +1312,4 @@ pub(super) fn generate_sdf_lod3(
         LodLevel::Lod3,
         neighbor_lods,
     )
-}
-
-pub(super) fn skirt_depth_for_lod(lod: LodLevel) -> f32 {
-    (match lod {
-        LodLevel::Lod0 => 1.5,
-        LodLevel::Lod1 => 3.0,
-        LodLevel::Lod2 => 8.0,
-        LodLevel::Lod3 => 16.0,
-        LodLevel::Culled => 1.5,
-    }) * VOXEL_SIZE
 }

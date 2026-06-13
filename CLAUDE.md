@@ -44,8 +44,8 @@ If a change was not benchmarked, say so directly.
 
 ## Terrain Debug Views
 
-Live in-game overlays for diagnosing LOD seams, holes, normals, and skirt
-geometry. Implementation: [`src/voxel/terrain_debug.rs`](src/voxel/terrain_debug.rs).
+Live in-game overlays for diagnosing terrain holes, normals, and page/live
+handoff. Implementation: [`src/voxel/terrain_debug.rs`](src/voxel/terrain_debug.rs).
 Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md).
 
 | Hotkey | What it does | Output |
@@ -53,8 +53,8 @@ Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wire
 | **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
 | **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
 | **Alt+Shift+F7** | Capture current frame. ⚠ Known bug: also fires the Alt+F7 toggle — state flips on every capture. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
-| **Alt+F10** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, lod-delta>1 faces, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down). | `debug/terrain-hole-probe-<ts>.json` |
-| **Alt+F5** | Toggle MC+Transvoxel LOD seam spike on/off (Surface Nets terrain only). Remeshes all loaded chunks; F3 `MC+TVX: ON/OFF`. YAML `assets/config/mc_transvoxel.yaml` is startup default only. | Console log + F3 chunk stats line |
+| **Alt+F10** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down). | `debug/terrain-hole-probe-<ts>.json` |
+| **Alt+F11** | Toggle CLOD page source meshing for A/B inspection. | Console log |
 
 ### Wireframe colour key
 
@@ -63,9 +63,7 @@ Section colour (multiplied by LOD tint):
 | Colour | Mesh section |
 |---|---|
 | White | Main Surface Nets mesh |
-| Cyan | Horizontal skirt / transition apron |
-| Magenta | Vertical skirt |
-| Yellow | Transvoxel transition apron (MC+Transvoxel only) |
+| Cyan / Magenta / Yellow | Legacy seam sections; should not appear in the default CLOD live path |
 
 LOD tint:
 
@@ -82,8 +80,8 @@ Per [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md) → W
 
 - **Stepped geometry** in wireframe → DC/QEF/SDF placement issue.
 - **Smooth geometry, stepped colour in Alt+F8** → normals issue (not geometry).
-- **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` in the hole-probe dump.
-- **Coloured (non-white) edges visible at an altitude band** → a skirt is being used to hide a real gap. Skirt is a band-aid, not a fix.
+- **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` and page ownership state in the hole-probe dump.
+- **Coloured (non-white) seam-section edges in the default path** → stale legacy seam geometry or debug data; live terrain should be main Surface Nets inside the bubble, with pages outside it.
 
 # Behavioral guidelines to reduce common LLM coding mistakes. 
 

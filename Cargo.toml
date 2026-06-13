@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "voxel_builder"
 
 [features]
-default = ["mc_transvoxel", "naadf"]
+default = ["naadf"]
 # cargo run --release --features tracy then connect with Tracy 0.11.x.
 tracy = ["bevy/trace_tracy"]
 legacy_prop_spawn = []
@@ -13,7 +13,7 @@ legacy_prop_spawn = []
 # keep naadf_debug separate for heavier diagnostics.
 naadf = []
 naadf_debug = ["naadf"]
-# Off-by-default MC + Transvoxel LOD seam spike (see docs/lod/mc-transvoxel-plan.md).
+# Legacy MC + Transvoxel LOD seam spike (kept off default while the CLOD path owns far field).
 mc_transvoxel = ["dep:transvoxel-data"]
 
 [dependencies]

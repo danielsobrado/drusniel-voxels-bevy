@@ -331,7 +331,6 @@ pub(crate) fn clod_page_mesh_commit_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
     use crate::voxel::pages::quadtree::ClodPageNode;
     use crate::voxel::pages::types::PageFootprint;
     use bevy_mesh::VertexAttributeValues;
@@ -402,7 +401,6 @@ mod tests {
                 3
             ]))
         );
-        assert!(mesh.attribute(ATTRIBUTE_MORPH_TARGET).is_none());
         assert_eq!(bounds.min_y, -2.0);
         assert_eq!(bounds.max_y, 6.0);
     }
@@ -423,6 +421,7 @@ mod tests {
             .insert_resource(ClodPagesShow(ClodPagesShowMode::Off))
             .insert_resource(material_handles())
             .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<TriplanarMaterial>>()
             .init_resource::<ClodPageMeshCommitState>()
             .init_resource::<ClodPageSelectionIndex>()
             .add_systems(

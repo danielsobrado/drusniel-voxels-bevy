@@ -38,8 +38,7 @@ pub(crate) use crate::voxel::lod::{
     build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
     calculate_target_lod_with_hysteresis, chunk_contains_liquid, chunk_layer_intersects_waterline,
     collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    enforce_lod_delta_max_one, forensics_forced_lod, forensics_mesh_mode_override,
-    is_horizon_proxy_lod, lod_upgrade_for_face_neighbor_coherence,
+    forensics_forced_lod, forensics_mesh_mode_override, is_horizon_proxy_lod,
     mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode, should_defer_surface_nets_mesh,
     target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz, terrain_lod_hysteresis,
     terrain_lod_requires_collider, terrain_material_quality_for_lod,
@@ -57,7 +56,6 @@ use crate::voxel::occlusion::{
     update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks,
 };
 use crate::voxel::persistence::WorldPersistence;
-use crate::voxel::skirt::SkirtConfig;
 #[cfg(test)]
 use crate::voxel::terrain::TerrainGenerator;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
@@ -81,7 +79,7 @@ pub use crate::voxel::runtime::{
 use crate::voxel::runtime::{
     build_water_body_group, chunks_per_frame_limit_for_dirty_meshes, desired_water_visibility,
     expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
-    mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
+    mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
     should_defer_runtime_chunk_stats_recompute, should_force_initial_runtime_chunk_stats,
     should_poll_chunk_generation_tasks, should_recompute_runtime_chunk_stats,
     terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
@@ -90,8 +88,7 @@ use crate::voxel::runtime::{
 };
 #[cfg(test)]
 use crate::voxel::runtime::{
-    MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME, TERRAIN_MATERIAL_LOD_DISTANCE,
-    TERRAIN_MATERIAL_LOD_HYSTERESIS,
+    MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME,
 };
 
 pub struct VoxelPlugin;
@@ -128,14 +125,12 @@ impl Plugin for VoxelPlugin {
         .insert_resource(LodSettings::default())
         .insert_resource(crate::voxel::terrain_debug::TerrainDebugView::default())
         .insert_resource(crate::voxel::terrain_debug::TerrainProbeNotice::default())
-        .insert_resource(crate::voxel::lod_boundary_strip::LodBoundaryStripCache::default())
         .insert_resource(McTransvoxelSettings::load_or_default())
         .insert_resource(McTransvoxelRuntimeStats::default())
         .insert_resource(TerrainLodControl::default())
         .insert_resource(TerrainLodTransitionState::default())
         .insert_resource(LodMeshTransactionState::default())
         .insert_resource(MeshDirtyQueueWarningState::default())
-        .insert_resource(SkirtConfig::default())
         // Runtime chunk statistics for debug overlay
         .insert_resource(RuntimeChunkStats::default())
         .insert_resource(WaterBodyRegistry::default())
@@ -313,17 +308,28 @@ mod tests {
     }
 
     #[test]
-    fn initial_lod_assignment_uses_distance_without_lod_dirty_reason() {
+    fn initial_lod_assignment_uses_lod0_without_lod_dirty_reason() {
         let mut chunk = Chunk::new(IVec3::new(18, 0, 0));
         let lod_settings = LodSettings::default();
-        let initial_lod = initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings, None);
+        let initial_lod =
+            initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings, None, false);
 
-        assert!(initial_lod.is_lower_detail_than(LodLevel::Lod0));
+        assert_eq!(initial_lod, LodLevel::Lod0);
         chunk.set_initial_lod_level(initial_lod);
 
         assert_eq!(chunk.lod_level(), initial_lod);
         assert!(chunk.has_dirty_reason(MeshDirtyReason::Generation));
         assert!(!chunk.has_dirty_reason(MeshDirtyReason::Lod));
+    }
+
+    #[test]
+    fn initial_lod_assignment_uses_lod0_when_pages_own_far_field() {
+        let chunk = Chunk::new(IVec3::new(18, 0, 0));
+        let lod_settings = LodSettings::default();
+        let initial_lod =
+            initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings, None, true);
+
+        assert_eq!(initial_lod, LodLevel::Lod0);
     }
 
     #[test]
@@ -349,34 +355,6 @@ mod tests {
         assert!(dirty.contains(&(center + IVec3::X)));
         assert!(dirty.contains(&(center + IVec3::NEG_Y)));
         assert!(!dirty.contains(&(center + IVec3::new(-1, -1, -1))));
-    }
-
-    #[test]
-    fn lod_change_marks_face_halo_dirty() {
-        let center = IVec3::new(1, 1, 1);
-        let mut world = VoxelWorld::new(IVec3::new(3, 3, 3));
-
-        for z in 0..3 {
-            for y in 0..3 {
-                for x in 0..3 {
-                    let mut chunk = Chunk::new(IVec3::new(x, y, z));
-                    chunk.clear_dirty();
-                    world.insert_chunk(chunk);
-                }
-            }
-        }
-
-        mark_chunk_lod_halo_dirty(&mut world, center);
-
-        let dirty = world.dirty_chunks().collect::<HashSet<_>>();
-        assert_eq!(dirty.len(), 6);
-        assert!(!dirty.contains(&center));
-        assert!(dirty.contains(&(center + IVec3::Y)));
-        assert!(dirty.contains(&(center + IVec3::NEG_Y)));
-        assert!(!dirty.contains(&(center + IVec3::new(1, 1, 0))));
-        assert!(world
-            .get_chunk(center + IVec3::Y)
-            .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::NeighborLod)));
     }
 
     #[test]
@@ -764,19 +742,19 @@ mod tests {
     }
 
     #[test]
-    fn terrain_lod_uses_triplanar_material_for_far_meshes() {
+    fn live_terrain_material_stays_full_triplanar_by_distance() {
         assert_eq!(
             terrain_material_quality_for_lod(LodLevel::Lod1, None),
             TerrainMaterialQuality::CheapTriplanar
         );
         assert_eq!(
             terrain_material_quality_for_distance(
-                TERRAIN_MATERIAL_LOD_DISTANCE + TERRAIN_MATERIAL_LOD_HYSTERESIS + 1.0,
+                10_000.0,
                 TerrainMaterialQuality::FullTriplanar,
                 None,
                 RenderQualityPreset::High,
             ),
-            TerrainMaterialQuality::CheapTriplanar
+            TerrainMaterialQuality::FullTriplanar
         );
     }
 

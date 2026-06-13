@@ -33,16 +33,7 @@ use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::materials::MaterialId;
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::voxel::meshing_lod::append_morph_targets;
-#[cfg(test)]
-#[allow(unused_imports)]
-use crate::voxel::meshing_types::{ATTRIBUTE_MORPH_TARGET, TerrainMorphConfig};
-#[cfg(test)]
-#[allow(unused_imports)]
-use crate::voxel::skirt::{
-    ChunkFace, NeighborLods, SkirtConfig, SkirtGenerationStats, extract_boundary_edges,
-    generate_skirts_with_sealed_faces,
-};
+use crate::voxel::skirt::{ChunkFace, NeighborLods};
 #[cfg(test)]
 #[allow(unused_imports)]
 use crate::voxel::types::{Voxel, VoxelType};
@@ -85,7 +76,6 @@ mod blocky;
 pub mod commit;
 mod data;
 pub mod invalidation;
-pub mod lod;
 mod lod_seam;
 mod material_weights;
 pub(crate) mod mc_support;
@@ -95,7 +85,6 @@ pub mod seam_audit;
 mod surface_nets;
 #[cfg(test)]
 mod tests;
-pub mod types;
 mod water;
 
 pub use blocky::get_blocky_material_index;
@@ -103,8 +92,7 @@ pub use data::*;
 #[cfg(test)]
 pub(crate) use lod_seam::snap_column_for_face;
 pub(crate) use lod_seam::{
-    coarse_lattice_y_face_target, scale_vertex_from_center, terrain_morph_config,
-    transition_target_lod, xz_face_coarse_target_local,
+    scale_vertex_from_center, transition_target_lod,
 };
 pub use pipeline::*;
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};

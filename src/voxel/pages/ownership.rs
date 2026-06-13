@@ -21,7 +21,7 @@ use crate::gameplay::camera::controller::PlayerCamera;
 use crate::gameplay::player::Player;
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
-use crate::voxel::runtime::mark_chunk_lod_halo_dirty;
+use crate::voxel::runtime::mark_surface_nets_halo_dirty;
 use crate::voxel::world::VoxelWorld;
 
 #[cfg(test)]
@@ -52,7 +52,7 @@ pub(crate) struct ClodPageMeshGate {
 impl Default for ClodPageMeshGate {
     fn default() -> Self {
         Self {
-            enabled: env_truthy("CLOD_PAGES_MESH_GATE"),
+            enabled: env_default_on("CLOD_PAGES_MESH_GATE"),
             pages_ready: false,
             pages_failed: false,
             pages_pending: false,
@@ -101,10 +101,10 @@ impl ClodPageMeshGate {
     }
 }
 
-fn env_truthy(key: &str) -> bool {
-    matches!(
+fn env_default_on(key: &str) -> bool {
+    !matches!(
         std::env::var(key).ok().as_deref().map(str::trim),
-        Some("1") | Some("true") | Some("on") | Some("yes")
+        Some("0") | Some("false") | Some("off") | Some("no")
     )
 }
 
@@ -265,7 +265,7 @@ fn refresh_terrain_mutation_restore_columns(gate: &mut ClodPageMeshGate, world: 
         }
     }
     for pos in lod_changed {
-        mark_chunk_lod_halo_dirty(world, pos);
+        mark_surface_nets_halo_dirty(world, pos);
     }
 
     for column in &mutation_columns {
@@ -302,7 +302,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     mut gate: ResMut<ClodPageMeshGate>,
 ) {
-    gate.enabled = env_truthy("CLOD_PAGES_MESH_GATE");
+    gate.enabled = runtime.enabled && env_default_on("CLOD_PAGES_MESH_GATE");
     if !gate.enabled {
         gate.pages_ready = false;
         gate.pages_failed = false;

@@ -69,7 +69,6 @@ pub(crate) struct MeshDirtyTimingParams<'w> {
     timing: ResMut<'w, AreaTimingRecorder>,
     gen_state: Res<'w, ChunkGenerationState>,
     lod_transaction: ResMut<'w, LodMeshTransactionState>,
-    strip_cache: ResMut<'w, crate::voxel::lod_boundary_strip::LodBoundaryStripCache>,
     queue_warning: ResMut<'w, MeshDirtyQueueWarningState>,
     page_runtime: Option<Res<'w, crate::voxel::pages::runtime::ClodPagesRuntime>>,
     page_cache: Option<ResMut<'w, crate::voxel::pages::runtime::PageExportCache>>,
@@ -99,7 +98,6 @@ pub(crate) fn mesh_dirty_chunks_system(
     mesh_settings: Res<MeshSettings>,
     lod_settings: Res<LodSettings>,
     mut mc_spike: McSpikeMeshParams,
-    skirt_config: Res<SkirtConfig>,
     ao_config: Res<AmbientOcclusionConfig>,
     mut chunk_stats: ResMut<RuntimeChunkStats>,
     mut material_logged: Local<bool>,
@@ -109,10 +107,6 @@ pub(crate) fn mesh_dirty_chunks_system(
     let frame = &timing_params.frame;
     let timing = &mut timing_params.timing;
     let generation_complete = timing_params.gen_state.is_complete;
-    // Periodic vertex-exact-seam consume counters (~every 5s at 60fps).
-    if frame.0 % 300 == 0 {
-        crate::voxel::lod_boundary_strip::log_strip_diag("periodic");
-    }
     let mesh_dirty_total_start = timing.enabled.then(Instant::now);
     // Reset per-frame counters
     chunk_stats.reset_frame_counters();
@@ -223,12 +217,10 @@ pub(crate) fn mesh_dirty_chunks_system(
             &mesh_settings,
             &lod_settings,
             &mc_spike.settings,
-            &skirt_config,
             &ao_config,
             &mut mc_spike.stats,
             &mut chunk_stats,
             frame.0,
-            &mut timing_params.strip_cache,
             timing.enabled,
         );
         chunks_per_frame_limit = MAX_LOD_TRANSACTION_PREPARE_CHUNKS_PER_FRAME;
@@ -384,23 +376,8 @@ pub(crate) fn mesh_dirty_chunks_system(
             transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
 
         // Step 1: Generate mesh data using immutable borrow (with timing).
-        // Vertex-exact seam: consume the coarse neighbour strips, then publish ours.
-        let neighbor_strips = crate::voxel::mesh_commit::lookup_neighbor_boundary_strips(
-            &timing_params.strip_cache,
-            &world,
-            chunk_pos,
-            mesh_lod_level,
-            &neighbor_lods,
-        );
-        let strip_status = crate::voxel::meshing::seam_audit::resolve_strip_status_per_face(
-            &timing_params.strip_cache,
-            &world,
-            chunk_pos,
-            mesh_lod_level,
-            &neighbor_lods,
-        );
         let mesh_start = Instant::now();
-        let mut mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
+        let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
             generate_chunk_mesh_for_request(MeshRequest {
                 chunk,
                 world: &world,
@@ -408,15 +385,12 @@ pub(crate) fn mesh_dirty_chunks_system(
                 logical_lod: lod_level,
                 mesh_lod: mesh_lod_level,
                 neighbor_lods,
-                skirt_config: &skirt_config,
                 ao_config: &ao_config.baked,
                 water_exposure_mode: mesh_settings.water_air_exposure_mode,
                 forensics: mesh_forensics_options(
                     bench_params.forensics.as_deref(),
                     &mc_spike.settings,
                 ),
-                neighbor_strips: Some(&neighbor_strips),
-                strip_status: Some(&strip_status),
                 mc_settings: Some(&*mc_spike.settings),
                 timing_enabled: timing.enabled,
             })
@@ -426,15 +400,6 @@ pub(crate) fn mesh_dirty_chunks_system(
         let mesh_elapsed = mesh_start.elapsed();
         mesh_dirty_generate_us += mesh_elapsed.as_micros() as u64;
         mesh_generation_timing.add(mesh_result.generation_timing);
-        crate::voxel::mesh_commit::publish_chunk_boundary_strips(
-            &mut timing_params.strip_cache,
-            &mut world,
-            chunk_pos,
-            mesh_lod_level,
-            target_mode,
-            &neighbor_lods,
-            std::mem::take(&mut mesh_result.boundary_strips),
-        );
 
         // Track mesh pressure before buffers are consumed.
         let vertex_count = mesh_result.solid.positions.len() as u32;
@@ -902,22 +867,6 @@ pub(crate) fn mesh_dirty_chunks_system(
     timing.record_area(frame.0, "LOD Seam CPU", mesh_generation_timing.lod_seam_us);
     timing.record_area(
         frame.0,
-        "LOD Strip Export CPU",
-        mesh_generation_timing.boundary_strip_us,
-    );
-    timing.record_area(
-        frame.0,
-        "LOD Stitch CPU",
-        mesh_generation_timing.seam_stitch_us,
-    );
-    timing.record_area(frame.0, "Skirt CPU", mesh_generation_timing.skirt_us);
-    timing.record_area(
-        frame.0,
-        "LOD Morph Finalize CPU",
-        mesh_generation_timing.morph_finalize_us,
-    );
-    timing.record_area(
-        frame.0,
         "Terrain Water Mesh CPU",
         mesh_generation_timing.water_us,
     );
@@ -1287,10 +1236,10 @@ fn compare_dirty_chunk_distance(a: &IVec3, b: &IVec3, camera_pos: Vec3) -> std::
 }
 
 pub(crate) fn terrain_material_quality_for_distance(
-    distance: f32,
+    _distance: f32,
     current: TerrainMaterialQuality,
     bench_toggles: Option<&BenchRenderToggles>,
-    quality_preset: RenderQualityPreset,
+    _quality_preset: RenderQualityPreset,
 ) -> TerrainMaterialQuality {
     if let Some(forced) =
         bench_toggles.and_then(|toggles| toggles.terrain_material_quality.forced_quality())
@@ -1301,20 +1250,11 @@ pub(crate) fn terrain_material_quality_for_distance(
         return TerrainMaterialQuality::FullTriplanar;
     }
 
-    let lod_distance = quality_preset.terrain_material_lod_distance(TERRAIN_MATERIAL_LOD_DISTANCE);
-    let switch_in = (lod_distance - TERRAIN_MATERIAL_LOD_HYSTERESIS).max(0.0);
-    let switch_out = lod_distance + TERRAIN_MATERIAL_LOD_HYSTERESIS;
     match current {
-        TerrainMaterialQuality::FullTriplanar if distance > switch_out => {
-            TerrainMaterialQuality::CheapTriplanar
-        }
-        TerrainMaterialQuality::CheapTriplanar if distance < switch_in => {
-            TerrainMaterialQuality::FullTriplanar
-        }
         TerrainMaterialQuality::CheapTriplanar
         | TerrainMaterialQuality::SingleProjectionFar
-        | TerrainMaterialQuality::HorizonProxy
-        | TerrainMaterialQuality::AtlasOnlyDebug
+        | TerrainMaterialQuality::HorizonProxy => TerrainMaterialQuality::FullTriplanar,
+        TerrainMaterialQuality::AtlasOnlyDebug
         | TerrainMaterialQuality::WireframeDebug
         | TerrainMaterialQuality::NormalsDebug
         | TerrainMaterialQuality::WireframeNormalsDebug
@@ -1326,7 +1266,6 @@ pub(crate) fn terrain_material_quality_for_distance(
 
 pub(crate) fn update_terrain_material_lod(
     time: Res<Time>,
-    camera_query: Query<&Transform, With<PlayerCamera>>,
     triplanar_material: Res<TriplanarMaterialHandle>,
     terrain_debug_handles: Option<Res<crate::voxel::terrain_debug::TerrainDebugMaterialHandles>>,
     terrain_debug: Res<crate::voxel::terrain_debug::TerrainDebugView>,
@@ -1350,10 +1289,6 @@ pub(crate) fn update_terrain_material_lod(
     }
     *last_update = now;
 
-    let Ok(camera_transform) = camera_query.single() else {
-        return;
-    };
-    let camera_pos = camera_transform.translation;
     let bench_toggles = bench_toggles.as_deref();
     let forced_quality =
         bench_toggles.and_then(|toggles| toggles.terrain_material_quality.forced_quality());
@@ -1364,7 +1299,7 @@ pub(crate) fn update_terrain_material_lod(
         forced_quality,
     );
 
-    for (transform, mut chunk_mesh, mut material, mesh_debug) in &mut terrain_meshes {
+    for (_transform, mut chunk_mesh, mut material, mesh_debug) in &mut terrain_meshes {
         // Both Surface Nets and MC+Transvoxel chunks render with TriplanarMaterial
         // and need the debug-overlay material swap (Alt+F7 / Alt+F8). Without MC
         // here the indicator flips "WIRE ON" but the wireframe never appears on
@@ -1387,10 +1322,8 @@ pub(crate) fn update_terrain_material_lod(
             }
             continue;
         }
-        let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
-        let distance = chunk_center.distance(camera_pos);
         let target_quality = terrain_material_quality_for_distance(
-            distance,
+            0.0,
             chunk_mesh.material_quality,
             bench_toggles,
             *quality_preset,

@@ -1111,8 +1111,6 @@ impl Plugin for InteractionPlugin {
                     crate::voxel::terrain_debug::capture_terrain_debug_frame
                         .run_if(|state: Res<PauseMenuState>| !state.open),
                     crate::voxel::terrain_debug::update_terrain_debug_indicator,
-                    crate::voxel::terrain_debug::render_morph_vector_debug
-                        .run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::draw_chunk_borders.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_system_monitor.run_if(|state: Res<PauseMenuState>| !state.open),
                     debug::update_debug_overlay.run_if(|state: Res<PauseMenuState>| !state.open),

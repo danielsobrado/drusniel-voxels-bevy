@@ -9,7 +9,7 @@
 //! - [`plugin`] - Bevy plugin integration
 //! - [`io::persistence`] - World save/load functionality
 //! - [`simulation::gravity`] - Voxel gravity simulation
-//! - [`lod::skirt`] - LOD boundary skirts for seamless transitions
+//! - [`lod::skirt`] - chunk face and neighbor LOD helper types
 //! - [`meshing::baked_ao`] - Baked ambient occlusion for voxel lighting
 //! - [`culling::visibility`] - Face visibility computation for occlusion culling
 //! - [`culling::occlusion`] - Runtime BFS occlusion culling
@@ -58,14 +58,6 @@ pub mod mesh_commit {
 
 pub mod mesh_invalidation {
     pub use super::meshing::invalidation::*;
-}
-
-pub mod meshing_lod {
-    pub use super::meshing::lod::*;
-}
-
-pub mod meshing_types {
-    pub use super::meshing::types::*;
 }
 
 pub mod occlusion {

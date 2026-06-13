@@ -147,10 +147,8 @@ pub fn apply_visibility_culling_system(
 pub(crate) fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
-    lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
     page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
-    mc_spike: McSpikeMeshParams,
     lod_control: Res<TerrainLodControl>,
     lod_transaction: Res<LodMeshTransactionState>,
     mut lod_transitions: ResMut<TerrainLodTransitionState>,
@@ -163,13 +161,9 @@ pub(crate) fn update_chunk_lod_system(
     mut stationary_lod_scans_remaining: Local<u8>,
 ) {
     let timing_enabled = timing.enabled;
-    let mut lod_guard_us = 0u64;
     let mut lod_desired_us = 0u64;
-    let mut lod_coherence_us = 0u64;
-    let mut lod_max_one_us = 0u64;
     let mut lod_candidates_us = 0u64;
     let mut lod_commit_us = 0u64;
-    let mut lod_halo_dirty_us = 0u64;
     let _timer = area_timer(&mut timing, frame.0, "LOD Update");
     lod_transitions.repeated_chunks_this_frame = 0;
     if lod_control.freeze_lod {
@@ -255,15 +249,11 @@ pub(crate) fn update_chunk_lod_system(
     *last_camera_pos = Some(camera_pos);
     *last_chunk_count = Some(chunk_count);
 
-    let start = timing_enabled.then(Instant::now);
-    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(&world);
-    lod_guard_us += elapsed_us(start);
-    let water_lod_guard_count = water_lod_guard_chunks.len() as f64;
-
-    // Pass 1 â€” compute each chunk's hysteresis/water-guarded desired LOD.
+    // Live terrain is now the near-field LOD0 fallback. Pages own far-field
+    // detail, so this updater only restores stale/forced live chunks to LOD0.
     let start = timing_enabled.then(Instant::now);
     let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
-    let mut chunk_state: HashMap<IVec3, (LodLevel, f32)> = HashMap::new();
+    let mut chunk_state: HashMap<IVec3, LodLevel> = HashMap::new();
     for (chunk_pos, chunk) in world.chunk_entries() {
         if page_mesh_gate
             .as_deref()
@@ -272,7 +262,6 @@ pub(crate) fn update_chunk_lod_system(
         {
             continue;
         }
-        let distance = terrain_lod_distance_xz(*chunk_pos, camera_pos);
         let current_lod = chunk.lod_level();
         let page_restore_mutation = chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation)
             && page_mesh_gate
@@ -280,88 +269,20 @@ pub(crate) fn update_chunk_lod_system(
                 .is_some_and(|gate| gate.chunk_pending_restore(*chunk_pos));
         let target_lod = if page_restore_mutation {
             LodLevel::Lod0
+        } else if let Some(lod) = forensics_forced_lod(bench_forensics.as_deref()) {
+            lod
         } else {
-            forensics_forced_lod(bench_forensics.as_deref()).unwrap_or_else(|| {
-                water_shore_guarded_lod(
-                    calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings),
-                    distance,
-                    &lod_settings,
-                    water_lod_guard_chunks.contains(chunk_pos),
-                )
-            })
+            LodLevel::Lod0
         };
         desired.insert(*chunk_pos, target_lod);
-        chunk_state.insert(*chunk_pos, (current_lod, distance));
+        chunk_state.insert(*chunk_pos, current_lod);
     }
     lod_desired_us += elapsed_us(start);
 
-    // Pass 2 â€” LOD coherence. A chunk that is coarser than every loaded
-    // face-neighbour is an isolated LOD island, and an island carries up to six
-    // LOD-boundary cracks around it. Pull any such island up to match its
-    // coarsest face-neighbour so LOD stays spatially coherent.
-    const FACE_OFFSETS: [IVec3; 6] = [
-        IVec3::new(1, 0, 0),
-        IVec3::new(-1, 0, 0),
-        IVec3::new(0, 1, 0),
-        IVec3::new(0, -1, 0),
-        IVec3::new(0, 0, 1),
-        IVec3::new(0, 0, -1),
-    ];
     let start = timing_enabled.then(Instant::now);
-    for _ in 0..LOD_COHERENCE_PASSES {
-        let mut updates: Vec<(IVec3, LodLevel)> = Vec::new();
-        for (chunk_pos, &lod) in &desired {
-            let mut coarsest_neighbor: Option<LodLevel> = None;
-            let mut is_island = true;
-            for offset in FACE_OFFSETS {
-                let Some(&neighbor_lod) = desired.get(&(*chunk_pos + offset)) else {
-                    continue;
-                };
-                if let Some(upgraded_lod) =
-                    lod_upgrade_for_face_neighbor_coherence(lod, neighbor_lod)
-                {
-                    updates.push((*chunk_pos, upgraded_lod));
-                    break;
-                }
-                if !lod.is_lower_detail_than(neighbor_lod) {
-                    is_island = false;
-                }
-                coarsest_neighbor = Some(match coarsest_neighbor {
-                    Some(coarsest) if !neighbor_lod.is_lower_detail_than(coarsest) => coarsest,
-                    _ => neighbor_lod,
-                });
-            }
-            if is_island {
-                if let Some(target) = coarsest_neighbor {
-                    updates.push((*chunk_pos, target));
-                }
-            }
-        }
-        if updates.is_empty() {
-            break;
-        }
-        for (pos, lod) in updates {
-            desired.insert(pos, lod);
-        }
-    }
-    lod_coherence_us += elapsed_us(start);
-
-    let start = timing_enabled.then(Instant::now);
-    let forced_by_max_one = if mc_spike.settings.enabled
-        && mc_spike.settings.lod_delta_policy == McTransvoxelLodDeltaPolicy::MaxOne
-    {
-        enforce_lod_delta_max_one(&mut desired)
-    } else {
-        HashSet::new()
-    };
-    lod_max_one_us += elapsed_us(start);
-
-    // Pass 3 â€” turn coherent desired LODs into change candidates.
-    // 5th tuple element flags max_one-forced changes for prioritized handling.
-    let start = timing_enabled.then(Instant::now);
-    let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32, bool)> = Vec::new();
+    let mut lod_candidates: Vec<(IVec3, LodLevel, LodLevel, f32)> = Vec::new();
     for (chunk_pos, &target_lod) in &desired {
-        let Some(&(current_lod, distance)) = chunk_state.get(chunk_pos) else {
+        let Some(&current_lod) = chunk_state.get(chunk_pos) else {
             continue;
         };
         if target_lod == current_lod {
@@ -374,35 +295,18 @@ pub(crate) fn update_chunk_lod_system(
             .unwrap_or(true);
         // Cooldown only throttles downgrades; upgrades to higher detail must
         // not be punished or stale LOD states can persist during movement.
-        // Coherence-forced refinements (from `enforce_lod_delta_max_one`) also
-        // bypass cooldown; without this, max-one bumps sit blocked for 30
-        // frames while the user walks, leaving Lod0-Lod2 deltas the
-        // MC+Transvoxel apron cannot bridge (visible as a horizontal band
-        // of holes along the LOD seam that drifts as the camera moves).
         let is_upgrade = target_lod.is_higher_detail_than(current_lod);
-        let is_max_one_forced = forced_by_max_one.contains(chunk_pos);
-        if !is_upgrade && !cooldown_elapsed && !is_max_one_forced {
+        if !is_upgrade && !cooldown_elapsed {
             continue;
         }
-        lod_candidates.push((
-            *chunk_pos,
-            current_lod,
-            target_lod,
-            distance,
-            is_max_one_forced,
-        ));
+        lod_candidates.push((*chunk_pos, current_lod, target_lod, 0.0));
     }
 
     lod_candidates.sort_by(|a, b| {
-        // Forced max_one changes first (constraint-mandated; can't bake them in
-        // later). Then upgrades (visual responsiveness during motion). Then by
-        // closeness so what's near the camera updates ahead of far chunks.
-        b.4.cmp(&a.4)
-            .then_with(|| {
-                let a_upgrade = a.2.is_higher_detail_than(a.1);
-                let b_upgrade = b.2.is_higher_detail_than(b.1);
-                b_upgrade.cmp(&a_upgrade)
-            })
+        let a_upgrade = a.2.is_higher_detail_than(a.1);
+        let b_upgrade = b.2.is_higher_detail_than(b.1);
+        b_upgrade
+            .cmp(&a_upgrade)
             .then_with(|| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
     });
     lod_candidates_us += elapsed_us(start);
@@ -411,18 +315,11 @@ pub(crate) fn update_chunk_lod_system(
     let mut lod_changed: Vec<IVec3> = Vec::new();
     let mut voluntary_count = 0usize;
     let start = timing_enabled.then(Instant::now);
-    for (chunk_pos, _current_lod, target_lod, _distance, is_forced) in lod_candidates {
-        // Voluntary changes throttled by MAX_LOD_CHANGES_PER_UPDATE to keep mesh
-        // load smooth. Forced max_one changes are not optional â€” capping them
-        // leaves chunks with delta>1 neighbours that the MC apron can't bridge,
-        // recreating the horizontal band of holes that drifts as the camera
-        // moves. Commit ALL forced changes regardless of cap.
-        if !is_forced {
-            if voluntary_count >= MAX_LOD_CHANGES_PER_UPDATE {
-                continue;
-            }
-            voluntary_count += 1;
+    for (chunk_pos, _current_lod, target_lod, _distance) in lod_candidates {
+        if voluntary_count >= MAX_LOD_CHANGES_PER_UPDATE {
+            continue;
         }
+        voluntary_count += 1;
         let Some(mut chunk) = world.get_chunk_mut(chunk_pos) else {
             continue;
         };
@@ -448,11 +345,6 @@ pub(crate) fn update_chunk_lod_system(
     } else {
         *stationary_lod_scans_remaining = 0;
     }
-    let start = timing_enabled.then(Instant::now);
-    for chunk_pos in &lod_changed {
-        mark_chunk_lod_halo_dirty(&mut world, *chunk_pos);
-    }
-    lod_halo_dirty_us += elapsed_us(start);
 
     if !lod_transitions.last_change_frame.is_empty() && frame.0 % 600 == 0 {
         lod_transitions
@@ -466,18 +358,9 @@ pub(crate) fn update_chunk_lod_system(
     let repeated_chunks_this_frame = lod_transitions.repeated_chunks_this_frame;
     let changes_per_second = lod_transitions.changes_per_second;
     drop(_timer);
-    timing.record_area(frame.0, "LOD Guard CPU", lod_guard_us);
     timing.record_area(frame.0, "LOD Desired CPU", lod_desired_us);
-    timing.record_area(frame.0, "LOD Coherence CPU", lod_coherence_us);
-    timing.record_area(frame.0, "LOD MaxOne CPU", lod_max_one_us);
     timing.record_area(frame.0, "LOD Candidates CPU", lod_candidates_us);
     timing.record_area(frame.0, "LOD Commit CPU", lod_commit_us);
-    timing.record_area(frame.0, "LOD Halo Dirty CPU", lod_halo_dirty_us);
-    timing.record_count(
-        frame.0,
-        "Water Shore Terrain LOD Guard Chunks",
-        water_lod_guard_count,
-    );
     record_lod_counters(
         &mut timing,
         frame.0,

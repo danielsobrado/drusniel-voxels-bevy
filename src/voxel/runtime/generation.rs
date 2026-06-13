@@ -395,6 +395,8 @@ pub(crate) fn poll_world_load_task(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
+    clod_pages_runtime: Option<Res<crate::voxel::pages::runtime::ClodPagesRuntime>>,
+    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
 ) {
     for (entity, mut task) in tasks.iter_mut() {
         let Some(result) = block_on(poll_once(&mut task.task)) else {
@@ -431,11 +433,16 @@ pub(crate) fn poll_world_load_task(
                     .single()
                     .ok()
                     .map(|transform| transform.translation);
+                let live_lod0_only = clod_live_chunks_lod0_only(
+                    clod_pages_runtime.as_deref(),
+                    page_mesh_gate.as_deref(),
+                );
                 assign_initial_lods_for_loaded_world(
                     &mut world,
                     camera_pos,
                     &lod_settings,
                     bench_forensics.as_deref(),
+                    live_lod0_only,
                 );
                 gen_state.total_chunks = loaded_chunks as u32;
                 gen_state.chunks_completed = gen_state.total_chunks;
@@ -829,6 +836,8 @@ pub(crate) fn poll_chunk_generation_tasks(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
+    clod_pages_runtime: Option<Res<crate::voxel::pages::runtime::ClodPagesRuntime>>,
+    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
     _lod_control: Res<TerrainLodControl>,
 ) {
     // NOTE: LOD freeze (Alt+F6) does NOT halt chunk insertion. Freeze only pauses LOD
@@ -847,6 +856,8 @@ pub(crate) fn poll_chunk_generation_tasks(
         .single()
         .ok()
         .map(|transform| transform.translation);
+    let live_lod0_only =
+        clod_live_chunks_lod0_only(clod_pages_runtime.as_deref(), page_mesh_gate.as_deref());
 
     for (entity, mut task) in tasks.iter_mut() {
         if let Some(result) = block_on(poll_once(&mut task.task)) {
@@ -877,6 +888,7 @@ pub(crate) fn poll_chunk_generation_tasks(
                 camera_pos,
                 &lod_settings,
                 bench_forensics.as_deref(),
+                live_lod0_only,
             );
             chunk.set_initial_lod_level(initial_lod);
             world.insert_chunk(chunk);
@@ -914,7 +926,6 @@ pub(crate) fn poll_chunk_generation_tasks(
             "Terrain mesh build COMPLETE: {} chunks meshed",
             gen_state.chunks_completed
         );
-        crate::voxel::lod_boundary_strip::log_strip_diag("build complete");
 
         if let Some(start_time) = gen_state.start_time {
             gen_state.world_stats.log_summary(start_time.elapsed());
@@ -934,47 +945,26 @@ pub(crate) fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IV
     world.mark_generation_face_neighbors_dirty(chunk_pos);
 }
 
-pub(crate) fn mark_chunk_lod_halo_dirty(world: &mut VoxelWorld, chunk_pos: IVec3) {
-    for offset in [
-        IVec3::new(1, 0, 0),
-        IVec3::new(-1, 0, 0),
-        IVec3::new(0, 1, 0),
-        IVec3::new(0, -1, 0),
-        IVec3::new(0, 0, 1),
-        IVec3::new(0, 0, -1),
-    ] {
-        world.mark_chunk_dirty_with_reason(chunk_pos + offset, MeshDirtyReason::NeighborLod);
-    }
-}
-
 pub(crate) fn initial_lod_for_chunk(
     chunk: &Chunk,
-    camera_pos: Option<Vec3>,
-    lod_settings: &LodSettings,
+    _camera_pos: Option<Vec3>,
+    _lod_settings: &LodSettings,
     forensics: Option<&BenchForensicsConfig>,
+    _live_lod0_only: bool,
 ) -> LodLevel {
     if let Some(lod) = forensics_forced_lod(forensics) {
         return lod;
     }
-    let Some(camera_pos) = camera_pos else {
-        return chunk.lod_level();
-    };
-
-    let distance = terrain_lod_distance_xz(chunk.position(), camera_pos);
-    let target_lod = calculate_target_lod_with_hysteresis(distance, LodLevel::Lod0, lod_settings);
-    water_shore_guarded_lod(
-        target_lod,
-        distance,
-        lod_settings,
-        chunk_contains_liquid(chunk) || chunk_layer_intersects_waterline(chunk.position()),
-    )
+    let _ = chunk;
+    LodLevel::Lod0
 }
 
 pub(crate) fn assign_initial_lods_for_loaded_world(
     world: &mut VoxelWorld,
-    camera_pos: Option<Vec3>,
-    lod_settings: &LodSettings,
+    _camera_pos: Option<Vec3>,
+    _lod_settings: &LodSettings,
     forensics: Option<&BenchForensicsConfig>,
+    _live_lod0_only: bool,
 ) {
     if let Some(lod) = forensics_forced_lod(forensics) {
         let positions: Vec<IVec3> = world.chunk_positions().collect();
@@ -985,24 +975,17 @@ pub(crate) fn assign_initial_lods_for_loaded_world(
         }
         return;
     }
-    let Some(camera_pos) = camera_pos else {
-        return;
-    };
-
-    let water_lod_guard_chunks = collect_water_shore_lod_guard_chunks(world);
     let positions: Vec<IVec3> = world.chunk_positions().collect();
     for chunk_pos in positions {
-        let distance = terrain_lod_distance_xz(chunk_pos, camera_pos);
-        let target_lod =
-            calculate_target_lod_with_hysteresis(distance, LodLevel::Lod0, lod_settings);
-        let target_lod = water_shore_guarded_lod(
-            target_lod,
-            distance,
-            lod_settings,
-            water_lod_guard_chunks.contains(&chunk_pos),
-        );
         if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
-            chunk.set_initial_lod_level(target_lod);
+            chunk.set_initial_lod_level(LodLevel::Lod0);
         }
     }
+}
+
+fn clod_live_chunks_lod0_only(
+    runtime: Option<&crate::voxel::pages::runtime::ClodPagesRuntime>,
+    gate: Option<&crate::voxel::pages::ClodPageMeshGate>,
+) -> bool {
+    runtime.is_some_and(|runtime| runtime.enabled) && gate.is_some_and(|gate| gate.enabled)
 }

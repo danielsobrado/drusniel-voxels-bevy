@@ -3,10 +3,8 @@
 use crate::camera::controller::PlayerCamera;
 use crate::rendering::triplanar_material::{TerrainMaterialQuality, TriplanarMaterial};
 use crate::voxel::chunk::LodLevel;
-use crate::voxel::meshing::{ChunkMesh, MeshSettings, terrain_morph_config};
-use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
+use crate::voxel::meshing::MeshSettings;
 use crate::voxel::plugin::LodSettings;
-use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use serde::Serialize;
@@ -16,7 +14,6 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOD_MATERIAL_SLOTS: usize = 4;
-const MAX_MORPH_VECTOR_DEBUG_LINES: usize = 4096;
 
 /// Live terrain mesh debug view toggles (wireframe overlay, normal-as-colour).
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -25,7 +22,6 @@ pub struct TerrainDebugView {
     pub normals: bool,
     pub iso_band: bool,
     pub flat_unlit: bool,
-    pub morph_vectors: bool,
 }
 
 impl TerrainDebugView {
@@ -185,7 +181,6 @@ struct TerrainDebugCaptureModes {
     normals: bool,
     iso_band: bool,
     flat_unlit: bool,
-    morph_vectors: bool,
     editor_wireframe: bool,
 }
 
@@ -270,17 +265,6 @@ pub fn toggle_terrain_debug_view(
         );
     }
 
-    if keyboard.just_pressed(KeyCode::F11) {
-        terrain_debug.morph_vectors = !terrain_debug.morph_vectors;
-        info!(
-            "Terrain morph vector debug: {} (Alt+F11)",
-            if terrain_debug.morph_vectors {
-                "ON"
-            } else {
-                "OFF"
-            }
-        );
-    }
 }
 
 /// Returns true when Alt+F7 should toggle wireframe (not Alt+Shift+F7 capture).
@@ -329,7 +313,6 @@ pub fn capture_terrain_debug_frame(
             normals: terrain_debug.normals,
             iso_band: terrain_debug.iso_band,
             flat_unlit: terrain_debug.flat_unlit,
-            morph_vectors: terrain_debug.morph_vectors,
             editor_wireframe: runtime_debug.is_some_and(|state| state.wireframe),
         },
         terrain_settings_hash: terrain_settings_hash(&mesh_settings, &lod_settings),
@@ -405,68 +388,10 @@ fn terrain_debug_indicator_label(
     if view.flat_unlit {
         parts.push("FLAT");
     }
-    if view.morph_vectors {
-        parts.push("MORPH VECTORS");
-    }
     if !parts.is_empty() {
         lines.push(format!("TERRAIN DEBUG: {} ON", parts.join(" + ")));
     }
     lines.join("\n")
-}
-
-pub fn render_morph_vector_debug(
-    terrain_debug: Res<TerrainDebugView>,
-    meshes: Res<Assets<Mesh>>,
-    terrain_meshes: Query<(&GlobalTransform, &Mesh3d), With<ChunkMesh>>,
-    mut gizmos: Gizmos,
-) {
-    if !terrain_debug.morph_vectors {
-        return;
-    }
-
-    let max_stitch_distance = terrain_morph_config().max_stitch_distance.max(0.0);
-    let mut lines = 0usize;
-    for (transform, mesh_handle) in &terrain_meshes {
-        let Some(mesh) = meshes.get(&mesh_handle.0) else {
-            continue;
-        };
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            continue;
-        };
-        let Some(VertexAttributeValues::Float32x4(targets)) =
-            mesh.attribute(ATTRIBUTE_MORPH_TARGET)
-        else {
-            continue;
-        };
-
-        for (position, target) in positions.iter().zip(targets) {
-            if lines >= MAX_MORPH_VECTOR_DEBUG_LINES {
-                return;
-            }
-            if target[3] <= 0.0 {
-                continue;
-            }
-
-            let start = Vec3::from_array(*position);
-            let end = Vec3::new(target[0], target[1], target[2]);
-            let delta = end - start;
-            let invalid = !(end.x.is_finite() && end.y.is_finite() && end.z.is_finite())
-                || delta.length() > max_stitch_distance * 1.05;
-            let color = if invalid {
-                Color::srgb(1.0, 0.05, 0.05)
-            } else {
-                Color::srgb(0.1, 1.0, 0.95)
-            };
-            gizmos.line(
-                transform.transform_point(start),
-                transform.transform_point(end),
-                color,
-            );
-            lines += 1;
-        }
-    }
 }
 
 fn projection_fov_degrees(projection: &Projection) -> f32 {
@@ -516,7 +441,6 @@ mod tests {
             normals: true,
             iso_band: false,
             flat_unlit: false,
-            morph_vectors: false,
         };
         assert_eq!(
             terrain_debug_material_mode(&view, true, Some(TerrainMaterialQuality::WireframeDebug)),
@@ -540,7 +464,6 @@ mod tests {
             normals: true,
             iso_band: false,
             flat_unlit: true,
-            morph_vectors: false,
         };
         assert_eq!(
             terrain_debug_material_mode(&view, false, None),

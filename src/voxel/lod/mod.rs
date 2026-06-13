@@ -3,7 +3,7 @@
 pub mod boundary_strip;
 pub mod skirt;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use bevy::prelude::*;
 
@@ -126,70 +126,6 @@ pub(crate) fn forensics_mesh_mode_override(
         BenchForensicsTerrainMesher::SurfaceNets => MeshMode::SurfaceNets,
         BenchForensicsTerrainMesher::McTransvoxel => MeshMode::McTransvoxel,
     }
-}
-
-fn lod_level_from_index(index: u8) -> LodLevel {
-    match index {
-        0 => LodLevel::Lod0,
-        1 => LodLevel::Lod1,
-        2 => LodLevel::Lod2,
-        _ => LodLevel::Lod3,
-    }
-}
-
-/// Enforce that no two face-adjacent chunks have LOD indices differing by
-/// more than 1 by refining the coarser side of violating boundaries. Returns
-/// the set of chunks whose `desired` LOD was modified by this pass; pass-3
-/// uses it to bypass the LOD-change cooldown for these coherence-mandated
-/// changes (otherwise forced refinements sit blocked for 30 frames during
-/// camera motion, leaving transient LOD deltas of 2+ that MC+Transvoxel
-/// cannot bridge).
-pub(crate) fn enforce_lod_delta_max_one(desired: &mut HashMap<IVec3, LodLevel>) -> HashSet<IVec3> {
-    const FACE_OFFSETS: [IVec3; 6] = [
-        IVec3::new(1, 0, 0),
-        IVec3::new(-1, 0, 0),
-        IVec3::new(0, 1, 0),
-        IVec3::new(0, -1, 0),
-        IVec3::new(0, 0, 1),
-        IVec3::new(0, 0, -1),
-    ];
-    let mut forced: HashSet<IVec3> = HashSet::new();
-    for _ in 0..6 {
-        let mut updates: HashMap<IVec3, LodLevel> = HashMap::new();
-        for (chunk_pos, &lod) in desired.iter() {
-            let Some(my_idx) = lod.lod_index() else {
-                continue;
-            };
-            for offset in FACE_OFFSETS {
-                let Some(&neighbor_lod) = desired.get(&(*chunk_pos + offset)) else {
-                    continue;
-                };
-                let Some(neighbor_idx) = neighbor_lod.lod_index() else {
-                    continue;
-                };
-                if my_idx <= neighbor_idx + 1 {
-                    continue;
-                }
-                let target = lod_level_from_index(neighbor_idx + 1);
-                updates
-                    .entry(*chunk_pos)
-                    .and_modify(|existing| {
-                        if target.is_higher_detail_than(*existing) {
-                            *existing = target;
-                        }
-                    })
-                    .or_insert(target);
-            }
-        }
-        if updates.is_empty() {
-            break;
-        }
-        for (pos, lod) in updates {
-            desired.insert(pos, lod);
-            forced.insert(pos);
-        }
-    }
-    forced
 }
 
 pub(crate) fn target_terrain_mesh_mode_for_lod(
@@ -556,23 +492,6 @@ pub(crate) fn collect_water_shore_lod_guard_chunks(world: &VoxelWorld) -> HashSe
     chunks
 }
 
-pub(crate) fn max_lod_for_face_neighbor(neighbor_lod: LodLevel) -> LodLevel {
-    match neighbor_lod {
-        LodLevel::Lod0 => LodLevel::Lod1,
-        LodLevel::Lod1 => LodLevel::Lod2,
-        LodLevel::Lod2 => LodLevel::Lod3,
-        LodLevel::Lod3 | LodLevel::Culled => LodLevel::Culled,
-    }
-}
-
-pub(crate) fn lod_upgrade_for_face_neighbor_coherence(
-    lod: LodLevel,
-    neighbor_lod: LodLevel,
-) -> Option<LodLevel> {
-    let max_lod = max_lod_for_face_neighbor(neighbor_lod);
-    lod.is_lower_detail_than(max_lod).then_some(max_lod)
-}
-
 pub(crate) fn chunk_layer_intersects_waterline(chunk_pos: IVec3) -> bool {
     let min_y = chunk_pos.y * CHUNK_SIZE_I32;
     let max_y = min_y + CHUNK_SIZE_I32 - 1;
@@ -610,33 +529,6 @@ mod tests {
         CHUNK_VOLUME, INTEGRATED_GPU_CULL_DISTANCE, INTEGRATED_GPU_HIGH_DETAIL_DISTANCE,
     };
     use crate::voxel::types::VoxelType;
-
-    fn assert_face_lod_deltas_le_one(desired: &HashMap<IVec3, LodLevel>) {
-        const FACE_OFFSETS: [IVec3; 3] = [
-            IVec3::new(1, 0, 0),
-            IVec3::new(0, 1, 0),
-            IVec3::new(0, 0, 1),
-        ];
-
-        for (pos, lod) in desired {
-            let Some(lod_idx) = lod.lod_index() else {
-                continue;
-            };
-            for offset in FACE_OFFSETS {
-                let Some(neighbor) = desired.get(&(*pos + offset)) else {
-                    continue;
-                };
-                let Some(neighbor_idx) = neighbor.lod_index() else {
-                    continue;
-                };
-                assert!(
-                    lod_idx.abs_diff(neighbor_idx) <= 1,
-                    "expected face-adjacent delta <= 1 for {pos:?} and {:?}, got {lod_idx} vs {neighbor_idx}",
-                    *pos + offset
-                );
-            }
-        }
-    }
 
     #[test]
     fn surface_nets_transition_mesh_lod_refines_to_finer_neighbor() {
@@ -679,101 +571,6 @@ mod tests {
                 },
             ),
             LodLevel::Lod1
-        );
-    }
-
-    /// `enforce_lod_delta_max_one` must (a) clamp deltas to 1 and (b) return
-    /// the chunks it touched so pass-3 can bypass the LOD-change cooldown for
-    /// those coherence-forced refinements. Without (b), the bumps sit blocked
-    /// for 30 frames while the user walks, leaving the LOD0-LOD2 deltas the
-    /// MC+Transvoxel apron can't bridge.
-    #[test]
-    fn enforce_lod_delta_max_one_returns_modified_chunks() {
-        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
-        desired.insert(IVec3::ZERO, LodLevel::Lod0);
-        desired.insert(IVec3::new(1, 0, 0), LodLevel::Lod2);
-
-        let forced = enforce_lod_delta_max_one(&mut desired);
-
-        assert_face_lod_deltas_le_one(&desired);
-
-        assert!(
-            !forced.is_empty(),
-            "enforce_lod_delta_max_one must report which chunks it modified"
-        );
-        // The modified chunk's desired LOD must differ from its starting LOD.
-        let initial: HashMap<IVec3, LodLevel> = [
-            (IVec3::ZERO, LodLevel::Lod0),
-            (IVec3::new(1, 0, 0), LodLevel::Lod2),
-        ]
-        .into_iter()
-        .collect();
-        for pos in &forced {
-            assert_ne!(
-                desired[pos], initial[pos],
-                "chunk reported as forced ({pos:?}) but its LOD is unchanged"
-            );
-        }
-    }
-
-    #[test]
-    fn enforce_lod_delta_max_one_refines_coarser_side_only() {
-        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
-        let fine = IVec3::ZERO;
-        let coarse = IVec3::new(1, 0, 0);
-        desired.insert(fine, LodLevel::Lod0);
-        desired.insert(coarse, LodLevel::Lod2);
-
-        let forced = enforce_lod_delta_max_one(&mut desired);
-
-        assert_eq!(
-            desired[&fine],
-            LodLevel::Lod0,
-            "max-one enforcement must not coarsen the high-detail side"
-        );
-        assert_eq!(
-            desired[&coarse],
-            LodLevel::Lod1,
-            "coarser neighbor should refine to the only bridgeable LOD"
-        );
-        assert_eq!(
-            forced,
-            HashSet::from([coarse]),
-            "only the refined coarse chunk should bypass the cooldown"
-        );
-        assert_face_lod_deltas_le_one(&desired);
-    }
-
-    #[test]
-    fn enforce_lod_delta_max_one_propagates_refinements_across_chain() {
-        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
-        let lod0 = IVec3::ZERO;
-        let lod3_a = IVec3::new(1, 0, 0);
-        let lod3_b = IVec3::new(2, 0, 0);
-        desired.insert(lod0, LodLevel::Lod0);
-        desired.insert(lod3_a, LodLevel::Lod3);
-        desired.insert(lod3_b, LodLevel::Lod3);
-
-        let forced = enforce_lod_delta_max_one(&mut desired);
-
-        assert_eq!(desired[&lod0], LodLevel::Lod0);
-        assert_eq!(desired[&lod3_a], LodLevel::Lod1);
-        assert_eq!(desired[&lod3_b], LodLevel::Lod2);
-        assert_eq!(forced, HashSet::from([lod3_a, lod3_b]));
-        assert_face_lod_deltas_le_one(&desired);
-    }
-
-    #[test]
-    fn enforce_lod_delta_max_one_no_modifications_returns_empty_set() {
-        let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
-        desired.insert(IVec3::ZERO, LodLevel::Lod0);
-        desired.insert(IVec3::new(1, 0, 0), LodLevel::Lod1);
-
-        let forced = enforce_lod_delta_max_one(&mut desired);
-
-        assert!(
-            forced.is_empty(),
-            "delta=1 fixture must not trigger any modifications"
         );
     }
 
@@ -905,30 +702,6 @@ mod tests {
                 true
             ),
             LodLevel::Culled
-        );
-    }
-
-    #[test]
-    fn lod_coherence_rejects_multi_step_face_jumps() {
-        assert_eq!(
-            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod2, LodLevel::Lod0),
-            Some(LodLevel::Lod1)
-        );
-        assert_eq!(
-            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod3, LodLevel::Lod1),
-            Some(LodLevel::Lod2)
-        );
-        assert_eq!(
-            lod_upgrade_for_face_neighbor_coherence(LodLevel::Culled, LodLevel::Lod2),
-            Some(LodLevel::Lod3)
-        );
-        assert_eq!(
-            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod1, LodLevel::Lod0),
-            None
-        );
-        assert_eq!(
-            lod_upgrade_for_face_neighbor_coherence(LodLevel::Lod0, LodLevel::Lod2),
-            None
         );
     }
 

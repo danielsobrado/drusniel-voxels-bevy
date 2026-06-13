@@ -902,6 +902,7 @@ pub(super) fn mc_source_matches_cell_probe(
     }
 }
 
+#[cfg(any(feature = "mc_transvoxel", test))]
 pub(super) fn mesher_iso_crossing_between_samples(
     origin: Vec3,
     dir: Vec3,

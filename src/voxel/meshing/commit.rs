@@ -36,7 +36,7 @@ use crate::voxel::meshing::{
     generate_chunk_mesh_for_request, lod_delta_gt_one_face_mask,
 };
 use crate::voxel::plugin::{RuntimeChunkStats, WaterMaskProxy};
-use crate::voxel::skirt::{NeighborLods, SkirtConfig};
+use crate::voxel::skirt::NeighborLods;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 
@@ -446,12 +446,10 @@ pub(crate) fn process_lod_mesh_transaction(
     mesh_settings: &MeshSettings,
     lod_settings: &LodSettings,
     mc_settings: &McTransvoxelSettings,
-    skirt_config: &SkirtConfig,
     ao_config: &AmbientOcclusionConfig,
     runtime_mc_stats: &mut McTransvoxelRuntimeStats,
     chunk_stats: &mut RuntimeChunkStats,
     frame: u32,
-    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
     timing_enabled: bool,
 ) -> LodMeshTransactionFrameStats {
     let mut frame_stats = LodMeshTransactionFrameStats::default();
@@ -515,12 +513,10 @@ pub(crate) fn process_lod_mesh_transaction(
                 mesh_settings,
                 lod_settings,
                 mc_settings,
-                skirt_config,
                 ao_config,
                 runtime_mc_stats,
                 chunk_stats,
                 &mut frame_stats,
-                strip_cache,
                 timing_enabled,
             ) {
                 LodChunkPrepareOutcome::Prepared(commit) => {
@@ -608,135 +604,6 @@ pub(crate) fn process_lod_mesh_transaction(
     frame_stats
 }
 
-#[inline(never)]
-/// Look up the coarse boundary strips this chunk consumes for the vertex-exact seam
-/// weld: one per X/Z face whose neighbour is exactly one LOD coarser, revision-gated by
-/// that neighbour's `last_terrain_mesh_key`. Missing/stale/over-distance -> the face's
-/// entry stays `None` and the morph falls back to the iso target (never blocks). Delta>1
-/// is skipped (the coarse strip's LOD wouldn't match what this chunk welds to).
-pub(crate) fn lookup_neighbor_boundary_strips(
-    strip_cache: &crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
-    world: &VoxelWorld,
-    chunk_pos: IVec3,
-    my_lod: LodLevel,
-    neighbor_lods: &NeighborLods,
-) -> crate::voxel::lod_boundary_strip::NeighborBoundaryStrips {
-    use crate::voxel::lod_boundary_strip::{face_neighbor_offset, opposite_face};
-    use crate::voxel::meshing::neighbor_lod_for_face;
-    use crate::voxel::skirt::ChunkFace;
-
-    let mut strips = crate::voxel::lod_boundary_strip::NeighborBoundaryStrips::default();
-    if my_lod.step_size() == 0 {
-        return strips;
-    }
-    for face in [
-        ChunkFace::NegX,
-        ChunkFace::PosX,
-        ChunkFace::NegZ,
-        ChunkFace::PosZ,
-    ] {
-        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
-            continue;
-        };
-        // Exactly one level coarser (delta 1) -> the strip LOD matches the weld target.
-        if neighbor_lod.step_size() != my_lod.step_size().saturating_mul(2) {
-            continue;
-        }
-        let neighbor_pos = chunk_pos + face_neighbor_offset(face);
-        let revision = world
-            .get_chunk(neighbor_pos)
-            .and_then(|c| c.last_terrain_mesh_key());
-        let Some(strip) = strip_cache.strip_for_face(neighbor_pos, opposite_face(face), revision)
-        else {
-            continue;
-        };
-        crate::voxel::lod_boundary_strip::bump(
-            &crate::voxel::lod_boundary_strip::STRIP_LOOKUPS_HIT,
-        );
-        let cloned = Some(strip.clone());
-        match face {
-            ChunkFace::NegX => strips.neg_x = cloned,
-            ChunkFace::PosX => strips.pos_x = cloned,
-            ChunkFace::NegZ => strips.neg_z = cloned,
-            ChunkFace::PosZ => strips.pos_z = cloned,
-            _ => {}
-        }
-    }
-    strips
-}
-
-/// Convergence trigger: when a chunk's exported boundary strip changes, dirty its
-/// delta-1 **finer** neighbours so they re-mesh next frame and weld to the new coarse
-/// boundary. Without this the fine side never re-consumes after the coarse side
-/// re-meshes (the strip publish/commit revision only lines up across frames, not within
-/// one transaction). Bounded to one hop: consuming a strip changes a chunk's morph
-/// targets, not its pre-morph boundary, so a re-consume does not re-change its own strip.
-fn dirty_finer_neighbors_for_strip(
-    world: &mut VoxelWorld,
-    chunk_pos: IVec3,
-    my_lod: LodLevel,
-    neighbor_lods: &NeighborLods,
-) {
-    use crate::voxel::chunk::MeshDirtyReason;
-    use crate::voxel::lod_boundary_strip::face_neighbor_offset;
-    use crate::voxel::meshing::neighbor_lod_for_face;
-    use crate::voxel::skirt::ChunkFace;
-
-    if my_lod.step_size() == 0 {
-        return;
-    }
-    for face in [
-        ChunkFace::NegX,
-        ChunkFace::PosX,
-        ChunkFace::NegZ,
-        ChunkFace::PosZ,
-    ] {
-        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
-            continue;
-        };
-        // Neighbour exactly one level FINER (it consumes our strip): its step == ours/2.
-        if neighbor_lod.step_size().saturating_mul(2) != my_lod.step_size() {
-            continue;
-        }
-        let neighbor_pos = chunk_pos + face_neighbor_offset(face);
-        if let Some(mut neighbor) = world.get_chunk_mut(neighbor_pos) {
-            // Skip if already dirty: during active LOD churn the finer neighbour is
-            // re-meshing (and re-consuming) on its own, so re-dirtying it only piles on
-            // redundant re-meshes. At rest it is clean, so this still drives convergence.
-            if !neighbor.is_dirty() {
-                neighbor.mark_dirty_with_reason(MeshDirtyReason::NeighborLod);
-            }
-        }
-    }
-}
-
-/// Publish (or evict) a chunk's exported boundary strips for finer neighbours to weld
-/// to, and — when the strip actually changed — dirty the delta-1 finer neighbours so
-/// they re-mesh and consume it. Called from EVERY mesh path (transaction, regular dirty,
-/// generation) so a coarse strip exists regardless of how the chunk was meshed.
-pub(crate) fn publish_chunk_boundary_strips(
-    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
-    world: &mut VoxelWorld,
-    chunk_pos: IVec3,
-    mesh_lod_level: LodLevel,
-    target_mode: MeshMode,
-    neighbor_lods: &NeighborLods,
-    boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
-) {
-    let strip_revision = terrain_mesh_dedup_key(target_mode, mesh_lod_level, neighbor_lods);
-    let previous_revision = strip_cache.revision_for(chunk_pos);
-    let new_revision = (!boundary_strips.is_empty()).then_some(strip_revision);
-    if boundary_strips.is_empty() {
-        strip_cache.remove(chunk_pos);
-    } else {
-        crate::voxel::lod_boundary_strip::bump(&crate::voxel::lod_boundary_strip::STRIPS_PUBLISHED);
-        strip_cache.insert(chunk_pos, strip_revision, boundary_strips);
-    }
-    if previous_revision != new_revision {
-        dirty_finer_neighbors_for_strip(world, chunk_pos, mesh_lod_level, neighbor_lods);
-    }
-}
-
 fn prepare_lod_chunk_commit(
     world: &mut VoxelWorld,
     meshes: &mut Assets<Mesh>,
@@ -749,12 +616,10 @@ fn prepare_lod_chunk_commit(
     mesh_settings: &MeshSettings,
     lod_settings: &LodSettings,
     mc_settings: &McTransvoxelSettings,
-    skirt_config: &SkirtConfig,
     ao_config: &AmbientOcclusionConfig,
     runtime_mc_stats: &mut McTransvoxelRuntimeStats,
     chunk_stats: &mut RuntimeChunkStats,
     frame_stats: &mut LodMeshTransactionFrameStats,
-    strip_cache: &mut crate::voxel::lod_boundary_strip::LodBoundaryStripCache,
     timing_enabled: bool,
 ) -> LodChunkPrepareOutcome {
     let dirty_flags = if let Some(chunk) = world.get_chunk(chunk_pos) {
@@ -849,20 +714,6 @@ fn prepare_lod_chunk_commit(
     let mesh_lod_level =
         transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
     let mesh_start = Instant::now();
-    let neighbor_strips = lookup_neighbor_boundary_strips(
-        strip_cache,
-        world,
-        chunk_pos,
-        mesh_lod_level,
-        &neighbor_lods,
-    );
-    let strip_status = super::seam_audit::resolve_strip_status_per_face(
-        strip_cache,
-        world,
-        chunk_pos,
-        mesh_lod_level,
-        &neighbor_lods,
-    );
     let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
         generate_chunk_mesh_for_request(MeshRequest {
             chunk,
@@ -871,12 +722,9 @@ fn prepare_lod_chunk_commit(
             logical_lod: lod_level,
             mesh_lod: mesh_lod_level,
             neighbor_lods,
-            skirt_config,
             ao_config: &ao_config.baked,
             water_exposure_mode: mesh_settings.water_air_exposure_mode,
             forensics: mesh_forensics_options(bench_forensics, mc_settings),
-            neighbor_strips: Some(&neighbor_strips),
-            strip_status: Some(&strip_status),
             mc_settings: Some(mc_settings),
             timing_enabled,
         })
@@ -896,24 +744,11 @@ fn prepare_lod_chunk_commit(
         mc_transvoxel_stats,
         mc_triangle_sources,
         generation_timing,
-        boundary_strips,
+        boundary_strips: _,
         seam_face_audit,
         seam_strip_debug,
     } = mesh_result;
     frame_stats.mesh_generation_timing.add(generation_timing);
-
-    // Publish (or evict) this chunk's exported boundary strips for finer neighbours to
-    // weld to. Revision = the same dedup key the commit stamps, so a consumer that
-    // checks the neighbour's `last_terrain_mesh_key` only matches a current strip.
-    publish_chunk_boundary_strips(
-        strip_cache,
-        world,
-        chunk_pos,
-        mesh_lod_level,
-        target_mode,
-        &neighbor_lods,
-        boundary_strips,
-    );
 
     let vertex_count = solid.positions.len() as u32;
     let triangle_count = (solid.indices.len() / 3) as u32;

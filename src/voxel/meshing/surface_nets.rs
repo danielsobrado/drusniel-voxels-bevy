@@ -1,14 +1,10 @@
-use super::seam_audit::{SeamStripStatus, XZ_FACE_COUNT};
+use super::seam_audit::{SeamFaceAudit, XZ_FACE_COUNT};
 use super::{
     ChunkMeshResult, LodShape1, LodShape2, LodShape3, MeshData, MeshGenerationTimingStats,
     MeshSdfCache, PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats,
-    WaterAirExposureMode, append_seam_stitches, apply_snap_or_morph,
-    build_surface_nets_seam_face_audit, compute_vertex_material_weights,
-    compute_vertex_material_weights_lod_transition_aware, extract_export_boundary_strips,
-    extract_main_surface_boundary_edges, extract_own_boundary_strips, generate_sdf,
-    generate_sdf_lod1, generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh,
-    pad_morph_targets_identity, recompute_morphed_seam_normals, scale_vertex_from_center,
-    skirt_depth_for_lod, terrain_morph_config,
+    TerrainSeamStripDebug, WaterAirExposureMode, apply_lod_snap, compute_vertex_material_weights,
+    compute_vertex_material_weights_lod_transition_aware, generate_sdf, generate_sdf_lod1,
+    generate_sdf_lod2, generate_sdf_lod3, generate_water_mesh, scale_vertex_from_center,
 };
 use crate::constants::{
     CHUNK_SIZE, LOD1_PADDED_SIZE, LOD1_STEP_SIZE, LOD2_PADDED_SIZE, LOD2_STEP_SIZE,
@@ -17,7 +13,7 @@ use crate::constants::{
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::baked_ao::compute_surface_nets_ao;
 use crate::voxel::chunk::{Chunk, LodLevel};
-use crate::voxel::skirt::{NeighborLods, SkirtConfig, generate_skirts_with_sealed_faces};
+use crate::voxel::skirt::NeighborLods;
 use crate::voxel::types::Voxel;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::prelude::Vec3;
@@ -70,11 +66,8 @@ pub fn generate_chunk_mesh_surface_nets(
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: NeighborLods,
-    skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
-    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    strip_status: &[SeamStripStatus; XZ_FACE_COUNT],
     timing_enabled: bool,
 ) -> ChunkMeshResult {
     generate_chunk_mesh_surface_nets_impl(
@@ -83,11 +76,8 @@ pub fn generate_chunk_mesh_surface_nets(
         world,
         my_lod,
         neighbor_lods,
-        skirt_config,
         ao_config,
         water_exposure_mode,
-        neighbor_strips,
-        strip_status,
         timing_enabled,
     )
 }
@@ -100,11 +90,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: NeighborLods,
-    skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
-    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    strip_status: &[SeamStripStatus; XZ_FACE_COUNT],
     timing_enabled: bool,
 ) -> ChunkMeshResult {
     generate_chunk_mesh_surface_nets_impl(
@@ -113,11 +100,8 @@ pub fn generate_chunk_mesh_surface_nets_lod1(
         world,
         my_lod,
         neighbor_lods,
-        skirt_config,
         ao_config,
         water_exposure_mode,
-        neighbor_strips,
-        strip_status,
         timing_enabled,
     )
 }
@@ -130,11 +114,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: NeighborLods,
-    skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
-    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    strip_status: &[SeamStripStatus; XZ_FACE_COUNT],
     timing_enabled: bool,
 ) -> ChunkMeshResult {
     generate_chunk_mesh_surface_nets_impl(
@@ -143,11 +124,8 @@ pub fn generate_chunk_mesh_surface_nets_lod2(
         world,
         my_lod,
         neighbor_lods,
-        skirt_config,
         ao_config,
         water_exposure_mode,
-        neighbor_strips,
-        strip_status,
         timing_enabled,
     )
 }
@@ -160,11 +138,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: NeighborLods,
-    skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig, // AO disabled for low LOD
     water_exposure_mode: WaterAirExposureMode,
-    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    strip_status: &[SeamStripStatus; XZ_FACE_COUNT],
     timing_enabled: bool,
 ) -> ChunkMeshResult {
     generate_chunk_mesh_surface_nets_impl(
@@ -173,11 +148,8 @@ pub fn generate_chunk_mesh_surface_nets_lod3(
         world,
         my_lod,
         neighbor_lods,
-        skirt_config,
         ao_config,
         water_exposure_mode,
-        neighbor_strips,
-        strip_status,
         timing_enabled,
     )
 }
@@ -375,11 +347,8 @@ fn generate_chunk_mesh_surface_nets_impl(
     world: &VoxelWorld,
     my_lod: LodLevel,
     neighbor_lods: NeighborLods,
-    skirt_config: &SkirtConfig,
     ao_config: &BakedAoConfig,
     water_exposure_mode: WaterAirExposureMode,
-    neighbor_strips: Option<&crate::voxel::lod_boundary_strip::NeighborBoundaryStrips>,
-    strip_status: &[SeamStripStatus; XZ_FACE_COUNT],
     timing_enabled: bool,
 ) -> ChunkMeshResult {
     let index_cap = grid.index_capacity();
@@ -474,9 +443,8 @@ fn generate_chunk_mesh_surface_nets_impl(
     }
     generation_timing.emit_surface_us += elapsed_us(start);
 
-    let morph = terrain_morph_config();
     let start = timing_enabled.then(Instant::now);
-    let (lod_transition_snap_stats, morph_counts) = apply_snap_or_morph(
+    let (lod_transition_snap_stats, _) = apply_lod_snap(
         &mut solid_mesh,
         &mut local_positions,
         chunk,
@@ -485,94 +453,13 @@ fn generate_chunk_mesh_surface_nets_impl(
         chunk_center,
         my_lod,
         &neighbor_lods,
-        morph,
-        neighbor_strips,
     );
     generation_timing.lod_seam_us += elapsed_us(start);
 
-    let mut mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
-    // Own main-surface boundary strips (before skirts) — single extract for export/stitch/audit.
-    let start = timing_enabled.then(Instant::now);
-    let own_boundary_strips =
-        extract_own_boundary_strips(&local_positions, &solid_mesh, chunk_origin, chunk, my_lod);
-    let boundary_strips =
-        extract_export_boundary_strips(morph, &own_boundary_strips, &neighbor_lods, my_lod);
-    generation_timing.boundary_strip_us += elapsed_us(start);
-
-    // Stage 4: stitch the fine boundary to coarser neighbours (closes steep-side gaps
-    // and the 2:1 density T-junction the morph weld alone can't). Seals stitched faces.
-    let start = timing_enabled.then(Instant::now);
-    let stitch_result = append_seam_stitches(
-        &mut solid_mesh,
-        &local_positions,
-        chunk_origin,
-        chunk_center,
-        my_lod,
-        &own_boundary_strips,
-        neighbor_strips,
-    );
-    generation_timing.seam_stitch_us += elapsed_us(start);
-
-    // Generate skirts for LOD boundaries
-    let mut skirt_stats = crate::voxel::skirt::SkirtGenerationStats::default();
-    let start = timing_enabled.then(Instant::now);
-    if !solid_mesh.indices.is_empty() {
-        let boundary_band = my_lod.step_size() as f32;
-        let boundary_edges = extract_main_surface_boundary_edges(
-            &local_positions,
-            &solid_mesh,
-            mesh_section_stats.main_surface_vertex_count as usize,
-            mesh_section_stats.main_surface_index_count as usize,
-            CHUNK_SIZE as f32,
-            boundary_band,
-        );
-
-        let mut local_skirt_config = skirt_config.clone();
-        local_skirt_config.depth = skirt_depth_for_lod(my_lod);
-
-        skirt_stats = generate_skirts_with_sealed_faces(
-            &mut solid_mesh.positions,
-            &mut solid_mesh.normals,
-            &mut solid_mesh.uvs,
-            &mut solid_mesh.barycentric_uvs,
-            &mut solid_mesh.colors,
-            &mut solid_mesh.indices,
-            &boundary_edges,
-            &local_skirt_config,
-            my_lod,
-            &neighbor_lods,
-            (lod_transition_snap_stats.snapped_face_mask
-                & !lod_transition_snap_stats.fallback_face_mask)
-                | stitch_result.stitched_face_mask,
-        );
-        mesh_section_stats.add_skirt_stats(skirt_stats);
-    }
-    generation_timing.skirt_us += elapsed_us(start);
-
-    let (seam_face_audit, seam_strip_debug) = build_surface_nets_seam_face_audit(
-        chunk,
-        my_lod,
-        &neighbor_lods,
-        &own_boundary_strips,
-        &lod_transition_snap_stats,
-        &morph_counts,
-        &stitch_result,
-        &skirt_stats,
-        neighbor_strips,
-        strip_status,
-    );
-
-    // Skirts/aprons appended after morph baking get identity targets so
-    // morph_targets stays parallel to positions (into_mesh upload invariant).
-    if morph.enabled {
-        let start = timing_enabled.then(Instant::now);
-        // Stage 5: recompute normals for still-welded boundary verts at their welded
-        // position, so the seam is lit by the geometry it renders on (no flat-dark
-        // welds). After the skirt, so the apron keeps its original boundary normals.
-        recompute_morphed_seam_normals(&mut solid_mesh, world, &mut sdf_cache, chunk_center);
-        pad_morph_targets_identity(&mut solid_mesh);
-        generation_timing.morph_finalize_us += elapsed_us(start);
-    }
+    let mesh_section_stats = TerrainMeshSectionStats::from_main_surface(&solid_mesh);
+    let boundary_strips = Vec::new();
+    let seam_face_audit = [SeamFaceAudit::default(); XZ_FACE_COUNT];
+    let seam_strip_debug = TerrainSeamStripDebug::default();
 
     // Generate water mesh at full resolution (water is usually flat, so LOD
     // doesn't help much).

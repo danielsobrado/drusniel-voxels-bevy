@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "mc_transvoxel")]
 pub(super) fn sample_active_seam_faces(
     world: &VoxelWorld,
     terrain_entities: &TerrainEntityQuery,
@@ -878,8 +879,6 @@ pub(super) fn median_sorted(values: &[f32]) -> Option<f32> {
         Some(values[mid])
     }
 }
-
-#[cfg(feature = "mc_transvoxel")]
 
 pub(super) fn entity_probe(
     entity: Entity,

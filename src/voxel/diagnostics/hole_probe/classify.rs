@@ -132,8 +132,6 @@ pub(super) fn hit_has_shading_or_normal_anomaly(hit: &CameraRayHit) -> bool {
     normal_flip || bad_material
 }
 
-#[cfg(feature = "mc_transvoxel")]
-
 pub(super) fn normalized_probe_summary(
     camera_ray_fan: Option<&CameraRayFan>,
     active_seam_faces: &[SeamFaceProbe],

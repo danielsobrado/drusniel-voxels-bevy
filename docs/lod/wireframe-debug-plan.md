@@ -1,7 +1,7 @@
 # Terrain Wireframe & Mesh Debug View — Plan
 
-> Created: 2026-05-23 · Status: Planning
-> Scope: `src/voxel/meshing.rs`, `src/voxel/skirt.rs`, `src/voxel/plugin.rs`,
+> Created: 2026-05-23 · Status: Historical plan; current default path is CLOD pages + live LOD0.
+> Scope: `src/voxel/meshing.rs`, `src/voxel/plugin.rs`,
 > `src/rendering/triplanar_material.rs`, `src/runtime_commands.rs`,
 > `src/interaction/debug.rs`, `assets/shaders/triplanar_terrain.wgsl`,
 > `docs/lod/`
@@ -11,16 +11,15 @@
 > geometry is stepped, it's the DC/QEF placement; if the geometry is smooth
 > but shading is stepped, it's normals"), we need a runtime wireframe
 > diagnostic that can answer **geometry vs shading** in seconds, plus a few
-> small additions that let us tell **which mesh section** (main / skirt /
-> transition apron) and **which LOD** a visible artifact belongs to. Without
+> small additions that let us tell **which mesh section** (main / legacy seam
+> section) and **which LOD** a visible artifact belongs to. Without
 > this, every seam investigation is guesswork.
 
 ## Why this, why now
 
-The MC+Transvoxel spike (see [`mc-transvoxel-plan.md`](mc-transvoxel-plan.md))
-costs 3 weeks. Before committing that, the diagnostic costs **1–2 days** and
-directly answers the question that determines whether MC+Transvoxel is the
-right next step:
+The original MC+Transvoxel spike (see [`mc-transvoxel-plan.md`](mc-transvoxel-plan.md))
+is no longer part of the default D1-a path. The diagnostic remains useful for
+checking the live LOD0 bubble and CLOD page handoff:
 
 - If the visible "terraced" artifacts are **geometric** — the mesh truly has
   stepped polygons — the spike is justified: DC/QEF/extractor choice is the
@@ -39,7 +38,7 @@ plan finishes it.
 |---|---|---|
 | `WireframeDebug` material variant | Defined | `TerrainMaterialQuality::WireframeDebug` referenced in [`runtime_commands.rs:5551`](../../src/runtime_commands.rs#L5551), `bench/mod.rs:265`, plugin handle in `plugin.rs:2879` |
 | Barycentric UVs on main SN mesh | Emitted | `MeshData.barycentric_uvs` populated via `push_triangle_barycentrics` ([`meshing.rs:325`](../../src/voxel/meshing.rs#L325)) for all four SN LODs |
-| Barycentric UVs on skirts | Emitted | `push_quad_barycentrics` in [`skirt.rs:351`](../../src/voxel/skirt.rs#L351) |
+| Legacy seam-section colours | Historical | Skirt/apron generation was removed from the default live path; non-white section colours should not appear in normal CLOD operation. |
 | Wireframe shader branch | In WGSL | `#ifdef TERRAIN_DEBUG_WIREFRAME` in [`triplanar_terrain.wgsl:455-460`](../../assets/shaders/triplanar_terrain.wgsl#L455) |
 | Bench TOML activation | Works | `bench/mod.rs:265-285` maps `BenchTerrainMaterialQuality::WireframeDebug` |
 

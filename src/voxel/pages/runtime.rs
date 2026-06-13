@@ -1,7 +1,7 @@
 //! Phase 5 Step 3a — LOD0 live-mesh export cache maintenance.
 //!
-//! Default-OFF (`ClodPagesRuntime.enabled`, D4) so it is zero-cost until you flip it on for
-//! A/B + bench. Reuses the EXACT live mesher with all-LOD0 neighbors, so the eventual
+//! Default-ON (`ClodPagesRuntime.enabled`, D1-a) with `CLOD_PAGES=0` as the kill switch.
+//! Reuses the EXACT live mesher with all-LOD0 neighbors, so the eventual
 //! near/far bubble edge matches the live chunks by construction (I3.1). Off-thread
 //! decimation + page assembly + entity commit land in Step 3b; this only fills the cache.
 //!
@@ -21,7 +21,7 @@ use crate::voxel::world::VoxelWorld;
 #[derive(Resource)]
 pub struct ClodPagesRuntime {
     pub cfg: ClodPagesConfig,
-    /// Master gate. Default false — zero cost when off.
+    /// Master gate. Default true; `CLOD_PAGES=0` is the release kill switch.
     pub enabled: bool,
     /// LOD0 pages assembled per frame by the build queue.
     pub source_budget_per_frame: usize,
@@ -29,13 +29,13 @@ pub struct ClodPagesRuntime {
     pub source_radius_chunks: i32,
 }
 
-/// Reproducible bench/run A/B: start with pages ON if `CLOD_PAGES` is set to a truthy value
-/// (`1`/`true`/`on`). Lets a scripted bench run entirely pages-on without a manual Alt+F11.
+/// Reproducible bench/run A/B: pages default ON unless `CLOD_PAGES` is set false
+/// (`0`/`false`/`off`/`no`). Lets a scripted bench run old live LOD via env kill switch.
 /// `CLOD_PAGES_BUDGET` optionally overrides the per-frame page-source job budget.
-fn env_truthy(key: &str) -> bool {
-    matches!(
+fn env_default_on(key: &str) -> bool {
+    !matches!(
         std::env::var(key).ok().as_deref().map(str::trim),
-        Some("1") | Some("true") | Some("on") | Some("yes")
+        Some("0") | Some("false") | Some("off") | Some("no")
     )
 }
 
@@ -52,7 +52,7 @@ impl Default for ClodPagesRuntime {
             .unwrap_or(4);
         Self {
             cfg,
-            enabled: env_truthy("CLOD_PAGES"),
+            enabled: env_default_on("CLOD_PAGES"),
             source_budget_per_frame,
             source_radius_chunks,
         }
@@ -167,7 +167,7 @@ fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> (i32, i32) {
 /// Logs the initial page state once so bench output records whether the A/B ran pages-on.
 pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
     info!(
-        "CLOD PAGES: source cache {} at startup (CLOD_PAGES env); radius {} chunks, page-source budget {}/frame. Alt+F11 toggles.",
+        "CLOD PAGES: source cache {} at startup (default ON; CLOD_PAGES=0 disables); radius {} chunks, page-source budget {}/frame. Alt+F11 toggles.",
         if runtime.enabled { "ON" } else { "OFF" },
         runtime.source_radius_chunks,
         runtime.source_budget_per_frame
@@ -191,7 +191,7 @@ pub fn clod_pages_debug_toggle_system(
     }
 }
 
-/// Default-off. Maintains the page-source export cache filled by the live dirty mesher.
+/// Maintains the page-source export cache filled by the live dirty mesher.
 pub fn clod_pages_source_meshing_system(
     runtime: Res<ClodPagesRuntime>,
     gen_state: Res<ChunkGenerationState>,

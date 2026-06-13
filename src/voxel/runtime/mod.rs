@@ -48,8 +48,7 @@ use crate::voxel::lod::{
     LodSettings, build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
     calculate_target_lod_with_hysteresis, chunk_contains_liquid, chunk_layer_intersects_waterline,
     collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    enforce_lod_delta_max_one, forensics_forced_lod, forensics_mesh_mode_override,
-    is_horizon_proxy_lod, lod_upgrade_for_face_neighbor_coherence, max_lod_for_face_neighbor,
+    forensics_forced_lod, forensics_mesh_mode_override, is_horizon_proxy_lod,
     mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode, should_defer_surface_nets_mesh,
     target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz, terrain_lod_requires_collider,
     terrain_material_quality_for_lod, transition_refined_surface_nets_lod, water_shore_guarded_lod,
@@ -76,7 +75,6 @@ use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
 use crate::voxel::persistence::{self, WorldPersistence};
-use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::terrain::{Biome, TerrainGenerator, WaterGenerationMetadata};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
@@ -94,9 +92,6 @@ const MESH_DIRTY_QUEUE_WARN_THRESHOLD: usize = 96;
 const MESH_DIRTY_QUEUE_WARN_INTERVAL_SECS: f32 = 1.0;
 const MAX_LOD_CHANGES_PER_UPDATE: usize = 32;
 const LOD_CHANGE_COOLDOWN_FRAMES: u32 = 30;
-const LOD_COHERENCE_PASSES: u32 = 4;
-pub(crate) const TERRAIN_MATERIAL_LOD_DISTANCE: f32 = 96.0;
-pub(crate) const TERRAIN_MATERIAL_LOD_HYSTERESIS: f32 = 16.0;
 const TERRAIN_MATERIAL_UPDATE_INTERVAL: f32 = 0.5;
 const WATER_BODY_UPDATE_INTERVAL: f32 = 0.5;
 const WATER_BODY_POND_MAX_AREA: f32 = 128.0;
@@ -126,8 +121,8 @@ pub use generation::ChunkGenerationState;
 pub(crate) use generation::{
     PendingWorldGeneration, WorldGenerationQueue, WorldStats, assign_initial_lods_for_loaded_world,
     begin_world_generation, expected_world_chunk_count, generate_chunk_async,
-    initial_lod_for_chunk, mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty,
-    poll_chunk_generation_tasks, poll_world_load_task, should_poll_chunk_generation_tasks,
+    initial_lod_for_chunk, mark_surface_nets_halo_dirty, poll_chunk_generation_tasks,
+    poll_world_load_task, should_poll_chunk_generation_tasks,
     spawn_queued_chunk_generation_tasks, start_pending_world_generation,
     start_voxel_world_after_overlay_frame,
 };

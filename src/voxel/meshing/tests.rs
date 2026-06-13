@@ -2,11 +2,6 @@ use super::*;
 use crate::constants::{CHUNK_VOLUME, WATER_LEVEL};
 use crate::rendering::ao_config::BakedAoConfig;
 
-fn default_strip_status() -> [super::seam_audit::SeamStripStatus; super::seam_audit::XZ_FACE_COUNT]
-{
-    [super::seam_audit::SeamStripStatus::NotNeeded; super::seam_audit::XZ_FACE_COUNT]
-}
-
 fn ao_config() -> BakedAoConfig {
     BakedAoConfig {
         enabled: false,
@@ -176,11 +171,8 @@ fn surface_nets_mesh(chunk_pos: IVec3, world: &VoxelWorld) -> ChunkMeshResult {
             neg_z: None,
             pos_z: None,
         },
-        &SkirtConfig::default(),
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     )
 }
@@ -296,58 +288,6 @@ fn lod0_transition_coarsens_full_boundary_band_not_just_outer_plane() {
     assert_eq!(raw_sdf[inner_idx], 1.0);
     // The transition must coarsen the inner plane too.
     assert_eq!(transition_sdf[inner_idx], -1.0);
-}
-
-#[test]
-fn lod0_morph_base_sdf_keeps_transition_band_uniformly_fine() {
-    let chunk_pos = IVec3::new(1, 0, 2);
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let mut world = world_with_test_chunks(IVec3::new(4, 1, 5));
-    world.set_voxel(chunk_origin + IVec3::new(14, 4, 4), VoxelType::Rock);
-
-    let chunk = world.get_chunk(chunk_pos).unwrap();
-    let no_transition_lods = NeighborLods::default();
-    let transition_lods = NeighborLods {
-        pos_x: Some(LodLevel::Lod1),
-        ..Default::default()
-    };
-
-    let inner_idx = PaddedChunkShape::linearize([LOD0_PADDED_SIZE - 2, 5, 5]) as usize;
-
-    let raw_sdf = generate_sdf_with_transition_mode(
-        chunk,
-        &world,
-        LodLevel::Lod0,
-        &no_transition_lods,
-        false,
-        BaseSdfTransitionMode::Uniform,
-    );
-    let morph_base_sdf = generate_sdf_with_transition_mode(
-        chunk,
-        &world,
-        LodLevel::Lod0,
-        &transition_lods,
-        false,
-        BaseSdfTransitionMode::Uniform,
-    );
-    let legacy_coarsened_sdf = generate_sdf_with_transition_mode(
-        chunk,
-        &world,
-        LodLevel::Lod0,
-        &transition_lods,
-        false,
-        BaseSdfTransitionMode::Coarsen,
-    );
-
-    assert_eq!(raw_sdf[inner_idx], 1.0);
-    assert_eq!(
-        morph_base_sdf[inner_idx], raw_sdf[inner_idx],
-        "GPU morph base POSITION mesh must not create a transition-only sign change"
-    );
-    assert_eq!(
-        legacy_coarsened_sdf[inner_idx], -1.0,
-        "fixture must still exercise the old coarsened-boundary wall risk"
-    );
 }
 
 #[test]
@@ -744,11 +684,8 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &world,
         LodLevel::Lod0,
         NeighborLods::default(),
-        &SkirtConfig::default(),
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
     let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
@@ -756,11 +693,8 @@ fn lod1_flat_surface_stays_within_half_voxel_of_lod0() {
         &world,
         LodLevel::Lod1,
         NeighborLods::default(),
-        &SkirtConfig::default(),
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
 
@@ -798,7 +732,6 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
     let lod1_chunk = world.get_chunk(lod1_chunk_pos).unwrap();
     let lod0_origin = VoxelWorld::chunk_to_world(lod0_chunk_pos);
     let lod1_origin = VoxelWorld::chunk_to_world(lod1_chunk_pos);
-    let skirt_config = SkirtConfig::default();
     let samples = [
         Vec3::new(31.5, 0.0, 8.5),
         Vec3::new(32.25, 0.0, 8.5),
@@ -814,11 +747,8 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
             pos_x: Some(LodLevel::Lod0),
             ..Default::default()
         },
-        &skirt_config,
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
     let reference_right = generate_chunk_mesh_surface_nets(
@@ -829,11 +759,8 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
             neg_x: Some(LodLevel::Lod0),
             ..Default::default()
         },
-        &skirt_config,
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
     let reference_meshes = [
@@ -863,11 +790,8 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
             pos_x: Some(LodLevel::Lod1),
             ..Default::default()
         },
-        &skirt_config,
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
     let transition_right = generate_chunk_mesh_surface_nets_lod1(
@@ -878,11 +802,8 @@ fn steep_lod0_lod1_x_seam_transition_stays_near_reference_surface() {
             neg_x: Some(LodLevel::Lod0),
             ..Default::default()
         },
-        &skirt_config,
         &ao_config(),
         WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
         false,
     );
     let transition_meshes = [
@@ -1361,226 +1282,6 @@ fn mesh_data_for_local_positions(local_positions: &[Vec3], chunk_center: Vec3) -
     mesh
 }
 
-fn morph_enabled_config() -> TerrainMorphConfig {
-    TerrainMorphConfig {
-        enabled: true,
-        ..Default::default()
-    }
-}
-
-#[test]
-fn into_mesh_uploads_morph_attribute_only_when_parallel() {
-    let base = || {
-        let mut mesh = MeshData::new();
-        for _ in 0..3 {
-            mesh.positions.push([0.0, 0.0, 0.0]);
-            mesh.normals.push([0.0, 1.0, 0.0]);
-            mesh.uvs.push([0.0, 0.0]);
-            mesh.colors.push([0.0; 4]);
-        }
-        mesh.indices.extend_from_slice(&[0, 1, 2]);
-        mesh
-    };
-
-    // No morph targets → attribute omitted.
-    assert!(
-        base()
-            .into_mesh()
-            .attribute(ATTRIBUTE_MORPH_TARGET)
-            .is_none(),
-        "empty morph_targets must not upload the attribute"
-    );
-
-    // Mismatched length → attribute omitted (guards the Bevy length panic).
-    let mut short = base();
-    short.morph_targets = vec![[0.0; 4]; 2];
-    assert!(
-        short
-            .into_mesh()
-            .attribute(ATTRIBUTE_MORPH_TARGET)
-            .is_none(),
-        "mismatched morph_targets must not upload the attribute"
-    );
-
-    // Parallel length → attribute uploaded.
-    let mut full = base();
-    full.morph_targets = vec![[1.0, 2.0, 3.0, 1.0]; 3];
-    assert!(
-        full.into_mesh().attribute(ATTRIBUTE_MORPH_TARGET).is_some(),
-        "parallel morph_targets must upload the attribute"
-    );
-}
-
-#[test]
-fn pad_morph_targets_identity_restores_invariant() {
-    let mut mesh = MeshData::new();
-    // Two "main" vertices already morphed.
-    mesh.positions.push([1.0, 1.0, 1.0]);
-    mesh.positions.push([2.0, 2.0, 2.0]);
-    mesh.morph_targets.push([9.0, 9.0, 9.0, 1.0]);
-    mesh.morph_targets.push([8.0, 8.0, 8.0, 0.0]);
-    // Two "skirt" vertices appended after baking.
-    mesh.positions.push([3.0, 3.0, 3.0]);
-    mesh.positions.push([4.0, 4.0, 4.0]);
-
-    pad_morph_targets_identity(&mut mesh);
-
-    assert_eq!(mesh.morph_targets.len(), mesh.positions.len());
-    assert_eq!(mesh.morph_targets[2], [3.0, 3.0, 3.0, 0.0]);
-    assert_eq!(mesh.morph_targets[3], [4.0, 4.0, 4.0, 0.0]);
-    // Pre-existing rows are untouched.
-    assert_eq!(mesh.morph_targets[0], [9.0, 9.0, 9.0, 1.0]);
-}
-
-#[test]
-fn pad_morph_targets_identity_is_noop_without_targets() {
-    let mut mesh = MeshData::new();
-    mesh.positions.push([1.0, 1.0, 1.0]);
-    pad_morph_targets_identity(&mut mesh);
-    assert!(mesh.morph_targets.is_empty());
-}
-
-#[test]
-fn apply_snap_or_morph_enabled_skips_snap_and_bakes_targets() {
-    let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
-    fill_steep_x_slope(&mut world);
-    let chunk_pos = IVec3::new(1, 1, 1);
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
-    let mut local_positions = vec![
-        Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0),
-        Vec3::new(8.0, 8.0, 8.0),
-    ];
-    let mut mesh = mesh_data_for_local_positions(&local_positions, center);
-    let positions_before = mesh.positions.clone();
-    let neighbors = NeighborLods {
-        pos_x: Some(LodLevel::Lod1),
-        ..Default::default()
-    };
-
-    let (stats, _) = apply_snap_or_morph(
-        &mut mesh,
-        &mut local_positions,
-        world.get_chunk(chunk_pos).unwrap(),
-        &world,
-        chunk_origin,
-        center,
-        LodLevel::Lod0,
-        &neighbors,
-        &morph_enabled_config(),
-        None,
-    );
-
-    // Snap was skipped: stats default, POSITION untouched (fine mesh kept).
-    assert_eq!(stats.snapped_vertex_count, 0);
-    assert!(stats.face_snapped(ChunkFace::PosX));
-    assert_eq!(mesh.positions, positions_before);
-    // Targets baked: boundary vertex morphs, interior does not.
-    assert_eq!(mesh.morph_targets.len(), mesh.positions.len());
-    assert_eq!(mesh.morph_targets[0][3], 1.0);
-    assert_eq!(mesh.morph_targets[1][3], 0.0);
-}
-
-#[test]
-fn fractional_morph_target_lands_on_lod1_neighbor_mesh() {
-    let mut world = world_with_test_chunks(IVec3::new(4, 4, 1));
-    fill_steep_x_slope(&mut world);
-
-    let lod0_chunk_pos = IVec3::new(1, 1, 0);
-    let lod1_chunk_pos = IVec3::new(2, 1, 0);
-    let lod0_origin = VoxelWorld::chunk_to_world(lod0_chunk_pos);
-    let lod1_origin = VoxelWorld::chunk_to_world(lod1_chunk_pos);
-    let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
-    let mut local_positions = vec![Vec3::new(CHUNK_SIZE as f32 - 0.6, 8.0, 7.4)];
-    let mut mesh = mesh_data_for_local_positions(&local_positions, center);
-    let neighbors = NeighborLods {
-        pos_x: Some(LodLevel::Lod1),
-        ..Default::default()
-    };
-
-    let (stats, _) = apply_snap_or_morph(
-        &mut mesh,
-        &mut local_positions,
-        world.get_chunk(lod0_chunk_pos).unwrap(),
-        &world,
-        lod0_origin,
-        center,
-        LodLevel::Lod0,
-        &neighbors,
-        &morph_enabled_config(),
-        None,
-    );
-
-    assert_eq!(stats.boundary_candidate_vertex_count, 1);
-    assert_eq!(stats.morph_target_vertex_count, 1);
-    assert_eq!(stats.morph_missing_target_vertex_count, 0);
-    assert_eq!(mesh.morph_targets[0][3], 1.0);
-
-    let lod1_mesh = generate_chunk_mesh_surface_nets_lod1(
-        world.get_chunk(lod1_chunk_pos).unwrap(),
-        &world,
-        LodLevel::Lod1,
-        NeighborLods {
-            neg_x: Some(LodLevel::Lod0),
-            ..Default::default()
-        },
-        &SkirtConfig::default(),
-        &ao_config(),
-        WaterAirExposureMode::ExteriorConnected,
-        None,
-        &default_strip_status(),
-        false,
-    );
-
-    let target = mesh.morph_targets[0];
-    let target_world_x = lod0_origin.x as f32 + target[0];
-    let target_world_y = lod0_origin.y as f32 + target[1];
-    let target_world_z = lod0_origin.z as f32 + target[2];
-    let neighbor_y = highest_vertical_hit_y_for_meshes(
-        &[(&lod1_mesh.solid, lod1_origin)],
-        target_world_x,
-        target_world_z,
-    )
-    .expect("morph target should sit over the generated Lod1 neighbor mesh");
-
-    assert!(
-        (target_world_y - neighbor_y).abs() <= VOXEL_SIZE * 0.75,
-        "morph target must land on the generated Lod1 mesh: target=({target_world_x:.2},{target_world_y:.2},{target_world_z:.2}) neighbor_y={neighbor_y:.2}"
-    );
-}
-
-#[test]
-fn resolve_morph_face_coverage_seals_if_any_vert_welds_and_keeps_welds() {
-    let neighbors = NeighborLods {
-        neg_x: Some(LodLevel::Lod1),
-        ..Default::default()
-    };
-    let locals = vec![Vec3::new(0.0, 5.0, 5.0), Vec3::new(0.0, 6.0, 6.0)];
-
-    // Any welded vert -> face complete (sealed). Welds are KEPT: un-morphing a
-    // welded boundary vert is what released the LOD-seam spike it was pinning.
-    let one_welded = vec![[0.0, 5.0, 5.0, 1.0], [0.0, 6.0, 6.0, 0.0]];
-    let (complete, fallback, counts) =
-        resolve_morph_face_coverage(&locals, &one_welded, LodLevel::Lod0, &neighbors);
-    assert_eq!(complete, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
-    assert_eq!(fallback, 0);
-    assert_eq!(counts.candidate[0], 2);
-    assert_eq!(counts.welded[0], 1);
-    assert!(
-        one_welded[0][3] > 0.5,
-        "welded vert must stay welded (no spike)"
-    );
-
-    // No welded vert on the face -> fallback (keeps skirt); nothing moved, no tear.
-    let none_welded = vec![[0.0, 5.0, 5.0, 0.0], [0.0, 6.0, 6.0, 0.0]];
-    let (complete, fallback, counts) =
-        resolve_morph_face_coverage(&locals, &none_welded, LodLevel::Lod0, &neighbors);
-    assert_eq!(complete, 0);
-    assert_eq!(fallback, LodTransitionSnapStats::face_mask(ChunkFace::NegX));
-    assert_eq!(counts.candidate[0], 2);
-    assert_eq!(counts.welded[0], 0);
-}
-
 #[test]
 fn partial_morph_without_stitch_or_skirt_is_invalid_unsafe_topology() {
     use super::seam_audit::{
@@ -1648,41 +1349,7 @@ fn strip_oracle_rejects_mismatched_segment_count() {
 }
 
 #[test]
-fn apply_snap_or_morph_enabled_does_not_seal_when_bake_fails() {
-    let world = world_with_test_chunks(IVec3::new(2, 2, 1));
-    let chunk_pos = IVec3::ZERO;
-    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-    let center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
-    let mut local_positions = vec![Vec3::new(CHUNK_SIZE as f32, 5.0, 8.0)];
-    let mut mesh = mesh_data_for_local_positions(&local_positions, center);
-    mesh.positions.push([0.0, 0.0, 0.0]);
-    let neighbors = NeighborLods {
-        pos_x: Some(LodLevel::Lod1),
-        ..Default::default()
-    };
-
-    let (stats, _) = apply_snap_or_morph(
-        &mut mesh,
-        &mut local_positions,
-        world.get_chunk(chunk_pos).unwrap(),
-        &world,
-        chunk_origin,
-        center,
-        LodLevel::Lod0,
-        &neighbors,
-        &morph_enabled_config(),
-        None,
-    );
-
-    assert_eq!(
-        stats.snapped_face_mask, 0,
-        "morph mode must leave skirts available when weld target baking fails"
-    );
-    assert!(mesh.morph_targets.is_empty());
-}
-
-#[test]
-fn apply_snap_or_morph_disabled_snaps_and_leaves_targets_empty() {
+fn apply_lod_snap_snaps_boundary_vertices() {
     let mut world = world_with_test_chunks(IVec3::new(4, 4, 3));
     fill_steep_x_slope(&mut world);
     let chunk_pos = IVec3::new(1, 1, 1);
@@ -1695,7 +1362,7 @@ fn apply_snap_or_morph_disabled_snaps_and_leaves_targets_empty() {
         ..Default::default()
     };
 
-    let (stats, _) = apply_snap_or_morph(
+    let (stats, _) = apply_lod_snap(
         &mut mesh,
         &mut local_positions,
         world.get_chunk(chunk_pos).unwrap(),
@@ -1704,17 +1371,11 @@ fn apply_snap_or_morph_disabled_snaps_and_leaves_targets_empty() {
         center,
         LodLevel::Lod0,
         &neighbors,
-        &TerrainMorphConfig::default(), // disabled
-        None,
     );
 
     assert!(
         stats.snapped_vertex_count > 0,
-        "snap should run when morph off"
-    );
-    assert!(
-        mesh.morph_targets.is_empty(),
-        "disabled morph must leave morph_targets empty so into_mesh stays legacy"
+        "snap should run on an LOD boundary"
     );
 }
 
@@ -2495,7 +2156,6 @@ fn perf_probe_surface_nets_meshing() {
         corner_darkness: 0.6,
         fix_anisotropy: false,
     };
-    let skirt_config = SkirtConfig::default();
     let chunk_pos = IVec3::new(1, 0, 1);
     let chunk = world.get_chunk(chunk_pos).unwrap();
 
@@ -2524,12 +2184,9 @@ fn perf_probe_surface_nets_meshing() {
                 logical_lod: lod,
                 mesh_lod: lod,
                 neighbor_lods,
-                skirt_config: &skirt_config,
                 ao_config: &ao,
                 water_exposure_mode: WaterAirExposureMode::ExteriorConnected,
                 forensics: MeshForensicsOptions::default(),
-                neighbor_strips: None,
-                strip_status: None,
                 mc_settings: None,
                 timing_enabled: true,
             });
@@ -2539,7 +2196,7 @@ fn perf_probe_surface_nets_meshing() {
         let result = last.unwrap();
         let t = result.generation_timing;
         println!(
-            "{lod:?}: best {best_us} us | verts {} tris {} | sdf {} sn {} emit {} seam {} strips {} stitch {} skirt {} morph {} water {} us",
+            "{lod:?}: best {best_us} us | verts {} tris {} | sdf {} sn {} emit {} seam {} strips {} stitch {} skirt {} water {} us",
             result.solid.positions.len(),
             result.solid.indices.len() / 3,
             t.sdf_us,
@@ -2549,7 +2206,6 @@ fn perf_probe_surface_nets_meshing() {
             t.boundary_strip_us,
             t.seam_stitch_us,
             t.skirt_us,
-            t.morph_finalize_us,
             t.water_us,
         );
     }

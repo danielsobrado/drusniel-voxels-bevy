@@ -1,8 +1,7 @@
 use super::{MeshMode, air_connected_to_exterior_with_stats, air_open_to_sky_with_stats};
 use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::chunk::LodLevel;
-use crate::voxel::meshing_types::ATTRIBUTE_MORPH_TARGET;
-use crate::voxel::skirt::{ChunkFace, NeighborLods, SkirtGenerationStats};
+use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelSample, VoxelWorld};
 use bevy::asset::RenderAssetUsages;
@@ -148,15 +147,6 @@ impl TerrainMeshSectionStats {
             main_surface_index_count: mesh.indices.len() as u32,
             ..Default::default()
         }
-    }
-
-    pub(super) fn add_skirt_stats(&mut self, stats: SkirtGenerationStats) {
-        self.transition_apron_index_count = self
-            .transition_apron_index_count
-            .saturating_add(stats.transition_apron_index_count);
-        self.vertical_skirt_index_count = self
-            .vertical_skirt_index_count
-            .saturating_add(stats.vertical_skirt_index_count);
     }
 }
 
@@ -322,7 +312,6 @@ pub struct MeshGenerationTimingStats {
     pub boundary_strip_us: u64,
     pub seam_stitch_us: u64,
     pub skirt_us: u64,
-    pub morph_finalize_us: u64,
     pub water_us: u64,
 }
 
@@ -337,9 +326,6 @@ impl MeshGenerationTimingStats {
             .saturating_add(other.boundary_strip_us);
         self.seam_stitch_us = self.seam_stitch_us.saturating_add(other.seam_stitch_us);
         self.skirt_us = self.skirt_us.saturating_add(other.skirt_us);
-        self.morph_finalize_us = self
-            .morph_finalize_us
-            .saturating_add(other.morph_finalize_us);
         self.water_us = self.water_us.saturating_add(other.water_us);
     }
 }
@@ -368,11 +354,6 @@ pub struct MeshData {
     /// Chunk LOD index baked into UV1 for wireframe tinting.
     pub wireframe_lod_index: u8,
     pub colors: Vec<[f32; 4]>, // Vertex colors for AO (blocky) or material weights (surface nets)
-    /// Per-vertex GPU geomorph target (`ATTRIBUTE_MORPH_TARGET`): `xyz` coarse-aligned
-    /// local position, `w` seam weight. Filled by `meshing_lod::append_morph_targets`
-    /// on Surface Nets terrain and uploaded by `into_mesh` only when its length
-    /// matches `positions`. Left empty on the blocky/water paths, which never morph.
-    pub morph_targets: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
 }
 
@@ -385,7 +366,6 @@ impl MeshData {
             barycentric_uvs: Vec::new(),
             wireframe_lod_index: 0,
             colors: Vec::new(),
-            morph_targets: Vec::new(),
             indices: Vec::new(),
         }
     }
@@ -399,7 +379,6 @@ impl MeshData {
             barycentric_uvs: Vec::with_capacity(vertex_cap),
             wireframe_lod_index: 0,
             colors: Vec::with_capacity(vertex_cap),
-            morph_targets: Vec::new(),
             indices: Vec::with_capacity(index_cap),
         }
     }
@@ -424,12 +403,6 @@ impl MeshData {
         };
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uv1);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
-        // GPU geomorph: only upload the morph attribute when it is fully populated
-        // (one row per vertex). Empty on the blocky/water paths and whenever morph
-        // is disabled, in which case the mesh keeps the legacy CPU snap/skirt path.
-        if self.morph_targets.len() == vertex_count {
-            mesh.insert_attribute(ATTRIBUTE_MORPH_TARGET, self.morph_targets);
-        }
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }

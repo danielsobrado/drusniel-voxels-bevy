@@ -26,8 +26,10 @@ use crate::runtime_commands::RuntimeViewportDebugState;
 use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
-use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
-use crate::voxel::meshing::{ChunkMesh, Face, MeshMode, MeshSettings, get_blocky_material_index};
+use crate::voxel::mc_transvoxel::McTransvoxelSettings;
+use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
+#[cfg(feature = "mc_transvoxel")]
+use crate::voxel::meshing::MeshMode;
 use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
 use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,
@@ -83,8 +85,6 @@ pub struct DebugOverlayParams<'w> {
     pub reflection_mask_stats: Option<Res<'w, WaterReflectionMaskStats>>,
     pub water_visual_debug: Option<Res<'w, WaterVisualDebugState>>,
     pub water_bodies: Option<Res<'w, WaterBodyRegistry>>,
-    pub mc_spike_stats: Res<'w, McTransvoxelRuntimeStats>,
-    pub mc_spike_settings: Res<'w, McTransvoxelSettings>,
     pub lod_control: Res<'w, crate::voxel::plugin::TerrainLodControl>,
     pub enclosure: Res<'w, EnclosureState>,
     pub occlusion_config: Res<'w, OcclusionConfig>,
@@ -433,11 +433,24 @@ pub fn toggle_debug_details(
     }
 }
 
-/// Toggle MC+Transvoxel spike at runtime with **Alt+F5** (Surface Nets terrain only).
-///
-/// Flips [`McTransvoxelSettings::enabled`] for this session (YAML is only the startup
-/// default). Marks all loaded chunks dirty so meshes rebuild. Requires the
-/// `mc_transvoxel` Cargo feature (on by default in `Cargo.toml`).
+/// Toggle legacy MC+Transvoxel spike at runtime with **Alt+F5**.
+#[cfg(not(feature = "mc_transvoxel"))]
+pub fn toggle_mc_transvoxel_spike(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    _mesh_settings: Res<MeshSettings>,
+    _mc_settings: ResMut<McTransvoxelSettings>,
+    _world: ResMut<crate::voxel::world::VoxelWorld>,
+) {
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if !alt_held || !keyboard.just_pressed(KeyCode::F5) {
+        return;
+    }
+
+    log::warn!("MC+Transvoxel runtime toggle ignored: rebuild with --features mc_transvoxel");
+}
+
+/// Toggle legacy MC+Transvoxel spike at runtime with **Alt+F5** (Surface Nets terrain only).
+#[cfg(feature = "mc_transvoxel")]
 pub fn toggle_mc_transvoxel_spike(
     keyboard: Res<ButtonInput<KeyCode>>,
     mesh_settings: Res<MeshSettings>,
@@ -446,12 +459,6 @@ pub fn toggle_mc_transvoxel_spike(
 ) {
     let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     if !alt_held || !keyboard.just_pressed(KeyCode::F5) {
-        return;
-    }
-
-    #[cfg(not(feature = "mc_transvoxel"))]
-    {
-        log::warn!("MC+Transvoxel runtime toggle ignored: rebuild with --features mc_transvoxel");
         return;
     }
 
@@ -930,8 +937,6 @@ pub fn update_debug_overlay(
         append_chunk_stats_debug(
             &mut text_content,
             &chunk_stats,
-            &debug.mc_spike_stats,
-            &debug.mc_spike_settings,
             debug.lod_control.freeze_lod,
         );
     }
@@ -1210,8 +1215,6 @@ fn is_grass_like_prop(prop_id: &str) -> bool {
 fn append_chunk_stats_debug(
     text_content: &mut String,
     stats: &RuntimeChunkStats,
-    mc_stats: &McTransvoxelRuntimeStats,
-    mc_settings: &McTransvoxelSettings,
     lod_frozen: bool,
 ) {
     text_content.push_str("\n[Chunk Statistics]\n");
@@ -1279,19 +1282,6 @@ fn append_chunk_stats_debug(
             hi_avg, lo_avg, reduction
         ));
     }
-
-    #[cfg(feature = "mc_transvoxel")]
-    let mc_feature = "compiled";
-    #[cfg(not(feature = "mc_transvoxel"))]
-    let mc_feature = "stub (rebuild with --features mc_transvoxel)";
-    text_content.push_str(&format!(
-        "MC+TVX: {} mode={:?} feature={} meshed/frame={} lod_delta_gt_one_skips={} (Alt+F5)\n",
-        if mc_settings.enabled { "ON" } else { "OFF" },
-        mc_settings.mode,
-        mc_feature,
-        mc_stats.chunks_meshed_this_frame,
-        mc_stats.aggregated.skipped_lod_delta_gt_one,
-    ));
 
     // Per-frame stats
     if stats.chunks_meshed_this_frame > 0
@@ -1771,7 +1761,6 @@ fn append_control_hints(
     text_content.push_str("\n[Alt+F8] Terrain normal debug");
     text_content.push_str("\n[Alt+F9] Terrain iso-band debug");
     text_content.push_str("\n[Alt+F10] Terrain flat-unlit debug");
-    text_content.push_str("\n[Alt+F11] Terrain morph vectors");
     text_content.push_str("\n[Alt+Shift+F7] Capture terrain debug frame");
     text_content.push_str("\n[F3] Toggle overlay");
     text_content.push_str("\n[F4] Dump performance CSV");

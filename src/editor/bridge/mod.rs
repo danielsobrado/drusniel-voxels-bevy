@@ -33,7 +33,6 @@ use crate::voxel::plugin::{
     LodSettings, WaterBodyInfo, WaterBodyRegistry, build_terrain_neighbor_lods,
     effective_terrain_mesh_lod_for_chunk, target_terrain_mesh_mode_for_lod,
 };
-use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
@@ -1070,10 +1069,6 @@ fn chunk_mesh_payload(
         .get_resource::<LodSettings>()
         .copied()
         .unwrap_or_default();
-    let skirt_config = world
-        .get_resource::<SkirtConfig>()
-        .cloned()
-        .unwrap_or_default();
     let ao_config = world
         .get_resource::<AmbientOcclusionConfig>()
         .cloned()
@@ -1092,7 +1087,6 @@ fn chunk_mesh_payload(
         target_mode,
         mesh_lod_level,
         neighbor_lods,
-        &skirt_config,
         &ao_config.baked,
         mesh_settings.water_air_exposure_mode,
     );
