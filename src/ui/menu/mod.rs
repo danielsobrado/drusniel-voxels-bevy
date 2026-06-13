@@ -267,7 +267,7 @@ pub(crate) struct MultiplayerResources<'w> {
 }
 
 #[derive(SystemParam)]
-pub struct PreviewResources<'w> {
+pub struct PreviewResources<'w, 's> {
     pub image: Option<Res<'w, BlockPreviewImage>>,
     pub triplanar_image: Option<Res<'w, preview_3d::TriplanarPreviewImage>>,
     pub preview_material: Option<Res<'w, preview_3d::BlockPreviewMaterial>>,
@@ -275,6 +275,8 @@ pub struct PreviewResources<'w> {
         Option<Res<'w, crate::rendering::triplanar_material::TriplanarMaterialHandle>>,
     pub mapping: Option<Res<'w, crate::rendering::array_loader::AtlasMapping>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
+    pub block_scene: Query<'w, 's, Entity, With<preview_3d::BlockPreviewScene>>,
+    pub triplanar_scene: Query<'w, 's, Entity, With<preview_3d::TriplanarPreviewScene>>,
 }
 
 #[derive(SystemParam)]
@@ -479,21 +481,25 @@ fn handle_settings_button(
         );
         settings_res.settings_state.dialog_root = Some(dialog);
 
-        preview_3d::spawn_preview_scene(
-            commands,
-            image,
-            &mut preview.meshes,
-            preview_material,
-            mapping,
-            *settings_res.active_layer,
-        );
+        if preview.block_scene.iter().next().is_none() {
+            preview_3d::spawn_preview_scene(
+                commands,
+                image,
+                &mut preview.meshes,
+                preview_material,
+                mapping,
+                *settings_res.active_layer,
+            );
+        }
 
-        preview_3d::spawn_triplanar_preview_scene(
-            commands,
-            trip_image,
-            &mut preview.meshes,
-            trip_material,
-        );
+        if preview.triplanar_scene.iter().next().is_none() {
+            preview_3d::spawn_triplanar_preview_scene(
+                commands,
+                trip_image,
+                &mut preview.meshes,
+                trip_material,
+            );
+        }
     }
 }
 
