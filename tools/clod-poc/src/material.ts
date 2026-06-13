@@ -50,6 +50,7 @@ const FRAG = /* glsl */ `
   uniform float uSaturation;
   uniform float uWarmth;
   uniform bool uUseTexture;
+  uniform bool uUseTriplanar;
   uniform int uTerrainTextureCount;
   uniform sampler2D uTerrainTexture0;
   uniform sampler2D uTerrainTexture1;
@@ -89,14 +90,36 @@ const FRAG = /* glsl */ `
   float centerDistance(float height, vec2 range) {
     return abs(height - (range.x + range.y) * 0.5);
   }
+  // Triplanar mapping ported from the engine shader
+  // (assets/shaders/triplanar_terrain.wgsl). Mirrors triplanar_weights():
+  // pow(abs(normal), blend_sharpness) normalized. blend_sharpness = 4.0 (engine default).
+  vec3 triplanarWeights(vec3 worldNormal) {
+    vec3 a = abs(worldNormal);
+    vec3 w = vec3(pow(a.x, 4.0), pow(a.y, 4.0), pow(a.z, 4.0));
+    return w / max(w.x + w.y + w.z, 0.001);
+  }
+  // Mirrors sample_albedo_tp()'s three-plane projection: yz -> w.x, xz -> w.y, xy -> w.z.
+  // Engine compute_uv divides world coords by tex_scale; uTextureScales holds the
+  // reciprocal here, so the multiply matches.
+  vec3 triplanarSample(sampler2D tex, vec3 worldPos, float scale) {
+    if (!uUseTriplanar) {
+      // Planar (top-down) projection — stretches on vertical faces; kept for comparison.
+      return texture2D(tex, worldPos.xz * scale).rgb;
+    }
+    vec3 w = triplanarWeights(normalize(vWorldNormal));
+    vec3 cy = texture2D(tex, worldPos.yz * scale).rgb;
+    vec3 cz = texture2D(tex, worldPos.xz * scale).rgb;
+    vec3 cx = texture2D(tex, worldPos.xy * scale).rgb;
+    return cy * w.x + cz * w.y + cx * w.z;
+  }
   vec3 sampleTerrainTexture(vec3 worldPos) {
     float height = worldPos.y;
-    vec3 t0 = texture2D(uTerrainTexture0, worldPos.xz * uTextureScales.x).rgb;
+    vec3 t0 = triplanarSample(uTerrainTexture0, worldPos, uTextureScales.x);
     if (uTerrainTextureCount <= 1) return t0;
 
-    vec3 t1 = texture2D(uTerrainTexture1, worldPos.xz * uTextureScales.y).rgb;
-    vec3 t2 = texture2D(uTerrainTexture2, worldPos.xz * uTextureScales.z).rgb;
-    vec3 t3 = texture2D(uTerrainTexture3, worldPos.xz * uTextureScales.w).rgb;
+    vec3 t1 = triplanarSample(uTerrainTexture1, worldPos, uTextureScales.y);
+    vec3 t2 = triplanarSample(uTerrainTexture2, worldPos, uTextureScales.z);
+    vec3 t3 = triplanarSample(uTerrainTexture3, worldPos, uTextureScales.w);
 
     float w0 = rangeWeight(height, uTextureRange0);
     float w1 = uTerrainTextureCount > 1 ? rangeWeight(height, uTextureRange1) : 0.0;
@@ -152,10 +175,10 @@ const FRAG = /* glsl */ `
       vec3 tex = sampleTerrainTexture(vWorldPos);
       if (paint > 0.0) {
         // painted deposit: force the chosen texture slot instead of the height band
-        vec3 painted = vMaterial.x * texture2D(uTerrainTexture0, vWorldPos.xz * uTextureScales.x).rgb
-                     + vMaterial.y * texture2D(uTerrainTexture1, vWorldPos.xz * uTextureScales.y).rgb
-                     + vMaterial.z * texture2D(uTerrainTexture2, vWorldPos.xz * uTextureScales.z).rgb
-                     + vMaterial.w * texture2D(uTerrainTexture3, vWorldPos.xz * uTextureScales.w).rgb;
+        vec3 painted = vMaterial.x * triplanarSample(uTerrainTexture0, vWorldPos, uTextureScales.x)
+                     + vMaterial.y * triplanarSample(uTerrainTexture1, vWorldPos, uTextureScales.y)
+                     + vMaterial.z * triplanarSample(uTerrainTexture2, vWorldPos, uTextureScales.z)
+                     + vMaterial.w * triplanarSample(uTerrainTexture3, vWorldPos, uTextureScales.w);
         tex = mix(tex, painted, paint);
       }
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
@@ -192,6 +215,7 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uSaturation: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation },
       uWarmth: { value: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth },
       uUseTexture: { value: false },
+      uUseTriplanar: { value: true },
       uTerrainTextureCount: { value: 0 },
       uTerrainTexture0: { value: null },
       uTerrainTexture1: { value: null },

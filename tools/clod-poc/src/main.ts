@@ -556,6 +556,8 @@ async function main() {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     textureScale: 1,
+    triplanar: true,
+    albedo: true,
     textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
@@ -694,11 +696,12 @@ async function main() {
   };
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
-    const enabled = activeTerrainSlots.length > 0;
+    const enabled = state.albedo && activeTerrainSlots.length > 0;
     const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
     const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
     const apply = (mat: THREE.ShaderMaterial) => {
       mat.uniforms.uUseTexture.value = enabled;
+      mat.uniforms.uUseTriplanar.value = state.triplanar;
       mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
       mat.uniforms.uTextureScales.value.set(
         (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -784,6 +787,7 @@ async function main() {
         const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
         const mat = createTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
         mat.uniforms.uNormalColor.value = state.normalColor;
+        mat.uniforms.uUseTriplanar.value = state.triplanar;
         mat.uniforms.uNormalDivergence.value = state.normalDivergence;
         mat.uniforms.uDivergenceGain.value = state.divergenceGain;
         applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
@@ -791,7 +795,7 @@ async function main() {
         rebuildActiveTerrainSlots();
         const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
         const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
-        mat.uniforms.uUseTexture.value = activeTerrainSlots.length > 0;
+        mat.uniforms.uUseTexture.value = state.albedo && activeTerrainSlots.length > 0;
         mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
         mat.uniforms.uTextureScales.value.set(
           (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -1743,7 +1747,9 @@ async function main() {
   buildProgress.hidden = true;
 
   const textureFolder = gui.addFolder("terrain texture");
-  textureFolder.add(textureActions, "loadTexture").name("texture slots");
+  textureFolder.add(state, "albedo").name("albedo").onChange(applyTerrainTextures);
+  textureFolder.add(textureActions, "loadTexture").name("load albedo");
+  textureFolder.add(state, "triplanar").name("triplanar").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureScale", 0.25, 4, 0.05).name("scale multiplier").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
