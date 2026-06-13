@@ -18,6 +18,12 @@ use crate::environment::{AtmosphereSettings, Sun};
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::water_reflection::WaterReflectionConfig;
+use crate::ui::theme::{
+    BODY_TEXT_SIZE, DR_BUTTON_ACTIVE_BG, DR_BUTTON_BG, DR_BUTTON_BORDER, DR_BUTTON_HOVER_BG,
+    DR_GOLD, DR_GOLD_DIM, DR_OK, DR_PANEL_BG, DR_PANEL_BG_STRONG, DR_PANEL_BORDER,
+    DR_PANEL_BORDER_STRONG, DR_TEXT, DR_TEXT_MUTED, PANEL_GAP, PANEL_PADDING, WINDOW_TITLE_SIZE,
+};
+use crate::ui::widgets::fantasy_button_node;
 use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::plugin::WorldConfig;
 use crate::voxel::world::VoxelWorld;
@@ -51,16 +57,19 @@ pub fn spawn_settings_dialog(
             height: Val::Auto,
             max_width: Val::Percent(78.0), // Slightly wider to fit both previews
             max_height: Val::Percent(85.0),
-            padding: UiRect::all(Val::Px(16.0)),
+            padding: UiRect::all(Val::Px(PANEL_PADDING)),
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(12.0),
+            row_gap: Val::Px(PANEL_GAP),
             position_type: PositionType::Absolute,
             left: Val::Px(dialog_position.x),
             top: Val::Px(dialog_position.y),
             justify_content: JustifyContent::FlexStart,
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.95)),
+        BackgroundColor(DR_PANEL_BG_STRONG),
+        BorderColor::all(DR_PANEL_BORDER_STRONG),
         SettingsDialogRoot,
         // SettingsDialogDrag is a Resource, not a Component
     ));
@@ -99,9 +108,12 @@ fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>)
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(10.0),
                 align_self: AlignSelf::Stretch,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(5.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.95)),
+            BackgroundColor(DR_PANEL_BG),
+            BorderColor::all(DR_PANEL_BORDER),
             SettingsDragHandle,
         ))
         .with_children(|header| {
@@ -111,7 +123,7 @@ fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>)
                     height: Val::Percent(100.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.45, 0.6, 0.5, 0.9)),
+                BackgroundColor(DR_GOLD_DIM),
                 SettingsDragHighlight,
             ));
             header.spawn((
@@ -121,16 +133,16 @@ fn spawn_settings_header(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>)
                     font_size: 20.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
+                TextColor(DR_TEXT_MUTED),
             ));
             header.spawn((
                 Text::new("Settings"),
                 TextFont {
                     font: font.clone(),
-                    font_size: 28.0,
+                    font_size: WINDOW_TITLE_SIZE,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_GOLD),
             ));
         });
 }
@@ -170,9 +182,12 @@ fn spawn_settings_tab_button(
                 padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.18, 0.9)),
+            BackgroundColor(DR_BUTTON_BG),
+            BorderColor::all(DR_BUTTON_BORDER),
             tab,
         ))
         .with_children(|button| {
@@ -183,7 +198,7 @@ fn spawn_settings_tab_button(
                     font_size: 18.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
         });
 }
@@ -232,14 +247,9 @@ fn spawn_save_settings_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
     parent
         .spawn((
             Button,
-            Node {
-                width: Val::Px(140.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9)),
+            fantasy_button_node(Some(150.0)),
+            BackgroundColor(DR_OK),
+            BorderColor::all(DR_GOLD_DIM),
             SaveSettingsButton,
         ))
         .with_children(|button| {
@@ -247,10 +257,10 @@ fn spawn_save_settings_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
                 Text::new("Save Settings"),
                 TextFont {
                     font: font.clone(),
-                    font_size: 18.0,
+                    font_size: BODY_TEXT_SIZE,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
         });
 }
@@ -259,14 +269,9 @@ fn spawn_settings_close_button(parent: &mut ChildSpawnerCommands, font: &Handle<
     parent
         .spawn((
             Button,
-            Node {
-                width: Val::Px(120.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
+            fantasy_button_node(Some(120.0)),
             BackgroundColor(BUTTON_BG),
+            BorderColor::all(DR_BUTTON_BORDER),
             CloseSettingsButton,
         ))
         .with_children(|button| {
@@ -274,10 +279,10 @@ fn spawn_settings_close_button(parent: &mut ChildSpawnerCommands, font: &Handle<
                 Text::new("Close"),
                 TextFont {
                     font: font.clone(),
-                    font_size: 18.0,
+                    font_size: BODY_TEXT_SIZE,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
         });
 }
@@ -300,7 +305,7 @@ fn spawn_graphics_tab(
                 display: Display::Flex,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             GraphicsTabContent,
         ))
         .with_children(|content| {
@@ -448,7 +453,7 @@ fn spawn_meshing_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 display: Display::None,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             MeshingTabContent,
         ))
         .with_children(|content| {
@@ -469,7 +474,7 @@ fn spawn_gameplay_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 display: Display::None,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             GameplayTabContent,
         ))
         .with_children(|content| {
@@ -571,7 +576,7 @@ fn spawn_atmosphere_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) 
                 max_height: Val::Px(400.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             AtmosphereTabContent,
         ))
         .with_children(|content| {
@@ -666,7 +671,7 @@ fn spawn_fog_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 max_height: Val::Px(400.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             FogTabContent,
         ))
         .with_children(|content| {
@@ -787,7 +792,7 @@ fn spawn_visual_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 max_height: Val::Px(400.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             VisualTabContent,
         ))
         .with_children(|content| {
@@ -881,7 +886,7 @@ fn spawn_controls_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 max_height: Val::Px(400.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             ControlsTabContent,
         ))
         .with_children(|content| {
@@ -969,7 +974,7 @@ fn spawn_debug_tab(dialog: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 max_height: Val::Px(400.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             DebugTabContent,
         ))
         .with_children(|content| {
@@ -1049,7 +1054,7 @@ fn spawn_debug_column(
                     font_size: 13.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.78, 0.82, 0.86, 1.0)),
+                TextColor(DR_TEXT_MUTED),
             ));
 
             for (label, key) in rows {
@@ -1075,7 +1080,7 @@ fn spawn_debug_row(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label
                     font_size: 14.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
 
             row.spawn((
@@ -1095,7 +1100,7 @@ fn spawn_debug_row(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label
                         font_size: 12.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(DR_TEXT),
                 ));
             });
         });
@@ -1125,7 +1130,7 @@ fn spawn_rebind_row(
                     font_size: 16.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
 
             row.spawn((
@@ -1148,7 +1153,7 @@ fn spawn_rebind_row(
                         font_size: 14.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(DR_TEXT),
                 ));
             });
         });
@@ -1173,7 +1178,7 @@ fn spawn_save_controls_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9)),
+                    BackgroundColor(DR_OK),
                     SaveControlsButton,
                 ))
                 .with_children(|button| {
@@ -1184,7 +1189,7 @@ fn spawn_save_controls_button(parent: &mut ChildSpawnerCommands, font: &Handle<F
                             font_size: 16.0,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(DR_TEXT),
                     ));
                 });
         });
@@ -1215,7 +1220,7 @@ fn spawn_textures_tab(
                 max_height: Val::Px(500.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+            BackgroundColor(DR_PANEL_BG),
             TexturesTabContent,
         ))
         .with_children(|content| {
@@ -1253,7 +1258,7 @@ fn spawn_textures_tab(
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(DR_TEXT),
                             ));
 
                             // Atlas Viewport (Scrollable)
@@ -1321,7 +1326,7 @@ fn spawn_textures_tab(
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(DR_TEXT),
                             ));
 
                             right
@@ -1355,7 +1360,7 @@ fn spawn_textures_tab(
                                                         font_size: 12.0,
                                                         ..default()
                                                     },
-                                                    TextColor(Color::WHITE),
+                                                    TextColor(DR_TEXT),
                                                 ));
                                             });
                                         };
@@ -1469,7 +1474,7 @@ fn spawn_textures_tab(
                                             font_size: 16.0,
                                             ..default()
                                         },
-                                        TextColor(Color::WHITE),
+                                        TextColor(DR_TEXT),
                                     ));
                                 });
                         });
@@ -1491,7 +1496,7 @@ fn spawn_textures_tab(
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(DR_TEXT),
                             ));
 
                             // Material List (Vertical)
@@ -1528,7 +1533,7 @@ fn spawn_textures_tab(
                                                         font_size: 14.0,
                                                         ..default()
                                                     },
-                                                    TextColor(Color::WHITE),
+                                                    TextColor(DR_TEXT),
                                                 ));
                                             });
                                         };
@@ -1547,7 +1552,7 @@ fn spawn_textures_tab(
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(DR_TEXT),
                             ));
 
                             right_col
@@ -1697,7 +1702,7 @@ fn spawn_layer_button(
                         font_size: 13.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(DR_TEXT),
                 ));
             });
 
@@ -1828,7 +1833,7 @@ fn spawn_slider_row(
                     font_size: 14.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
                 Node {
                     width: Val::Px(110.0),
                     ..default()
@@ -1911,7 +1916,7 @@ fn spawn_fog_slider_row(
                     font_size: 13.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
                 Node {
                     width: Val::Px(110.0),
                     ..default()
@@ -1992,7 +1997,7 @@ fn spawn_settings_column<F>(
                     font_size: 13.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.78, 0.82, 0.86, 1.0)),
+                TextColor(DR_TEXT_MUTED),
             ));
 
             spawn_rows(column, font);
@@ -2029,7 +2034,7 @@ fn spawn_graphics_option<T: Component + Copy + Send + Sync + 'static>(
                     font_size: 16.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
         });
 }
@@ -2057,7 +2062,7 @@ fn spawn_option_row<F>(
                     font_size: 16.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
                 Node {
                     width: Val::Px(140.0),
                     ..default()
@@ -2090,7 +2095,7 @@ fn spawn_day_night_row(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                     font_size: 16.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
                 Node {
                     width: Val::Px(140.0),
                     ..default()
@@ -4082,14 +4087,14 @@ pub fn handle_save_controls_interaction(
     for (interaction, mut bg) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                *bg = BackgroundColor(Color::srgba(0.3, 0.7, 0.4, 1.0));
+                *bg = BackgroundColor(DR_BUTTON_ACTIVE_BG);
                 crate::input::config::save_inputs(&input_config);
             }
             Interaction::Hovered => {
-                *bg = BackgroundColor(Color::srgba(0.25, 0.65, 0.35, 1.0));
+                *bg = BackgroundColor(DR_BUTTON_HOVER_BG);
             }
             Interaction::None => {
-                *bg = BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9));
+                *bg = BackgroundColor(DR_OK);
             }
         }
     }
@@ -4110,7 +4115,7 @@ pub fn handle_save_settings_interaction(
     for (interaction, mut bg) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                *bg = BackgroundColor(Color::srgba(0.3, 0.7, 0.4, 1.0));
+                *bg = BackgroundColor(DR_BUTTON_ACTIVE_BG);
                 match super::settings_persistence::save_settings_to_disk(
                     &settings_state,
                     &visual_settings,
@@ -4128,10 +4133,10 @@ pub fn handle_save_settings_interaction(
                 }
             }
             Interaction::Hovered => {
-                *bg = BackgroundColor(Color::srgba(0.25, 0.65, 0.35, 1.0));
+                *bg = BackgroundColor(DR_BUTTON_HOVER_BG);
             }
             Interaction::None => {
-                *bg = BackgroundColor(Color::srgba(0.2, 0.6, 0.3, 0.9));
+                *bg = BackgroundColor(DR_OK);
             }
         }
     }
