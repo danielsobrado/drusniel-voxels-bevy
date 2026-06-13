@@ -1294,11 +1294,17 @@ fn append_chunk_stats_debug(
     ));
 
     // Per-frame stats
-    if stats.chunks_meshed_this_frame > 0 || stats.chunks_skipped_this_frame > 0 {
+    if stats.chunks_meshed_this_frame > 0
+        || stats.chunks_skipped_this_frame > 0
+        || stats.chunks_skipped_page_owned > 0
+    {
         let mesh_time_ms = stats.meshing_time_us as f64 / 1000.0;
         text_content.push_str(&format!(
-            "This frame: {} meshed, {} skipped ({:.1}ms)\n",
-            stats.chunks_meshed_this_frame, stats.chunks_skipped_this_frame, mesh_time_ms
+            "This frame: {} meshed, {} skipped, {} page-owned ({:.1}ms)\n",
+            stats.chunks_meshed_this_frame,
+            stats.chunks_skipped_this_frame,
+            stats.chunks_skipped_page_owned,
+            mesh_time_ms
         ));
     }
 }

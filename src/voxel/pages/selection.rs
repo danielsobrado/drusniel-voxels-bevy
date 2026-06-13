@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
+use super::ownership::ClodPageMeshGate;
 use super::render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 use super::runtime::ClodPagesRuntime;
 use super::types::PageFootprint;
@@ -389,11 +390,16 @@ fn hide_all_pages(query: &mut Query<(&ClodPageMeshTag, &mut Visibility)>) {
     }
 }
 
+fn should_hold_current_page_visibility(gate: Option<&ClodPageMeshGate>) -> bool {
+    gate.is_some_and(ClodPageMeshGate::should_hold_pages_visible)
+}
+
 pub(crate) fn clod_page_selection_system(
     runtime: Res<ClodPagesRuntime>,
     show: Res<ClodPagesShow>,
     tree: Res<ClodPageTree>,
     index: Res<ClodPageSelectionIndex>,
+    gate: Option<Res<ClodPageMeshGate>>,
     mut state: ResMut<ClodPageSelectionState>,
     camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
@@ -406,16 +412,22 @@ pub(crate) fn clod_page_selection_system(
         || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
     {
         state.split.clear();
-        hide_all_pages(&mut pages);
+        if !should_hold_current_page_visibility(gate.as_deref()) {
+            hide_all_pages(&mut pages);
+        }
         return;
     }
 
     let Ok((camera_transform, projection)) = camera_query.single() else {
-        hide_all_pages(&mut pages);
+        if !should_hold_current_page_visibility(gate.as_deref()) {
+            hide_all_pages(&mut pages);
+        }
         return;
     };
     let Ok(window) = window_query.single() else {
-        hide_all_pages(&mut pages);
+        if !should_hold_current_page_visibility(gate.as_deref()) {
+            hide_all_pages(&mut pages);
+        }
         return;
     };
     let player_transform = player_query.single().ok();
@@ -426,7 +438,9 @@ pub(crate) fn clod_page_selection_system(
         window.physical_height() as f32,
         player_transform,
     ) else {
-        hide_all_pages(&mut pages);
+        if !should_hold_current_page_visibility(gate.as_deref()) {
+            hide_all_pages(&mut pages);
+        }
         return;
     };
 
@@ -434,12 +448,17 @@ pub(crate) fn clod_page_selection_system(
     state.split = new_split;
 
     let rendered: HashSet<ClodPageNodeKey> = rendered.into_iter().collect();
+    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
     for (tag, mut visibility) in pages.iter_mut() {
         let key = ClodPageNodeKey::from(tag);
+        let pending_live_restore = gate
+            .as_deref()
+            .is_some_and(|gate| gate.node_has_pending_restore(key, chunks_per_page));
         let visible = rendered.contains(&key)
-            && index.node(key).is_some_and(|node| {
-                !near_field_intersects_footprint(node.footprint, params.near_field)
-            });
+            && (pending_live_restore
+                || index.node(key).is_some_and(|node| {
+                    !near_field_intersects_footprint(node.footprint, params.near_field)
+                }));
         let desired = if visible {
             Visibility::Visible
         } else {

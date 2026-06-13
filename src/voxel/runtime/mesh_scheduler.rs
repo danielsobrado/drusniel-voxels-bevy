@@ -73,6 +73,7 @@ pub(crate) struct MeshDirtyTimingParams<'w> {
     queue_warning: ResMut<'w, MeshDirtyQueueWarningState>,
     page_runtime: Option<Res<'w, crate::voxel::pages::runtime::ClodPagesRuntime>>,
     page_cache: Option<ResMut<'w, crate::voxel::pages::runtime::PageExportCache>>,
+    page_mesh_gate: Option<Res<'w, crate::voxel::pages::ClodPageMeshGate>>,
 }
 
 #[derive(SystemParam)]
@@ -136,6 +137,24 @@ pub(crate) fn mesh_dirty_chunks_system(
     // Collect dirty chunks and sort by distance from camera (nearest first)
     // This prioritizes meshing chunks close to the player for better visual quality
     let mut dirty_chunks: Vec<IVec3> = world.dirty_chunks().collect();
+    let dirty_chunks_seen = dirty_chunks.len();
+    let mut chunks_skipped_page_owned = 0u32;
+    if let Some(gate) = timing_params.page_mesh_gate.as_deref() {
+        if gate.enabled && gate.pages_ready {
+            let mut live_dirty_chunks = Vec::with_capacity(dirty_chunks.len());
+            for chunk_pos in dirty_chunks {
+                if gate.owns_chunk(chunk_pos) {
+                    if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
+                        chunk.clear_dirty();
+                    }
+                    chunks_skipped_page_owned += 1;
+                } else {
+                    live_dirty_chunks.push(chunk_pos);
+                }
+            }
+            dirty_chunks = live_dirty_chunks;
+        }
+    }
     let dirty_chunks_queued = dirty_chunks.len();
     if generation_complete
         && dirty_chunks_queued >= MESH_DIRTY_QUEUE_WARN_THRESHOLD
@@ -831,6 +850,7 @@ pub(crate) fn mesh_dirty_chunks_system(
     // Update runtime statistics
     chunk_stats.chunks_meshed_this_frame = chunks_meshed;
     chunk_stats.chunks_skipped_this_frame = chunks_skipped;
+    chunk_stats.chunks_skipped_page_owned = chunks_skipped_page_owned;
     chunk_stats.dirty_chunks_queued = dirty_chunks_queued as u32;
     chunk_stats.generation_dirty_chunks_queued = reason_counts.generation;
     chunk_stats.surface_nets_chunks_deferred_for_halo = surface_nets_chunks_deferred_for_halo;
@@ -902,6 +922,12 @@ pub(crate) fn mesh_dirty_chunks_system(
         frame.0,
         "Mesh Dirty Chunks Queued",
         dirty_chunks_queued as f64,
+    );
+    timing.record_count(frame.0, "Mesh Dirty Chunks Seen", dirty_chunks_seen as f64);
+    timing.record_count(
+        frame.0,
+        "Mesh Dirty Chunks Skipped Page Owned",
+        chunks_skipped_page_owned as f64,
     );
     timing.record_count(
         frame.0,

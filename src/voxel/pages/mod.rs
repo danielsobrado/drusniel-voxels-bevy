@@ -32,6 +32,7 @@ pub mod weld;
 
 pub use build_queue::{ClodPageBuildStatus, ClodPageTree};
 pub use export::{ClodExportError, TerrainMainSurfaceExport, extract_main_surface_for_clod};
+pub(crate) use ownership::ClodPageMeshGate;
 pub use plugin::ClodPagesPlugin;
 pub use render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 pub use types::{ClodBuildError, PageFootprint, PageMesh};

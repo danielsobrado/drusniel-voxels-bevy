@@ -438,6 +438,7 @@ struct BenchReadySnapshot {
     signature: BenchReadySignature,
     chunks_meshed_this_frame: u32,
     chunks_skipped_this_frame: u32,
+    chunks_skipped_page_owned: u32,
     require_collider_ready: bool,
 }
 
@@ -3702,6 +3703,7 @@ fn bench_ready_snapshot(
         },
         chunks_meshed_this_frame: chunk_stats.chunks_meshed_this_frame,
         chunks_skipped_this_frame: chunk_stats.chunks_skipped_this_frame,
+        chunks_skipped_page_owned: chunk_stats.chunks_skipped_page_owned,
         require_collider_ready,
     }
 }
@@ -3845,6 +3847,11 @@ fn record_bench_ready_counts(
         frame,
         "Bench Ready Chunks Skipped This Frame",
         snapshot.chunks_skipped_this_frame as f64,
+    );
+    timing.record_count(
+        frame,
+        "Bench Ready Chunks Skipped Page Owned",
+        snapshot.chunks_skipped_page_owned as f64,
     );
 }
 
@@ -4922,6 +4929,7 @@ frame = 1
             },
             chunks_meshed_this_frame: 4,
             chunks_skipped_this_frame: 2,
+            chunks_skipped_page_owned: 0,
             require_collider_ready: true,
         };
 

@@ -21,6 +21,13 @@ pub type ClodPageCoord = (i32, i32);
 
 const BUILD_DEBOUNCE_FRAMES: u32 = 3;
 
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        std::env::var(key).ok().as_deref().map(str::trim),
+        Some("1") | Some("true") | Some("on") | Some("yes")
+    )
+}
+
 pub enum ClodPageBuildStatus {
     Building,
     Ready,
@@ -231,6 +238,23 @@ pub(crate) fn clod_pages_build_queue_system(
     }) else {
         return;
     };
+
+    if env_truthy("CLOD_PAGES_FORCE_FAIL") {
+        let page_coords = signature.page_coords.clone();
+        if tree.build_page_coords != page_coords
+            || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Failed(_)))
+        {
+            fail_build(
+                &mut tree,
+                page_coords,
+                ClodBuildError::DirtyInput(
+                    "forced by CLOD_PAGES_FORCE_FAIL for fallback verification".to_string(),
+                ),
+            );
+        }
+        queue.clear();
+        return;
+    }
 
     if queue.observe_signature(signature.clone()) {
         if matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Building)) {

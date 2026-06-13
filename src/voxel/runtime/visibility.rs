@@ -149,6 +149,7 @@ pub(crate) fn update_chunk_lod_system(
     camera_query: Query<&Transform, With<PlayerCamera>>,
     lod_settings: Res<LodSettings>,
     bench_forensics: Option<Res<BenchForensicsConfig>>,
+    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
     mc_spike: McSpikeMeshParams,
     lod_control: Res<TerrainLodControl>,
     lod_transaction: Res<LodMeshTransactionState>,
@@ -264,6 +265,12 @@ pub(crate) fn update_chunk_lod_system(
     let mut desired: HashMap<IVec3, LodLevel> = HashMap::new();
     let mut chunk_state: HashMap<IVec3, (LodLevel, f32)> = HashMap::new();
     for (chunk_pos, chunk) in world.chunk_entries() {
+        if page_mesh_gate
+            .as_deref()
+            .is_some_and(|gate| gate.owns_chunk(*chunk_pos))
+        {
+            continue;
+        }
         let distance = terrain_lod_distance_xz(*chunk_pos, camera_pos);
         let current_lod = chunk.lod_level();
         let target_lod = forensics_forced_lod(bench_forensics.as_deref()).unwrap_or_else(|| {

@@ -30,20 +30,21 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::chunk::{Chunk, LodLevel, MeshDirtyReason};
 use crate::voxel::diagnostics::seam_audit_pass::SeamAuditPassPlugin;
 use crate::voxel::enclosure::{
-    EnclosureOcclusionStats, EnclosureState, toggle_enclosure_culling, update_enclosure_state,
+    toggle_enclosure_culling, update_enclosure_state, EnclosureOcclusionStats, EnclosureState,
 };
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 #[allow(unused_imports)]
 pub(crate) use crate::voxel::lod::{
-    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, build_base_terrain_neighbor_lods,
-    build_terrain_neighbor_lods, calculate_target_lod_with_hysteresis, chunk_contains_liquid,
-    chunk_layer_intersects_waterline, collect_water_shore_lod_guard_chunks,
-    effective_terrain_mesh_lod_for_chunk, enforce_lod_delta_max_one, forensics_forced_lod,
-    forensics_mesh_mode_override, is_horizon_proxy_lod, lod_upgrade_for_face_neighbor_coherence,
+    build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
+    calculate_target_lod_with_hysteresis, chunk_contains_liquid, chunk_layer_intersects_waterline,
+    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
+    enforce_lod_delta_max_one, forensics_forced_lod, forensics_mesh_mode_override,
+    is_horizon_proxy_lod, lod_upgrade_for_face_neighbor_coherence,
     mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode, should_defer_surface_nets_mesh,
     target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz, terrain_lod_hysteresis,
     terrain_lod_requires_collider, terrain_material_quality_for_lod,
-    transition_refined_surface_nets_lod, water_shore_guarded_lod,
+    transition_refined_surface_nets_lod, water_shore_guarded_lod, LodSettings,
+    WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
 };
 use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
 use crate::voxel::mesh_commit::LodMeshTransactionState;
@@ -53,7 +54,7 @@ use crate::voxel::meshing::{ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterM
 #[cfg(test)]
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::occlusion::{
-    OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
+    update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks,
 };
 use crate::voxel::persistence::WorldPersistence;
 use crate::voxel::skirt::SkirtConfig;
@@ -61,36 +62,36 @@ use crate::voxel::skirt::SkirtConfig;
 use crate::voxel::terrain::TerrainGenerator;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
+pub(crate) use crate::voxel::runtime::{
+    adjust_lod_for_integrated_gpu, draw_water_body_debug_overlay, log_mc_spike_build_tag,
+    mesh_dirty_chunks_system, poll_chunk_generation_tasks, poll_world_load_task,
+    spawn_queued_chunk_generation_tasks, spawn_world_startup_overlay,
+    start_pending_world_generation, start_voxel_world_after_overlay_frame,
+    update_chunk_face_visibility_system, update_chunk_lod_system, update_terrain_material_lod,
+    update_water_body_registry, update_water_material_lod, update_world_startup_background_cover,
+    update_world_startup_overlay, MeshDirtyQueueWarningState, PendingWorldGeneration,
+    TerrainLodTransitionState, WaterMaskProxy, WorldGenerationQueue, WorldStartupLoadingFlames,
+    WorldStartupOverlayState, WorldStartupSetupState,
+};
 pub use crate::voxel::runtime::{
-    ChunkGenerationState, RuntimeChunkStats, TerrainLodControl, VoxelTerrainSet, WaterBodyInfo,
-    WaterBodyRegistry, WorldConfig, apply_visibility_culling_system,
+    apply_visibility_culling_system, ChunkGenerationState, RuntimeChunkStats, TerrainLodControl,
+    VoxelTerrainSet, WaterBodyInfo, WaterBodyRegistry, WorldConfig,
+};
+#[cfg(test)]
+use crate::voxel::runtime::{
+    build_water_body_group, chunks_per_frame_limit_for_dirty_meshes, desired_water_visibility,
+    expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
+    mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
+    should_defer_runtime_chunk_stats_recompute, should_force_initial_runtime_chunk_stats,
+    should_poll_chunk_generation_tasks, should_recompute_runtime_chunk_stats,
+    terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
+    world_startup_background_cover_size, world_startup_snapshot, MeshDirtyReasonCounts,
+    WaterMeshBodySample, WorldStartupStage, WorldStats,
 };
 #[cfg(test)]
 use crate::voxel::runtime::{
     MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME, TERRAIN_MATERIAL_LOD_DISTANCE,
     TERRAIN_MATERIAL_LOD_HYSTERESIS,
-};
-pub(crate) use crate::voxel::runtime::{
-    MeshDirtyQueueWarningState, PendingWorldGeneration, TerrainLodTransitionState, WaterMaskProxy,
-    WorldGenerationQueue, WorldStartupLoadingFlames, WorldStartupOverlayState,
-    WorldStartupSetupState, adjust_lod_for_integrated_gpu, draw_water_body_debug_overlay,
-    log_mc_spike_build_tag, mesh_dirty_chunks_system, poll_chunk_generation_tasks,
-    poll_world_load_task, spawn_queued_chunk_generation_tasks, spawn_world_startup_overlay,
-    start_pending_world_generation, start_voxel_world_after_overlay_frame,
-    update_chunk_face_visibility_system, update_chunk_lod_system, update_terrain_material_lod,
-    update_water_body_registry, update_water_material_lod,
-    update_world_startup_background_cover, update_world_startup_overlay,
-};
-#[cfg(test)]
-use crate::voxel::runtime::{
-    MeshDirtyReasonCounts, WaterMeshBodySample, WorldStartupStage, WorldStats,
-    build_water_body_group, chunks_per_frame_limit_for_dirty_meshes, desired_water_visibility,
-    expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
-    mark_chunk_lod_halo_dirty, mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
-    should_defer_runtime_chunk_stats_recompute, should_poll_chunk_generation_tasks,
-    should_force_initial_runtime_chunk_stats, should_recompute_runtime_chunk_stats,
-    terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
-    world_startup_background_cover_size, world_startup_snapshot,
 };
 
 pub struct VoxelPlugin;
@@ -373,11 +374,9 @@ mod tests {
         assert!(dirty.contains(&(center + IVec3::Y)));
         assert!(dirty.contains(&(center + IVec3::NEG_Y)));
         assert!(!dirty.contains(&(center + IVec3::new(1, 1, 0))));
-        assert!(
-            world
-                .get_chunk(center + IVec3::Y)
-                .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::NeighborLod))
-        );
+        assert!(world
+            .get_chunk(center + IVec3::Y)
+            .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::NeighborLod)));
     }
 
     #[test]
@@ -392,7 +391,7 @@ mod tests {
         };
         let chunk_stats = RuntimeChunkStats::default();
 
-        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true, None);
 
         assert_eq!(snapshot.stage, WorldStartupStage::GeneratingTerrain);
         assert_eq!(snapshot.progress, 0.225);
@@ -412,12 +411,12 @@ mod tests {
         };
         let mut chunk_stats = RuntimeChunkStats::default();
 
-        let preparing = world_startup_snapshot(&gen_state, &chunk_stats, true);
+        let preparing = world_startup_snapshot(&gen_state, &chunk_stats, true, None);
         assert_eq!(preparing.stage, WorldStartupStage::PreparingMeshes);
         assert!(!preparing.complete);
 
         chunk_stats.mesh_entities = 1;
-        let ready = world_startup_snapshot(&gen_state, &chunk_stats, true);
+        let ready = world_startup_snapshot(&gen_state, &chunk_stats, true, None);
         assert_eq!(ready.stage, WorldStartupStage::Ready);
         assert!(ready.complete);
     }
@@ -439,7 +438,7 @@ mod tests {
             ..Default::default()
         };
 
-        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true, None);
 
         assert_eq!(snapshot.stage, WorldStartupStage::PreparingMeshes);
         assert!(snapshot.detail.contains("waiting for neighbors"));
@@ -462,10 +461,56 @@ mod tests {
             ..Default::default()
         };
 
-        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true);
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, true, None);
 
         assert_eq!(snapshot.stage, WorldStartupStage::Ready);
         assert!(snapshot.complete);
+    }
+
+    #[test]
+    fn world_startup_snapshot_gate_waits_for_pages_and_live_queue() {
+        let gen_state = ChunkGenerationState {
+            total_chunks: 100,
+            chunks_completed: 100,
+            is_complete: true,
+            loading_from_disk: false,
+            world_stats: WorldStats::default(),
+            start_time: None,
+        };
+        let mut chunk_stats = RuntimeChunkStats {
+            mesh_entities: 10,
+            ..Default::default()
+        };
+        let mut gate = crate::voxel::pages::ClodPageMeshGate::default();
+        gate.enabled = true;
+        gate.pages_ready = false;
+        gate.pages_pending = true;
+
+        let waiting_pages = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(waiting_pages.stage, WorldStartupStage::PreparingMeshes);
+        assert!(waiting_pages.detail.contains("terrain pages"));
+
+        gate.pages_pending = false;
+        let missing_fallback = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(missing_fallback.stage, WorldStartupStage::Ready);
+        assert!(missing_fallback.complete);
+
+        gate.pages_failed = true;
+        let failed_fallback = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(failed_fallback.stage, WorldStartupStage::Ready);
+        assert!(failed_fallback.complete);
+
+        gate.pages_failed = false;
+        gate.pages_ready = true;
+        chunk_stats.dirty_chunks_queued = 2;
+        let waiting_live = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(waiting_live.stage, WorldStartupStage::PreparingMeshes);
+        assert!(waiting_live.detail.contains("live terrain meshes"));
+
+        chunk_stats.dirty_chunks_queued = 0;
+        let ready = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(ready.stage, WorldStartupStage::Ready);
+        assert!(ready.complete);
     }
 
     #[test]
@@ -473,7 +518,7 @@ mod tests {
         let gen_state = ChunkGenerationState::default();
         let chunk_stats = RuntimeChunkStats::default();
 
-        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, false);
+        let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, false, None);
 
         assert_eq!(snapshot.stage, WorldStartupStage::LoadingSavedWorld);
         assert!(snapshot.detail.contains("Starting world load"));

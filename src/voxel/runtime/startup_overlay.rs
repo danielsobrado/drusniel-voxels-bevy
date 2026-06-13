@@ -520,6 +520,7 @@ pub(crate) fn update_world_startup_overlay(
     time: Res<Time>,
     gen_state: Res<ChunkGenerationState>,
     chunk_stats: Res<RuntimeChunkStats>,
+    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
     setup_state: Res<WorldStartupSetupState>,
     mut overlay_state: ResMut<WorldStartupOverlayState>,
     mut loading_flames: ResMut<WorldStartupLoadingFlames>,
@@ -556,7 +557,12 @@ pub(crate) fn update_world_startup_overlay(
         }
     }
 
-    let snapshot = world_startup_snapshot(&gen_state, &chunk_stats, setup_state.started);
+    let snapshot = world_startup_snapshot(
+        &gen_state,
+        &chunk_stats,
+        setup_state.started,
+        page_mesh_gate.as_deref(),
+    );
     if snapshot.complete {
         loading_flames.active = false;
         overlay_state.ready_seconds += time.delta_secs();
@@ -593,6 +599,7 @@ pub(crate) fn world_startup_snapshot(
     gen_state: &ChunkGenerationState,
     chunk_stats: &RuntimeChunkStats,
     setup_started: bool,
+    page_mesh_gate: Option<&crate::voxel::pages::ClodPageMeshGate>,
 ) -> WorldStartupSnapshot {
     if !setup_started {
         return WorldStartupSnapshot {
@@ -671,6 +678,32 @@ pub(crate) fn world_startup_snapshot(
             ),
             complete: false,
         };
+    }
+
+    if page_mesh_gate.is_some_and(|gate| gate.enabled) {
+        if page_mesh_gate.is_some_and(|gate| !gate.pages_ready && gate.pages_pending) {
+            return WorldStartupSnapshot {
+                stage: WorldStartupStage::PreparingMeshes,
+                progress: 0.98,
+                detail: "Building terrain pages".to_string(),
+                complete: false,
+            };
+        }
+
+        if chunk_stats.dirty_chunks_queued > 0 || chunk_stats.generation_dirty_chunks_queued > 0 {
+            return WorldStartupSnapshot {
+                stage: WorldStartupStage::PreparingMeshes,
+                progress: 0.98,
+                detail: format!(
+                    "Building live terrain meshes ({} queued, {} page-owned skipped)",
+                    chunk_stats
+                        .generation_dirty_chunks_queued
+                        .max(chunk_stats.dirty_chunks_queued),
+                    chunk_stats.chunks_skipped_page_owned
+                ),
+                complete: false,
+            };
+        }
     }
 
     WorldStartupSnapshot {
