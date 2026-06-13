@@ -1,0 +1,313 @@
+/* Visual style adapted from the MIT-licensed world-of-claudecraft reference copied under tools/clod-poc/reference/world-of-claudecraft-ui. */
+:root {
+  --clod-gold: #e9c96a;
+  --clod-gold-dim: #9f813d;
+  --clod-border: #6b572d;
+  --clod-panel-bg: linear-gradient(165deg, rgba(27, 27, 34, 0.94), rgba(10, 11, 16, 0.92) 68%, rgba(7, 8, 12, 0.95));
+  --clod-panel-bg-strong: linear-gradient(165deg, #202027, #0c0d12 68%, #08090c);
+  --clod-title-font: "Palatino Linotype", Palatino, Georgia, serif;
+  --clod-ui-font: Arial, Helvetica, sans-serif;
+  --clod-danger: #d96b59;
+  --clod-ok: #78b86a;
+  --clod-blue: #79aede;
+  --clod-muted: #9b9279;
+}
+
+#info,
+#project-toolbar,
+#player-mode-bar,
+#terraform-menu,
+#build-progress,
+#texture-modal .texture-panel,
+.texture-slot,
+.lil-gui.root {
+  color: #e8ddbd;
+  background: var(--clod-panel-bg);
+  border-color: var(--clod-border);
+  outline: 1px solid rgba(0, 0, 0, 0.86);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 246, 208, 0.09),
+    inset 0 0 22px rgba(0, 0, 0, 0.24);
+}
+
+#info,
+#player-mode-bar,
+#terraform-menu,
+#build-progress,
+#texture-modal {
+  font-family: var(--clod-ui-font);
+}
+
+#info {
+  border-radius: 5px;
+  color: #d8cfb7;
+}
+
+#project-toolbar {
+  background: var(--clod-panel-bg-strong);
+  border-width: 0 0 1px 1px;
+  border-radius: 0 0 0 6px;
+}
+
+#player-mode-bar,
+#terraform-menu,
+#build-progress {
+  border-radius: 6px;
+}
+
+#player-mode-status,
+#build-progress-phase,
+.texture-panel h2,
+.texture-slot-name,
+.lil-gui .title {
+  font-family: var(--clod-title-font);
+  letter-spacing: 0.025em;
+  text-shadow: 1px 1px 2px #000;
+}
+
+#player-mode-status,
+#build-progress-phase,
+.texture-panel h2 {
+  color: var(--clod-gold);
+}
+
+#player-mode-hint {
+  color: var(--clod-blue);
+  border-left-color: rgba(233, 201, 106, 0.25);
+}
+
+.tf-label,
+.tf-edit-toggle,
+.tf-slider-label,
+.texture-slot-select,
+.texture-slot-param {
+  color: var(--clod-muted);
+}
+
+#project-toolbar button,
+#project-toolbar a,
+#player-mode-bar button,
+#terraform-menu button,
+.texture-panel button {
+  color: #e8ddbd;
+  background: linear-gradient(180deg, #343029 0%, #211e1a 52%, #151411 100%);
+  border-color: #78643a;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 245, 205, 0.13),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.7),
+    0 1px 2px rgba(0, 0, 0, 0.55);
+  font-family: var(--clod-title-font);
+  text-shadow: 1px 1px 1px #000;
+}
+
+#project-toolbar button:hover,
+#project-toolbar a:hover,
+#player-mode-bar button:hover,
+#terraform-menu button:hover,
+.texture-panel button:hover,
+#project-toolbar button:focus-visible,
+#project-toolbar a:focus-visible,
+#player-mode-bar button:focus-visible,
+#terraform-menu button:focus-visible,
+.texture-panel button:focus-visible {
+  color: #fff8d9;
+  background: linear-gradient(180deg, #4b4028 0%, #302817 55%, #1c1810 100%);
+  border-color: var(--clod-gold);
+  outline: 1px solid rgba(233, 201, 106, 0.38);
+  outline-offset: 1px;
+  box-shadow:
+    0 0 8px rgba(233, 201, 106, 0.22),
+    inset 0 1px 0 rgba(255, 250, 220, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.72);
+}
+
+#project-toolbar button:active,
+#project-toolbar a:active,
+#player-mode-bar button:active,
+#terraform-menu button:active,
+.texture-panel button:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.72);
+}
+
+#project-toolbar button:disabled,
+#terraform-menu button:disabled,
+.texture-panel button:disabled {
+  filter: saturate(0.35);
+}
+
+#player-mode-bar button[aria-pressed="true"],
+#terraform-menu button[aria-pressed="true"] {
+  color: #fff8d9;
+  background: linear-gradient(180deg, #63522b, #342a17 58%, #211a0f);
+  border-color: var(--clod-gold);
+  box-shadow:
+    0 0 7px rgba(233, 201, 106, 0.2),
+    inset 0 1px 0 rgba(255, 247, 207, 0.2);
+}
+
+#terraform-menu input[type="range"],
+#terraform-menu input[type="checkbox"] {
+  accent-color: var(--clod-gold-dim);
+}
+
+.tf-swatch {
+  border-color: #5e4d2b;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 2px 5px rgba(0, 0, 0, 0.55);
+}
+
+.tf-swatch[aria-pressed="true"] {
+  border-color: var(--clod-gold);
+  box-shadow:
+    0 0 0 2px var(--clod-gold),
+    0 0 10px rgba(233, 201, 106, 0.3);
+}
+
+#build-progress-label {
+  font-family: var(--clod-title-font);
+}
+
+#build-progress-percent {
+  color: var(--clod-gold);
+  font-variant-numeric: tabular-nums;
+}
+
+#build-progress-bar {
+  background: #08090c;
+  border-color: #5b4a29;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+#build-progress-bar::-webkit-progress-bar {
+  background: #08090c;
+}
+
+#build-progress-bar::-webkit-progress-value {
+  background: linear-gradient(180deg, #f2d87d, #b48a32 56%, #79591f);
+  box-shadow: inset 0 1px 0 rgba(255, 253, 222, 0.35);
+}
+
+#build-progress-bar::-moz-progress-bar {
+  background: linear-gradient(180deg, #f2d87d, #b48a32 56%, #79591f);
+}
+
+#texture-modal {
+  background: rgba(4, 5, 8, 0.76);
+}
+
+#texture-modal .texture-panel {
+  background: var(--clod-panel-bg-strong);
+  border-color: var(--clod-border);
+  border-radius: 7px;
+}
+
+.texture-panel header {
+  background: linear-gradient(180deg, rgba(78, 63, 31, 0.36), rgba(21, 19, 16, 0.12));
+  border-bottom-color: #574724;
+  box-shadow: inset 0 1px 0 rgba(255, 245, 204, 0.08);
+}
+
+.texture-panel h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.texture-slot {
+  background: linear-gradient(160deg, rgba(30, 29, 27, 0.94), rgba(12, 12, 15, 0.97));
+  border-color: #4f4227;
+  border-radius: 5px;
+  outline-color: rgba(0, 0, 0, 0.65);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 213, 0.06),
+    0 3px 9px rgba(0, 0, 0, 0.34);
+}
+
+.texture-slot-name {
+  color: #e5d6ae;
+}
+
+.texture-preview,
+.texture-panel button.texture-preview {
+  color: var(--clod-muted);
+  background-color: #08090b;
+  border-color: #5b4b2b;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 0 18px rgba(0, 0, 0, 0.62);
+}
+
+.texture-preview:hover,
+.texture-panel button.texture-preview:focus-visible {
+  border-color: var(--clod-gold);
+  box-shadow:
+    0 0 9px rgba(233, 201, 106, 0.25),
+    inset 0 0 18px rgba(0, 0, 0, 0.48);
+}
+
+.texture-slot-select select,
+.texture-slot-param input {
+  color: #e8ddbd;
+  background: #0d0e12;
+  border-color: #5b4b2b;
+  border-radius: 3px;
+  padding: 3px 5px;
+  outline: none;
+}
+
+.texture-slot-select select:focus,
+.texture-slot-param input:focus {
+  border-color: var(--clod-gold);
+  box-shadow: 0 0 0 1px rgba(233, 201, 106, 0.25);
+}
+
+.texture-slot-normal button {
+  color: #e8ddbd;
+  background: linear-gradient(180deg, #343029, #171512);
+  border-color: #78643a;
+}
+
+.lil-gui {
+  --background-color: #101116;
+  --text-color: #ddd3b8;
+  --title-background-color: #1c1a17;
+  --title-text-color: var(--clod-gold);
+  --widget-color: #292722;
+  --hover-color: #403821;
+  --focus-color: #5b4823;
+  --number-color: var(--clod-blue);
+  --string-color: var(--clod-ok);
+  --font-family: var(--clod-ui-font);
+  --widget-border-radius: 3px;
+}
+
+.lil-gui.root {
+  border: 1px solid var(--clod-border);
+  border-radius: 0 0 0 6px;
+  overflow: hidden;
+}
+
+.lil-gui.root > .title,
+.lil-gui.root > .children > .lil-gui > .title {
+  color: var(--clod-gold);
+  background: linear-gradient(180deg, #2b271e, #171613);
+  border-bottom: 1px solid #4b3e23;
+  box-shadow: inset 0 1px 0 rgba(255, 246, 213, 0.07);
+}
+
+.lil-gui.root > .children > .lil-gui {
+  border-bottom: 1px solid rgba(107, 87, 45, 0.55);
+}
+
+.lil-gui .controller > .name {
+  color: #bdb399;
+}
+
+.lil-gui input:focus,
+.lil-gui button:focus {
+  outline-color: var(--clod-gold);
+}
