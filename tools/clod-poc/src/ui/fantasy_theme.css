@@ -754,7 +754,10 @@ body[data-player-mode="playing"] #terraform-menu {
 }
 
 .texture-panel.clod-texture-dialog {
-  width: min(920px, calc(100vw - 32px));
+  width: min(1080px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-x: visible;
+  overflow-y: auto;
   border-width: 2px;
   border-radius: 8px;
   outline: 1px solid rgba(0, 0, 0, 0.9);
@@ -764,29 +767,59 @@ body[data-player-mode="playing"] #terraform-menu {
     inset 0 0 38px rgba(0, 0, 0, 0.32);
 }
 
+.texture-panel.clod-texture-dialog .texture-panel-body {
+  padding: 20px 16px;
+  overflow: visible;
+}
+
 .texture-slot-carousel {
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: 14px;
+  overflow: visible;
 }
 
-.texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-prev,
-.texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-next {
+.texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-nav {
   display: none;
+}
+
+.texture-panel.clod-texture-dialog .texture-carousel-nav {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  min-height: 132px;
+  padding: 0;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 700;
+  color: #f0d985;
+  background:
+    linear-gradient(180deg, rgba(58, 46, 24, 0.98), rgba(18, 15, 10, 0.98));
+  border: 2px solid #8f7435;
+  border-radius: 6px;
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 246, 213, 0.12);
+}
+
+.texture-panel.clod-texture-dialog .texture-carousel-nav:hover:not(:disabled) {
+  color: #fff3c4;
+  background:
+    linear-gradient(180deg, rgba(82, 66, 32, 0.98), rgba(28, 22, 14, 0.98));
+  border-color: #e9c96a;
+}
+
+.texture-panel.clod-texture-dialog .texture-carousel-nav:disabled {
+  opacity: 0.38;
+  filter: none;
 }
 
 .texture-slot-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 22px;
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.texture-carousel-prev,
-.texture-carousel-next {
-  align-self: center;
-  min-height: 148px;
 }
 
 .texture-panel header {
@@ -836,6 +869,7 @@ body[data-player-mode="playing"] #terraform-menu {
   position: relative;
   gap: 10px;
   padding: 12px;
+  margin: 2px;
   border-color: #574724;
   background:
     linear-gradient(160deg, rgba(38, 35, 29, 0.96), rgba(10, 10, 13, 0.98)),

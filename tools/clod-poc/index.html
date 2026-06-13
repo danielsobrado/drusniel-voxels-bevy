@@ -237,14 +237,30 @@
         min-height: 28px; padding: 4px 9px; cursor: pointer;
       }
       .texture-panel button:hover { background: #303842; }
-      .texture-panel-body { padding: 18px; overflow-x: hidden; }
-      .texture-slot-carousel {
-        display: flex; align-items: stretch; gap: 10px;
+      .texture-panel.clod-texture-dialog {
+        width: min(1080px, calc(100vw - 24px));
+        overflow-x: visible;
       }
-      .texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-prev,
-      .texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-next { display: none; }
+      .texture-panel-body { padding: 20px 16px; overflow: visible; }
+      .texture-slot-carousel {
+        display: flex; align-items: stretch; gap: 14px; overflow: visible;
+      }
+      .texture-slot-carousel:not(.texture-slot-carousel-active) .texture-carousel-nav { display: none; }
+      .texture-carousel-nav {
+        flex: 0 0 40px; width: 40px; min-width: 40px; align-self: center;
+        min-height: 132px; padding: 0; margin: 0;
+        font-size: 30px; line-height: 1; font-weight: 600;
+        color: #f0d985; background: rgba(24, 20, 14, 0.94);
+        border: 2px solid #8f7435; border-radius: 6px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+        cursor: pointer;
+      }
+      .texture-carousel-nav:hover:not(:disabled) {
+        background: rgba(52, 42, 22, 0.98); border-color: #e9c96a; color: #fff3c4;
+      }
+      .texture-carousel-nav:disabled { opacity: 0.38; cursor: not-allowed; }
       .texture-slot-grid {
-        display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 16px;
+        display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 22px;
         flex: 1 1 auto; min-width: 0;
       }
       .texture-slot {

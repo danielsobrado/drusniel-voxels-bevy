@@ -773,6 +773,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     pbr_input.specular_occlusion = ao_factor;
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT;
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
+    // The lit path currently collapses sampled terrain albedo to the fog color on DX12.
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT;
 
     if (DEBUG_FORCE_ALBEDO) {
         pbr_input.material.base_color = DEBUG_ALBEDO_COLOR;

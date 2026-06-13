@@ -1723,9 +1723,9 @@ async function main() {
       </header>
       <div class="texture-panel-body">
         <div class="texture-slot-carousel">
-          <button type="button" class="tf-carousel-nav texture-carousel-prev" aria-label="Previous materials">‹</button>
+          <button type="button" class="texture-carousel-nav texture-carousel-prev" aria-label="Previous materials">‹</button>
           <div class="texture-slot-grid"></div>
-          <button type="button" class="tf-carousel-nav texture-carousel-next" aria-label="Next materials">›</button>
+          <button type="button" class="texture-carousel-nav texture-carousel-next" aria-label="Next materials">›</button>
         </div>
         <div class="texture-actions">
           <button type="button" data-texture-add>+ Add material</button>
