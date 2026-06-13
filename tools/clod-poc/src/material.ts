@@ -29,14 +29,17 @@ export const DEFAULT_TERRAIN_COLOR_ADJUSTMENTS: TerrainColorAdjustments = {
 export type { TerrainTextureSlotUniform };
 
 const VERT = /* glsl */ `
-  attribute float paintSlot;
+  attribute vec4 paintSlots;
+  attribute vec4 paintWeights;
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
-  varying float vPaintSlot;
+  varying vec4 vPaintSlots;
+  varying vec4 vPaintWeights;
   void main() {
     vWorldPos = position;
     vWorldNormal = normal;
-    vPaintSlot = paintSlot;
+    vPaintSlots = paintSlots;
+    vPaintWeights = paintWeights;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;

@@ -5,15 +5,18 @@ function lines(count: number, build: (index: number) => string): string {
   return Array.from({ length: count }, (_, index) => build(index)).join("\n");
 }
 
+// Albedo + normal are packed into two layered textures (one layer per material slot)
+// rather than one sampler2D per slot. A fragment shader can only bind ~16 samplers, so
+// 16 slots * 2 maps = 32 individual samplers would fail to link; two array samplers fit.
 function buildTextureUniformDecls(): string {
-  return lines(MAX_TERRAIN_TEXTURES, (i) => `  uniform sampler2D uTerrainTexture${i};`);
+  return "  uniform sampler2DArray uTerrainAlbedoArray;";
 }
 
 function buildNormalUniformDecls(): string {
-  return lines(MAX_TERRAIN_TEXTURES, (i) => `  uniform sampler2D uTerrainNormal${i};`);
+  return "  uniform sampler2DArray uTerrainNormalArray;";
 }
 
-function buildPaintFallback(): string {
+function buildPaintFallbackFn(): string {
   const colors = [
     "vec3(0.42, 0.58, 0.30)", "vec3(0.55, 0.52, 0.50)",
     "vec3(0.85, 0.78, 0.55)", "vec3(0.96, 0.97, 1.00)",
@@ -24,26 +27,29 @@ function buildPaintFallback(): string {
     "vec3(0.74, 0.66, 0.58)", "vec3(0.52, 0.44, 0.40)",
     "vec3(0.68, 0.72, 0.76)", "vec3(0.82, 0.80, 0.74)",
   ];
-  return lines(MAX_TERRAIN_TEXTURES, (i) => `    ${colors[i] ?? colors[i % 4]}`);
-}
-
-function buildSampleTextureSlot(): string {
-  const branches = lines(MAX_TERRAIN_TEXTURES, (i) =>
-    `    if (slot == ${i}) return triplanarSample(uTerrainTexture${i}, worldPos, uTextureScales[${i}]);`,
+  // Expose per-slot fallback colours through a function rather than a `const vec3[]`
+  // constructor with initializer (cleaner and avoids array-init pitfalls).
+  const branches = lines(
+    MAX_TERRAIN_TEXTURES,
+    (i) => `    if (slot == ${i}) return ${colors[i] ?? colors[i % 4]};`,
   );
-  return `  vec3 sampleTextureSlot(int slot, vec3 worldPos) {
+  return `  vec3 paintFallbackColor(int slot) {
 ${branches}
     return vec3(0.0);
   }`;
 }
 
+// ES 3.00 allows a dynamic layer index into a texture array (a dynamic index into an
+// array of samplers is NOT allowed), so these collapse to a single sampled layer.
+function buildSampleTextureSlot(): string {
+  return `  vec3 sampleTextureSlot(int slot, vec3 worldPos) {
+    return triplanarSample(float(slot), worldPos, uTextureScales[slot]);
+  }`;
+}
+
 function buildSampleNormalSlot(): string {
-  const branches = lines(MAX_TERRAIN_TEXTURES, (i) =>
-    `    if (slot == ${i}) return uNormalMapMask[${i}] > 0.5 ? triplanarNormal(uTerrainNormal${i}, worldPos, uTextureScales[${i}], baseN) : baseN;`,
-  );
   return `  vec3 sampleNormalSlot(int slot, vec3 worldPos, vec3 baseN) {
-${branches}
-    return baseN;
+    return uNormalMapMask[slot] > 0.5 ? triplanarNormal(float(slot), worldPos, uTextureScales[slot], baseN) : baseN;
   }`;
 }
 
@@ -52,7 +58,7 @@ function buildSampleTerrainNormal(): string {
     const active = i === 0 ? "" : `    if (uTerrainTextureCount <= ${i}) return normalize(acc / wsum);\n`;
     const weight = i === 0
       ? "    float w = rangeWeight(height, uTextureRanges[0]);"
-      : `    float w = uTerrainTextureCount > ${i} ? rangeWeight(height, uTextureRanges[${i}]) : 0.0;`;
+      : `    w = uTerrainTextureCount > ${i} ? rangeWeight(height, uTextureRanges[${i}]) : 0.0;`;
     return `${active}    vec3 n${i} = sampleNormalSlot(${i}, worldPos, baseN);
 ${weight}
     acc += n${i} * w;
@@ -77,7 +83,7 @@ function buildSampleTerrainTexture(): string {
 `;
     const weight = i === 0
       ? "    float w = rangeWeight(height, uTextureRanges[0]);"
-      : `    float w = uTerrainTextureCount > ${i} ? rangeWeight(height, uTextureRanges[${i}]) : 0.0;`;
+      : `    w = uTerrainTextureCount > ${i} ? rangeWeight(height, uTextureRanges[${i}]) : 0.0;`;
     const nearest = i === 0
       ? "    vec3 nearest = t0;\n    float best = centerDistance(height, uTextureRanges[0]);"
       : `    if (uTerrainTextureCount > ${i} && centerDistance(height, uTextureRanges[${i}]) < best) {
@@ -100,15 +106,39 @@ ${accum}
   }`;
 }
 
-function buildPaintFallbackMix(): string {
-  return lines(MAX_TERRAIN_TEXTURES, (i) => {
-    const prefix = i === 0 ? "      vec3 fb = " : "      fb += ";
-    const slot = i + 1;
-    const suffix = i === 0
-      ? `float(vPaintSlot) == ${slot}.0 ? PAINT_FALLBACK[${i}] : vec3(0.0);`
-      : `float(vPaintSlot) == ${slot}.0 ? PAINT_FALLBACK[${i}] : vec3(0.0);`;
-    return `${prefix}${suffix}`;
-  });
+// Painted terrain blends up to 4 (slot, weight) channels carried per vertex (vPaintSlots /
+// vPaintWeights, matching terrain.ts PAINT_BLEND_CHANNELS = 4). The interpolated weights give
+// a smooth fade into natural terrain and a smooth blend between painted materials.
+const PAINT_CHANNELS = ["x", "y", "z", "w"] as const;
+
+function buildPaintedAlbedo(): string {
+  const body = PAINT_CHANNELS.map(
+    (c) => `    if (vPaintWeights.${c} > 0.0 && vPaintSlots.${c} > -0.5) {
+      acc += sampleTextureSlot(int(vPaintSlots.${c} + 0.5), worldPos) * vPaintWeights.${c};
+      wsum += vPaintWeights.${c};
+    }`,
+  ).join("\n");
+  return `  vec3 blendPaintedAlbedo(vec3 worldPos) {
+    vec3 acc = vec3(0.0);
+    float wsum = 0.0;
+${body}
+    return wsum > 0.0 ? acc / wsum : vec3(0.0);
+  }`;
+}
+
+function buildPaintedFallback(): string {
+  const body = PAINT_CHANNELS.map(
+    (c) => `    if (vPaintWeights.${c} > 0.0 && vPaintSlots.${c} > -0.5) {
+      acc += paintFallbackColor(int(vPaintSlots.${c} + 0.5)) * vPaintWeights.${c};
+      wsum += vPaintWeights.${c};
+    }`,
+  ).join("\n");
+  return `  vec3 blendPaintedFallback() {
+    vec3 acc = vec3(0.0);
+    float wsum = 0.0;
+${body}
+    return wsum > 0.0 ? acc / wsum : vec3(0.0);
+  }`;
 }
 
 export function buildTerrainFragmentShader(): string {
@@ -144,11 +174,10 @@ ${buildNormalUniformDecls()}
   uniform vec2 uTextureRanges[${MAX_TERRAIN_TEXTURES}];
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
-  varying float vPaintSlot;
+  varying vec4 vPaintSlots;
+  varying vec4 vPaintWeights;
 
-  const vec3 PAINT_FALLBACK[${MAX_TERRAIN_TEXTURES}] = vec3[${MAX_TERRAIN_TEXTURES}](
-${buildPaintFallback()}
-  );
+${buildPaintFallbackFn()}
 
   float ign(vec2 p) {
     return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
@@ -170,14 +199,14 @@ ${buildPaintFallback()}
     vec3 w = vec3(pow(a.x, 4.0), pow(a.y, 4.0), pow(a.z, 4.0));
     return w / max(w.x + w.y + w.z, 0.001);
   }
-  vec3 triplanarSample(sampler2D tex, vec3 worldPos, float scale) {
+  vec3 triplanarSample(float layer, vec3 worldPos, float scale) {
     if (!uUseTriplanar) {
-      return texture2D(tex, worldPos.xz * scale).rgb;
+      return texture(uTerrainAlbedoArray, vec3(worldPos.xz * scale, layer)).rgb;
     }
     vec3 w = triplanarWeights(normalize(vWorldNormal));
-    vec3 cy = texture2D(tex, worldPos.yz * scale).rgb;
-    vec3 cz = texture2D(tex, worldPos.xz * scale).rgb;
-    vec3 cx = texture2D(tex, worldPos.xy * scale).rgb;
+    vec3 cy = texture(uTerrainAlbedoArray, vec3(worldPos.yz * scale, layer)).rgb;
+    vec3 cz = texture(uTerrainAlbedoArray, vec3(worldPos.xz * scale, layer)).rgb;
+    vec3 cx = texture(uTerrainAlbedoArray, vec3(worldPos.xy * scale, layer)).rgb;
     return cy * w.x + cz * w.y + cx * w.z;
   }
   vec3 unpackNormalMap(vec3 s) { return normalize(s * 2.0 - 1.0); }
@@ -187,17 +216,19 @@ ${buildPaintFallback()}
     if (axis == 1) return normalize(vec3(n.x, n.z * sign(wn.y), n.y));
     return normalize(vec3(n.x, n.y, n.z * sign(wn.z)));
   }
-  vec3 triplanarNormal(sampler2D nmap, vec3 worldPos, float scale, vec3 wn) {
+  vec3 triplanarNormal(float layer, vec3 worldPos, float scale, vec3 wn) {
     vec3 w = triplanarWeights(wn);
-    vec3 n0 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.yz * scale).rgb), wn, 0);
-    vec3 n1 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.xz * scale).rgb), wn, 1);
-    vec3 n2 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.xy * scale).rgb), wn, 2);
+    vec3 n0 = reorientNormal(unpackNormalMap(texture(uTerrainNormalArray, vec3(worldPos.yz * scale, layer)).rgb), wn, 0);
+    vec3 n1 = reorientNormal(unpackNormalMap(texture(uTerrainNormalArray, vec3(worldPos.xz * scale, layer)).rgb), wn, 1);
+    vec3 n2 = reorientNormal(unpackNormalMap(texture(uTerrainNormalArray, vec3(worldPos.xy * scale, layer)).rgb), wn, 2);
     return normalize(n0 * w.x + n1 * w.y + n2 * w.z);
   }
 ${buildSampleTextureSlot()}
 ${buildSampleNormalSlot()}
 ${buildSampleTerrainNormal()}
 ${buildSampleTerrainTexture()}
+${buildPaintedAlbedo()}
+${buildPaintedFallback()}
   vec3 adjustColor(vec3 color) {
     color *= uBrightness;
     color = (color - 0.5) * uContrast + 0.5;
@@ -225,19 +256,16 @@ ${buildSampleTerrainTexture()}
     }
     float sun = max(dot(n, normalize(uLight)), 0.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
-    float paint = vPaintSlot > 0.5 ? 1.0 : 0.0;
+    float paint = clamp(dot(vPaintWeights, vec4(1.0)), 0.0, 1.0);
     vec3 baseColor = uColor;
     if (uUseTexture) {
       vec3 tex = sampleTerrainTexture(vWorldPos);
       if (paint > 0.0) {
-        int slot = int(vPaintSlot + 0.5) - 1;
-        vec3 painted = sampleTextureSlot(slot, vWorldPos);
-        tex = mix(tex, painted, paint);
+        tex = mix(tex, blendPaintedAlbedo(vWorldPos), paint);
       }
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
     } else if (paint > 0.0) {
-${buildPaintFallbackMix()}
-      baseColor = mix(uColor, fb, paint);
+      baseColor = mix(uColor, blendPaintedFallback(), paint);
     }
     baseColor = adjustColor(baseColor);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
@@ -286,11 +314,11 @@ export function createTerrainTextureUniforms(): Record<string, { value: unknown 
     uTextureRanges: {
       value: Array.from({ length: MAX_TERRAIN_TEXTURES }, () => new THREE.Vector2(0, 0)),
     },
+    // Layered albedo/normal textures (one layer per slot); null binds three.js' empty
+    // array texture, which is safe to sample.
+    uTerrainAlbedoArray: { value: null },
+    uTerrainNormalArray: { value: null },
   };
-  for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
-    uniforms[`uTerrainTexture${i}`] = { value: null };
-    uniforms[`uTerrainNormal${i}`] = { value: null };
-  }
   return uniforms;
 }
 
@@ -315,6 +343,8 @@ export function applyTerrainTextureUniforms(
     textureScale: number;
     blendBands: boolean;
     blendWidth: number;
+    albedoArray: THREE.DataArrayTexture | null;
+    normalArray: THREE.DataArrayTexture | null;
   },
 ): void {
   mat.uniforms.uUseTexture.value = options.enabled;
@@ -326,12 +356,12 @@ export function applyTerrainTextureUniforms(
   mat.uniforms.uTerrainTextureCount.value = slots.length;
   mat.uniforms.uTextureBlendBands.value = options.blendBands;
   mat.uniforms.uTextureBlendWidth.value = options.blendWidth;
+  mat.uniforms.uTerrainAlbedoArray.value = options.albedoArray;
+  mat.uniforms.uTerrainNormalArray.value = options.normalArray;
   const scales = mat.uniforms.uTextureScales.value as Float32Array;
   const masks = mat.uniforms.uNormalMapMask.value as Float32Array;
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
     const slot = slots[i];
-    mat.uniforms[`uTerrainTexture${i}`].value = slot?.texture ?? null;
-    mat.uniforms[`uTerrainNormal${i}`].value = slot?.normalTexture ?? null;
     scales[i] = (slot?.scale ?? 1 / 64) * options.textureScale;
     masks[i] = slot?.normalTexture ? 1 : 0;
     (mat.uniforms.uTextureRanges.value as THREE.Vector2[])[i].set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);

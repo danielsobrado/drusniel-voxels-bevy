@@ -24,6 +24,8 @@ import {
   DIG_INFLUENCE_MARGIN,
   getDigEditsSnapshot,
   meshChunk,
+  PAINT_BLEND_CHANNELS,
+  paintWeightsAt,
   replaceDigEdits,
 } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
@@ -98,9 +100,20 @@ const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
   { id: "earth-1", scale: 0.04, heightMin: 40, heightMax: 60 },
   { id: "snow-rocks-1", scale: 0.025, heightMin: 60, heightMax: 118 },
 ] as const;
-const DEMO_TEXTURE_BASE_URL =
-  "https://raw.githubusercontent.com/danielsobrado/drusniel-voxels-bevy/main/tools/clod-poc/textures/";
-const demoTextureUrl = (file: string) => `${DEMO_TEXTURE_BASE_URL}${file}`;
+// Bundle the texture files with the app so they are served same-origin. Fetching them
+// cross-origin from raw.githubusercontent.com fails: that host sends no
+// Access-Control-Allow-Origin header, so a crossOrigin="anonymous" TextureLoader request
+// is rejected and the built-in texture load throws, aborting the rest of init.
+const BUNDLED_TEXTURE_URLS = import.meta.glob<string>("../textures/*.jpg", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+const demoTextureUrl = (file: string): string => {
+  const entry = Object.entries(BUNDLED_TEXTURE_URLS).find(([path]) => path.endsWith(`/${file}`));
+  if (!entry) throw new Error(`Bundled texture not found: ${file}`);
+  return entry[1];
+};
 const BUILTIN_TERRAIN_TEXTURES = [
   { id: "earth-1", label: "Earth 1", url: demoTextureUrl("earth-1.jpg") },
   { id: "earth-2", label: "Earth 2", url: demoTextureUrl("earth-2.jpg") },
@@ -130,7 +143,21 @@ function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
-  g.setAttribute("paintSlot", new THREE.BufferAttribute(mesh.materials, 1));
+  // Painted-material blend, recomputed from vertex positions (a pure function of the edit
+  // list). Done here rather than carried through the simplifier because slot indices can't
+  // be linearly interpolated/decimated; positions can, and the blend is exact off them.
+  const vertexCount = mesh.positions.length / 3;
+  const paintSlots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
+  const paintWeights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
+  for (let i = 0; i < vertexCount; i++) {
+    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
+    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
+      paintSlots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
+      paintWeights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
+    }
+  }
+  g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
+  g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
   g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }
@@ -743,17 +770,80 @@ async function main() {
   let syncTerraformMenu: () => void = () => {};
   const rebuildActiveTerrainSlots = () => {};
   const texturesActive = () => state.albedo && textureSlots.some((slot) => slot.texture !== null);
-  const terrainTextureUniformOptions = () => ({
-    enabled: texturesActive(),
-    triplanar: state.triplanar,
-    normalMap: state.normalMap,
-    normalIntensity: state.normalIntensity,
-    roughness: state.roughness,
-    metalness: state.metalness,
-    textureScale: state.textureScale,
-    blendBands: state.textureBlendMode === "blend bands",
-    blendWidth: state.textureBlendWidth,
-  });
+
+  // The shader binds two layered textures (albedo + normal), one layer per slot, instead of
+  // 32 individual samplers. Slot images can differ in size, so each layer is rasterised to a
+  // fixed square via canvas. Rebuilt only when the set of source images changes (tracked by
+  // signature) so slider tweaks stay cheap.
+  const TEXTURE_ARRAY_SIZE = 512;
+  let albedoArrayTex: THREE.DataArrayTexture | null = null;
+  let normalArrayTex: THREE.DataArrayTexture | null = null;
+  let textureArraySignature = "";
+  const arrayBuildCanvas = document.createElement("canvas");
+  arrayBuildCanvas.width = TEXTURE_ARRAY_SIZE;
+  arrayBuildCanvas.height = TEXTURE_ARRAY_SIZE;
+  const arrayBuildCtx = arrayBuildCanvas.getContext("2d", { willReadFrequently: true })!;
+  const buildDataArray = (
+    images: readonly (TexImageSource | null)[],
+    colorSpace: THREE.ColorSpace,
+  ): THREE.DataArrayTexture | null => {
+    if (images.every((img) => img === null)) return null;
+    const size = TEXTURE_ARRAY_SIZE;
+    const layerStride = size * size * 4;
+    const data = new Uint8Array(layerStride * images.length);
+    for (let i = 0; i < images.length; i++) {
+      arrayBuildCtx.save();
+      arrayBuildCtx.clearRect(0, 0, size, size);
+      // Match the flipY=true that TextureLoader applies to a normal Texture: a
+      // DataArrayTexture is built from raw pixels and is not auto-flipped, and an
+      // unflipped normal map inverts the green channel -> wrong slope lighting.
+      arrayBuildCtx.translate(0, size);
+      arrayBuildCtx.scale(1, -1);
+      if (images[i]) arrayBuildCtx.drawImage(images[i] as CanvasImageSource, 0, 0, size, size);
+      arrayBuildCtx.restore();
+      data.set(arrayBuildCtx.getImageData(0, 0, size, size).data, i * layerStride);
+    }
+    const tex = new THREE.DataArrayTexture(data, size, size, images.length);
+    tex.format = THREE.RGBAFormat;
+    tex.type = THREE.UnsignedByteType;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = colorSpace;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const ensureTextureArrays = () => {
+    const signature = textureSlots
+      .map((s) => `${s.texture?.uuid ?? "_"}:${s.normalTexture?.uuid ?? "_"}`)
+      .join("|");
+    if (signature === textureArraySignature) return;
+    textureArraySignature = signature;
+    albedoArrayTex?.dispose();
+    normalArrayTex?.dispose();
+    albedoArrayTex = buildDataArray(textureSlots.map((s) => s.texture?.image ?? null), THREE.SRGBColorSpace);
+    normalArrayTex = buildDataArray(textureSlots.map((s) => s.normalTexture?.image ?? null), THREE.NoColorSpace);
+  };
+
+  const terrainTextureUniformOptions = () => {
+    ensureTextureArrays();
+    return {
+      enabled: texturesActive(),
+      triplanar: state.triplanar,
+      normalMap: state.normalMap,
+      normalIntensity: state.normalIntensity,
+      roughness: state.roughness,
+      metalness: state.metalness,
+      textureScale: state.textureScale,
+      blendBands: state.textureBlendMode === "blend bands",
+      blendWidth: state.textureBlendWidth,
+      albedoArray: albedoArrayTex,
+      normalArray: normalArrayTex,
+    };
+  };
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
     const apply = (mat: THREE.ShaderMaterial) => {
@@ -1894,7 +1984,10 @@ async function main() {
   };
   const addTextureSlot = (refresh = true) => {
     if (textureSlots.length >= MAX_TERRAIN_TEXTURES) return;
-    textureSlots.push({ ...emptyTextureSlotState() });
+    // New slots default to an empty [0,0] band, which rangeWeight() zeroes out at every
+    // terrain height, so a freshly-loaded texture would never render. Default to the full
+    // height range so the texture is visible immediately; the user narrows Low/High after.
+    textureSlots.push({ ...emptyTextureSlotState(), heightMin: 0, heightMax: 128 });
     mountTextureSlotCard(textureSlots.length - 1);
     syncTextureModalCarousel();
     if (refresh) refreshTextureState();

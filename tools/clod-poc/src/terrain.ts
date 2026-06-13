@@ -355,6 +355,56 @@ export function paintMaterialAt(x: number, y: number, z: number): number {
   return 0;
 }
 
+/** Up to this many painted materials blend smoothly at any one vertex. */
+export const PAINT_BLEND_CHANNELS = 4;
+
+export interface VertexPaint {
+  /** Slot index per channel, or -1 for an unused channel. */
+  slots: number[];
+  /** Coverage 0..1 per channel; the mesh interpolates these for a smooth blend. */
+  weights: number[];
+}
+
+/** World-space distance over which painted coverage fades into the natural terrain. */
+const PAINT_FADE = 3.0;
+
+/**
+ * Per-vertex painted-material blend: up to `PAINT_BLEND_CHANNELS` (slot, weight) pairs.
+ * An `add` edit assigns its slot to a channel across the whole fade zone (`sdf <= PAINT_FADE`)
+ * so the slot *index* stays constant there, while the coverage `weight` falls smoothly from 1
+ * (on the deposited surface) to 0 at the fade edge. Keeping the index constant matters: it is
+ * interpolated across the mesh, and a varying index would sample the wrong textures in the
+ * blend zone — only the weight should vary. Channels are ordered by slot index so neighbouring
+ * vertices agree on the channel layout. Pure function of position, so welded borders match.
+ */
+export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
+  const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
+  const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
+  if (digEdits.length === 0) return { slots, weights };
+  const cover = new Map<number, number>();
+  for (let i = digEdits.length - 1; i >= 0; i--) {
+    const e = digEdits[i];
+    if (e.op !== "add") continue;
+    const h = editHeight(e);
+    const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
+    const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+    if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
+    const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
+    if (sdf >= PAINT_FADE) continue;
+    const t = Math.min(Math.max((sdf - MATERIAL_PAINT_BAND) / (PAINT_FADE - MATERIAL_PAINT_BAND), 0), 1);
+    const w = 1 - t * t * (3 - 2 * t); // smoothstep falloff: 1 on the deposit, 0 at the fade edge
+    if (w <= 0) continue;
+    const slot = Math.max(0, (e.material ?? 0) | 0);
+    cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
+  }
+  const ordered = [...cover.keys()].sort((a, b) => a - b).slice(0, PAINT_BLEND_CHANNELS);
+  for (let c = 0; c < ordered.length; c++) {
+    slots[c] = ordered[c];
+    weights[c] = cover.get(ordered[c])!;
+  }
+  return { slots, weights };
+}
+
 // ---- per-chunk surface nets ----------------------------------------------
 
 // CCW cell-corner loops around each axis edge (offsets to the cell min-corner).
