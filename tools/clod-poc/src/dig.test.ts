@@ -3,7 +3,7 @@
 // targeted rebuild of the dug pages and their ancestors.
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { addDigEdit, clearDigEdits, density, surfaceHeight } from "./terrain.js";
+import { addDigEdit, clearDigEdits, density, paintMaterialAt, surfaceHeight } from "./terrain.js";
 import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./quadtree.js";
 import { buildLod0PageSource } from "./source_mesh.js";
 import { initSimplifier } from "./simplify.js";
@@ -47,6 +47,33 @@ describe("dig edits in the density field", () => {
     expect(density(5, 1, 5)).toBeGreaterThan(0); // y <= bedrock: untouched
     expect(density(5, 2, 5)).toBeLessThan(0); // above bedrock, inside sphere: air
   });
+
+  it("raise deposits solid above the surface and tags it with the chosen material", () => {
+    const x = 30, z = 30;
+    const sy = surfaceHeight(x, z);
+    expect(density(x, sy + 2, z)).toBeLessThan(0); // above the surface: air before
+    addDigEdit({ x, y: sy, z, r: 4, op: "add", material: 2 });
+    expect(density(x, sy + 2, z)).toBeGreaterThan(0); // raised: now solid
+
+    // deposited vertices carry a one-hot weight on the chosen slot; far field stays natural
+    expect(paintMaterialAt(x, sy, z)).toEqual([0, 0, 1, 0]);
+    expect(paintMaterialAt(x + 50, sy, z)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("cube and cylinder brushes carve their own footprint (not the sphere's)", () => {
+    const x = 60, z = 60;
+    const y = surfaceHeight(x, z) - 6; // solidly underground
+    const r = 4;
+    // a corner of the radius-r box, well outside the inscribed sphere (|offset| ≈ 1.56r)
+    const cx = x + 0.9 * r, cy = y + 0.9 * r, cz = z + 0.9 * r;
+
+    addDigEdit({ x, y, z, r, shape: "sphere" });
+    expect(density(cx, cy, cz)).toBeGreaterThan(0); // sphere doesn't reach the corner
+    clearDigEdits();
+
+    addDigEdit({ x, y, z, r, shape: "cube" });
+    expect(density(cx, cy, cz)).toBeLessThan(0); // cube does
+  });
 });
 
 describe("rebuildDirtyPages", () => {
@@ -77,6 +104,29 @@ describe("rebuildDirtyPages", () => {
     expect(a.mesh.indices.length).not.toBe(trisBefore);
 
     // the dug border chain must still match exactly between the two pages (gate A2)
+    assertBorderMatch(
+      borderChain(a.mesh, "x", 32, a.footprint),
+      borderChain(b.mesh, "x", 32, b.footprint),
+    );
+  });
+
+  it("raises a border-straddling mound watertight (paint material welds across the page seam)", () => {
+    const result = buildWorld(2, 2, cfg);
+    const lod0 = result.nodesByLevel.get(0)!;
+    const a = lod0.find((n) => n.id === "L0:0,0")!;
+    const b = lod0.find((n) => n.id === "L0:1,0")!;
+
+    // raise solid (painted material 1) across the x=32 page border
+    const x = 32, z = 16, r = 4;
+    addDigEdit({ x, y: surfaceHeight(x, z), z, r, op: "add", material: 1 });
+    // a per-edit material mismatch at the seam would hard-fail the weld here
+    const rebuild = rebuildDirtyPages(
+      result,
+      { minX: x - r - 4, maxX: x + r + 4, minZ: z - r - 4, maxZ: z + r + 4 },
+      cfg,
+    );
+
+    expect(rebuild.lod0Pages).toBe(2);
     assertBorderMatch(
       borderChain(a.mesh, "x", 32, a.footprint),
       borderChain(b.mesh, "x", 32, b.footprint),

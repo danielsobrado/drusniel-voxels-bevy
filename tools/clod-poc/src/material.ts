@@ -21,11 +21,14 @@ export const DEFAULT_TERRAIN_COLOR_ADJUSTMENTS: TerrainColorAdjustments = {
 };
 
 const VERT = /* glsl */ `
+  attribute vec4 material;       // per-vertex paint: one-hot texture slot, or all-zero for natural terrain
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
+  varying vec4 vMaterial;
   void main() {
     vWorldPos = position;
     vWorldNormal = normal;
+    vMaterial = material;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -61,6 +64,14 @@ const FRAG = /* glsl */ `
   uniform vec2 uTextureRange3;
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
+  varying vec4 vMaterial;
+
+  // Fallback tints for painted deposits when no terrain textures are loaded — one per slot
+  // (low / mid-low / mid-high / high), so the chosen material is still visible.
+  const vec3 PAINT_FALLBACK[4] = vec3[4](
+    vec3(0.42, 0.58, 0.30), vec3(0.55, 0.52, 0.50),
+    vec3(0.85, 0.78, 0.55), vec3(0.96, 0.97, 1.00)
+  );
 
   // interleaved-gradient noise — cheap stable screen-door threshold
   float ign(vec2 p) {
@@ -135,10 +146,24 @@ const FRAG = /* glsl */ `
     vec3 n = normalize(vWorldNormal);
     float sun = max(dot(n, normalize(uLight)), 0.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    float paint = clamp(vMaterial.x + vMaterial.y + vMaterial.z + vMaterial.w, 0.0, 1.0);
     vec3 baseColor = uColor;
     if (uUseTexture) {
       vec3 tex = sampleTerrainTexture(vWorldPos);
+      if (paint > 0.0) {
+        // painted deposit: force the chosen texture slot instead of the height band
+        vec3 painted = vMaterial.x * texture2D(uTerrainTexture0, vWorldPos.xz * uTextureScales.x).rgb
+                     + vMaterial.y * texture2D(uTerrainTexture1, vWorldPos.xz * uTextureScales.y).rgb
+                     + vMaterial.z * texture2D(uTerrainTexture2, vWorldPos.xz * uTextureScales.z).rgb
+                     + vMaterial.w * texture2D(uTerrainTexture3, vWorldPos.xz * uTextureScales.w).rgb;
+        tex = mix(tex, painted, paint);
+      }
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
+    } else if (paint > 0.0) {
+      // no textures loaded: tint the deposit by its slot's fallback colour so it still reads
+      vec3 fb = vMaterial.x * PAINT_FALLBACK[0] + vMaterial.y * PAINT_FALLBACK[1]
+              + vMaterial.z * PAINT_FALLBACK[2] + vMaterial.w * PAINT_FALLBACK[3];
+      baseColor = mix(uColor, fb, paint);
     }
     baseColor = adjustColor(baseColor);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);

@@ -17,7 +17,7 @@ import {
   resimplifyParent,
   type NodeIndex,
 } from "./quadtree.js";
-import { addDigEdit, digEditCount, DIG_INFLUENCE_MARGIN, meshChunk } from "./terrain.js";
+import { addDigEdit, type BrushOp, type BrushShape, digEditCount, DIG_INFLUENCE_MARGIN, meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
   applyTerrainColorAdjustments,
@@ -95,6 +95,8 @@ function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+  // per-vertex paint slot for the terrain shader (zero = natural terrain, height-banded)
+  g.setAttribute("material", new THREE.BufferAttribute(mesh.materials, 4));
   g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }
@@ -484,6 +486,9 @@ async function main() {
     tintBubble: true,
     digEnabled: true,
     digRadius: 3,
+    brushOp: "remove" as BrushOp,
+    brushShape: "sphere" as BrushShape,
+    brushMaterial: 0,
     grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
@@ -559,6 +564,9 @@ async function main() {
     textureSlots[i].heightMax = DEFAULT_TEXTURE_RANGES[i][1];
   }
   let activeTerrainSlots: TextureSlot[] = [];
+  // assigned when the terraform menu is built; refreshes the material swatches after textures change
+  let refreshTerraformSwatches: () => void = () => {};
+  let syncTerraformMenu: () => void = () => {};
   const rebuildActiveTerrainSlots = () => {
     activeTerrainSlots = textureSlots.filter((slot) => slot.texture !== null);
   };
@@ -592,6 +600,7 @@ async function main() {
         apply(m);
       }
     }
+    refreshTerraformSwatches();
   };
 
   // One view per node; visibility/fade drive what's drawn.
@@ -618,9 +627,16 @@ async function main() {
   const boundaryGroup = new THREE.Group();
   scene.add(boundaryGroup);
 
-  // dig preview reticle: translucent sphere at the aim point, sized to the dig radius
+  // brush preview reticle: translucent volume at the aim point, sized to the brush radius,
+  // shaped to the active brush and tinted by op (remove = red, add = green). Geometries are
+  // unit-sized so a uniform scale by the radius matches the brush SDFs exactly.
+  const brushPreviewGeometries: Record<BrushShape, THREE.BufferGeometry> = {
+    sphere: new THREE.SphereGeometry(1, 24, 16),
+    cube: new THREE.BoxGeometry(2, 2, 2),
+    cylinder: new THREE.CylinderGeometry(1, 1, 2, 28),
+  };
   const digPreview = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 24, 16),
+    brushPreviewGeometries.sphere,
     new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }),
   );
   digPreview.visible = false;
@@ -818,7 +834,7 @@ async function main() {
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
-      `dig: ${state.digEnabled ? "on" : "off"}  r=${state.digRadius}  edits=${digEditCount()}` +
+      `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}` +
       `${lastDigSummary ? `  last: ${lastDigSummary}` : ""}\n` +
       playerLine;
   };
@@ -973,7 +989,11 @@ async function main() {
     const hit = terrainColliders.raycastSurface(ray);
     if (!hit) return;
     const radius = state.digRadius;
-    addDigEdit({ x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius });
+    addDigEdit({
+      x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
+      shape: state.brushShape, op: state.brushOp,
+      material: state.brushOp === "add" ? state.brushMaterial : undefined,
+    });
     const t0 = performance.now();
     const margin = radius + DIG_INFLUENCE_MARGIN;
     const lod0 = rebuildDirtyLod0Pages(result, {
@@ -995,7 +1015,7 @@ async function main() {
       `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
       `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
     console.log(
-      `[dig] r=${radius} at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
+      `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
     );
     lastDigAt = performance.now();
     lastCutKey = "";
@@ -1484,8 +1504,126 @@ async function main() {
     if (delta === 0) return;
     state.digRadius = THREE.MathUtils.clamp(state.digRadius - Math.sign(delta) * 0.5, 1, 8);
     digRadiusController.updateDisplay();
+    syncTerraformMenu();
     updateInfo();
   });
+
+  // ---- bottom-left terraform menu (orbit mode): material + brush shape/op/size ----
+  // Material swatches map to terrain texture slots 0..3 (what `add` deposits paint with);
+  // brush controls drive the same global state the click handlers and preview read.
+  const PAINT_SWATCH_COLORS = ["#6b9b4d", "#8c8580", "#d9c78d", "#f5f7ff"];
+  const terraformMenu = document.getElementById("terraform-menu")!;
+
+  const makeRow = (label: string) => {
+    const row = document.createElement("div");
+    row.className = "tf-row";
+    const tag = document.createElement("span");
+    tag.className = "tf-label";
+    tag.textContent = label;
+    row.appendChild(tag);
+    terraformMenu.appendChild(row);
+    return row;
+  };
+
+  const materialRow = makeRow("Material");
+  const swatchButtons: HTMLButtonElement[] = [];
+  for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tf-swatch";
+    const name = document.createElement("span");
+    btn.appendChild(name);
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      state.brushMaterial = i;
+      refreshTerraformSwatches();
+    });
+    swatchButtons.push(btn);
+    materialRow.appendChild(btn);
+  }
+
+  const makeToggleGroup = <T extends string>(
+    row: HTMLElement,
+    options: { value: T; label: string }[],
+    get: () => T,
+    set: (v: T) => void,
+  ) => {
+    const buttons = options.map(({ value, label }) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        set(value);
+        sync();
+      });
+      row.appendChild(btn);
+      return { value, btn };
+    });
+    const sync = () => {
+      for (const { value, btn } of buttons) btn.setAttribute("aria-pressed", String(get() === value));
+    };
+    sync();
+    return sync;
+  };
+
+  const brushRow = makeRow("Brush");
+  const syncOp = makeToggleGroup<BrushOp>(
+    brushRow,
+    [{ value: "remove", label: "Dig" }, { value: "add", label: "Raise" }],
+    () => state.brushOp,
+    (v) => { state.brushOp = v; updateInfo(); },
+  );
+  const spacer = document.createElement("span");
+  spacer.style.width = "6px";
+  brushRow.appendChild(spacer);
+  makeToggleGroup<BrushShape>(
+    brushRow,
+    [{ value: "sphere", label: "Sphere" }, { value: "cube", label: "Cube" }, { value: "cylinder", label: "Cyl" }],
+    () => state.brushShape,
+    (v) => { state.brushShape = v; },
+  );
+
+  const sizeRow = makeRow("Size");
+  const sizeWrap = document.createElement("div");
+  sizeWrap.className = "tf-size";
+  const sizeInput = document.createElement("input");
+  sizeInput.type = "range";
+  sizeInput.min = "1"; sizeInput.max = "8"; sizeInput.step = "0.5";
+  sizeInput.value = String(state.digRadius);
+  const sizeOut = document.createElement("output");
+  sizeOut.textContent = String(state.digRadius);
+  sizeInput.addEventListener("input", () => {
+    state.digRadius = Number(sizeInput.value);
+    sizeOut.textContent = String(state.digRadius);
+    digRadiusController.updateDisplay();
+    updateInfo();
+  });
+  sizeWrap.append(sizeInput, sizeOut);
+  sizeRow.appendChild(sizeWrap);
+
+  refreshTerraformSwatches = () => {
+    rebuildActiveTerrainSlots();
+    const active = activeTerrainSlots.length;
+    // with textures loaded, only painted slots that have a texture are selectable (else black)
+    if (active > 0 && state.brushMaterial >= active) state.brushMaterial = 0;
+    for (let i = 0; i < swatchButtons.length; i++) {
+      const btn = swatchButtons[i];
+      const slot = activeTerrainSlots[i];
+      const label = btn.firstChild as HTMLSpanElement;
+      btn.disabled = active > 0 && i >= active;
+      btn.style.backgroundImage = slot?.previewUrl ? `url("${slot.previewUrl}")` : "";
+      btn.style.backgroundColor = slot?.previewUrl ? "transparent" : PAINT_SWATCH_COLORS[i];
+      label.textContent = slot?.name && slot.name !== "empty" ? slot.name : TERRAIN_TEXTURE_BANDS[i];
+      btn.setAttribute("aria-pressed", String(state.brushMaterial === i && !btn.disabled));
+    }
+  };
+  // keep the slider/op in sync if state changes elsewhere (e.g. Shift+wheel radius)
+  syncTerraformMenu = () => {
+    sizeInput.value = String(state.digRadius);
+    sizeOut.textContent = String(state.digRadius);
+    syncOp();
+  };
+  refreshTerraformSwatches();
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -1537,6 +1675,10 @@ async function main() {
     if (digAimHit) {
       digPreview.position.copy(digAimHit.point);
       digPreview.scale.setScalar(state.digRadius);
+      digPreview.geometry = brushPreviewGeometries[state.brushShape];
+      (digPreview.material as THREE.MeshBasicMaterial).color.setHex(
+        state.brushOp === "add" ? 0x55dd66 : 0xff5533,
+      );
     }
     digPreview.visible = digAimHit !== null;
 

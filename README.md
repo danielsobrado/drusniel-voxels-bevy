@@ -5,6 +5,8 @@ Game based on https://www.drusniel.com/ lore.
 ![Loader](docs/images/Loader.jpg)
 
 
+Play with the online web version:  https://danielsobrado.github.io/drusniel-voxels-bevy/
+
 ## Version History
 
 See [version-history.md](docs/reference/version-history.md) for release notes and historical feature summaries.

@@ -204,12 +204,19 @@ export function surfaceHeight(x: number, z: number): number {
 // field via CSG min(base, |p-c| - r). The edits stay a pure function of (x,y,z), so
 // halo recomputation still emits byte-identical border vertices and welding holds.
 
-/** A carved-out sphere of air. */
+export type BrushShape = "sphere" | "cube" | "cylinder";
+/** "remove" carves air (CSG subtract); "add" deposits solid (CSG union) tagged `material`. */
+export type BrushOp = "remove" | "add";
+
+/** One terraform edit: a brush volume at (x,y,z) of half-size r, subtracted or added. */
 export interface DigEdit {
   x: number;
   y: number;
   z: number;
   r: number;
+  shape?: BrushShape; // default "sphere"
+  op?: BrushOp; // default "remove"
+  material?: number; // add only: terrain texture slot 0..3 to paint the deposit with
 }
 
 /** Carving at or below this height is ignored — analogue of the engine's bedrock guard. */
@@ -232,6 +239,25 @@ export function digEditCount(): number {
   return digEdits.length;
 }
 
+/** Signed distance to a brush volume centred at the offset (dx,dy,dz), half-size r.
+ *  Negative inside, positive outside — the same convention for every shape. */
+function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: number, r: number): number {
+  switch (shape) {
+    case "cube": {
+      const qx = Math.abs(dx) - r, qy = Math.abs(dy) - r, qz = Math.abs(dz) - r;
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
+      return outside + Math.min(Math.max(qx, qy, qz), 0);
+    }
+    case "cylinder": {
+      const dRadial = Math.hypot(dx, dz) - r, dAxial = Math.abs(dy) - r;
+      const outside = Math.hypot(Math.max(dRadial, 0), Math.max(dAxial, 0));
+      return outside + Math.min(Math.max(dRadial, dAxial), 0);
+    }
+    default:
+      return Math.hypot(dx, dy, dz) - r; // sphere
+  }
+}
+
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
 export function density(x: number, y: number, z: number): number {
   let d = surfaceHeight(x, z) - y;
@@ -240,7 +266,9 @@ export function density(x: number, y: number, z: number): number {
       const reach = e.r + DIG_INFLUENCE_MARGIN;
       const dx = x - e.x, dy = y - e.y, dz = z - e.z;
       if (Math.abs(dx) > reach || Math.abs(dy) > reach || Math.abs(dz) > reach) continue;
-      d = Math.min(d, Math.hypot(dx, dy, dz) - e.r);
+      const sdf = brushSdf(e.shape, dx, dy, dz, e.r);
+      // add: union solid (max with the inverted SDF); remove: subtract air (min with the SDF)
+      d = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
     }
   }
   return d;
@@ -273,6 +301,34 @@ export function materialWeights(y: number, ny: number): [number, number, number,
   const grass = Math.max(0, 1 - sand - snow - rock);
   const sum = sand + snow + rock + grass || 1;
   return [grass / sum, rock / sum, sand / sum, snow / sum];
+}
+
+/** Deposited-surface vertices sit at the brush boundary (sdf ≈ 0); catch both sides. */
+const MATERIAL_PAINT_BAND = 0.75;
+
+/**
+ * Per-vertex paint override carried in the mesh `material` attribute: a one-hot weight on
+ * the terrain texture slot of the last `add` edit whose brush contains this vertex, or all
+ * zeros for natural terrain (which the shader renders with its height bands). Pure function
+ * of position, so coincident border vertices agree and the weld holds.
+ */
+export function paintMaterialAt(x: number, y: number, z: number): [number, number, number, number] {
+  if (digEdits.length > 0) {
+    for (let i = digEdits.length - 1; i >= 0; i--) {
+      const e = digEdits[i];
+      if (e.op !== "add") continue;
+      const reach = e.r + DIG_INFLUENCE_MARGIN;
+      const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+      if (Math.abs(dx) > reach || Math.abs(dy) > reach || Math.abs(dz) > reach) continue;
+      if (brushSdf(e.shape, dx, dy, dz, e.r) <= MATERIAL_PAINT_BAND) {
+        const slot = Math.max(0, Math.min(3, (e.material ?? 0) | 0));
+        const m: [number, number, number, number] = [0, 0, 0, 0];
+        m[slot] = 1;
+        return m;
+      }
+    }
+  }
+  return [0, 0, 0, 0];
 }
 
 // ---- per-chunk surface nets ----------------------------------------------
@@ -355,7 +411,7 @@ function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): numbe
   if (p === null) return null;
   const [px, py, pz] = p;
   const [nx, ny, nz] = gradient(px, py, pz);
-  const [m0, m1, m2, m3] = materialWeights(py, ny);
+  const [m0, m1, m2, m3] = paintMaterialAt(px, py, pz);
   const idx = buf.pos.length / 3;
   buf.pos.push(px, py, pz);
   buf.nrm.push(nx, ny, nz);

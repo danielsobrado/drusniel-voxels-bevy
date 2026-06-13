@@ -53,6 +53,39 @@
       }
       #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
       #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
+      #terraform-menu {
+        position: absolute; left: 8px; bottom: 8px; z-index: 12;
+        display: grid; gap: 7px; padding: 8px 9px;
+        color: #eef3f8; background: rgba(12, 15, 19, 0.74);
+        border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 5px;
+        font: 11px/1.3 system-ui, -apple-system, Segoe UI, sans-serif;
+        backdrop-filter: blur(3px); user-select: none;
+      }
+      body[data-player-mode="playing"] #terraform-menu,
+      body[data-player-mode="choosingSpawn"] #terraform-menu { display: none; }
+      .tf-row { display: flex; align-items: center; gap: 5px; }
+      .tf-label { width: 52px; color: #9fb0c0; flex: none; }
+      #terraform-menu button {
+        padding: 4px 8px; border: 1px solid #46515e; border-radius: 3px;
+        color: #dce5ee; background: #20262d; cursor: pointer; font: inherit;
+      }
+      #terraform-menu button:hover { background: #2b343e; }
+      #terraform-menu button[aria-pressed="true"] {
+        border-color: #74b8f5; color: #fff; background: #245781;
+      }
+      .tf-swatch {
+        width: 30px; height: 30px; padding: 0; border-radius: 3px;
+        background: #0b0d10 center / cover no-repeat; position: relative;
+      }
+      .tf-swatch[aria-pressed="true"] { border-color: #ffd479; box-shadow: 0 0 0 1px #ffd479; }
+      .tf-swatch[disabled] { opacity: 0.32; cursor: not-allowed; }
+      .tf-swatch span {
+        position: absolute; left: 0; right: 0; bottom: 0; font-size: 8px; line-height: 1.2;
+        background: rgba(0, 0, 0, 0.55); text-align: center; color: #e8edf3;
+      }
+      .tf-size { display: flex; align-items: center; gap: 6px; }
+      .tf-size input[type="range"] { width: 96px; }
+      .tf-size output { width: 26px; text-align: right; color: #cdd8e3; }
       #build-progress[hidden] { display: none; }
       #build-progress {
         position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -144,6 +177,7 @@
       <button id="player-mode" type="button" aria-pressed="false">Player</button>
       <span id="player-mode-status">Orbit camera</span>
     </div>
+    <div id="terraform-menu" aria-label="Terraform brush"></div>
     <div id="build-progress">
       <div id="build-progress-label">
         <span id="build-progress-phase">preparing</span>

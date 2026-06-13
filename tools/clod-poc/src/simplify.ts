@@ -6,7 +6,7 @@
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
-import { materialWeights } from "./terrain.js";
+import { paintMaterialAt } from "./terrain.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {
@@ -110,7 +110,7 @@ function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number): Pag
       const pz = snap(mesh.positions[old * 3 + 2], snapEpsilon);
       pos.push(px, py, pz);
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      const [m0, m1, m2, m3] = materialWeights(py, mesh.normals[old * 3 + 1]);
+      const [m0, m1, m2, m3] = paintMaterialAt(px, py, pz);
       mat.push(m0, m1, m2, m3);
     }
     out[i] = ni;
