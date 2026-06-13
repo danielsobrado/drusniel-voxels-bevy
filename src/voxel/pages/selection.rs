@@ -13,6 +13,7 @@ use super::runtime::ClodPagesRuntime;
 use super::types::PageFootprint;
 use crate::gameplay::camera::controller::PlayerCamera;
 use crate::gameplay::player::Player;
+use crate::rendering::triplanar_material::TriplanarMaterial;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ClodPageNodeKey {
@@ -109,6 +110,14 @@ impl ClodPageSelectionIndex {
 #[derive(Resource, Default)]
 pub(crate) struct ClodPageSelectionState {
     split: HashSet<ClodPageNodeKey>,
+    fades: HashMap<ClodPageNodeKey, f32>,
+}
+
+impl ClodPageSelectionState {
+    fn clear(&mut self) {
+        self.split.clear();
+        self.fades.clear();
+    }
 }
 
 struct SelectionParams {
@@ -382,11 +391,38 @@ fn make_params(
     })
 }
 
-fn hide_all_pages(query: &mut Query<(&ClodPageMeshTag, &mut Visibility)>) {
-    for (_, mut visibility) in query.iter_mut() {
+fn set_page_fade(
+    materials: &mut Assets<TriplanarMaterial>,
+    handle: &Handle<TriplanarMaterial>,
+    fade: f32,
+) {
+    let fade = fade.clamp(0.0, 1.0);
+    let dither = fade > 0.0 && fade < 0.999;
+    if materials.get(handle).is_some_and(|material| {
+        (material.uniforms.clod_fade - fade).abs() <= 0.0001
+            && material.clod_page_dither == dither
+    }) {
+        return;
+    }
+    if let Some(material) = materials.get_mut(handle) {
+        material.uniforms.clod_fade = fade;
+        material.clod_page_dither = dither;
+    }
+}
+
+fn hide_all_pages(
+    query: &mut Query<(
+        &ClodPageMeshTag,
+        &mut Visibility,
+        &MeshMaterial3d<TriplanarMaterial>,
+    )>,
+    materials: &mut Assets<TriplanarMaterial>,
+) {
+    for (_, mut visibility, material) in query.iter_mut() {
         if *visibility != Visibility::Hidden {
             *visibility = Visibility::Hidden;
         }
+        set_page_fade(materials, &material.0, 0.0);
     }
 }
 
@@ -404,29 +440,36 @@ pub(crate) fn clod_page_selection_system(
     camera_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    mut pages: Query<(&ClodPageMeshTag, &mut Visibility)>,
+    mut pages: Query<(
+        &ClodPageMeshTag,
+        &mut Visibility,
+        &MeshMaterial3d<TriplanarMaterial>,
+    )>,
+    mut materials: ResMut<Assets<TriplanarMaterial>>,
 ) {
     if !runtime.enabled
         || show.0 == ClodPagesShowMode::Off
         || index.revision.is_none()
         || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
     {
-        state.split.clear();
+        state.clear();
         if !should_hold_current_page_visibility(gate.as_deref()) {
-            hide_all_pages(&mut pages);
+            hide_all_pages(&mut pages, &mut materials);
         }
         return;
     }
 
     let Ok((camera_transform, projection)) = camera_query.single() else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
-            hide_all_pages(&mut pages);
+            state.clear();
+            hide_all_pages(&mut pages, &mut materials);
         }
         return;
     };
     let Ok(window) = window_query.single() else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
-            hide_all_pages(&mut pages);
+            state.clear();
+            hide_all_pages(&mut pages, &mut materials);
         }
         return;
     };
@@ -439,7 +482,8 @@ pub(crate) fn clod_page_selection_system(
         player_transform,
     ) else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
-            hide_all_pages(&mut pages);
+            state.clear();
+            hide_all_pages(&mut pages, &mut materials);
         }
         return;
     };
@@ -449,27 +493,57 @@ pub(crate) fn clod_page_selection_system(
 
     let rendered: HashSet<ClodPageNodeKey> = rendered.into_iter().collect();
     let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-    for (tag, mut visibility) in pages.iter_mut() {
+    let crossfade_frames = runtime.cfg.selection.crossfade_frames;
+    let fade_step = if crossfade_frames == 0 {
+        1.0
+    } else {
+        1.0 / crossfade_frames as f32
+    };
+    for (tag, mut visibility, material) in pages.iter_mut() {
         let key = ClodPageNodeKey::from(tag);
         let pending_live_restore = gate
             .as_deref()
             .is_some_and(|gate| gate.node_has_pending_restore(key, chunks_per_page));
-        let visible = rendered.contains(&key)
-            && (pending_live_restore
-                || index.node(key).is_some_and(|node| {
-                    !near_field_intersects_footprint(node.footprint, params.near_field)
-                }));
-        let desired = if visible {
+        let outside_near_field = index.node(key).is_some_and(|node| {
+            !near_field_intersects_footprint(node.footprint, params.near_field)
+        });
+        let in_cut = rendered.contains(&key);
+        let current =
+            state
+                .fades
+                .get(&key)
+                .copied()
+                .unwrap_or(if *visibility == Visibility::Visible {
+                    1.0
+                } else {
+                    0.0
+                });
+        let next = if pending_live_restore && in_cut {
+            1.0
+        } else if !outside_near_field {
+            0.0
+        } else if in_cut {
+            (current + fade_step).min(1.0)
+        } else {
+            (current - fade_step).max(0.0)
+        };
+
+        if next > 0.0 {
+            state.fades.insert(key, next);
+        } else {
+            state.fades.remove(&key);
+        }
+
+        set_page_fade(&mut materials, &material.0, next);
+        let desired_visibility = if next > 0.0 {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-        if *visibility != desired {
-            *visibility = desired;
+        if *visibility != desired_visibility {
+            *visibility = desired_visibility;
         }
     }
-    // TODO(clod phase5 §6): replace instant visibility flips with triplanar alpha-hash
-    // crossfade driven by `selection.crossfade_frames`.
 }
 
 #[cfg(test)]

@@ -143,7 +143,10 @@ pub(crate) fn mesh_dirty_chunks_system(
         if gate.enabled && gate.pages_ready {
             let mut live_dirty_chunks = Vec::with_capacity(dirty_chunks.len());
             for chunk_pos in dirty_chunks {
-                if gate.owns_chunk(chunk_pos) {
+                let terrain_mutation = world
+                    .get_chunk(chunk_pos)
+                    .is_some_and(|chunk| chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation));
+                if gate.owns_chunk(chunk_pos) && !terrain_mutation {
                     if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
                         chunk.clear_dirty();
                     }

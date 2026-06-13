@@ -42,6 +42,8 @@ pub struct TriplanarUniforms {
     pub snow_tint_strength: f32,
     pub weather_time: f32,
     pub weather_flags: u32,
+    /// CLOD page screen-door fade: 0 = fully dithered out, 1 = fully visible.
+    pub clod_fade: f32,
 }
 
 /// High byte of `weather_flags` stores chunk LOD (0–3) for debug wireframe tinting.
@@ -118,6 +120,7 @@ impl Default for TriplanarUniforms {
             snow_tint_strength: 0.0,
             weather_time: 0.0,
             weather_flags: 0,
+            clod_fade: 1.0,
         }
     }
 }
@@ -132,6 +135,8 @@ pub struct TriplanarMaterial {
     pub quality: TerrainMaterialQuality,
     /// Pipeline specialization flag: compile the hex-tiling shader branch.
     pub hex_tiling_shader_enabled: bool,
+    /// Pipeline specialization flag: page meshes use alpha-hash crossfade.
+    pub clod_page_dither: bool,
 
     // Grass textures (mat 0)
     #[texture(1)]
@@ -194,6 +199,7 @@ pub enum TerrainMaterialQuality {
 pub struct TriplanarMaterialKey {
     quality: TerrainMaterialQuality,
     hex_tiling_shader_enabled: bool,
+    clod_page_dither: bool,
 }
 
 impl From<&TriplanarMaterial> for TriplanarMaterialKey {
@@ -201,6 +207,7 @@ impl From<&TriplanarMaterial> for TriplanarMaterialKey {
         Self {
             quality: material.quality,
             hex_tiling_shader_enabled: material.hex_tiling_shader_enabled,
+            clod_page_dither: material.clod_page_dither,
         }
     }
 }
@@ -211,6 +218,7 @@ impl Default for TriplanarMaterial {
             uniforms: TriplanarUniforms::default(),
             quality: TerrainMaterialQuality::FullTriplanar,
             hex_tiling_shader_enabled: false,
+            clod_page_dither: false,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -263,7 +271,11 @@ impl Material for TriplanarMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
+        if self.clod_page_dither {
+            AlphaMode::Mask(0.0)
+        } else {
+            AlphaMode::Opaque
+        }
     }
 
     fn opaque_render_method(&self) -> OpaqueRendererMethod {
@@ -354,6 +366,9 @@ impl Material for TriplanarMaterial {
             }
             if _key.bind_group_data.hex_tiling_shader_enabled {
                 fragment.shader_defs.push("TERRAIN_HEX_TILING".into());
+            }
+            if _key.bind_group_data.clod_page_dither {
+                fragment.shader_defs.push("TERRAIN_CLOD_DITHER".into());
             }
         }
         Ok(())

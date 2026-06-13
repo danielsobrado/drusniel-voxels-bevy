@@ -19,8 +19,9 @@ use super::types::PageFootprint;
 use crate::constants::CHUNK_SIZE_F32;
 use crate::gameplay::camera::controller::PlayerCamera;
 use crate::gameplay::player::Player;
-use crate::voxel::chunk::MeshDirtyReason;
+use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
+use crate::voxel::runtime::mark_chunk_lod_halo_dirty;
 use crate::voxel::world::VoxelWorld;
 
 #[cfg(test)]
@@ -67,6 +68,13 @@ impl Default for ClodPageMeshGate {
 impl ClodPageMeshGate {
     pub(crate) fn owns_chunk(&self, chunk_pos: IVec3) -> bool {
         self.enabled && self.pages_ready && self.owned_columns.contains(&chunk_column(chunk_pos))
+    }
+
+    pub(crate) fn chunk_pending_restore(&self, chunk_pos: IVec3) -> bool {
+        self.enabled
+            && self
+                .pending_restore_columns
+                .contains(&chunk_column(chunk_pos))
     }
 
     pub(crate) fn should_hold_pages_visible(&self) -> bool {
@@ -221,6 +229,51 @@ fn refresh_pending_restore_columns(gate: &mut ClodPageMeshGate, world: &VoxelWor
     gate.pending_restore_columns = pending;
 }
 
+fn refresh_terrain_mutation_restore_columns(gate: &mut ClodPageMeshGate, world: &mut VoxelWorld) {
+    if gate.owned_columns.is_empty() {
+        return;
+    }
+
+    let mutation_columns = world
+        .chunk_entries()
+        .filter_map(|(pos, chunk)| {
+            chunk
+                .has_dirty_reason(MeshDirtyReason::TerrainMutation)
+                .then_some(chunk_column(*pos))
+        })
+        .filter(|column| gate.owned_columns.contains(column))
+        .collect::<HashSet<_>>();
+    if mutation_columns.is_empty() {
+        return;
+    }
+
+    let positions = world
+        .chunk_entries()
+        .filter_map(|(pos, _)| {
+            mutation_columns
+                .contains(&chunk_column(*pos))
+                .then_some(*pos)
+        })
+        .collect::<Vec<_>>();
+    let mut lod_changed = Vec::new();
+    for pos in positions {
+        if let Some(mut chunk) = world.get_chunk_mut(pos) {
+            if chunk.set_lod_level(LodLevel::Lod0) {
+                lod_changed.push(pos);
+            }
+            chunk.mark_dirty_with_reason(MeshDirtyReason::TerrainMutation);
+        }
+    }
+    for pos in lod_changed {
+        mark_chunk_lod_halo_dirty(world, pos);
+    }
+
+    for column in &mutation_columns {
+        gate.owned_columns.remove(column);
+    }
+    gate.pending_restore_columns.extend(mutation_columns);
+}
+
 fn mark_lost_owned_columns_dirty(
     gate: &mut ClodPageMeshGate,
     world: &mut VoxelWorld,
@@ -263,6 +316,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     }
 
     refresh_pending_restore_columns(&mut gate, &world);
+    refresh_terrain_mutation_restore_columns(&mut gate, &mut world);
 
     let pages_ready = runtime.enabled
         && show.0 != ClodPagesShowMode::Off
@@ -366,6 +420,8 @@ pub(crate) fn clod_page_chunk_ownership_system(
         ),
         Without<WaterMesh>,
     >,
+    page_mesh_gate: Option<Res<ClodPageMeshGate>>,
+    world: Res<VoxelWorld>,
     mut had_owned_chunks: Local<bool>,
 ) {
     let pages_can_own = runtime.enabled
@@ -414,6 +470,16 @@ pub(crate) fn clod_page_chunk_ownership_system(
                 commands.entity(entity).insert(ClodPageOwnedChunk);
             }
         } else {
+            if page_mesh_gate
+                .as_deref()
+                .is_some_and(|gate| gate.chunk_pending_restore(chunk_mesh.chunk_position))
+                && world
+                    .get_chunk(chunk_mesh.chunk_position)
+                    .is_some_and(|chunk| chunk.is_dirty() || chunk.mesh_entity().is_none())
+            {
+                any_owned_chunks = true;
+                continue;
+            }
             restore_clod_hidden_chunk(&mut commands, entity, &mut visibility, marker);
         }
     }

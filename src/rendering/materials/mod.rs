@@ -649,6 +649,7 @@ pub fn setup_triplanar_material(
             },
             quality: TerrainMaterialQuality::FullTriplanar,
             hex_tiling_shader_enabled: false,
+            clod_page_dither: false,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -674,6 +675,7 @@ pub fn setup_triplanar_material(
             },
             quality: TerrainMaterialQuality::FullTriplanar,
             hex_tiling_shader_enabled: false,
+            clod_page_dither: false,
             // Grass textures (for TopSoil top faces)
             grass_albedo: Some(asset_server.load("pbr/grass/albedo.png")),
             grass_normal: Some(asset_server.load("pbr/grass/normal.png")),

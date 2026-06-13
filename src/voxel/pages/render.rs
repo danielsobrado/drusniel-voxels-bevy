@@ -16,7 +16,7 @@ use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
-use crate::voxel::meshing::{TERRAIN_MESH_SECTION_MAIN, encode_barycentric_uv};
+use crate::voxel::meshing::{encode_barycentric_uv, TERRAIN_MESH_SECTION_MAIN};
 const PAGE_MESH_COMMITS_PER_FRAME: usize = 4;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,7 +85,9 @@ pub(crate) struct ClodPageMeshCommitState {
     committed_tree_revision: Option<u64>,
     entities: Vec<Entity>,
     mesh_handles: Vec<Handle<Mesh>>,
+    material_handles: Vec<Handle<TriplanarMaterial>>,
     retired_mesh_handles: Vec<Handle<Mesh>>,
+    retired_material_handles: Vec<Handle<TriplanarMaterial>>,
     pending: Option<PendingMeshCommit>,
 }
 
@@ -94,6 +96,7 @@ struct PendingMeshCommit {
     remaining_nodes: VecDeque<(usize, usize)>,
     entities: Vec<Entity>,
     mesh_handles: Vec<Handle<Mesh>>,
+    material_handles: Vec<Handle<TriplanarMaterial>>,
     bounds_by_node: HashMap<ClodPageNodeKey, ClodPageMeshBounds>,
 }
 
@@ -155,6 +158,7 @@ fn page_mesh_to_bevy_mesh(page_mesh: &PageMesh) -> (Mesh, ClodPageMeshBounds) {
 fn clear_pending_commit(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<TriplanarMaterial>,
     state: &mut ClodPageMeshCommitState,
 ) {
     let Some(mut pending) = state.pending.take() else {
@@ -164,6 +168,7 @@ fn clear_pending_commit(
         commands.entity(entity).despawn();
     }
     remove_mesh_assets(meshes, pending.mesh_handles);
+    remove_material_assets(materials, pending.material_handles);
 }
 
 fn remove_mesh_assets(meshes: &mut Assets<Mesh>, handles: Vec<Handle<Mesh>>) {
@@ -172,23 +177,52 @@ fn remove_mesh_assets(meshes: &mut Assets<Mesh>, handles: Vec<Handle<Mesh>>) {
     }
 }
 
+fn remove_material_assets(
+    materials: &mut Assets<TriplanarMaterial>,
+    handles: Vec<Handle<TriplanarMaterial>>,
+) {
+    for handle in handles {
+        materials.remove(handle.id());
+    }
+}
+
+fn clod_page_material(
+    materials: &mut Assets<TriplanarMaterial>,
+    base_handle: &Handle<TriplanarMaterial>,
+) -> Handle<TriplanarMaterial> {
+    let mut material = materials
+        .get(base_handle)
+        .cloned()
+        .unwrap_or_else(TriplanarMaterial::default);
+    material.quality = TerrainMaterialQuality::FullTriplanar;
+    material.clod_page_dither = true;
+    material.uniforms.clod_fade = 0.0;
+    materials.add(material)
+}
+
 pub(crate) fn clod_page_mesh_commit_system(
     mut commands: Commands,
     runtime: Res<ClodPagesRuntime>,
     tree: Res<ClodPageTree>,
     triplanar_material: Res<TriplanarMaterialHandle>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TriplanarMaterial>>,
     mut state: ResMut<ClodPageMeshCommitState>,
     mut selection_index: ResMut<ClodPageSelectionIndex>,
 ) {
     remove_mesh_assets(&mut meshes, std::mem::take(&mut state.retired_mesh_handles));
+    remove_material_assets(
+        &mut materials,
+        std::mem::take(&mut state.retired_material_handles),
+    );
 
     if !runtime.enabled {
-        clear_pending_commit(&mut commands, &mut meshes, &mut state);
+        clear_pending_commit(&mut commands, &mut meshes, &mut materials, &mut state);
         for entity in state.entities.drain(..) {
             commands.entity(entity).despawn();
         }
         remove_mesh_assets(&mut meshes, std::mem::take(&mut state.mesh_handles));
+        remove_material_assets(&mut materials, std::mem::take(&mut state.material_handles));
         state.committed_tree_revision = None;
         selection_index.clear();
         return;
@@ -207,7 +241,7 @@ pub(crate) fn clod_page_mesh_commit_system(
         .as_ref()
         .is_none_or(|pending| pending.tree_revision != tree.revision)
     {
-        clear_pending_commit(&mut commands, &mut meshes, &mut state);
+        clear_pending_commit(&mut commands, &mut meshes, &mut materials, &mut state);
         let node_count = tree.nodes_by_level.iter().map(Vec::len).sum();
         let remaining_nodes = tree
             .nodes_by_level
@@ -222,6 +256,7 @@ pub(crate) fn clod_page_mesh_commit_system(
             remaining_nodes,
             entities: Vec::with_capacity(node_count),
             mesh_handles: Vec::with_capacity(node_count),
+            material_handles: Vec::with_capacity(node_count),
             bounds_by_node: HashMap::with_capacity(node_count),
         });
     }
@@ -238,19 +273,20 @@ pub(crate) fn clod_page_mesh_commit_system(
             .get(level_index)
             .and_then(|nodes| nodes.get(node_index))
         else {
-            clear_pending_commit(&mut commands, &mut meshes, &mut state);
+            clear_pending_commit(&mut commands, &mut meshes, &mut materials, &mut state);
             return;
         };
 
         let (mesh, bounds) = page_mesh_to_bevy_mesh(&node.mesh);
         let mesh_handle = meshes.add(mesh);
+        let page_material_handle = clod_page_material(&mut materials, &material_handle);
         pending
             .bounds_by_node
             .insert(ClodPageNodeKey::new(node.level, node.coord), bounds);
         let entity = commands
             .spawn((
                 Mesh3d(mesh_handle.clone()),
-                MeshMaterial3d::<TriplanarMaterial>(material_handle.clone()),
+                MeshMaterial3d::<TriplanarMaterial>(page_material_handle.clone()),
                 Transform::IDENTITY,
                 RenderLayers::default(),
                 NotShadowCaster,
@@ -264,6 +300,7 @@ pub(crate) fn clod_page_mesh_commit_system(
             .id();
         pending.entities.push(entity);
         pending.mesh_handles.push(mesh_handle);
+        pending.material_handles.push(page_material_handle);
     }
 
     if state
@@ -280,8 +317,13 @@ pub(crate) fn clod_page_mesh_commit_system(
     }
     let mut old_mesh_handles = std::mem::take(&mut state.mesh_handles);
     state.retired_mesh_handles.append(&mut old_mesh_handles);
+    let mut old_material_handles = std::mem::take(&mut state.material_handles);
+    state
+        .retired_material_handles
+        .append(&mut old_material_handles);
     state.entities = pending.entities;
     state.mesh_handles = pending.mesh_handles;
+    state.material_handles = pending.material_handles;
     state.committed_tree_revision = Some(tree.revision);
     selection_index.rebuild(&tree, &pending.bounds_by_node);
 }

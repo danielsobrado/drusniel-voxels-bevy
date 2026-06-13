@@ -41,6 +41,7 @@ struct TriplanarUniforms {
     snow_tint_strength: f32,
     weather_time: f32,
     weather_flags: u32,
+    clod_fade: f32,
 };
 
 // Uniform roughness values per terrain material (no texture maps needed)
@@ -68,6 +69,12 @@ fn triplanar_debug_lod_level() -> u32 {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: TriplanarUniforms;
+
+#ifdef TERRAIN_CLOD_DITHER
+fn clod_interleaved_gradient_noise(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+#endif
 
 // Grass textures (material 0)
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var grass_albedo: texture_2d<f32>;
@@ -489,6 +496,12 @@ fn apply_terrain_iso_band_overlay(
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
+#ifdef TERRAIN_CLOD_DITHER
+    if (clod_interleaved_gradient_noise(in.position.xy) > clamp(uniforms.clod_fade, 0.0, 1.0)) {
+        discard;
+    }
+#endif
+
     var pbr_input = pbr_fragment::pbr_input_from_vertex_output(in, is_front, true);
     let world_pos = pbr_input.world_position.xyz;
     let raw_world_normal = normalize(in.world_normal);

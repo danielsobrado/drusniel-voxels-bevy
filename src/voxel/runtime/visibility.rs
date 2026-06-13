@@ -268,19 +268,28 @@ pub(crate) fn update_chunk_lod_system(
         if page_mesh_gate
             .as_deref()
             .is_some_and(|gate| gate.owns_chunk(*chunk_pos))
+            && !chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation)
         {
             continue;
         }
         let distance = terrain_lod_distance_xz(*chunk_pos, camera_pos);
         let current_lod = chunk.lod_level();
-        let target_lod = forensics_forced_lod(bench_forensics.as_deref()).unwrap_or_else(|| {
-            water_shore_guarded_lod(
-                calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings),
-                distance,
-                &lod_settings,
-                water_lod_guard_chunks.contains(chunk_pos),
-            )
-        });
+        let page_restore_mutation = chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation)
+            && page_mesh_gate
+                .as_deref()
+                .is_some_and(|gate| gate.chunk_pending_restore(*chunk_pos));
+        let target_lod = if page_restore_mutation {
+            LodLevel::Lod0
+        } else {
+            forensics_forced_lod(bench_forensics.as_deref()).unwrap_or_else(|| {
+                water_shore_guarded_lod(
+                    calculate_target_lod_with_hysteresis(distance, current_lod, &lod_settings),
+                    distance,
+                    &lod_settings,
+                    water_lod_guard_chunks.contains(chunk_pos),
+                )
+            })
+        };
         desired.insert(*chunk_pos, target_lod);
         chunk_state.insert(*chunk_pos, (current_lod, distance));
     }
