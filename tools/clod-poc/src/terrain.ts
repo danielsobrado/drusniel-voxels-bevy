@@ -208,7 +208,7 @@ export type BrushShape = "sphere" | "cube" | "cylinder";
 /** "remove" carves air (CSG subtract); "add" deposits solid (CSG union) tagged `material`. */
 export type BrushOp = "remove" | "add";
 
-/** One terraform edit: a brush volume at (x,y,z) of half-size r, subtracted or added. */
+/** One terraform edit: a brush volume at (x,y,z) of horizontal half-size r, subtracted or added. */
 export interface DigEdit {
   x: number;
   y: number;
@@ -217,6 +217,9 @@ export interface DigEdit {
   shape?: BrushShape; // default "sphere"
   op?: BrushOp; // default "remove"
   material?: number; // add only: terrain texture slot 0..3 to paint the deposit with
+  height?: number; // vertical half-extent (cells); default r (sphere becomes an ellipsoid)
+  strength?: number; // 0..1 fraction of the full carve/fill applied; default 1 (hard edit)
+  falloff?: number; // 0..1 edge softness: feather width as a fraction of r; default 0 (hard edge)
 }
 
 /** Carving at or below this height is ignored — analogue of the engine's bedrock guard. */
@@ -250,23 +253,28 @@ export function digEditCount(): number {
   return digEdits.length;
 }
 
-/** Signed distance to a brush volume centred at the offset (dx,dy,dz), half-size r.
- *  Negative inside, positive outside — the same convention for every shape. */
-function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: number, r: number): number {
+/** Signed distance to a brush volume centred at the offset (dx,dy,dz), horizontal half-size
+ *  r and vertical half-size h. Negative inside, positive outside, for every shape. */
+function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: number, r: number, h: number): number {
   switch (shape) {
     case "cube": {
-      const qx = Math.abs(dx) - r, qy = Math.abs(dy) - r, qz = Math.abs(dz) - r;
+      const qx = Math.abs(dx) - r, qy = Math.abs(dy) - h, qz = Math.abs(dz) - r;
       const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
       return outside + Math.min(Math.max(qx, qy, qz), 0);
     }
     case "cylinder": {
-      const dRadial = Math.hypot(dx, dz) - r, dAxial = Math.abs(dy) - r;
+      const dRadial = Math.hypot(dx, dz) - r, dAxial = Math.abs(dy) - h;
       const outside = Math.hypot(Math.max(dRadial, 0), Math.max(dAxial, 0));
       return outside + Math.min(Math.max(dRadial, dAxial), 0);
     }
     default:
-      return Math.hypot(dx, dy, dz) - r; // sphere
+      return Math.hypot(dx, (dy * r) / h, dz) - r; // sphere -> ellipsoid when h != r
   }
+}
+
+/** Vertical half-extent of an edit's brush (defaults to its horizontal radius). */
+function editHeight(e: DigEdit): number {
+  return e.height ?? e.r;
 }
 
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
@@ -274,12 +282,18 @@ export function density(x: number, y: number, z: number): number {
   let d = surfaceHeight(x, z) - y;
   if (digEdits.length > 0 && y > BEDROCK_Y) {
     for (const e of digEdits) {
-      const reach = e.r + DIG_INFLUENCE_MARGIN;
+      const h = editHeight(e);
+      const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
       const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-      if (Math.abs(dx) > reach || Math.abs(dy) > reach || Math.abs(dz) > reach) continue;
-      const sdf = brushSdf(e.shape, dx, dy, dz, e.r);
+      if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
+      const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
       // add: union solid (max with the inverted SDF); remove: subtract air (min with the SDF)
-      d = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
+      const full = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
+      // strength scales the edit; falloff feathers it to zero over a band inside the surface,
+      // so strength 1 / falloff 0 reproduces the hard CSG edit exactly.
+      const feather = Math.max(1e-3, (e.falloff ?? 0) * e.r);
+      const weight = Math.min(1, Math.max(0, -sdf / feather)) * (e.strength ?? 1);
+      d += (full - d) * weight;
     }
   }
   return d;
@@ -328,10 +342,11 @@ export function paintMaterialAt(x: number, y: number, z: number): [number, numbe
     for (let i = digEdits.length - 1; i >= 0; i--) {
       const e = digEdits[i];
       if (e.op !== "add") continue;
-      const reach = e.r + DIG_INFLUENCE_MARGIN;
+      const h = editHeight(e);
+      const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
       const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-      if (Math.abs(dx) > reach || Math.abs(dy) > reach || Math.abs(dz) > reach) continue;
-      if (brushSdf(e.shape, dx, dy, dz, e.r) <= MATERIAL_PAINT_BAND) {
+      if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
+      if (brushSdf(e.shape, dx, dy, dz, e.r, h) <= MATERIAL_PAINT_BAND) {
         const slot = Math.max(0, Math.min(3, (e.material ?? 0) | 0));
         const m: [number, number, number, number] = [0, 0, 0, 0];
         m[slot] = 1;
@@ -463,8 +478,9 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
       let j1 = Math.min(Y_CELLS - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
       for (const e of chunkEdits) {
         if (Math.abs(i - e.x) > e.r + DIG_INFLUENCE_MARGIN || Math.abs(k - e.z) > e.r + DIG_INFLUENCE_MARGIN) continue;
-        j0 = Math.max(0, Math.min(j0, Math.floor(e.y - e.r - DIG_INFLUENCE_MARGIN)));
-        j1 = Math.min(Y_CELLS - 1, Math.max(j1, Math.ceil(e.y + e.r + DIG_INFLUENCE_MARGIN)));
+        const eh = editHeight(e);
+        j0 = Math.max(0, Math.min(j0, Math.floor(e.y - eh - DIG_INFLUENCE_MARGIN)));
+        j1 = Math.min(Y_CELLS - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
       }
       for (let j = j0; j <= j1; j++) {
         emitAxis("x", i, j, k, buf, indices, world);

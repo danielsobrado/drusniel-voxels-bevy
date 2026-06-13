@@ -42,7 +42,8 @@ const state: ProjectSessionState = {
   postProcessOpacity: 1, postProcessExposure: 1.1, postProcessContrast: 1.05,
   postProcessSaturation: 0.95, postProcessVignette: 0.15, postProcessDebugMode: "output",
   bubble: true, bubbleRadius: 64, tintBubble: false, digEnabled: true, digRadius: 4,
-  brushOp: "add", brushShape: "cylinder", brushMaterial: 2, grassEnabled: true,
+  brushOp: "add", brushShape: "cylinder", brushMaterial: 2, brushHeight: 6,
+  brushStrength: 0.75, brushFalloff: 0.25, brushFlowMs: 180, grassEnabled: true,
   grassDistance: 96, grassBladeSpacing: 1.6, grassBladeHeight: 1.15,
   grassBladeHeightVariation: 0.75, grassBladeWidth: 0.08, grassWindStrength: 0.32,
   grassWindSpeed: 1.35, grassSlopeMinY: 0.72, grassMinHeight: 20, grassMaxHeight: 86,
@@ -57,7 +58,10 @@ function manifest(): ClodProjectManifestV1 {
     worldSize: 4,
     config: cfg,
     state,
-    terrainEdits: [{ x: 4, y: 5, z: 6, r: 3, op: "add", shape: "cube", material: 2 }],
+    terrainEdits: [{
+      x: 4, y: 5, z: 6, r: 3, op: "add", shape: "cube", material: 2,
+      height: 6, strength: 0.75, falloff: 0.25,
+    }],
     textures: [
       { index: 0, source: "custom", name: "soil.png", selectedId: "custom", scale: 0.02, heightMin: 0, heightMax: 40, customPath: "textures/slot-0.png", mimeType: "image/png" },
       { index: 1, source: "builtin", name: "Rock", selectedId: "cobblestone-1", scale: 0.03, heightMin: 40, heightMax: 70 },

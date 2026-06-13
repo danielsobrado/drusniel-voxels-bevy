@@ -57,6 +57,10 @@ export interface ProjectSessionState {
   brushOp: BrushOp;
   brushShape: BrushShape;
   brushMaterial: number;
+  brushHeight: number;
+  brushStrength: number;
+  brushFalloff: number;
+  brushFlowMs: number;
   grassEnabled: boolean;
   grassDistance: number;
   grassBladeSpacing: number;
@@ -117,7 +121,8 @@ const NUMBER_STATE_KEYS: (keyof ProjectSessionState)[] = [
   "sunAzimuthDeg", "sunElevationDeg", "sunIntensity", "skyIntensity", "groundIntensity",
   "exposure", "horizonSoftness", "sunDiskIntensity", "sunGlowIntensity", "hazeIntensity",
   "postProcessOpacity", "postProcessExposure", "postProcessContrast", "postProcessSaturation",
-  "postProcessVignette", "bubbleRadius", "digRadius", "brushMaterial", "grassDistance",
+  "postProcessVignette", "bubbleRadius", "digRadius", "brushMaterial", "brushHeight",
+  "brushStrength", "brushFalloff", "brushFlowMs", "grassDistance",
   "grassBladeSpacing", "grassBladeHeight", "grassBladeHeightVariation", "grassBladeWidth",
   "grassWindStrength", "grassWindSpeed", "grassSlopeMinY", "grassMinHeight", "grassMaxHeight",
   "grassMaxBlades", "grassSeed",
@@ -193,9 +198,17 @@ function assertSessionState(value: unknown): asserts value is ProjectSessionStat
   }
   const brushMaterial = value.brushMaterial;
   const digRadius = value.digRadius;
+  const brushHeight = value.brushHeight;
+  const brushStrength = value.brushStrength;
+  const brushFalloff = value.brushFalloff;
+  const brushFlowMs = value.brushFlowMs;
   const grassMaxBlades = value.grassMaxBlades;
   if (!isFiniteNumber(brushMaterial) || !Number.isInteger(brushMaterial) || brushMaterial < 0 || brushMaterial > 3 ||
       !isFiniteNumber(digRadius) || digRadius < 1 || digRadius > 8 ||
+      !isFiniteNumber(brushHeight) || brushHeight < 1 || brushHeight > 16 ||
+      !isFiniteNumber(brushStrength) || brushStrength < 0 || brushStrength > 1 ||
+      !isFiniteNumber(brushFalloff) || brushFalloff < 0 || brushFalloff > 1 ||
+      !isFiniteNumber(brushFlowMs) || brushFlowMs < 80 || brushFlowMs > 600 ||
       !isFiniteNumber(grassMaxBlades) || grassMaxBlades < 0 || grassMaxBlades > 100_000) {
     throw new Error("project.json has unsafe brush or grass settings");
   }
@@ -212,8 +225,18 @@ function assertDigEdit(value: unknown, index: number): asserts value is DigEdit 
   if (value.op !== undefined && !["remove", "add"].includes(String(value.op))) {
     throw new Error(`project.json terrainEdits[${index}] has an invalid operation`);
   }
-  if (value.material !== undefined && !isFiniteNumber(value.material)) {
+  if (value.material !== undefined &&
+      (!isFiniteNumber(value.material) || !Number.isInteger(value.material) || value.material < 0 || value.material > 3)) {
     throw new Error(`project.json terrainEdits[${index}] has an invalid material`);
+  }
+  if (value.height !== undefined && (!isFiniteNumber(value.height) || value.height <= 0 || value.height > 16)) {
+    throw new Error(`project.json terrainEdits[${index}] has an invalid height`);
+  }
+  if (value.strength !== undefined && (!isFiniteNumber(value.strength) || value.strength < 0 || value.strength > 1)) {
+    throw new Error(`project.json terrainEdits[${index}] has an invalid strength`);
+  }
+  if (value.falloff !== undefined && (!isFiniteNumber(value.falloff) || value.falloff < 0 || value.falloff > 1)) {
+    throw new Error(`project.json terrainEdits[${index}] has an invalid falloff`);
   }
 }
 

@@ -78,6 +78,43 @@ describe("dig edits in the density field", () => {
     expect(paintMaterialAt(x + 50, sy, z)).toEqual([0, 0, 0, 0]);
   });
 
+  it("strength scales how much an edit moves the field", () => {
+    const x = 40, z = 40;
+    const y = surfaceHeight(x, z) - 1; // solid
+    const base = density(x, y, z);
+    expect(base).toBeGreaterThan(0);
+
+    addDigEdit({ x, y, z, r: 3, strength: 0 });
+    expect(density(x, y, z)).toBeCloseTo(base); // 0 strength is a no-op
+    clearDigEdits();
+
+    addDigEdit({ x, y, z, r: 3, strength: 0.5 });
+    const half = density(x, y, z);
+    clearDigEdits();
+
+    addDigEdit({ x, y, z, r: 3 }); // full (default strength 1)
+    const full = density(x, y, z);
+
+    // a half-strength carve lands between untouched and full
+    expect(half).toBeLessThan(base);
+    expect(half).toBeGreaterThan(full);
+  });
+
+  it("brush height extends the vertical reach independent of radius", () => {
+    const x = 45, z = 45;
+    const sy = surfaceHeight(x, z);
+    const y = sy - 10; // 10 cells below the surface
+
+    // a radius-2 cylinder (height defaults to 2) can't reach this deep
+    addDigEdit({ x, y: sy, z, r: 2, shape: "cylinder" });
+    expect(density(x, y, z)).toBeGreaterThan(0); // still solid
+    clearDigEdits();
+
+    // same radius, but tall enough to carve down to it
+    addDigEdit({ x, y: sy, z, r: 2, shape: "cylinder", height: 14 });
+    expect(density(x, y, z)).toBeLessThan(0); // now air
+  });
+
   it("cube and cylinder brushes carve their own footprint (not the sphere's)", () => {
     const x = 60, z = 60;
     const y = surfaceHeight(x, z) - 6; // solidly underground

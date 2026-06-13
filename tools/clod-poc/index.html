@@ -82,7 +82,7 @@
       }
       body[data-player-mode="playing"] #terraform-menu,
       body[data-player-mode="choosingSpawn"] #terraform-menu { display: none; }
-      .tf-row { display: flex; align-items: center; gap: 5px; }
+      .tf-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
       .tf-label { width: 52px; color: #9fb0c0; flex: none; }
       #terraform-menu button {
         padding: 4px 8px; border: 1px solid #46515e; border-radius: 3px;
@@ -93,18 +93,22 @@
         border-color: #74b8f5; color: #fff; background: #245781;
       }
       .tf-swatch {
-        width: 30px; height: 30px; padding: 0; border-radius: 3px;
+        width: 48px; height: 48px; padding: 0; border-radius: 4px;
         background: #0b0d10 center / cover no-repeat; position: relative;
       }
-      .tf-swatch[aria-pressed="true"] { border-color: #ffd479; box-shadow: 0 0 0 1px #ffd479; }
+      .tf-swatch[aria-pressed="true"] { border-color: #ffd479; box-shadow: 0 0 0 2px #ffd479; }
       .tf-swatch[disabled] { opacity: 0.32; cursor: not-allowed; }
       .tf-swatch span {
-        position: absolute; left: 0; right: 0; bottom: 0; font-size: 8px; line-height: 1.2;
+        position: absolute; left: 0; right: 0; bottom: 0; font-size: 9px; line-height: 1.25;
         background: rgba(0, 0, 0, 0.55); text-align: center; color: #e8edf3;
       }
       .tf-size { display: flex; align-items: center; gap: 6px; }
-      .tf-size input[type="range"] { width: 96px; }
+      .tf-size input[type="range"] { width: 76px; }
       .tf-size output { width: 26px; text-align: right; color: #cdd8e3; }
+      .tf-slider { display: flex; align-items: center; gap: 5px; }
+      .tf-slider-label { color: #9fb0c0; }
+      .tf-slider input[type="range"] { width: 66px; }
+      .tf-slider output { min-width: 30px; text-align: right; color: #cdd8e3; }
       #build-progress[hidden] { display: none; }
       #build-progress {
         position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);

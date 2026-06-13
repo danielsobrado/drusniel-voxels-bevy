@@ -541,6 +541,10 @@ async function main() {
     brushOp: "remove" as BrushOp,
     brushShape: "sphere" as BrushShape,
     brushMaterial: 0,
+    brushHeight: 3,
+    brushStrength: 1,
+    brushFalloff: 0,
+    brushFlowMs: DIG_HOLD_INTERVAL_MS,
     grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
@@ -1065,6 +1069,7 @@ async function main() {
       x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
       shape: state.brushShape, op: state.brushOp,
       material: state.brushOp === "add" ? state.brushMaterial : undefined,
+      height: state.brushHeight, strength: state.brushStrength, falloff: state.brushFalloff,
     });
     const t0 = performance.now();
     const margin = radius + DIG_INFLUENCE_MARGIN;
@@ -1747,7 +1752,29 @@ async function main() {
     return sync;
   };
 
+  // Brush row: size slider on the left, then op + shape toggles.
   const brushRow = makeRow("Brush");
+  const sizeWrap = document.createElement("div");
+  sizeWrap.className = "tf-size";
+  const sizeInput = document.createElement("input");
+  sizeInput.type = "range";
+  sizeInput.min = "1"; sizeInput.max = "8"; sizeInput.step = "0.5";
+  sizeInput.value = String(state.digRadius);
+  const sizeOut = document.createElement("output");
+  sizeOut.textContent = String(state.digRadius);
+  sizeInput.addEventListener("input", () => {
+    state.digRadius = Number(sizeInput.value);
+    sizeOut.textContent = String(state.digRadius);
+    digRadiusController.updateDisplay();
+    updateInfo();
+  });
+  sizeWrap.append(sizeInput, sizeOut);
+  brushRow.appendChild(sizeWrap);
+
+  const sizeGap = document.createElement("span");
+  sizeGap.style.width = "8px";
+  brushRow.appendChild(sizeGap);
+
   const syncOp = makeToggleGroup<BrushOp>(
     brushRow,
     [{ value: "remove", label: "Dig" }, { value: "add", label: "Raise" }],
@@ -1764,23 +1791,55 @@ async function main() {
     (v) => { state.brushShape = v; },
   );
 
-  const sizeRow = makeRow("Size");
-  const sizeWrap = document.createElement("div");
-  sizeWrap.className = "tf-size";
-  const sizeInput = document.createElement("input");
-  sizeInput.type = "range";
-  sizeInput.min = "1"; sizeInput.max = "8"; sizeInput.step = "0.5";
-  sizeInput.value = String(state.digRadius);
-  const sizeOut = document.createElement("output");
-  sizeOut.textContent = String(state.digRadius);
-  sizeInput.addEventListener("input", () => {
-    state.digRadius = Number(sizeInput.value);
-    sizeOut.textContent = String(state.digRadius);
-    digRadiusController.updateDisplay();
-    updateInfo();
-  });
-  sizeWrap.append(sizeInput, sizeOut);
-  sizeRow.appendChild(sizeWrap);
+  // labelled slider (label · range · value); returns its sync fn for external updates
+  const makeSlider = (
+    parent: HTMLElement,
+    label: string,
+    min: number, max: number, step: number,
+    get: () => number, set: (v: number) => void,
+    fmt: (v: number) => string = String,
+  ) => {
+    const group = document.createElement("div");
+    group.className = "tf-slider";
+    const lab = document.createElement("span");
+    lab.className = "tf-slider-label";
+    lab.textContent = label;
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min); input.max = String(max); input.step = String(step);
+    input.value = String(get());
+    const out = document.createElement("output");
+    out.textContent = fmt(get());
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      set(v);
+      out.textContent = fmt(v);
+      updateInfo();
+    });
+    group.append(lab, input, out);
+    parent.appendChild(group);
+    return () => { input.value = String(get()); out.textContent = fmt(get()); };
+  };
+
+  // sculpt sliders: how hard, how tall, how soft the edge, how fast when held
+  const sculptRow1 = makeRow("Sculpt");
+  const syncStrength = makeSlider(
+    sculptRow1, "Strength", 0, 1, 0.05,
+    () => state.brushStrength, (v) => { state.brushStrength = v; }, (v) => v.toFixed(2),
+  );
+  const syncHeight = makeSlider(
+    sculptRow1, "Height", 1, 16, 0.5,
+    () => state.brushHeight, (v) => { state.brushHeight = v; },
+  );
+  const sculptRow2 = makeRow("");
+  const syncFalloff = makeSlider(
+    sculptRow2, "Falloff", 0, 1, 0.05,
+    () => state.brushFalloff, (v) => { state.brushFalloff = v; }, (v) => v.toFixed(2),
+  );
+  const syncFlow = makeSlider(
+    sculptRow2, "Flow", 80, 600, 20,
+    () => state.brushFlowMs, (v) => { state.brushFlowMs = v; }, (v) => `${v}ms`,
+  );
 
   refreshTerraformSwatches = () => {
     rebuildActiveTerrainSlots();
@@ -1803,6 +1862,7 @@ async function main() {
     sizeInput.value = String(state.digRadius);
     sizeOut.textContent = String(state.digRadius);
     syncOp();
+    syncStrength(); syncHeight(); syncFalloff(); syncFlow();
   };
   refreshTerraformSwatches();
 
@@ -1853,6 +1913,10 @@ async function main() {
     brushOp: state.brushOp,
     brushShape: state.brushShape,
     brushMaterial: state.brushMaterial,
+    brushHeight: state.brushHeight,
+    brushStrength: state.brushStrength,
+    brushFalloff: state.brushFalloff,
+    brushFlowMs: state.brushFlowMs,
     grassEnabled: state.grassEnabled,
     grassDistance: state.grassDistance,
     grassBladeSpacing: state.grassBladeSpacing,
@@ -1912,11 +1976,25 @@ async function main() {
       const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], {
         type: slot.mimeType ?? "application/octet-stream",
       });
+      const previewUrl = URL.createObjectURL(blob);
       try {
-        const bitmap = await createImageBitmap(blob);
-        bitmap.close();
+        await new Promise<void>((resolve, reject) => {
+          const image = new Image();
+          const timeout = window.setTimeout(() => reject(new Error("image decode timed out")), 5_000);
+          image.onload = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
+          image.onerror = () => {
+            window.clearTimeout(timeout);
+            reject(new Error("image decode failed"));
+          };
+          image.src = previewUrl;
+        });
       } catch {
         throw new Error(`Custom texture ${slot.name} is not a decodable image`);
+      } finally {
+        URL.revokeObjectURL(previewUrl);
       }
     }
   };
@@ -2053,7 +2131,7 @@ async function main() {
     if (
       interaction.mode === "playing" && digHeld && state.digEnabled &&
       document.pointerLockElement === renderer.domElement &&
-      performance.now() - lastDigAt >= DIG_HOLD_INTERVAL_MS
+      performance.now() - lastDigAt >= state.brushFlowMs
     ) {
       camera.getWorldDirection(digDirection);
       performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
@@ -2072,7 +2150,7 @@ async function main() {
     }
     if (digAimHit) {
       digPreview.position.copy(digAimHit.point);
-      digPreview.scale.setScalar(state.digRadius);
+      digPreview.scale.set(state.digRadius, state.brushHeight, state.digRadius);
       digPreview.geometry = brushPreviewGeometries[state.brushShape];
       (digPreview.material as THREE.MeshBasicMaterial).color.setHex(
         state.brushOp === "add" ? 0x55dd66 : 0xff5533,
