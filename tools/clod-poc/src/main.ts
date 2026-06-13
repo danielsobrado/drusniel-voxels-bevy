@@ -1,8 +1,7 @@
 // Phase 2 runtime viewer. Plan §4.
 //
 // Per-frame DAG-cut selection (errorPx + hysteresis + optional 2:1), dithered crossfade on
-// cut changes, and debug overlays. The full Phase 3 stress scenes / near-field bubble mask
-// (§4.4) and floating per-node error labels / locked-border highlight are not built yet.
+// cut changes, debug overlays, per-node screen labels and locked-border highlights.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -73,6 +72,11 @@ import {
   type ProjectTextureSlot,
   type TextureBlendMode,
 } from "./project_archive.js";
+import { iconDataUrl, type ClodIconKind } from "./ui/icons/index.js";
+import { setButtonIcon, setIconOnlyButton } from "./ui/dom_icons.js";
+import { createClodOverlay, updateClodOverlay, type ClodOverlaySnapshot } from "./ui/overlay_panel.js";
+import { LockedBorderOverlay } from "./ui/locked_border_overlay.js";
+import { NodeLabelOverlay } from "./ui/node_labels.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
@@ -110,6 +114,7 @@ const BUILTIN_TERRAIN_TEXTURES = [
   { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
 ] as const;
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
+const TERRAIN_BAND_ICONS = ["grass", "earth", "rock", "snow"] as const;
 
 function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
@@ -233,6 +238,7 @@ function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacenc
 
 async function main() {
   const info = document.getElementById("info")!;
+  createClodOverlay(document.getElementById("clod-overlay")!);
   const importButton = document.getElementById("project-import") as HTMLButtonElement;
   const exportButton = document.getElementById("project-export") as HTMLButtonElement;
   const projectImportInput = document.getElementById("project-import-input") as HTMLInputElement;
@@ -243,6 +249,10 @@ async function main() {
   const buildProgressBar = document.getElementById("build-progress-bar") as HTMLProgressElement;
   const buildProgressPhase = document.getElementById("build-progress-phase")!;
   const buildProgressPercent = document.getElementById("build-progress-percent")!;
+  setIconOnlyButton(importButton, "project", "import", "Import project");
+  setIconOnlyButton(exportButton, "project", "export", "Export project");
+  setButtonIcon(orbitModeButton, "camera", "orbit", "Orbit");
+  setButtonIcon(playerModeButton, "camera", "player", "Player");
   const searchParams = new URLSearchParams(location.search);
   const importToken = searchParams.get("import");
   let stagedImport: ProjectArchiveContents | null = null;
@@ -269,6 +279,18 @@ async function main() {
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
   const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : 4);
+  let buildStatus = "preparing";
+  const updateBuildOverlay = () => updateClodOverlay({
+    worldSize: WORLD,
+    renderedTriangles: 0,
+    nodesByLod: {},
+    forcedSplits: 0,
+    bubbleForcedSplits: 0,
+    cutFrozen: false,
+    errorThreshold: cfg.selection.error_threshold_px,
+    buildStatus,
+  });
+  updateBuildOverlay();
   if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
   const buildNote =
     WORLD >= 16 ? " (large build, tab will freeze longer)" :
@@ -279,6 +301,8 @@ async function main() {
   buildProgressPhase.textContent = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
   buildProgressPercent.textContent = "0%";
   buildProgressBar.value = 0;
+  buildStatus = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
+  updateBuildOverlay();
   await new Promise((r) => setTimeout(r, 16));
   const result = await buildWorldAsync(WORLD, WORLD, cfg, ({ done, total, level, phase }) => {
     const fraction = total > 0 ? Math.min(1, done / total) : 0;
@@ -286,8 +310,11 @@ async function main() {
     buildProgressPercent.textContent = `${Math.floor(fraction * 100)}%`;
     buildProgressPhase.textContent = `${phase}  L${level}  ${done}/${total}`;
     info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
+    buildStatus = `${phase} L${level} ${done}/${total}`;
+    updateBuildOverlay();
   });
   buildProgress.hidden = true;
+  buildStatus = "ready";
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -554,6 +581,8 @@ async function main() {
     showBounds: false,
     showSeamPoints: false,
     showCrossLodBorders: false,
+    showNodeLabels: false,
+    showLockedBorderVertices: false,
     colorByLod: true,
     normalColor: false,
     normalDivergence: false,
@@ -797,6 +826,11 @@ async function main() {
   scene.add(seamGroup);
   const crossLodBorderGroup = new THREE.Group();
   scene.add(crossLodBorderGroup);
+  const lockedBorderOverlay = new LockedBorderOverlay(scene);
+  const nodeLabelRoot = document.createElement("div");
+  document.body.appendChild(nodeLabelRoot);
+  const nodeLabelOverlay = new NodeLabelOverlay(nodeLabelRoot);
+  nodeLabelOverlay.setVisible(state.showNodeLabels);
 
   // Near-field bubble: raw per-chunk meshes for a LOD0 page, built lazily and cached.
   // Page LOD0 = welded chunks, so with tint off the bubble edge must be invisible (§4.4).
@@ -982,11 +1016,24 @@ async function main() {
   let lastNearFieldForced = 0;
   let lastCrossLodAdjacencyCount = 0;
   let lastRenderedCount = 0;
+  let lastRenderedNodes: ClodPageNode[] = [];
   let lastLevelSummary = "";
+  let lastNodesByLod: Record<number, number> = {};
   let lastTriCount = 0;
   let averageFps = 0;
   let lastDigSummary = "";
   let lastArchiveSummary = "";
+  const currentOverlaySnapshot = (): ClodOverlaySnapshot => ({
+    worldSize: WORLD,
+    renderedTriangles: lastTriCount,
+    nodesByLod: lastNodesByLod,
+    forcedSplits: lastForced,
+    bubbleForcedSplits: lastNearFieldForced,
+    cutFrozen: state.freeze,
+    errorThreshold: state.thresholdPx,
+    buildStatus,
+    digCostLine: lastDigSummary || undefined,
+  });
 
   const updateInfo = () => {
     const playerLine = interaction.mode === "playing"
@@ -1004,6 +1051,7 @@ async function main() {
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
       playerLine;
+    updateClodOverlay(currentOverlaySnapshot());
   };
 
   const updateSelection = () => {
@@ -1041,6 +1089,8 @@ async function main() {
     const xLodAdjacencies = crossLodAdjacencies(rendered);
     lastCrossLodAdjacencyCount = xLodAdjacencies.length;
     lastRenderedCount = rendered.length;
+    lastRenderedNodes = rendered;
+    lastNodesByLod = Object.fromEntries([...perLevel.entries()]);
     lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
     lastTriCount = tris;
 
@@ -1049,10 +1099,12 @@ async function main() {
       lastCutKey = cutKey;
       updateInfo();
     }
-    const debugKey = `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}`;
+    const debugKey =
+      `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}|locks:${state.showLockedBorderVertices}`;
     if (debugKey !== lastDebugKey) {
       lastDebugKey = debugKey;
       rebuildDebugOverlays(rendered, xLodAdjacencies);
+      lockedBorderOverlay.rebuild(rendered, state.showLockedBorderVertices);
     }
   };
 
@@ -1235,6 +1287,10 @@ async function main() {
   gui.add(state, "showBounds").name("page boundaries").onChange(updateSelection);
   gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(updateSelection);
   gui.add(state, "showCrossLodBorders").name("cross-LOD borders").onChange(updateSelection);
+  gui.add(state, "showNodeLabels").name("show floating node labels").onChange((on: boolean) => {
+    nodeLabelOverlay.setVisible(on);
+  });
+  gui.add(state, "showLockedBorderVertices").name("show locked border vertices").onChange(updateSelection);
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
     for (const v of views.values()) v.mat.wireframe = on;
   });
@@ -1391,6 +1447,16 @@ async function main() {
   const slotCards: HTMLElement[] = [];
   let loadedTextureController: { updateDisplay: () => unknown } | null = null;
   let syncTextureModalControls = () => {};
+  const terrainIconForTexture = (slot: TextureSlot, index: number): string => {
+    const id = `${slot.selectedId} ${slot.name}`.toLowerCase();
+    if (id.includes("water")) return "water";
+    if (id.includes("snow")) return "snow";
+    if (id.includes("rock") || id.includes("cobble") || id.includes("bedrock")) return "rock";
+    if (id.includes("sand")) return "sand";
+    if (id.includes("earth") || id.includes("terracotta") || id.includes("bark")) return "earth";
+    if (id.includes("grass") || id.includes("leaf")) return "grass";
+    return TERRAIN_BAND_ICONS[index] ?? "earth";
+  };
 
   const updateLoadedTextureDisplay = () => {
     const loaded = textureSlots
@@ -1405,11 +1471,22 @@ async function main() {
     const slot = textureSlots[index];
     const preview = card.querySelector<HTMLElement>(".texture-preview");
     const name = card.querySelector<HTMLElement>(".texture-slot-name");
+    const band = card.querySelector<HTMLElement>(".clod-texture-band");
+    const badge = card.querySelector<HTMLElement>(".clod-material-badge");
+    const isLoaded = slot.texture !== null;
+    card.classList.toggle("is-loaded", isLoaded);
+    card.classList.toggle("is-empty", !isLoaded);
     if (preview) {
       preview.style.backgroundImage = slot.previewUrl ? `url("${slot.previewUrl}")` : "";
-      preview.textContent = slot.previewUrl ? "" : TERRAIN_TEXTURE_BANDS[index];
+      preview.style.setProperty("--clod-preview-icon", `url("${iconDataUrl("terrain", terrainIconForTexture(slot, index), 64)}")`);
+      if (band) {
+        band.textContent = TERRAIN_TEXTURE_BANDS[index];
+      } else {
+        preview.textContent = slot.previewUrl ? "" : TERRAIN_TEXTURE_BANDS[index];
+      }
     }
     if (name) name.textContent = slot.texture ? slot.name : "empty";
+    if (badge) badge.textContent = slot.texture ? "Loaded" : "Empty";
     const normalBtn = card.querySelector<HTMLElement>(".texture-normal-load");
     if (normalBtn) normalBtn.textContent = slot.normalTexture ? "Normal map ✓" : "+ Normal map";
     card.title = `${TERRAIN_TEXTURE_BANDS[index]} height texture`;
@@ -1657,11 +1734,12 @@ async function main() {
 
   const textureModal = document.createElement("div");
   textureModal.id = "texture-modal";
+  textureModal.className = "clod-texture-dialog";
   textureModal.hidden = true;
   textureModal.innerHTML = `
-    <section class="texture-panel" role="dialog" aria-modal="true" aria-labelledby="texture-modal-title">
+    <section class="texture-panel clod-texture-dialog" role="dialog" aria-modal="true" aria-labelledby="texture-modal-title">
       <header>
-        <h2 id="texture-modal-title">Terrain textures</h2>
+        <h2 id="texture-modal-title">Terrain materials</h2>
         <button type="button" data-texture-close>Close</button>
       </header>
       <div class="texture-panel-body">
@@ -1718,11 +1796,15 @@ async function main() {
   const slotGrid = textureModal.querySelector<HTMLElement>(".texture-slot-grid")!;
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
     const card = document.createElement("article");
-    card.className = "texture-slot";
+    card.className = "texture-slot clod-texture-slot is-empty";
+    const bandIcon = iconDataUrl("terrain", TERRAIN_BAND_ICONS[i] ?? "earth", 64);
     card.innerHTML = `
-      <button class="texture-preview" type="button">${TERRAIN_TEXTURE_BANDS[i]}</button>
+      <button class="texture-preview clod-texture-preview" type="button" style="--clod-preview-icon: url('${bandIcon}')">
+        <span class="clod-texture-band">${TERRAIN_TEXTURE_BANDS[i]}</span>
+        <span class="clod-material-badge">Empty</span>
+      </button>
       <span class="texture-slot-name">empty</span>
-      <label class="texture-slot-select"><span>Use Demo Texture</span><select data-slot-texture="${i}">${textureOptionHtml}</select></label>
+      <label class="texture-slot-select"><span>Built-in texture</span><select data-slot-texture="${i}">${textureOptionHtml}</select></label>
       <div class="texture-slot-params">
         <label class="texture-slot-param"><span>Scale</span><input data-slot-scale="${i}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[i].scale}" /></label>
         <label class="texture-slot-param"><span>Low</span><input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
@@ -1749,6 +1831,9 @@ async function main() {
     slotCards.push(card);
     slotGrid.appendChild(card);
   }
+  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-close]")!, "system", "warning", "Close");
+  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-load-all]")!, "texture", "load", "Load custom set");
+  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-clear]")!, "texture", "slot", "Clear");
   syncTextureModalControls = () => {
     for (let i = 0; i < textureSlots.length; i++) {
       const low = textureModal.querySelector<HTMLInputElement>(`[data-slot-low="${i}"]`);
@@ -2005,14 +2090,18 @@ async function main() {
 
   const makeToggleGroup = <T extends string>(
     row: HTMLElement,
-    options: { value: T; label: string }[],
+    options: { value: T; label: string; icon?: readonly [ClodIconKind, string] }[],
     get: () => T,
     set: (v: T) => void,
   ) => {
-    const buttons = options.map(({ value, label }) => {
+    const buttons = options.map(({ value, label, icon }) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = label;
+      if (icon) {
+        const [kind, id] = icon;
+        setButtonIcon(btn, kind, id, label);
+      }
       btn.addEventListener("click", () => {
         set(value);
         sync();
@@ -2052,7 +2141,10 @@ async function main() {
 
   const syncOp = makeToggleGroup<BrushOp>(
     brushRow,
-    [{ value: "remove", label: "Dig" }, { value: "add", label: "Raise" }],
+    [
+      { value: "remove", label: "Dig", icon: ["tool", "dig"] },
+      { value: "add", label: "Raise", icon: ["tool", "raise"] },
+    ],
     () => state.brushOp,
     (v) => { state.brushOp = v; updateInfo(); },
   );
@@ -2061,7 +2153,11 @@ async function main() {
   brushRow.appendChild(spacer);
   makeToggleGroup<BrushShape>(
     brushRow,
-    [{ value: "sphere", label: "Sphere" }, { value: "cube", label: "Cube" }, { value: "cylinder", label: "Cyl" }],
+    [
+      { value: "sphere", label: "Sphere", icon: ["tool", "smooth"] },
+      { value: "cube", label: "Cube", icon: ["tool", "lower"] },
+      { value: "cylinder", label: "Cyl", icon: ["tool", "paint"] },
+    ],
     () => state.brushShape,
     (v) => { state.brushShape = v; },
   );
@@ -2241,6 +2337,8 @@ async function main() {
     buildProgressPhase.textContent = phase;
     buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
     buildProgressBar.value = fraction;
+    buildStatus = busy ? phase : "ready";
+    updateClodOverlay(currentOverlaySnapshot());
   };
 
   const showProjectError = (operation: string, error: unknown) => {
@@ -2484,10 +2582,18 @@ async function main() {
       state.grassBladeCount = grassBladeCount;
       grassBladeCountController?.updateDisplay();
     }
+    nodeLabelOverlay.update({
+      nodes: lastRenderedNodes,
+      camera,
+      viewport: renderer.domElement,
+      viewportHeight: renderer.domElement.height,
+      fovY: THREE.MathUtils.degToRad(camera.fov),
+    });
     postProcess.updateSettings(currentPostProcessSettings());
     postProcess.render(scene, camera);
   });
   window.addEventListener("beforeunload", () => {
+    lockedBorderOverlay.dispose();
     grassSystem.dispose();
     skyEnvironment.dispose();
     postProcess.dispose();

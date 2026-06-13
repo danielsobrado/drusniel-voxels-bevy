@@ -203,7 +203,21 @@ re-sampled after digs (blades can float over holes), and single-vertex Surface N
 can't split two surface sheets inside one cell, so very thin walls between digs can look
 chunky (a PoC mesher limit, not a CLOD one; the engine's mesher handles caves).
 
-Not yet built: floating per-node error labels + locked-border highlight.
+The viewer also has optional floating per-node error labels and locked-border vertex
+highlights. The labels are DOM overlays projected from the current 3D cut and show node
+id, LOD, footprint, `error_world`, and computed screen-space error. The locked-border
+debug pass draws small markers over the visible nodes' preserved outer border vertices.
+
+## PoC UI skin
+
+The CLOD PoC UI skin is adapted from an MIT-licensed visual reference, but no reference
+files are required at runtime and production code does not import from a reference folder.
+The icons used by the toolbar, material dialog, terraform palette, and runtime overlay are
+generated procedurally as CLOD-specific TypeScript modules. `lil-gui` remains the detailed
+control surface for tuning selection, rendering, terrain textures, environment,
+postprocess, bubble, and digging parameters. The custom fantasy overlay is a compact CLOD
+runtime status surface for cut health, triangle counts, forced splits, build status, and
+recent dig cost.
 
 ## Module map (mirrors the Rust appendix §11)
 
